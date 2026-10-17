@@ -1,4 +1,6 @@
 import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
+import { screenLimits } from "@grasp-os/shared/screens";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -21,6 +23,7 @@ import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { keptManifestSchema } from "./previews.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The repair loop, fed by the preview: the chat's agent writes a draft
@@ -201,6 +204,45 @@ const previewAt = async (
  * by `replies`; with `agentBuilds`, the organization's agent may build
  * Apps (granted once: every chat's agent is that one).
  */
+/** A notes App of spec 8's layout, as the agent drafts one. */
+const spec8Notes: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  notes: defineTable({ title: v.string().min(1).max(200) }),
+});
+`,
+  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+export const create = mutation({
+  args: { title: v.string().min(1).max(200) },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+export const titles = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { create, titles } from "./operations/notes.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Invoice desk",
+  schema,
+  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+  operations: { notes: { create, titles } },
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
+};
+
 const setUp = async (replies: GatewayReply[], agentBuilds = true) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
@@ -751,5 +793,132 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       // Each audited as the agent's call, the refused one too.
       audited: [true, true, false, undefined],
     });
+  });
+
+  it("lets the agent call a function of its spec 8 draft by its path, and hears what it got wrong as data", async () => {
+    const drafted = spec8Notes;
+    const { stub, chatId } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+        await env.build.write(app.id, ${JSON.stringify(drafted)});
+        const created = await env.build.call(app.id, "notes.create", { title: "Invoice 7" });
+        const titles = await env.build.call(app.id, "notes.titles");
+        const missing = await env.build.call(app.id, "notes.missing");
+        return {
+          created: created.ok && typeof created.answer,
+          titles,
+          missing: { ok: missing.ok, code: missing.code },
+        };
+      };`),
+      says("Called."),
+    ]);
+
+    await stub.ask(chatIdSchema.parse(chatId), {
+      text: "Try the invoice desk's notes",
+      model,
+    });
+
+    const results = await codeResults(stub, chatId);
+    expect(returned(results[0]?.text)).toStrictEqual({
+      created: "string",
+      titles: { ok: true, answer: ["Invoice 7"] },
+      missing: { ok: false, code: "operation.not_found" },
+    });
+  });
+
+  it("throws to the agent what no change of its spec 8 draft fixes: a kept artifact changed since", async () => {
+    const { builder, stub, chatId, app, gateway } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+        try {
+          const answered = await env.build.call(app.id, "notes.titles");
+          return { thrown: null, answered };
+        } catch (error) {
+          return { thrown: String(error.message) };
+        }
+      };`),
+      says("Called."),
+    ]);
+    const chat = chatIdSchema.parse(chatId);
+    const appId = appIdSchema.parse(app);
+    await stub.saveDraft(
+      chat,
+      appId,
+      1,
+      spec8Notes,
+      [],
+      0,
+      await openTestRun(stub, chat)
+    );
+    await stub.previewReferences(chat, builder.userId, appId, 1);
+    await runInDurableObject(stub, (_instance, state) => {
+      const [kept] = state.storage.sql
+        .exec<{ manifest: string }>(
+          "SELECT manifest FROM preview_releases WHERE chat_id = ?",
+          chat
+        )
+        .toArray();
+      const module = keptManifestSchema
+        .parse(JSON.parse(kept?.manifest ?? "null"))
+        .artifacts.find(({ path }) => path.startsWith("modules/"));
+      state.storage.sql.exec(
+        "UPDATE preview_release_artifacts SET content = content || ' ' WHERE chat_id = ? AND sha256 = ?",
+        chat,
+        module?.sha256 ?? ""
+      );
+    });
+    await runInDurableObject(stub, (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // The stub before the restart is broken with it: a fresh one.
+    const restarted = workspace(env, personalWorkspaceId(builder.userId));
+    await pointAtGateway(restarted, gateway);
+
+    await restarted.ask(chat, { text: "Try the invoice desk's notes", model });
+
+    const results = await codeResults(restarted, chatId);
+    const { thrown } = z
+      .object({ thrown: z.string() })
+      .parse(returned(results[0]?.text));
+    expect(thrown).toContain("sealed artifacts no longer matches");
+  });
+
+  it("counts the agent's calls of its spec 8 draft against the person's requests", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    try {
+      const { stub, chatId } = await setUp([
+        codeStep(`export default async (self, env) => {
+          const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+          await env.build.write(app.id, ${JSON.stringify(spec8Notes)});
+          const answered = [];
+          for (let call = 0; call < ${screenLimits.requests.burst + 5}; call += 1) {
+            try {
+              const result = await env.build.call(app.id, "notes.titles");
+              answered.push(result.ok ? "ok" : result.code);
+            } catch (error) {
+              answered.push("refused");
+            }
+          }
+          return answered;
+        };`),
+        says("Called."),
+      ]);
+
+      await stub.ask(chatIdSchema.parse(chatId), {
+        text: "Call the notes again and again",
+        model,
+      });
+
+      const results = await codeResults(stub, chatId);
+      const answered = z.array(z.string()).parse(returned(results[0]?.text));
+      expect(answered.slice(0, screenLimits.requests.burst)).toStrictEqual(
+        Array.from({ length: screenLimits.requests.burst }, () => "ok")
+      );
+      expect(answered.at(-1)).toBe("refused");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

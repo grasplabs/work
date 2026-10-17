@@ -1,3 +1,4 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
@@ -8,13 +9,19 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { setCurrentVersion } from "../src/apps.ts";
 import { appMembers } from "../src/db/core/schema.ts";
+import { release as released } from "./apps.ts";
+import { mockIdp } from "./idp.ts";
 import { isolationFiles } from "./isolation-app.ts";
+import { chatWithDraft, outcome, requestFor } from "./previews.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
+import { signedInApi } from "./sign-in.ts";
 
 // What App code keeps of one invocation never acts in another (GRA-383,
 // GRA-387), through the real Loader: every invocation runs in a fresh
-// isolate of its own, and its channel stops working when it ends. The
+// isolate of its own, and its channel stops working when it ends, on a
+// screen's calls and, below, on a chat's preview of its draft
+// (sealed-previews.ts), across two people's chats. The
 // held-call reproduction from GRA-383, the channel kept past its call,
 // and state one caller leaves for the next. A call cut short at its
 // deadline is app-functions.test.ts's ("a call past its deadline").
@@ -135,3 +142,89 @@ describe("an invocation's authority", { timeout: 120_000 }, () => {
     }
   });
 });
+
+const idp = mockIdp();
+
+describe(
+  "an invocation's authority in a draft's preview",
+  { timeout: 180_000 },
+  () => {
+    it("never reaches another person's preview, held open alongside it, nor outlives its call, nor leaves anything for the next", async () => {
+      const owner = await signedInApi(idp, "builder");
+      const { id } = await owner.api.apps.create({ name: "Isolation" });
+      const app = appIdSchema.parse(id);
+      await released(owner, app, isolationFiles);
+      const other = await signedInApi(idp, "builder");
+      await owner.api.apps.members.add(app, {
+        type: "person",
+        id: other.userId,
+        role: "builder",
+      });
+      const drafted = {
+        "operations/notes.ts": `${isolationFiles["operations/notes.ts"] ?? ""}\n// Drafted.\n`,
+      };
+      const [ownDraft, theirDraft] = await Promise.all([
+        chatWithDraft(owner, app, drafted),
+        chatWithDraft(other, app, drafted),
+      ]);
+      type Drafter = typeof owner;
+      const previewed = async (
+        by: Drafter,
+        { chatId, revision }: typeof ownDraft,
+        path: string,
+        input: Json = {}
+      ): Promise<unknown> =>
+        outcome(
+          await by.api.chats.previewFunction(
+            chatId,
+            app,
+            revision,
+            await requestFor(by, { chatId, app, revision }, path, input)
+          )
+        );
+
+      const held = previewed(owner, ownDraft, "notes.hold");
+      await vi.waitFor(
+        async () => {
+          await expect(
+            previewed(owner, ownDraft, "notes.titles")
+          ).resolves.toStrictEqual(["A holding"]);
+        },
+        { timeout: 10_000, interval: 100 }
+      );
+      // The other person's preview calls while A holds, A's channel kept in
+      // module state.
+      const used = await previewed(other, theirDraft, "notes.useKept");
+      const theirs = await previewed(other, theirDraft, "notes.titles");
+      await previewed(owner, ownDraft, "notes.create", { title: "release" });
+      const unheld = await held;
+      const kept = await previewed(other, theirDraft, "notes.keepAfter");
+      await scheduler.wait(1000);
+      const after = await previewed(other, theirDraft, "notes.titles");
+      await previewed(owner, ownDraft, "notes.poison");
+      const probed = [
+        await previewed(other, theirDraft, "notes.probe"),
+        await previewed(owner, ownDraft, "notes.probe"),
+      ];
+
+      expect({
+        used,
+        theirs,
+        released: unheld,
+        kept,
+        after,
+        probed,
+      }).toStrictEqual({
+        used: "nothing kept",
+        theirs: [],
+        released: null,
+        kept: null,
+        after: [],
+        probed: [
+          ["clean", "clean", "clean"],
+          ["clean", "clean", "clean"],
+        ],
+      });
+    });
+  }
+);

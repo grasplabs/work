@@ -910,6 +910,21 @@ export const appTestFixtures = sqliteTable(
 );
 
 /**
+ * The fixture stores chats' previews of their drafts run on
+ * (sealed-previews.ts), each recorded before its object is first touched
+ * and deleted once the object is discarded. Kept apart from App tests'
+ * (`app_test_fixtures`), whose sweep discards a store an hour after it
+ * was made: a preview's lives as long as its draft's revision, and the
+ * chat's Workspace object, which also records it, discards it. A fixture
+ * store is never in the store inventory (`business_stores`).
+ */
+export const previewFixtureStores = sqliteTable("preview_fixture_stores", {
+  storeId: text("store_id").primaryKey(),
+  appId: text("app_id").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * Published templates (resource-bindings.ts): each version's content,
  * written once by an admin and never changed, so a binding to a version
  * always reads exactly what was approved (spec 32.3). A template keeps the
