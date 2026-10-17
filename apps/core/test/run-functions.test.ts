@@ -35,7 +35,7 @@ import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { isolationFiles } from "./isolation-app.ts";
-import { endLiveRuns, finished, liveStatus, sleeping, woken } from "./runs.ts";
+import { endLiveRuns, finished, runObject, sleeping, woken } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
@@ -518,6 +518,32 @@ const connectShared = async (admin: Person): Promise<string> => {
 
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
+
+/**
+ * Where run `run` stands in its journal: its status, how many steps it
+ * has, and the wait it waits in, if any. The same twice means nothing
+ * happened in between.
+ */
+const journalOf = async (run: string) =>
+  await runInDurableObject(runObject(run), (_object, state) => {
+    const { sql } = state.storage;
+    const [current] = sql
+      .exec<{ status: string }>("SELECT status FROM run")
+      .toArray();
+    const [steps] = sql
+      .exec<{ count: number }>("SELECT count(*) AS count FROM steps")
+      .toArray();
+    const [waiting] = sql
+      .exec<{ name: string }>(
+        "SELECT name FROM steps WHERE type = 'waitForEvent' AND state = 'waiting'"
+      )
+      .toArray();
+    return {
+      status: current?.status,
+      steps: steps?.count ?? 0,
+      waiting: waiting?.name,
+    };
+  });
 
 /** How many messages Graph sent with `subject` (each test's own). */
 const sentCount = async (subject: string): Promise<number> => {
@@ -1287,14 +1313,25 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await pending.confirm(action.id, action.inputHash);
     }
+    // The run checks again on its own timer, and on each wake: its status
+    // is read only while it provably sits in one wait whose check ran
+    // after every confirmation, so the read can't land in a check.
+    const { waiting: confirmedIn } = await journalOf(run.id);
+    let whileOneWaits: string | undefined;
     await vi.waitFor(
       async () => {
-        await expect(liveStatus(run.id)).resolves.toBe("waiting");
+        const before = await journalOf(run.id);
+        expect(before.status).toBe("waiting");
+        expect(before.waiting).toBeDefined();
+        expect(before.waiting).not.toBe(confirmedIn);
+        const { status } = await builder.api.workflows.status(run.id);
+        await expect(journalOf(run.id)).resolves.toStrictEqual(before);
+        // A wake that replays to the same wait leaves the journal as it was:
+        // a read in it may say running, so it reads again.
+        expect(status).toBe("waiting");
+        whileOneWaits = status;
       },
-      { timeout: 20_000, interval: 100 }
-    );
-    const { status: whileOneWaits } = await builder.api.workflows.status(
-      run.id
+      { timeout: 30_000, interval: 50 }
     );
     if (last !== undefined) {
       await pending.confirm(last.id, last.inputHash);
