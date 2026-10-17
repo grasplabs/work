@@ -22,7 +22,10 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
-import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
+import {
+  workflowModuleLimits,
+  workflowModulePattern,
+} from "@grasp-os/shared/workflow-modules";
 import {
   openWorkflowProtocol,
   workflowResourceErrors,
@@ -689,14 +692,21 @@ const sealedContractKey =
 
 /** The compute modules' contracts, as `compute.json` seals them. */
 const computeFileSchema = z.strictObject({
-  paths: z.array(z.string().max(256)).max(64),
-  contracts: z.record(
-    z.string().max(512),
-    z.strictObject({
-      input: z.string().max(256 * 1024),
-      output: z.string().max(256 * 1024),
-    })
-  ),
+  paths: z
+    .array(z.string().max(workflowModuleLimits.pathChars))
+    .max(workflowModuleLimits.files),
+  contracts: z
+    .record(
+      z.string().max(512),
+      z.strictObject({
+        input: z.string().max(workflowModuleLimits.descriptorChars),
+        output: z.string().max(workflowModuleLimits.descriptorChars),
+      })
+    )
+    .refine(
+      (contracts) =>
+        Object.keys(contracts).length <= workflowModuleLimits.contracts
+    ),
 });
 
 const corrupt = (id: string, version: number, what: string): Error => {

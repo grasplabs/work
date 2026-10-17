@@ -167,7 +167,7 @@ const rpcResult = (value: unknown): unknown => {
  * a value past what a step records, or nested past the evaluator's depth,
  * is refused before anything walks it.
  */
-const requireShape = (
+export const requireShape = (
   descriptor: string | undefined,
   value: unknown,
   what: string

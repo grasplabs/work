@@ -10,6 +10,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { valueDepth } from "@grasp-os/shared/value-depth";
+import { workflowModuleLimits } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
@@ -99,7 +100,7 @@ const inspectionMaxLength = 1024 * 1024;
 /** How deep a manifest's JSON may nest (see `contractsOf`). */
 const manifestMaxDepth = 2 * valueDepth + 8;
 /** The most calculations one version's modules export. */
-const maxContracts = 256;
+const maxContracts = workflowModuleLimits.contracts;
 
 /** What a JSON number, boolean or null starts with. */
 const scalarStart = /^[-0-9tfn]$/u;
@@ -261,6 +262,19 @@ const contractsOf = (
       input: canonicalJson(input),
       output: canonicalJson(output),
     };
+    // As the version's load reads it back (workflow-builds.ts): a contract
+    // past it would publish and then never load.
+    if (
+      contract.input.length > workflowModuleLimits.descriptorChars ||
+      contract.output.length > workflowModuleLimits.descriptorChars
+    ) {
+      throw invalid([
+        {
+          file: groups.module,
+          message: `${groups.export}'s input or output takes more than ${workflowModuleLimits.descriptorChars} characters as JSON.`,
+        },
+      ]);
+    }
     try {
       schemaFromDescriptor(contract.input);
       schemaFromDescriptor(contract.output);

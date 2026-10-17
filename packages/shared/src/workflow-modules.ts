@@ -19,6 +19,14 @@ export const workflowModuleLimits = {
   totalChars: 1024 * 1024,
   /** The longest path. */
   pathChars: 256,
+  /**
+   * The most calculations a version's modules export, and the most
+   * characters of each contract's input or output descriptor, as canonical
+   * JSON: refused at publication past these, and read back within them,
+   * so a version that published always loads.
+   */
+  contracts: 256,
+  descriptorChars: 256 * 1024,
 } as const;
 
 /**

@@ -4,7 +4,7 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 
 import type { LoadedModules, SealedCall } from "../workflow-builds.ts";
 import { runCompute } from "../workflow-modules.ts";
-import { takesExactly } from "./exact-values.ts";
+import { requireShape } from "./resource-calls.ts";
 
 // A run's `grasp.compute` call (platform specification 13.6): one
 // calculation of the workflow's own sealed compute modules, run in core's
@@ -36,9 +36,9 @@ export const callCompute = async (
   if (contract === undefined) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
-  if (!takesExactly(contract.input, input)) {
-    throw workflowResourceErrors.create("workflow.call_invalid");
-  }
+  // Within what a step records, as every call's arguments, and exactly
+  // what the contract takes: refused before anything is sent.
+  const checked = requireShape(contract.input, input, "arguments");
   const remaining = deadline - Date.now();
   if (remaining <= 0) {
     throw deadlineError();
@@ -55,7 +55,7 @@ export const callCompute = async (
       paths: compute.paths,
       module: call.module,
       export: call.export,
-      input,
+      input: checked,
     },
     // What one step's result may take, as every task's answer.
     platformLimits.stepPayloadBytes
@@ -78,12 +78,5 @@ export const callCompute = async (
   if (!settled.ok) {
     throw settled.error;
   }
-  const output = settled.value;
-  if (!takesExactly(contract.output, output)) {
-    throw workflowResourceErrors.create("workflow.call_invalid");
-  }
-  // Checked as plain JSON, taken exactly as it is.
-  // SAFETY: `takesExactly` accepts only plain JSON values.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return output as Json;
+  return requireShape(contract.output, settled.value, "output");
 };

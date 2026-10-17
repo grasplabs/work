@@ -1,6 +1,8 @@
 import { workflowSdkModules } from "@grasp-os/compiler";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { valueDepth } from "@grasp-os/shared/value-depth";
+import { workflowModuleLimits } from "@grasp-os/shared/workflow-modules";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowResourceRun,
@@ -12,6 +14,7 @@ import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
+import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import { jsonTextDepth, runCompute } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
@@ -20,6 +23,7 @@ import {
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { callCompute } from "../src/workflows/resource-compute.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
@@ -731,6 +735,83 @@ export const keys = compute({ input: v.record(v.number()), output: v.array(v.str
       crashed: "workflow.build_slow",
       executable: true,
     });
+  });
+
+  it("refuses a contract its version couldn't load, and loads every contract it publishes", async () => {
+    const by = await builder();
+    /** A module exporting `total` and `wide`, whose input has `fields` strings. */
+    const wideModule = (fields: number) => `${totalModule}
+const wideInput = v.object({ ${Array.from({ length: fields }, (_, index) => `f${index}: v.string()`).join(", ")} });
+export const wide = compute({ input: wideInput, output: v.number(), handler: () => 0 });
+`;
+    // About 113 characters a field: 3000 fields are past the load's bound.
+    const refused = await publicationRefusal(by, {
+      "code/total.ts": wideModule(3000),
+      "code/sum.ts": sumModule,
+    });
+    expect(refused.code).toBe("workflow.modules_invalid");
+    expect(JSON.stringify(refused.details)).toContain(
+      `more than ${workflowModuleLimits.descriptorChars} characters`
+    );
+    // 2000 are within it: published, it loads and runs.
+    const { workflow } = await published(by, {
+      "code/total.ts": wideModule(2000),
+      "code/sum.ts": sumModule,
+    });
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    expect(build.compute.contracts.has("code/total.ts#wide")).toBeTruthy();
+    await expect(ran(by, workflow.id)).resolves.toStrictEqual({
+      status: "completed",
+      output: { status: "6" },
+    });
+  });
+
+  it("refuses arguments past what a step records before sending anything", async () => {
+    const by = await builder();
+    const half = Math.ceil(platformLimits.stepPayloadBytes / 2) + 1024;
+    const args = [`\${ "x" * ${half} }`, `\${ "y" * ${half} }`];
+    const modules = {
+      "code/total.ts": `import { compute, v } from "@grasp-os/sdk/compute";
+export const total = compute({ input: v.array(v.string()), output: v.number(), handler: (items) => items.length });
+`,
+    };
+    const { workflow } = await published(by, modules, { args });
+    await expect(ran(by, workflow.id)).resolves.toStrictEqual({
+      status: "failed",
+      code: "workflow.call_invalid",
+    });
+    // Directly, with a sandbox that fails any call made: none is.
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const noLoader: WorkerLoader = {
+      get: () => {
+        throw new Error("A sandbox call was made");
+      },
+      load: () => {
+        throw new Error("A sandbox call was made");
+      },
+    };
+    const unreachable: Env = {
+      ...env,
+      SANDBOX_HOST: undefined,
+      LOADER: noLoader,
+    };
+    const code = await outcome(
+      callCompute(
+        unreachable,
+        build.compute,
+        build.sdk,
+        {
+          name: "grasp.compute",
+          binding: "total",
+          module: "code/total.ts",
+          export: "total",
+          arguments: { literal: [] },
+        },
+        ["x".repeat(half), "y".repeat(half)],
+        Date.now() + 60_000
+      )
+    );
+    expect(code).toBe("workflow.call_invalid");
   });
 
   it("refuses modules past their bounds and paths outside code/", async () => {
