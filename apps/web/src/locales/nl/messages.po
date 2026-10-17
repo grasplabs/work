@@ -6929,6 +6929,10 @@ msgstr "Versie {number}, huidig"
 msgid "Version {version}"
 msgstr "Versie {version}"
 
+#: src/workflows/test-run.tsx
+msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
+msgstr "Versie {version} heeft geen build die draait, dus er draaide niets: een van de taken gebruikt iets wat Grasp nog niet kan uitvoeren."
+
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
 msgstr "Te beoordelen versie: {version}"
