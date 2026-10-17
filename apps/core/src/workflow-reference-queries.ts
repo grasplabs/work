@@ -10,6 +10,10 @@ import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import {
+  liveWindowMaxItems,
+  queryMaxResults,
+} from "@grasp-os/shared/store-limits";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, desc, eq, lt, or } from "drizzle-orm";
@@ -21,6 +25,7 @@ import {
   workflowResourceRuns,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
+import { windowPages } from "./query-windows.ts";
 
 // A workflow reference's ordinary queries, as an App's screens read them
 // (spec 10.7.2): `workflows.<alias>.queries.runs`, `.history`,
@@ -387,13 +392,12 @@ export const callWorkflowQuery = async (
   };
 };
 
-/** The most records one window of runs reads. */
-const maxWindow = 500;
-
 /**
  * Reads a paginated workflow query's window of `extent` records for
  * `caller`, as a live list reads one (query-windows.ts): its records and
- * whether more follow, from one read. Only `runs` pages through records;
+ * whether more follow, from one read, charged as a window's pages are:
+ * the caller paid `windowPages(extent)`, and `charge` is asked for any
+ * page's worth of records past that. Only `runs` pages through records;
  * `decisions` answers its empty inbox, and anything else isn't paginated.
  */
 export const readWorkflowWindow = async (
@@ -401,7 +405,10 @@ export const readWorkflowWindow = async (
   caller: WorkflowQueryCaller,
   query: ResolvedWorkflowQuery,
   input: unknown,
-  extent: number
+  window: {
+    readonly extent: number;
+    readonly charge: (pages: number, whole: number) => Promise<void>;
+  }
 ): Promise<OperationResult> => {
   if (query.name !== "runs" && query.name !== "decisions") {
     throw operationErrors.create("contract.not_paginated");
@@ -424,8 +431,13 @@ export const readWorkflowWindow = async (
   }
   const page = await runsPage(env, caller, workflowId, {
     ...(typeof args.status === "string" ? { status: args.status } : {}),
-    size: Math.min(Math.max(extent, 1), maxWindow),
+    size: Math.min(Math.max(window.extent, 1), liveWindowMaxItems),
   });
+  const owed =
+    Math.ceil(page.items.length / queryMaxResults) - windowPages(window.extent);
+  if (owed > 0) {
+    await window.charge(owed, windowPages(window.extent) + owed);
+  }
   // Each record as the query's own pages carry it.
   const checkedPage = checked(
     query.returns,

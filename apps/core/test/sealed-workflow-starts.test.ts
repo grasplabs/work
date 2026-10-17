@@ -1,5 +1,6 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runDurableObjectAlarm } from "cloudflare:test";
@@ -442,6 +443,20 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       cursor: "data.invalid_cursor",
       notPaginated: "contract.not_paginated",
     });
+
+    // A caller no longer allowed to call (an agent whose permission was
+    // withdrawn) is refused before anything is read.
+    const withdrawn = await callAppFunction(
+      env,
+      bob,
+      app,
+      JSON.stringify({ reference: references.runs, input: { pagination: {} } }),
+      Date.now() + 30_000,
+      async () => {
+        await Promise.reject(roleErrors.create("role.forbidden"));
+      }
+    );
+    expect(codeOf(withdrawn.result)).toBe("role.forbidden");
 
     // Without the binding, nothing is read.
     await unbindWorkflowFromApp(env, owner, binding.id);

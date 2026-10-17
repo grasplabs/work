@@ -612,11 +612,79 @@ const callAllowed = (
   // A window is a screen's, and a query's only.
   if (
     call.window !== undefined &&
-    (!windows || call.reference.kind !== "query")
+    (!windowed || call.reference.kind !== "query")
   ) {
     throw operationErrors.create("contract.invalid_request");
   }
   return call;
+};
+
+/**
+ * What `reference` names in `release`: a public function's path, or a
+ * workflow reference's query, which is core's to answer, never the App's
+ * (workflow-reference-queries.ts).
+ */
+const referenceIn = async (
+  release: Release,
+  reference: FunctionRequest["reference"]
+): Promise<{
+  path: string;
+  workflowQuery: ResolvedWorkflowQuery | undefined;
+}> =>
+  isWorkflowQueryPath(reference.contractId)
+    ? {
+        path: reference.contractId,
+        workflowQuery: await workflowQueryOf(release, reference),
+      }
+    : { path: publicOperationOf(release, reference), workflowQuery: undefined };
+
+/** A workflow reference's query, answered as `callFunction` answers a call. */
+const answeredWorkflowQuery = async (
+  env: Env,
+  {
+    caller,
+    query,
+    call,
+    release,
+    refused,
+    stillAllowed,
+    chargeWindow,
+  }: {
+    caller: { app: string; userId: string };
+    query: ResolvedWorkflowQuery;
+    call: FunctionRequest;
+    release: Release;
+    refused: (error: unknown) => FunctionAnswer;
+    stillAllowed: FunctionCallOptions["stillAllowed"];
+    chargeWindow: FunctionCallOptions["chargeWindow"];
+  }
+): Promise<FunctionAnswer> => {
+  try {
+    // The caller's own check of whether it may still call (an agent's
+    // permission, say), as every call's invocation asks it.
+    await stillAllowed?.();
+    const result =
+      call.window === undefined
+        ? await callWorkflowQuery(env, caller, query, call.input)
+        : await readWorkflowWindow(env, caller, query, call.input, {
+            extent: call.window.extent,
+            charge:
+              chargeWindow ??
+              (async () => {
+                await Promise.reject(
+                  operationErrors.create("contract.invalid_request")
+                );
+              }),
+          });
+    return {
+      result,
+      provenance: null,
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
 };
 
 /** `callAppFunction`, with all of its options. */
@@ -681,6 +749,8 @@ const callFunction = async (
       call,
       release,
       refused,
+      stillAllowed,
+      chargeWindow,
     });
   }
   try {
