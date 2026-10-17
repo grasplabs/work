@@ -8,10 +8,12 @@
  */
 import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
+import type { WorkflowState } from "@grasp-os/shared/admin/interviews";
 import { LISTEN_DAYS } from "@grasp-os/shared/admin/onboarding";
 import { dateOn, mayInvite } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   ContractState,
+  LinkState,
   Need,
   OrgView,
   Settler,
@@ -99,6 +101,27 @@ export const stageWords: Record<Stage, string> = {
   leads: "Team leads",
   interviews: "Interviews",
   open: "Grasp opens",
+};
+
+/** Where someone's link stands. */
+export const linkWords: Record<LinkState, string> = {
+  waiting: "No link yet",
+  invited: "Invited",
+  opened: "Opened",
+  progress: "Talking now",
+  incomplete: "Stopped halfway",
+  completed: "Completed",
+  expired: "Link expired",
+  away: "Away",
+};
+
+/** How far a piece of work is known. */
+export const workflowWords: Record<WorkflowState, string> = {
+  mapping: "Still mapping",
+  saturating: "Nearly there",
+  complete: "Complete",
+  variants: "Complete, in more than one way",
+  blocked: "Waits on an answer",
 };
 
 /** The phases the list of organizations is cut into. */
