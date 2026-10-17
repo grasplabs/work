@@ -22,6 +22,7 @@ import {
   signInInputSchema,
 } from "./settings.ts";
 import type { SettingsErrorCode } from "./settings.ts";
+import { getClientSetup } from "./setup.ts";
 
 const clientSchema = z.object({ clientId: z.string().min(1) });
 
@@ -68,6 +69,11 @@ export const fetchGridLive = createServerFn({ method: "GET" }).handler(
 export const fetchClientAdmins = createServerFn({ method: "POST" }).handler(
   async ({ context }) => await adminReader(env, context.staff)()
 );
+
+/** A client's own Grasp as the console runs it, for the admin's Setup; null for no such client. */
+export const fetchClientSetup = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }) => await getClientSetup(env, data.clientId));
 
 /** A client's settings and its latest console actions; null settings for no such client. */
 export const fetchClientSettings = createServerFn({ method: "GET" })
