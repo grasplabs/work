@@ -31,7 +31,7 @@ function Tabs({
 // An end with more tabs behind it fades (`watchRow` marks it), since nothing else would say so,
 // and the open tab stays clear of that fade: both are the same 1.5rem.
 const tabsListVariants = cva(
-  "group/tabs-list text-muted-foreground relative inline-flex w-fit max-w-full scroll-px-6 items-center justify-start overflow-x-auto overflow-y-hidden rounded-lg p-[3px] group-data-horizontal/tabs:h-9 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col group-data-vertical/tabs:overflow-visible data-more-end:mask-r-from-[calc(100%-1.5rem)] data-more-start:mask-l-from-[calc(100%-1.5rem)] data-[variant=line]:rounded-none data-[variant=line]:group-data-horizontal/tabs:h-[41px] data-[variant=line]:group-data-horizontal/tabs:pb-2",
+  "group/tabs-list text-muted-foreground relative inline-flex w-fit max-w-full scroll-px-6 items-center justify-start overflow-x-auto overflow-y-hidden rounded-lg p-[3px] group-data-horizontal/tabs:h-9 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col group-data-vertical/tabs:overflow-visible data-more-end:mask-r-from-[calc(100%-1.5rem)] data-more-start:mask-l-from-[calc(100%-1.5rem)] data-[variant=line]:rounded-none data-[variant=line]:group-data-horizontal/tabs:h-10.25 data-[variant=line]:group-data-horizontal/tabs:pb-2",
   {
     variants: {
       variant: {
