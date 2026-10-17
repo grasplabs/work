@@ -316,15 +316,16 @@ describe("the catalog", () => {
     return await core.authenticate().connections;
   };
 
-  it("lists Composio's toolkits next to the native providers, each described and in one of Grasp's groups", async () => {
+  it("lists Composio's toolkits next to the native providers, each described, in one of Grasp's groups, and saying whose sign-in app it takes", async () => {
     const connections = await userConnections();
     const { entries, composio } = await connections.catalog();
     expect(composio).toBe("listed");
     expect(
-      entries.map(({ source, id, description, group }) => ({
+      entries.map(({ source, id, description, group, auth }) => ({
         entry: `${source}:${id}`,
         description,
         group,
+        auth,
       }))
     ).toStrictEqual([
       {
@@ -332,17 +333,26 @@ describe("the catalog", () => {
         description:
           "Outlook mail and calendars, and files in OneDrive and SharePoint.",
         group: "Email and calendar",
+        auth: "managed",
       },
       {
         entry: "native:google",
         description: "Gmail, Google Calendar, and files in Google Drive.",
         group: "Email and calendar",
+        auth: "managed",
       },
       {
         entry: "composio:hubspot",
         description:
           "HubSpot is a CRM platform for marketing, sales and service.",
         group: "CRM",
+        auth: "managed",
+      },
+      {
+        entry: "composio:acme_erp",
+        description: null,
+        group: "Other",
+        auth: "own",
       },
     ]);
   });
@@ -442,6 +452,23 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
+  it("is refused for a toolkit Composio holds no app for, connecting nothing", async () => {
+    const admin = await signedInAdmin();
+    await expect(
+      outcome(
+        admin.connections.connectToolkit({
+          ...request,
+          toolkit: "acme_erp",
+          tools: ["ACME_ERP_LIST_ORDERS"],
+        })
+      )
+    ).resolves.toBe("connection.own_auth_required");
+    const connected = await admin.connections.list();
+    expect(
+      connected.filter(({ provider }) => provider === "acme_erp")
+    ).toStrictEqual([]);
+  });
+
   it("sends the browser back nowhere but this origin", async () => {
     const admin = await signedInAdmin();
     await expect(
@@ -495,8 +522,13 @@ describe("offering catalog entries", () => {
       admin: entries.map(({ id, offered }) => `${id}:${offered}`),
       anna: await listed(anna.connections),
     }).toStrictEqual({
-      admin: ["microsoft:true", "google:false", "hubspot:false"],
-      anna: ["native:microsoft"],
+      admin: [
+        "microsoft:true",
+        "google:false",
+        "hubspot:false",
+        "acme_erp:true",
+      ],
+      anna: ["native:microsoft", "composio:acme_erp"],
     });
     const refused = await auditedDuring(async () => {
       await expect(
@@ -589,6 +621,7 @@ describe("offering catalog entries", () => {
       "native:microsoft",
       "native:google",
       "composio:hubspot",
+      "composio:acme_erp",
     ]);
     await expect(
       outcome(admin.connections.connectToolkit(toolkitRequest))

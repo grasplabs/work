@@ -384,7 +384,7 @@ const Subtitle = ({ integration }: { integration: Integration }) => {
   );
 };
 
-/** Why this person can't connect it, where they can't: staff, an entry not offered, or a toolkit only admins connect. */
+/** Why this person can't connect it, where they can't: staff, an entry not offered, one that needs the organization's own sign-in app, or a toolkit only admins connect. */
 const WhyNoConnect = ({
   integration,
   identity,
@@ -416,6 +416,16 @@ const WhyNoConnect = ({
         ) : (
           <Trans>It isn&apos;t offered to your organization.</Trans>
         )}
+      </p>
+    );
+  }
+  if (integration.auth === "own") {
+    return (
+      <p className="text-muted-foreground">
+        <Trans>
+          Connecting it needs your organization&apos;s own sign-in app for it,
+          which Grasp can&apos;t take yet.
+        </Trans>
       </p>
     );
   }
