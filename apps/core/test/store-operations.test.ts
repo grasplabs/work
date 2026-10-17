@@ -1647,3 +1647,136 @@ describe("a shared store's commits", () => {
     ]);
   });
 });
+
+/** An App whose store's mutation stages a start of the workflow it declares. */
+const trackerFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  requests: defineTable({ who: v.string() }),
+});
+`,
+  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
+import { mutation } from "#grasp/server";
+
+export const followUp = resource.workflow("followUp", {
+  input: v.object({ who: v.string() }),
+  output: v.object({ status: v.string() }),
+});
+
+export const file = mutation({
+  args: { who: v.string() },
+  returns: v.null(),
+  uses: [followUp],
+  handler: async (ctx, args) => {
+    await ctx.db.insert("requests", { who: args.who });
+    await ctx.afterCommit.start(followUp, { who: args.who });
+    return null;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { file, followUp } from "./operations/requests.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Tracker",
+  schema,
+  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
+  operations: { requests: { file } },
+  internalOperations: {},
+  screens: [],
+  uses: [followUp],
+});
+`,
+};
+
+/** An App filing requests in the Tracker's store through its store resource. */
+const frontFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  marks: defineTable({ label: v.string() }),
+});
+`,
+  "operations/front.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const tracker = resource.store("tracker", {
+  operations: {
+    "requests.file": { kind: "mutation", args: { who: v.string() }, returns: v.null() },
+  },
+});
+
+export const file = action({
+  args: { who: v.string() },
+  returns: v.string(),
+  uses: [tracker],
+  handler: async (ctx, args) => {
+    try {
+      await ctx.resources.tracker.call("requests.file", { who: args.who });
+      return JSON.stringify("filed");
+    } catch (error) {
+      const details = Object(Reflect.get(Object(error), "details"));
+      return "error:" + String(Reflect.get(details, "code") ?? Reflect.get(Object(error), "code"));
+    }
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { file, tracker } from "./operations/front.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Front",
+  schema,
+  access: { tables: { marks: { read: "owner", write: "owner" } } },
+  operations: { front: { file } },
+  internalOperations: {},
+  screens: [],
+  uses: [tracker],
+});
+`,
+};
+
+describe("a store operation starting a workflow", () => {
+  it("is refused after its commit, so a caller of another App's store, a run's included, starts nothing through it", async () => {
+    const admin = await person("admin");
+    const tracker = await sealedApp(trackerFiles, "Tracker");
+    const front = await sealedApp(frontFiles, "Front");
+    const permission = await granted(
+      admin,
+      {
+        subject: { type: "app", appId: front.app },
+        object: { type: "store", storeId: tracker.store },
+        actions: ["requests.file"],
+      },
+      front.release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: front.app,
+      alias: "tracker",
+      target: { kind: "store", permissionId: permission },
+      reviewed: { version: front.release.manifest.resourceVersion },
+    });
+    const answered = await call(front.owner, front, "front.file", {
+      who: "Ada",
+    });
+    const outbox = await runInDurableObject(
+      env.DATA_STORES.getByName(tracker.store),
+      (_instance, state) =>
+        state.storage.sql.exec("SELECT id FROM sdk_change_outbox").toArray()
+          .length
+    );
+    const receipts = await env.DB.prepare(
+      "SELECT count(*) AS count FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ?"
+    )
+      .bind(tracker.app)
+      .first<{ count: number }>();
+    expect({ answered, outbox, receipts: receipts?.count }).toStrictEqual({
+      answered: "error:resource.unavailable",
+      outbox: 0,
+      receipts: 0,
+    });
+  });
+});

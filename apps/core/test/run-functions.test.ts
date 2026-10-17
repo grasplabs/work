@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -14,10 +15,18 @@ import { z } from "zod";
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
 import type { RunCaller } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { appFor } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { budgetMonth } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import {
+  createWorkflowResource,
+  publishWorkflowVersion,
+} from "../src/workflow-resources.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { release } from "./apps.ts";
@@ -196,6 +205,130 @@ export default app({
 });
 `,
 });
+
+/**
+ * An App whose action starts the workflow it declares, and whose mutation
+ * stages its start for after its commit (workflow-start-intents.ts).
+ */
+const startingFiles = (): Record<string, string> => ({
+  "schema.ts": schemaFile,
+  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action, mutation } from "#grasp/server";
+
+export const followUp = resource.workflow("followUp", {
+  input: v.object({ who: v.string() }),
+  output: v.object({ status: v.string() }),
+});
+
+export const kickOff = action({
+  args: { who: v.string() },
+  returns: v.string(),
+  uses: [followUp],
+  handler: async (ctx, args) => {
+    const started = await ctx.startWorkflow(followUp, { who: args.who });
+    return started.startId;
+  },
+});
+
+export const submit = mutation({
+  args: { who: v.string() },
+  returns: v.id("notes"),
+  uses: [followUp],
+  handler: async (ctx, args) => {
+    const id = await ctx.db.insert("notes", { title: args.who });
+    await ctx.afterCommit.start(followUp, { who: args.who });
+    return id;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { followUp, kickOff, submit } from "./operations/desk.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { desk: { kickOff, submit } },
+  screens: [],
+  uses: [followUp],
+});
+`,
+});
+
+/** A JSON object's schema descriptor, all of `properties` required. */
+const objectSchemaOf = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/**
+ * A workflow of `owner`'s, bound to App `app` as `followUp`, with the
+ * App's `start` on it granted by an admin, for version 1.
+ */
+const deskWorkflowBound = async (owner: string, app: string) => {
+  const by = {
+    userId: owner,
+    role: "builder" as const,
+    teams: [],
+    staff: false,
+  };
+  const admin = await person("admin");
+  const workflow = await createWorkflowResource(
+    env,
+    by,
+    `desk-${crypto.randomUUID()}`
+  );
+  await publishWorkflowVersion(env, by, workflow.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: workflow.name,
+        version: "1.0.0",
+        title: workflow.name,
+        metadata: {
+          grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+        },
+      },
+      input: { schema: objectSchemaOf({ who: { type: "string" } }) },
+      output: { schema: objectSchemaOf({ status: { type: "string" } }) },
+      do: [{ greet: { set: { status: "done" } } }],
+    }),
+    basedOn: null,
+  });
+  await bindWorkflowToApp(env, by, workflow.id, {
+    app,
+    alias: "followUp",
+    version: 1,
+  });
+  const asked = await requestPermission(
+    env,
+    by,
+    {
+      subject: { type: "app", appId: app },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: "FOLLOW_UP",
+    },
+    {
+      app: async (named: string, role: "user" | "builder") =>
+        await appFor(env, by, named, role),
+      resource: async (
+        ref: Parameters<typeof requireResourceRole>[2],
+        needed: Parameters<typeof requireResourceRole>[3]
+      ) => {
+        await requireResourceRole(env, by, ref, needed);
+      },
+    }
+  );
+  await grantPermission(env, admin, asked.id, { version: 1 });
+};
 
 /**
  * An App whose actions send mail through Microsoft 365, with a mutation
@@ -710,6 +843,48 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
           purpose: "app.resource",
         },
       ],
+    });
+  });
+
+  it("start no workflow, from an action or after a mutation's commit, so no run's step opens a lineage of its own", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, {
+      ...startingFiles(),
+      ...callingWorkflow("desk", [
+        {
+          name: "start",
+          reference: { contractId: "desk.kickOff", kind: "action" },
+          input: { who: "Ada" },
+          more: [
+            {
+              reference: { contractId: "desk.submit", kind: "mutation" },
+              input: { who: "Ada" },
+            },
+          ],
+        },
+      ]),
+    });
+    // Bound and granted, as a person's start from a screen needs: what
+    // refuses the run's start is that a run makes it, nothing else.
+    await deskWorkflowBound(builder.userId, app);
+    const run = await builder.api.workflows.start(app, "desk");
+    const ended = await endedRun(builder, run.id);
+    const receipts = await env.DB.prepare(
+      "SELECT count(*) AS count FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ?"
+    )
+      .bind(app)
+      .first<{ count: number }>();
+    expect({ ended, receipts: receipts?.count }).toMatchObject({
+      ended: {
+        status: "completed",
+        output: [
+          [
+            { ok: false, error: { code: "resource.unavailable" } },
+            { ok: false, error: { code: "resource.unavailable" } },
+          ],
+        ],
+      },
+      receipts: 0,
     });
   });
 
