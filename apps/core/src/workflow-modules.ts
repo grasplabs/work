@@ -39,9 +39,10 @@ import { buildComputeModules, withinBuildWait } from "./screens.ts";
 //   the host makes the call from the sealed task table.
 // - Imports past the SDK. The compiler builds them as their own kind
 //   (`computeCode`): their own files and `@grasp-os/sdk/compute` only, so
-//   no Workers runtime, no other SDK entry and no package (approved
-//   packages for calculations are GRA-665), type-checked against that
-//   SDK.
+//   no Workers runtime, no other SDK entry and no package, type-checked
+//   against that SDK. A workflow's builders may have packages approved
+//   for its compute modules (`computation`, dependencies/subjects.ts),
+//   but none is imported yet: a later slice of GRA-665 builds them.
 // - The clock, randomness, timers and generated code. The isolate takes
 //   them away before any module of the workflow's evaluates (the SDK's
 //   compute-lockdown.ts), on the global object and every prototype of it,
