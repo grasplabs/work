@@ -225,7 +225,7 @@ const toolkitSchema = z.object({
   /** The auth schemes Composio holds an app for: connectable without one of ours. */
   composio_managed_auth_schemes: z.array(z.string()).default([]),
   /** Whether it takes no account at all: then there is nothing to connect. */
-  no_auth: z.boolean().default(false),
+  no_auth: z.boolean().nullish(),
   meta: z
     .object({
       categories: z.array(z.unknown()).default([]),
@@ -343,7 +343,8 @@ const composioList = async <Item>(
 const isListed = ({
   no_auth: noAuth,
   meta,
-}: z.infer<typeof toolkitSchema>): boolean => !noAuth && meta.tools_count > 0;
+}: z.infer<typeof toolkitSchema>): boolean =>
+  noAuth !== true && meta.tools_count > 0;
 
 /**
  * Whose app connecting a toolkit takes: Composio's, where it holds one

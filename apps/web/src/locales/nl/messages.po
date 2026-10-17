@@ -2073,8 +2073,8 @@ msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "Koppelen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "Connecting it needs your organization's own sign-in app for it, which Grasp can't take yet."
-msgstr "Om het te koppelen heeft je organisatie er een eigen inlog-app voor nodig, die Grasp nog niet kan gebruiken."
+msgid "Connecting it needs your organization's own sign-in app, which Grasp can't use yet."
+msgstr "Om het te koppelen heeft je organisatie een eigen inlog-app nodig, die Grasp nog niet kan gebruiken."
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.outcomes.tsx

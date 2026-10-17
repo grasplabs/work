@@ -2,8 +2,9 @@
  * Composio's REST API as the connect Worker reaches it in core's tests:
  * part of the `connect-providers` Worker (test/connect-providers.ts), so
  * the real connect runs unchanged behind core. It lists two toolkits,
- * HubSpot and one it holds no app for, and an admin's auth at its link succeeds at once: the link it
- * gives is the callback connect asked it to send the browser back to.
+ * HubSpot and one it holds no app for, and an admin's auth at its link
+ * succeeds at once: the link it gives is the callback connect asked it to
+ * send the browser back to.
  * Imported by vite.config.ts (Node) and the tests (workerd), so it only
  * holds data.
  */

@@ -2073,8 +2073,8 @@ msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "No se pudo conectar. Vuelve a intentarlo o pregunta a un administrador."
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "Connecting it needs your organization's own sign-in app for it, which Grasp can't take yet."
-msgstr "Para conectarla, tu organización necesita su propia app de inicio de sesión, que Grasp aún no admite."
+msgid "Connecting it needs your organization's own sign-in app, which Grasp can't use yet."
+msgstr "Para conectarla, tu organización necesita su propia app de inicio de sesión, que Grasp aún no puede usar."
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.outcomes.tsx

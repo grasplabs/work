@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { requestGranted } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { hubspotLogo } from "./composio-api.ts";
 import { consentCode, tokensFor } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -463,10 +464,22 @@ describe("connecting a Composio toolkit", () => {
         })
       )
     ).resolves.toBe("connection.own_auth_required");
-    const connected = await admin.connections.list();
+    // Recorded in the deployment's one log, as connect records it.
+    const events = await allEvents();
     expect(
-      connected.filter(({ provider }) => provider === "acme_erp")
-    ).toStrictEqual([]);
+      events.filter(
+        ({ action, actor, detail }) =>
+          action === "connection.connect" &&
+          actor?.type === "person" &&
+          actor.userId === admin.userId &&
+          detail.provider === "acme_erp"
+      )
+    ).toMatchObject([
+      {
+        source: "connect",
+        detail: { outcome: "refused", reason: "connection.own_auth_required" },
+      },
+    ]);
   });
 
   it("sends the browser back nowhere but this origin", async () => {

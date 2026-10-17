@@ -423,8 +423,8 @@ const WhyNoConnect = ({
     return (
       <p className="text-muted-foreground">
         <Trans>
-          Connecting it needs your organization&apos;s own sign-in app for it,
-          which Grasp can&apos;t take yet.
+          Connecting it needs your organization&apos;s own sign-in app, which
+          Grasp can&apos;t use yet.
         </Trans>
       </p>
     );

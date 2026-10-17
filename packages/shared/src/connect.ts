@@ -412,8 +412,7 @@ export interface CatalogEntry {
  * OAuth client or API key). Grasp can't take one yet, so connecting such a
  * toolkit is refused (`connection.own_auth_required`).
  */
-export const catalogAuths = ["managed", "own"] as const;
-export type CatalogAuth = (typeof catalogAuths)[number];
+export type CatalogAuth = "managed" | "own";
 
 /**
  * Grasp's kinds of app, in the order the Integrations page lists them. Each
