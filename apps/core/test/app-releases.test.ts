@@ -841,6 +841,10 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       "// @ts-nocheck\nexport const title = (): string => document.title;\n",
     ],
     [
+      "a file the type check is told to skip, in another case",
+      "// @ts-NoCheck\nexport const title = (): string => document.title;\n",
+    ],
+    [
       "an ambient module that shadows the SDK's",
       'declare module "@grasp-os/sdk" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
     ],

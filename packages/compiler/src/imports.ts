@@ -279,7 +279,9 @@ export interface DirectiveSite {
 const tripleSlash = /^\/\s*<(?:reference|amd-module|amd-dependency)\b/iu;
 
 /** A comment that switches the type check off for a file, a line or the next. */
-const suppression = /@ts-(?:nocheck|ignore|expect-error)\b/u;
+// TypeScript reads `@ts-nocheck` in any case (`@ts-NoCheck`); the others
+// are refused in any case too.
+const suppression = /@ts-(?:nocheck|ignore|expect-error)\b/iu;
 
 /**
  * A Babel plugin that lists into `directives` every comment of a file
