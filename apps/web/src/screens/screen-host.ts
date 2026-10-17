@@ -691,6 +691,15 @@ const refusedInPreview = async (): Promise<never> => {
   throw appErrors.create("app.preview_side_effect");
 };
 
+/** Whether `frame` is a stream's last: its result, a refusal, or the end. */
+const isLastFrame = (frame: unknown): boolean =>
+  typeof frame === "object" &&
+  frame !== null &&
+  "type" in frame &&
+  (frame.type === "result" ||
+    frame.type === "refused" ||
+    frame.type === "closed");
+
 /**
  * A preview of the chat's draft: its server calls go to the draft's
  * preview, what its screen reports to the chat's agent; it starts no
@@ -717,10 +726,47 @@ const previewTarget = (
         async ({ chats }) =>
           await chats.previewFunction(chatId, app, revision, request)
       ),
-    // A streaming action runs in an object of its own, which a preview
-    // has none of (yet): refused, as it starts nothing.
-    streamFunction: refusedInPreview,
-    cancelStream: refusedInPreview,
+    // A streaming action runs in the draft's preview too, on its draft
+    // release and store (core's sealed-previews.ts), relayed over the
+    // page's connection while the person may still have it.
+    streamFunction: async (what, request, onFrame, onEnded) =>
+      await on(link, async ({ chats }) => {
+        let ended = false;
+        const end = (): void => {
+          if (!ended) {
+            ended = true;
+            onEnded();
+          }
+        };
+        const subscription = await chats.previewStream(
+          chatId,
+          app,
+          revision,
+          what,
+          request,
+          forCore(async (frame: unknown) => {
+            try {
+              return await onFrame(frame);
+            } finally {
+              if (isLastFrame(frame)) {
+                end();
+              }
+            }
+          })
+        );
+        return {
+          release: () => {
+            end();
+            void subscription.release();
+          },
+        };
+      }),
+    cancelStream: async (request) =>
+      await on(
+        link,
+        async ({ chats }) =>
+          await chats.previewCancelStream(chatId, app, revision, request)
+      ),
     report: async (problem) => {
       await on(link, async ({ chats }) => {
         await chats.previewReport(chatId, app, revision, screen, problem);

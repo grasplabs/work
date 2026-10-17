@@ -2983,6 +2983,61 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Starts, joins or (`attach`) reads again `personId`'s invocation of the
+   * streaming action `request` names (its text, as a screen sends it) in
+   * the preview of their own chat's draft of App `appId` at `revision`
+   * (sealed-previews.ts): `app.preview_outdated` once the draft is at
+   * another. Answers its frames, as JSON lines: progress, then its result.
+   */
+  async previewStream(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown,
+    request: unknown,
+    attach: boolean
+  ): Promise<ReadableStream<Uint8Array>> {
+    const draft = this.previewDraft(chatId, personId, appId);
+    if (draft.revision !== revision) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    return await this.#sealedPreviews.openStream(
+      chatIdSchema.parse(chatId),
+      personId,
+      appIdSchema.parse(appId),
+      draft,
+      request,
+
+      attach
+    );
+  }
+
+  /**
+   * Asks `personId`'s invocation of the streaming action `request` names,
+   * in the preview of their own chat's draft of App `appId` at
+   * `revision`, to stop: whether it was still running.
+   */
+  async previewCancelStream(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown,
+    request: unknown
+  ): Promise<boolean> {
+    const draft = this.previewDraft(chatId, personId, appId);
+    if (draft.revision !== revision) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    return await this.#sealedPreviews.cancelStream(
+      chatIdSchema.parse(chatId),
+      personId,
+      appIdSchema.parse(appId),
+      draft,
+      request
+    );
+  }
+
+  /**
    * The `#grasp` references the screens of `personId`'s own chat's draft
    * of App `appId` at `revision` import: generated from its draft
    * release, sealed now if it isn't yet; null when it generates none.

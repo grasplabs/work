@@ -20,13 +20,18 @@ import type {
   PreviewBundle,
   ProjectDocument,
 } from "@grasp-os/shared/chat";
-import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
+import {
+  authErrors,
+  internalErrors,
+  isExpectedError,
+} from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   screenErrors,
@@ -49,6 +54,7 @@ import { appHost, workspace } from "./durable-objects.ts";
 import { gatewaySettings, modelEffortsOf } from "./models.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
+import { relayPreviewStream } from "./preview-stream-relay.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type { LiveReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -710,6 +716,118 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         request,
         onSnapshot
       );
+    });
+  }
+
+  /**
+   * Starts (`stream`) or follows again (`attach`) a streaming action of the
+   * draft of spec 8's layout in its preview, as a screen's `streamFunction`
+   * does (sealed-previews.ts), relayed to `onFrame` only while the person
+   * still builds the App and the draft is still at `revision`
+   * (preview-stream-relay.ts). Each start and attach counts as one of the
+   * person's preview requests.
+   */
+  async previewStream(
+    chatId: string,
+    app: string,
+    revision: number,
+    what: "stream" | "attach",
+    request: string,
+    onFrame: (frame: unknown) => Promise<unknown>
+  ): Promise<RunSubscription> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      await admitPreviewCall(this.#env, by, id);
+      if (
+        (what !== "stream" && what !== "attach") ||
+        typeof request !== "string" ||
+        request.length > functionRequestMaxBytes ||
+        typeof revision !== "number" ||
+        !isStub(onFrame)
+      ) {
+        throw screenErrors.create("screen.invalid");
+      }
+      if (this.#watches.size >= maxWatches) {
+        throw agentErrors.create("agent.too_many_watches");
+      }
+      const chat = chatIdOf(chatId);
+      const chats = this.#chatsOf(by.userId);
+      const frames = await chats.previewStream(
+        chat,
+        by.userId,
+        id,
+        revision,
+        request,
+        what === "attach"
+      );
+      const relayed: { stop?: () => void } = {};
+      const toPage = callbackFor(onFrame, this.#stillOpen, refusals, () => {
+        this.#watches.delete(toPage);
+        relayed.stop?.();
+      });
+      this.#watches.add(toPage);
+      relayed.stop = relayPreviewStream(frames, {
+        deliver: toPage,
+        // The session still theirs, the App still theirs to build, and the
+        // draft still at the stream's revision.
+        stillOpen: async () => {
+          const now = await this.#check();
+          if (now.userId !== by.userId) {
+            throw authErrors.create("auth.unauthenticated");
+          }
+          const draft = await chats.draft(chat, id);
+          if (draft.revision !== revision) {
+            throw appErrors.create("app.preview_outdated");
+          }
+          if (!(await buildsNow(this.#env, now, id))) {
+            throw roleErrors.create("role.forbidden");
+          }
+        },
+        cancel: async () =>
+          await chats.previewCancelStream(
+            chat,
+            by.userId,
+            id,
+            revision,
+            request
+          ),
+        requestId: crypto.randomUUID(),
+      }).stop;
+      return new RunSubscription(async () => {
+        await Promise.resolve();
+        toPage[Symbol.dispose]();
+      });
+    });
+  }
+
+  /**
+   * Asks the preview's invocation of the streaming action `request` names
+   * to stop, as a screen's `cancelStream` does: `{ requested }`.
+   */
+  async previewCancelStream(
+    chatId: string,
+    app: string,
+    revision: number,
+    request: string
+  ): Promise<{ requested: boolean }> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      await admitPreviewCall(this.#env, by, id);
+      if (
+        typeof request !== "string" ||
+        request.length > functionRequestMaxBytes
+      ) {
+        throw screenErrors.create("screen.invalid");
+      }
+      return {
+        requested: await this.#chatsOf(by.userId).previewCancelStream(
+          chatIdOf(chatId),
+          by.userId,
+          id,
+          revision,
+          request
+        ),
+      };
     });
   }
 
