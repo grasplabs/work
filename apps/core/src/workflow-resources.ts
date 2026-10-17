@@ -89,6 +89,12 @@ import {
 import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import type { ResolvedCatalogContract } from "./workflow-catalog.ts";
+import {
+  compileModules,
+  moduleLookup,
+  modulesHashOf,
+} from "./workflow-modules.ts";
+import type { CompiledModules } from "./workflow-modules.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
@@ -824,7 +830,8 @@ const checkDefinition = async (
   env: Env,
   by: Acting,
   workflow: Live,
-  definition: string
+  definition: string,
+  modules: CompiledModules | undefined
 ): Promise<{
   checked: CheckedWorkflow;
   bindings: PinnedBinding[];
@@ -845,6 +852,8 @@ const checkDefinition = async (
   const policy = await quotaPolicy(env);
   const result = await validateWorkflow(definition, {
     catalog: (key) => resolved.get(key)?.contract ?? catalog.get(key)?.contract,
+    // `local:` keys resolve against the workflow's own modules only.
+    modules: moduleLookup(modules),
     ceilings: {
       maxSteps: policy.limits.workflowSteps,
       maxModelCalls: policy.limits.lineageModelRequests,
@@ -879,6 +888,11 @@ const checkDefinition = async (
   }
   const bindings: PinnedBinding[] = [];
   for (const [alias, binding] of checked.bindings) {
+    // A binding of the workflow's own modules is sealed with its build
+    // (workflow-builds.ts): no approval serves it, so nothing pins it here.
+    if (binding.contract.startsWith("local:")) {
+      continue;
+    }
     const contract = catalog.get(binding.contract);
     if (binding.kind !== "workflow" && contract?.kind === binding.kind) {
       bindings.push({
@@ -1067,12 +1081,32 @@ export const versionContract = async (
   return storedContractSchema.parse(JSON.parse(row.contract));
 };
 
+/** Where a version's manifest says what its modules were published as. */
+const manifestModulesSchema = z.object({
+  modulesHash: z.string().nullable().optional(),
+});
+
+/** The hash of the modules version `row` was published with, null for none. */
+const sealedModulesHash = (
+  row: typeof workflowResourceVersions.$inferSelect
+): string | null => {
+  try {
+    return (
+      manifestModulesSchema.parse(JSON.parse(row.manifest)).modulesHash ?? null
+    );
+  } catch {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+};
+
 /** The version of `id` with semantic version `definitionVersion`, if any. */
 const publishedAs = async (
   env: Env,
   id: string,
   definitionVersion: string
-): Promise<WorkflowResourceVersion | undefined> => {
+): Promise<
+  { version: WorkflowResourceVersion; modulesHash: string | null } | undefined
+> => {
   const row = await drizzle(env.DB)
     .select()
     .from(workflowResourceVersions)
@@ -1087,7 +1121,10 @@ const publishedAs = async (
     return undefined;
   }
   const bindings = await bindingsOf(env, id);
-  return versionOf(row, bindings.get(row.version) ?? []);
+  return {
+    version: versionOf(row, bindings.get(row.version) ?? []),
+    modulesHash: sealedModulesHash(row),
+  };
 };
 
 /** Where a definition's text says its semantic version. */
@@ -1107,7 +1144,8 @@ const statedVersionSchema = z.object({
 const savedPublication = async (
   env: Env,
   id: string,
-  definition: string
+  definition: string,
+  modulesHash: string | null
 ): Promise<WorkflowResourceVersion | undefined> => {
   let parsed: unknown;
   try {
@@ -1122,11 +1160,12 @@ const savedPublication = async (
   const existing = await publishedAs(env, id, stated);
   if (
     existing === undefined ||
-    existing.definitionHash !== (await definitionHashOf(parsed))
+    existing.modulesHash !== modulesHash ||
+    existing.version.definitionHash !== (await definitionHashOf(parsed))
   ) {
     return undefined;
   }
-  return existing;
+  return existing.version;
 };
 
 /**
@@ -1157,6 +1196,8 @@ interface Publication {
   bindings: PinnedBinding[];
   /** What it runs: the code generated from it, compiled (workflow-builds.ts). */
   compiled: CompiledBuild;
+  /** The hash of the modules published with it, null for none. */
+  modulesHash: string | null;
 }
 
 /**
@@ -1170,8 +1211,15 @@ const writeVersion = async (
   by: Acting,
   publication: Publication
 ): Promise<WorkflowResourceVersion> => {
-  const { workflow, checked, definition, definitionHash, bindings, compiled } =
-    publication;
+  const {
+    workflow,
+    checked,
+    definition,
+    definitionHash,
+    bindings,
+    compiled,
+    modulesHash,
+  } = publication;
   const contract = contractOf(checked);
   const contractText = canonicalJson(contract);
   if (bytesOf(contractText) > contractMaxBytes) {
@@ -1198,6 +1246,7 @@ const writeVersion = async (
     definitionVersion,
     profile: checked.profile,
     definitionHash,
+    modulesHash,
     evaluatorHash: jqProvenance.sha256,
     contractHash,
     bindings: bindings.map((binding) => ({ ...binding })),
@@ -1375,24 +1424,44 @@ const publish = async (
   input: unknown
 ): Promise<WorkflowResourceVersion> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const { definition, basedOn } = workflowResourceErrors.parse(
+  const {
+    definition,
+    basedOn,
+    modules: sources = {},
+  } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     publishSchema,
     input
   );
+  // Its modules are part of what is published: the same definition with
+  // other modules is another publication.
+  const modulesHash =
+    Object.keys(sources).length === 0 ? null : await modulesHashOf(sources);
   // A retry of a publication that was saved answers the saved version
   // before its bindings are resolved again: the builder may have lost
   // their role in a workflow it binds since, or that workflow been
   // deleted, and the version still binds what it pinned then.
-  const saved = await savedPublication(env, workflow.id, definition);
+  const saved = await savedPublication(
+    env,
+    workflow.id,
+    definition,
+    modulesHash
+  );
   if (saved !== undefined) {
     return saved;
   }
+  // Built and inspected first: validation resolves `local:` bindings
+  // against what they export.
+  const modules =
+    modulesHash === null
+      ? undefined
+      : await compileModules(env, sources, workflow.id);
   const { checked, bindings } = await checkDefinition(
     env,
     by,
     workflow,
-    definition
+    definition,
+    modules
   );
   await requireStaffKeepsBindings(env, by, workflow, bindings);
   // Of its canonical JSON: a retry that differs only in whitespace or key
@@ -1406,10 +1475,14 @@ const publish = async (
       workflow.id,
       checked.identity.version
     );
-    if (existing !== undefined && existing.definitionHash !== definitionHash) {
+    if (
+      existing !== undefined &&
+      (existing.version.definitionHash !== definitionHash ||
+        existing.modulesHash !== modulesHash)
+    ) {
       throw workflowResourceErrors.create("workflow.version_exists");
     }
-    return existing;
+    return existing?.version;
   };
   const existing = await sameVersion();
   if (existing !== undefined) {
@@ -1419,7 +1492,13 @@ const publish = async (
     throw workflowResourceErrors.create("workflow.version_conflict");
   }
   // Generated and built once, here: no start or resume compiles anything.
-  const compiled = await compileWorkflow(env, checked, definition, workflow.id);
+  const compiled = await compileWorkflow(
+    env,
+    checked,
+    definition,
+    workflow.id,
+    modules
+  );
   try {
     return await writeVersion(env, by, {
       workflow,
@@ -1428,6 +1507,7 @@ const publish = async (
       definitionHash,
       bindings,
       compiled,
+      modulesHash,
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
@@ -1594,6 +1674,10 @@ export const workflowSource = async (
   if (sealedBuildOf(workflowId, number, row.manifest).executable) {
     const build = await loadWorkflowBuild(env, workflowId, number);
     files[generatedPath] = build.source;
+    // Its own modules, as published, read back from the seal.
+    for (const [path, source] of Object.entries(build.compute.sources)) {
+      files[path] = source;
+    }
   }
   return { files };
 };
