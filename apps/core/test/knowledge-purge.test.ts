@@ -140,6 +140,44 @@ const apiWith = async (person: Person, hooks: KnowledgeHooks) => {
   return await core.authenticate();
 };
 
+/**
+ * `person`'s API on a connection that adds up the rows each batch writes,
+ * the search index's own included (D1's `meta.changes`): what a purge
+ * writes, which a rebuild of the whole index makes grow with the corpus.
+ * Not `meta.rows_written`, which counts a rebuild as one row whatever the
+ * index holds: its writes to the index's own tables don't show there.
+ */
+const countingWrites = async (person: Person) => {
+  const real = env.KNOWLEDGE;
+  const written = { rows: 0 };
+  const knowledge: D1Database = {
+    prepare: (query) => real.prepare(query),
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      const results = await real.batch<T>(statements);
+      for (const { meta } of results) {
+        written.rows += meta.changes;
+      }
+      return results;
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+  const { core } = await openRpc(person.session, {
+    coreEnv: { ...env, KNOWLEDGE: knowledge },
+  });
+  return { api: core.authenticate(), written };
+};
+
+/** How many sections the search index holds. */
+const indexedSections = async (): Promise<number> => {
+  const row = await env.KNOWLEDGE.prepare(
+    "SELECT count(*) AS n FROM search_rows"
+  ).first<{ n: number }>();
+  return row?.n ?? 0;
+};
+
 /** Saves `text` over what is at `path` now. */
 const saveOver = async (
   person: Person,
@@ -490,6 +528,159 @@ describe("a purge of content", setUpTime, () => {
         },
       ],
       carriesText: false,
+    });
+  });
+
+  it("drops a term from the index's page directory, where it was the first term of a page", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    // A first purge turns secure deletes on, as any purge does.
+    const first = await saveOver(
+      admin,
+      handbook.id,
+      "first.md",
+      "# First\nA note."
+    );
+    await purged(admin, {
+      type: "content",
+      documentIds: [first.id],
+      terms: ["note"],
+      reason: "other",
+    });
+    // Enough words, in order, to fill pages, alternating between two
+    // documents: a page holds words of both, so it isn't emptied when one
+    // document's words go, and its directory entry, made from its first
+    // word, all of it here, stays.
+    const stem = `zq${unique()}`;
+    const words = Array.from(
+      { length: 3000 },
+      (_, at) => `${stem}${String(at).padStart(5, "0")}`
+    );
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "even.md",
+      `# Words\n${words.filter((_, at) => at % 2 === 0).join(" ")}`
+    );
+    await saveOver(
+      admin,
+      handbook.id,
+      "odd.md",
+      `# Words\n${words.filter((_, at) => at % 2 === 1).join(" ")}`
+    );
+    // Their words in one segment, as FTS5's own merges put them in time.
+    await env.KNOWLEDGE.prepare(
+      "INSERT INTO search_words (search_words) VALUES ('optimize')"
+    ).run();
+    const { results } = await env.KNOWLEDGE.prepare(
+      "SELECT CAST(term AS TEXT) AS term FROM search_words_idx WHERE CAST(term AS TEXT) LIKE ?"
+    )
+      .bind(`0${stem}%`)
+      .all<{ term: string }>();
+    // A word of the document purged that heads a page.
+    const leading = words.find(
+      (word, at) =>
+        at % 2 === 0 && results.some(({ term }) => term === `0${word}`)
+    );
+    const heldBefore = leading === undefined ? [] : await holding(leading);
+    await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [leading ?? ""],
+      reason: "other",
+    });
+    expect({
+      found: leading !== undefined,
+      heldBefore: heldBefore.includes("search_words_idx.term"),
+      heldAfter: await holding(leading ?? ""),
+    }).toStrictEqual({
+      found: true,
+      heldBefore: true,
+      heldAfter: [],
+    });
+  });
+
+  it("writes no more to the search index for a purge however large the corpus", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    /** Purges a name from a document of its own, saying what it wrote. */
+    const purgeOne = async () => {
+      const name = `purged${unique()}`;
+      const document = await saveOver(
+        admin,
+        handbook.id,
+        `${name}.md`,
+        `# ${name}\nWrite to ${name} about leave.\n\n## More\nNothing else ${name}.`
+      );
+      const counting = await countingWrites(admin);
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [document.id],
+        terms: [name],
+        reason: "other",
+      };
+      const { token } = await counting.api.knowledge.preparePurge(input);
+      await counting.api.knowledge.purge(input, token);
+      return counting.written.rows;
+    };
+    // Secure deletes turned on first, as any purge does.
+    await purgeOne();
+    const small = await purgeOne();
+    const before = await indexedSections();
+    for (let at = 0; at < 150; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await saveOver(
+        admin,
+        handbook.id,
+        `other-${at}.md`,
+        `# Other ${at}\n${unique()} ${unique()} text.\n\n## Part\nMore ${unique()}.\n\n## Last\nEnd ${unique()}.`
+      );
+    }
+    const added = (await indexedSections()) - before;
+    const large = await purgeOne();
+    // A rebuild of the whole index writes at least a row for each section
+    // it holds: what the corpus grew by would show, many times over.
+    expect({
+      grewBy: large - small,
+      bound: large - small < added / 4,
+    }).toMatchObject({ bound: true });
+  });
+
+  it("removes a term with accents from every table, though its tokens can't be checked one by one", async () => {
+    const admin = await personOf("admin");
+    const secret = `Renée${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "people.md",
+      `# ${secret}\nWrite to ${secret} for leave.`
+    );
+    const folded = `renee${secret.slice(5)}`;
+    const heldBefore = await holding(folded);
+    await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [secret],
+      reason: "other",
+    });
+    expect({
+      heldBefore: heldBefore.length > 0,
+      heldAfter: await holding(folded),
+      heldAfterAsWritten: await holding(secret),
+    }).toStrictEqual({
+      heldBefore: true,
+      heldAfter: [],
+      heldAfterAsWritten: [],
     });
   });
 
@@ -1087,17 +1278,38 @@ describe("a purge of content", setUpTime, () => {
 });
 
 describe("a purge whose index cleanup fails", setUpTime, () => {
-  /** `person`'s API, on which the purge's index rebuild fails once. */
+  /**
+   * `person`'s API on a platform that refuses secure deletes, as a remote
+   * one may (search-erasure.ts), on which the purge's index rebuild also
+   * fails once. The index's secure deletes are turned off first: a
+   * delete's terms then stay in the index's pages until it is rebuilt.
+   */
   const rebuildFailingOnce = async (person: Person) => {
+    await env.KNOWLEDGE.batch([
+      env.KNOWLEDGE.prepare(
+        "INSERT INTO search_words (search_words, rank) VALUES ('secure-delete', 0)"
+      ),
+      env.KNOWLEDGE.prepare(
+        "INSERT INTO search_trigrams (search_trigrams, rank) VALUES ('secure-delete', 0)"
+      ),
+    ]);
+    let refuseNext = false;
     let failNext = false;
     let failed = false;
     return await apiWith(person, {
       prepare: (query) => {
-        if (!failed && query.includes("VALUES ('rebuild')")) {
+        if (query.includes("'secure-delete'")) {
+          refuseNext = true;
+        } else if (!failed && query.includes("VALUES ('rebuild')")) {
           failNext = true;
         }
       },
       beforeBatch: () => {
+        if (refuseNext) {
+          refuseNext = false;
+          failNext = false;
+          throw new Error("not authorized");
+        }
         if (failNext) {
           failNext = false;
           failed = true;
