@@ -277,4 +277,25 @@ test("a builder sees every declared branch of the checked definition, and a test
   await expect(
     ran.getByRole("listitem", { name: "greet-other" })
   ).toHaveAttribute("data-state", "none");
+
+  // A version with no build that runs is admitted and never runs: the
+  // panel says so instead of waiting on a run that doesn't exist.
+  await save(
+    page,
+    definition(
+      name,
+      "unused",
+      { set: { status: "done", ["k".repeat(2100)]: "${ . }" } },
+      "1.1.0"
+    )
+  );
+  await page.getByRole("button", { name: "Publish revision 4" }).click();
+  await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
+  await page.getByLabel("Input").fill("{}");
+  await page.getByRole("button", { name: "Start a test run" }).click();
+  await expect(
+    page.getByText("Version 2 has no build that runs, so nothing ran", {
+      exact: false,
+    })
+  ).toBeVisible();
 });

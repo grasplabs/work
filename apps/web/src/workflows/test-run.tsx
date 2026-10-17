@@ -43,6 +43,8 @@ export const TestRun = ({
   const [failure, setFailure] = useState<string>();
   const [runId, setRunId] = useState<string | null>(null);
   const [trace, setTrace] = useState<WorkflowRunTrace>();
+  // Started, and admitted with no run: the version has no build that runs.
+  const [unrunnable, setUnrunnable] = useState(false);
 
   // The run is read again while it goes, and no longer once it ended or
   // the panel is gone.
@@ -92,6 +94,7 @@ export const TestRun = ({
 
   const start = async (): Promise<void> => {
     setFailure(undefined);
+    setUnrunnable(false);
     let parsed: unknown;
     try {
       parsed = JSON.parse(input);
@@ -111,6 +114,7 @@ export const TestRun = ({
       );
       setTrace(undefined);
       setRunId(started.runId);
+      setUnrunnable(started.runId === null);
     } catch (error) {
       setFailure(failureText(error));
     }
@@ -152,6 +156,14 @@ export const TestRun = ({
         </Button>
       </div>
       <ErrorText>{failure}</ErrorText>
+      {unrunnable ? (
+        <output>
+          <Trans>
+            Version {version} has no build that runs, so nothing ran: one of its
+            tasks uses something Grasp can&apos;t run yet.
+          </Trans>
+        </output>
+      ) : null}
       {trace === undefined ? null : (
         <div className="flex flex-col gap-2">
           <output>
