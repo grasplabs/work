@@ -40,14 +40,23 @@ import { settling } from "./code.ts";
 import type { RunHostCalls, Settled } from "./code.ts";
 import { takesExactly } from "./exact-values.ts";
 import {
+  busyMarker,
+  busyOf,
   cpuLimitKill,
   forIsolate,
   fromIsolate,
   isCpuLimitKill,
+  loadWaitAfter,
+  loadWaitStart,
+  markerOf,
+  queueTimedOut,
   settle,
   toStepError,
+  waitKeyOf,
+  waitStep,
 } from "./host.ts";
-import type { RunStep } from "./host.ts";
+import type { Busy, LoadWait, RunStep } from "./host.ts";
+import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import { makeCall } from "./resource-calls.ts";
@@ -103,9 +112,23 @@ import type { BuiltCall } from "./resource-calls.ts";
 //   byte of the data it reads (`attemptFuel`); an attempt evaluates each of
 //   its step's slots once, as generated code does, at most 128 of them
 //   (generate.ts), so a looping isolate can't make core evaluate without
-//   end. What
-//   a whole activation may spend is the lineage quotas' to bound (not yet
-//   kept for these runs: resource-runs.ts).
+//   end; an activation funds a bounded number of attempts' fuel
+//   (`activationFuel`), then yields to the next.
+// - A run getting past the lineage quotas App runs are held to. Each
+//   attempt is admitted by the same admission (quotas.ts, `admitAttempt`)
+//   before its function runs, against its run's lineage, of which the run
+//   is the root, and the client's shares of attempts running at once; it
+//   settles once its function, every evaluation it started and its
+//   record's checks are done, so their time counts. Each evaluation is one
+//   of the lineage's host calls. What a run spends in core on expressions,
+//   across every activation, retry, restart and replay, is so held to its
+//   lineage's active time and host calls, which only grow: an
+//   activation's fuel is only a tighter bound of its own.
+// - A refusal for load forged as a result. A lineage that is busy, or a
+//   share that is full, ends the attempt as core's busy marker, which the
+//   run waits on durably, as an App run does (host.ts, `busyMarker`); what
+//   a step records is held to its SDK's record (`recordSchema`), which no
+//   marker of core's is, so the isolate can't make core sleep or wait.
 // - A named call the isolate shapes. A call task's call is the build's:
 //   its binding, operation and argument template are sealed in the task
 //   table, and the host builds the arguments itself (`#built`), evaluating
@@ -234,6 +257,12 @@ export interface ResourceHostHooks {
   tampered: (error: { name: string; message: string; code?: string }) => void;
   /** The activation's fuel for expressions: {@link activationFuel} if unset. */
   activationFuel?: number;
+  /**
+   * Admits a step's attempt against its run's lineage quotas and the
+   * client's shares before its function runs (quotas.ts, `admitAttempt`),
+   * throwing the refusal. Required: no attempt runs unadmitted.
+   */
+  admitAttempt: (attempt: QuotaAttempt) => Promise<AttemptAdmission>;
 }
 
 /** A step's name, as the SDK names it. */
@@ -393,6 +422,8 @@ const boundedJson = (
 const attemptContextSchema = z.object({
   attempt: z.int().positive(),
   idempotencyKey: z.string().min(1),
+  /** Its step's place among the run's steps (host.ts, `countedStep`). */
+  stepOrdinal: z.int().positive().optional(),
 });
 
 /**
@@ -546,6 +577,23 @@ interface StepAttempt {
   until: number | undefined;
   /** Whether it asked for its deadline: once, however it went. */
   untilAsked: boolean;
+  /** Its admission: what admits each evaluation as a host call. */
+  admission: AttemptAdmission;
+}
+
+/** What every attempt of one step shares (`ResourceRunHost.#attempt`). */
+interface StepRun {
+  step: StepOf;
+  name: string;
+  data: { input: Json; context: Json };
+  /** The size of what the step captured. */
+  capturedSize: number;
+  /** When its task started, as its enter step recorded it, if it has one. */
+  taskStart: number | undefined;
+  /** Whether it is an enter step, which journals when its task started. */
+  entering: boolean;
+  /** Its wait for load since its last admission (host.ts, `LoadWait`). */
+  wait: LoadWait;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
@@ -868,152 +916,52 @@ export class ResourceRunHost
           step.kind === "leave" && step.task !== undefined
             ? this.#taskStarts.get(step.task.id)
             : undefined;
-        const recorded = await this.#step.do(
+        // Its wait for load since its last admission, read off the markers
+        // its attempts recorded, so every replay counts the same.
+        const run: StepRun = {
+          step,
+          name: stepName,
+          data,
+          capturedSize: bounded.size,
+          taskStart,
+          entering,
+          wait: loadWaitStart,
+        };
+        const attemptStep = async (context: unknown): Promise<unknown> =>
+          await this.#attempt(run, context, fn, stepDone.promise);
+        let recorded = await this.#step.do(
           stepName,
           configOf(step),
-          async (context) => {
-            const told = attemptContextSchema.parse(context);
-            const lease = this.#hooks.leaseOf(
-              told.idempotencyKey,
-              told.attempt
-            );
-            if (lease === undefined) {
-              throw new Error(`Step "${stepName}"'s attempt holds no lease`);
-            }
-            const attempt: StepAttempt = {
-              step,
-              data,
-              startedAt: taskStart ?? Date.now(),
-              key: told.idempotencyKey,
-              number: told.attempt,
-              generation: lease.generation,
-              deadline: lease.deadline,
-              over: false,
-              evaluated: new Set(),
-              checked: new Set(),
-              capturedSize: bounded.size,
-              condition: "unevaluated",
-              inputFrom: new Map(),
-              checkedInput: undefined,
-              budget: { fuel: attemptFuel },
-              pending: new Set(),
-              call: "none",
-              answer: undefined,
-              outputAs: new Map(),
-              exportAs: new Map(),
-              until: undefined,
-              untilAsked: false,
-            };
-            // An activation that can't fund a whole attempt any more cuts it
-            // off as the Loader does an isolate past its CPU time: its step
-            // is retried in the next activation (see `activationFuel`). A
-            // funded one holds its whole share from the start, so attempts
-            // run at once can't each find the same fuel.
-            const funded =
-              !this.#isolateStopped && this.#activationFuel >= attemptFuel;
-            if (funded) {
-              this.#activationFuel -= attemptFuel;
-            }
-            // A call tried once (`triedOnce`) is never cut off: its step has
-            // no attempt to retry it in the next activation, so it runs on a
-            // share of its own. Each step runs at most once an activation,
-            // so these add at most one share for each such task.
-            const triedOnly = configOf(step).retries.limit === 0;
-            const call =
-              funded || (triedOnly && !this.#isolateStopped)
-                ? fn(
-                    new ResourceAttemptHost({
-                      evaluate: async (slot, frame) =>
-                        await this.#evaluate(attempt, slot, frame),
-                      check: (which, value) =>
-                        this.#check(attempt, which, value),
-                      call: async (frame) =>
-                        await ResourceRunHost.#tracked(
-                          attempt,
-                          this.#call(attempt, frame)
-                        ),
-                      until: async (frame) =>
-                        await ResourceRunHost.#tracked(
-                          attempt,
-                          this.#until(attempt, frame)
-                        ),
-                    })
-                  )
-                : Promise.reject(cpuLimitKill());
-            this.#hooks.attemptCall?.(call, stepDone.promise);
-            let result: Settled<unknown>;
-            try {
-              result = fromIsolate(await call);
-            } catch (error) {
-              if (!isCpuLimitKill(error)) {
-                throw error;
-              }
-              this.#isolateStopped = true;
-              result = { ok: false, error: forIsolate(error) };
-            } finally {
-              attempt.over = true;
-              // What it didn't spend of its share goes back, once every
-              // evaluation it started has settled: one it left running would
-              // spend after its fuel went back. Over now, none starts jq.
-              await Promise.allSettled(attempt.pending);
-              if (funded) {
-                this.#activationFuel += Math.max(0, attempt.budget.fuel);
-              }
-            }
-            // A refusal is never retried: the same module refuses the same.
-            if (this.#tampered !== undefined) {
-              throw toStepError(forIsolate(this.#tampered));
-            }
-            if (!result.ok) {
-              throw toStepError(result.error);
-            }
-            // Written once by the bounded writer before anything else reads
-            // it: an answer past what a step records is refused having cost
-            // core no more than that much.
-            const written = writeJson(result.value, {
-              maxBytes: maxResultBytes,
-              maxDepth: evaluatorLimits.maxJsonDepth + 2,
-              maxNodes: maxResultBytes,
-              sortKeys: false,
-              safeIntegers: false,
-            });
-            if (!written.ok) {
-              throw toStepError({
-                name: "Error",
-                message:
-                  written.refusal === "too_large"
-                    ? `Step "${stepName}" answered more than a step may record`
-                    : `Step "${stepName}" answered something that isn't JSON`,
-              });
-            }
-            const value = z.json().parse(JSON.parse(written.text));
-            // Its record's checks, as the host makes them, spend the
-            // activation's fuel as an evaluation of it would.
-            this.#activationFuel -=
-              evaluationFuel + fuelPerByte * written.text.length;
-            try {
-              this.#acceptRecord(attempt, value);
-            } catch (error) {
-              // A record off its task's schemas fails the same every time.
-              throw toStepError(forIsolate(error));
-            }
-            if (!entering) {
-              return value;
-            }
-            const journaled = { record: value, startedAt: attempt.startedAt };
-            // Measured as the engine measures what a step returns: the
-            // record fit, but with its start beside it may not.
-            try {
-              encode(journaled);
-            } catch {
-              throw toStepError({
-                name: "Error",
-                message: `Step "${stepName}" answered more than a step may record`,
-              });
-            }
-            return journaled;
-          }
+          attemptStep
         );
+        // Refused for load: the step runs again after a durable sleep, in
+        // steps of core's own outside the run's step allowance, as an App
+        // run's does (host.ts, `RunHost.do`), until it has waited as long
+        // as a step may.
+        const waitKey = await waitKeyOf(stepName);
+        for (
+          let marker = markerOf(recorded), round = 1;
+          marker !== undefined;
+          marker = markerOf(recorded), round += 1
+        ) {
+          // Only the host records a marker, and only a busy one.
+          if (marker.kind !== "busy") {
+            throw new Error(`Step "${stepName}" recorded a hold it can't have`);
+          }
+          run.wait = loadWaitAfter(run.wait, marker);
+          if (run.wait.sleepMs <= 0) {
+            throw toStepError(queueTimedOut(stepName, marker.maxWaitMs));
+          }
+          const prefix = waitStep(waitKey, "busy", round);
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          await this.#step.sleep(prefix, run.wait.sleepMs);
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          recorded = await this.#step.do(
+            `${prefix}:run`,
+            configOf(step),
+            attemptStep
+          );
+        }
         let outcome = recorded;
         if (entering) {
           // The host's own journal entry, fresh or replayed.
@@ -1029,6 +977,264 @@ export class ResourceRunHost
       });
     } finally {
       stepDone.resolve(null);
+    }
+  }
+
+  /**
+   * One attempt of step `run`, as the engine claimed it (`context`):
+   * admitted, then its function `fn` called in the isolate, then settled
+   * with what it, its evaluations and its record's checks used. Answers
+   * what the step records: its record (with when its task started, for an
+   * enter step), or core's busy marker when it was refused for load.
+   */
+  async #attempt(
+    run: StepRun,
+    context: unknown,
+    fn: (attempt: ResourceAttemptHost) => Promise<unknown>,
+    stepDone: Promise<unknown>
+  ): Promise<unknown> {
+    const { name: stepName, step } = run;
+    const told = attemptContextSchema.parse(context);
+    const lease = this.#hooks.leaseOf(told.idempotencyKey, told.attempt);
+    if (lease === undefined) {
+      throw new Error(`Step "${stepName}"'s attempt holds no lease`);
+    }
+    // An activation that can't fund a whole attempt any more cuts it
+    // off as the Loader does an isolate past its CPU time: its step
+    // is retried in the next activation (see `activationFuel`). A
+    // funded one holds its whole share from the start, so attempts
+    // run at once can't each find the same fuel.
+    const funded = !this.#isolateStopped && this.#activationFuel >= attemptFuel;
+    // A call tried once (`triedOnce`) is never cut off: its step has
+    // no attempt to retry it in the next activation, so it runs on a
+    // share of its own. Each step runs at most once an activation,
+    // so these add at most one share for each such task.
+    const triedOnly = configOf(step).retries.limit === 0;
+    const runs = funded || (triedOnly && !this.#isolateStopped);
+    // Only an attempt that runs is admitted: one cut off holds nothing of
+    // its lineage.
+    let admission: AttemptAdmission | undefined;
+    if (runs) {
+      const admitted = await this.#admitFunded(run, told, lease, funded);
+      if (!("settle" in admitted)) {
+        return busyMarker(admitted);
+      }
+      admission = admitted;
+    }
+    // Settled however it ends, from here on (the `finally` below).
+    try {
+      const attempt =
+        admission === undefined
+          ? undefined
+          : ResourceRunHost.#newAttempt(run, told, lease, admission);
+      const call =
+        attempt === undefined
+          ? Promise.reject(cpuLimitKill())
+          : fn(this.#attemptHostOf(attempt));
+      this.#hooks.attemptCall?.(call, stepDone);
+      let result: Settled<unknown>;
+      try {
+        result = fromIsolate(await call);
+      } catch (error) {
+        if (!isCpuLimitKill(error)) {
+          throw error;
+        }
+        this.#isolateStopped = true;
+        result = { ok: false, error: forIsolate(error) };
+      } finally {
+        if (attempt !== undefined) {
+          attempt.over = true;
+          // What it didn't spend of its share goes back, once every
+          // evaluation it started has settled: one it left running would
+          // spend after its fuel went back. Over now, none starts jq.
+          await Promise.allSettled(attempt.pending);
+          if (funded) {
+            this.#activationFuel += Math.max(0, attempt.budget.fuel);
+          }
+        }
+      }
+      // A refusal is never retried: the same module refuses the same.
+      if (this.#tampered !== undefined) {
+        throw toStepError(forIsolate(this.#tampered));
+      }
+      if (!result.ok || attempt === undefined) {
+        throw toStepError(
+          result.ok
+            ? forIsolate(new Error("The attempt was cut off"))
+            : result.error
+        );
+      }
+      return this.#recordOf(run, attempt, result.value);
+    } finally {
+      // Settled last, however it ended: what it held of its lineage's time
+      // turns into what it used, its evaluations' and its record's checks'
+      // time included.
+      await admission?.settle();
+    }
+  }
+
+  /**
+   * Admits an attempt of step `run` that runs (`#admit`), holding its
+   * share of the activation's fuel while it does when `funded`, given
+   * back if it is refused: its admission, or, refused for load, how long
+   * to wait. Any other refusal is thrown, as the step's error.
+   */
+  async #admitFunded(
+    run: StepRun,
+    told: z.infer<typeof attemptContextSchema>,
+    lease: AttemptLease,
+    funded: boolean
+  ): Promise<AttemptAdmission | Busy> {
+    if (funded) {
+      this.#activationFuel -= attemptFuel;
+    }
+    const admitted = await settle(
+      async () => await this.#admit(told, lease, run.name, run.wait)
+    );
+    if (admitted.ok && "settle" in admitted.value) {
+      return admitted.value;
+    }
+    if (funded) {
+      this.#activationFuel += attemptFuel;
+    }
+    if (!admitted.ok) {
+      throw toStepError(admitted.error);
+    }
+    return admitted.value;
+  }
+
+  /** A fresh attempt of step `run`, as the engine `told` of it, admitted. */
+  static #newAttempt(
+    run: StepRun,
+    told: z.infer<typeof attemptContextSchema>,
+    lease: AttemptLease,
+    admission: AttemptAdmission
+  ): StepAttempt {
+    return {
+      step: run.step,
+      data: run.data,
+      startedAt: run.taskStart ?? Date.now(),
+      key: told.idempotencyKey,
+      number: told.attempt,
+      generation: lease.generation,
+      deadline: lease.deadline,
+      over: false,
+      evaluated: new Set(),
+      checked: new Set(),
+      capturedSize: run.capturedSize,
+      condition: "unevaluated",
+      inputFrom: new Map(),
+      checkedInput: undefined,
+      budget: { fuel: attemptFuel },
+      pending: new Set(),
+      call: "none",
+      answer: undefined,
+      outputAs: new Map(),
+      exportAs: new Map(),
+      until: undefined,
+      untilAsked: false,
+      admission,
+    };
+  }
+
+  /** The host `attempt`'s function gets in the isolate. */
+  #attemptHostOf(attempt: StepAttempt): ResourceAttemptHost {
+    return new ResourceAttemptHost({
+      evaluate: async (slot, frame) =>
+        await this.#evaluate(attempt, slot, frame),
+      check: (which, value) => this.#check(attempt, which, value),
+      call: async (frame) =>
+        await ResourceRunHost.#tracked(attempt, this.#call(attempt, frame)),
+      until: async (frame) =>
+        await ResourceRunHost.#tracked(attempt, this.#until(attempt, frame)),
+    });
+  }
+
+  /**
+   * What `attempt` of step `run` records of `answer`, its function's: its
+   * record, accepted against its task's schemas, with when its task
+   * started beside it for an enter step.
+   */
+  #recordOf(run: StepRun, attempt: StepAttempt, answer: unknown): unknown {
+    const { name: stepName } = run;
+    // Written once by the bounded writer before anything else reads
+    // it: an answer past what a step records is refused having cost
+    // core no more than that much.
+    const written = writeJson(answer, {
+      maxBytes: maxResultBytes,
+      maxDepth: evaluatorLimits.maxJsonDepth + 2,
+      maxNodes: maxResultBytes,
+      sortKeys: false,
+      safeIntegers: false,
+    });
+    if (!written.ok) {
+      throw toStepError({
+        name: "Error",
+        message:
+          written.refusal === "too_large"
+            ? `Step "${stepName}" answered more than a step may record`
+            : `Step "${stepName}" answered something that isn't JSON`,
+      });
+    }
+    const value = z.json().parse(JSON.parse(written.text));
+    // Its record's checks, as the host makes them, spend the
+    // activation's fuel as an evaluation of it would.
+    this.#activationFuel -= evaluationFuel + fuelPerByte * written.text.length;
+    try {
+      this.#acceptRecord(attempt, value);
+    } catch (error) {
+      // A record off its task's schemas fails the same every time.
+      throw toStepError(forIsolate(error));
+    }
+    if (!run.entering) {
+      return value;
+    }
+    const journaled = { record: value, startedAt: attempt.startedAt };
+    // Measured as the engine measures what a step returns: the
+    // record fit, but with its start beside it may not.
+    try {
+      encode(journaled);
+    } catch {
+      throw toStepError({
+        name: "Error",
+        message: `Step "${stepName}" answered more than a step may record`,
+      });
+    }
+    return journaled;
+  }
+
+  /**
+   * Admits the attempt the engine `told` of, holding `lease`, of step
+   * `step` that has waited `wait` for load, against its run's lineage
+   * quotas and the client's shares (`ResourceHostHooks.admitAttempt`):
+   * its admission, or, refused for load, how long to wait. Any other
+   * refusal is thrown.
+   */
+  async #admit(
+    told: z.infer<typeof attemptContextSchema>,
+    lease: AttemptLease,
+    step: string,
+    wait: LoadWait
+  ): Promise<AttemptAdmission | Busy> {
+    try {
+      return await this.#hooks.admitAttempt({
+        key: told.idempotencyKey,
+        step,
+        number: told.attempt,
+        ...(told.stepOrdinal === undefined
+          ? {}
+          : { ordinal: told.stepOrdinal }),
+        generation: lease.generation,
+        deadline: lease.deadline,
+        waited: wait.rounds,
+        ...(wait.rounds === 0 ? {} : { waitedMs: wait.waitedMs }),
+      });
+    } catch (error) {
+      const busy = busyOf(error);
+      if (busy === undefined) {
+        throw error;
+      }
+      return busy;
     }
   }
 
@@ -1460,6 +1666,11 @@ export class ResourceRunHost
   ): Promise<Json> {
     this.#requireCurrent(attempt);
     this.#charge(attempt, expression, frameSize);
+    // One of its lineage's host calls, before any of core's CPU goes on
+    // it: a lineage with none left evaluates nothing more, in this
+    // activation or any later one.
+    await attempt.admission.hostCall();
+    this.#requireCurrent(attempt);
     const expressionCompiled = await this.#compiled(expression);
     // Compiling awaited: an attempt over meanwhile evaluates nothing.
     this.#requireCurrent(attempt);

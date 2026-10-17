@@ -20,6 +20,7 @@ import type { Settled } from "../src/workflows/code.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { admittedFreely } from "./runs.ts";
 import { refusal, unique } from "./sign-in.ts";
 
 // Scoped sequencing, switch, transitions and data flow of JSON workflows
@@ -610,6 +611,7 @@ const hostOf = async (
       },
       tampered: () => {},
       ...(activationFuel === undefined ? {} : { activationFuel }),
+      admitAttempt: admittedFreely,
     }
   );
 };

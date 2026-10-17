@@ -311,7 +311,12 @@ const joinedField = `${coreStepPrefix}joined`;
  * `LoadWait`), then fail (`workflow.queue_timeout`). Workflow code can't
  * return it (`do` refuses it).
  */
-const busyMarker = ({ busyFor, queuedFor, maxWaitMs, joined }: Busy) => ({
+export const busyMarker = ({
+  busyFor,
+  queuedFor,
+  maxWaitMs,
+  joined,
+}: Busy) => ({
   [busyField]: busyFor,
   [busyMaxField]: maxWaitMs,
   ...(queuedFor === undefined ? {} : { [queuedField]: queuedFor }),
@@ -323,7 +328,7 @@ const busyMarker = ({ busyFor, queuedFor, maxWaitMs, joined }: Busy) => ({
  * queued for, when it was (`workflow.queued`), not its lineage busy, and
  * how long a step may wait in all, as the quota policy said then.
  */
-interface Busy {
+export interface Busy {
   busyFor: number;
   queuedFor?: Share;
   maxWaitMs: number;
@@ -334,7 +339,7 @@ interface Busy {
 const shareSchema = z.enum(["client", "person", "app"]);
 
 /** Whether `value` is one of core's markers, which workflow code can't return. */
-const isCoreMarker = (value: unknown): boolean =>
+export const isCoreMarker = (value: unknown): boolean =>
   isHeldMarker(value) ||
   (typeof value === "object" &&
     value !== null &&
@@ -354,7 +359,7 @@ const busyRecordSchema = z.object({
  * to wait, when it was refused, how long a step may wait in all, and the
  * share it was queued for and whether it joined the queue then.
  */
-type CoreMarker =
+export type CoreMarker =
   | { kind: "held"; keys: string[]; unknown: boolean }
   | ({ kind: "busy" } & z.infer<typeof busyRecordSchema>);
 
@@ -362,7 +367,7 @@ type CoreMarker =
  * The marker `value` is, as recorded; none when it is a step's own result.
  * A marker core recorded always reads: one that doesn't is refused.
  */
-const markerOf = (value: unknown): CoreMarker | undefined => {
+export const markerOf = (value: unknown): CoreMarker | undefined => {
   if (!isCoreMarker(value) || typeof value !== "object" || value === null) {
     return undefined;
   }
@@ -403,7 +408,7 @@ const unadmitted: AttemptAdmission = {
  * What a `workflow.lineage_busy` or `workflow.queued` refusal says: the
  * seconds to wait, at least one, and the share a queued one waits for.
  */
-const busyOf = (error: unknown): Busy | undefined => {
+export const busyOf = (error: unknown): Busy | undefined => {
   if (
     !isExpectedError(error) ||
     (error.code !== "workflow.lineage_busy" && error.code !== "workflow.queued")
@@ -454,7 +459,7 @@ interface WaitedSoFar {
  * refused for load, keeps counting from before its admission. That errs
  * safe: such a step times out sooner, never later.
  */
-interface LoadWait {
+export interface LoadWait {
   rounds: number;
   waitedMs: number;
   maxWaitMs: number;
@@ -462,7 +467,7 @@ interface LoadWait {
 }
 
 /** No wait for load yet. */
-const loadWaitStart: LoadWait = {
+export const loadWaitStart: LoadWait = {
   rounds: 0,
   waitedMs: 0,
   maxWaitMs: 0,
@@ -476,7 +481,7 @@ const loadWaitStart: LoadWait = {
  * rounds wait in all. A round left nothing to sleep (`sleepMs` 0) has
  * waited as long as a step may.
  */
-const loadWaitAfter = (wait: LoadWait, marker: CoreMarker): LoadWait => {
+export const loadWaitAfter = (wait: LoadWait, marker: CoreMarker): LoadWait => {
   if (marker.kind === "held") {
     return loadWaitStart;
   }
@@ -506,7 +511,7 @@ interface WaitRound {
  * (`maxWaitMs`, the quota policy's `workflowQueuedStepMs`): no retry of
  * its own is spent, and none tried.
  */
-const queueTimedOut = (step: string, maxWaitMs: number): StepError => ({
+export const queueTimedOut = (step: string, maxWaitMs: number): StepError => ({
   name: "Error",
   code: "workflow.queue_timeout",
   message: `Step "${step}" waited its turn to run for ${String(Math.round(maxWaitMs / 1000))} seconds, as long as a step may wait`,
@@ -767,7 +772,7 @@ type WaitKind = "busy" | "held" | "unknown";
  * `key` (`waitKeyOf`) for `kind`: the one builder of a wait's step names,
  * which `uncountedWaitStep` reads back.
  */
-const waitStep = (key: string, kind: WaitKind, round: number): string =>
+export const waitStep = (key: string, kind: WaitKind, round: number): string =>
   `${waitStepPrefix}${key}:${kind}:${round}`;
 
 /**
@@ -790,6 +795,13 @@ const waitStep = (key: string, kind: WaitKind, round: number): string =>
  */
 const uncountedWaitStep =
   /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:|again:[1-9]\d*$|woken:\d+$)/u;
+
+/**
+ * A wait's step that runs the step it holds again (`#waitBefore`), of any
+ * kind: its key names that step (`waitKeyOf`).
+ */
+const waitRunStep =
+  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?:busy|held|unknown):\d+:run$/u;
 
 /**
  * Tries of one check whether a held side effect still waits, after the
@@ -1016,12 +1028,38 @@ export const stepLimitOf = async (env: Env): Promise<number> => {
  * allowance of one. So are the steps of a wait that aren't the run's own
  * (`uncountedWaitStep`),
  * and a step run again after one has no place of its own: it is the step
- * that already took its place. Counted over every replay, so each step
+ * that already took its place, which its attempts are told
+ * (`placeOfRunAgain`), so the policy's steps hold every round of it. Counted over every replay, so each step
  * keeps its place.
  */
 export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
   let own = 0;
   let params = false;
+  /** Each of the run's own steps' place, by name, over every replay. */
+  const places = new Map<string, number>();
+  /** Each own step's wait key (`waitKeyOf`), worked out once. */
+  const keys = new Map<string, string>();
+  /**
+   * The place of the step a wait's run again (`waitRunStep`) runs, which
+   * takes none of its own: the step's own, as its first attempt had it,
+   * so every round's attempt is admitted against the policy's steps as
+   * it is then, whatever limit this activation counts by.
+   */
+  const placeOfRunAgain = async (name: string): Promise<number | undefined> => {
+    const key = waitRunStep.exec(name)?.groups?.key;
+    if (key === undefined) {
+      return undefined;
+    }
+    for (const [ownName, place] of places) {
+      // oxlint-disable-next-line no-await-in-loop -- each key once, cached
+      const ownKey = keys.get(ownName) ?? (await waitKeyOf(ownName));
+      keys.set(ownName, ownKey);
+      if (ownKey === key) {
+        return place;
+      }
+    }
+    return undefined;
+  };
   /** The step's place among the run's own steps; none for core's own. */
   const take = (name: string): number | undefined => {
     const core =
@@ -1036,11 +1074,14 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
     if (own > stepLimit) {
       throw workflowErrors.create("workflow.too_many_steps");
     }
+    if (!places.has(name)) {
+      places.set(name, own);
+    }
     return own;
   };
   return {
     do: async (name, config, fn) => {
-      const ordinal = take(name);
+      const ordinal = take(name) ?? (await placeOfRunAgain(name));
       if (ordinal === undefined) {
         return await step.do(name, config, fn);
       }
