@@ -13,8 +13,11 @@
  */
 import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
 import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
-import { LISTEN_DAYS } from "@grasp-os/shared/admin/onboarding";
-import { dateOn, REMIND_AFTER } from "@grasp-os/shared/admin/onboarding-admin";
+import {
+  dateOn,
+  listenDays,
+  REMIND_AFTER,
+} from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   OrgView,
   PersonView,
@@ -122,7 +125,7 @@ const TalkedDays = ({ view, asked }: { view: OrgView; asked: number }) => {
       <div className="flex items-baseline justify-between gap-3">
         <span className="font-medium">Talked, day by day</span>
         <span className="text-muted-foreground text-xs tabular-nums">
-          {`${talked} of ${asked} by day ${view.day} of ${LISTEN_DAYS}`}
+          {`${talked} of ${asked} by day ${view.day} of ${listenDays(view.org)}`}
         </span>
       </div>
       <BarList
@@ -245,7 +248,7 @@ export const InterviewTeams = ({ view }: { view: OrgView }) => {
     );
   }
   const funnel = funnelOf(view);
-  const closes = dayDate(view, LISTEN_DAYS);
+  const closes = dayDate(view, listenDays(view.org));
   let links = "The links go out once the company has told its team.";
   if (view.closed) {
     links = `The links closed on ${closes}.`;

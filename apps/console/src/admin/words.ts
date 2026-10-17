@@ -10,8 +10,11 @@ import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
 import type { Interviewer } from "@grasp-os/shared/admin/interviewer";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import type { Phase } from "@grasp-os/shared/admin/interviews";
-import { LISTEN_DAYS } from "@grasp-os/shared/admin/onboarding";
-import { dateOn, mayInvite } from "@grasp-os/shared/admin/onboarding-admin";
+import {
+  dateOn,
+  listenDays,
+  mayInvite,
+} from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   ContractState,
   LinkState,
@@ -179,18 +182,20 @@ const leadsLine = (view: OrgView): string => {
     return "They get their link when the team is told";
   }
   const taking = view.teams.filter((team) => !team.off);
-  const leads = taking.filter((team) => team.sent !== null).length;
+  // Heard, not sent: a team's links can go out without its lead.
+  const leads = taking.filter((team) => team.heard !== null).length;
   return `${leads} of ${taking.length} talked`;
 };
 
 const interviewsLine = (view: OrgView): string => {
   const talked = view.counts.completed;
+  const days = listenDays(view.org);
   if (view.closed) {
     return `Closed. ${talked} of ${view.asked} talked`;
   }
   return view.told
-    ? `Day ${view.day} of ${LISTEN_DAYS}. ${talked} of ${view.asked} talked`
-    : "Two weeks, from the day the team is told";
+    ? `Day ${view.day} of ${days}. ${talked} of ${view.asked} talked`
+    : `${days === 14 ? "Two weeks" : `${days} days`}, from the day the team is told`;
 };
 
 const openLine = (view: OrgView): string => {
