@@ -5,7 +5,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { loadWorkflowBuild } from "../../src/workflow-builds.ts";
 import { publishCatalogContract } from "../../src/workflow-catalog.ts";
@@ -13,8 +13,10 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../../src/workflow-resources.ts";
+import { startWorkflow } from "../../src/workflow-starts.ts";
 import { callAction } from "../../src/workflows/resource-action.ts";
 import type { BuiltCall } from "../../src/workflows/resource-calls.ts";
+import { resourceRunFor } from "../../src/workflows/resource-runs.ts";
 import { unique } from "../sign-in.ts";
 
 // A JSON workflow's own action on-prem: it runs as a sandbox session of
@@ -166,4 +168,89 @@ export const notify = action({
       ],
     });
   }, 60_000);
+
+  it("runs the actions of two runs at once, each a child of its run's own session", async () => {
+    const ada = await person("builder");
+    const workflow = await createWorkflowResource(env, ada, `act-${unique()}`);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: JSON.stringify({
+        document: {
+          dsl: "1.0.3",
+          namespace: workflowNamespace,
+          name: workflow.name,
+          version: "1.0.0",
+          title: workflow.name,
+          metadata: {
+            grasp: {
+              profile: "grasp-open-workflow/1",
+              params: {},
+              bindings: {
+                notify: {
+                  kind: "operation",
+                  contract: "local:code/notify.ts#notify",
+                },
+              },
+            },
+          },
+        },
+        input: { schema: objectSchema({ who: { type: "string" } }) },
+        output: { schema: objectSchema({ status: { type: "string" } }) },
+        do: [
+          {
+            notify: {
+              call: "grasp.operation",
+              with: {
+                binding: "notify",
+                arguments: { to: "${ $workflow.input.who }" },
+              },
+            },
+          },
+        ],
+      }),
+      basedOn: null,
+      modules: {
+        "code/notify.ts": `import { action, v } from "@grasp-os/sdk/action";
+
+export const notify = action({
+  args: { to: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [],
+  handler: (_ctx, args) => ({ status: \`hello \${args.to}\` }),
+});
+`,
+      },
+    });
+    const start = async (who: string) => {
+      const { runId } = await startWorkflow(
+        env,
+        { type: "person", person: ada },
+        workflow.id,
+        { version: 1, input: { who }, key: unique() }
+      );
+      if (runId === null) {
+        throw new Error("The start admitted no run");
+      }
+      return runId;
+    };
+    const runs = await Promise.all([start("Ada"), start("Grace")]);
+    const ends = await Promise.all(
+      runs.map(
+        async (runId) =>
+          await vi.waitFor(
+            async () => {
+              const read = await resourceRunFor(env, ada, workflow.id, runId);
+              expect(read.endedAt).not.toBeNull();
+              return read.status === "completed"
+                ? { status: read.status, output: read.output }
+                : { status: read.status, code: read.error?.code };
+            },
+            { timeout: 90_000, interval: 500 }
+          )
+      )
+    );
+    expect(ends).toStrictEqual([
+      { status: "completed", output: { status: "hello Ada" } },
+      { status: "completed", output: { status: "hello Grace" } },
+    ]);
+  }, 120_000);
 });

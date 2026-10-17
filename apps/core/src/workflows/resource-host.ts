@@ -271,6 +271,11 @@ export interface ResourceHostHooks {
   attemptCall?: (call: Promise<unknown>, stepDone: Promise<unknown>) => void;
   /** Hears, once, that the isolate asked for what generated code never does. */
   tampered: (error: { name: string; message: string; code?: string }) => void;
+  /**
+   * The run's own sandbox session on-prem, once open: the parent of the
+   * sessions its actions run in (resource-action.ts).
+   */
+  sessionId?: () => string | undefined;
   /** The activation's fuel for expressions: {@link activationFuel} if unset. */
   activationFuel?: number;
   /**
@@ -2257,7 +2262,10 @@ export class ResourceRunHost
       input,
       attempt.deadline,
       {
-        owner: `workflow-resource:${this.#run.workflowId}`,
+        // The workflow's actions apart from its runs, as a child of the
+        // run's own session on-prem (resource-action.ts).
+        owner: `workflow-action:${this.#run.workflowId}`,
+        parent: this.#hooks.sessionId?.(),
         make: async (built, ordinal) => {
           this.#requireCurrent(attempt);
           await attempt.admission.hostCall();
@@ -2274,6 +2282,7 @@ export class ResourceRunHost
             requireHolds: () => {
               this.#requireCurrent(attempt);
             },
+            fromAction: true,
           });
         },
       }

@@ -34,6 +34,7 @@ import {
   callAction,
   maxActionCalls,
 } from "../src/workflows/resource-action.ts";
+import { makeCall } from "../src/workflows/resource-calls.ts";
 import type { BuiltCall } from "../src/workflows/resource-calls.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
@@ -177,6 +178,15 @@ const sendsTwice =
   notifyModule(`await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" });
     await ctx.resources.mail.call("mail.send", { to: args.to, subject: "two" });
     return { status: [...Object.keys(ctx), ...Object.keys(ctx.resources)].join(",") };`);
+
+/** The sealed call of the `notify` action. */
+const notifyCall = {
+  name: "grasp.action",
+  binding: "notify",
+  module: "code/notify.ts",
+  export: "notify",
+  arguments: { literal: null },
+} as const;
 
 /** A definition of `name`: binding `notify` to the action, and `mail`. */
 /** What a definition holds besides its action: its tasks before, its `mail`. */
@@ -464,6 +474,171 @@ describe("a JSON workflow's own actions", () => {
     expect({ code, calls }).toStrictEqual({
       code: "workflow.call_denied",
       calls: 2,
+    });
+  });
+
+  it("waits for every call an action made before its task records, and keeps the refusal of one it didn't wait for", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Calls without waiting for them, and answers at once.
+    const { workflow } = await actingWorkflow(
+      ada,
+      admin,
+      notifyModule(`void ctx.resources.mail.call("mail.send", { to: args.to, subject: "late" });
+    return { status: "answered" };`)
+    );
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const run = async (make: () => Promise<Json>) =>
+      await callAction(
+        env,
+        build.compute,
+        build.sdk,
+        notifyCall,
+        { to: "Ada" },
+        Date.now() + 30_000,
+        { owner: `workflow-action:${workflow.id}`, make }
+      );
+    // Its effect lands before the task does.
+    let done = false;
+    const answered = await run(async () => {
+      await scheduler.wait(200);
+      done = true;
+      return { messageId: "m" };
+    });
+    // Its refusal stands though the action never saw it.
+    const refused = await outcome(
+      run(async () => {
+        await scheduler.wait(200);
+        throw workflowResourceErrors.create("workflow.call_denied");
+      })
+    );
+    expect({ answered, done, refused }).toStrictEqual({
+      answered: { status: "answered" },
+      done: true,
+      refused: "workflow.call_denied",
+    });
+  });
+
+  it("refuses arguments past a step's payload as a call's refusal, and hands the action no host error's detail", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await actingWorkflow(
+      ada,
+      admin,
+      notifyModule(`let seen = "";
+    try {
+      await ctx.resources.mail.call("mail.send", { to: args.to, subject: "x".repeat(1_100_000) });
+    } catch (error) {
+      seen = String((error as Error).message);
+    }
+    try {
+      await ctx.resources.mail.call("mail.send", { to: args.to, subject: "fails" });
+    } catch (error) {
+      seen = String((error as Error).message);
+    }
+    await ctx.resources.mail.call("mail.send", { to: args.to, subject: seen });
+    return { status: "swallowed" };`)
+    );
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const subjects: unknown[] = [];
+    const code = await outcome(
+      callAction(
+        env,
+        build.compute,
+        build.sdk,
+        notifyCall,
+        { to: "Ada" },
+        Date.now() + 30_000,
+        {
+          owner: `workflow-action:${workflow.id}`,
+          make: async (built: BuiltCall): Promise<Json> => {
+            subjects.push(
+              built.name === "grasp.connector"
+                ? z.object({ subject: z.string() }).parse(built.arguments)
+                    .subject
+                : null
+            );
+            if (subjects.length === 1) {
+              // A host fault with internals in its message.
+              throw new Error("internal: secret detail of the host");
+            }
+            return await Promise.resolve({ messageId: "m" });
+          },
+        }
+      )
+    );
+    // The oversized call never reached the host, and stands as the task's
+    // refusal; the host's fault reached the action as an opaque error.
+    expect(code).toBe("workflow.call_invalid");
+    expect(subjects).toHaveLength(2);
+    expect(String(subjects[1])).not.toContain("secret detail");
+  });
+
+  it("refuses a restricted run's action its connector calls before anything is sent, and keeps the receipt", async () => {
+    const runId = crypto.randomUUID();
+    const code = await outcome(
+      makeCall(
+        env,
+        {
+          runId,
+          workflowId: crypto.randomUUID(),
+          version: 1,
+          principal: crypto.randomUUID(),
+          invoker: {
+            type: "person",
+            id: crypto.randomUUID(),
+            appVersion: null,
+          },
+          restricted: true,
+          bindings: new Map([
+            [
+              "mail",
+              {
+                alias: "mail",
+                kind: "connector",
+                resourceId: null,
+                resourceVersion: null,
+                contractId: "mail",
+                fingerprint: "f",
+                approval: "a",
+                target: {
+                  kind: "connector",
+                  permissionId: "p",
+                  contract: "composio.mail@1",
+                },
+              },
+            ],
+          ]),
+        },
+        "notify",
+        {
+          name: "grasp.connector",
+          binding: "mail",
+          operation: "mail.send",
+          arguments: { to: "Ada", subject: "s" },
+          sensitive: [],
+        },
+        {
+          key: `${runId}:1`,
+          deadline: Date.now() + 30_000,
+          fence: { run: runId, key: "k", number: 1, generation: 1 },
+          requireHolds: () => {
+            // Holds.
+          },
+          fromAction: true,
+        }
+      )
+    );
+    expect({ code, receipts: await receiptsOf(runId) }).toStrictEqual({
+      code: "workflow.action_restricted",
+      receipts: [
+        {
+          call: "grasp.connector",
+          binding: "mail",
+          key: `${runId}:1`,
+          result: "workflow.action_restricted",
+        },
+      ],
     });
   });
 

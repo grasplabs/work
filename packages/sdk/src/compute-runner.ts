@@ -1,7 +1,9 @@
+// Loaded first, as a side effect before every other import: it takes the
+// clock, randomness and the platform's globals away before anything else
+// in the isolate evaluates. A side-effect import keeps its place.
+import "./compute-lockdown.ts";
 import { actionHandler } from "./action.ts";
-// Loaded first: it takes the clock and randomness away before anything
-// else in the isolate evaluates.
-import { lockedDown } from "./compute-lockdown.ts";
+import { lockedDown } from "./compute-locked.ts";
 import { computeHandler } from "./compute.ts";
 
 // What core runs in the isolate of a workflow's own modules
@@ -37,6 +39,8 @@ const { stringify } = JSON;
  */
 const { entries, freeze, getOwnPropertyDescriptor, hasOwn, keys } = Object;
 const { apply, get: reflectGet } = Reflect;
+/** `Promise.allSettled`, as it was when the runner loaded. */
+const allSettled = Promise.allSettled.bind(Promise);
 const regexpExec: unknown = getOwnPropertyDescriptor(
   RegExp.prototype,
   "exec"
@@ -241,9 +245,19 @@ export const runAction = async (
   ) {
     return { ok: false, message: "There is no such action." };
   }
+  // Every call made, so the action answers only once each has settled:
+  // one it didn't wait for still reaches the host within its step.
+  const made: Promise<unknown>[] = [];
   const callHost = async (alias: string, call: unknown): Promise<unknown> => {
-    const answer: unknown = await apply(hostCall, host, [alias, call]);
-    return answer;
+    const calling: Promise<unknown> = (async () => {
+      const answer: unknown = await apply(hostCall, host, [alias, call]);
+      return answer;
+    })();
+    made.push(calling);
+    return await calling;
+  };
+  const settled = async (): Promise<void> => {
+    await allSettled(made);
   };
   const resources: Record<string, unknown> = {};
   for (const use of uses) {
@@ -267,12 +281,14 @@ export const runAction = async (
   const ctx = freeze({ resources: freeze(resources) });
   try {
     const output: unknown = await handler(ctx, request.input);
+    await settled();
     // Serialized here, so a `toJSON` on the answer runs locked down too.
     const text = stringify(output);
     return text === undefined
       ? { ok: false, message: "The action answered no JSON value." }
       : { ok: true, output: text };
   } catch (error) {
+    await settled();
     return { ok: false, message: failureOf(error, "The action threw") };
   }
 };

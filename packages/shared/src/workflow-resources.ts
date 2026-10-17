@@ -164,6 +164,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "Only the latest draft can be published, and only once it passes the profile.",
   "workflow.action_failed":
     "A task's action threw, or the sandbox stopped it, so the run failed.",
+  "workflow.action_restricted":
+    "This run is restricted, so its actions can't make connector calls: connect holds those for a decision, which an action can't wait for.",
   "workflow.action_call_limit":
     "A task's action made as many calls as one attempt of it may, so the run failed.",
 });
