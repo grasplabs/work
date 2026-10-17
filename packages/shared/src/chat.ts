@@ -1,7 +1,12 @@
 import { z } from "zod";
 
 import type { ModelEffort, ModelEfforts } from "./models.ts";
-import type { ScreenBundle, ScreenProblem } from "./screens.ts";
+import type {
+  QuerySnapshotPush,
+  RunSubscriptionApi,
+  ScreenBundle,
+  ScreenProblem,
+} from "./screens.ts";
 import { uploadNameSchema } from "./uploads.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
@@ -484,6 +489,33 @@ export interface ChatsApi {
     method: string,
     args: unknown[]
   ) => Promise<unknown>;
+  /**
+   * Calls a function of the draft of an App of spec 8's layout, as a
+   * screen's `callFunction` does, in the draft's preview: its draft
+   * release, on a store of its own, with no resources, so it changes none
+   * of the App's data and reaches nothing outside. `request` is the
+   * call's text; answers as a screen's call is answered. `revision` is
+   * the preview's: `app.preview_outdated` once the draft changed.
+   */
+  previewFunction: (
+    chatId: string,
+    app: string,
+    revision: number,
+    request: string
+  ) => Promise<unknown>;
+  /**
+   * Follows a public query of the draft of an App of spec 8's layout in
+   * its preview, as a screen's `watchQuery` does: each push goes to
+   * `onSnapshot`, until the hold is released, the draft moves past
+   * `revision` or the person no longer builds the App.
+   */
+  previewWatchQuery: (
+    chatId: string,
+    app: string,
+    revision: number,
+    request: string,
+    onSnapshot: (snapshot: QuerySnapshotPush) => void
+  ) => Promise<RunSubscriptionApi>;
   /**
    * Tells the chat's agent of `problem`, one the preview of the draft at
    * `revision` ran into on `screen` (an uncaught error, an unhandled

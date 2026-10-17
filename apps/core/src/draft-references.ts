@@ -28,42 +28,58 @@ const mentionsReferences = (files: Readonly<Record<string, string>>): boolean =>
   );
 
 /**
- * `files` with the references their screens import as `#grasp`, generated
- * for `app`'s `version` from the manifest `manifestOf` reads: unchanged
- * when no screen names them, when the files aren't of spec 8's layout, or
- * when their server code doesn't inspect. A screen that imports them then
- * fails its build and says so, and the server build says why.
+ * `files` with the references their screens import as `#grasp`, as
+ * `referencesOf` answers them: unchanged when no screen names them, when
+ * the files aren't of spec 8's layout, or when there are none (their
+ * server code doesn't build or inspect: an expected error). A screen that
+ * imports them then fails its build and says so, and the server build
+ * says why.
  */
-export const withReferencesFrom = async (
-  app: AppId,
-  version: number,
+export const withReferencesText = async (
   files: Record<string, string>,
-  manifestOf: () => Promise<AppManifest | undefined>
+  referencesOf: () => Promise<string | undefined>
 ): Promise<Record<string, string>> => {
   if (!(mentionsReferences(files) && isAppLayout(files))) {
     return files;
   }
-  let manifest: AppManifest | undefined;
+  let references: string | undefined;
   try {
-    manifest = await manifestOf();
+    references = await referencesOf();
   } catch (error) {
     if (isExpectedError(error)) {
       return files;
     }
     throw error;
   }
-  if (manifest === undefined) {
-    return files;
-  }
-  const generated = await generateModules(manifest, {
-    resourceId: app,
-    resourceVersion: version,
-  });
-  const references = generated[generatedPaths.references];
   return references === undefined
     ? files
     : { ...files, [generatedPaths.references]: references };
 };
+
+/**
+ * `files` with the references their screens import as `#grasp`, generated
+ * for `app`'s `version` from the manifest `manifestOf` reads (see
+ * `withReferencesText`).
+ */
+export const withReferencesFrom = async (
+  app: AppId,
+  version: number,
+  files: Record<string, string>,
+  manifestOf: () => Promise<AppManifest | undefined>
+): Promise<Record<string, string>> =>
+  await withReferencesText(files, async () => {
+    const manifest = await manifestOf();
+    const generated =
+      manifest === undefined
+        ? {}
+        : await generateModules(manifest, {
+            resourceId: app,
+            resourceVersion: version,
+          });
+    return Object.hasOwn(generated, generatedPaths.references)
+      ? generated[generatedPaths.references]
+      : undefined;
+  });
 
 /**
  * `files` as saved or drafted, for `app`'s `version` (a draft's base), with

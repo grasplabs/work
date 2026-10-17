@@ -694,7 +694,9 @@ const refusedInPreview = async (): Promise<never> => {
 /**
  * A preview of the chat's draft: its server calls go to the draft's
  * preview, what its screen reports to the chat's agent; it starts no
- * workflow run, finds none, and follows none.
+ * workflow run, finds none, and follows none. A draft of spec 8's layout
+ * runs on its draft release (core's sealed-previews.ts): its function
+ * calls and live queries go there, on a store of the preview's own.
  */
 const previewTarget = (
   link: FrameLink,
@@ -709,8 +711,14 @@ const previewTarget = (
         async ({ chats }) =>
           await chats.previewCall(chatId, app, revision, method, args)
       ),
-    // A draft's functions aren't sealed, so its preview has none to call.
-    callFunction: refusedInPreview,
+    callFunction: async (request) =>
+      await on(
+        link,
+        async ({ chats }) =>
+          await chats.previewFunction(chatId, app, revision, request)
+      ),
+    // A streaming action runs in an object of its own, which a preview
+    // has none of (yet): refused, as it starts nothing.
     streamFunction: refusedInPreview,
     cancelStream: refusedInPreview,
     report: async (problem) => {
@@ -730,8 +738,18 @@ const previewTarget = (
           await Promise.resolve();
         },
       }),
-    // As `callFunction`: a draft's functions aren't sealed.
-    watchQuery: refusedInPreview,
+    watchQuery: async (request, onSnapshot) =>
+      await on(
+        link,
+        async ({ chats }) =>
+          await chats.previewWatchQuery(
+            chatId,
+            app,
+            revision,
+            request,
+            forCore(onSnapshot)
+          )
+      ),
     // A preview reads no real data, so it keeps no drafts of it.
     drafts: async () => await Promise.resolve({}),
     saveDraft: () => {
