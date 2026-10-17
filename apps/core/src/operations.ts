@@ -261,8 +261,14 @@ export interface Invocation {
   readonly observeReads?: (readSet: Record<string, number>) => void;
   /**
    * How core starts the workflows the App binds, for this call; none
-   * started without it (a workflow run's call: a run starting another is
-   * a child run of its own, which isn't this).
+   * started without it. A workflow run's call (app-functions.ts,
+   * `runInvocationFor`) and a store operation's (store-operations.ts) have
+   * none, so App code in a run's step starts nothing, now or after its
+   * commit (`resource.unavailable`): a start there would open a lineage of
+   * its own, past its run's nesting, descendant, active-time and host-call
+   * limits (GRA-669). Letting a run start one needs its root and depth
+   * carried to the start, `admitChild` as it is admitted, and its attempts
+   * counted on that root (quotas.ts).
    */
   readonly workflows?: WorkflowStarts;
 }
