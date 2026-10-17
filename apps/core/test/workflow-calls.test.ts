@@ -1845,7 +1845,8 @@ const activationOf = async (
     /** The run's row: a real start's, which its calls are checked against. */
     runId: string;
     runKey: string;
-    marks: TriedOnceMarks;
+    /** The run's marks; none: the host's own, of one activation alone. */
+    marks?: TriedOnceMarks;
     attempts?: Record<string, number>;
     /** The bindings its start froze. */
     bindings: ReadonlyMap<string, FrozenCatalogBinding>;
@@ -1910,7 +1911,7 @@ const activationOf = async (
       leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
       tampered: () => {},
       admitAttempt: admittedFreely,
-      triedOnce: marks,
+      ...(marks === undefined ? {} : { triedOnce: marks }),
     }
   );
 };
@@ -2001,6 +2002,56 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
         { name: "TimeoutError", code: null },
       ],
       ran: ["first", "greet, next activation"],
+      requests: 1,
+    });
+  });
+
+  it("never tries again a call that started on a host given no marks to keep", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, approval } = await greetingWorkflow(ada, admin, {
+      before: [longHold],
+    });
+    const runId = await started(ada, workflow.id);
+    const gateway = gatewayAnswering(
+      { status: 503, errorType: "overloaded_error" },
+      answer('{"line":"Never sent"}')
+    );
+    const runKey = unique();
+    const bindings = frozenSummary(approval);
+    const ran: string[] = [];
+    const failed: unknown[] = [];
+    // Hosts with no store of the run's: each keeps its activation's alone.
+    const first = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      bindings,
+      failed,
+    });
+    await first.do("task:greet", adaData, async (attempt) => {
+      ran.push("first attempt");
+      return await called(attempt);
+    });
+    const again = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      attempts: { "task:greet": 2 },
+      bindings,
+      failed,
+    });
+    await again.do("task:greet", adaData, async (attempt) => {
+      ran.push("retry");
+      return await called(attempt);
+    });
+    const [, retried] = failed;
+    expect({
+      retried,
+      ran,
+      requests: gateway.requests.length,
+    }).toStrictEqual({
+      // Nothing kept says attempt 1 never started: refused, as left open.
+      retried: { name: "TimeoutError", code: null },
+      ran: ["first attempt"],
       requests: 1,
     });
   });
