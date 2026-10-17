@@ -1326,6 +1326,9 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         expect(before.waiting).not.toBe(confirmedIn);
         const { status } = await builder.api.workflows.status(run.id);
         await expect(journalOf(run.id)).resolves.toStrictEqual(before);
+        // A wake that replays to the same wait leaves the journal as it was:
+        // a read in it may say running, so it reads again.
+        expect(status).toBe("waiting");
         whileOneWaits = status;
       },
       { timeout: 30_000, interval: 50 }
