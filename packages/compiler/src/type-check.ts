@@ -80,6 +80,10 @@ export const serverTarget = (
 ): TypeTarget => ({
   options: {
     ...compilerOptions,
+    // Every file is a module of its own, as the build loads it: a file
+    // without imports or exports shares nothing with the others, though
+    // TypeScript would otherwise read it as a script whose names they see.
+    moduleDetection: ts.ModuleDetectionKind.Force,
     lib: ["lib.es2024.d.ts", ...serverLibs, "lib.esnext.disposable.d.ts"],
     jsx: undefined,
     paths: Object.fromEntries(

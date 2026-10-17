@@ -841,6 +841,10 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       "// @ts-nocheck\nexport const title = (): string => document.title;\n",
     ],
     [
+      "a line the type check is told to ignore, in a block comment",
+      "/**\n * @ts-ignore\n */\nexport const title = (): string => document.title;\n",
+    ],
+    [
       "a file the type check is told to skip, in another case",
       "// @ts-NoCheck\nexport const title = (): string => document.title;\n",
     ],
@@ -850,6 +854,20 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
   ])("refuses %s", async (_case, source) => {
     await expect(refusedSeal(withOperation(source))).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["operations/extra.ts"],
+    });
+  });
+
+  it("refuses a name of another file that shares none, as the build loads each file on its own", async () => {
+    // Without imports or exports, TypeScript would read the other file as
+    // a script whose names every file sees; the build makes each a module.
+    await expect(
+      refusedSeal({
+        ...withOperation("export const greeting = (): string => shared;\n"),
+        "operations/extra-name.ts": 'const shared = "Hi";\n',
+      })
+    ).resolves.toStrictEqual({
       code: "version.build_failed",
       files: ["operations/extra.ts"],
     });
@@ -876,7 +894,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     await expect(
       refusedSeal(
         withOperation(
-          '/// <summary>A comment, not a directive.</summary>\nexport const later = async (): Promise<string> => {\n  await new Promise((resolve) => setTimeout(resolve, 1));\n  return crypto.randomUUID() + new TextEncoder().encode("x").length + new URL("https://acme.test").host;\n};\n'
+          '/// <summary>A comment, not a directive.</summary>\n// Do not use @ts-ignore here: a comment that mentions it.\nexport const later = async (): Promise<string> => {\n  await new Promise((resolve) => setTimeout(resolve, 1));\n  return crypto.randomUUID() + new TextEncoder().encode("x").length + new URL("https://acme.test").host;\n};\n'
         )
       )
     ).resolves.toStrictEqual({ code: "ok", files: [] });

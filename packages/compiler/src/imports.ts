@@ -278,10 +278,35 @@ export interface DirectiveSite {
  */
 const tripleSlash = /^\/\s*<(?:reference|amd-module|amd-dependency)\b/iu;
 
-/** A comment that switches the type check off for a file, a line or the next. */
-// TypeScript reads `@ts-nocheck` in any case (`@ts-NoCheck`); the others
-// are refused in any case too.
-const suppression = /@ts-(?:nocheck|ignore|expect-error)\b/iu;
+/**
+ * A comment that switches the type check off for the whole file: a
+ * `@ts-nocheck` pragma, which TypeScript reads in any case
+ * (`@ts-NoCheck`). Refused wherever a comment holds it, stricter than
+ * TypeScript, which reads it only where a pragma goes.
+ */
+const fileSuppression = /@ts-nocheck\b/iu;
+
+/**
+ * A comment line that switches the type check off for the next line: one
+ * that starts, after any `/` or `*` and space, with `@ts-ignore` or
+ * `@ts-expect-error`, where TypeScript reads them (in a line comment, or
+ * on any line of a block comment). A comment that only mentions one
+ * (`// Do not use @ts-ignore here.`) is prose to it, and to the build.
+ */
+const lineSuppression = /^[\s/*]*@ts-(?:ignore|expect-error)\b/iu;
+
+/** The suppression `comment` holds where TypeScript would obey it, if any. */
+const suppressionIn = (comment: string): string | undefined =>
+  fileSuppression.exec(comment)?.[0] ??
+  comment
+    .split("\n")
+    .map((line) =>
+      lineSuppression
+        .exec(line)?.[0]
+        .trim()
+        .replace(/^[\s/*]*/u, "")
+    )
+    .find((found) => found !== undefined);
 
 /**
  * A Babel plugin that lists into `directives` every comment of a file
@@ -300,11 +325,11 @@ export const collectDirectives = (directives: DirectiveSite[]) => () => ({
         const line = loc?.start.line;
         if (type === "CommentLine" && tripleSlash.test(value)) {
           directives.push({ directive: `//${value}`.trim(), line });
-        } else if (suppression.test(value)) {
-          directives.push({
-            directive: suppression.exec(value)?.[0] ?? value.trim(),
-            line,
-          });
+        } else {
+          const directive = suppressionIn(value);
+          if (directive !== undefined) {
+            directives.push({ directive, line });
+          }
         }
       }
     },
