@@ -402,7 +402,12 @@ export const usageOf = (
   }
 
   // Once Grasp is open: the chat of everyone who is in, and each workflow from the day it went live.
-  if (isOpen(view) && view.knowledge.opened !== null) {
+  // Worked out at a sample only: at a real organization, what the Worker counted is all there was.
+  if (
+    org.real === undefined &&
+    isOpen(view) &&
+    view.knowledge.opened !== null
+  ) {
     const opened = dateOn(org, view.knowledge.opened);
     const each = (
       from: string,

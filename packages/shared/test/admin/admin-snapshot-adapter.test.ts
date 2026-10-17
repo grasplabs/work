@@ -567,6 +567,32 @@ describe("an organization from core's admin snapshot", () => {
     expect(total.spend).toBeGreaterThan(0);
   });
 
+  it("counts no chat nobody had, once the company is in", () => {
+    const opened = adminOrgOf(
+      {
+        ...snapshot,
+        gate: {
+          ...snapshot.gate,
+          open: true,
+          closedSince: null,
+          openedAt: "2026-10-12T15:00:00.000Z",
+        },
+      },
+      client
+    );
+
+    const { members, usage } = adminViewOf(
+      opened.org,
+      opened.state,
+      "2026-10-14"
+    );
+    // Its members are in, and core counted none of their chat.
+    expect({
+      active: members.filter((member) => member.state === "active").length,
+      chat: [usage.purposes.chat.tokensIn, usage.purposes.runs.tokensIn],
+    }).toStrictEqual({ active: 2, chat: [0, 0] });
+  });
+
   it("counts the AI of a model it has no price for, with its spend unknown", () => {
     // Core's default deployment reads with Workers AI's models.
     const llama = adminOrgOf(
