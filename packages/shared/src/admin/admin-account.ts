@@ -169,7 +169,7 @@ export const agreementsOf = (org: Org, state: OrgState): AgreementView[] =>
     return {
       what,
       state: stands,
-      on: byHand ?? paper?.signed ?? null,
+      on: handDone ? byHand : (paper?.signed ?? null),
       by: handDone ? null : (paper?.by ?? null),
       version: handDone ? null : (paper?.version ?? null),
       file: handDone ? null : (paper?.file ?? null),

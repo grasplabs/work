@@ -193,6 +193,17 @@ describe("the agreements", () => {
     });
   });
 
+  it("signed with their paper keep its day when the day by hand was left empty", () => {
+    const state: OrgState = {
+      ...noordkade.seed,
+      papers: { processing: "" },
+    };
+    expect(agreementsOf(noordkade, state)[0]).toMatchObject({
+      on: "2026-09-16",
+      by: "the COO",
+    });
+  });
+
   it("taken back are open again, whatever paper there was", () => {
     const state: OrgState = {
       ...noordkade.seed,
