@@ -1332,7 +1332,16 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * can't follow, the App's queries stop, as when a store can't be
    * watched, and the screens follow again later.
    */
-  #follow(userId: string, app: AppId): void {
+  #follow(
+    userId: string,
+    app: AppId,
+    /**
+     * Whether it follows again, after the host let go of it: a run change
+     * the host had no connection to tell of meanwhile is made up for once
+     * it follows (`#runsChanged`), as a revocation is by its look.
+     */
+    again = false
+  ): void {
     const following: Following = {
       id: undefined,
       ready: Promise.resolve(),
@@ -1346,7 +1355,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       this.#following.delete(app);
       this.#revoked(app);
       if (this.#follows(app)) {
-        this.#follow(userId, app);
+        this.#follow(userId, app, true);
       }
     };
     const watcher = Object.assign(
@@ -1401,6 +1410,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         letGo();
       } else if (current()) {
         this.#revoked(app);
+        if (again) {
+          this.#runsChanged(app);
+        }
       } else {
         await this.#leave(app, following.id);
       }
