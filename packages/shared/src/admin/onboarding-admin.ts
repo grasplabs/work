@@ -548,7 +548,8 @@ export interface RealHappened {
   metered: {
     day: string;
     purpose: "reading" | "interviews" | "drawing";
-    model: "opus" | "sonnet" | "haiku" | "voice" | "ears";
+    /** `other` for a model the admin has no price for: its spend counts as nothing. */
+    model: "opus" | "sonnet" | "haiku" | "voice" | "ears" | "other";
     use: {
       tokensIn: number;
       tokensOut: number;

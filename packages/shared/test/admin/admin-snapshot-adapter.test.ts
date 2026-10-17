@@ -545,6 +545,42 @@ describe("an organization from core's admin snapshot", () => {
     expect(total.spend).toBeGreaterThan(0);
   });
 
+  it("counts the AI of a model it has no price for, with its spend unknown", () => {
+    // Core's default deployment reads with Workers AI's models.
+    const llama = adminOrgOf(
+      {
+        ...snapshot,
+        usage: [
+          {
+            day: "2026-10-05",
+            use: {
+              reading: {
+                "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+                  ...metered,
+                  calls: 2,
+                  tokensIn: 9000,
+                  tokensOut: 1500,
+                },
+              },
+            },
+          },
+        ],
+      },
+      client
+    );
+    const { usage } = adminViewOf(llama.org, llama.state, "2026-10-14");
+
+    expect({
+      counted: usage.counted,
+      other: usage.models.other,
+      reading: usage.purposes.reading.tokensIn,
+    }).toStrictEqual({
+      counted: true,
+      other: { tokensIn: 9000, tokensOut: 1500, spoken: 0, heard: 0, spend: 0 },
+      reading: 9000,
+    });
+  });
+
   it("names its members as core does, ready for when it opens", () => {
     const { view } = shown();
 

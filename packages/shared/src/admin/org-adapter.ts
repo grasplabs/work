@@ -121,31 +121,28 @@ export const workOf = (record: WorkRecord): Work => {
   };
 };
 
-/** The model a call was made to, by the name its maker gives it; none for one the admin does not count. */
-const modelOf = (name: string): Model | null => {
+/** The model a call was made to, by the name its maker gives it: one the admin has no price for is another. */
+const modelOf = (name: string): Model => {
   if (name === "voice") {
     return "voice";
   }
   return (
     (["opus", "sonnet", "haiku"] as const).find((model) =>
       name.includes(model)
-    ) ?? null
+    ) ?? "other"
   );
 };
 
 /**
  * What the Worker counted, as the admin counts use: tokens read (new and kept together) and
  * written, minutes spoken, and what that cost at the admin's prices, with what the model had kept
- * of an earlier call at a tenth.
+ * of an earlier call at a tenth. A model with no price is counted as another, its spend unknown.
  */
 export const meteredOf = (usage: MeterDay[]): RealHappened["metered"] =>
   usage.flatMap((day) =>
     METER_PURPOSES.flatMap((purpose) =>
       Object.entries(day.use[purpose] ?? {}).flatMap(([name, took]) => {
         const model = modelOf(name);
-        if (!model) {
-          return [];
-        }
         const price = PRICES[model];
         const spoken = took.seconds / 60;
         const spend =
