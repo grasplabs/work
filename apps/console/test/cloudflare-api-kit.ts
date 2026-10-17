@@ -2,6 +2,7 @@
  * What the fake Cloudflare API (test/cloudflare-api.ts) is built from: an
  * account's state, the API's envelope, and how a route answers.
  */
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 
 export const base = "https://api.cloudflare.com/client/v4";
@@ -87,6 +88,23 @@ export interface AccountState {
    * `absent` for a core from before the summary, which answers 404.
    */
   onboarding?: OnboardingSummary | "absent";
+  /**
+   * What its core answers the console's signed admin snapshot request
+   * with (@grasp-os/shared/admin-snapshot): a company with nothing begun
+   * unless set; `absent` for a core from before the snapshot, which
+   * answers 404; `ended` for one whose company ended Grasp's staff
+   * access, which refuses it (403); `garbled` for one that answers
+   * something that isn't a snapshot.
+   */
+  admin?: AdminSnapshot | "absent" | "ended" | "garbled";
+  /**
+   * What its core does once a snapshot request arrives, before answering
+   * it: waits, as a slow or hanging one does, or throws, as a dropped
+   * connection does.
+   */
+  adminHeld?: () => Promise<void>;
+  /** The staff members its core answered a snapshot to, as each signed request named them. */
+  adminReaders: string[];
   /**
    * What the analytics API reports for it (`/graphql`): its Workers'
    * requests and CPU time this month, its AI Gateway's spend, and its
