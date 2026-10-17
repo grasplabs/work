@@ -102,6 +102,10 @@ export const TestRun = ({
       setFailure(t`The input isn't JSON.`);
       return;
     }
+    // The run shown before is no longer followed, so nothing of it can
+    // clear what this start answers.
+    setRunId(null);
+    setTrace(undefined);
     setBusy(true);
     try {
       const started = await core.withSession(
@@ -112,7 +116,6 @@ export const TestRun = ({
             key: crypto.randomUUID(),
           })
       );
-      setTrace(undefined);
       setRunId(started.runId);
       setUnrunnable(started.runId === null);
     } catch (error) {
