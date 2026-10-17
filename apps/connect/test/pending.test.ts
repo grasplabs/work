@@ -1279,11 +1279,12 @@ describe("a side effect from chat", () => {
         signed
       )
     );
-    // Another run's call, under the same App: not this run's.
+    // Another run's call, under the same App, its ID this one's and more:
+    // not this run's.
     await retried(
       callAs(
         appB,
-        { ...mail(other), idempotencyKey: "run-other:task:send" },
+        { ...mail(other), idempotencyKey: `${run}x:task:send` },
         signed
       )
     );
@@ -1294,6 +1295,57 @@ describe("a side effect from chat", () => {
     expect(
       waiting.map(({ connectionId }) => connectionId).toSorted()
     ).toStrictEqual([other]);
+  });
+
+  it("keeps the inputs of calls an ended run didn't make, whatever their key, and drops its own", async () => {
+    const anna = someone();
+    const run = `run-${crypto.randomUUID()}`;
+    const connectionId = await addConnection();
+    const db = drizzle(env.DB);
+    // Calls of unknown outcome, each keeping its input: the run's own, one
+    // with the person there under a key of the run's shape, and another
+    // run's whose ID is this one's and more.
+    const kept = (key: string, mode: "interactive" | "workflow") => ({
+      subjectType: "app" as const,
+      subjectId: "app-b",
+      onBehalfOf: anna.userId,
+      connectionId,
+      action: "send",
+      idempotencyKey: key,
+      inputHash: "0".repeat(64),
+      state: "unknown" as const,
+      createdAt: new Date(),
+      claimedAt: new Date(),
+      input: `{"key":"${key}"}`,
+      origin: JSON.stringify({ mode }),
+      listId: crypto.randomUUID(),
+    });
+    await db
+      .insert(idempotentCalls)
+      .values([
+        kept(`${run}:task:send`, "workflow"),
+        kept(`${run}:chosen`, "interactive"),
+        kept(`${run}x:task:send`, "workflow"),
+      ]);
+    await exports.default.dropForEndedRuns({
+      runs: [{ workflowId: "workflow-1", runId: run }],
+    });
+    const rows = await db
+      .select({
+        key: idempotentCalls.idempotencyKey,
+        input: idempotentCalls.input,
+      })
+      .from(idempotentCalls)
+      .where(eq(idempotentCalls.connectionId, connectionId));
+    expect(
+      rows
+        .map(({ key, input }) => ({ key, kept: input !== null }))
+        .toSorted((a, b) => a.key.localeCompare(b.key))
+    ).toStrictEqual([
+      { key: `${run}:chosen`, kept: true },
+      { key: `${run}:task:send`, kept: false },
+      { key: `${run}x:task:send`, kept: true },
+    ]);
   });
 
   it("from a run that read nothing restricted isn't held", async () => {
