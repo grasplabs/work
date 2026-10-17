@@ -1189,9 +1189,12 @@ export const workflowRuns = sqliteTable(
  *   attempt settles, only those it made.
  */
 export const runLineages = sqliteTable("run_lineages", {
-  rootRunId: text("root_run_id")
-    .primaryKey()
-    .references(() => workflowRuns.id),
+  /**
+   * The root run's ID: an App's run (`workflow_runs`) or an independent
+   * workflow's (`workflow_resource_runs`). No foreign key can name both,
+   * so a trigger refuses a root neither has (migration 0093).
+   */
+  rootRunId: text("root_run_id").primaryKey(),
   createdAt: timestamp("created_at").notNull(),
   descendants: integer().notNull().default(0),
   activeUsedMs: integer("active_used_ms").notNull().default(0),
@@ -1216,9 +1219,11 @@ export const runLineages = sqliteTable("run_lineages", {
 export const runLineageAttempts = sqliteTable(
   "run_lineage_attempts",
   {
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id),
+    /**
+     * The attempt's run, of either table, as `run_lineages.root_run_id`:
+     * a trigger refuses one neither has (migration 0093).
+     */
+    runId: text("run_id").notNull(),
     stepKey: text("step_key").notNull(),
     attempt: integer().notNull(),
     generation: integer().notNull(),
@@ -2770,6 +2775,14 @@ export const workflowResourceRuns = sqliteTable(
      * holds every other run's error, has nothing to say of it.
      */
     failureCode: text("failure_code"),
+    /**
+     * The newest activation generation whose step attempts the engine has
+     * fenced (workflows/quotas.ts, `sharesReleased`): an attempt of it, or
+     * an older one, whose admission lands later takes no share. An ended
+     * run takes none whatever this says, so it moves only while the run
+     * hasn't ended.
+     */
+    sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
   },
   (table) => [
     // A workflow's runs that haven't ended, for its deletion check.

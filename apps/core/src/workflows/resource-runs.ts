@@ -32,6 +32,7 @@ import {
 import { requireNotStaff } from "../sharing.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
+import { runDequeued } from "./admission.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
 import { loadRunIsolate } from "./code.ts";
@@ -40,7 +41,7 @@ import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import { countedStep, fromIsolate, settle, stepLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { admitAttempt, quotaPolicy } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
 import {
@@ -101,16 +102,17 @@ import type { EngineStatus } from "./runs.ts";
 // - Output the workflow doesn't declare. The run's result must match its
 //   version's output schema, by the SDK's own validator, or the run fails
 //   (`workflow.output_invalid`).
-//
-// Not yet: lineage quotas (a run's active time and descendants,
-// quotas.ts) are kept for App runs' lineages, which reference their rows;
-// an independent run is held to the platform's step limit, each step to
-// its attempt's time, and each expression to the evaluator's fuel. A
-// workflow's own `limits` lower those: `maxSteps` the step limit and
-// `maxModelCalls` the model requests a lineage may make (the lower of
-// each and the host's, `loadedRun`, one request per call). A
-// `maxActiveMs` isn't lowered (generate.ts): nothing holds these runs to
-// an active time until GRA-567.
+// - A run getting past the quotas an App's run is held to. Each run is the
+//   root of its own lineage (quotas.ts), in the same tables, and each of
+//   its steps' attempts is admitted by the same admission, against the
+//   lineage's active time, host calls, age and steps and the client's
+//   shares of attempts running at once (resource-host.ts): a retry, a
+//   restart or a replay counts on, never afresh. An independent run
+//   starts no runs, so its lineage has no descendants. A workflow's own
+//   `limits` lower those: `maxSteps` the step limit and `maxModelCalls`
+//   the model requests a lineage may make (the lower of each and the
+//   host's, `loadedRun`, one request per call). A `maxActiveMs` isn't
+//   lowered (generate.ts).
 
 /** The statuses of a run that hasn't ended. */
 const unended: WorkflowRunStatus[] = ["starting", "running"];
@@ -128,8 +130,27 @@ const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
   terminated: "cancelled",
 };
 
-/** Whose runs a run's isolate is among, for the sandbox's share. */
+/**
+ * Whose runs a run's isolate is among, for the sandbox's share; and whose
+ * App share of the client's attempts running at once its attempts take
+ * (admission.ts): the workflow's own, as an App's runs take their App's.
+ */
 const ownerOf = (workflow: string): string => `workflow-resource:${workflow}`;
+
+/**
+ * Whose person share of the attempts running at once a run's attempts
+ * take (admission.ts), from its receipt, never its input: the person it
+ * acts for, whose App runs take the same share; for a trigger's start, the
+ * trigger's own (`trigger:<id>`), as an App's triggers take theirs, so
+ * the events that fire it never take its principal's.
+ */
+const admissionSubjectOf = (
+  row: Pick<RunRow, "principalId">,
+  receipt: { invokerType: string; invokerId: string }
+): string =>
+  receipt.invokerType === "trigger"
+    ? `trigger:${receipt.invokerId}`
+    : row.principalId;
 
 /** What a start's run is admitted as: its pins, from the authorization. */
 export interface RunAdmission {
@@ -148,7 +169,7 @@ export interface RunAdmission {
  */
 export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
   db.insert(workflowResourceRuns).select(
-    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL
+    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0
         WHERE EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
   );
 
@@ -168,6 +189,8 @@ const receiptOf = async (env: Env, id: string) =>
       manifestHash: workflowStartReceipts.manifestHash,
       input: workflowStartReceipts.input,
       params: workflowStartReceipts.params,
+      invokerType: workflowStartReceipts.invokerType,
+      invokerId: workflowStartReceipts.invokerId,
     })
     .from(workflowStartReceipts)
     .where(eq(workflowStartReceipts.id, id))
@@ -238,6 +261,18 @@ export const projectResourceRun = async (
     ...(action === undefined
       ? []
       : [outboxedIfChanged(db, runEntry(row, action))]),
+    // Ended, it waits in the admission queue for nothing more: its places
+    // go now, rather than keep others waiting until they lapse. After the
+    // audit entry, which reads what the row's update changed.
+    ...(ended
+      ? [
+          runDequeued(
+            db,
+            id,
+            sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${id} AND ${workflowResourceRuns.status} = ${status})`
+          ),
+        ]
+      : []),
   ]);
 };
 
@@ -528,7 +563,7 @@ const loadedRun = async (
   env: Env,
   pin: PinnedResourceRun,
   runId: string
-): Promise<{ run: HostedResourceRun; output: string }> => {
+): Promise<{ run: HostedResourceRun; output: string; subject: string }> => {
   const row = await runOf(env, runId);
   if (
     row === undefined ||
@@ -610,6 +645,7 @@ const loadedRun = async (
       ),
     },
     output: JSON.stringify(contract.output),
+    subject: admissionSubjectOf(row, receipt),
   };
 };
 
@@ -668,7 +704,7 @@ export const runResourceWorkflow = async (
   engineStep: RunStep,
   memory: ResourceRunMemory
 ): Promise<unknown> => {
-  const { run, output } = await loadedRun(env, pin, runId);
+  const { run, output, subject } = await loadedRun(env, pin, runId);
   // The workflow's own step limit only ever lowers the host's.
   const ceiling = await stepLimitOf(env);
   const step = countedStep(
@@ -683,6 +719,13 @@ export const runResourceWorkflow = async (
     tampered: (error) => {
       tampered ??= error;
     },
+    // The root of its own lineage: an independent run starts no runs.
+    admitAttempt: async (attempt) =>
+      await admitAttempt(
+        env,
+        { run: runId, root: runId, subject, resource: ownerOf(pin.workflow) },
+        attempt
+      ),
   });
   const code = loadRunIsolate<ResourceAttemptHost>(
     env,

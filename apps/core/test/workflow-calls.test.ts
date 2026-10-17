@@ -64,6 +64,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
+import { admittedFreely } from "./runs.ts";
 import {
   outcome as resultOf,
   refusal,
@@ -1780,6 +1781,7 @@ const hostOf = async (
       leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
       ...(activationFuel === undefined ? {} : { activationFuel }),
       tampered: () => {},
+      admitAttempt: admittedFreely,
     }
   );
 };

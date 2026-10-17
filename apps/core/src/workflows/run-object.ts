@@ -602,6 +602,14 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         },
         live?.status === "errored" ? (live.error.code ?? null) : null
       );
+      // Then what its fenced attempts still hold of the client's shares
+      // comes back, as an App run's does: after its row, so a run that
+      // ended cancelled has its attempts charged up to their deadlines
+      // (quotas.ts, `sharesReleased`).
+      const run = this.instanceId();
+      if (run !== undefined) {
+        await this.#sharesReleased(run, false);
+      }
       return;
     }
     if (pin?.type !== "app") {

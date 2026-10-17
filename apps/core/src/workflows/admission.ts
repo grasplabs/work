@@ -11,6 +11,7 @@ import { z } from "zod";
 import {
   workflowAdmissionQueue,
   workflowModelWaits,
+  workflowResourceRuns,
   workflowRuns,
 } from "../db/core/schema.ts";
 
@@ -469,6 +470,17 @@ export const nextTurn = (pool: Pool, scope: AdmissionScope, now: number): SQL =>
   sql`(SELECT coalesce(max(p.turn) + 1, 0) FROM ${pool.queue} AS p WHERE p.seen_at > ${literal(now - queueLiveMs)} AND p.subject = ${scope.subject} AND p.resource = ${scope.resource})`;
 
 /**
+ * The row of run `run`, as SQL to read from (`run`): its ID, and whether
+ * it still goes (`active`: it hasn't ended, and no one cancelled it). An
+ * App's run (`workflow_runs`) or an independent workflow's
+ * (`workflow_resource_runs`, whose cancel ends it at once): their steps'
+ * attempts take the same shares and wait in the same queue.
+ */
+const runRowOf = (run: string): SQL =>
+  sql`(SELECT ${workflowRuns.id} AS id, (${workflowRuns.status} IN ('starting', 'running') AND ${workflowRuns.cancelRequestedAt} IS NULL) AS active FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run}
+    UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.status} IN ('starting', 'running') FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run}) AS run`;
+
+/**
  * Where the step at `place` stands in the queue: its place's turn and
  * when it joined, if it holds one still; if it doesn't, `now`, behind
  * everyone waiting, and the turn it would take, after the latest of the
@@ -497,8 +509,7 @@ export const standingOf = async (
     // which every run has.
     db
       .select({ next: sql<number>`${nextTurn(attemptPool, scope, now)}` })
-      .from(workflowRuns)
-      .where(eq(workflowRuns.id, place.runId)),
+      .from(runRowOf(place.runId)),
   ]);
   const [held] = mine;
   if (held !== undefined) {
@@ -665,8 +676,8 @@ export const sharesRead = (
   // Read off the run's row, which every run has: one row of counts.
   db
     .select(admissionCounts(attemptPool, scope, place, standing, now, shares))
-    .from(workflowRuns)
-    .where(and(eq(workflowRuns.id, place.runId), sql`NOT (${admitted})`));
+    .from(runRowOf(place.runId))
+    .where(sql`NOT (${admitted})`);
 
 /** What `sharesRead` reads. */
 const foundSchema = z.object({
@@ -780,22 +791,18 @@ export const queuedRefusal = async (
   // A newer attempt of the step took the place, or a lease: this one's
   // refusal is late, and the step has gone on without it.
   const superseded = db
-    .select({ id: workflowRuns.id })
-    .from(workflowRuns)
+    .select({ id: sql<string>`run.id` })
+    .from(runRowOf(place.runId))
     .where(
-      and(
-        eq(workflowRuns.id, place.runId),
-        sql`(EXISTS (SELECT 1 FROM ${queue} WHERE ${mine} AND ${queue.attemptDeadline} > ${place.deadline}) OR NOT ${noNewerLease(place)})`
-      )
+      sql`(EXISTS (SELECT 1 FROM ${queue} WHERE ${mine} AND ${queue.attemptDeadline} > ${place.deadline}) OR NOT ${noNewerLease(place)})`
     );
   // Still going as its place is written, in the same statement: a run
   // paused, cancelled or ended meanwhile has given up its places
   // (runs.ts, `projectStatus`), and takes none again.
-  const runActive = sql`${workflowRuns.status} IN ('starting', 'running') AND ${workflowRuns.cancelRequestedAt} IS NULL`;
   const active = db
-    .select({ id: workflowRuns.id })
-    .from(workflowRuns)
-    .where(and(eq(workflowRuns.id, place.runId), runActive));
+    .select({ id: sql<string>`run.id` })
+    .from(runRowOf(place.runId))
+    .where(sql`run.active`);
   const written = await db.batch([
     // A place that lapsed is lost: the step joins at the back.
     db
@@ -814,7 +821,7 @@ export const queuedRefusal = async (
     db
       .insert(queue)
       .select(
-        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(attemptPool, scope, now)}, ${place.deadline} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND ${runActive} AND ${noNewerLease(place)} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(attemptPool, sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(attemptPool, sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
+        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(attemptPool, scope, now)}, ${place.deadline} FROM ${runRowOf(place.runId)} WHERE run.active AND ${noNewerLease(place)} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(attemptPool, sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(attemptPool, sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
       )
       .onConflictDoNothing()
       .returning({ runId: queue.runId }),
