@@ -19,17 +19,18 @@ import {
 const WorkflowPackages = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const workflow = page.state === "ready" ? page.data.subject.name : "";
   return (
     <SettingsSection
       description={
         <Trans>
-          The packages approved for this workflow&apos;s calculations, and
-          retiring or revoking them.
+          The packages approved for this workflow&apos;s calculations. Retire or
+          revoke them here.
         </Trans>
       }
       title={
         page.state === "ready"
-          ? t`Packages for ${page.data.subject.name}`
+          ? t`Packages for ${workflow}`
           : t`Workflow packages`
       }
     >
