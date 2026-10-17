@@ -1461,6 +1461,62 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
   });
 
+  it("cancels an upload that failed for good after its start, so it holds none of the person's places", async () => {
+    const { app, release, screen } = await openedApp();
+    // Every chunk is refused for good, with no answer lost to send again.
+    const channel = fileChannel({
+      app,
+      lease: screen.lease,
+      person: screen.named,
+      fetch: async (path, init) => {
+        if (path.includes("/chunks/")) {
+          return await Promise.resolve(
+            Response.json(
+              { code: "file.content_mismatch", message: "Refused." },
+              { status: 422 }
+            )
+          );
+        }
+        return await screen.fetch(path, init);
+      },
+    });
+    const failed = await codeOf(upload(channel, blobOf(png(100), "image/png")));
+    expect({
+      failed,
+      states: await fileStates(release),
+    }).toStrictEqual({
+      failed: "file.content_mismatch",
+      states: ["deleted:cancelled"],
+    });
+  });
+
+  it("answers an upload whose finish was refused after core published it with its file", async () => {
+    const { app, release, screen } = await openedApp();
+    // Core publishes the file; the screen hears a refusal instead.
+    const channel = fileChannel({
+      app,
+      lease: screen.lease,
+      person: screen.named,
+      fetch: async (path, init) => {
+        const response = await screen.fetch(path, init);
+        if (path.endsWith("/finish")) {
+          await response.body?.cancel();
+          return Response.json(
+            { code: "file.content_mismatch", message: "Refused." },
+            { status: 422 }
+          );
+        }
+        return response;
+      },
+    });
+    const bytes = png(100);
+    const id = await upload(channel, blobOf(bytes, "image/png"));
+    await expect(
+      screen.channel.describe("attachments", id)
+    ).resolves.toMatchObject({ size: bytes.length });
+    await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
+  });
+
   it("answers a cancellation with what won: cancelled, or the file when publication came first", async () => {
     const { app, client, api, release, screen } = await openedApp();
     const early = new AbortController();

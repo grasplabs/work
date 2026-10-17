@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
-import { GraspClient } from "../src/client-core.ts";
-import { GraspError } from "../src/client-error.ts";
+import { clientInternals, GraspClient } from "../src/client-core.ts";
+import { clientError, GraspError } from "../src/client-error.ts";
 import type { FileTransport, TransferProgress } from "../src/client-files.ts";
 import { UploadTransfer } from "../src/upload-transfer.ts";
 
@@ -9,7 +9,9 @@ import { UploadTransfer } from "../src/upload-transfer.ts";
 // of the file port, which these tests play: the page is outside the
 // frame, and what it answers (progress, a published file, a cancellation
 // that won or lost) is what the transfer must show, no more. One upload
-// at a time; a cancellation that publication beat resolves completed.
+// at a time; a cancellation that publication beat resolves completed. A
+// fence (the person's access or the screen's build changed) cancels the
+// running upload, and what settles after one is never shown completed.
 
 /** An upload the page has under way, which the test settles. */
 interface PageUpload {
@@ -87,7 +89,7 @@ const codeOf = async (promise: Promise<unknown>): Promise<string> => {
 describe("an upload's transfer", () => {
   it("shows the bytes the page reports, then the file core published", async () => {
     const { client, upload } = page();
-    const transfer = new UploadTransfer();
+    const transfer = new UploadTransfer(clientInternals(client));
     const done = transfer.upload(client.files, resource, photo);
     expect(transfer.view()).toStrictEqual({
       status: "uploading",
@@ -114,7 +116,7 @@ describe("an upload's transfer", () => {
 
   it("sends nothing to the page for an upload cancelled before it starts", async () => {
     const { client, upload } = page();
-    const transfer = new UploadTransfer();
+    const transfer = new UploadTransfer(clientInternals(client));
     const cancelled = new AbortController();
     cancelled.abort();
     await expect(
@@ -129,7 +131,7 @@ describe("an upload's transfer", () => {
 
   it("refuses a second upload while one runs, without disturbing it", async () => {
     const { client, upload } = page();
-    const transfer = new UploadTransfer();
+    const transfer = new UploadTransfer(clientInternals(client));
     const first = transfer.upload(client.files, resource, photo);
     await expect(
       codeOf(transfer.upload(client.files, resource, photo))
@@ -144,7 +146,7 @@ describe("an upload's transfer", () => {
 
   it("shows a cancellation once the page acknowledged it, and completed when publication won", async () => {
     const { client, upload } = page();
-    const transfer = new UploadTransfer();
+    const transfer = new UploadTransfer(clientInternals(client));
     const cancelled = transfer.upload(client.files, resource, photo);
     const acknowledged = transfer.cancel();
     expect(upload(0).cancel.aborted).toBeTruthy();
@@ -169,7 +171,7 @@ describe("an upload's transfer", () => {
 
   it("rejects a cancellation the page couldn't get acknowledged with why", async () => {
     const { client, upload } = page();
-    const transfer = new UploadTransfer();
+    const transfer = new UploadTransfer(clientInternals(client));
     const running = transfer.upload(client.files, resource, photo);
     const cancelling = transfer.cancel();
     upload(0).refuse("operation.unreachable");
@@ -194,7 +196,7 @@ describe("an upload's transfer", () => {
 
   it("fails with the page's refusal, and refuses a resource that doesn't declare uploads before anything", async () => {
     const { client, upload } = page();
-    const transfer = new UploadTransfer();
+    const transfer = new UploadTransfer(clientInternals(client));
     const failed = transfer.upload(client.files, resource, photo);
     upload(0).refuse("file.content_mismatch");
     await expect(codeOf(failed)).resolves.toBe("file.content_mismatch");
@@ -212,5 +214,138 @@ describe("an upload's transfer", () => {
       status: "failed",
       error: { code: "file.content_mismatch" },
     });
+  });
+
+  it("cancels its upload at a fence and shows the fence's refusal, never the file published after", async () => {
+    const { client, upload } = page();
+    const transfer = new UploadTransfer(clientInternals(client));
+    const running = transfer.upload(client.files, resource, photo);
+    clientInternals(client).workflowLink.fence(
+      clientError("auth.principal_changed")
+    );
+    const cancelSent = upload(0).cancel.aborted;
+    // Core published it before the cancellation reached it.
+    upload(0).publish("file-1");
+    await expect(codeOf(running)).resolves.toBe("auth.principal_changed");
+    expect({ cancelSent, view: transfer.view() }).toMatchObject({
+      cancelSent: true,
+      view: { status: "failed", error: { code: "auth.principal_changed" } },
+    });
+  });
+
+  it("shows the fence's refusal for an upload a fence cancelled, not a cancellation the screen asked for", async () => {
+    const { client, upload } = page();
+    const transfer = new UploadTransfer(clientInternals(client));
+    const running = transfer.upload(client.files, resource, photo);
+    clientInternals(client).workflowLink.fence(
+      clientError("auth.principal_changed")
+    );
+    upload(0).refuse("file.cancelled");
+    await expect(codeOf(running)).resolves.toBe("auth.principal_changed");
+    expect(transfer.view()).toMatchObject({
+      status: "failed",
+      error: { code: "auth.principal_changed" },
+    });
+    // A fence before an upload started stops none after it.
+    const next = transfer.upload(client.files, resource, photo);
+    upload(1).publish("file-2");
+    await expect(next).resolves.toStrictEqual({ id: "file-2" });
+  });
+
+  it("tells the views of a file once it is deleted, and only once core recorded it", async () => {
+    const outcomes = ["refused", "deleted", "stopped"];
+    const finished = Promise.withResolvers<null>();
+    const sentSignal: unknown[] = [];
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+      files: {
+        upload: async () => await Promise.reject(new Error("Not here")),
+        read: async () => await Promise.reject(new Error("Not here")),
+        download: async () => {
+          await Promise.reject(new Error("Not here"));
+        },
+        delete: async (_resource, _file, _key, signal) => {
+          const outcome = outcomes.shift();
+          if (outcome === "refused") {
+            await Promise.reject(
+              Object.assign(new Error("file.referenced"), {
+                code: "file.referenced",
+              })
+            );
+          }
+          if (outcome === "stopped") {
+            // Sent: it runs to its end, whoever stops waiting for it.
+            sentSignal.push(signal);
+            await finished.promise;
+          }
+        },
+      },
+    });
+    const told: string[] = [];
+    const stop = clientInternals(client).onFileDeleted((key) => {
+      told.push(key);
+    });
+    const files = { ...resource, operations: ["delete"] } as const;
+    const id = crypto.randomUUID();
+    const refused = await codeOf(client.files.delete(files, { id }));
+    const toldAfterRefusal = [...told];
+    await client.files.delete(files, { id });
+    // A deletion whose caller stopped waiting goes through all the same:
+    // its views read it again once core recorded it, never before.
+    const other = crypto.randomUUID();
+    const stopping = new AbortController();
+    const stopped = codeOf(
+      client.files.delete(files, { id: other }, { signal: stopping.signal })
+    );
+    stopping.abort();
+    const stoppedCode = await stopped;
+    const toldWhileRunning = [...told];
+    finished.resolve(null);
+    await vi.waitFor(() => {
+      expect(told).toHaveLength(2);
+    });
+    stop();
+    expect({ stoppedCode, toldWhileRunning, sentSignal }).toStrictEqual({
+      stoppedCode: "file.stopped",
+      toldWhileRunning: [`attachments/${id}`],
+      sentSignal: [undefined],
+    });
+    expect({ refused, toldAfterRefusal, told }).toStrictEqual({
+      refused: "file.referenced",
+      toldAfterRefusal: [],
+      told: [`attachments/${id}`, `attachments/${other}`],
+    });
+  });
+
+  it("tells every view of a deleted file, and resolves the deletion, though one view fails", async () => {
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+      files: {
+        upload: async () => await Promise.reject(new Error("Not here")),
+        read: async () => await Promise.reject(new Error("Not here")),
+        download: async () => {
+          await Promise.reject(new Error("Not here"));
+        },
+        delete: async () => {
+          await Promise.resolve();
+        },
+      },
+    });
+    const told: string[] = [];
+    const internals = clientInternals(client);
+    const stopFailing = internals.onFileDeleted(() => {
+      throw new Error("This view failed.");
+    });
+    const stopTelling = internals.onFileDeleted((key) => {
+      told.push(key);
+    });
+    const id = crypto.randomUUID();
+    const files = { ...resource, operations: ["delete"] } as const;
+    await expect(client.files.delete(files, { id })).resolves.toBeUndefined();
+    stopFailing();
+    stopTelling();
+    expect(told).toStrictEqual([`attachments/${id}`]);
   });
 });

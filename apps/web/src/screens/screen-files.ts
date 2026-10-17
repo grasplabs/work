@@ -95,7 +95,11 @@ const download = async (
 ): Promise<void> => {
   const { name, mimeType } = await channel.describe(resource, file, signal);
   const response = await channel.content(resource, file, signal);
-  const url = URL.createObjectURL(await response.blob());
+  const bytes = await response.blob();
+  // A screen gone while its bytes were assembled asks for nothing more:
+  // no save prompt for it.
+  signal.throwIfAborted();
+  const url = URL.createObjectURL(bytes);
   try {
     const link = document.createElement("a");
     link.href = url;

@@ -1,3 +1,4 @@
+import type { ClientInternals } from "./client-core.ts";
 import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
 import { fileFailure, readSignal, signalOnly } from "./client-files.ts";
@@ -7,7 +8,10 @@ import type { ClientFiles, FileRef } from "./client-files.ts";
 // time, its view kept as an external store the hook reads. The view says
 // only what core confirmed: completed once core published the file,
 // cancelled once core acknowledged the cancellation, and completed after
-// a cancellation that publication won.
+// a cancellation that publication won. It follows the client's fences:
+// a fence (the person's access or the screen's build changed) cancels the
+// running upload and shows its refusal, and an upload that settles after
+// one is never shown completed, its file no use to the screen now.
 
 /** An upload's view, as `useUpload` shows it (spec 10.7.5). */
 export type UploadView =
@@ -37,6 +41,22 @@ export class UploadTransfer {
   #view: UploadView = idle;
   #running: Running | undefined;
   readonly #listeners = new Set<() => void>();
+  readonly #fences: Pick<ClientInternals, "fences" | "fencedBy" | "onFence">;
+
+  /** A transfer of the client whose fences are `fences`. */
+  constructor(
+    fences: Pick<ClientInternals, "fences" | "fencedBy" | "onFence">
+  ) {
+    this.#fences = fences;
+  }
+
+  /** Why a fence since `startedUnder` stopped an upload, if one came. */
+  #fencedSince(startedUnder: number): GraspError | undefined {
+    if (this.#fences.fences() === startedUnder) {
+      return undefined;
+    }
+    return this.#fences.fencedBy() ?? clientError("operation.unreachable");
+  }
 
   /** The view now, as `useSyncExternalStore` reads it. */
   view = (): UploadView => this.#view;
@@ -114,12 +134,22 @@ export class UploadTransfer {
       bytesUploaded: 0,
       bytesTotal: file.size,
     });
+    // A fence while it runs cancels it: what it uploads is no use to the
+    // screen now, and an open upload holds one of the person's places.
+    const startedUnder = this.#fences.fences();
+    const unfence = this.#fences.onFence(() => {
+      running.cancel.abort();
+    });
     try {
       const uploaded = await done;
+      const fenced = this.#fencedSince(startedUnder);
+      if (fenced !== undefined) {
+        throw fenced;
+      }
       this.#show({ status: "completed", file: uploaded });
       return uploaded;
     } catch (error) {
-      const failure = fileFailure(error);
+      const failure = this.#fencedSince(startedUnder) ?? fileFailure(error);
       this.#show(
         failure.code === "file.cancelled"
           ? { status: "cancelled" }
@@ -127,6 +157,7 @@ export class UploadTransfer {
       );
       throw failure;
     } finally {
+      unfence();
       signal?.removeEventListener("abort", onAbort);
       this.#running = undefined;
     }
