@@ -293,7 +293,9 @@ const fileSuppression = /@ts-nocheck\b/iu;
  * on any line of a block comment). A comment that only mentions one
  * (`// Do not use @ts-ignore here.`) is prose to it, and to the build.
  */
-const lineSuppression = /^[\s/*]*@ts-(?:ignore|expect-error)\b/iu;
+// No word boundary after it, as TypeScript has none: it reads
+// `// @ts-ignoreX` as `@ts-ignore`.
+const lineSuppression = /^[\s/*]*@ts-(?:ignore|expect-error)/iu;
 
 /** The suppression `comment` holds where TypeScript would obey it, if any. */
 const suppressionIn = (comment: string): string | undefined =>
