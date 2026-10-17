@@ -118,7 +118,7 @@ const Packages = () => {
       description={
         <Trans>
           The Apps and workflows that may use approved npm packages. Open one to
-          retire or revoke what it was approved.
+          retire or revoke what was approved for it.
         </Trans>
       }
       title={t`Packages`}
