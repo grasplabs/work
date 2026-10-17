@@ -317,4 +317,35 @@ describe("an upload's transfer", () => {
       told: [`attachments/${id}`, `attachments/${other}`],
     });
   });
+
+  it("tells every view of a deleted file, and resolves the deletion, though one view fails", async () => {
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+      files: {
+        upload: async () => await Promise.reject(new Error("Not here")),
+        read: async () => await Promise.reject(new Error("Not here")),
+        download: async () => {
+          await Promise.reject(new Error("Not here"));
+        },
+        delete: async () => {
+          await Promise.resolve();
+        },
+      },
+    });
+    const told: string[] = [];
+    const internals = clientInternals(client);
+    const stopFailing = internals.onFileDeleted(() => {
+      throw new Error("This view failed.");
+    });
+    const stopTelling = internals.onFileDeleted((key) => {
+      told.push(key);
+    });
+    const id = crypto.randomUUID();
+    const files = { ...resource, operations: ["delete"] } as const;
+    await expect(client.files.delete(files, { id })).resolves.toBeUndefined();
+    stopFailing();
+    stopTelling();
+    expect(told).toStrictEqual([`attachments/${id}`]);
+  });
 });

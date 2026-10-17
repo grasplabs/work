@@ -1508,7 +1508,13 @@ export class GraspClient {
       () => this.#generation,
       (key) => {
         for (const listener of this.#deletionListeners) {
-          listener(key);
+          // One view failing never changes the deletion's outcome, nor
+          // keeps the others from reading the file again.
+          try {
+            listener(key);
+          } catch {
+            // The view's own failure, shown by the view.
+          }
         }
       }
     );
