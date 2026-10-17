@@ -78,6 +78,11 @@ const tracedSteps = async (
       return { steps, complete: true };
     }
     ({ more } = page);
+    // A page that says there is more but holds nothing would ask again
+    // for the same page forever: what was read stands, as incomplete.
+    if (page.records.length === 0) {
+      break;
+    }
     for (const record of page.records) {
       read += 1;
       after = record.eventId;
