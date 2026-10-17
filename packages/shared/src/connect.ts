@@ -861,7 +861,17 @@ export type HeldOutcome =
 /** Workflow runs that have ended, each with its App: at most 50. */
 export const endedRunsSchema = z.strictObject({
   runs: z
-    .array(z.strictObject({ appId: identifierSchema, runId: identifierSchema }))
+    .array(
+      z.union([
+        // An App's run.
+        z.strictObject({ appId: identifierSchema, runId: identifierSchema }),
+        // A run of an independent workflow (a restricted one's).
+        z.strictObject({
+          workflowId: identifierSchema,
+          runId: identifierSchema,
+        }),
+      ])
+    )
     .max(50),
 });
 export type EndedRuns = z.input<typeof endedRunsSchema>;

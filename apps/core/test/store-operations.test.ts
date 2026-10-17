@@ -1289,7 +1289,12 @@ describe("a workflow calling a store's public operation", () => {
       await outcome(
         callApprovedStoreOperation(
           env,
-          { id: workflow.id, version: 1, approval: frozen },
+          {
+            id: workflow.id,
+            version: 1,
+            approval: frozen,
+            restrictedRun: null,
+          },
           { text },
           {
             actor: { type: "person", userId: ada.userId },
@@ -1354,7 +1359,7 @@ describe("a workflow calling a store's public operation", () => {
       await outcome(
         callApprovedStoreOperation(
           env,
-          { id: workflow.id, version: 1, approval },
+          { id: workflow.id, version: 1, approval, restrictedRun: null },
           { text: "from the run" },
           {
             actor: { type: "person", userId: ada.userId },
@@ -1457,7 +1462,7 @@ describe("a workflow calling a store's public operation", () => {
       await outcome(
         callApprovedStoreOperation(
           env,
-          { id: workflow.id, version: 1, approval },
+          { id: workflow.id, version: 1, approval, restrictedRun: null },
           { name },
           {
             actor: { type: "person", userId: ada.userId },
@@ -1494,6 +1499,66 @@ describe("a workflow calling a store's public operation", () => {
         ["contacts.add", "store.restricted"],
         ["contacts.add", "store.restricted"],
       ],
+      crmSees: ["Ada"],
+    });
+  });
+
+  it("restricts the store's App before a restricted run's input reaches it, and answers that run", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const key = await contractOf(admin, crm.release, "contacts.add");
+    const workflow = await workflowOf(ada, key, byName);
+    const permissionId = await granted(
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "store", storeId: crm.store },
+        actions: ["contacts.add"],
+      },
+      null
+    );
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "lookup",
+      target: {
+        kind: "storeOperation",
+        permissionId,
+        operation: "contacts.add",
+        operationKind: "mutation",
+      },
+      reviewed: { version: 1 },
+    });
+    const runId = `run-${unique()}`;
+    const answered = await outcome(
+      callApprovedStoreOperation(
+        env,
+        { id: workflow.id, version: 1, approval, restrictedRun: runId },
+        { name: "Ada" },
+        {
+          actor: { type: "person", userId: ada.userId },
+          principal: ada.userId,
+          requestId: crypto.randomUUID(),
+          deadline: Date.now() + 30_000,
+          idempotencyKey: `step-${unique()}`,
+          runId: null,
+        }
+      )
+    );
+    const events = await allEvents();
+    expect({
+      answered: answered !== "resource.unavailable",
+      crmRestricted: await isRestricted(env, authorityOf(crm), contextOf(crm)),
+      entered: events
+        .filter(
+          ({ action, target }) =>
+            action === "context.restricted" && target?.id === crm.app
+        )
+        .map(({ provenance }) => provenance),
+      crmSees: await call(crm.owner, crm, "contacts.list"),
+    }).toStrictEqual({
+      answered: true,
+      crmRestricted: true,
+      entered: [[`workflow_run:${runId}`]],
       crmSees: ["Ada"],
     });
   });

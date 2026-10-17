@@ -666,6 +666,13 @@
       "when": 1792211825311,
       "tag": "0094_preview_fixture_stores",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1792242626311,
+      "tag": "0095_restricted_workflow_runs",
+      "breakpoints": true
     }
   ]
 }

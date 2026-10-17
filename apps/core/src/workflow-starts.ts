@@ -1,12 +1,13 @@
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
-import type { AuditActor } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError, issuesOf } from "@grasp-os/shared/errors";
 import {
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
+import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -22,6 +23,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { chatAuthority, chatContext } from "./agent-scope.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -34,7 +36,9 @@ import {
   workflowStartReceipts,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
+import { appHost } from "./durable-objects.ts";
 import { allowingPermissionSql } from "./permissions.ts";
+import { isRestricted } from "./restricted.ts";
 import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
 import { buildOf } from "./workflow-builds.ts";
 import type { SealedBuild } from "./workflow-builds.ts";
@@ -127,6 +131,12 @@ import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 // - A binding to another workflow it may not start, or that is gone: the
 //   admitting statement requires the bound workflow live and an active
 //   `start` grant of this workflow's own on it.
+// - Restricted data carried into an unrestricted run: a start by an App
+//   that read restricted data, or made by the call of an agent whose chat
+//   did, starts in restricted mode (`restrictedStart`), read after the
+//   code formed its input; its receipt and run pin it, the database
+//   refuses any change of it, and every call of the run reads it there
+//   (restricted.ts), so no later step, retry or replay runs without it.
 // - A frozen snapshot changed later: a receipt, with its frozen params and
 //   bindings and their hashes, is a row written once; the database refuses
 //   any change of it but retention removing its input and values, and any
@@ -134,10 +144,17 @@ import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 //   parameter's value nor a hash of the values, which a guess at a short
 //   sensitive one could be checked against.
 
+/** The agent whose call of an App made the App's start, and its chat. */
+export interface StartingAgent {
+  readonly agentId: string;
+  readonly workspaceId: WorkspaceId;
+  readonly chatId: ChatId;
+}
+
 /** Who starts a workflow: what the host established, never the caller. */
 export type StartInvoker =
   | { type: "person"; person: Acting }
-  | { type: "app"; authority: Authority }
+  | { type: "app"; authority: Authority; agent?: StartingAgent | null }
   | { type: "agent"; authority: Authority; context?: WorkContext }
   /**
    * Nothing dispatches independent triggers yet. Once something does, a
@@ -173,6 +190,11 @@ export interface StartAuthorization {
   /** The bindings it froze (canonical JSON). */
   bindings: string;
   /**
+   * Whether it starts in restricted mode (`restrictedStart`): its run is
+   * restricted for good.
+   */
+  restricted: boolean;
+  /**
    * The executable identity of the version's build, which the start's run
    * is admitted for; null for a version without one: no run is admitted.
    */
@@ -205,7 +227,7 @@ const refusedStart = async (
   env: Env,
   actor: AuditActor,
   workflowId: string,
-  detail: Record<string, string | number | null>,
+  detail: Record<string, AuditDetailValue>,
   reason: string
 ): Promise<void> => {
   const db = drizzle(env.DB);
@@ -742,6 +764,73 @@ const deniedAt = async (
 };
 
 /**
+ * Whether a start by `invoker` starts in restricted mode (restricted.ts):
+ * an App's while the App has read restricted data, or the chat of the
+ * agent whose call made it has; an agent's while its chat has. A chat
+ * that can't be read, or an agent's start that names none, counts as
+ * restricted: failing closed. A person's or
+ * a trigger's carries no App's or chat's data, and never is.
+ *
+ * Read once, as the start is decided, after the code that asked for it
+ * formed its input: a flag is set before restricted data is returned and
+ * never cleared, so a read that fed the input is seen, and the receipt
+ * and run keep what was read (`admitWorkflowStart`).
+ */
+const restrictedStart = async (
+  env: Env,
+  invoker: StartInvoker
+): Promise<boolean> => {
+  const chatRestricted = async (
+    work: () => { authority: Authority; context: WorkContext }
+  ): Promise<boolean> => {
+    try {
+      const { authority, context } = work();
+      return await isRestricted(env, authority, context);
+    } catch (error) {
+      if (isExpectedError(error)) {
+        return true;
+      }
+      throw error;
+    }
+  };
+  switch (invoker.type) {
+    case "app": {
+      const { subject, onBehalfOf } = invoker.authority;
+      if (subject.type !== "app") {
+        throw denied();
+      }
+      if (await appHost(env, subject.appId).isRestricted()) {
+        return true;
+      }
+      const { agent } = invoker;
+      return agent === undefined || agent === null
+        ? false
+        : await chatRestricted(() => ({
+            authority: chatAuthority({
+              agentId: agent.agentId,
+              personId: onBehalfOf,
+            }),
+            context: chatContext(agent),
+          }));
+    }
+    case "agent": {
+      const { authority, context } = invoker;
+      // No chat to read: failing closed.
+      return context === undefined
+        ? true
+        : await chatRestricted(() => ({ authority, context }));
+    }
+    case "person":
+    case "trigger": {
+      return false;
+    }
+    default: {
+      return invoker satisfies never;
+    }
+  }
+};
+
+/**
  * Decides on `request` (`workflowStartSchema`: the exact version, the
  * input and the invoker's idempotency key) to start workflow `id` for
  * `invoker` (see the rules above). The invoker's own access is checked
@@ -868,6 +957,9 @@ export const decideWorkflowStart = async (
       throw error;
     }
   }
+  // Read after the invoker's code formed the input it starts with, so a
+  // restricted read that fed it is seen (`restrictedStart`).
+  const restricted = await restrictedStart(env, invoker);
   // Frozen now, from what was read above: the parameter values of the
   // revision in force, and what serves each binding.
   const params = await frozenParams(env, id, version, configRevision);
@@ -906,6 +998,7 @@ export const decideWorkflowStart = async (
       params,
       paramsRevision: configRevision,
       bindings: bindings.text,
+      restricted,
       buildHash,
       actor: rule.actor,
       holds,
@@ -971,6 +1064,7 @@ export const admitWorkflowStart = async (
     bindingsHash,
     createdAt.getTime(),
     null,
+    authorization.restricted ? 1 : 0,
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
     ...noted,
@@ -987,6 +1081,7 @@ export const admitWorkflowStart = async (
     // them: a sensitive one stays out.
     paramsRevision: authorization.paramsRevision,
     bindingsHash,
+    restricted: authorization.restricted,
   };
   // Why it wasn't admitted, if it isn't: read in the admitting batch, just
   // before its insert, so the reason is the state it was refused in.
@@ -1014,6 +1109,7 @@ export const admitWorkflowStart = async (
               manifestHash: authorization.manifestHash,
               buildHash: authorization.buildHash,
               principal: authorization.principal,
+              restricted: authorization.restricted,
               createdAt: createdAt.getTime(),
             }),
           ]),

@@ -1853,10 +1853,6 @@ const startFailure = (error: unknown, requestId: string): Error => {
   if (code === "workflow.start_conflict") {
     return hostError(operationErrors.create("resource.idempotency_conflict"));
   }
-  // The App read restricted data: said as it is, so its builders know why.
-  if (code === "workflow.start_restricted") {
-    return hostError(workflowResourceErrors.create(code));
-  }
   if (code !== undefined) {
     return hostError(operationErrors.create("resource.unavailable"));
   }

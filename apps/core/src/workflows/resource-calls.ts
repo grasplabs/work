@@ -11,6 +11,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
@@ -27,6 +28,7 @@ import { appVersions, permissions } from "../db/core/schema.ts";
 import { appHost } from "../durable-objects.ts";
 import { models } from "../models.ts";
 import { authorizeExport } from "../permissions.ts";
+import { restrict } from "../restricted.ts";
 import {
   approvalServing,
   callApprovedStoreOperation,
@@ -76,11 +78,20 @@ import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 //   (`workflow.call_invalid`); a model's answer against the task's own
 //   output schema, as sealed.
 // - Restricted data reaching a run that would pass it on. A run never
-//   enters restricted mode (restricted.ts): an operation of an App in
-//   restricted mode is refused before it is called, and its answer
-//   withheld if the App entered it meanwhile (`permission.restricted`);
-//   so is a store operation of a store whose App is restricted
-//   (`resource.unavailable`, workflow-bindings.ts).
+//   enters restricted mode once it runs (restricted.ts): for one that
+//   isn't restricted, an operation of an App in restricted mode is refused
+//   before it is called, and its answer withheld if the App entered it
+//   meanwhile (`permission.restricted`); so is a store operation of a
+//   store whose App is restricted (`resource.unavailable`,
+//   workflow-bindings.ts).
+// - A restricted run (one a restricted App started) passing on what its
+//   start carried. Its connector calls carry its restricted mode to
+//   connect, which holds every one but a native connector's declared
+//   reads for its person (`connect.held`; the run waits for their
+//   decision, resource-host.ts); its model calls are judged as restricted
+//   by the gateway's data rules; and an App it calls, through an export
+//   or a store operation, is restricted before the input reaches it
+//   (`carryRestricted`), audited with the run as provenance.
 // - Sensitive values in what a run records. A binding argument (a
 //   sensitive parameter's value, put in by the host) is sent to connect
 //   only, and a connector's answer that echoes one is refused
@@ -326,8 +337,9 @@ const callConnector = async (
     [call.operation, input, { idempotencyKey: effect.key }]
   );
   if (result.pending !== undefined) {
-    // Connect holds a workflow's side effect only in restricted mode,
-    // which a run never enters: never a success.
+    // Connect answers a workflow's held side effect (a restricted run's)
+    // with `connect.held`, whose decision the run waits for
+    // (resource-host.ts), never with a held answer: never a success.
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   let output: unknown;
@@ -362,6 +374,36 @@ const exportOf = async (
   return exported !== undefined && Object.hasOwn(exported, name)
     ? exported[name]
     : undefined;
+};
+
+/**
+ * Carries restricted mode into App `authority.subject` before `run` calls
+ * it, as a call from one App to another does (app-calls.ts): a restricted
+ * run restricts the App first, its input may carry what the run's start
+ * read restricted; an unrestricted run calls no App in restricted mode
+ * (`permission.restricted`), whose answer could carry what that App read.
+ */
+const carryRestricted = async (
+  env: Env,
+  run: CallingRun,
+  authority: Authority,
+  isAppRestricted: () => Promise<boolean>
+): Promise<void> => {
+  if (authority.subject.type !== "app") {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  if (run.restricted) {
+    await restrict(
+      env,
+      authority,
+      { type: "app", appId: authority.subject.appId },
+      [`workflow_run:${run.runId}`]
+    );
+    return;
+  }
+  if (await isAppRestricted()) {
+    throw permissionErrors.create("permission.restricted");
+  }
 };
 
 /** An operation call refused because the release it pins isn't current. */
@@ -399,7 +441,12 @@ const callStoreOperation = async (
   effect.requireHolds();
   const answer = await callApprovedStoreOperation(
     env,
-    { id: run.workflowId, version: run.version, approval },
+    {
+      id: run.workflowId,
+      version: run.version,
+      approval,
+      restrictedRun: run.restricted ? run.runId : null,
+    },
     input,
     {
       // As the run's own receipts name it: an independent run acts as no
@@ -486,9 +533,17 @@ const callOperation = async (
     throw releaseNotCurrent();
   }
   const host = appHost(env, app.data);
-  if (await host.isRestricted()) {
-    throw permissionErrors.create("permission.restricted");
-  }
+  await carryRestricted(
+    env,
+    run,
+    {
+      subject: { type: "app", appId: app.data },
+      onBehalfOf: run.principal,
+      mode: "workflow",
+      appVersion: target.appVersion,
+    },
+    async () => await host.isRestricted()
+  );
   effect.requireHolds();
   let answer: unknown;
   try {
@@ -549,8 +604,9 @@ const callOperation = async (
     }
     throw error;
   }
-  // The App may have read restricted data as it answered: withheld.
-  if (await host.isRestricted()) {
+  // The App may have read restricted data as it answered: withheld from
+  // a run that isn't restricted itself.
+  if (!run.restricted && (await host.isRestricted())) {
     throw permissionErrors.create("permission.restricted");
   }
   return requireShape(contract.output, rpcResult(answer), "output");

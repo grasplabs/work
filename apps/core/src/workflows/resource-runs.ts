@@ -160,6 +160,8 @@ export interface RunAdmission {
   manifestHash: string;
   buildHash: string;
   principal: string;
+  /** Whether its start was decided in restricted mode: pinned with it. */
+  restricted: boolean;
   createdAt: number;
 }
 
@@ -169,7 +171,7 @@ export interface RunAdmission {
  */
 export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
   db.insert(workflowResourceRuns).select(
-    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0
+    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0, ${run.restricted ? 1 : 0}
         WHERE EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
   );
 
