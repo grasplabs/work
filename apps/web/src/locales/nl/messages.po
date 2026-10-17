@@ -453,6 +453,10 @@ msgstr "{moreFindings, plural, one {En nog # bevinding: toon alle pakketten om d
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# daarvan veranderde later, in een volgend gesprek met het bestuur.} other {# daarvan veranderden later, in volgende gesprekken met het bestuur.}}"
 
+#: src/engines/resource-bindings.tsx
+msgid "{name} ({appId})"
+msgstr "{name} ({appId})"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp-medewerker)"
@@ -1266,6 +1270,10 @@ msgstr "In een app werkt het team van dit domein, gebouwd op de workflows en int
 #: src/activity/audit-words.ts
 msgid "An app nobody approved was refused the domain's data"
 msgstr "Een app die niemand heeft goedgekeurd kreeg de gegevens van het domein niet"
+
+#: src/engines/resource-bindings.tsx
+msgid "Another domain"
+msgstr "Ander domein"
 
 #: src/activity/pending.tsx
 msgid "Another domain already keeps {type} records here: this domain's won't apply."
@@ -2369,6 +2377,7 @@ msgid "Doesn't build now"
 msgstr "Bouwt nu niet"
 
 #: src/dashboard/runs-widget.tsx
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -2382,6 +2391,7 @@ msgid "domain {app}, version {version}"
 msgstr "domein {app}, versie {version}"
 
 #: src/connections/connection-list.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Domain {domain}"
 msgstr "Domein {domain}"
 
@@ -3812,6 +3822,10 @@ msgstr "Er is nog geen model ingesteld voor deze omgeving."
 #: src/workflows/triggers.tsx
 msgid "No next run"
 msgstr "Geen volgende run"
+
+#: src/engines/resource-bindings.tsx
+msgid "No other domain serves every function it declares, public and exactly as declared."
+msgstr "Geen ander domein stelt elke functie beschikbaar die het declareert, als openbare functie en precies zoals gedeclareerd."
 
 #: src/engines/package-approvals.tsx
 msgid "No packages are approved for this domain."
