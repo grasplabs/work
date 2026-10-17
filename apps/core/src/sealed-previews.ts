@@ -116,9 +116,9 @@ import type { Draft } from "./workspace.ts";
 //   `serverInvocationWallMs`, one nobody follows is cancelled after
 //   `streamIdleCancelMs`, and what is kept is the latest snapshot and at
 //   most `streamsKept` receipts, never the input or a progress log.
-// - Another key's input, or another person: the key is the person's own
-//   (`streamName`), and other input under it is
-//   `submission.key_conflict`.
+// - Another key's input, another action, or another person: the key is
+//   the person's own and the action's (`streamName`), and other input
+//   under it is `submission.key_conflict`.
 
 /** What one chat's preview of one App runs: its revision, release and store. */
 interface Running {
@@ -143,9 +143,22 @@ interface PreviewStream {
 /** The most streaming actions' invocations one preview keeps, settled ones first to go. */
 const streamsKept = 64;
 
-/** The key of `personId`'s invocation under `key`: never anyone else's. */
-const streamName = (personId: string, key: string): string =>
-  canonicalJson([personId, key]);
+/**
+ * The key of `personId`'s invocation of the action `call` names under
+ * `key`, as a live invocation's name (`invocationName`): never anyone
+ * else's, nor another action's under the same key.
+ */
+const streamName = (
+  personId: string,
+  call: FunctionRequest,
+  key: string
+): string =>
+  canonicalJson([
+    personId,
+    call.reference.contractId,
+    call.reference.fingerprint,
+    key,
+  ]);
 
 /**
  * The streaming action `request` names, with the key it must have:
@@ -450,7 +463,7 @@ export class SealedPreviews {
       canonicalJson(jsonOf(call.input) ?? null)
     );
     const running = this.#runningFor(chatId, app, draft);
-    const name = streamName(personId, key);
+    const name = streamName(personId, call, key);
     const known = running.streams.get(name);
     if (known !== undefined) {
       return known.inputHash === inputHash
@@ -521,9 +534,9 @@ export class SealedPreviews {
     request: unknown
   ): Promise<boolean> {
     await Promise.resolve();
-    const { key } = streamRequestOf(request);
+    const { call, key } = streamRequestOf(request);
     const running = this.#runningFor(chatId, app, draft);
-    const known = running.streams.get(streamName(personId, key));
+    const known = running.streams.get(streamName(personId, call, key));
     if (known === undefined || known.live.result !== undefined) {
       return false;
     }
