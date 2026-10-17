@@ -119,8 +119,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
   "workflow.start_denied":
     "You, or what starts it for you, may not start this workflow, or that changed as it started. Check again, then retry.",
-  "workflow.start_restricted":
-    "This App has read restricted data, so it can't start workflows: a run it started would carry what it read. Ask an admin to start the workflow another way.",
   "workflow.start_conflict":
     "This idempotency key already started this workflow with another version or input.",
   "workflow.trigger_unavailable":
