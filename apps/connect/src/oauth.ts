@@ -564,7 +564,13 @@ const keepTokens = async (
   };
   const refusal = async (reason: RefusalReason): Promise<never> => {
     const accountId = account?.id ?? provider.subject?.(tokens);
-    await drop(accountId);
+    // An app's tokens whose account its lookup didn't name could be a
+    // grant a live connection holds (an app may issue the same refresh
+    // token again, or revoke the whole grant with any one): kept from
+    // revoking, they lapse. A suite's ID token always names its subject.
+    if (accountId !== undefined || provider.pinned) {
+      await drop(accountId);
+    }
     const held =
       account === null || accountId === undefined
         ? undefined
@@ -693,6 +699,74 @@ export const finishConnection = async (
 };
 
 /**
+ * Gives a live key connection that holds `account` the new key `key`:
+ * a key the person rotated at the app, which an API key's connection
+ * otherwise can't take, since nothing tells connect the old one stopped
+ * working. Only one of `scope` that the person may manage (their own if
+ * personal; any admin's if shared, as checked before), so it keeps its ID
+ * and every permission on it. In one write with its event, and only
+ * while it is still active. Its ID if this call replaced the key.
+ */
+const replaceKey = async (
+  env: Env,
+  { provider, vault }: { provider: ApiKeyProviderConfig; vault: Vault },
+  scope: ConnectionScope,
+  person: ConnectionPerson,
+  account: ProviderAccount,
+  key: string
+): Promise<string | undefined> => {
+  const held = await connectionHolding(env, provider.id, account.id);
+  if (
+    held?.status !== "active" ||
+    held.scope !== scope ||
+    (scope === "personal" && held.ownerUserId !== person.userId)
+  ) {
+    return undefined;
+  }
+  const now = new Date();
+  const row = await firstTokens(
+    vault,
+    held.id,
+    { apiKey: key, expiresAt: apiKeyExpiresAt },
+    now
+  );
+  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active'`;
+  const db = drizzle(env.DB);
+  const replaced = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.reconnected", held.id, {
+      provider: provider.id,
+      scope: held.scope,
+      outcome: "ok",
+    }),
+    { from: connections, where: stillActive },
+    [
+      db
+        .update(connectionTokens)
+        .set({
+          sealed: row.sealed,
+          accessExpiresAt: row.accessExpiresAt,
+          generation: row.generation,
+          refreshUntil: null,
+          updatedAt: now,
+        })
+        .where(
+          sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
+      db
+        .update(connections)
+        .set({
+          accountName: account.name,
+          accountEmail: account.email?.toLowerCase() ?? null,
+          updatedAt: now,
+        })
+        .where(stillActive),
+    ]
+  );
+  return replaced ? held.id : undefined;
+};
+
+/**
  * Connects an app that signs in with an API key: the key the person gave,
  * once the app's own lookup takes it and names its account, kept sealed
  * as a connection's tokens are, under the same rules (`keepAccount`). The
@@ -744,6 +818,17 @@ export const connectWithKey = async (
   if (account === null) {
     await refuse("connection.provider_refused", { outcome: "failed" });
     throw connectionErrors.create("connection.provider_refused");
+  }
+  const replaced = await replaceKey(
+    env,
+    { provider, vault },
+    scope,
+    person,
+    account,
+    key
+  );
+  if (replaced !== undefined) {
+    return { connectionId: replaced };
   }
   const connectionId = await keepAccount(
     env,

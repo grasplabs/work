@@ -81,6 +81,14 @@ describe("an app's provider record", () => {
         .map(() => endpoint)
     );
     expect(accepted).toStrictEqual([]);
+    // Parameters past connect's checks, in the authorization endpoint.
+    expect(
+      signInSchema.safeParse({
+        ...oauth2,
+        authorizationEndpoint:
+          "https://auth.example.test/oauth/authorize?request_uri=https://evil.test/r",
+      }).success
+    ).toBeFalsy();
     // The secret is posted: no query string to mix it into.
     expect(
       signInSchema.safeParse({
@@ -119,6 +127,9 @@ describe("an app's provider record", () => {
       "request_uri",
       "request",
       "Redirect_URI",
+      "resource",
+      "authorization_details",
+      "claims",
     ];
     expect(
       reserved.filter(

@@ -18,8 +18,9 @@ import { z } from "zod";
 //   token never goes out in the clear, or to an address a name hides.
 // - The redirect URI, the state, the PKCE challenge, the client ID and the
 //   scope are connect's to set: the authorization parameters a record adds
-//   may not name them, so it can't send the code elsewhere, weaken PKCE or
-//   ask for more than its scopes.
+//   may not name them (nor may its authorization endpoint carry a query),
+//   so it can't send the code elsewhere, weaken PKCE or ask for more than
+//   its scopes.
 // - Its client credentials are found by its provider's name in the
 //   deployment's `APP_OAUTH_CLIENTS`, never by a name the record gives.
 // - The account lookup, which carries the token or key, goes only to one
@@ -64,10 +65,14 @@ const endpointSchema = z
   .max(512)
   .refine(isEndpoint, "Not an HTTPS endpoint on a DNS name");
 
-/** An endpoint connect posts a secret to: no query string to mix it into. */
-const postEndpointSchema = endpointSchema.refine(
+/**
+ * An endpoint without a query string: one connect posts a secret to, with
+ * nothing to mix it into, or the authorization endpoint, whose parameters
+ * are connect's and the record's `authorizationParams`, every one checked.
+ */
+const plainEndpointSchema = endpointSchema.refine(
   (value) => urlOf(value)?.search === "",
-  "A token or revocation endpoint has no query string"
+  "An endpoint without a query string"
 );
 
 /**
@@ -90,6 +95,11 @@ export const reservedAuthorizationParams: ReadonlySet<string> = new Set([
   "request",
   "request_uri",
   "response_mode",
+  // What could ask for more than the record's scopes (RFC 9396, RFC 8707,
+  // OpenID Connect's claims).
+  "authorization_details",
+  "resource",
+  "claims",
 ]);
 
 const paramNameSchema = z
@@ -136,10 +146,10 @@ const appNameSchema = z.string().min(1).max(64);
 const oauth2SignInSchema = z.strictObject({
   kind: z.literal("oauth2"),
   name: appNameSchema,
-  authorizationEndpoint: endpointSchema,
-  tokenEndpoint: postEndpointSchema,
+  authorizationEndpoint: plainEndpointSchema,
+  tokenEndpoint: plainEndpointSchema,
   /** RFC 7009; without one, disconnecting deletes the tokens only. */
-  revocationEndpoint: postEndpointSchema.optional(),
+  revocationEndpoint: plainEndpointSchema.optional(),
   /** Exactly what connect asks for: the connector's scopes are among them. */
   scopes: z.array(scopeSchema).min(1).max(64),
   /** How the scopes are joined: RFC 6749 says a space; some apps a comma. */

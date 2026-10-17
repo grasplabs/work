@@ -332,7 +332,9 @@ describe("threat model", () => {
     );
   });
 
-  it("AP3: the client secret, the code and the tokens go only to the record's HTTPS endpoints, never through a redirect", async () => {
+  // The record's endpoints themselves (HTTPS, a DNS name, no port) are the
+  // connector kit's sign-in tests'; here, connect's side of them.
+  it("AP3: the client secret, the code and the tokens go only to the record's endpoints, never through a redirect", async () => {
     const { person, account } = personWithAccount("sample-oauth");
     await connectApp(apps, person, account);
     expect(
@@ -440,6 +442,7 @@ describe("threat model", () => {
       );
     });
     expect(lines).toContain("APP_OAUTH_CLIENTS");
+
     expect(lines).not.toContain("secret in it");
     expect(lines).not.toContain("not-a-client");
     // An app that takes a key has no OAuth to start, and an OAuth app
@@ -457,6 +460,31 @@ describe("threat model", () => {
         })
       )
     ).resolves.toBe("connection.provider_unavailable");
+  });
+
+  it("AP6: a broken entry of another app's leaves an app's own client as it is", async () => {
+    const { person } = personWithAccount("sample-oauth");
+    const request = {
+      person,
+      provider: "sample-oauth",
+      scope: "personal",
+      origin: clientOrigin,
+      returnTo: "/",
+    } as const;
+    await expect(
+      outcome(
+        startConnection(
+          {
+            ...env,
+            APP_OAUTH_CLIENTS: JSON.stringify({
+              ...appClients,
+              "Not An App": "broken",
+            }),
+          },
+          request
+        )
+      )
+    ).resolves.toBe("ok");
   });
 
   it("AP7: an API key goes only to the app, in its header, and nowhere else", async () => {
@@ -496,6 +524,10 @@ describe("threat model", () => {
       const disconnected = await exports.default.disconnect({
         person,
         connectionId,
+      });
+      expect({ refused, invalid }).toStrictEqual({
+        refused: "connection.provider_refused",
+        invalid: "connection.invalid",
       });
       console.info(
         JSON.stringify([
@@ -610,31 +642,49 @@ describe("threat model", () => {
     ).resolves.toBe("role.forbidden");
   });
 
-  it("AP8: an account already connected can't be connected again", async () => {
+  it("AP8: an account already connected can't be connected again, but a key connection takes its account's new key", async () => {
     const ada = someone("admin");
-    for (const provider of ["sample-oauth", "sample-key"] as const) {
-      const account = apps.account(provider);
-      // oxlint-disable-next-line no-await-in-loop -- one app after another
-      await connectApp(apps, ada, account, "shared");
-      // oxlint-disable-next-line no-await-in-loop -- one app after another
-      await expect(
-        outcome(connectApp(apps, someone("admin"), account, "shared"))
-      ).resolves.toBe("connection.already_connected");
-    }
+    const shared = apps.account("sample-oauth");
+    await connectApp(apps, ada, shared, "shared");
+    await expect(
+      outcome(connectApp(apps, someone("admin"), shared, "shared"))
+    ).resolves.toBe("connection.already_connected");
+    // A key rotated at the app: the same connection, with the new key.
+    const { person, account } = personWithAccount("sample-key");
+    const first = await connectApp(apps, person, account);
+    const second = await connectApp(apps, person, account);
+    expect(second).toBe(first);
+    await listItems({ id: first, person });
+    const keys = apps.issued.filter((token) => token.startsWith("app-key-"));
+    expect(
+      internet.sent.map(({ headers }) => headers[sampleKeyHeader])
+    ).toStrictEqual([keys.at(-1)]);
+    // Nobody else gives it a key: not as their own, nor as a shared one.
+    expect({
+      colleague: await outcome(connectApp(apps, someone(), account)),
+      asShared: await outcome(
+        connectApp(apps, someone("admin"), account, "shared")
+      ),
+    }).toStrictEqual({
+      colleague: "connection.not_own_account",
+      asShared: "connection.already_connected",
+    });
+    await listItems({ id: first, person });
+    expect(internet.sent.at(-1)?.headers[sampleKeyHeader]).toBe(keys.at(-1));
   });
 
-  it("AP8: a lookup that fails refuses the connection, and revokes what was minted", async () => {
+  it("AP8: a lookup that fails refuses the connection, and revokes nothing a live connection might hold", async () => {
     const { person, account } = personWithAccount("sample-oauth");
     apps.options.lookup = () => json({ error: "unavailable" }, 503);
     await expect(outcome(connectApp(apps, person, account))).resolves.toBe(
       "connection.provider_refused"
     );
-    expect(apps.revocations()).toHaveLength(1);
     // An answer without an ID names no account either.
     apps.options.lookup = () => json({ data: { name: "No ID" } });
     await expect(outcome(connectApp(apps, person, account))).resolves.toBe(
       "connection.provider_refused"
     );
+    expect(apps.revocations()).toStrictEqual([]);
   });
 
   it("AP9: a record can't take a suite's path, and a provider without one can't be started", async () => {

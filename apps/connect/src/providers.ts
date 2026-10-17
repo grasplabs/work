@@ -286,20 +286,19 @@ export const providers: Readonly<Record<OAuthProvider, OAuthProviderConfig>> = {
 
 /**
  * Grasp's OAuth apps at the apps, by provider: one Worker secret, JSON,
- * which the console delivers as it does the suites' secrets.
+ * which the console delivers as it does the suites' secrets. Each entry
+ * is read on its own, so one that's broken leaves only its own app unset.
  */
-const appClientsSchema = z.record(
-  appProviderSchema,
-  z.strictObject({
-    id: z.string().min(1).max(512),
-    secret: z.string().min(1).max(4096),
-  })
-);
+const appClientsSchema = z.record(z.string(), z.unknown());
+const appClientSchema = z.strictObject({
+  id: z.string().min(1).max(512),
+  secret: z.string().min(1).max(4096),
+});
 
 /**
  * Grasp's client at the app `provider`, from `APP_OAUTH_CLIENTS`, by that
- * name only. One that doesn't parse leaves every app unset, and is logged
- * by its name, never its value.
+ * name only. A map that doesn't parse, or an entry that doesn't, leaves
+ * that app unset, and is logged by its name, never its value.
  */
 const appClient = (
   env: Env,
@@ -315,14 +314,20 @@ const appClient = (
   } catch {
     // Refused below, as anything else that isn't the map.
   }
-  const parsed = appClientsSchema.safeParse(value);
-  if (!parsed.success) {
+  const clients = appClientsSchema.safeParse(value);
+  if (!clients.success) {
     log.error("config.invalid", { var: "APP_OAUTH_CLIENTS" });
     return undefined;
   }
-  return Object.hasOwn(parsed.data, provider)
-    ? parsed.data[provider]
-    : undefined;
+  if (!Object.hasOwn(clients.data, provider)) {
+    return undefined;
+  }
+  const client = appClientSchema.safeParse(clients.data[provider]);
+  if (!client.success) {
+    log.error("config.invalid", { var: "APP_OAUTH_CLIENTS", provider });
+    return undefined;
+  }
+  return client.data;
 };
 
 /** The account an app's lookup names, with `credential`. */

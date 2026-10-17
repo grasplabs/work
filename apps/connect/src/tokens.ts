@@ -38,7 +38,8 @@ type StoredOAuthTokens = Extract<StoredTokens, { refreshToken: string }>;
 
 /**
  * When an API key's "access" expires: never, as far as connect goes. A key
- * the app stopped taking fails the call, and the person connects again.
+ * the app stopped taking fails the call, until the person gives the
+ * connection a new one (`connectWithKey`).
  */
 export const apiKeyExpiresAt = Date.UTC(9999, 11, 31);
 
