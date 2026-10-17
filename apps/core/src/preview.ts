@@ -43,7 +43,7 @@ const facetName = (chatId: ChatId, app: string): string =>
  */
 export const loadPreview = async (
   env: Env,
-  { app, preview }: Required<Omit<TailOf, "version">>,
+  { app, preview }: Required<Pick<TailOf, "app" | "preview">>,
   draft: Draft
 ): Promise<DurableObjectClass> => {
   // On-prem, nothing bounds a draft's server object (a facet of core's own
