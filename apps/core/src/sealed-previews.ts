@@ -481,9 +481,13 @@ export class SealedPreviews {
     attach: boolean
   ): Promise<ReadableStream<Uint8Array>> {
     const { call, key } = streamRequestOf(request);
-    const inputHash = await sha256Hex(
-      canonicalJson(jsonOf(call.input) ?? null)
-    );
+    // Input past what reads as a value is refused, never hashed as none:
+    // two such inputs would share a key's run.
+    const input = jsonOf(call.input);
+    if (input === undefined && call.input !== undefined) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const inputHash = await sha256Hex(canonicalJson(input ?? null));
     const name = streamName(personId, call, key);
     // An attach reads only what runs: a preview not running holds nothing,
     // and none is sealed just to say so.
