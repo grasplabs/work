@@ -18,7 +18,7 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@grasp-os/ui/components/radio-group";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import {
@@ -69,28 +69,42 @@ const StartFrom = () => (
 );
 
 /** Started: where its provisioning is followed, as the prototype's dialog ends on the way in. */
-const Started = ({ clientId, name }: { clientId: string; name: string }) => (
-  <div className="flex flex-col gap-4">
-    <p className="text-sm">
-      {`${name} is being set up: its own Cloudflare account, its Grasp, and its address. It shows among the organizations once the console has recorded it.`}
-    </p>
-    <div className="flex items-center gap-2">
-      <Button
-        nativeButton={false}
-        render={<Link params={{ clientId }} to="/clients/$clientId" />}
-      >
-        Follow its provisioning
-      </Button>
-      <Button
-        nativeButton={false}
-        render={<Link to="/admin" />}
-        variant="outline"
-      >
-        Back to the organizations
-      </Button>
+const Started = ({ clientId, name }: { clientId: string; name: string }) => {
+  const router = useRouter();
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm">
+        {`${name} is being set up: its own Cloudflare account, its Grasp, and its address. It shows among the organizations once the console has recorded it.`}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          nativeButton={false}
+          render={<Link params={{ clientId }} to="/clients/$clientId" />}
+        >
+          Follow its provisioning
+        </Button>
+        <Button
+          nativeButton={false}
+          render={
+            <Link
+              // The organizations stand a minute (src/routes/admin.tsx): read
+              // them again, so one recorded since shows.
+              onClick={() => {
+                void router.invalidate({
+                  filter: (match) => match.routeId === "/admin",
+                });
+              }}
+              to="/admin"
+            />
+          }
+          variant="outline"
+        >
+          Back to the organizations
+        </Button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /**
  * Adding an organization, ported from the prototype's dialog as a page of
