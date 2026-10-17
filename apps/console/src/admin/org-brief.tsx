@@ -84,7 +84,8 @@ export const OrgBrief = ({
             ))}
           </BriefList>
         ) : null}
-        {brief.missing.length > 0 ? (
+        {/* Core gives how much is known without its parts: what nobody could answer still stands on its own. */}
+        {brief.missing.length > 0 || questions > 0 ? (
           <BriefList title="Not known yet">
             {brief.missing.map((each) => (
               <BriefItem key={each.source}>
@@ -118,6 +119,7 @@ export const OrgBrief = ({
         ) : null}
         {brief.bringUp.length === 0 &&
         brief.missing.length === 0 &&
+        questions === 0 &&
         brief.opportunities.length === 0 ? (
           <p className="text-muted-foreground">Nothing to bring up.</p>
         ) : null}
