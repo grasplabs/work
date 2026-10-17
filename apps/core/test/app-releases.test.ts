@@ -790,7 +790,11 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a path into the kit's packages, for its types",
-      'import type { runScreen } from "./node_modules/@grasp-os/sdk/src/screen-runtime.ts";\nexport type Reached = typeof runScreen;\n',
+      'import type { runScreen } from "../node_modules/@grasp-os/sdk/src/screen-runtime.ts";\nexport type Reached = typeof runScreen;\n',
+    ],
+    [
+      "a module of the kit's screens, for its types",
+      'import type { ReactNode } from "react";\nexport type Reached = ReactNode;\n',
     ],
     [
       "a module the SDK doesn't give it, named with a trailing slash",
@@ -801,8 +805,8 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       '/// <reference path="../node_modules/@grasp-os/sdk/src/client.ts" />\nexport const extra = 1;\n',
     ],
     [
-      "an ambient module",
-      'declare module "x-probe" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
+      "an ambient module that shadows the SDK's",
+      'declare module "@grasp-os/sdk" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
     ],
   ])("refuses %s", async (_case, source) => {
     await expect(refusedSeal(withOperation(source))).resolves.toStrictEqual({
