@@ -471,7 +471,7 @@ export const mail = resource.connector("mail", {
   actions: ["list"],
 });
 
-const attempt = async (work) => {
+const attempt = async <T,>(work: () => Promise<T>): Promise<T | string> => {
   try {
     return await work();
   } catch (error) {
