@@ -37,7 +37,7 @@ import type {
   SealedTemplate,
 } from "../workflow-builds.ts";
 import { settling } from "./code.ts";
-import type { RunHostCalls, Settled } from "./code.ts";
+import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import { takesExactly } from "./exact-values.ts";
 import {
   busyMarker,
@@ -143,7 +143,9 @@ import type { BuiltCall } from "./resource-calls.ts";
 // - An effect repeated. Each call is its task's step's work, recorded:
 //   a replay answers the record and calls nothing; a retry of the step
 //   calls again under the same key (`stepIdempotencyKey` of the step),
-//   and a model call's step isn't retried at all (`configOf`).
+//   and a call tried once (an export's, a model's) runs its module in one
+//   attempt at most: a later attempt runs only if every one before it
+//   never did, as the run's object keeps (`#onceAtMost`, `TriedOnceMarks`).
 // - Time, randomness and deadlines that change on replay. `grasp.now`,
 //   `grasp.random` and a deadline (an expression wait's, a
 //   `grasp.sleepUntil`'s) are made by the host within a step that records
@@ -265,7 +267,75 @@ export interface ResourceHostHooks {
    * throwing the refusal. Required: no attempt runs unadmitted.
    */
   admitAttempt: (attempt: QuotaAttempt) => Promise<AttemptAdmission>;
+  /**
+   * What the run keeps of its tried-once steps' attempts, across its
+   * activations (run-object.ts, `triedOnceIn`). Unset, a store of this
+   * activation's alone: no attempt after the first of such a step runs
+   * then, as none is known never to have started.
+   */
+  triedOnce?: TriedOnceMarks;
 }
+
+/**
+ * What a run keeps of the attempts of its steps tried once (`triedOnce`),
+ * by the engine's key of the step and attempt number: which never ran
+ * their module, and what one that did failed with. Kept with the run, as
+ * each attempt may run in an activation of its own.
+ */
+export interface TriedOnceMarks {
+  /** Marks an attempt as one whose module never ran: its call never went out. */
+  markUnstarted: (key: string, attempt: number) => void;
+  /** Whether that attempt was so marked. */
+  unstarted: (key: string, attempt: number) => boolean;
+  /** Keeps what an attempt that ran its module failed with. */
+  keepFailure: (key: string, attempt: number, error: StepError) => void;
+  /** What that attempt failed with, if it was kept. */
+  failureOf: (key: string, attempt: number) => StepError | undefined;
+}
+
+/** An attempt's ID among marks: its number, and its step's key. */
+const markId = (key: string, attempt: number): string => `${attempt}:${key}`;
+
+/** Marks of one activation's alone (`ResourceHostHooks.triedOnce` unset). */
+const activationMarks = (): TriedOnceMarks => {
+  const unstarted = new Set<string>();
+  const failures = new Map<string, StepError>();
+  const id = markId;
+  return {
+    markUnstarted: (key, attempt) => {
+      unstarted.add(id(key, attempt));
+    },
+    unstarted: (key, attempt) => unstarted.has(id(key, attempt)),
+    keepFailure: (key, attempt, error) => {
+      failures.set(id(key, attempt), error);
+    },
+    failureOf: (key, attempt) => failures.get(id(key, attempt)),
+  };
+};
+
+/**
+ * What a tried-once step's attempt fails with when an earlier attempt ran
+ * its module and nothing it failed with was kept: the attempt left open
+ * (its activation died, the engine timed it out), as the engine's own
+ * timeout of it would have failed the step.
+ */
+const leftOpen: StepError = {
+  name: "TimeoutError",
+  message: "The step ran out of time.",
+};
+
+/** A step's error (`toStepError`) as plain data again, to keep. */
+const stepErrorOf = (error: unknown): StepError => {
+  if (!(error instanceof Error)) {
+    return forIsolate(error);
+  }
+  const code: unknown = Reflect.get(error, "code");
+  return {
+    name: error.name,
+    message: error.message,
+    ...(typeof code === "string" ? { code } : {}),
+  };
+};
 
 /** A step's name, as the SDK names it. */
 const stepNamePattern =
@@ -465,8 +535,11 @@ const triedOnce = new Set<SealedCall["name"]>([
 
 /**
  * The config of `step`'s attempts: the platform's, its timeout lowered to
- * its task's own (`timeout`, never above the host's ceiling), and no retry
- * for a call `triedOnce`.
+ * its task's own (`timeout`, never above the host's ceiling), and whether
+ * its call is `triedOnce`. Such a step keeps the platform's retries, but
+ * only for attempts that never ran its module: the host refuses any after
+ * one that did (`ResourceRunHost.do`), so its call goes out at most once,
+ * while one the activation could no longer run is parked for the next.
  */
 const configOf = (step: StepOf) => {
   const { task } = step;
@@ -478,10 +551,13 @@ const configOf = (step: StepOf) => {
     step.kind === "task" &&
     task?.kind === "call" &&
     triedOnce.has(task.call.name);
-  return {
-    retries: once ? { ...stepConfig.retries, limit: 0 } : stepConfig.retries,
-    timeout,
-  };
+  return { retries: stepConfig.retries, timeout, once };
+};
+
+/** `configOf(step)` as the engine takes it: retries and timeout only. */
+const engineConfigOf = (step: StepOf) => {
+  const { retries, timeout } = configOf(step);
+  return { retries, timeout };
 };
 
 /**
@@ -819,6 +895,8 @@ export class ResourceRunHost
   #modelCalls = 0;
   /** The model tasks whose call this activation made, counted then. */
   readonly #modelCallsMade = new Set<string>();
+  /** What the run keeps of its tried-once steps' attempts. */
+  readonly #triedOnce: TriedOnceMarks;
 
   constructor(
     env: Env,
@@ -832,6 +910,7 @@ export class ResourceRunHost
     this.#run = run;
     this.#hooks = hooks;
     this.#activationFuel = hooks.activationFuel ?? activationFuel;
+    this.#triedOnce = hooks.triedOnce ?? activationMarks();
     this.#readableParams = Object.fromEntries(
       run.build.params.flatMap((name) =>
         Object.hasOwn(run.params, name)
@@ -876,6 +955,64 @@ export class ResourceRunHost
     }
     this.#asked.add(name);
     return step;
+  }
+
+  /**
+   * The first attempt before `attempt` of the step keyed `key` that may
+   * have run its module: one not marked as never run. Unmarked is taken
+   * as run, whatever kept it unmarked (a mark that didn't land, an
+   * activation that died mid-attempt): a step tried once is refused
+   * rather than ever risk its call going out twice.
+   */
+  #ranBefore(key: string, attempt: number): number | undefined {
+    for (let earlier = 1; earlier < attempt; earlier += 1) {
+      if (!this.#triedOnce.unstarted(key, earlier)) {
+        return earlier;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Runs `attempt` (`told`) of a step, `once` if its call is tried once:
+   * then it runs its module in one attempt at most, a later attempt only
+   * if every one before it never did. Any other is refused unrun, with
+   * what the one that ran failed with, or as left open: its call may have
+   * gone out. An attempt that fails having run its module (`ran` says so,
+   * just before it's called) has what it failed with kept, for a later
+   * one to fail with too; one that fails never having called it (cut off
+   * in an isolate already stopped, refused its admission) is marked as
+   * never run, so a later attempt may run it. Only that branch, where the
+   * module was never called, ever writes the mark.
+   */
+  async #onceAtMost<T>(
+    once: boolean,
+    told: { idempotencyKey: string; attempt: number },
+    attempt: (ran: () => void) => Promise<T>
+  ): Promise<T> {
+    if (!once) {
+      return await attempt(() => {
+        // Only a step tried once keeps what it did.
+      });
+    }
+    const { idempotencyKey: key, attempt: number } = told;
+    const earlier = this.#ranBefore(key, number);
+    if (earlier !== undefined) {
+      throw toStepError(this.#triedOnce.failureOf(key, earlier) ?? leftOpen);
+    }
+    let ranModule = false;
+    try {
+      return await attempt(() => {
+        ranModule = true;
+      });
+    } catch (error) {
+      if (ranModule) {
+        this.#triedOnce.keepFailure(key, number, stepErrorOf(error));
+      } else {
+        this.#triedOnce.markUnstarted(key, number);
+      }
+      throw error;
+    }
   }
 
   /** The person the run acts for must still be an active member. */
@@ -933,7 +1070,7 @@ export class ResourceRunHost
           await this.#attempt(run, context, fn, stepDone.promise);
         let recorded = await this.#step.do(
           stepName,
-          configOf(step),
+          engineConfigOf(step),
           attemptStep
         );
         // Refused for load: the step runs again after a durable sleep, in
@@ -960,7 +1097,7 @@ export class ResourceRunHost
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           recorded = await this.#step.do(
             `${prefix}:run`,
-            configOf(step),
+            engineConfigOf(step),
             attemptStep
           );
         }
@@ -995,8 +1132,23 @@ export class ResourceRunHost
     fn: (attempt: ResourceAttemptHost) => Promise<unknown>,
     stepDone: Promise<unknown>
   ): Promise<unknown> {
-    const { name: stepName, step } = run;
     const told = attemptContextSchema.parse(context);
+    return await this.#onceAtMost(
+      configOf(run.step).once,
+      told,
+      async (ran) => await this.#attemptOf(run, told, fn, stepDone, ran)
+    );
+  }
+
+  /** One attempt of step `run` (`#attempt`), `ran` told just before its module is. */
+  async #attemptOf(
+    run: StepRun,
+    told: z.infer<typeof attemptContextSchema>,
+    fn: (attempt: ResourceAttemptHost) => Promise<unknown>,
+    stepDone: Promise<unknown>,
+    ran: () => void
+  ): Promise<unknown> {
+    const { name: stepName, step } = run;
     const lease = this.#hooks.leaseOf(told.idempotencyKey, told.attempt);
     if (lease === undefined) {
       throw new Error(`Step "${stepName}"'s attempt holds no lease`);
@@ -1007,12 +1159,13 @@ export class ResourceRunHost
     // funded one holds its whole share from the start, so attempts
     // run at once can't each find the same fuel.
     const funded = !this.#isolateStopped && this.#activationFuel >= attemptFuel;
-    // A call tried once (`triedOnce`) is never cut off: its step has
-    // no attempt to retry it in the next activation, so it runs on a
-    // share of its own. Each step runs at most once an activation,
-    // so these add at most one share for each such task.
-    const triedOnly = configOf(step).retries.limit === 0;
-    const runs = funded || (triedOnly && !this.#isolateStopped);
+    // A call tried once (`triedOnce`) is never cut off by the fuel: it
+    // runs on a share of its own, as an attempt cut off having started
+    // couldn't be tried again. Each step runs at most once an activation,
+    // so these add at most one share for each such task. In an isolate
+    // already stopped past its CPU time it can't run: its step is parked
+    // for the next activation, its call not spent (`#onceAtMost`).
+    const runs = funded || (configOf(step).once && !this.#isolateStopped);
     // Only an attempt that runs is admitted: one cut off holds nothing of
     // its lineage.
     let admission: AttemptAdmission | undefined;
@@ -1029,10 +1182,13 @@ export class ResourceRunHost
         admission === undefined
           ? undefined
           : ResourceRunHost.#newAttempt(run, told, lease, admission);
-      const call =
-        attempt === undefined
-          ? Promise.reject(cpuLimitKill())
-          : fn(this.#attemptHostOf(attempt));
+      let call: Promise<unknown>;
+      if (attempt === undefined) {
+        call = Promise.reject(cpuLimitKill());
+      } else {
+        ran();
+        call = fn(this.#attemptHostOf(attempt));
+      }
       this.#hooks.attemptCall?.(call, stepDone);
       let result: Settled<unknown>;
       try {

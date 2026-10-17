@@ -10,6 +10,7 @@ import type {
 } from "@grasp-os/workerflow/contracts";
 import { WorkflowRun } from "@grasp-os/workerflow/run";
 import type { RunNotification } from "@grasp-os/workerflow/run";
+import { z } from "zod";
 
 import { appHost } from "../durable-objects.ts";
 import type { AttemptFence } from "./attempt-fence.ts";
@@ -19,6 +20,7 @@ import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls, BusyRefusals } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
+import type { TriedOnceMarks } from "./resource-host.ts";
 import { projectResourceRun } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 
@@ -84,6 +86,102 @@ export const busyRefusalsIn = (sql: SqlStorage): BusyRefusals => ({
       at,
       details === undefined ? null : JSON.stringify(details)
     );
+  },
+});
+
+/**
+ * Where a run keeps the attempts of its steps tried once (resource-host.ts,
+ * `TriedOnceMarks`): a table of its object's SQLite beside the engine's
+ * journal, dropped with it as `busyTable` is. Only the host writes it,
+ * never the run's code.
+ */
+const triedOnceTable = "grasp_tried_once";
+
+/** Whether the run's own table is there: a run removed keeps nothing. */
+const runIsThere = (sql: SqlStorage): boolean =>
+  sql
+    .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'")
+    .toArray().length > 0;
+
+/** Whether the table of tried-once attempts is there yet. */
+const hasTriedOnce = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+      triedOnceTable
+    )
+    .toArray().length > 0;
+
+/** One row of `triedOnceTable`, as the host reads it. */
+const triedOnceRow = (
+  sql: SqlStorage,
+  key: string,
+  attempt: number
+): { unstarted: number; failure: string | null } | undefined => {
+  if (!hasTriedOnce(sql)) {
+    return undefined;
+  }
+  const [row] = sql
+    .exec<{ unstarted: number; failure: string | null }>(
+      `SELECT unstarted, failure FROM ${triedOnceTable} WHERE key = ? AND attempt = ?`,
+      key,
+      attempt
+    )
+    .toArray();
+  return row;
+};
+
+/** Writes an attempt's row, while the run is there. */
+const writeTriedOnce = (
+  sql: SqlStorage,
+  key: string,
+  attempt: number,
+  values: { unstarted?: 1; failure?: string }
+): void => {
+  if (!runIsThere(sql)) {
+    return;
+  }
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS ${triedOnceTable} (key TEXT NOT NULL, attempt INTEGER NOT NULL, unstarted INTEGER NOT NULL DEFAULT 0, failure TEXT, PRIMARY KEY (key, attempt))`
+  );
+  sql.exec(
+    `INSERT INTO ${triedOnceTable} (key, attempt, unstarted, failure) VALUES (?, ?, ?, ?) ON CONFLICT (key, attempt) DO UPDATE SET unstarted = max(unstarted, excluded.unstarted), failure = coalesce(excluded.failure, failure)`,
+    key,
+    attempt,
+    values.unstarted ?? 0,
+    values.failure ?? null
+  );
+};
+
+/** A kept failure, as the host kept it: a step's error, or nothing. */
+const keptFailureSchema = z.object({
+  name: z.string(),
+  message: z.string(),
+  code: z.string().optional(),
+});
+
+/** The run's tried-once attempts, kept with it (`triedOnceTable`). */
+export const triedOnceIn = (sql: SqlStorage): TriedOnceMarks => ({
+  markUnstarted: (key, attempt) => {
+    writeTriedOnce(sql, key, attempt, { unstarted: 1 });
+  },
+  unstarted: (key, attempt) => triedOnceRow(sql, key, attempt)?.unstarted === 1,
+  keepFailure: (key, attempt, error) => {
+    writeTriedOnce(sql, key, attempt, { failure: JSON.stringify(error) });
+  },
+  failureOf: (key, attempt) => {
+    const failure = triedOnceRow(sql, key, attempt)?.failure ?? null;
+    const kept =
+      failure === null
+        ? undefined
+        : keptFailureSchema.safeParse(JSON.parse(failure)).data;
+    return kept === undefined
+      ? undefined
+      : {
+          name: kept.name,
+          message: kept.message,
+          ...(kept.code === undefined ? {} : { code: kept.code }),
+        };
   },
 });
 
@@ -291,6 +389,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         }
         return await runPinned(this.env, pin, event, step, {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
+          triedOnce: triedOnceIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
           revokeAttempt: (fence) => {

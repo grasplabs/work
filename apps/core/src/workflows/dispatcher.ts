@@ -39,6 +39,7 @@ import type {
 } from "./host.ts";
 import { paramValues } from "./param-values.ts";
 import { admitAttempt } from "./quotas.ts";
+import type { TriedOnceMarks } from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
@@ -202,6 +203,8 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
  */
 export interface RunMemory {
   busyRefusals: BusyRefusals;
+  /** What it keeps of its JSON workflow's tried-once attempts (resource-host.ts). */
+  triedOnce?: TriedOnceMarks;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
   aiCalls: AiCalls;
   leaseOf: HostHooks["leaseOf"];

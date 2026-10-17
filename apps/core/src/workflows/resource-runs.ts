@@ -548,6 +548,8 @@ const settledRun = async (
 /** What an activation of a run is given by its object (run-object.ts). */
 export interface ResourceRunMemory {
   leaseOf: ResourceHostHooks["leaseOf"];
+  /** What the run keeps of its tried-once attempts (`TriedOnceMarks`). */
+  triedOnce?: ResourceHostHooks["triedOnce"];
   /** Aborts once the activation running the run is over. */
   over?: AbortSignal;
   /** Whether the run is still this activation's. */
@@ -715,6 +717,7 @@ export const runResourceWorkflow = async (
   let tampered: StepError | undefined;
   const host = new ResourceRunHost(env, step, run, {
     leaseOf: memory.leaseOf,
+    ...(memory.triedOnce === undefined ? {} : { triedOnce: memory.triedOnce }),
     attemptCall: trackAttemptCalls(calls),
     tampered: (error) => {
       tampered ??= error;
