@@ -380,6 +380,20 @@ describe(
         "attach",
         await streamRequest(builder, seat, "notes.slow", { topic: "jam" }, key)
       );
+      // Input deeper than a value reads is refused, never taken for none.
+      let deep: unknown = "bottom";
+      for (let level = 0; level < 40; level += 1) {
+        deep = { deeper: deep };
+      }
+      const tooDeep = await failure(
+        async () =>
+          await follow(
+            builder,
+            seat,
+            "stream",
+            await streamRequest(builder, seat, "notes.draft", deep, key)
+          )
+      );
       const unknown = await follow(
         builder,
         seat,
@@ -395,6 +409,7 @@ describe(
       expect({
         ends: [firstEnd, joinedEnd, await attached.ended],
         other: await other.ended,
+        tooDeep,
         otherAction: await otherAction.ended,
         unknown: await unknown.ended,
         // Run once, whoever followed it.
@@ -402,6 +417,7 @@ describe(
       }).toStrictEqual({
         ends: ["ok", "ok", "ok"],
         other: "submission.key_conflict",
+        tooDeep: "contract.invalid_request",
         otherAction: "submission.expired",
         unknown: "submission.expired",
         preview: ["Draft about jam"],
