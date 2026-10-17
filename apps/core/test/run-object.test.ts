@@ -1,10 +1,8 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { cancelRun } from "../src/workflows/controls.ts";
 import { markRunCancelled } from "../src/workflows/engine.ts";
 import { busyRefusalsIn, triedOnceIn } from "../src/workflows/run-object.ts";
@@ -20,7 +18,13 @@ import {
   sleeping,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import {
+  appWith,
+  hitCall,
+  hitsCall,
+  hitsOf,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // What core keeps in a run's object beside the engine's journal goes when
 // the engine removes the run: a step's last busy-budget refusal outlives
@@ -43,8 +47,8 @@ const napper = workflowFiles(
 const looping = workflowFiles(
   "looping",
   `  await step.do("loop", { description: "Loop" }, async () => {
-    while ((await env.APP.call("hits", "gate")) === 0) {
-      await env.APP.call("hit", "round");
+    while ((await ${hitsCall(`"gate"`)}) === 0) {
+      await ${hitCall(`"round"`)};
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     return null;
@@ -108,7 +112,7 @@ const refusedLoop = workflowFiles(
   "refused",
   `  await step.do("loop", { description: "Loop", retries: { limit: 0 } }, async () => {
     for (;;) {
-      await env.APP.call("hit", "round");
+      await ${hitCall(`"round"`)};
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   });
@@ -251,16 +255,7 @@ describe("a run's object", { timeout: 60_000 }, () => {
   it("refuses every call of a cancelled run's attempt from the cancel on, even when the engine fails to terminate it", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(builder, looping);
-    const rounds = async () =>
-      Number(
-        await callApp(
-          env,
-          appIdSchema.parse(app),
-          { userId: builder.userId, mode: "interactive" },
-          "hits",
-          ["round"]
-        )
-      );
+    const rounds = async () => await hitsOf(builder, app, "round");
     const { id: run } = await builder.api.workflows.start(app, "looping");
     await vi.waitFor(
       async () => {
@@ -422,15 +417,7 @@ describe("a run's object", { timeout: 60_000 }, () => {
     const { id: run } = await builder.api.workflows.start(app, "refused");
     await vi.waitFor(
       async () => {
-        const rounds = Number(
-          await callApp(
-            env,
-            appIdSchema.parse(app),
-            { userId: builder.userId, mode: "interactive" },
-            "hits",
-            ["round"]
-          )
-        );
+        const rounds = await hitsOf(builder, app, "round");
         expect(rounds).toBeGreaterThan(0);
       },
       { timeout: 20_000, interval: 100 }

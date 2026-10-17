@@ -9,14 +9,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
 import {
   admitAttempt,
   admitChild,
   quotaPolicy,
 } from "../src/workflows/quotas.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
-import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
 import { mockIdp } from "./idp.ts";
@@ -29,7 +27,7 @@ import {
   woken,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appWith, hitCall, hitsOf, workflowFiles } from "./workflow-apps.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
 // how often a step is tried and how long its steps run in all, each held
@@ -120,16 +118,6 @@ const failedWith = async (run: string): Promise<unknown> => {
   )?.detail.error;
 };
 
-/** How many times the App's server counted `name` (its `hits`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
-
 /** A step that takes about `ms`, then returns 1. */
 const working = (name: string, ms: number) =>
   `  await step.do("${name}", { description: "Work" }, async () => {
@@ -146,7 +134,7 @@ const hanging = (name: string, retries: "most" | "undeclared" = "most") =>
   workflowFiles(
     name,
     `  return await step.do("hang", { description: "Hang", timeout: "1 second"${retries === "most" ? ', retries: { limit: 4, delay: 1, backoff: "constant" }' : ""} }, async () => {
-    await env.APP.call("hit", "${name}");
+    await ${hitCall(`"${name}"`)};
     await new Promise(() => {});
   });`,
     { hang: null }
@@ -275,7 +263,6 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       ...hanging("undeclared", "undeclared"),
       ...hanging("lowered"),
     });
-    await serverBuilt(app, 1);
 
     const declared = await withQuotas({}, async () => {
       const run = await builder.api.workflows.start(app, "declared");
@@ -299,11 +286,11 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const declaredRun = await builder.api.workflows.status(declared);
     const undeclaredRun = await builder.api.workflows.status(undeclared);
     expect({
-      declared: await hitsOf(app, builder.userId, "declared"),
-      undeclared: await hitsOf(app, builder.userId, "undeclared"),
+      declared: await hitsOf(builder, app, "declared"),
+      undeclared: await hitsOf(builder, app, "undeclared"),
       // Its own error, its fifth attempt's timeout: never a sixth refused.
       undeclaredWith: undeclaredRun.failure?.error.message,
-      lowered: await hitsOf(app, builder.userId, "lowered"),
+      lowered: await hitsOf(builder, app, "lowered"),
       loweredWith: await failedWith(lowered),
       declaredStatus: declaredRun.status,
     }).toStrictEqual({

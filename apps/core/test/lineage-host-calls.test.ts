@@ -6,17 +6,15 @@ import {
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { admitAttempt, quotaPolicy } from "../src/workflows/quotas.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
-import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { lastGeneration, nextPolicy, withQuotas } from "./quota-policies.ts";
 import { racingDb } from "./racing-db.ts";
 import { finished, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appWith, hitCall, hitsOf, workflowFiles } from "./workflow-apps.ts";
 
 // A run lineage's host calls: every call its steps' attempts make through
 // their hosts, counted durably on the lineage, held to the deployment's
@@ -68,20 +66,10 @@ const refusedCalls = async (run: string): Promise<unknown[]> => {
     .map(({ detail }) => detail.step);
 };
 
-/** How many times the App's server counted `name` (its `hits`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
-
 /** A step `name` that calls the App's `hit` of its name `calls` times. */
 const calling = (name: string, calls: number) =>
   `  await step.do("${name}", { description: "Call" }, async () => {
-${Array.from({ length: calls }, () => `    await env.APP.call("hit", "${name}");`).join("\n")}
+${Array.from({ length: calls }, () => `    await ${hitCall(`"${name}"`)};`).join("\n")}
     return 1;
   });`;
 
@@ -210,7 +198,7 @@ describe("run lineage host calls", { timeout: 90_000 }, () => {
         "calls",
         `  try {
     await step.do("flaky", { description: "Flaky", timeout: "1 second", retries: { limit: 2, delay: 1, backoff: "constant" } }, async () => {
-      await env.APP.call("hit", "flaky");
+      await ${hitCall(`"flaky"`)};
       await new Promise(() => {});
     });
   } catch {}
@@ -219,7 +207,7 @@ ${calling("more", 2)}
   await step.do("last", { description: "Call" }, async () => {
     for (const _ of [1, 2, 3]) {
       try {
-        await env.APP.call("hit", "last");
+        await ${hitCall(`"last"`)};
       } catch {}
     }
     return 1;
@@ -232,7 +220,6 @@ ${calling("over", 1)}
         child: 1,
       }),
     });
-    await serverBuilt(app, 1);
 
     const result = await withQuotas({ lineageHostCalls: 6 }, async () => {
       const root = await builder.api.workflows.start(app, "calls");
@@ -249,8 +236,7 @@ ${calling("over", 1)}
     const hits = Object.fromEntries(
       await Promise.all(
         ["flaky", "more", "last", "over", "child"].map(
-          async (name) =>
-            [name, await hitsOf(app, builder.userId, name)] as const
+          async (name) => [name, await hitsOf(builder, app, name)] as const
         )
       )
     );

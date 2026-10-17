@@ -7,7 +7,7 @@ import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { buildOnSave } from "../../src/save-builds.ts";
 import { buildScreens, buildServer } from "../../src/screens.ts";
-import { server, workflowFiles } from "../workflow-apps.ts";
+import { v1Server, workflowFiles } from "../workflow-apps.ts";
 
 // The screen compiler on-prem: it runs on the sandbox host this project
 // starts (src/platform-sandbox.ts), never in core's own process, whose
@@ -283,7 +283,7 @@ describe("the screen compiler on-prem", () => {
       version: 1,
       files: {
         ...screen(`// ${fresh}`),
-        "app/server.ts": `${server}\n// ${fresh}\n`,
+        "app/server.ts": `${v1Server}\n// ${fresh}\n`,
         ...workflowFiles(
           "single",
           `  return await step.do("only", { description: "${fresh}" }, async () => "done");`

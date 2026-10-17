@@ -26,7 +26,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
-import { server } from "./workflow-apps.ts";
+import { v1Server } from "./workflow-apps.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
 // person in a draft of its own, and repairing what its checks report.
@@ -1422,7 +1422,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     };
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await release(builder, app, {
-      "app/server.ts": server,
+      "app/server.ts": v1Server,
       "app/lib/books.ts": "export const twice = false;\n",
       ...notify,
     });
