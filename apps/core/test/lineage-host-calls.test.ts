@@ -3,7 +3,6 @@ import {
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -13,6 +12,7 @@ import { runActor, startRun } from "../src/workflows/runs.ts";
 import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { lastGeneration, nextPolicy, withQuotas } from "./quota-policies.ts";
 import { racingDb } from "./racing-db.ts";
 import { finished, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
@@ -26,42 +26,6 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 // engine, the dispatcher and core's database are real.
 
 const idp = mockIdp();
-
-/** The policy generation of the next test's limits: each higher than before. */
-let generations = 10_000;
-
-/** A policy setting `limits`, under a generation of its own. */
-const nextPolicy = (limits: Record<string, number>) => {
-  generations += 1;
-  return { generation: generations, limits };
-};
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/**
- * What `run` returns, with the operator's quota policy `limits` in force;
- * the deployment's own limits again after it, under a newer generation.
- */
-const withQuotas = async <Result>(
-  limits: Record<string, number>,
-  run: () => Promise<Result>
-): Promise<Result> => {
-  const retryDelay = env.WORKFLOW_RETRY_DELAY_MS;
-  env.QUOTA_LIMITS = nextPolicy(limits);
-  // A step's retries come at once.
-  env.WORKFLOW_RETRY_DELAY_MS = "0";
-  try {
-    return await run();
-  } finally {
-    env.QUOTA_LIMITS = nextPolicy(configuredLimits);
-    if (retryDelay === undefined) {
-      Reflect.deleteProperty(env, "WORKFLOW_RETRY_DELAY_MS");
-    } else {
-      env.WORKFLOW_RETRY_DELAY_MS = retryDelay;
-    }
-  }
-};
 
 /** Starts a run of `workflow` under `parent`, as core starts a child run. */
 const startChild = async (
@@ -363,7 +327,7 @@ ${calling("over", 1)}
         details: {
           limit: "hostCalls",
           max: 50,
-          generation: generations - 1,
+          generation: lastGeneration() - 1,
         },
       },
     });
@@ -404,7 +368,7 @@ ${calling("over", 1)}
         details: {
           limit: "hostCalls",
           max: 2,
-          generation: generations - 1,
+          generation: lastGeneration() - 1,
         },
       },
     });
@@ -442,7 +406,11 @@ ${calling("over", 1)}
       first: "ok",
       second: {
         code: "workflow.lineage_limit",
-        details: { limit: "hostCalls", max: 1, generation: generations - 1 },
+        details: {
+          limit: "hostCalls",
+          max: 1,
+          generation: lastGeneration() - 1,
+        },
       },
       lowered: true,
     });
