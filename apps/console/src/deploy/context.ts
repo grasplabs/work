@@ -110,6 +110,29 @@ export const clientDomain = (env: Env): string | null => {
   return domain === "" ? null : domain;
 };
 
+/**
+ * Shared secrets a deploy goes on without, with the value it gives
+ * instead: `APP_OAUTH_CLIENTS` names no app until one has an OAuth client,
+ * and connect refuses OAuth for an app without an entry, so a store that
+ * doesn't have it yet must not stop every client's deploy.
+ */
+const optionalSharedSecrets: Readonly<Partial<Record<SharedSecret, string>>> = {
+  APP_OAUTH_CLIENTS: "{}",
+};
+
+/** A shared secret's value, or its stand-in while the store has none. */
+const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
+  try {
+    return await storeSecret(env, name);
+  } catch (error) {
+    const standIn = optionalSharedSecrets[name];
+    if (standIn !== undefined && error instanceof MissingStoreSecretError) {
+      return standIn;
+    }
+    throw error;
+  }
+};
+
 /** Every secret a deploy gives the Workers, read from Secrets Store. */
 export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
   const names = [...new Set(Object.values(sharedSecrets).flat())];
@@ -117,7 +140,7 @@ export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
     await Promise.all(
       names.map(async (name): Promise<[string, string]> => [
         name,
-        await storeSecret(env, name),
+        await sharedSecret(env, name),
       ])
     )
   );
