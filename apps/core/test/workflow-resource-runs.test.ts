@@ -1809,6 +1809,69 @@ describe(
       });
     });
 
+    it("removes an ended run's attempt receipts with its start's details once its retention is over, keeping its lineage as it was", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      const { runId } = await start(by, workflow.id);
+      const run = await ended(by, workflow.id, runId);
+      const receipts = await receiptsOf(runId);
+      const kept = {
+        receipts: receipts.length,
+        lineage: await lineageOf(runId),
+      };
+      // Past the deployment's run retention (30 days) since it ended.
+      await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
+      const receipt = await env.DB.prepare(
+        "SELECT input FROM workflow_start_receipts WHERE id = ?"
+      )
+        .bind(runId)
+        .first<{ input: string | null }>();
+      expect({
+        // What the run was as the sweep reached it: ended, with receipts.
+        before: { status: run.status, receipts: kept.receipts },
+        after: {
+          input: receipt?.input,
+          receipts: await receiptsOf(runId),
+          lineage: await lineageOf(runId),
+        },
+      }).toStrictEqual({
+        before: { status: "completed", receipts: 2 },
+        after: { input: null, receipts: [], lineage: kept.lineage },
+      });
+    });
+
+    it("settles a receipt still held as the sweep removes it, charging the run's lineage up to its deadline", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      const { runId } = await start(by, workflow.id);
+      await ended(by, workflow.id, runId);
+      const before = await lineageOf(runId);
+      // A last attempt that never returned, as a run's whose activation
+      // died before its receipt settled: it holds what it reserved.
+      const reserved = 5000;
+      const admittedAt = Date.now();
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at, policy_generation) VALUES (?, 'task:call', 9, 1, ?, ?, ?, ?, 0)"
+        ).bind(runId, runId, reserved, admittedAt + reserved, admittedAt),
+        env.DB.prepare(
+          "UPDATE run_lineages SET active_held_ms = active_held_ms + ? WHERE root_run_id = ?"
+        ).bind(reserved, runId),
+      ]);
+      await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
+      expect({
+        receipts: await receiptsOf(runId),
+        lineage: await lineageOf(runId),
+      }).toStrictEqual({
+        receipts: [],
+        lineage: before && {
+          ...before,
+          used: before.used + reserved,
+          held: 0,
+        },
+      });
+    });
+
     it("queues an attempt behind its person's share, and runs it once a stopped run's attempt gives the share back, charged up to its deadline", async () => {
       const by = await builder();
       const hanging = await published(by, (name) =>

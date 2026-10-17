@@ -1,6 +1,6 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, asc, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -51,7 +51,9 @@ import { runEngine, runRetentionDays } from "./engine.ts";
 // person put in (`sweepWorkflowStartDetails`): a start receipt's input and
 // the parameter values it froze, once it was admitted that long ago and
 // the run it admitted, if any, ended that long ago (the run reads them
-// from the receipt until it ends: resource-runs.ts), and
+// from the receipt until it ends: resource-runs.ts), with the receipts
+// of that run's attempts, as an App run's go with its details (its
+// lineage's row stays, as an App run's does), and
 // the values of a parameter revision once another replaced it that long
 // ago, or its workflow was deleted. The database lets nothing else of
 // either change (migration 0080): their IDs, hashes, revisions and who
@@ -177,21 +179,19 @@ const unkeyed = (step: SQL): SQL =>
 
 /**
  * The statements that remove the receipts of the steps' attempts of
- * `runs` (IDs of runs marked, at most {@link receiptRunsPerBatch}, as
- * each is bound several times), quotas.ts's: a receipt names
- * its step by the engine's key, which can hold a keyed step's data, so
- * none outlives its run's details. One still holding (a last attempt
- * that never returned: its run has ended) is settled first, as an
- * admission would, charging its lineage up to its deadline (now, at the
- * latest), so the lineage's row, which stays, neither keeps holding it nor
- * loses what it used. Every receipt of the runs goes, and every token of
- * their mail. Run before its runs
- * are marked, so a sweep that stops before marking them leaves them due,
- * and none of a marked run is left.
+ * `runs` (run IDs, or a query of them; of either run table, as
+ * quotas.ts keeps both): a receipt names its step by the engine's key,
+ * which can hold a keyed step's data, and kept for ever, the receipts of
+ * ended runs would grow the table without bound, so none outlives its
+ * run's details. One still holding (a last attempt that never returned:
+ * its run has ended) is settled first, as an admission would, charging
+ * its lineage up to its deadline (now, at the latest), so the lineage's
+ * row, which stays, neither keeps holding it nor loses what it used.
+ * Then every receipt of the runs goes.
  */
-const receiptsPruned = (
+const attemptsPruned = (
   db: DrizzleD1Database,
-  runs: readonly string[],
+  runs: readonly string[] | SQLWrapper,
   now: Date
 ) => {
   const held = runLineageAttempts;
@@ -215,6 +215,24 @@ const receiptsPruned = (
       ),
     db.update(held).set({ usedMs: used, settledAt: now }).where(lapsed),
     db.delete(held).where(inArray(held.runId, runs)),
+  ] as const;
+};
+
+/**
+ * The statements that remove what quotas.ts and mail-stamps.ts keep of
+ * App runs `runs` (IDs of runs marked, at most
+ * {@link receiptRunsPerBatch}, as each is bound several times): their
+ * attempts' receipts (`attemptsPruned`), and every token of their mail.
+ * Run before its runs are marked, so a sweep that stops before marking
+ * them leaves them due, and none of a marked run is left.
+ */
+const receiptsPruned = (
+  db: DrizzleD1Database,
+  runs: readonly string[],
+  now: Date
+) =>
+  [
+    ...attemptsPruned(db, runs, now),
     // The tokens of the runs' mail (mail-stamps.ts): mail to one this
     // late is mail to an address no one receives at.
     db.delete(runMailStamps).where(inArray(runMailStamps.runId, runs)),
@@ -250,7 +268,6 @@ const receiptsPruned = (
       )
     ),
   ] as const;
-};
 
 /**
  * The statements that mark `runs`, those of them still `due`, as having
@@ -325,11 +342,14 @@ export const startDetailsPerSweep = 500;
 
 /**
  * Removes the input and frozen parameter values of start receipts
- * admitted before `before`, and the values of parameter revisions
- * replaced before it or of workflows deleted before it, at most
- * {@link startDetailsPerSweep} of each, oldest first, marked at `now`:
- * set to null once, which is all the database lets anything change of
- * them. The rest is left to the next cron run.
+ * admitted before `before`, with the receipts of the attempts of the
+ * runs they admitted (`attemptsPruned`; the runs' lineages stay), and
+ * the values of parameter revisions replaced before it or of workflows
+ * deleted before it, at most {@link startDetailsPerSweep} of each, oldest
+ * first, marked at `now`: set to null once, which is all the database
+ * lets anything change of them. The rest is left to the next cron run.
+ * One batch, so the attempts go only with their start's details, and
+ * those of every start marked are gone.
  */
 export const sweepWorkflowStartDetails = async (
   env: Env,
@@ -339,33 +359,33 @@ export const sweepWorkflowStartDetails = async (
   const db = drizzle(env.DB);
   const receipts = workflowStartReceipts;
   const params = workflowResourceParams;
+  // The starts due, as each statement reads them before the last marks
+  // them: by when they were admitted and their IDs, the same ones.
+  const due = db
+    .select({ id: receipts.id })
+    .from(receipts)
+    .where(
+      and(
+        isNull(receipts.detailsRemovedAt),
+        lt(receipts.createdAt, before),
+        // Not while its run reads them: a run that hasn't ended
+        // loads its input and parameters from its receipt on every
+        // activation (resource-runs.ts). Once it ended, its
+        // retention counts from its end, as an App run's does.
+        sql`NOT EXISTS (SELECT 1 FROM workflow_resource_runs AS run
+          WHERE run.id = ${receipts.id}
+            AND (run.ended_at IS NULL OR run.ended_at >= ${before.getTime()}))`
+      )
+    )
+    .orderBy(asc(receipts.createdAt), asc(receipts.id))
+    .limit(startDetailsPerSweep);
   await db.batch([
+    // A start's run has its receipt's ID (resource-runs.ts).
+    ...attemptsPruned(db, due, now),
     db
       .update(receipts)
       .set({ input: null, params: null, detailsRemovedAt: now })
-      .where(
-        inArray(
-          receipts.id,
-          db
-            .select({ id: receipts.id })
-            .from(receipts)
-            .where(
-              and(
-                isNull(receipts.detailsRemovedAt),
-                lt(receipts.createdAt, before),
-                // Not while its run reads them: a run that hasn't ended
-                // loads its input and parameters from its receipt on every
-                // activation (resource-runs.ts). Once it ended, its
-                // retention counts from its end, as an App run's does.
-                sql`NOT EXISTS (SELECT 1 FROM workflow_resource_runs AS run
-                  WHERE run.id = ${receipts.id}
-                    AND (run.ended_at IS NULL OR run.ended_at >= ${before.getTime()}))`
-              )
-            )
-            .orderBy(asc(receipts.createdAt))
-            .limit(startDetailsPerSweep)
-        )
-      ),
+      .where(inArray(receipts.id, due)),
     db
       .update(params)
       .set({ values: null, valuesRemovedAt: now })
