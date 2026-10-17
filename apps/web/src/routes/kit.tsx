@@ -388,6 +388,7 @@ const demoIntegration = (
   categories: [],
   group: "Other",
   description: null,
+  auth: "managed",
   logo: null,
   toolCount: undefined,
   offered: true,
