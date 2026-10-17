@@ -9,6 +9,7 @@ import {
 } from "@grasp-os/shared/app-releases";
 import type {
   ConnectorContract,
+  EndedRuns,
   PendingAction,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -2205,8 +2206,26 @@ describe("runs started by a restricted App", () => {
       ).length;
     };
     const beforeSweep = await heldOf(sweptRun);
+    // An unrestricted run, Ada's own: an App its calls reached may hold
+    // under its key too (one entering restricted mode as it ran), so the
+    // sweep asks connect to drop what it holds of it as well.
+    const ownRun = await started(ada, confirmed.workflow.id, confirmed.serving);
+    await ended(ada, confirmed.workflow.id, ownRun);
+    const asked: string[] = [];
+    const recording: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: (target, name): unknown =>
+          name === "dropForEndedRuns"
+            ? async (request: EndedRuns) => {
+                asked.push(...request.runs.map(({ runId }) => runId));
+                await target.dropForEndedRuns(request);
+              }
+            : Reflect.get(target, name),
+      }),
+    };
     // Past the run's retention, the sweep removes what connect holds of it.
-    await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
+    await sweepRunDetails(recording, new Date(Date.now() + 31 * 86_400_000));
     const confirmedMail = await confirmed.mail.did();
     const sweptMail = await swept.mail.did();
     expect({
@@ -2214,13 +2233,16 @@ describe("runs started by a restricted App", () => {
       confirmedHeld: await heldOf(confirmedRun),
       beforeSweep,
       afterSweep: await heldOf(sweptRun),
+      sweptOwn: asked.includes(ownRun),
       calls: [confirmedMail.calls, sweptMail.calls],
     }).toStrictEqual({
       confirming: "connect.run_ended",
       confirmedHeld: 0,
       beforeSweep: 1,
       afterSweep: 0,
-      calls: [0, 0],
+      sweptOwn: true,
+      // Ada's own run's send; the cancelled ones sent nothing.
+      calls: [1, 0],
     });
   });
 

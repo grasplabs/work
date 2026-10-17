@@ -1,5 +1,5 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -380,21 +380,21 @@ export const sweepWorkflowStartDetails = async (
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
     .limit(startDetailsPerSweep);
-  // What connect still holds of the restricted runs among them goes
-  // first, as an App run's does (`removedElsewhere`): a run that ended
-  // while its side effect was held leaves the action, with its exact
-  // input, until its person confirms it, which they may never do. Only a
-  // restricted run's side effects are held: its own, under the workflow,
-  // and those of every App its calls reached, keyed by its steps as its
-  // own are, which connect drops by the run (`dropForEndedRuns`). A sweep
-  // that fails here marks nothing, and the next does it again.
+  // What connect still holds of their runs goes first, as an App run's
+  // does (`removedElsewhere`): a run that ended while a side effect of it
+  // was held leaves the action, with its exact input, until its person
+  // confirms it, which they may never do. A restricted run's own are held,
+  // under the workflow, and so may be those of any App its calls reached,
+  // an unrestricted run's included (an App entering restricted mode as an
+  // export of it runs), keyed by its steps as its own are: connect drops
+  // them all by the run (`dropForEndedRuns`). A sweep that fails here
+  // marks nothing, and the next does it again.
   const heldOf = await db
     .select({ runId: receipts.id, workflowId: receipts.workflowResourceId })
     .from(receipts)
     .where(
       and(
         inArray(receipts.id, due),
-        eq(receipts.restricted, true),
         sql`EXISTS (SELECT 1 FROM workflow_resource_runs AS run
           WHERE run.id = ${receipts.id})`
       )
