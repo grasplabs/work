@@ -170,7 +170,7 @@ export const DefinitionEditor = ({
       // Someone saved a newer revision first: the draft conflicts, as a
       // save of the revision read would, and the person chooses.
       setOutcome(
-        workflowResourceErrors.codeOf(error) === "workflow.draft_unchecked"
+        workflowResourceErrors.codeOf(error) === "workflow.draft_conflict"
           ? { kind: "conflict" }
           : { kind: "failed", reason: failureText(error) }
       );

@@ -265,7 +265,8 @@ describe("a workflow's draft", () => {
       incompleteCheckpoint: { revision: 1, source: good },
       leaked: false,
     });
-    // Only the latest revision, once it passed, publishes.
+    // Only the latest revision, once it passed, publishes: an earlier one
+    // conflicts, as an edit of it would.
     await expect(
       outcome(
         publishWorkflowDraft(env, ada, workflow.id, {
@@ -281,7 +282,7 @@ describe("a workflow's draft", () => {
           basedOn: null,
         })
       )
-    ).resolves.toBe("workflow.draft_unchecked");
+    ).resolves.toBe("workflow.draft_conflict");
     await expect(workflowVersions(env, ada, workflow.id)).resolves.toHaveLength(
       0
     );

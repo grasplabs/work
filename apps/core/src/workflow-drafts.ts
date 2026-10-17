@@ -353,7 +353,13 @@ export const publishWorkflowDraft = async (
     input
   );
   const { latest } = await draftRows(env, workflow.id);
-  if (latest?.revision !== revision || !latest.checked) {
+  // A revision another edit has replaced conflicts, as an edit of it
+  // would; the latest one publishes only once it passed.
+  const stale = latest !== undefined && latest.revision !== revision;
+  if (stale) {
+    throw workflowResourceErrors.create("workflow.draft_conflict");
+  }
+  if (latest === undefined || !latest.checked) {
     throw workflowResourceErrors.create("workflow.draft_unchecked");
   }
   return await publishWorkflowVersion(env, by, workflow.id, {
