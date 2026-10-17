@@ -4,17 +4,12 @@ import {
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
-import type {
-  Authority,
-  CodeSubject,
-  WorkContext,
-} from "@grasp-os/shared/permissions";
+import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import {
   catalogBindingKinds,
   workflowBindingTargetSchema,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
-import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -305,47 +300,6 @@ export const requireRunCallAllowed = async (
 ): Promise<void> => {
   const run = await callingRunOf(env, admitted.workflow, admitted.run);
   const binding = run?.bindings.get(admitted.alias);
-  if (run === undefined || binding === undefined) {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  await requireCallAuthority(env, run, binding);
-};
-
-/**
- * Refuses (`workflow.call_denied`) a decision on a connector call a run
- * of an independent workflow held for its person (pending-actions.ts)
- * unless that run is still going, acts for `person`, its call's key names
- * it, and a connector binding its start froze for the call's permission
- * is allowed now (`requireCallAuthority`): confirming sends the call, so
- * it is decided as the call itself would be.
- */
-export const requireHeldRunCallAllowed = async (
-  env: Env,
-  held: {
-    readonly subject: CodeSubject;
-    readonly context: WorkContext;
-    readonly idempotencyKey: string;
-    readonly permissionId: string;
-  },
-  person: string
-): Promise<void> => {
-  const { subject, context } = held;
-  const run =
-    subject.type === "workflow" &&
-    context.type === "workflowRun" &&
-    context.workflowId === subject.workflowId &&
-    runOfStepKey(held.idempotencyKey) === context.runId
-      ? await callingRunOf(env, subject.workflowId, context.runId)
-      : undefined;
-  const binding =
-    run?.principal === person
-      ? [...run.bindings.values()].find(
-          ({ kind, target }) =>
-            kind === "connector" &&
-            "permissionId" in target &&
-            target.permissionId === held.permissionId
-        )
-      : undefined;
   if (run === undefined || binding === undefined) {
     throw workflowResourceErrors.create("workflow.call_denied");
   }

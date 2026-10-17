@@ -9,6 +9,7 @@ import {
 } from "@grasp-os/shared/app-releases";
 import type {
   ConnectorContract,
+  EndedRuns,
   PendingAction,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -76,7 +77,11 @@ import type { RunStep } from "../src/workflows/host.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
-import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import {
+  resourceRunFor,
+  terminateResourceRun,
+} from "../src/workflows/resource-runs.ts";
+import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { release, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -471,15 +476,23 @@ const mailingWorkflow = async (
     before = [],
     to = "${ $workflow.input.who }",
     plan = [],
+    sharing,
   }: {
     before?: unknown[];
     to?: string;
     plan?: Parameters<typeof mailConnection>[0];
+    /** Another alias, sorted first, approved for the same permission. */
+    sharing?: string;
   } = {}
 ) => {
   const key = await mailContract(admin);
   const { workflow, executable } = await published(by, {
-    bindings: { mail: { kind: "connector", contract: key } },
+    bindings: {
+      mail: { kind: "connector", contract: key },
+      ...(sharing === undefined
+        ? {}
+        : { [sharing]: { kind: "connector", contract: key } }),
+    },
     params: {
       token: {
         schema: { type: "string", maxLength: 64 },
@@ -490,6 +503,22 @@ const mailingWorkflow = async (
     },
     tasks: [
       ...before,
+      // The other alias, declared by a task that never runs.
+      ...(sharing === undefined
+        ? []
+        : [
+            {
+              skipped: {
+                if: "${ false }",
+                call: "grasp.connector",
+                with: {
+                  binding: sharing,
+                  operation: "mail.send",
+                  arguments: { to: "Nobody", subject: "Never" },
+                },
+              },
+            },
+          ]),
       {
         send: {
           call: "grasp.connector",
@@ -518,6 +547,13 @@ const mailingWorkflow = async (
     target: { kind: "connector", permissionId, contract: "composio.mail@1" },
     reviewed: { version: 1 },
   });
+  if (sharing !== undefined) {
+    await approveWorkflowBinding(serving, admin, workflow.id, {
+      alias: sharing,
+      target: { kind: "connector", permissionId, contract: "composio.mail@1" },
+      reviewed: { version: 1 },
+    });
+  }
   return { workflow, executable, mail, permissionId, approval, serving };
 };
 
@@ -2071,11 +2107,13 @@ describe("runs started by a restricted App", () => {
     });
   });
 
-  it("send nothing their person declines, nor anything confirmed once the run's own authority for it is gone", async () => {
+  it("send nothing their person declines, nor anything confirmed once the run's own authority for its alias is gone, whatever other alias shares its permission", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const declined = await mailingWorkflow(ada, admin);
-    const revoked = await mailingWorkflow(ada, admin);
+    // Another alias shares its permission, and stays approved: it never
+    // stands in for the alias its call went through.
+    const revoked = await mailingWorkflow(ada, admin, { sharing: "draft" });
     const declinedStarter = await startingApp(
       ada,
       admin,
@@ -2120,6 +2158,60 @@ describe("runs started by a restricted App", () => {
       confirmed: "workflow.call_denied",
       // Its next run of the call is refused before connect is asked.
       revoked: { status: "failed", code: "workflow.call_denied" },
+      calls: [0, 0],
+    });
+  });
+
+  it("leave nothing held in connect once they end: confirming one refused, and the rest swept with their details", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const confirmed = await mailingWorkflow(ada, admin);
+    const swept = await mailingWorkflow(ada, admin);
+    const confirmedStarter = await startingApp(
+      ada,
+      admin,
+      confirmed.workflow.id,
+      { restricted: true }
+    );
+    const sweptStarter = await startingApp(ada, admin, swept.workflow.id, {
+      restricted: true,
+    });
+    const confirmedRun = await confirmedStarter.start(confirmed.serving);
+    const sweptRun = await sweptStarter.start(swept.serving);
+    const confirmedHeld = await heldFor(ada, confirmedRun);
+    await heldFor(ada, sweptRun);
+    // Both cancelled while their send waits for Ada.
+    await terminateResourceRun(env, ada, confirmed.workflow.id, confirmedRun);
+    await terminateResourceRun(env, ada, swept.workflow.id, sweptRun);
+    await ended(ada, confirmed.workflow.id, confirmedRun);
+    await ended(ada, swept.workflow.id, sweptRun);
+    const confirming = await settledCode(
+      confirmPendingAction(env, ada, confirmedHeld.id, confirmedHeld.inputHash)
+    );
+    const adaPerson = await personOf(env, ada);
+    const heldOf = async (runId: string) => {
+      const waiting = await env.CONNECT.listPendingActions(adaPerson);
+      return waiting.filter(
+        ({ context }) =>
+          context.type === "workflowRun" && context.runId === runId
+      ).length;
+    };
+    const beforeSweep = await heldOf(sweptRun);
+    // Past the run's retention, the sweep removes what connect holds of it.
+    await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
+    const confirmedMail = await confirmed.mail.did();
+    const sweptMail = await swept.mail.did();
+    expect({
+      confirming,
+      confirmedHeld: await heldOf(confirmedRun),
+      beforeSweep,
+      afterSweep: await heldOf(sweptRun),
+      calls: [confirmedMail.calls, sweptMail.calls],
+    }).toStrictEqual({
+      confirming: "connect.run_ended",
+      confirmedHeld: 0,
+      beforeSweep: 1,
+      afterSweep: 0,
       calls: [0, 0],
     });
   });
@@ -2171,8 +2263,34 @@ describe("runs started by a restricted App", () => {
     const runId = await starter.start();
     const end = endOf(await ended(admin, workflowId, runId));
     const events = await allEvents();
+    // Past its retention, the sweep asks connect to drop what it holds of
+    // the run under the App it called too: the export's own calls are
+    // keyed by the run's step, under the App.
+    const asked: unknown[] = [];
+    const recording: Env = {
+      ...env,
+      CONNECT: new Proxy(env.CONNECT, {
+        get: (target, name): unknown =>
+          name === "dropForEndedRuns"
+            ? async (request: EndedRuns) => {
+                asked.push(...request.runs);
+                await target.dropForEndedRuns(request);
+              }
+            : Reflect.get(target, name),
+      }),
+    };
+    await sweepRunDetails(recording, new Date(Date.now() + 31 * 86_400_000));
     expect({
       end,
+      sweptUnderDesk: asked.some(
+        (entry) =>
+          typeof entry === "object" &&
+          entry !== null &&
+          "appId" in entry &&
+          entry.appId === desk &&
+          "runId" in entry &&
+          entry.runId === runId
+      ),
       called: await appCalled(runId),
       deskRestricted: await appHost(env, desk).isRestricted(),
       entered: events
@@ -2183,13 +2301,14 @@ describe("runs started by a restricted App", () => {
         .map(({ provenance }) => provenance),
     }).toStrictEqual({
       end: { status: "completed", output: { status: "called" } },
+      sweptUnderDesk: true,
       called: true,
       deskRestricted: true,
       entered: [[`workflow_run:${runId}`]],
     });
   });
 
-  it("start restricted from an agent's restricted chat, and only from it", async () => {
+  it("start restricted from an agent's restricted chat, or one that names none, and not from an open chat", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await published(ada, {
@@ -2217,13 +2336,40 @@ describe("runs started by a restricted App", () => {
     });
     const fromOpen = await starter.start(env, agentIn(open.id));
     const fromShut = await starter.start(env, agentIn(shut.id));
+    // An agent's own start that names no chat: nothing to read, so
+    // restricted.
+    const agent = agentIdSchema.parse(workspaceId);
+    await granted(ada, admin, {
+      subject: { type: "agent", agentId: agent },
+      object: {
+        type: "workflow",
+        workflowId: workflowResourceIdSchema.parse(workflow.id),
+      },
+      actions: ["start"],
+      binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    const { runId: unnamed } = await startWorkflow(
+      env,
+      {
+        type: "agent",
+        authority: {
+          subject: { type: "agent", agentId: agent },
+          onBehalfOf: ada.userId,
+          mode: "interactive",
+        },
+      },
+      workflow.id,
+      adaStart()
+    );
     expect({
       open: await pinnedRestricted(fromOpen),
       shut: await pinnedRestricted(fromShut),
+      unnamed: await pinnedRestricted(unnamed ?? ""),
       appRestricted: await appHost(env, starter.app).isRestricted(),
     }).toStrictEqual({
       open: { receipt: 0, run: 0 },
       shut: { receipt: 1, run: 1 },
+      unnamed: { receipt: 1, run: 1 },
       appRestricted: false,
     });
   });

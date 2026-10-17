@@ -1,5 +1,5 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, asc, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -17,6 +17,7 @@ import {
   workflowDecisions,
   workflowRuns,
 } from "../db/core/schema.ts";
+import { chunks, inList } from "../db/d1.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
 
 // Retention of workflow runs. A run reads what its person may read (a
@@ -379,6 +380,45 @@ export const sweepWorkflowStartDetails = async (
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
     .limit(startDetailsPerSweep);
+  // What connect still holds of the restricted runs among them goes
+  // first, as an App run's does (`removedElsewhere`): a run that ended
+  // while its side effect was held leaves the action, with its exact
+  // input, until its person confirms it, which they may never do. Only a
+  // restricted run's side effects are held: its own, under the workflow,
+  // and those of the App exports it called, under each App, keyed by its
+  // step as the run's own are. A sweep that fails here marks nothing, and
+  // the next does it again.
+  const heldOf = await db
+    .select({ runId: receipts.id, workflowId: receipts.workflowResourceId })
+    .from(receipts)
+    .where(
+      and(
+        inArray(receipts.id, due),
+        eq(receipts.restricted, true),
+        sql`EXISTS (SELECT 1 FROM workflow_resource_runs AS run
+          WHERE run.id = ${receipts.id})`
+      )
+    );
+  for (const batch of chunks(heldOf, sweptPerBatch)) {
+    // The Apps whose exports each run's start froze a binding to.
+    // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+    const called = await db.all<{ runId: string; appId: string }>(
+      sql`SELECT DISTINCT receipt.id AS runId, held.object_id AS appId
+        FROM ${receipts} AS receipt, json_each(receipt.bindings) AS bound
+        JOIN permissions AS held
+          ON held.id = json_extract(bound.value, '$.target.permissionId')
+            AND held.object_type = 'app'
+        WHERE json_extract(bound.value, '$.target.kind') = 'operation'
+          AND ${inList(
+            sql`receipt.id`,
+            batch.map(({ runId }) => runId)
+          )}`
+    );
+    for (const runs of chunks([...batch, ...called], sweptPerBatch)) {
+      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+      await env.CONNECT.dropForEndedRuns({ runs });
+    }
+  }
   await db.batch([
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),

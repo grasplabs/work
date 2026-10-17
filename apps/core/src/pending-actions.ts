@@ -9,8 +9,13 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { authoritySchema } from "@grasp-os/shared/permissions";
-import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
+import type {
+  Authority,
+  CodeSubject,
+  WorkContext,
+} from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -25,7 +30,12 @@ import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { requireHeldRunCallAllowed } from "./workflows/resource-authority.ts";
+import { loadWorkflowBuild } from "./workflow-builds.ts";
+import {
+  callingRunOf,
+  requireCallAuthority,
+} from "./workflows/resource-authority.ts";
+import type { CallingRun } from "./workflows/resource-authority.ts";
 import { wakingHeld } from "./workflows/wakes.ts";
 import type { HeldOutcome } from "./workspace.ts";
 
@@ -85,6 +95,90 @@ const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
     run.appId !== held.subject.appId ||
     endedStatuses.has(run.status)
   );
+};
+
+/** How a task's step is named, and so its call's key (resource-host.ts). */
+const taskStepPrefix = "task:";
+
+/**
+ * The alias of the binding task `step` (a step's name, `task:<id>`) of
+ * run `run` calls, as its sealed build has it: only a connector call's.
+ */
+const heldAliasOf = async (
+  env: Env,
+  run: CallingRun,
+  step: string
+): Promise<string | undefined> => {
+  if (!step.startsWith(taskStepPrefix)) {
+    return undefined;
+  }
+  const taskId = step.slice(taskStepPrefix.length);
+  const pinned = await drizzle(env.DB)
+    .select({ manifestHash: workflowResourceRuns.manifestHash })
+    .from(workflowResourceRuns)
+    .where(eq(workflowResourceRuns.id, run.runId))
+    .get();
+  if (pinned === undefined) {
+    return undefined;
+  }
+  const build = await loadWorkflowBuild(
+    env,
+    run.workflowId,
+    run.version,
+    pinned.manifestHash
+  );
+  const task = build.tasks.find(({ id }) => id === taskId);
+  return task?.kind === "call" && task.call.name === "grasp.connector"
+    ? task.call.binding
+    : undefined;
+};
+
+/**
+ * Refuses (`workflow.call_denied`) a decision on a connector call a run
+ * of an independent workflow held for its person (pending-actions.ts)
+ * unless that run is still going, acts for `person`, its call's key names
+ * it and the task that made it, and the binding that task's call goes
+ * through, as the run's sealed build names it, is the call's permission's
+ * and allowed now (`requireCallAuthority`): confirming sends the call, so
+ * it is decided as the call itself would be, through its own alias only,
+ * never another that shares the permission.
+ */
+const requireHeldRunCallAllowed = async (
+  env: Env,
+  held: {
+    readonly subject: CodeSubject;
+    readonly context: WorkContext;
+    readonly idempotencyKey: string;
+    readonly permissionId: string;
+  },
+  person: string
+): Promise<void> => {
+  const { subject, context, idempotencyKey } = held;
+  const run =
+    subject.type === "workflow" &&
+    context.type === "workflowRun" &&
+    context.workflowId === subject.workflowId &&
+    runOfStepKey(idempotencyKey) === context.runId
+      ? await callingRunOf(env, subject.workflowId, context.runId)
+      : undefined;
+  const alias =
+    run?.principal === person
+      ? await heldAliasOf(
+          env,
+          run,
+          idempotencyKey.slice(idempotencyKey.indexOf(":") + 1)
+        )
+      : undefined;
+  const binding = alias === undefined ? undefined : run?.bindings.get(alias);
+  if (
+    run === undefined ||
+    binding?.kind !== "connector" ||
+    !("permissionId" in binding.target) ||
+    binding.target.permissionId !== held.permissionId
+  ) {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  await requireCallAuthority(env, run, binding);
 };
 
 /** Whether connect still holds the held action `id` for `person`. */

@@ -767,7 +767,8 @@ const deniedAt = async (
  * Whether a start by `invoker` starts in restricted mode (restricted.ts):
  * an App's while the App has read restricted data, or the chat of the
  * agent whose call made it has; an agent's while its chat has. A chat
- * that can't be read counts as restricted: failing closed. A person's or
+ * that can't be read, or an agent's start that names none, counts as
+ * restricted: failing closed. A person's or
  * a trigger's carries no App's or chat's data, and never is.
  *
  * Read once, as the start is decided, after the code that asked for it
@@ -814,8 +815,9 @@ const restrictedStart = async (
     }
     case "agent": {
       const { authority, context } = invoker;
+      // No chat to read: failing closed.
       return context === undefined
-        ? false
+        ? true
         : await chatRestricted(() => ({ authority, context }));
     }
     case "person":
