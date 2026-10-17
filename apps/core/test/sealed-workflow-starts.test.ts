@@ -933,6 +933,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ),
       carolOwn: pageOf(await ask(carol, { runId: carols, pagination: {} }))
         .items.length,
+      unknownCode: unknown === "ok" ? "ok" : unknown.code,
     }).toStrictEqual({
       carols: unknown,
       direct: unknown,
@@ -941,8 +942,55 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       carolsWindow: unknown,
       ownBadCursor: "data.invalid_cursor",
       carolOwn: 5,
+      unknownCode: "workflow.run_unavailable",
     });
-    expect(unknown).toMatchObject({ code: "workflow.run_unavailable" });
+
+    // Version 1's sealed build no longer verifying is the platform's
+    // fault: the run's history tells nothing rather than failing the page.
+    const versionRow = (text: string) =>
+      env.DB.prepare(
+        "UPDATE workflow_resource_versions SET manifest = ? WHERE workflow_resource_id = ? AND version = 1"
+      ).bind(text, workflow.id);
+    const manifest = await env.DB.prepare(
+      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ manifest: string }>();
+    const immutable =
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END";
+    await env.DB.batch([
+      env.DB.prepare(
+        "DROP TRIGGER workflow_resource_versions_immutable_update"
+      ),
+      versionRow(`${manifest?.manifest ?? ""} `),
+      env.DB.prepare(immutable),
+    ]);
+    const unverified = await ask(bob, { runId: bobs, pagination: {} });
+    await env.DB.batch([
+      env.DB.prepare(
+        "DROP TRIGGER workflow_resource_versions_immutable_update"
+      ),
+      versionRow(manifest?.manifest ?? ""),
+      env.DB.prepare(immutable),
+    ]);
+
+    // Bound to another workflow without a new seal: the binding's runs are
+    // what `runs` lists, so the pinned workflow's history is read no more.
+    const other = await greetingOf(owner);
+    await bindWorkflowToApp(env, owner, other.id, {
+      app,
+      alias: "followUp",
+      version: 1,
+    });
+    expect({
+      unverified: pageOf(unverified),
+      reboundPage: refusalOf(await ask(bob, { runId: bobs, pagination: {} })),
+      reboundWindow: refusalOf(await ask(bob, { runId: bobs }, 50)),
+    }).toStrictEqual({
+      unverified: { items: [], nextCursor: null, hasMore: false },
+      reboundPage: unknown,
+      reboundWindow: unknown,
+    });
 
     // Rebound to version 2, which fails on what it reads: version 1's
     // release tells none of version 2's runs, and a release sealed after
@@ -986,15 +1034,25 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     };
     const failedPage = await askNext({ runId: failed, pagination: {} });
     const failedItems = pageOf(failedPage).items;
+    const oldRunThroughNext = refusalOf(
+      await askNext({ runId: bobs, pagination: {} })
+    );
+    // Once the retention sweep removed the run's details (as it marks
+    // its receipt), its history tells nothing.
+    await env.DB.prepare(
+      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
+    )
+      .bind(Date.now(), failed)
+      .run();
+    const removed = pageOf(await askNext({ runId: failed, pagination: {} }));
     expect({
       throughOld,
-      oldRunThroughNext: refusalOf(
-        await askNext({ runId: bobs, pagination: {} })
-      ),
+      oldRunThroughNext,
       failedStep: failedItems.find(
         (item) => item.kind === "step" && item.state === "failed"
       )?.error,
       leaks: JSON.stringify(failedPage).includes(secret),
+      removed,
     }).toStrictEqual({
       throughOld: unknown,
       oldRunThroughNext: unknown,
@@ -1007,17 +1065,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
         requestId: null,
       },
       leaks: false,
+      removed: { items: [], nextCursor: null, hasMore: false },
     });
-
-    // Once the retention sweep removed the run's details (as it marks
-    // its receipt), its history tells nothing.
-    await env.DB.prepare(
-      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
-    )
-      .bind(Date.now(), failed)
-      .run();
-    expect(
-      pageOf(await askNext({ runId: failed, pagination: {} }))
-    ).toStrictEqual({ items: [], nextCursor: null, hasMore: false });
   });
 });

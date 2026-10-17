@@ -1,10 +1,10 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import { isExpectedCode } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import { isPlatformCode } from "@grasp-os/shared/operations";
 import {
   reviewedTaskOf,
   runHistoryPageSchema,
@@ -56,7 +56,8 @@ import type { RunRow } from "./runs.ts";
 // workflow's own text, which can hold what the run read, so only those
 // who see the run's details (`seesDetails`: admins, and the person it
 // acts for) read it, with the error's own code; anyone else reads a
-// platform code as it is, any other as `workflow.step_failed`, and
+// code the platform defines as it is (`isExpectedCode`), any other as
+// `workflow.step_failed`, and
 // generic words. Once the run's details are removed, its retention over,
 // the history is empty, as the engine's record of it goes too.
 //
@@ -127,7 +128,9 @@ const errorShown = (
     return { code, message: error.message.slice(0, maxMessage) };
   }
   return {
-    code: isPlatformCode(code) ? code : "workflow.step_failed",
+    // Only a code the platform defines: one merely in its namespaces can
+    // still be made of what the run read.
+    code: isExpectedCode(code) ? code : "workflow.step_failed",
     message: stepFailedText,
   };
 };
