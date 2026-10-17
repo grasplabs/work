@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
-import { Route as AdminClientIdRouteImport } from './routes/admin/$clientId'
 import { Route as AdminAskRouteImport } from './routes/admin/ask'
 import { Route as AdminIntegrationsRouteImport } from './routes/admin/integrations'
 import { Route as AdminLabRouteImport } from './routes/admin/lab'
@@ -25,6 +24,7 @@ import { Route as ReleasesReleaseIdRouteImport } from './routes/releases/$releas
 import { Route as ReleasesDiffRouteImport } from './routes/releases/diff'
 import { Route as RolloutsIndexRouteImport } from './routes/rollouts/index'
 import { Route as RolloutsRolloutIdRouteImport } from './routes/rollouts/$rolloutId'
+import { Route as AdminOrganizationsClientIdRouteImport } from './routes/admin/organizations/$clientId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -39,11 +39,6 @@ const AdminRoute = AdminRouteImport.update({
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminClientIdRoute = AdminClientIdRouteImport.update({
-  id: '/$clientId',
-  path: '/$clientId',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminAskRoute = AdminAskRouteImport.update({
@@ -106,11 +101,16 @@ const RolloutsRolloutIdRoute = RolloutsRolloutIdRouteImport.update({
   path: '/rollouts/$rolloutId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminOrganizationsClientIdRoute =
+  AdminOrganizationsClientIdRouteImport.update({
+    id: '/organizations/$clientId',
+    path: '/organizations/$clientId',
+    getParentRoute: () => AdminRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
-  '/admin/$clientId': typeof AdminClientIdRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
@@ -124,10 +124,10 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/releases/': typeof ReleasesIndexRoute
   '/rollouts/': typeof RolloutsIndexRoute
+  '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/admin/$clientId': typeof AdminClientIdRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
@@ -141,12 +141,12 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/releases': typeof ReleasesIndexRoute
   '/rollouts': typeof RolloutsIndexRoute
+  '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
-  '/admin/$clientId': typeof AdminClientIdRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
@@ -160,13 +160,13 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/releases/': typeof ReleasesIndexRoute
   '/rollouts/': typeof RolloutsIndexRoute
+  '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/admin'
-    | '/admin/$clientId'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
@@ -180,10 +180,10 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/releases/'
     | '/rollouts/'
+    | '/admin/organizations/$clientId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/admin/$clientId'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
@@ -197,11 +197,11 @@ export interface FileRouteTypes {
     | '/admin'
     | '/releases'
     | '/rollouts'
+    | '/admin/organizations/$clientId'
   id:
     | '__root__'
     | '/'
     | '/admin'
-    | '/admin/$clientId'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
@@ -215,6 +215,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/releases/'
     | '/rollouts/'
+    | '/admin/organizations/$clientId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -250,13 +251,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/$clientId': {
-      id: '/admin/$clientId'
-      path: '/$clientId'
-      fullPath: '/admin/$clientId'
-      preLoaderRoute: typeof AdminClientIdRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/ask': {
@@ -343,27 +337,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RolloutsRolloutIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/organizations/$clientId': {
+      id: '/admin/organizations/$clientId'
+      path: '/organizations/$clientId'
+      fullPath: '/admin/organizations/$clientId'
+      preLoaderRoute: typeof AdminOrganizationsClientIdRouteImport
+      parentRoute: typeof AdminRoute
+    }
   }
 }
 
 interface AdminRouteChildren {
-  AdminClientIdRoute: typeof AdminClientIdRoute
   AdminAskRoute: typeof AdminAskRoute
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
   AdminLabRoute: typeof AdminLabRoute
   AdminPlatformRoute: typeof AdminPlatformRoute
   AdminSourcesRoute: typeof AdminSourcesRoute
   AdminIndexRoute: typeof AdminIndexRoute
+  AdminOrganizationsClientIdRoute: typeof AdminOrganizationsClientIdRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
-  AdminClientIdRoute: AdminClientIdRoute,
   AdminAskRoute: AdminAskRoute,
   AdminIntegrationsRoute: AdminIntegrationsRoute,
   AdminLabRoute: AdminLabRoute,
   AdminPlatformRoute: AdminPlatformRoute,
   AdminSourcesRoute: AdminSourcesRoute,
   AdminIndexRoute: AdminIndexRoute,
+  AdminOrganizationsClientIdRoute: AdminOrganizationsClientIdRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)

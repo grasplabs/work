@@ -30,7 +30,12 @@ import {
   SidebarProvider,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
-import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
@@ -118,7 +123,7 @@ const OrganizationItem = ({ admin }: { admin: ClientAdmin }) => {
   const unread = unreadOf(admin);
   const active =
     matchRoute({
-      to: "/admin/$clientId",
+      to: "/admin/organizations/$clientId",
       params: { clientId: id },
       fuzzy: true,
     }) !== false;
@@ -128,17 +133,26 @@ const OrganizationItem = ({ admin }: { admin: ClientAdmin }) => {
         // Room for the mark, so a long name ends before it.
         className={unread === null ? undefined : "pr-8"}
         isActive={active}
-        render={<Link params={{ clientId: id }} to="/admin/$clientId" />}
+        render={
+          <Link params={{ clientId: id }} to="/admin/organizations/$clientId" />
+        }
         tooltip={unread === null ? name : `${name}: ${unread.words}`}
       >
         <BuildingIcon />
         <span>{name}</span>
       </SidebarMenuButton>
       {unread === null ? null : (
-        <SidebarMenuBadge>
-          <unread.Mark aria-hidden className="size-4" />
-          <span className="sr-only">{unread.words}</span>
-        </SidebarMenuBadge>
+        // Its own tooltip: the button's shows only while the sidebar is
+        // folded, and the badge would let no pointer through to it.
+        <Tooltip>
+          <TooltipTrigger
+            render={<SidebarMenuBadge className="pointer-events-auto" />}
+          >
+            <unread.Mark aria-hidden className="size-4" />
+            <span className="sr-only">{unread.words}</span>
+          </TooltipTrigger>
+          <TooltipContent side="right">{unread.words}</TooltipContent>
+        </Tooltip>
       )}
     </SidebarMenuItem>
   );
