@@ -62,6 +62,8 @@ const personApi = async (role: Role): Promise<Person> =>
 
 /** The model the tests' deployment allows. */
 const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** Hosted in the EU, as the tests' config says: its provider's EU region. */
+const euModel = "openai/gpt-5.4";
 
 /** A step of a workflow that calls one of its App's functions. */
 interface CallingStep {
@@ -443,6 +445,76 @@ export default app({
   internalOperations: {},
   screens: [],
   uses: [mail, writer],
+});
+`,
+});
+
+/**
+ * An App that asks the Assistant's `assist.draft` through its `assistant`
+ * app resource: straight away (`relay.ask`), or after reading the team
+ * inbox through its `mail` connector (`relay.readThenAsk`). Each answers
+ * the draft, or `error:` and why it was refused.
+ */
+const relayingFiles = (): Record<string, string> => ({
+  "schema.ts": schemaFile,
+  "operations/relay.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const assistant = resource.app("assistant", {
+  functions: {
+    "assist.draft": { kind: "action", args: { prompt: v.string().min(1) }, returns: v.string() },
+  },
+});
+
+export const mail = resource.connector("mail", {
+  contract: "microsoft-365.mail@1",
+  actions: ["list"],
+});
+
+const attempt = async (work) => {
+  try {
+    return await work();
+  } catch (error) {
+    const details = Object(Reflect.get(Object(error), "details"));
+    return ["error", Reflect.get(Object(error), "code"), Reflect.get(details, "code")]
+      .filter((part) => part !== undefined)
+      .map(String)
+      .join(":");
+  }
+};
+
+export const ask = action({
+  args: {},
+  returns: v.string(),
+  uses: [assistant],
+  handler: async (ctx) =>
+    await attempt(() => ctx.resources.assistant.call("assist.draft", { prompt: "Hi" })),
+});
+
+export const readThenAsk = action({
+  args: {},
+  returns: v.string(),
+  uses: [assistant, mail],
+  handler: async (ctx) => {
+    const listed = await ctx.resources.mail.call("list", { mailbox: "team@acme.test" });
+    return await attempt(() =>
+      ctx.resources.assistant.call("assist.draft", { prompt: JSON.stringify(listed) })
+    );
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { ask, assistant, mail, readThenAsk } from "./operations/relay.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Relay",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { relay: { ask, readThenAsk } },
+  internalOperations: {},
+  screens: [],
+  uses: [assistant, mail],
 });
 `,
 });
@@ -1806,3 +1878,189 @@ describe(
     });
   }
 );
+
+/** `admin`'s binding of `app`'s `assistant` to the Assistant `assistant`. */
+const bindAssistant = async (admin: Person, app: string, assistant: string) =>
+  await admin.api.resourceBindings.approve({
+    app,
+    alias: "assistant",
+    target: { kind: "app", appId: assistant },
+    reviewed: { version: 1 },
+  });
+
+/** What `who`'s screen gets calling the action `contractId` of `app`, in `on`. */
+const screenCall = async (
+  on: Env,
+  who: Person,
+  app: string,
+  contractId: string
+): Promise<OperationResult> => {
+  const appId = appIdSchema.parse(app);
+  const released = await loadRelease(env, appId, 1);
+  const answered = await callAppFunction(
+    on,
+    await who.api.whoami(),
+    appId,
+    JSON.stringify({
+      reference: {
+        resourceId: appId,
+        resourceVersion: 1,
+        contractId,
+        fingerprint: released.fingerprints[contractId] ?? "",
+        kind: "action",
+      },
+      input: {},
+    })
+  );
+  return answered.result;
+};
+
+describe("another App's functions an App calls", { timeout: 120_000 }, () => {
+  afterEach(async () => {
+    await endLiveRuns();
+  });
+
+  it("count a run's model requests through another App against the run lineage's budget, which a screen's don't", async () => {
+    const asleep = await sleepingRun(relayingFiles());
+    const assistant = await appWith(asleep.builder, modelFiles());
+    await bindWriter(asleep.admin, assistant);
+    await bindAssistant(asleep.admin, asleep.app, assistant);
+    // The first answer costs far more than the run lineage may spend.
+    const { gateway, env: budgeted } = callEnv(
+      [
+        { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
+        // The run's second request never reaches it: the screen's does.
+        answer("For the screen."),
+      ],
+      { rules: { budgets: { run: { limit: 0.01 } } } }
+    );
+    const step = stepOf(asleep, { holds: true });
+    const ask = async () =>
+      await callRunFunction(
+        budgeted,
+        { ...step, requestId: crypto.randomUUID() },
+        { contractId: "relay.ask", kind: "action" },
+        {},
+        `step:${crypto.randomUUID()}`
+      );
+    const first = await ask();
+    const second = await ask();
+    const screen = await screenCall(
+      budgeted,
+      asleep.builder,
+      asleep.app,
+      "relay.ask"
+    );
+    expect({
+      first,
+      second,
+      screen,
+      asked: gateway.requests.length,
+    }).toStrictEqual({
+      first: { ok: true, value: "Costly." },
+      second: {
+        ok: true,
+        value: "error:resource.operation_failed:resource.budget_exhausted",
+      },
+      screen: { ok: true, value: "For the screen." },
+      asked: 2,
+    });
+    // Each request named as the run's, with the Assistant's binding it
+    // went through, so the log tells it from the Relay's own.
+    const events = await allEvents();
+    const models = events
+      .filter(
+        ({ action, actor }) =>
+          (action === "model.call" || action === "model.refused") &&
+          actor?.type === "workflow" &&
+          actor.runId === asleep.runId
+      )
+      .map(({ action, actor, detail }) => ({
+        action,
+        actor,
+        binding: detail.binding,
+        bindingApp: detail.bindingApp,
+      }));
+    const run = {
+      type: "workflow",
+      appId: asleep.app,
+      workflowId: "sleeper",
+      runId: asleep.runId,
+    };
+    expect(models).toStrictEqual([
+      {
+        action: "model.call",
+        actor: run,
+        binding: "writer",
+        bindingApp: assistant,
+      },
+      {
+        action: "model.refused",
+        actor: run,
+        binding: "writer",
+        bindingApp: assistant,
+      },
+    ]);
+  });
+
+  it("hold another App's model requests to the rules for what the calling App read, an EU-only connection's included", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const relay = await appWith(builder, relayingFiles());
+    const assistant = await appWith(builder, modelFiles());
+    await bindWriter(admin, assistant);
+    await bindAssistant(admin, relay, assistant);
+    const connectionId = await connectShared(admin);
+    const requested = await builder.api.permissions.request({
+      subject: { type: "app", appId: relay },
+      object: { type: "connection", connectionId },
+      actions: ["mail.list"],
+      binding: "MAIL",
+    });
+    await admin.api.permissions.grant(requested.id, { version: 1 });
+    await admin.api.resourceBindings.approve({
+      app: relay,
+      alias: "mail",
+      target: { kind: "connector", permissionId: requested.id },
+      reviewed: { version: 1 },
+    });
+    // The connection's data must stay with a model hosted in the EU; the
+    // Assistant's writer isn't one.
+    const { gateway, env: euOnly } = callEnv(
+      [answer("Nothing read."), answer("Never sent.")],
+      {
+        rules: {
+          models: [allowedModel, euModel],
+          eu: { models: [euModel], connections: [connectionId] },
+        },
+      }
+    );
+    const plain = await screenCall(euOnly, builder, relay, "relay.ask");
+    const afterReading = await screenCall(
+      euOnly,
+      builder,
+      relay,
+      "relay.readThenAsk"
+    );
+    expect({
+      plain,
+      afterReading,
+      asked: gateway.requests.length,
+    }).toStrictEqual({
+      plain: { ok: true, value: "Nothing read." },
+      afterReading: { ok: true, value: "error:resource.unavailable" },
+      asked: 1,
+    });
+    // Refused for the connection the calling App read, as the Assistant.
+    const events = await allEvents();
+    const refused = events.filter(
+      ({ action, actor }) =>
+        action === "model.refused" &&
+        actor?.type === "app" &&
+        actor.appId === assistant
+    );
+    expect(refused).toMatchObject([
+      { detail: { reason: "model.eu_only", because: "connection" } },
+    ]);
+  });
+});

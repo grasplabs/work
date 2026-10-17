@@ -973,6 +973,7 @@ export const appResourceBindings = sqliteTable(
         "store",
         "statistics",
         "guests",
+        "app",
       ],
     }).notNull(),
     target: text().notNull(),
