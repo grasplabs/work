@@ -1,6 +1,7 @@
 import { fileChannel } from "@grasp-os/sdk/host";
 import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { frameGesture, openFilePort } from "./screen-files.ts";
 
@@ -101,6 +102,13 @@ const within = async (promise: Promise<unknown>, ms: number) => {
     clearTimeout(timer);
   }
 };
+
+/** A refusal the page sends the frame, as far as a test reads it. */
+const refusalSchema = z.object({
+  type: z.string(),
+  call: z.number(),
+  error: z.object({ code: z.string() }),
+});
 
 /** The frame's end of a port the page answers through `channel`. */
 const frameOf = (channel: ReturnType<typeof fileChannel>) => {
@@ -269,12 +277,18 @@ describe("a screen's file port", () => {
     expect(typeof outcome === "object" && "error" in outcome).toBeTruthy();
   });
 
-  it("downloads only what the person asked for in this frame, one a second at most", async () => {
+  it("downloads only what the person asked for in this frame, one per click, and again once that click's activation can't last", async () => {
     const { channel, release } = heldChannel();
     const { port1: port, port2: page } = new MessageChannel();
-    // Not asked for the first; asked for the next two, made at once.
-    const asking = [false, true, true];
-    const close = openFilePort(page, channel, () => asking.shift() ?? false);
+    const frame = {};
+    const clock = { now: 0, active: false };
+    const gesture = frameGesture(frame, {
+      events: new EventTarget(),
+      active: () => clock.active,
+      focused: () => frame,
+      now: () => clock.now,
+    });
+    const close = openFilePort(page, channel, gesture.take);
     const answers: unknown[] = [];
     port.addEventListener("message", (event: MessageEvent<unknown>) => {
       answers.push(event.data);
@@ -287,17 +301,37 @@ describe("a screen's file port", () => {
       file: fileOf(call),
     });
     try {
+      // Not asked for: no activation.
       port.postMessage(download(1));
+      await settle();
+      // A click in the frame: the first of two made at once is admitted.
+      clock.active = true;
       port.postMessage(download(2));
       port.postMessage(download(3));
       await settle();
-      expect(answers).toMatchObject([
-        { type: "failed", call: 1, error: { code: "file.gesture_required" } },
-        { type: "failed", call: 3, error: { code: "file.gesture_required" } },
+      // The person clicks on: that click is spent until it can't last.
+      clock.now += 4999;
+      port.postMessage(download(4));
+      await settle();
+      clock.now += 1;
+      port.postMessage(download(5));
+      await settle();
+      // Admitted downloads answer only once released: what answered is
+      // what was refused.
+      expect(
+        answers.map((answer) => {
+          const { type, call, error } = refusalSchema.parse(answer);
+          return [type, call, error.code];
+        })
+      ).toStrictEqual([
+        ["failed", 1, "file.gesture_required"],
+        ["failed", 3, "file.gesture_required"],
+        ["failed", 4, "file.gesture_required"],
       ]);
     } finally {
       release();
       close();
+      gesture.close();
       port.close();
     }
   });
@@ -320,20 +354,43 @@ describe("a screen's file port", () => {
       // A click inside the frame: the page has activation, the frame focus.
       page.active = true;
       page.focused = frame;
-      const inFrame = gesture.asked();
+      const inFrame = gesture.take();
       // A click on the page itself, then the frame takes focus.
       page.focused = null;
       events.dispatchEvent(new Event("pointerdown"));
       page.focused = frame;
       page.now += 4000;
-      const borrowed = gesture.asked();
+      const borrowed = gesture.take();
       // That click's activation is over; a click in the frame counts again.
       page.now += 1000;
-      expect([inFrame, borrowed, gesture.asked()]).toStrictEqual([
+      expect([inFrame, borrowed, gesture.take()]).toStrictEqual([
         true,
         false,
         true,
       ]);
+    } finally {
+      gesture.close();
+    }
+  });
+
+  it("counts activation for a download only while the frame has the focus", () => {
+    const frame = {};
+    const page: { active: boolean; focused: unknown } = {
+      active: false,
+      focused: {},
+    };
+    const gesture = frameGesture(frame, {
+      events: new EventTarget(),
+      active: () => page.active,
+      focused: () => page.focused,
+      now: () => 0,
+    });
+    try {
+      // Activation from no input of the page's own: only focus decides.
+      page.active = true;
+      const elsewhere = gesture.take();
+      page.focused = frame;
+      expect([elsewhere, gesture.take()]).toStrictEqual([false, true]);
     } finally {
       gesture.close();
     }
@@ -351,11 +408,11 @@ describe("a screen's file port", () => {
       now: () => page.now,
     });
     try {
-      const opening = gesture.asked();
+      const opening = gesture.take();
       page.now += 2000;
-      const soon = gesture.asked();
+      const soon = gesture.take();
       page.now += 3000;
-      expect([opening, soon, gesture.asked()]).toStrictEqual([
+      expect([opening, soon, gesture.take()]).toStrictEqual([
         false,
         false,
         true,

@@ -191,7 +191,8 @@ const workOf =
  * so what is the page's own, or spent on a download, lasts this long from
  * that input or download. Never "until the activation ends": a person
  * clicking on in the frame within that time keeps it from ever ending,
- * and would never be let download.
+ * and would never be let download. A browser set to keep activation longer
+ * widens this window, by as much: the accepted residual.
  */
 const activationLifetimeMs = 5000;
 
@@ -221,20 +222,24 @@ export interface GesturePage {
 }
 
 /**
- * Whether the person asked for a download in `frame`: the page has
- * activation, `frame` is focused, and that activation isn't the page's
- * own. A frame can focus itself, so focus alone would let it borrow a
- * click elsewhere on the page; activation the page gained from its own
- * input counts for no frame for as long as it can last
- * (`activationLifetimeMs`). Returns the check and a function that stops
- * listening.
+ * Takes the person's gesture for a download in `frame`, if they made one:
+ * the page has activation, `frame` is focused, that activation isn't the
+ * page's own, and no download spent it. A frame can focus itself, so focus
+ * alone would let it borrow a click elsewhere on the page; activation the
+ * page gained from its own input counts for no frame for as long as it can
+ * last (`activationLifetimeMs`), and so does one a download already took:
+ * one click, one download. Checking and spending read one clock, the
+ * page's, so a test drives both. Returns `take`, which checks and spends
+ * at once, and a function that stops listening.
  */
 export const frameGesture = (
   frame: unknown,
   page: GesturePage
-): { readonly asked: () => boolean; readonly close: () => void } => {
+): { readonly take: () => boolean; readonly close: () => void } => {
   /** When the page last gained activation of its own. */
   let ownAt = Number.NEGATIVE_INFINITY;
+  /** When a download last took the person's activation. */
+  let spentAt = Number.NEGATIVE_INFINITY;
   const own = (): void => {
     ownAt = page.now();
   };
@@ -248,10 +253,18 @@ export const frameGesture = (
     own();
   }
   return {
-    asked: () =>
-      page.now() - ownAt >= activationLifetimeMs &&
-      page.active() &&
-      page.focused() === frame,
+    take: () => {
+      const now = page.now();
+      const asked =
+        now - ownAt >= activationLifetimeMs &&
+        now - spentAt >= activationLifetimeMs &&
+        page.active() &&
+        page.focused() === frame;
+      if (asked) {
+        spentAt = now;
+      }
+      return asked;
+    },
     close: () => {
       for (const type of pageActivationEvents) {
         page.events.removeEventListener(type, own, { capture: true });
@@ -269,16 +282,9 @@ export const frameGesture = (
 export const openFilePort = (
   port: MessagePort,
   channel?: FileChannel,
-  asked: () => boolean = () => false
+  take: () => boolean = () => false
 ): (() => void) => {
   const calls: Calls = new Map();
-  /**
-   * When the page last admitted a download: one click, one download. The
-   * activation that admitted it is spent for as long as it can last.
-   */
-  let spentAt = Number.NEGATIVE_INFINITY;
-  const spent = (): boolean =>
-    performance.now() - spentAt < activationLifetimeMs;
   const send = (message: PageFileMessage): void => {
     port.postMessage(message);
   };
@@ -353,12 +359,12 @@ export const openFilePort = (
       return;
     }
     // A download only for a person who asked for it, in this frame:
-    // `asked` says the page has transient activation (a click in the
+    // `take` says the page has transient activation (a click in the
     // frame gives it, activation reaching a frame's ancestors, which a
     // screen's code can't fake) and that the frame has the focus, so a
-    // click elsewhere on the page admits none. One per activation: a
-    // screen can't turn one click into many downloads.
-    if (message.type === "download" && (spent() || !asked())) {
+    // click elsewhere on the page admits none, and spends it. One per
+    // activation: a screen can't turn one click into many downloads.
+    if (message.type === "download" && !take()) {
       send({
         type: "failed",
         call: message.call,
@@ -368,9 +374,6 @@ export const openFilePort = (
         },
       });
       return;
-    }
-    if (message.type === "download") {
-      spentAt = performance.now();
     }
     if (calls.size < fileLimits.frameTransfers) {
       void start(message);
