@@ -271,8 +271,12 @@ export interface DirectiveSite {
   line: number | undefined;
 }
 
-/** A triple-slash directive: `/// <reference …/>`, `/// <amd-module …/>`, … */
-const tripleSlash = /^\/\s*<[a-z-]+\b/iu;
+/**
+ * A triple-slash directive TypeScript obeys: `/// <reference …/>`,
+ * `/// <amd-module …/>` or `/// <amd-dependency …/>`. Any other tag in a
+ * `///` comment (`/// <summary>`) is a comment to it.
+ */
+const tripleSlash = /^\/\s*<(?:reference|amd-module|amd-dependency)\b/iu;
 
 /** A comment that switches the type check off for a file, a line or the next. */
 const suppression = /@ts-(?:nocheck|ignore|expect-error)\b/u;

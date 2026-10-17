@@ -872,7 +872,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     await expect(
       refusedSeal(
         withOperation(
-          'export const later = async (): Promise<string> => {\n  await new Promise((resolve) => setTimeout(resolve, 1));\n  return crypto.randomUUID() + new TextEncoder().encode("x").length + new URL("https://acme.test").host;\n};\n'
+          '/// <summary>A comment, not a directive.</summary>\nexport const later = async (): Promise<string> => {\n  await new Promise((resolve) => setTimeout(resolve, 1));\n  return crypto.randomUUID() + new TextEncoder().encode("x").length + new URL("https://acme.test").host;\n};\n'
         )
       )
     ).resolves.toStrictEqual({ code: "ok", files: [] });
