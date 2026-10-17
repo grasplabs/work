@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
 
@@ -70,6 +71,7 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
 }) => {
   const { builder } = peopleIn("workflowEditor");
   const page = await pageOf(builder);
+  const reads = await callGate(page, '["workflowResources","draft"]');
   const name = `edited-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
   await page.getByLabel("Name of a new workflow").fill(name);
@@ -121,10 +123,17 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
     })
   ).toBeVisible();
   await expect(page.getByLabel("workflow.json")).toHaveValue(mine);
+  // While theirs is on its way, the editor holds still: nothing typed then
+  // is overwritten when it arrives.
+  reads.hold();
   await page.getByRole("button", { name: "Take theirs" }).click();
+  await expect.poll(reads.stalled).toBe(1);
+  await expect(page.getByLabel("workflow.json")).not.toBeEditable();
+  reads.release();
   await expect(page.getByLabel("workflow.json")).toHaveValue(
     definition(name, "theirs")
   );
+  await expect(page.getByLabel("workflow.json")).toBeEditable();
 
   // A newer revision saved before this tab publishes is the same conflict.
   await save(other, definition(name, "again"));

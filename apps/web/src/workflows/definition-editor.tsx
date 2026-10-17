@@ -92,6 +92,9 @@ export const DefinitionEditor = ({
   const [draft, setDraft] = useState(loaded);
   const [text, setText] = useState(loaded.source);
   const [busy, setBusy] = useState(false);
+  // Taking theirs replaces the text when it arrives: the editor holds still
+  // until then, so nothing typed meanwhile is overwritten.
+  const [replacing, setReplacing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
   const edited = text !== draft.source;
   const publishable =
@@ -127,6 +130,7 @@ export const DefinitionEditor = ({
   // text stays in the editor until they choose to take theirs.
   const reload = async (replace: boolean): Promise<void> => {
     setBusy(true);
+    setReplacing(replace);
     try {
       const latest = await core.withSession(
         async (session) => await session.workflowResources.draft(workflow)
@@ -139,6 +143,7 @@ export const DefinitionEditor = ({
     } catch (error) {
       setOutcome({ kind: "failed", reason: failureText(error) });
     }
+    setReplacing(false);
     setBusy(false);
   };
 
@@ -187,6 +192,7 @@ export const DefinitionEditor = ({
           onChange={(event) => {
             setText(event.target.value);
           }}
+          readOnly={replacing}
           spellCheck={false}
           value={text}
         />
