@@ -469,6 +469,58 @@ describe("the admin snapshot", () => {
     expect(text).not.toContain("What does your team do all week?");
   });
 
+  it("counts every interview of a large roster, page after page", async () => {
+    const store = onboardingStore(env);
+    const id = unique();
+    // More leads than one page of interviews holds, each talking now.
+    const leads = Array.from({ length: 110 }, (_, at) => `lead-${at}-${id}`);
+    const roster: Roster = {
+      teams: leads.map((lead, at) => ({
+        id: `team-${at}`,
+        name: `Team ${at}`,
+        lead,
+        does: "",
+        off: false,
+      })),
+      people: leads.map((lead, at) => ({
+        id: lead,
+        name: `Lead ${at}`,
+        email: "",
+        team: `team-${at}`,
+        title: "",
+        away: false,
+      })),
+    };
+    const by = { type: "system" } as const;
+    await store.setPaused(false, by);
+    await store.saveRoster(roster, by);
+    await store.savePlan(
+      { start: new Date().toISOString().slice(0, 10), days: 14 },
+      by
+    );
+    await store.releaseDue();
+    await Promise.all(
+      leads.map(async (lead) => {
+        const secret = ((await store.linkOf(lead)) ?? "").split("#")[1] ?? "";
+        const mark = await sha256Hex(secret);
+        const key = await sha256Hex(`${lead}'s device`);
+        await store.openLink(mark, null, key);
+        await store.saveInterview(mark, key, 0, progress());
+      })
+    );
+
+    const response = await askAsConsole();
+    const snapshot = adminSnapshotSchema.parse(await response.json());
+
+    const counted = snapshot.interviews.filter(({ person }) =>
+      leads.includes(person)
+    );
+    expect({
+      interviews: counted.length,
+      facts: [...new Set(counted.map(({ facts }) => facts))],
+    }).toStrictEqual({ interviews: 110, facts: [2] });
+  });
+
   it("puts every read in the company's audit log, by the staff member the console names", async () => {
     await running();
 

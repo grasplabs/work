@@ -51,6 +51,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   inArray,
   isNotNull,
   like,
@@ -184,8 +185,8 @@ export interface AdminInterviewFacts {
   completedAt: string | null;
   updatedAt: string;
   /** Where they stand, as their page last said; null before it saved. */
-  state: InterviewProgress["person"] | null;
-  phase: InterviewProgress["phase"] | null;
+  state: NonNullable<InterviewProgress["person"]> | null;
+  phase: NonNullable<InterviewProgress["phase"]> | null;
   facts: number;
   out: number;
   confirmed: number;
@@ -280,6 +281,43 @@ const logWhere = (filter: LogFilter, about: string[] | undefined) =>
 /** A count as given, when it is one: a number from nothing up. */
 const counted = (value: number | undefined): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+
+/** How many interviews a snapshot read parses at once. */
+const adminFactsPage = 100;
+
+/** What the admin reads of one interview's progress: its numbers alone. */
+interface InterviewCounts {
+  state: NonNullable<InterviewProgress["person"]> | null;
+  phase: NonNullable<InterviewProgress["phase"]> | null;
+  facts: number;
+  out: number;
+  confirmed: number;
+  rating: number | null;
+  typed: boolean;
+  interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
+}
+
+const noCounts: InterviewCounts = {
+  state: null,
+  phase: null,
+  facts: 0,
+  out: 0,
+  confirmed: 0,
+  rating: null,
+  typed: false,
+  interviewer: null,
+};
+
+const countsOf = (progress: InterviewProgress): InterviewCounts => ({
+  state: progress.person,
+  phase: progress.phase,
+  facts: progress.facts.filter(({ out }) => out !== true).length,
+  out: progress.facts.filter(({ out }) => out === true).length,
+  confirmed: progress.confirmed,
+  rating: progress.rating ?? null,
+  typed: progress.mode === "type",
+  interviewer: progress.interviewer ?? null,
+});
 
 export class Onboarding extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -1145,19 +1183,36 @@ export class Onboarding extends DurableObject<Env> {
     links: Omit<typeof links.$inferSelect, "keyMark" | "version">[];
     interviews: AdminInterviewFacts[];
   } {
-    // One interview's progress this core can't read leaves that interview
-    // with no counts, not the whole read failing; the log names the person
-    // by id alone, never what was kept.
-    const held = new Map<string, InterviewProgress>();
-    for (const row of this.#db.select().from(interviews).all()) {
-      const progress = interviewProgressSchema.safeParse(
-        parsedJson(row.progress)
-      );
-      if (progress.success) {
-        held.set(row.person, progress.data);
-      } else {
-        log.warn("onboarding.admin_facts.unreadable", { person: row.person });
+    // Only the counts are kept, read a page of interviews at a time, so a
+    // read of a large roster never holds every conversation at once. One
+    // interview's progress this core can't read leaves that interview with
+    // no counts, not the whole read failing; the log names the person by
+    // id alone, never what was kept.
+    const countsBy = new Map<string, InterviewCounts>();
+    let after = "";
+    for (;;) {
+      const page = this.#db
+        .select({ person: interviews.person, progress: interviews.progress })
+        .from(interviews)
+        .where(gt(interviews.person, after))
+        .orderBy(asc(interviews.person))
+        .limit(adminFactsPage)
+        .all();
+      for (const row of page) {
+        const progress = interviewProgressSchema.safeParse(
+          parsedJson(row.progress)
+        );
+        if (progress.success) {
+          countsBy.set(row.person, countsOf(progress.data));
+        } else {
+          log.warn("onboarding.admin_facts.unreadable", { person: row.person });
+        }
       }
+      const last = page.at(-1);
+      if (last === undefined || page.length < adminFactsPage) {
+        break;
+      }
+      after = last.person;
     }
     const [row] = this.#db
       .select({ toldAt: onboarding.toldAt })
@@ -1187,21 +1242,10 @@ export class Onboarding extends DurableObject<Env> {
         .select()
         .from(interviewStates)
         .all()
-        .map((state) => {
-          const progress = held.get(state.person);
-          return {
-            ...state,
-            state: progress?.person ?? null,
-            phase: progress?.phase ?? null,
-            facts:
-              progress?.facts.filter(({ out }) => out !== true).length ?? 0,
-            out: progress?.facts.filter(({ out }) => out === true).length ?? 0,
-            confirmed: progress?.confirmed ?? 0,
-            rating: progress?.rating ?? null,
-            typed: progress?.mode === "type",
-            interviewer: progress?.interviewer ?? null,
-          };
-        }),
+        .map((state) => ({
+          ...state,
+          ...(countsBy.get(state.person) ?? noCounts),
+        })),
     };
   }
 
