@@ -2107,6 +2107,13 @@ const trackedCalls = (
 ): {
   capabilities: Capabilities;
   settle: () => Promise<unknown>;
+  /**
+   * Settles once every call still under way has, however each ended: what
+   * a run stopped at its deadline or cancelled left running in the host
+   * (an App it called committing, that call's refusal recorded), which
+   * `letGo` keeps alive a little longer.
+   */
+  inFlight: () => Promise<unknown>;
 } => {
   let handlerSettled = false;
   const running = new Set<Promise<unknown>>();
@@ -2157,6 +2164,7 @@ const trackedCalls = (
       resource: track(capabilities.resource),
       emit: track(capabilities.emit),
     },
+    inFlight: async () => await Promise.allSettled(running),
     settle: async () => {
       handlerSettled = true;
       while (running.size > 0) {
@@ -2310,13 +2318,25 @@ const stoppedCode = (
 const letGoMs = 1000;
 
 /**
- * Waits, a little, for a run stopped at its deadline to let go of what it
- * holds (an on-prem sandbox process, which its runner frees when the run's
- * signal aborts): past the answer, the request that frees it may itself be
- * cancelled.
+ * Waits, a little, for a run stopped at its deadline or cancelled to let go
+ * of what it holds (an on-prem sandbox process, which its runner frees when
+ * the run's signal aborts), and for what it left under way in the host to
+ * settle (`inFlight`: a called App's commit, that call's refusal recorded;
+ * a call its handler started and didn't wait for). Past the answer, the
+ * request that frees or finishes them may itself be cancelled, its object
+ * evicted: kept alive this long, they finish rather than being cut off
+ * (GRA-701). Never longer, so a call that hangs can't hold the answer.
  */
-const letGo = async (ran: Promise<unknown>): Promise<void> => {
-  await Promise.race([ran, scheduler.wait(letGoMs)]);
+const letGo = async (
+  ran: Promise<unknown>,
+  inFlight: () => Promise<unknown>
+): Promise<void> => {
+  const timer = new AbortController();
+  await Promise.race([
+    Promise.allSettled([ran, inFlight()]),
+    scheduler.wait(letGoMs, { signal: timer.signal }).catch(() => null),
+  ]);
+  timer.abort();
 };
 
 /**
@@ -2351,7 +2371,6 @@ const runHandler = async (
       nested: run.depth > 0,
     })
   );
-  let expired = false;
   try {
     const outcome = await untilDeadline(
       ran,
@@ -2359,7 +2378,6 @@ const runHandler = async (
       run.cancelled
     );
     if (outcome === "expired" || outcome === "cancelled") {
-      expired = true;
       // Stopped at its deadline, or cancelled: its channel ends as this
       // returns (the `finally` below), so nothing it still does reaches
       // the store, and what it staged never commits.
@@ -2372,7 +2390,6 @@ const runHandler = async (
     // that wait too, saying what is known of what still ran.
     const left = await untilCancelled(calls.settle(), run.cancelled);
     if (left === "cancelled") {
-      expired = true;
       throw hostError(
         operationErrors.create(stoppedCode("cancelled", capabilities))
       );
@@ -2421,9 +2438,10 @@ const runHandler = async (
     // ends with its channel.
     stopped.abort();
     open.end();
-    if (expired) {
-      await letGo(ran);
-    }
+    // Stopped at its deadline or cancelled, or ended with calls it left
+    // still out (`operation.unfinished_call`): kept alive a little longer.
+    // A run that settled with nothing left out waits for nothing here.
+    await letGo(ran, calls.inFlight);
     // Its session, on-prem, which the function its caller named opened and
     // which went on after it answered: it ends now, as the run is over, and
     // is waited for a little, so it asks the supervisor to free its process
