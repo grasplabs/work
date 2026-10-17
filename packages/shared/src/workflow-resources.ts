@@ -146,6 +146,7 @@ export const catalogBindingKinds = [
   "connector",
   "model",
   "decision",
+  "event",
 ] as const;
 export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
 
@@ -198,7 +199,30 @@ export const catalogContractSchema = z
         })
       )
       .optional(),
+    /**
+     * An event contract's admitted CloudEvents types, each with the
+     * descriptor of its data (required: no type is admitted untyped) and
+     * whether a person's screen may send it, which is what makes it an
+     * App's event reference.
+     */
+    events: z
+      .record(
+        z.string().min(1).max(256),
+        z.strictObject({
+          data: z.string().max(256 * 1024),
+          browser: z.boolean(),
+        })
+      )
+      .optional(),
   })
+  .refine(
+    // A screen sends an event through its binding's alias, which names one
+    // type: an event contract admits at most one type a screen sends.
+    (contract) =>
+      Object.values(contract.events ?? {}).filter(({ browser }) => browser)
+        .length <= 1,
+    { message: "An event contract admits at most one type a screen sends." }
+  )
   .refine(
     // One row of the catalog: well under what a database row may hold.
     (contract) =>
@@ -234,7 +258,10 @@ const deciderSchema = z.string().regex(/^(?:person|team|role):[\w.-]{1,128}$/u);
  *   that owns the store as its current version serves it (core's
  *   store-operations.ts). It serves an `operation` binding, as an export
  *   does;
- * - `decision`: who answers it.
+ * - `decision`: who answers it;
+ * - `event`: that the workflow may listen for and emit the contract's
+ *   types. Who may send each is the contract's (`browser`) and the
+ *   host's checks on every send, never this approval's.
  */
 export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -273,6 +300,7 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("decision"),
     deciders: z.array(deciderSchema).min(1).max(16),
   }),
+  z.strictObject({ kind: z.literal("event") }),
 ]);
 export type WorkflowBindingTarget = z.infer<typeof workflowBindingTargetSchema>;
 
