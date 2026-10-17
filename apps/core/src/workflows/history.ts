@@ -107,8 +107,11 @@ interface HeldStep {
 interface Context {
   /** Whether the person sees the run's details. */
   sees: boolean;
-  /** What the run's version's review shows of it; none when none is kept. */
-  reviewed: WorkflowCalls | undefined;
+  /**
+   * The task an engine step name is, as its version names it; null for a
+   * name it doesn't (`reviewedTaskOf` for an App's run).
+   */
+  taskOf: (engineStep: string) => string | null;
   /** The run's held steps, by the key core's steps name them by. */
   heldByKey: ReadonlyMap<string, HeldStep>;
   /** The same, by the held step's ordinal. */
@@ -329,7 +332,7 @@ const coreStepOf = (
   const round = Number(parts.round);
   const told = {
     stepId: `step-${held.ordinal}`,
-    taskId: reviewedTaskOf(context.reviewed, held.name),
+    taskId: context.taskOf(held.name),
   };
   if (parts.rest === "run" && step.kind === "do") {
     let offset = held.attempts;
@@ -385,7 +388,7 @@ const entryOf = (
   }
   const told = {
     stepId: `step-${step.ordinal}`,
-    taskId: reviewedTaskOf(context.reviewed, step.name),
+    taskId: context.taskOf(step.name),
   };
   if (step.kind === "do") {
     const held = context.heldByOrdinal.get(step.ordinal);
@@ -530,38 +533,38 @@ const reviewedOf = async (
   }
 };
 
+/** How a page of a run's history tells its steps: `Context`'s own two. */
+export interface HistoryTelling {
+  readonly sees: boolean;
+  readonly taskOf: (engineStep: string) => string | null;
+}
+
+/** A page of a run's history entries, and where the next one starts. */
+export interface HistoryEntries {
+  readonly items: readonly RunHistoryEntry[];
+  /** The engine event ID the page ended at, when more follow. */
+  readonly nextCursor: string | null;
+  readonly hasMore: boolean;
+}
+
 /**
- * A page of run `run`'s history for `by`, from `input`'s cursor (the
- * engine event ID the page before ended at): at most its page size of
- * entries, oldest first.
+ * Up to `pageSize` entries of run `id`'s history after engine event
+ * `after`, oldest first, told as `telling` says, from at most `maxReads`
+ * reads of its engine journal. Empty for a run the engine has no record
+ * of: still starting, or never started. Who may read it is the caller's
+ * to have checked.
  */
-export const runHistory = async (
+export const historyEntries = async (
   env: Env,
-  by: Member,
-  run: unknown,
-  input?: unknown
-): Promise<RunHistoryPage> => {
-  const id = runIdSchema.safeParse(run);
-  const query = runHistoryPageSchema.safeParse(input);
-  if (!(id.success && query.success)) {
-    throw workflowErrors.create("workflow.invalid");
-  }
-  const row = await findRun(env, id.data);
-  if (row === undefined) {
-    throw workflowErrors.create("workflow.run_not_found");
-  }
-  const { owner } = await appFor(env, by, row.appId, "user");
-  const done: RunHistoryPage = { items: [], nextCursor: null, hasMore: false };
-  if (detailsRemoved(env, row)) {
-    return done;
-  }
-  const stub = runObjectOf(env, row.id);
-  const sees = seesDetails(by, row, owner);
-  const reviewed = await reviewedOf(env, row);
-  const { pageSize, cursor } = query.data;
+  id: string,
+  { after: from, pageSize }: { after: number; pageSize: number },
+  telling: HistoryTelling
+): Promise<HistoryEntries> => {
+  const done: HistoryEntries = { items: [], nextCursor: null, hasMore: false };
+  const stub = runObjectOf(env, id);
   const limit = Math.min(maxRecordsPerRead, pageSize * 4);
   const items: RunHistoryEntry[] = [];
-  let after = cursor === null ? 0 : Number(cursor);
+  let after = from;
   let more = true;
   for (
     let read = 0;
@@ -576,8 +579,7 @@ export const runHistory = async (
     }
     // Each read is told against the held steps of its own moment.
     const context: Context = {
-      sees,
-      reviewed,
+      ...telling,
       heldByKey: page.held,
       heldByOrdinal: new Map(
         [...page.held.values()].map((step) => [step.ordinal, step])
@@ -600,4 +602,44 @@ export const runHistory = async (
   return more
     ? { items, nextCursor: String(after), hasMore: true }
     : { items, nextCursor: null, hasMore: false };
+};
+
+/**
+ * A page of run `run`'s history for `by`, from `input`'s cursor (the
+ * engine event ID the page before ended at): at most its page size of
+ * entries, oldest first.
+ */
+export const runHistory = async (
+  env: Env,
+  by: Member,
+  run: unknown,
+  input?: unknown
+): Promise<RunHistoryPage> => {
+  const id = runIdSchema.safeParse(run);
+  const query = runHistoryPageSchema.safeParse(input);
+  if (!(id.success && query.success)) {
+    throw workflowErrors.create("workflow.invalid");
+  }
+  const row = await findRun(env, id.data);
+  if (row === undefined) {
+    throw workflowErrors.create("workflow.run_not_found");
+  }
+  const { owner } = await appFor(env, by, row.appId, "user");
+  if (detailsRemoved(env, row)) {
+    return { items: [], nextCursor: null, hasMore: false };
+  }
+  const reviewed = await reviewedOf(env, row);
+  const { pageSize, cursor } = query.data;
+  const page = await historyEntries(
+    env,
+    row.id,
+    { after: cursor === null ? 0 : Number(cursor), pageSize },
+    {
+      sees: seesDetails(by, row, owner),
+      taskOf: (engineStep) => reviewedTaskOf(reviewed, engineStep),
+    }
+  );
+  return page.hasMore && page.nextCursor !== null
+    ? { items: [...page.items], nextCursor: page.nextCursor, hasMore: true }
+    : { items: [...page.items], nextCursor: null, hasMore: false };
 };

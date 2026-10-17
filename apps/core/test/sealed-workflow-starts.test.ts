@@ -17,7 +17,7 @@ import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
-import { appFor, setCurrentVersion } from "../src/apps.ts";
+import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import {
@@ -244,6 +244,10 @@ const runIds = (result: OperationResult): string[] =>
         .items.map(({ run }) => run.runId)
     : [result.error.code];
 
+/** "ok", or a refusal's code and words. */
+const refusalOf = (result: OperationResult) =>
+  result.ok ? "ok" : { code: result.error.code, message: result.error.message };
+
 /** "ok", or a refusal's code. */
 const codeOf = (result: OperationResult): string =>
   result.ok ? "ok" : result.error.code;
@@ -468,8 +472,10 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       none: [],
       carol: [carols],
       owner: [],
-      ownHistory: "workflow.history_unavailable",
-      othersHistory: "workflow.history_unavailable",
+      // Sealed before the App bound anything, the release pins no
+      // workflow version: it reads no run's history, its own included.
+      ownHistory: "workflow.run_unavailable",
+      othersHistory: "workflow.run_unavailable",
     });
     const bobs = runIds(await ask(bob, references.runs, { pagination: {} }));
     expect({
@@ -510,7 +516,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
           pagination: { cursor: "not a cursor" },
         })
       ),
-      notPaginated: codeOf(
+      historyWindow: codeOf(
         await ask(bob, references.history, { runId: first }, 10)
       ),
     }).toStrictEqual({
@@ -518,7 +524,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       unknown: "operation.not_found",
       status: "contract.invalid_args",
       cursor: "data.invalid_cursor",
-      notPaginated: "contract.not_paginated",
+      historyWindow: "workflow.run_unavailable",
     });
 
     // A caller no longer allowed to call (an agent whose permission was
@@ -695,5 +701,323 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       revoked: "version.revoked",
       removed: "app.not_found",
     });
+  });
+});
+
+/**
+ * The Requests App with `workflowId` bound as `followUp` before its seal,
+ * so its release pins version 1, current, `members` given the user role,
+ * with the App's `start` grant.
+ */
+const pinnedApp = async (
+  admin: Identity,
+  members: readonly Identity[],
+  workflowId: string,
+  owner: Identity
+) => {
+  const fixture = await appWith(files(), "Requests", owner);
+  await bindWorkflowToApp(env, owner, workflowId, {
+    app: fixture.app,
+    alias: "followUp",
+    version: 1,
+  });
+  const release = await seal(fixture);
+  await setCurrentVersion(env, owner, fixture.app, 1);
+  for (const member of members) {
+    // oxlint-disable-next-line no-await-in-loop -- a row each
+    await env.DB.prepare(
+      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+    )
+      .bind(fixture.app, member.userId, owner.userId, Date.now())
+      .run();
+  }
+  const asked = await requestPermission(
+    env,
+    owner,
+    {
+      subject: { type: "app", appId: fixture.app },
+      object: { type: "workflow", workflowId },
+      actions: ["start"],
+      binding: "FOLLOW_UP",
+    },
+    rolesOf(owner)
+  );
+  await grantPermission(env, admin, asked.id, { version: 1 });
+  return { fixture, release };
+};
+
+/** A workflow whose task fails on an expression that reads the input. */
+const failingDefinitionOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "2.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      {
+        greet: {
+          set: { status: "${ $workflow.input.who | tonumber | tostring }" },
+        },
+      },
+    ],
+  });
+
+const historySchema = z.object({
+  items: z.array(z.looseObject({ sequence: z.number(), kind: z.string() })),
+  nextCursor: z.string().nullable(),
+  hasMore: z.boolean(),
+});
+
+describe("a workflow reference's run history", { timeout: 180_000 }, () => {
+  it("tells the person's own runs of the version the release pins, metadata only, and refuses every other run alike", async () => {
+    const admin = await person("admin");
+    const [bob, carol] = await Promise.all([person("user"), person("user")]);
+    const owner = await person("builder");
+    const workflow = await greetingOf(owner);
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob, carol],
+      workflow.id,
+      owner
+    );
+    const { app } = fixture;
+    const kickOff = async (
+      who: Identity,
+      name: string,
+      other?: { app: string; release: typeof release }
+    ): Promise<string> => {
+      const through = other ?? { app, release };
+      const { result } = await callAppFunction(
+        env,
+        who,
+        through.app,
+        JSON.stringify({
+          reference: {
+            resourceId: through.release.manifest.resourceId,
+            resourceVersion: through.release.manifest.resourceVersion,
+            contractId: "requests.kickOff",
+            fingerprint: through.release.fingerprints["requests.kickOff"] ?? "",
+            kind: "action",
+          },
+          input: { who: name },
+        })
+      );
+      if (!result.ok) {
+        throw new Error(result.error.code);
+      }
+      return z.object({ runId: z.string() }).parse(result.value).runId;
+    };
+    const settled = async (runId: string) =>
+      await vi.waitFor(
+        async () => {
+          const run = await resourceRunFor(env, admin, workflow.id, runId);
+          expect(run.endedAt).not.toBeNull();
+          return run;
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+    const bobs = await kickOff(bob, "Bob");
+    const carols = await kickOff(carol, "Carol");
+    // Bob's run of the same version, through another App pinning it too.
+    const otherApp = await pinnedApp(admin, [bob], workflow.id, owner);
+    const throughOther = await kickOff(bob, "Bob", {
+      app: otherApp.fixture.app,
+      release: otherApp.release,
+    });
+    await Promise.all([settled(bobs), settled(carols), settled(throughOther)]);
+    // The owner's own start, not through the App: never the App's to tell.
+    const direct = await startWorkflow(
+      env,
+      { type: "person", person: owner },
+      workflow.id,
+      { version: 1, input: { who: "Owner" }, key: `key-${unique()}` }
+    );
+
+    const history = await queryReference(release, "followUp", "history");
+    const ask = async (
+      who: Identity,
+      input: unknown,
+      window?: number
+    ): Promise<OperationResult> => {
+      const request = JSON.stringify({
+        reference: history,
+        input,
+        ...(window === undefined ? {} : { window: { extent: window } }),
+      });
+      const { result } =
+        window === undefined
+          ? await callAppFunction(env, who, app, request)
+          : await callScreenFunction(
+              env,
+              who,
+              app,
+              request,
+              Date.now() + 30_000,
+              async () => {
+                // A window's pages cost nothing here.
+              }
+            );
+      return result;
+    };
+    const pageOf = (result: OperationResult) =>
+      historySchema.parse(result.ok ? result.value : result);
+    const whole = pageOf(await ask(bob, { runId: bobs, pagination: {} }));
+    // Page by page, one entry each, from each page's cursor.
+    const paged: unknown[] = [];
+    let cursor: string | null = null;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
+      const answer = await ask(bob, {
+        runId: bobs,
+        pagination: { pageSize: 1, cursor },
+      });
+      const page = pageOf(answer);
+      paged.push(...page.items);
+      ({ nextCursor: cursor } = page);
+    } while (cursor !== null);
+    const window = await ask(bob, { runId: bobs }, 50);
+    expect({
+      told: whole.items.map((item) =>
+        Object.fromEntries(
+          Object.entries(item).filter(
+            ([key]) => key !== "id" && key !== "sequence" && key !== "at"
+          )
+        )
+      ),
+      ascending: whole.items.every(
+        (item, index) =>
+          index === 0 || item.sequence > (whole.items[index - 1]?.sequence ?? 0)
+      ),
+      paged,
+      window: window.ok ? window.value : window.error.code,
+    }).toStrictEqual({
+      // Metadata only: no input, output or engine step ID; the task named
+      // by the ID its sealed build declares.
+      told: [
+        { taskId: null, kind: "lifecycle", status: "queued" },
+        { taskId: null, kind: "lifecycle", status: "running" },
+        { taskId: "greet", kind: "step", state: "started", attempt: 1 },
+        { taskId: "greet", kind: "step", state: "completed", attempt: 1 },
+        { taskId: null, kind: "lifecycle", status: "completed" },
+      ],
+      ascending: true,
+      paged: whole.items,
+      window: { items: whole.items, hasMore: false },
+    });
+
+    // Anyone else's run, a run started outside the App, and an ID no run
+    // has are one refusal, word for word; a cursor tells nothing of them.
+    const unknown = refusalOf(
+      await ask(bob, { runId: crypto.randomUUID(), pagination: {} })
+    );
+    expect({
+      carols: refusalOf(await ask(bob, { runId: carols, pagination: {} })),
+      direct: refusalOf(await ask(owner, { runId: direct.id, pagination: {} })),
+      otherApps: refusalOf(
+        await ask(bob, { runId: throughOther, pagination: {} })
+      ),
+      carolsWithBadCursor: refusalOf(
+        await ask(bob, { runId: carols, pagination: { cursor: "x" } })
+      ),
+      carolsWindow: refusalOf(await ask(bob, { runId: carols }, 50)),
+      ownBadCursor: codeOf(
+        await ask(bob, { runId: bobs, pagination: { cursor: "x" } })
+      ),
+      carolOwn: pageOf(await ask(carol, { runId: carols, pagination: {} }))
+        .items.length,
+    }).toStrictEqual({
+      carols: unknown,
+      direct: unknown,
+      otherApps: unknown,
+      carolsWithBadCursor: unknown,
+      carolsWindow: unknown,
+      ownBadCursor: "data.invalid_cursor",
+      carolOwn: 5,
+    });
+    expect(unknown).toMatchObject({ code: "workflow.run_unavailable" });
+
+    // Rebound to version 2, which fails on what it reads: version 1's
+    // release tells none of version 2's runs, and a release sealed after
+    // the rebind, none of version 1's. A failure's own words never leave.
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: failingDefinitionOf(workflow.name),
+      basedOn: 1,
+    });
+    await bindWorkflowToApp(env, owner, workflow.id, {
+      app,
+      alias: "followUp",
+      version: 2,
+    });
+    const secret = `Secret-${unique()}`;
+    const failed = await kickOff(bob, secret);
+    await settled(failed);
+    const throughOld = refusalOf(
+      await ask(bob, { runId: failed, pagination: {} })
+    );
+    await commitFiles(
+      env,
+      owner,
+      app,
+      {
+        ...files(),
+        "app.ts": `${files()["app.ts"] ?? ""}// Sealed again.\n`,
+      },
+      "Seal again"
+    );
+    const next = await seal(fixture, 2);
+    await setCurrentVersion(env, owner, app, 2);
+    const nextHistory = await queryReference(next, "followUp", "history");
+    const askNext = async (input: unknown) => {
+      const answer = await callAppFunction(
+        env,
+        bob,
+        app,
+        JSON.stringify({ reference: nextHistory, input })
+      );
+      return answer.result;
+    };
+    const failedPage = await askNext({ runId: failed, pagination: {} });
+    const failedItems = pageOf(failedPage).items;
+    expect({
+      throughOld,
+      oldRunThroughNext: refusalOf(
+        await askNext({ runId: bobs, pagination: {} })
+      ),
+      failedStep: failedItems.find(
+        (item) => item.kind === "step" && item.state === "failed"
+      )?.error,
+      leaks: JSON.stringify(failedPage).includes(secret),
+    }).toStrictEqual({
+      throughOld: unknown,
+      oldRunThroughNext: unknown,
+      // The engine's code and words, never what the expression read.
+      failedStep: {
+        code: "expression.failed",
+        message: "A step of the workflow failed.",
+        category: "operational",
+        retryable: false,
+        requestId: null,
+      },
+      leaks: false,
+    });
+
+    // Once the retention sweep removed the run's details (as it marks
+    // its receipt), its history tells nothing.
+    await env.DB.prepare(
+      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
+    )
+      .bind(Date.now(), failed)
+      .run();
+    expect(
+      pageOf(await askNext({ runId: failed, pagination: {} }))
+    ).toStrictEqual({ items: [], nextCursor: null, hasMore: false });
   });
 });
