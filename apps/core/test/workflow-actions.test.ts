@@ -559,6 +559,83 @@ describe("a JSON workflow's own actions", () => {
     });
   });
 
+  it("makes no call of an action outside its step, though the action keeps the runner from waiting for it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // The runner shares the action's isolate, so its own wait is no
+    // boundary: this action makes a call, then breaks the call's then (and
+    // every promise's constructor, so await goes through then), and the
+    // runner answers at once, the call still on its way to the host. The
+    // host is the boundary: a call it has when the action answers settles
+    // before the task records (its refusal standing); one that reaches it
+    // after is refused, never made. Either way, no effect outside the step.
+    const { workflow } = await actingWorkflow(
+      ada,
+      admin,
+      `import { action, resource, v } from "@grasp-os/sdk/action";
+
+export const notify = action({
+  args: { to: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [resource.connector("mail")],
+  handler: (ctx, args) => {
+    const late = ctx.resources.mail.call("mail.send", { to: args.to, subject: "late" });
+    const realThen = Promise.prototype.then;
+    Object.defineProperty(Promise.prototype, "constructor", {
+      value: Object,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(Promise.prototype, "then", {
+      value(this: Promise<unknown>, onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+        // The call the runner waits for looks settled at once; every other
+        // promise works as it did.
+        if (this === late && typeof onFulfilled === "function") {
+          onFulfilled(undefined);
+          return this;
+        }
+        return Reflect.apply(realThen, this, [onFulfilled, onRejected]);
+      },
+      configurable: true,
+      writable: true,
+    });
+    return { status: "answered" };
+  },
+});
+`
+    );
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const run = async (make: () => Promise<Json>) =>
+      await callAction(
+        env,
+        build.compute,
+        build.sdk,
+        notifyCall,
+        { to: "Ada" },
+        Date.now() + 30_000,
+        { owner: `workflow-action:${workflow.id}`, make }
+      );
+    let begun = 0;
+    let done = 0;
+    const answered = await outcome(
+      run(async () => {
+        begun += 1;
+        await scheduler.wait(100);
+        done += 1;
+        return { messageId: "m" };
+      })
+    );
+    const atAnswer = { begun, done };
+    // Long enough for a call still on its way to reach the host.
+    await scheduler.wait(500);
+    expect({ answered, atAnswer, after: { begun, done } }).toStrictEqual({
+      answered: "ok",
+      // Every call made was made, and settled, within the step.
+      atAnswer: { begun: atAnswer.done, done: atAnswer.done },
+      after: atAnswer,
+    });
+  });
+
   it("refuses arguments past a step's payload as a call's refusal, and hands the action no host error's detail", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
