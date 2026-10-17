@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { adminSnapshotSchema } from "../../src/admin-snapshot.ts";
 import type { AdminSnapshot } from "../../src/admin-snapshot.ts";
+import { logItemsOf } from "../../src/admin/admin-log.ts";
 import {
   adminOrgOf,
   staffSnapshotOf,
@@ -600,6 +601,21 @@ describe("an organization from core's admin snapshot", () => {
       other: { tokensIn: 9000, tokensOut: 1500, spoken: 0, heard: 0, spend: 0 },
       reading: 9000,
     });
+  });
+
+  it("keeps in its log who was told and who talked, by the day, with no Worker activity", () => {
+    const { view } = shown();
+    const kinds = new Set(
+      logItemsOf(view, []).flatMap((item) =>
+        item.source.from === "company" ? [item.source.event.kind] : []
+      )
+    );
+
+    expect([
+      kinds.has("told"),
+      kinds.has("lead"),
+      kinds.has("talked"),
+    ]).toStrictEqual([true, true, true]);
   });
 
   it("names its members as core does, ready for when it opens", () => {
