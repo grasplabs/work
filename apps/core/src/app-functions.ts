@@ -49,6 +49,13 @@ import type {
   RunOrigin,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
+import {
+  callWorkflowQuery,
+  isWorkflowQueryPath,
+  readWorkflowWindow,
+  workflowQueryOf,
+} from "./workflow-reference-queries.ts";
+import type { ResolvedWorkflowQuery } from "./workflow-reference-queries.ts";
 import { appWorkflowStarts } from "./workflow-start-intents.ts";
 import type { CallingAgent } from "./workflow-start-intents.ts";
 
@@ -605,7 +612,7 @@ const callAllowed = (
   // A window is a screen's, and a query's only.
   if (
     call.window !== undefined &&
-    (!windowed || call.reference.kind !== "query")
+    (!windows || call.reference.kind !== "query")
   ) {
     throw operationErrors.create("contract.invalid_request");
   }
@@ -651,18 +658,30 @@ const callFunction = async (
   }
   let release: Release;
   let path: string;
+  let appId: string;
+  let workflowQuery: ResolvedWorkflowQuery | undefined;
   try {
     // Anyone without a role in the App learns nothing of it.
     const found = await appFor(env, by, app, "user");
     if (found.currentVersion === null) {
       throw versionErrors.create("version.not_sealed");
     }
+    appId = found.id;
     // The release of the App's current version: its manifest names the
     // App and the version the reference must name.
     release = await loadRelease(env, found.id, found.currentVersion);
-    path = publicOperationOf(release, call.reference);
+    ({ path, workflowQuery } = await referenceIn(release, call.reference));
   } catch (error) {
     return refused(error);
+  }
+  if (workflowQuery !== undefined) {
+    return await answeredWorkflowQuery(env, {
+      caller: { app: appId, userId: by.userId },
+      query: workflowQuery,
+      call,
+      release,
+      refused,
+    });
   }
   try {
     const invocation = await invocationFor(env, release, {

@@ -108,6 +108,10 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
   "workflow.run_unavailable": "This workflow has no such run.",
+  "workflow.decision_unavailable":
+    "This workflow has no such decision for you to see.",
+  "workflow.history_unavailable":
+    "A run's history isn't available through an App yet.",
   "workflow.run_limit":
     "The person this start acts for already has as many runs of this workflow under way as one person may. Wait for one to end, or stop one.",
   "workflow.run_ended": "This run has already ended.",

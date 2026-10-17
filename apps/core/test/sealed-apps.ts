@@ -1,3 +1,9 @@
+import {
+  contractFingerprint,
+  declaredWorkflows,
+  workflowQueries,
+} from "@grasp-os/sdk/host";
+import type { WorkflowQueryName } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -178,4 +184,30 @@ export const sweptAway = async (app: AppId, version: number): Promise<void> => {
     );
   }
   throw new Error(`Retention kept version ${version} of App ${app}`);
+};
+
+/**
+ * The reference to query `name` of the workflow the App declares as
+ * `alias`, as `#grasp` generates it from `release`.
+ */
+export const queryReference = async (
+  release: Release,
+  alias: string,
+  name: WorkflowQueryName
+) => {
+  const bound = declaredWorkflows(release.app, release.workflows).find(
+    (workflow) => workflow.alias === alias
+  );
+  const operation =
+    bound === undefined ? undefined : workflowQueries(bound)[name];
+  if (operation === undefined) {
+    throw new Error(`No query ${name} of ${alias}`);
+  }
+  return {
+    resourceId: release.manifest.resourceId,
+    resourceVersion: release.manifest.resourceVersion,
+    contractId: operation.path,
+    fingerprint: await contractFingerprint(operation),
+    kind: "query" as const,
+  };
 };

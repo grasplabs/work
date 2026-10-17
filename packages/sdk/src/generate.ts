@@ -209,7 +209,7 @@ export const readSealedWorkflows = (
  * tasks or decisions). A resolution for a workflow the App doesn't
  * declare throws: a reference is made only for a declaration.
  */
-const declaredWorkflows = (
+export const declaredWorkflows = (
   manifest: AppManifest,
   bound: readonly WorkflowBindingExtras[]
 ): BoundWorkflow[] => {
