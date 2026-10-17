@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { typeCheck } from "./type-check.ts";
+import { screenTarget, typeCheck } from "./type-check.ts";
 
 // What an App file's types may resolve to, on their own: the type check
 // is pure (in memory), so tested in isolation, against a kit of two
@@ -32,7 +32,11 @@ export type ByPath = Hidden;
 
 /** The modules the check couldn't resolve for the App, by name. */
 const unresolved = (allowed?: ReadonlySet<string>): string[] =>
-  typeCheck(appFiles, kitTypes, allowed)
+  typeCheck(
+    appFiles,
+    kitTypes,
+    allowed === undefined ? undefined : screenTarget(allowed)
+  )
     .filter(
       ({ rule, file }) =>
         rule === "TS2307" && (file === "probe.d.ts" || file === "by-path.ts")

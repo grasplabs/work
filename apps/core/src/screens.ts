@@ -97,7 +97,7 @@ export const buildKey = async (files: AppFiles): Promise<string> =>
 const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
   // An App's server code carries the host's generated modules, held to
   // their own allowance, so they never count against the App's limits.
-  if (kind === "app") {
+  if (kind === "app" || kind === "app-check") {
     return appCodeLimitErrors;
   }
   // A JSON workflow's generated module: one file, held to its own bound.
@@ -126,6 +126,7 @@ const compilerMethods = {
   server: "buildServer",
   workflow: "buildWorkflows",
   app: "buildAppCode",
+  "app-check": "checkAppCode",
   "app-tests": "buildAppTests",
   "open-workflow": "buildOpenWorkflow",
   compute: "buildComputeModules",
@@ -339,6 +340,29 @@ export const buildAppCode = async (
   await cachedBuild<AppCodeBuild>(
     env,
     "app",
+    appFiles,
+    appCodeFiles,
+    whose,
+    signal
+  );
+
+/**
+ * Builds an App's server code of spec 8's layout as `buildAppCode` does,
+ * then type-checks it against the SDK's server side, with the host's
+ * generated modules among its files and no DOM (the compiler's
+ * `checkAppCode`): its modules, or why it fails, type errors included.
+ * What a seal holds a release to. Cached in R2 like the others.
+ */
+export const checkAppCode = async (
+  env: BuildEnv,
+  appFiles: AppFiles,
+  /** Whose build it is: the App's ID. */
+  whose: string,
+  signal?: AbortSignal
+): Promise<AppCodeBuild> =>
+  await cachedBuild<AppCodeBuild>(
+    env,
+    "app-check",
     appFiles,
     appCodeFiles,
     whose,
