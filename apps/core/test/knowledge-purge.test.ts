@@ -144,6 +144,8 @@ const apiWith = async (person: Person, hooks: KnowledgeHooks) => {
  * `person`'s API on a connection that adds up the rows each batch writes,
  * the search index's own included (D1's `meta.changes`): what a purge
  * writes, which a rebuild of the whole index makes grow with the corpus.
+ * Not `meta.rows_written`, which counts a rebuild as one row whatever the
+ * index holds: its writes to the index's own tables don't show there.
  */
 const countingWrites = async (person: Person) => {
   const real = env.KNOWLEDGE;
