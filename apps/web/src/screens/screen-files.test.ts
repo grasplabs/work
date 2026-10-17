@@ -367,6 +367,15 @@ describe("a screen's file port", () => {
     const saved = vi.spyOn(URL, "createObjectURL");
     const { port1: port, port2: page } = new MessageChannel();
     const close = openFilePort(page, channel, () => true);
+    // The page answers the call once its download is over, however it
+    // ended: after its bytes came and whatever it did with them.
+    const { promise: ended, resolve: end } = Promise.withResolvers<null>();
+    port.addEventListener("message", (event: MessageEvent<unknown>) => {
+      const { data } = event;
+      if (typeof data === "object" && data !== null && "call" in data) {
+        end(null);
+      }
+    });
     port.start();
     try {
       port.postMessage({
@@ -379,7 +388,7 @@ describe("a screen's file port", () => {
       port.postMessage({ type: "stop", call: 1 });
       await settle();
       haveStopped(null);
-      await settle();
+      await ended;
       // Its bytes all came, after the stop: no URL was made to save them.
       expect(saved).toHaveBeenCalledTimes(0);
     } finally {
