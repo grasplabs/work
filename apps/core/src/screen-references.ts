@@ -1,14 +1,16 @@
 import type { AppId } from "@grasp-os/shared/ids";
 
-import { versionManifest } from "./app-releases.ts";
+import { versionReferenceSource } from "./app-releases.ts";
 import { withReferencesFrom } from "./draft-references.ts";
 
 // The `#grasp` references a version's screens import (draft-references.ts
 // says what they are). A version's screens get the very bytes its release
-// seals (`sealRelease` generates them from the same manifest and
-// identity), sealed or not yet: a sealed version's manifest is read back
-// from its release; an unsealed one's comes from inspecting its code as
-// sealing would (`versionManifest`). The references become part of the
+// seals (`sealRelease` generates them from the same manifest, identity and
+// bound workflows), sealed or not yet: a sealed version's manifest and
+// bound workflows are read back from its release, so a binding changed
+// since changes nothing; an unsealed one's come from inspecting its code
+// and reading the App's bindings as sealing would
+// (`versionReferenceSource`). The references become part of the
 // screen's built code, so the hash an admin approves covers them.
 
 /**
@@ -27,5 +29,5 @@ export const withScreenReferences = async (
     app,
     version,
     files,
-    async () => await versionManifest(env, app, version, files)
+    async () => await versionReferenceSource(env, app, version, files)
   );
