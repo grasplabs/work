@@ -377,10 +377,18 @@ describe("an organization from core's admin snapshot", () => {
           assessment: true,
           council: "waiting",
         },
+        // Core forgets a deleted interview at once, and keeps when it went.
         links: snapshot.links.map((link) =>
           link.person === "lisa"
-            ? { ...link, deletedAt: "2026-10-07T12:00:00.000Z" }
+            ? {
+                ...link,
+                deletedAt: "2026-10-07T12:00:00.000Z",
+                state: "opened" as const,
+              }
             : link
+        ),
+        interviews: snapshot.interviews.filter(
+          (interview) => interview.person !== "lisa"
         ),
       },
       client
@@ -399,6 +407,45 @@ describe("an organization from core's admin snapshot", () => {
       stage: "waits",
       need: true,
       deleted: true,
+    });
+  });
+
+  it("counts a fresh interview someone saved after deleting theirs", () => {
+    // Lisa deleted hers on day 2, opened her link again and agreed to a new one on day 3.
+    const again = adminOrgOf(
+      {
+        ...snapshot,
+        links: snapshot.links.map((link) =>
+          link.person === "lisa"
+            ? { ...link, deletedAt: "2026-10-07T12:00:00.000Z" }
+            : link
+        ),
+        interviews: snapshot.interviews.map((interview) =>
+          interview.person === "lisa"
+            ? {
+                ...interview,
+                startedAt: "2026-10-08T08:00:00.000Z",
+                completedAt: "2026-10-08T08:30:00.000Z",
+                updatedAt: "2026-10-08T08:30:00.000Z",
+              }
+            : interview
+        ),
+      },
+      client
+    );
+    const view = adminViewOf(again.org, again.state, "2026-10-14");
+    const lisa = view.people.find((each) => each.person.id === "lisa");
+
+    expect({
+      deleted: lisa?.deleted,
+      state: lisa?.state,
+      talked: view.interviews.some((each) => each.id === "lisa"),
+      completed: view.counts.completed,
+    }).toStrictEqual({
+      deleted: false,
+      state: "completed",
+      talked: true,
+      completed: 1,
     });
   });
 

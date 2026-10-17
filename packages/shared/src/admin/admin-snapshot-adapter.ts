@@ -196,8 +196,16 @@ const doneOf = (snapshot: AdminSnapshot, client: AdminClient): CoreDone => {
       gate.open && openedAt !== null
         ? Math.min(Math.max(daysBetween(start, openedAt), 0), today)
         : null,
+    // Core forgets a deleted interview at once but keeps when it was deleted, and the link still
+    // opens: an interview started since is a fresh one, not the one they deleted.
     deleted: snapshot.links.flatMap((link) =>
-      link.deletedAt === null ? [] : [link.person]
+      link.deletedAt === null ||
+      snapshot.interviews.some(
+        (interview) =>
+          interview.person === link.person && interview.startedAt !== null
+      )
+        ? []
+        : [link.person]
     ),
     conversation,
   };
