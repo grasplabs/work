@@ -281,4 +281,39 @@ describe("an organization's interviews", () => {
       ),
     ]).toStrictEqual([true, true, true]);
   });
+
+  it("gives no share of voice or of what was left in while no interview is finished", async () => {
+    const acme = await liveClient();
+    const snapshot = interviewingSnapshot();
+    // Only Ben, who stopped halfway, has started.
+    acme.account.admin = {
+      ...snapshot,
+      interviews: snapshot.interviews.filter((interview) => !interview.agreed),
+    };
+
+    const { html } = await page(
+      `/admin/organizations/${acme.clientId}/interviews?tab=interviewers`
+    );
+    /** The figure labelled `label`: its label up to the line under its number. */
+    const figureOf = (label: string) => {
+      const start = html.indexOf(`>${label}</span>`);
+      return start === -1
+        ? ""
+        : html.slice(start, html.indexOf("</div>", start));
+    };
+
+    expect(
+      ["Finished", "Left in", "By voice"].map((label) => ({
+        label,
+        shown: [">0 of 1<", ">–<", ">0%<"].filter((text) =>
+          figureOf(label).includes(text)
+        ),
+      }))
+    ).toStrictEqual([
+      // Its ring says the share too: none of the one who started.
+      { label: "Finished", shown: [">0 of 1<", ">0%<"] },
+      { label: "Left in", shown: [">–<"] },
+      { label: "By voice", shown: [">–<"] },
+    ]);
+  });
 });

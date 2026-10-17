@@ -196,9 +196,9 @@ export const InterviewersDoing = ({ view }: { view: OrgView }) => {
           />
           <Figure
             label="By voice"
-            ring={{ value: stats.byVoice, of: 1 }}
+            ring={stats.held > 0 ? { value: stats.byVoice, of: 1 } : undefined}
             sub="the rest typed"
-            value={percent.format(stats.byVoice)}
+            value={stats.held > 0 ? percent.format(stats.byVoice) : "–"}
           />
         </div>
       </section>
