@@ -20,6 +20,8 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   appIdSchema,
   chatIdSchema,
+  runIdSchema,
+  workflowIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -38,7 +40,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { invocationFor } from "../src/app-functions.ts";
+import { invocationFor, runInvocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   bindWorkflowToApp,
@@ -855,6 +857,89 @@ describe("App code starting a workflow it didn't declare", () => {
       actionUndeclared: "resource.not_allowed",
       mutationUndeclared: "operation.no_resources",
       receipts: [],
+      outbox: [],
+    });
+  });
+});
+
+/**
+ * Calls `path` as a step of a workflow run of the fixture's App would, as
+ * that run, acting for `by`: through the invocation core builds for a
+ * run's call (`runInvocationFor`), its attempt holding throughout.
+ */
+const callAsRun = async (
+  fx: Fixture,
+  by: Identity,
+  path: keyof typeof kinds,
+  args: Json
+): Promise<OperationResult> => {
+  const runId = runIdSchema.parse(crypto.randomUUID());
+  const invocation = await runInvocationFor(
+    env,
+    fx.release,
+    {
+      run: {
+        app: fx.app,
+        workflow: workflowIdSchema.parse("desk"),
+        runId,
+        version: 1,
+        authority: {
+          subject: { type: "app", appId: fx.app },
+          onBehalfOf: by.userId,
+          mode: "workflow",
+          appVersion: 1,
+        },
+        shareSubject: by.userId,
+      },
+      requestId: crypto.randomUUID(),
+      deadline: Date.now() + 30_000,
+      stillCurrent: async () => {
+        await Promise.resolve();
+      },
+      requireHolds: () => {
+        // The attempt holds throughout.
+      },
+      held: () => {
+        // Nothing is held for its person.
+      },
+    },
+    path
+  );
+  return await callOperation(
+    hosted(),
+    invocation,
+    { path, kind: kinds[path] },
+    args,
+    { idempotencyKey: `step:${unique()}` }
+  );
+};
+
+describe("a workflow run's call starting a workflow", () => {
+  it("is refused, now or after its commit, so no run's step opens a lineage of its own, and starts nothing", async () => {
+    const fx = await fixture();
+    const fromAction = await callAsRun(fx, fx.bob, "requests.kickOff", {
+      who: "Ada",
+    });
+    const fromMutation = await callAsRun(fx, fx.bob, "requests.submit", {
+      who: "Ada",
+    });
+    // The same call as the person, from a screen, starts it: the refusal
+    // is the run's, not the App's or the person's.
+    const asPerson = await call(fx, fx.bob, "requests.kickOff", { who: "Ada" });
+    await drainWith(fx.store, dispatch);
+    const receipts = await receiptsOf(fx.app);
+    expect({
+      fromAction: answerOf(fromAction),
+      fromMutation: answerOf(fromMutation),
+      asPerson: asPerson.ok,
+      receipts: receipts.length,
+      // The run's mutation committed nothing, so it staged nothing.
+      outbox: await outboxOf(fx.store),
+    }).toStrictEqual({
+      fromAction: "resource.unavailable",
+      fromMutation: "resource.unavailable",
+      asPerson: true,
+      receipts: 1,
       outbox: [],
     });
   });
