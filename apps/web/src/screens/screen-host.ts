@@ -955,7 +955,7 @@ const runFrame = <Bundle extends FrameCode>(
     });
     cleanups.push(
       gesture.close,
-      openFilePort(files.port1, channel, gesture.asked)
+      openFilePort(files.port1, channel, gesture.take)
     );
     const mounted = stage(
       "mounted",
