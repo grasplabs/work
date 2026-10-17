@@ -1928,6 +1928,42 @@ describe("another App's functions an App calls", { timeout: 120_000 }, () => {
       screen: { ok: true, value: "For the screen." },
       asked: 2,
     });
+    // Each request named as the run's, with the Assistant's binding it
+    // went through, so the log tells it from the Relay's own.
+    const events = await allEvents();
+    const models = events
+      .filter(
+        ({ action, actor }) =>
+          (action === "model.call" || action === "model.refused") &&
+          actor?.type === "workflow" &&
+          actor.runId === asleep.runId
+      )
+      .map(({ action, actor, detail }) => ({
+        action,
+        actor,
+        binding: detail.binding,
+        bindingApp: detail.bindingApp,
+      }));
+    const run = {
+      type: "workflow",
+      appId: asleep.app,
+      workflowId: "sleeper",
+      runId: asleep.runId,
+    };
+    expect(models).toStrictEqual([
+      {
+        action: "model.call",
+        actor: run,
+        binding: "writer",
+        bindingApp: assistant,
+      },
+      {
+        action: "model.refused",
+        actor: run,
+        binding: "writer",
+        bindingApp: assistant,
+      },
+    ]);
   });
 
   it("hold another App's model requests to the rules for what the calling App read, an EU-only connection's included", async () => {
