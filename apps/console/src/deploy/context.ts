@@ -20,13 +20,19 @@ type SharedSecret =
   | "ENTRA_CLIENT_SECRET"
   | "MICROSOFT_CLIENT_SECRET"
   | "GOOGLE_CLIENT_SECRET"
-  | "COMPOSIO_API_KEY";
+  | "COMPOSIO_API_KEY"
+  | "APP_OAUTH_CLIENTS";
 
 /**
  * Which Worker gets which shared secret: core signs people in with the
  * Entra and Google apps, connect connects their Microsoft and Google
  * accounts and reaches Composio. Each is named as the Worker secret it
  * becomes.
+ *
+ * `APP_OAUTH_CLIENTS` holds Grasp's OAuth apps at every other app, as
+ * JSON by provider (`{"<provider>": {"id", "secret"}}`): one secret for
+ * them all, so a new app is an entry in the store, never a change here or
+ * in connect (connect's src/providers.ts).
  */
 const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
   core: ["ENTRA_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"],
@@ -34,6 +40,7 @@ const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
     "MICROSOFT_CLIENT_SECRET",
     "GOOGLE_CLIENT_SECRET",
     "COMPOSIO_API_KEY",
+    "APP_OAUTH_CLIENTS",
   ],
 };
 
@@ -103,6 +110,41 @@ export const clientDomain = (env: Env): string | null => {
   return domain === "" ? null : domain;
 };
 
+/**
+ * Shared secrets a deploy goes on without, with the value it gives
+ * instead: `APP_OAUTH_CLIENTS` names no app until one has an OAuth client,
+ * and connect refuses OAuth for an app without an entry, so a store that
+ * doesn't have it yet must not stop every client's deploy.
+ */
+const optionalSharedSecrets: Readonly<Partial<Record<SharedSecret, string>>> = {
+  APP_OAUTH_CLIENTS: "{}",
+};
+
+/** Secrets Store's answer for a secret it doesn't have. */
+const notInStore = /not found/iu;
+
+/**
+ * A shared secret's value, or its stand-in while the store has none: not
+ * there at all, or empty. A read that failed any other way stops the
+ * deploy as a missing required secret does, so a store that answered
+ * badly once never deploys connect without the apps' clients it has.
+ */
+const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
+  const standIn = optionalSharedSecrets[name];
+  if (standIn === undefined) {
+    return await storeSecret(env, name);
+  }
+  let value = "";
+  try {
+    value = await env[name].get();
+  } catch (error) {
+    if (!(error instanceof Error && notInStore.test(error.message))) {
+      throw new MissingStoreSecretError(name);
+    }
+  }
+  return value === "" ? standIn : value;
+};
+
 /** Every secret a deploy gives the Workers, read from Secrets Store. */
 export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
   const names = [...new Set(Object.values(sharedSecrets).flat())];
@@ -110,7 +152,7 @@ export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
     await Promise.all(
       names.map(async (name): Promise<[string, string]> => [
         name,
-        await storeSecret(env, name),
+        await sharedSecret(env, name),
       ])
     )
   );

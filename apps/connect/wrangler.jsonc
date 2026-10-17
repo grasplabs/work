@@ -27,8 +27,9 @@
   // calls without them, so they aren't required: TOKEN_ENCRYPTION_KEY, which
   // seals OAuth tokens (src/vault.ts), and each provider's app credentials,
   // MICROSOFT_CLIENT_ID and _SECRET, GOOGLE_CLIENT_ID and _SECRET
-  // (src/providers.ts). While one is unset, connecting that provider is
-  // refused. So is COMPOSIO_API_KEY, Grasp's key for the client's Composio
+  // (src/providers.ts), and APP_OAUTH_CLIENTS, Grasp's OAuth apps at every
+  // other app, as JSON by provider. While one is unset, connecting that
+  // provider is refused. So is COMPOSIO_API_KEY, Grasp's key for the client's Composio
   // project (src/composio.ts): while it is unset, nothing of Composio is
   // offered or reached. Their types are in src/env.d.ts.
   "secrets": { "required": ["CAPABILITY_SIGNING_KEY"] },
