@@ -88,7 +88,7 @@ export const formatList = (items: string[]): string =>
   );
 
 /** One for one, many for the rest: `${count} ${plural(count, "thing", "things")}`. */
-const plural = (count: number, one: string, other: string): string =>
+export const plural = (count: number, one: string, other: string): string =>
   count === 1 ? one : other;
 
 /** The steps of an onboarding. */

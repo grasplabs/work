@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 
 import { useOrganization } from "../../../../admin/organization.tsx";
 import { BarList, Figure } from "../../../../admin/parts.tsx";
-import { knowledgeSourceWords } from "../../../../admin/words.ts";
+import { knowledgeSourceWords, plural } from "../../../../admin/words.ts";
 
 /** A part of the section: its title, what it is for, and what it shows. */
 const BrainPart = ({
@@ -58,7 +58,7 @@ const BrainSection = () => {
   const { percent, threshold, covered, differs } = brain;
   const stillOpen =
     differs > 0
-      ? `${differs} pieces of work told two ways, nobody knows why yet`
+      ? `${differs} ${plural(differs, "piece", "pieces")} of work told two ways, nobody knows why yet`
       : "questions for the next interviews";
   return (
     <>
