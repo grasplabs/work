@@ -29,16 +29,32 @@ const clientHost = new URL(clientOrigin).host;
 
 describe("sessions end", () => {
   it("after twelve hours, and aren't extended by use", async () => {
-    const startedAt = Date.now();
-    const session = await signedIn(idp, "microsoft", entraPerson(acmeTenant));
+    const person = entraPerson(acmeTenant);
+    const before = Date.now();
+    const session = await signedIn(idp, "microsoft", person);
+    const after = Date.now();
     const first = await whoami(session);
     const again = await whoami(session);
+    // Read from the session as stored: when it was made, whenever that
+    // was while signing in, and when it ends. No margin to guess.
+    const stored = await env.DB.prepare(
+      "SELECT created_at AS createdAt, expires_at AS expiresAt FROM sessions WHERE user_id = (SELECT user_id FROM accounts WHERE account_id = ?)"
+    )
+      .bind(person.sub)
+      .first<{ createdAt: number; expiresAt: number }>();
 
-    expect(Date.parse(first.expiresAt)).toBeGreaterThan(startedAt);
-    expect(Date.parse(first.expiresAt)).toBeLessThanOrEqual(
-      startedAt + 12 * hour + 1000
-    );
-    expect(again.expiresAt).toBe(first.expiresAt);
+    expect({
+      madeWhileSigningIn:
+        (stored?.createdAt ?? 0) >= before && (stored?.createdAt ?? 0) <= after,
+      lasts: (stored?.expiresAt ?? 0) - (stored?.createdAt ?? 0),
+      shown: Date.parse(first.expiresAt),
+      afterUse: again.expiresAt,
+    }).toStrictEqual({
+      madeWhileSigningIn: true,
+      lasts: 12 * hour,
+      shown: stored?.expiresAt,
+      afterUse: first.expiresAt,
+    });
   });
 
   it("when they expire", async () => {
