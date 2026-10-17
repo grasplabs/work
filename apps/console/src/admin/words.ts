@@ -176,7 +176,7 @@ const leadsLine = (view: OrgView): string => {
     return "They get their link when the team is told";
   }
   const taking = view.teams.filter((team) => !team.off);
-  const leads = taking.filter((team) => team.sent !== null).length;
+  const leads = taking.filter((team) => team.heard !== null).length;
   return `${leads} of ${taking.length} talked`;
 };
 

@@ -84,6 +84,73 @@ const rowOf = (html: string, clientId: string): string => {
     : html.slice(html.lastIndexOf("<tr", at), html.indexOf("</tr>", at));
 };
 
+/** `person`'s link, sent and opened at `sentAt`. */
+const openedLink = (person: string, sentAt: string) => ({
+  person,
+  sentAt,
+  openedAt: sentAt,
+  remindedAt: null,
+  deletedAt: null,
+  state: "opened" as const,
+});
+
+/**
+ * A company whose team was told and whose only team's lead, Lisa, opened
+ * her link and hasn't talked yet, while Tom's link went out after the wait
+ * for her: as the model has it, at the team leads, none of whom talked.
+ */
+const leadWaitedSnapshot = (name: string): AdminSnapshot => {
+  const empty = emptyAdminSnapshot(name);
+  return {
+    ...empty,
+    now: "2026-10-10T10:00:00.000Z",
+    company: {
+      ...empty.company,
+      signInDomains: ["acme.test"],
+      signIn: ["microsoft"],
+      admins: ["eva@acme.test"],
+    },
+    roster: {
+      teams: [
+        { id: "sales", name: "Sales", lead: "lisa", does: "", off: false },
+      ],
+      people: [
+        {
+          id: "lisa",
+          name: "Lisa",
+          email: "lisa@acme.test",
+          team: "sales",
+          title: "",
+          away: false,
+        },
+        {
+          id: "tom",
+          name: "Tom",
+          email: "tom@acme.test",
+          team: "sales",
+          title: "",
+          away: false,
+        },
+      ],
+    },
+    plan: { start: "2026-10-05", days: 14, at: "2026-10-05T07:00:00.000Z" },
+    agreements: {
+      processing: true,
+      assessment: true,
+      council: "none",
+      processingOn: "2026-09-25",
+      assessmentOn: "2026-09-29",
+    },
+    agreed: true,
+    told: true,
+    links: [
+      openedLink("lisa", "2026-10-05T07:00:00.000Z"),
+      openedLink("tom", "2026-10-09T07:00:00.000Z"),
+    ],
+    kickoff: { at: "2026-09-24T10:00:00.000Z", known: 0.6 },
+  };
+};
+
 /** The text of `html` between the admin's sidebar and the page beside it. */
 const sidebarOf = (html: string): string =>
   html.slice(html.indexOf('data-slot="sidebar"'), html.indexOf("<main"));
@@ -230,6 +297,19 @@ describe("the admin's frame", () => {
       counted: true,
       acmeCount: true,
     });
+  });
+
+  it("counts a team lead as talked only once they talked, not once their team's links went out", async () => {
+    const acme = await liveClient();
+    acme.account.admin = leadWaitedSnapshot("Acme");
+
+    const { html } = await page("/admin");
+    const row = rowOf(html.slice(html.indexOf("<main")), acme.clientId);
+
+    expect({
+      none: row.includes("0 of 1 talked"),
+      one: row.includes("1 of 1 talked"),
+    }).toStrictEqual({ none: true, one: false });
   });
 
   it("puts every organization's most pressing need in today's list before any one's next", async () => {
