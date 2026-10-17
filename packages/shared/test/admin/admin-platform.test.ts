@@ -132,6 +132,22 @@ describe("how a release reaches every company", () => {
       "running",
     ]);
   });
+
+  it("does not count a ring as done when its rollout was cancelled part way", () => {
+    const cancelled: Rollout = {
+      ...rollout,
+      status: "cancelled",
+      ring: 2,
+      targets: rollout.targets.map((target) =>
+        target.ring === 2 ? { ...target, status: "stopped" } : target
+      ),
+    };
+    expect(ringsOf(cancelled).map((ring) => ring.state)).toStrictEqual([
+      "done",
+      "done",
+      "stopped",
+    ]);
+  });
 });
 
 describe("the samples", () => {

@@ -8,12 +8,14 @@ import {
   ADMIN_TOOLS,
   adminDocument,
   callAdminTool,
+  digestOf,
   findOrganization,
   MEASURES,
   MILESTONE,
+  needText,
 } from "../../src/admin/admin-tools.ts";
 import type { Fleet } from "../../src/admin/admin-tools.ts";
-import { adminViewOf } from "../../src/admin/admin-view.ts";
+import { adminViewOf, NEED_ORDER } from "../../src/admin/admin-view.ts";
 import { SAMPLE_BUILDS } from "./fixtures/admin-integrations-sample.ts";
 import {
   SAMPLE_PLATFORMS,
@@ -118,6 +120,40 @@ describe("the admin’s tools", () => {
       .parse(call("what_needs_grasp").structured);
     expect(needs).toHaveLength(
       views.reduce((sum, view) => sum + view.needs.length, 0)
+    );
+  });
+
+  it("puts what is most pressing first, whichever organization it is at, in the list and in the digest", () => {
+    // The open organization listed first, so its needs come before the others' unless sorted.
+    const crowded = [views[3], ...views.slice(0, 3)].filter(
+      (view) => view !== undefined
+    );
+    const { needs } = z
+      .object({ needs: z.array(z.object({ kind: z.string() })) })
+      .parse(callAdminTool("what_needs_grasp", {}, crowded, today).structured);
+    const ranks: readonly string[] = NEED_ORDER;
+    const order = needs.map(({ kind }) => ranks.indexOf(kind));
+    expect(order).toStrictEqual(order.toSorted((a, b) => a - b));
+    const [first] = needs;
+    expect(first?.kind).toBe("go");
+    const digest = digestOf(crowded, today).split("\n");
+    const heading = digest.findIndex((line) =>
+      line.startsWith("Needs Grasp today")
+    );
+    expect(digest[heading + 1]).toMatch(
+      /^- Noordkade Finance: Ready for Grasp’s go/u
+    );
+  });
+
+  it("says how many days a quiet team has left, not how many people", () => {
+    const [view] = views;
+    const [team] = view?.org.teams ?? [];
+    expect(view && team).toBeTruthy();
+    if (!view || !team) {
+      return;
+    }
+    expect(needText({ kind: "quiet", team, talked: 3, left: 2 }, view)).toBe(
+      `${team.name} has gone quiet: 3 talked, with 2 days left.`
     );
   });
 

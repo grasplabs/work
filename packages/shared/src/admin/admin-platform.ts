@@ -303,30 +303,43 @@ export const standingOf = (
   return "healthy";
 };
 
-export type RingState = "done" | "running" | "waiting" | "failed" | "todo";
+export type RingState =
+  | "done"
+  | "running"
+  | "waiting"
+  | "failed"
+  | "stopped"
+  | "todo";
 
 export interface RingProgress {
   ring: Ring;
   targets: RolloutTarget[];
   done: number;
   failed: number;
+  /** Stopped part way when the rollout was cancelled: never finished, never failed. */
+  stopped: number;
   moving: number;
   waiting: number;
   state: RingState;
 }
 
-/** Where one ring of a rollout stands, from how many of its companies failed, deploy or wait. */
+/** Where one ring of a rollout stands, from how many of its companies failed, stopped, deploy or wait. */
 const ringStateOf = (
   rollout: Rollout,
   ring: Ring,
   {
     failed,
+    stopped,
     moving,
     waiting,
-  }: Pick<RingProgress, "failed" | "moving" | "waiting">
+  }: Pick<RingProgress, "failed" | "stopped" | "moving" | "waiting">
 ): RingState => {
   if (failed > 0) {
     return "failed";
+  }
+  // A cancelled rollout leaves the companies it was deploying to stopped: the ring never finished.
+  if (stopped > 0) {
+    return "stopped";
   }
   if (
     ring < rollout.ring ||
@@ -344,7 +357,7 @@ const ringStateOf = (
   return "todo";
 };
 
-/** A rollout ring by ring: who is in it, and how many are done, failed, deploying or still to come. */
+/** A rollout ring by ring: who is in it, and how many are done, failed, stopped, deploying or still to come. */
 export const ringsOf = (rollout: Rollout): RingProgress[] =>
   RINGS.map((ring) => {
     const targets = rollout.targets.filter((target) => target.ring === ring);
@@ -353,6 +366,9 @@ export const ringsOf = (rollout: Rollout): RingProgress[] =>
     ).length;
     const failed = targets.filter(
       (target) => target.status === "failed" || target.status === "rolled_back"
+    ).length;
+    const stopped = targets.filter(
+      (target) => target.status === "stopped"
     ).length;
     const moving = targets.filter(
       (target) => target.status === "deploying"
@@ -365,8 +381,9 @@ export const ringsOf = (rollout: Rollout): RingProgress[] =>
       targets,
       done,
       failed,
+      stopped,
       moving,
       waiting,
-      state: ringStateOf(rollout, ring, { failed, moving, waiting }),
+      state: ringStateOf(rollout, ring, { failed, stopped, moving, waiting }),
     };
   });

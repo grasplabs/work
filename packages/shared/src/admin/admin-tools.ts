@@ -18,6 +18,7 @@ import {
 import type { Platform, Release, Rollout } from "./admin-platform.ts";
 import { ADMIN_SOURCES } from "./admin-sources.ts";
 import type { AdminSource } from "./admin-sources.ts";
+import { byUrgency } from "./admin-view.ts";
 import type { AdminView } from "./admin-view.ts";
 import type { KnowledgeSource, Need, Stage } from "./onboarding-admin.ts";
 import { LISTEN_DAYS } from "./onboarding.ts";
@@ -294,7 +295,7 @@ export const needText = (need: Need, view: AdminView): string => {
       return `${need.lead}, who leads ${need.team.name}, has not talked yet.`;
     }
     case "quiet": {
-      return `${need.team.name} has gone quiet: ${need.talked} talked, ${need.left} still to.`;
+      return `${need.team.name} has gone quiet: ${need.talked} talked, with ${many(need.left, "day", "days")} left.`;
     }
     case "blocked": {
       return `${need.work.name} cannot be known yet: something stands in the way.`;
@@ -498,6 +499,14 @@ export const briefText = (view: AdminView): string => {
   return lines.join("\n");
 };
 
+/** What needs Grasp at every organization, the most pressing first, whichever organization it is at. */
+const everyNeed = (
+  views: readonly AdminView[]
+): { view: AdminView; need: Need }[] =>
+  views
+    .flatMap((view) => view.needs.map((need) => ({ view, need })))
+    .toSorted((a, b) => byUrgency(a.need, b.need));
+
 /** The morning message for Grasp's team. */
 export const digestOf = (
   views: readonly AdminView[],
@@ -509,8 +518,8 @@ export const digestOf = (
     (view) => !view.open && view.knowledge.percent >= MILESTONE
   );
   const ready = views.filter((view) => phaseOf(view) === "ready");
-  const needs = views.flatMap((view) =>
-    view.needs.map((need) => `- ${view.org.name}: ${needText(need, view)}`)
+  const needs = everyNeed(views).map(
+    ({ view, need }) => `- ${view.org.name}: ${needText(need, view)}`
   );
   const lines = [
     `Grasp, ${today}: ${many(views.length, "organization", "organizations")}. ${ADMIN_PHASES.map((phase) => `${count(phase)} ${phase}`).join(", ")}.`,
@@ -773,14 +782,12 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
     return typeof found === "string" ? fail(found) : { text: briefText(found) };
   },
   what_needs_grasp: ({ views }) => {
-    const all = views.flatMap((view) =>
-      view.needs.map((need) => ({
-        id: view.org.id,
-        name: view.org.name,
-        kind: need.kind,
-        text: needText(need, view),
-      }))
-    );
+    const all = everyNeed(views).map(({ view, need }) => ({
+      id: view.org.id,
+      name: view.org.name,
+      kind: need.kind,
+      text: needText(need, view),
+    }));
     return {
       text:
         all.length > 0
