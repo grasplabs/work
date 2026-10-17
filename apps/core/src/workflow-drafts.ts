@@ -51,8 +51,35 @@ import {
 //   only the workflow's builders read or edit its draft, as only they read
 //   its published definitions. Grasp staff don't edit it.
 // - Growth. A draft keeps only its latest revision and its latest
-//   checkpoint, each at most the profile's 1 MiB, and an edit is bounded
-//   as a definition is.
+//   checkpoint, each at most the profile's 1 MiB with its problems at
+//   most 256 KiB, and an edit is bounded as a definition is.
+
+/**
+ * The most a revision's problems take as stored JSON. A D1 row holds 2 MB
+ * and its text up to 1 MiB, but a problem's pointer escapes characters of
+ * the text as two (`/` as `~1`), so a single problem can outgrow the
+ * text: past this, the problems are replaced by one short one.
+ */
+const maxProblemBytes = 256 * 1024;
+
+/** `problems` as a revision stores them, within `maxProblemBytes`. */
+const boundedProblems = (
+  problems: WorkflowDefinitionProblem[]
+): WorkflowDefinitionProblem[] => {
+  const bytes = new TextEncoder().encode(JSON.stringify(problems)).byteLength;
+  if (bytes <= maxProblemBytes) {
+    return problems;
+  }
+  return [
+    {
+      code: "definition.problems_too_large",
+      message: `The definition has ${problems.length} problems, too long together to show.`,
+      pointer: "/",
+      remedy:
+        "Look for very long keys or values, shorten them, and check again.",
+    },
+  ];
+};
 
 /** The draft of a workflow nobody has published yet: one that passes. */
 const starterDefinition = (name: string): string =>
@@ -223,7 +250,9 @@ export const editWorkflowDraft = async (
     workflowDraftEditSchema,
     input
   );
-  const problems = await definitionProblems(env, by, workflow, source);
+  const problems = boundedProblems(
+    await definitionProblems(env, by, workflow, source)
+  );
   const checked = problems.length === 0;
   const revision = expectedRevision + 1;
   const editedAt = new Date();

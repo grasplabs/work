@@ -482,6 +482,34 @@ describe("a workflow's draft", () => {
     ).resolves.toBe("workflow.resource_invalid");
   });
 
+  it("keeps text whose problems would outgrow its row, with a short problem in their place", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    // A key the profile doesn't know, every character of which a JSON
+    // Pointer escapes as two: its problem alone is larger than the text.
+    const source = definitionOf(workflow.name, {
+      tasks: [
+        { finish: { set: { status: "done" }, ["/".repeat(750_000)]: 1 } },
+      ],
+    });
+    const saved = await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source,
+    });
+    const read = await workflowDraft(env, ada, workflow.id);
+    expect({
+      revision: read.revision,
+      kept: read.source === source,
+      problems: read.problems.map(({ code, pointer }) => `${code} ${pointer}`),
+      answered: saved.problems,
+    }).toStrictEqual({
+      revision: 1,
+      kept: true,
+      problems: ["definition.problems_too_large /"],
+      answered: read.problems,
+    });
+  });
+
   it("refuses text that names another workflow, at its document", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
