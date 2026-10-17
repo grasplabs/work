@@ -162,6 +162,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "Someone changed this draft since you read it. Read it again, then make your change.",
   "workflow.draft_unchecked":
     "Only the latest draft can be published, and only once it passes the profile.",
+  "workflow.action_failed":
+    "A task's action threw, or the sandbox stopped it, so the run failed.",
+  "workflow.action_call_limit":
+    "A task's action made as many calls as one attempt of it may, so the run failed.",
 });
 
 /** The binding kinds the host catalog serves, beside other workflows. */
@@ -597,7 +601,7 @@ export interface WorkflowBinders {
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 4;
+export const openWorkflowProtocol = 5;
 
 /**
  * Something of a definition the code generator doesn't lower yet: its

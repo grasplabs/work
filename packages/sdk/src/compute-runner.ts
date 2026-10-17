@@ -1,17 +1,22 @@
+import { actionHandler } from "./action.ts";
 // Loaded first: it takes the clock and randomness away before anything
 // else in the isolate evaluates.
 import { lockedDown } from "./compute-lockdown.ts";
 import { computeHandler } from "./compute.ts";
 
-// What core's compute call runs in the isolate of a workflow's compute
-// modules (workflow-modules.ts): never imported by a workflow's own code
-// (compiler: `computeCode` imports only `@grasp-os/sdk/compute`). Two
-// things only:
+// What core runs in the isolate of a workflow's own modules
+// (workflow-modules.ts): never imported by a workflow's own code
+// (compiler: `computeCode` imports only `@grasp-os/sdk/compute` and
+// `@grasp-os/sdk/action`). Three things only:
 //
-// - `computeManifestOf`: the contracts of the calculations the modules
-//   export, read once as a version is published, so the host seals them;
+// - `computeManifestOf`: the contracts of the calculations and actions the
+//   modules export, read once as a version is published, so the host
+//   seals them;
 // - `runCompute`: one calculation run on one value, as a run's
-//   `grasp.compute` task asks for it.
+//   `grasp.compute` task asks for it;
+// - `runAction`: one action run on its arguments, as a run's
+//   `grasp.operation` task of a local binding asks for it, its resources
+//   calls of the one host capability core passes in.
 //
 // Everything in the isolate is untrusted, this module too: the host checks
 // what either answers, against its own bounds and the sealed contract.
@@ -30,7 +35,7 @@ const { stringify } = JSON;
  * `String.prototype.slice` or an `instanceof` hook changes nothing here,
  * so a thenable answer is refused however it is dressed up.
  */
-const { entries, getOwnPropertyDescriptor, hasOwn, keys } = Object;
+const { entries, freeze, getOwnPropertyDescriptor, hasOwn, keys } = Object;
 const { apply, get: reflectGet } = Reflect;
 const regexpExec: unknown = getOwnPropertyDescriptor(
   RegExp.prototype,
@@ -95,17 +100,25 @@ export const computeManifestOf = (modules: ComputeModules): string => {
     }
     for (const name of keys(namespace)) {
       const value = exportOf(namespace, name);
-      if (
-        !matches(exportPattern, name) ||
-        computeHandler(value) === undefined
-      ) {
+      if (!matches(exportPattern, name)) {
         continue;
       }
-      const contract = exportOf(value, "~compute");
-      manifest[`local:${path}#${name}`] = {
-        input: exportOf(contract, "input"),
-        output: exportOf(contract, "output"),
-      };
+      if (computeHandler(value) !== undefined) {
+        const contract = exportOf(value, "~compute");
+        manifest[`local:${path}#${name}`] = {
+          kind: "compute",
+          input: exportOf(contract, "input"),
+          output: exportOf(contract, "output"),
+        };
+      } else if (actionHandler(value) !== undefined) {
+        const contract = exportOf(value, "~action");
+        manifest[`local:${path}#${name}`] = {
+          kind: "operation",
+          input: exportOf(contract, "input"),
+          output: exportOf(contract, "output"),
+          uses: exportOf(contract, "uses"),
+        };
+      }
     }
   }
   return stringify(manifest);
@@ -175,5 +188,91 @@ export const runCompute = (
         failureMaxLength
       ),
     };
+  }
+};
+
+/** The host's one capability in an action's isolate: a resource call. */
+export interface ActionHost {
+  readonly call: (alias: string, request: unknown) => Promise<unknown>;
+}
+
+/** One action to run: its module and export, and its arguments. */
+export interface ActionRequest {
+  readonly module: string;
+  readonly export: string;
+  readonly input: unknown;
+}
+
+/** Why `error`, which an action threw, failed: its own message, as data. */
+const failureOf = (error: unknown, fallback: string): string => {
+  const message: unknown =
+    (typeof error === "object" && error !== null) || typeof error === "function"
+      ? getOwnPropertyDescriptor(error, "message")?.value
+      : undefined;
+  return cut(
+    typeof message === "string" ? message : fallback,
+    failureMaxLength
+  );
+};
+
+/**
+ * Runs the action `request` names on its arguments, its resources each a
+ * call of `host`'s: the handler's answer as JSON text, or why it failed.
+ * `ctx.resources` holds the aliases the action declared, and nothing
+ * else; the host checks each call against the sealed contract again, so
+ * what this builds is a convenience, never the boundary.
+ */
+export const runAction = async (
+  modules: ComputeModules,
+  request: ActionRequest,
+  host: ActionHost
+): Promise<ComputeAnswer> => {
+  requireLockedDown();
+  const value = hasOwn(modules, request.module)
+    ? exportOf(modules[request.module], request.export)
+    : undefined;
+  const handler = actionHandler(value);
+  const uses: unknown = exportOf(exportOf(value, "~action"), "uses");
+  const hostCall: unknown = reflectGet(host, "call");
+  if (
+    handler === undefined ||
+    !Array.isArray(uses) ||
+    typeof hostCall !== "function"
+  ) {
+    return { ok: false, message: "There is no such action." };
+  }
+  const callHost = async (alias: string, call: unknown): Promise<unknown> => {
+    const answer: unknown = await apply(hostCall, host, [alias, call]);
+    return answer;
+  };
+  const resources: Record<string, unknown> = {};
+  for (const use of uses) {
+    const alias: unknown = exportOf(use, "alias");
+    const kind: unknown = exportOf(use, "kind");
+    if (typeof alias !== "string") {
+      continue;
+    }
+    resources[alias] = freeze(
+      kind === "connector"
+        ? {
+            call: async (operation: unknown, args: unknown) =>
+              await callHost(alias, { operation, arguments: args }),
+          }
+        : {
+            call: async (args: unknown) =>
+              await callHost(alias, { arguments: args }),
+          }
+    );
+  }
+  const ctx = freeze({ resources: freeze(resources) });
+  try {
+    const output: unknown = await handler(ctx, request.input);
+    // Serialized here, so a `toJSON` on the answer runs locked down too.
+    const text = stringify(output);
+    return text === undefined
+      ? { ok: false, message: "The action answered no JSON value." }
+      : { ok: true, output: text };
+  } catch (error) {
+    return { ok: false, message: failureOf(error, "The action threw") };
   }
 };

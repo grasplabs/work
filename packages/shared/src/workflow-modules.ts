@@ -9,6 +9,13 @@
 export const workflowModulePattern =
   /^code\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.ts$/u;
 
+/** The kinds of the workflow's own bindings an action may use. */
+export const actionUseKinds = ["connector", "operation"] as const;
+export type ActionUseKind = (typeof actionUseKinds)[number];
+
+/** An alias an action uses: a binding alias, as the profile names them. */
+export const actionUseAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
 /** What one version's modules may take. */
 export const workflowModuleLimits = {
   /** The most modules a version carries. */
@@ -27,6 +34,8 @@ export const workflowModuleLimits = {
    */
   contracts: 256,
   descriptorChars: 256 * 1024,
+  /** The most of the workflow's bindings one action uses. */
+  actionUses: 32,
 } as const;
 
 /**
