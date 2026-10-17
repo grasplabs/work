@@ -203,6 +203,8 @@ interface Draft {
   limits?: Record<string, number>;
   use?: Record<string, unknown>;
   tasks: unknown[];
+  /** The workflow's own code modules, by path. */
+  modules?: Record<string, string>;
 }
 
 /** A definition of `name`: its input `{ who }`, its output `{ status }`. */
@@ -238,6 +240,7 @@ const published = async (by: Identity, draft: Draft) => {
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: definitionOf(workflow.name, draft),
     basedOn: null,
+    ...(draft.modules === undefined ? {} : { modules: draft.modules }),
   });
   const [version] = await workflowVersions(env, by, workflow.id);
   return { workflow, executable: version?.build.executable };
@@ -1518,11 +1521,22 @@ const slowServer = appServer.replace(
   "async lookUp(caller: Caller, input: { who: string }): Promise<unknown> {\n    await new Promise((resolve) => setTimeout(resolve, 500));"
 );
 
+/** The task calling `lookUp`, as a workflow of its own holds it. */
+const lookUpTasks = [
+  {
+    look: {
+      call: "grasp.operation",
+      with: { binding: "lookup", arguments: { who: "Ada" } },
+    },
+  },
+  { finish: { set: { status: "called" } } },
+];
+
 /**
  * A workflow of an admin's calling App `server`'s export `lookUp`, sealed
- * and approved, in a task of its own.
+ * and approved: in a task of its own, or as `draft` has it.
  */
-const lookingUp = async (server: string) => {
+const lookingUp = async (server: string, draft?: Omit<Draft, "bindings">) => {
   const signedIn = await signedInApi(idp, "admin");
   const admin = identityOf(signedIn.userId, "admin");
   const input = descriptorOf(v.object({ who: v.string() }));
@@ -1552,16 +1566,16 @@ const lookingUp = async (server: string) => {
   await serverBuilt(app, version);
   await sealedRelease(app, version);
   const { workflow } = await published(admin, {
-    bindings: { lookup: { kind: "operation", contract: key } },
-    tasks: [
-      {
-        look: {
-          call: "grasp.operation",
-          with: { binding: "lookup", arguments: { who: "Ada" } },
-        },
-      },
-      { finish: { set: { status: "called" } } },
-    ],
+    tasks: lookUpTasks,
+    ...draft,
+    bindings: {
+      lookup: { kind: "operation", contract: key },
+      ...(draft?.modules === undefined
+        ? {}
+        : {
+            ask: { kind: "operation", contract: "local:code/ask.ts#ask" },
+          }),
+    },
   });
   const permissionId = await granted(admin, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
@@ -1687,6 +1701,66 @@ describe("grasp.operation calls of JSON workflows", () => {
         },
       },
       third: { status: "failed", code: "workflow.call_denied" },
+    });
+  });
+
+  it("calls the approved export from the workflow's own action, under its step's key and ordinal", async () => {
+    // The action's argument shape and host path for an operation, apart
+    // from a connector's (workflow-actions.test.ts covers connectors).
+    const { admin, workflowId } = await lookingUp(appServer, {
+      modules: {
+        "code/ask.ts": `import { action, resource, v } from "@grasp-os/sdk/action";
+
+export const ask = action({
+  args: { who: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [resource.operation("lookup")],
+  handler: async (ctx, args) => {
+    const first = await ctx.resources.lookup.call({ who: args.who });
+    const second = await ctx.resources.lookup.call({ who: "Grace" });
+    return { status: JSON.stringify([first, second]) };
+  },
+});
+`,
+      },
+      tasks: [
+        {
+          ask: {
+            call: "grasp.operation",
+            with: {
+              binding: "ask",
+              arguments: { who: "${ $workflow.input.who }" },
+            },
+            export: { as: "${ {status: .status} }" },
+          },
+        },
+        pause,
+        { finish: { set: { status: "${ $context.status }" } } },
+      ],
+    });
+    const runId = await started(admin, workflowId);
+    const run = await ended(admin, workflowId, runId);
+    const step = `${encodeURIComponent(runId)}:task:ask`;
+    expect({
+      end: endOf(run),
+      receipts: await receiptsOf(runId),
+    }).toStrictEqual({
+      end: {
+        status: "completed",
+        output: {
+          status: JSON.stringify([
+            { greeting: "Hello Ada 1", key: `${step}:1` },
+            { greeting: "Hello Grace 2", key: `${step}:2` },
+          ]),
+        },
+      },
+      // Each call an effect of its own: started, then done.
+      receipts: ["started", "done", "started", "done"].map((outcome) => ({
+        call: "grasp.operation",
+        binding: "lookup",
+        person: admin.userId,
+        outcome,
+      })),
     });
   });
 

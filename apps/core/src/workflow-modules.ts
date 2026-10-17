@@ -10,7 +10,12 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { valueDepth } from "@grasp-os/shared/value-depth";
-import { workflowModuleLimits } from "@grasp-os/shared/workflow-modules";
+import {
+  actionUseAliasPattern,
+  actionUseKinds,
+  workflowModuleLimits,
+} from "@grasp-os/shared/workflow-modules";
+import type { ActionUseKind } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
@@ -18,10 +23,13 @@ import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
 import { buildComputeModules, withinBuildWait } from "./screens.ts";
 
-// A JSON workflow's own compute modules (platform specification 13.6,
-// 32.4): TypeScript files under `code/`, published with the definition,
-// whose `compute()` exports its `grasp.compute` tasks call through
-// `local:code/<file>.ts#<export>` bindings. This module builds them and
+// A JSON workflow's own modules (platform specification 13.6, 32.4):
+// TypeScript files under `code/`, published with the definition, whose
+// `compute()` exports its `grasp.compute` tasks call, and whose `action()`
+// exports its `grasp.operation` tasks call (resource-action.ts), each
+// through a `local:code/<file>.ts#<export>` binding. An action's contract
+// also lists the workflow's own bindings it uses, which validation checks
+// against the definition and counts as referenced. This module builds them and
 // reads their contracts as a version is published, and runs one
 // calculation for a run (`runCompute`). workflow-builds.ts seals what it
 // builds with the version.
@@ -73,8 +81,15 @@ import { buildComputeModules, withinBuildWait } from "./screens.ts";
 
 /** A compute contract, as sealed: its descriptors' JSON text. */
 export interface ComputeContract {
+  /** A calculation (`compute`), or an action (`operation`). */
+  readonly kind: "compute" | "operation";
   readonly input: string;
   readonly output: string;
+  /** An action's: the workflow's own bindings it uses, by alias and kind. */
+  readonly uses?: readonly {
+    readonly alias: string;
+    readonly kind: ActionUseKind;
+  }[];
 }
 
 /** A version's compute modules, built and inspected for sealing. */
@@ -211,9 +226,31 @@ const manifestKey =
 
 const descriptorObject = z.record(z.string(), z.json());
 
+const useSchema = z.strictObject({
+  alias: z.string().regex(actionUseAliasPattern),
+  kind: z.enum(actionUseKinds),
+});
+
 const manifestSchema = z.record(
   z.string().max(512),
-  z.strictObject({ input: descriptorObject, output: descriptorObject })
+  z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("compute"),
+      input: descriptorObject,
+      output: descriptorObject,
+    }),
+    z.strictObject({
+      kind: z.literal("operation"),
+      input: descriptorObject,
+      output: descriptorObject,
+      uses: z
+        .array(useSchema)
+        .max(workflowModuleLimits.actionUses)
+        .refine(
+          (uses) => new Set(uses.map(({ alias }) => alias)).size === uses.length
+        ),
+    }),
+  ])
 );
 
 /**
@@ -245,12 +282,13 @@ const contractsOf = (
   if (entries.length > maxContracts) {
     throw invalid([
       {
-        message: `The modules export more than ${maxContracts} calculations.`,
+        message: `The modules export more than ${maxContracts} calculations and actions.`,
       },
     ]);
   }
   const contracts = new Map<string, ComputeContract>();
-  for (const [key, { input, output }] of entries) {
+  for (const [key, declared] of entries) {
+    const { input, output } = declared;
     const groups = manifestKey.exec(key)?.groups;
     if (
       groups?.module === undefined ||
@@ -259,9 +297,13 @@ const contractsOf = (
     ) {
       throw invalid([{ message: "A contract names no published module." }]);
     }
-    const contract = {
+    const contract: ComputeContract = {
+      kind: declared.kind,
       input: canonicalJson(input),
       output: canonicalJson(output),
+      ...(declared.kind === "operation"
+        ? { uses: declared.uses.map((use) => ({ ...use })) }
+        : {}),
     };
     // As the version's load reads it back (workflow-builds.ts): a contract
     // past it would publish and then never load.
@@ -378,7 +420,14 @@ export const moduleLookup =
         : compiled?.contracts.get(`${groups.module}#${groups.export}`);
     return contract === undefined
       ? undefined
-      : { kind: "compute", input: contract.input, output: contract.output };
+      : {
+          kind: contract.kind,
+          input: contract.input,
+          output: contract.output,
+          ...(contract.uses === undefined
+            ? {}
+            : { uses: contract.uses.map((use) => ({ ...use })) }),
+        };
   };
 
 /** One calculation of a version's sealed modules, as a run calls it. */
@@ -419,6 +468,67 @@ const answerSchema = z.discriminatedUnion("ok", [
 ]);
 
 /**
+ * The module a run's isolate reads its request from: parsed from JSON text,
+ * as the host checked it (in an object literal, a "__proto__" key would
+ * set a prototype instead). It evaluates before any of the workflow's
+ * modules (the main module imports it right after the runner).
+ */
+export const requestModule = (call: {
+  readonly module: string;
+  readonly export: string;
+  readonly input: unknown;
+}): Record<string, string> => ({
+  "grasp-compute-request.js": `export default JSON.parse(${JSON.stringify(
+    JSON.stringify({
+      module: call.module,
+      export: call.export,
+      input: call.input,
+    })
+  )});\n`,
+});
+
+/**
+ * What a run of a module answered (`answer`, what the runner sent), read
+ * within `maxBytes` and a value's depth: its value, or `failed` (it threw,
+ * answered no JSON, or its answer isn't one), or `workflow.call_invalid`
+ * (an answer past its bounds).
+ */
+export const readAnswer = (
+  answer: unknown,
+  maxBytes: number,
+  failed: () => Error
+): unknown => {
+  const read = answerSchema.safeParse(answer);
+  if (!read.success || !read.data.ok) {
+    throw failed();
+  }
+  const { output } = read.data;
+  // Its length first: no text longer than the bound in UTF-16 code units
+  // is within it in bytes.
+  if (
+    output.length > maxBytes ||
+    new TextEncoder().encode(output).byteLength > maxBytes
+  ) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  // Deeper than a value may nest, it is refused before anything walks it.
+  if (jsonTextDepth(output) > valueDepth) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  // Module code may have changed what wrote it: text that isn't JSON is
+  // the module's failure.
+  try {
+    return JSON.parse(output);
+  } catch {
+    throw failed();
+  }
+};
+
+/** A calculation's failure, as a run fails with it. */
+const computeFailed = (): Error =>
+  workflowResourceErrors.create("workflow.compute_failed");
+
+/**
  * Runs one calculation (`call`) in the sandbox: its answer, as JSON, once
  * its text is within `maxBytes`, or `workflow.compute_failed` (it threw,
  * answered a promise or no JSON, or the sandbox stopped it) or
@@ -440,16 +550,7 @@ export const runCompute = async (
         modules: {
           ...call.modules,
           ...call.sdk,
-          // Parsed from JSON text, as the host checked it: in an object
-          // literal, a "__proto__" key would set a prototype instead. It
-          // evaluates before any of the workflow's modules (`runMain`).
-          "grasp-compute-request.js": `export default JSON.parse(${JSON.stringify(
-            JSON.stringify({
-              module: call.module,
-              export: call.export,
-              input: call.input,
-            })
-          )});\n`,
+          ...requestModule(call),
           [computeMain]: runMain(call.paths),
         },
       },
@@ -460,33 +561,29 @@ export const runCompute = async (
     if (error instanceof SandboxUnavailableError) {
       throw error;
     }
-    throw workflowResourceErrors.create("workflow.compute_failed");
+    throw computeFailed();
   }
-  const read = answerSchema.safeParse(answer);
-  if (!read.success) {
-    throw workflowResourceErrors.create("workflow.compute_failed");
-  }
-  if (!read.data.ok) {
-    throw workflowResourceErrors.create("workflow.compute_failed");
-  }
-  const { output } = read.data;
-  // Its length first: no text longer than the bound in UTF-16 code units
-  // is within it in bytes.
-  if (
-    output.length > maxBytes ||
-    new TextEncoder().encode(output).byteLength > maxBytes
-  ) {
-    throw workflowResourceErrors.create("workflow.call_invalid");
-  }
-  // Deeper than a value may nest, it is refused before anything walks it.
-  if (jsonTextDepth(output) > valueDepth) {
-    throw workflowResourceErrors.create("workflow.call_invalid");
-  }
-  // Module code may have changed what wrote it: text that isn't JSON is
-  // the calculation's failure.
-  try {
-    return JSON.parse(output);
-  } catch {
-    throw workflowResourceErrors.create("workflow.compute_failed");
-  }
+  return readAnswer(answer, maxBytes, computeFailed);
 };
+
+/**
+ * An action's main module: the runner first, as at inspection; then the
+ * request and the modules. Its one method takes the host's capability.
+ */
+export const actionMain = (paths: readonly string[]): string => {
+  const { imports, object } = namespacesCode(paths);
+  return `import { WorkerEntrypoint } from "cloudflare:workers";
+import { runAction } from ${JSON.stringify(runnerModule)};
+import request from "grasp-compute-request.js";
+${imports}
+
+export class Action extends WorkerEntrypoint {
+  async run(host) {
+    return await runAction(${object}, request, host);
+  }
+}
+`;
+};
+
+/** The module an action's isolate starts from (`actionMain`). */
+export const actionMainModule = computeMain;

@@ -727,13 +727,18 @@ export const generatedWorkflowCode: CodeKind = {
 };
 
 /**
- * The SDK module a JSON workflow's compute modules (`code/`) import
- * (`@grasp-os/sdk/compute`), and nothing else of the platform: no Workers
- * runtime, no workflow engine, no server constructors, and no packages
- * (approved packages for computations are GRA-665). A calculation gets
- * only the value it is called with.
+ * The SDK modules a JSON workflow's own modules (`code/`) import: its
+ * calculations' (`@grasp-os/sdk/compute`) and actions'
+ * (`@grasp-os/sdk/action`), and nothing else of the platform: no Workers
+ * runtime, no workflow engine, no server or database constructors, and
+ * no packages (approved packages are GRA-665). A calculation gets only the
+ * value it is called with; an action, its arguments and the bindings it
+ * declares.
  */
-export const computeSdkImports = ["@grasp-os/sdk/compute"] as const;
+export const computeSdkImports = [
+  "@grasp-os/sdk/compute",
+  "@grasp-os/sdk/action",
+] as const;
 
 /** What core's compute call loads besides them (never importable). */
 export const computeRunnerImports = ["@grasp-os/sdk/compute-runner"] as const;

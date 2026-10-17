@@ -178,6 +178,9 @@ export default defineConfig({
           // The same for a run of an independent workflow's sealed build.
           "apps/core/src/workflows/resource-host.ts",
           "apps/core/src/workflows/resource-attempt-host.ts",
+          // An action's host, which bounds each call itself, so that a
+          // refusal of its bounds stands as any other (resource-action.ts).
+          "apps/core/src/workflows/resource-action.ts",
         ],
         rules: {
           "no-restricted-imports": [

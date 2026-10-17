@@ -91,6 +91,8 @@ export const diagnosticMessages = {
   "binding.contract_mismatch":
     "The binding's contract doesn't allow what the task asks of it.",
   "binding.unreferenced": "The binding is declared but nothing uses it.",
+  "binding.unknown_use":
+    "An action of the workflow's own modules uses a binding the definition doesn't declare, of another kind, or of its own modules.",
 } as const;
 
 export type DiagnosticCode = keyof typeof diagnosticMessages;

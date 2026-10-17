@@ -717,7 +717,10 @@ export const runResourceWorkflow = async (
   );
   const calls: AttemptCall[] = [];
   let tampered: StepError | undefined;
+  // The run's own sandbox session on-prem, its actions' parent.
+  let sessionId: string | undefined;
   const host = new ResourceRunHost(env, step, run, {
+    sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
     ...(memory.triedOnce === undefined ? {} : { triedOnce: memory.triedOnce }),
     attemptCall: trackAttemptCalls(calls),
@@ -746,6 +749,9 @@ export const runResourceWorkflow = async (
       attemptMethods: resourceAttemptMethods,
     },
     {
+      onSession: (id) => {
+        sessionId = id;
+      },
       ...(memory.over === undefined ? {} : { over: memory.over }),
       ...(memory.current === undefined ? {} : { current: memory.current }),
     }
