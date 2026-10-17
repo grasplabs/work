@@ -232,7 +232,8 @@ describe("an organization's records", () => {
       sees: [
         "Sales 5 people 5 2 1 40%",
         "Operations 2 people Too small to show 2 – – –",
-        "Everyone 7 people 7 2 1 29%",
+        // Operations is too small to show, so it adds nothing to everyone's numbers.
+        "Everyone 5 people 5 2 1 40%",
       ].map((line) => sees.includes(line)),
     }).toStrictEqual({
       status: 200,

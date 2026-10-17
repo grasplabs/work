@@ -474,17 +474,23 @@ export const personLog = (view: OrgView, id: string): PersonEvent[] => {
   );
 };
 
-/** One team as the company's own admin sees it: numbers, and only for a team of five or more. */
+/** One team as the company's own admin sees it: numbers, and only for a team where five or more are asked. */
 export interface CompanyTeam {
   team: OrgTeam;
   people: number;
-  /** Big enough to show: a smaller team shows no numbers, so nobody in it can be picked out. */
+  /** Big enough to show: where fewer are asked to talk, the team shows no numbers, so nobody in it can be picked out. */
   shown: boolean;
   completed: number;
   stopped: number;
 }
 
-/** What the company's own admin sees of the interviews: numbers per team and for everyone, never a name or anyone's words. */
+/**
+ * What the company's own admin sees of the interviews: numbers per team, and for everyone the
+ * teams that show theirs, never a name or anyone's words. A team shows its numbers once enough of
+ * it is asked to talk, as core shows the company its progress (core's `progressOf`): someone away
+ * is not asked, and a team too small to show adds nothing to everyone's numbers, which would give
+ * its own away.
+ */
 export const companySees = (
   view: OrgView
 ): {
@@ -499,15 +505,18 @@ export const companySees = (
     .map((team): CompanyTeam => ({
       team: team.team,
       people: team.people.length,
-      shown: team.people.length >= MIN_GROUP,
+      shown: team.asked >= MIN_GROUP,
       completed: team.counts.completed,
       stopped: team.counts.incomplete,
     }));
+  const shown = teams.filter((team) => team.shown);
+  const sum = (of: (team: CompanyTeam) => number): number =>
+    shown.reduce((total, team) => total + of(team), 0);
   return {
     teams,
-    people: view.asked,
-    completed: view.counts.completed,
-    stopped: view.counts.incomplete,
+    people: sum((team) => team.people),
+    completed: sum((team) => team.completed),
+    stopped: sum((team) => team.stopped),
   };
 };
 

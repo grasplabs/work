@@ -340,13 +340,17 @@ export const logDays = (
   });
 };
 
-/** How many entries each hour of one day has, by who did it: for a log that is one day long. What has no time is left out. */
+/**
+ * How many entries each hour of one day has, by who did it: for a log that is one day long. What
+ * has no time is left out. Hours are UTC's, as the console shows times, so a page drawn on the
+ * server and again in the reader's browser counts each entry in the same hour.
+ */
 export const logHours = (
   items: LogItem[]
 ): ({ hour: number } & Record<LogActor, number>)[] =>
   Array.from({ length: 24 }, (_, hour) => {
     const of = items.filter(
-      (item) => item.at !== null && new Date(item.at).getHours() === hour
+      (item) => item.at !== null && new Date(item.at).getUTCHours() === hour
     );
     return {
       hour,

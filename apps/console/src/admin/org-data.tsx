@@ -184,7 +184,7 @@ const CompanySees = ({ view }: { view: AdminView }) => {
   const sees = companySees(view);
   return (
     <Panel
-      description={`Numbers per team, only for teams of ${MIN_GROUP} or more. Never a name, never anyone’s words, and never who stopped or did not start.`}
+      description={`Numbers per team, only where ${MIN_GROUP} or more in a team are asked to talk, and for everyone only the teams that show theirs. Never a name, never anyone’s words, and never who stopped or did not start.`}
       title="What the company itself sees"
     >
       {sees.teams.length === 0 ? (

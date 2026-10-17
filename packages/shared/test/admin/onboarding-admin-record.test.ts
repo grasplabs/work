@@ -485,6 +485,32 @@ describe("what the company itself sees", () => {
     ).teams.filter((team) => !team.shown);
     expect(small.map((team) => team.people)).toStrictEqual([4]);
   });
+
+  it("counts who is asked to talk, as core shows the company, and leaves a hidden team out of everyone's numbers", () => {
+    // Compliance is five people: with one of them away, four are asked.
+    const compliance = at(noordkade).teams.find(
+      (team) => team.team.id === "compliance"
+    );
+    const [away] = compliance?.people ?? [];
+    const view = at(noordkade, { away: away ? [away.person.id] : [] });
+    const sees = companySees(view);
+    const hidden = sees.teams.find((team) => team.team.id === "compliance");
+    const shown = sees.teams.filter((team) => team.shown);
+    expect({
+      people: hidden?.people,
+      shown: hidden?.shown,
+      everyone: [sees.people, sees.completed, sees.stopped],
+    }).toStrictEqual({
+      people: 5,
+      shown: false,
+      everyone: [
+        shown.reduce((sum, team) => sum + team.people, 0),
+        shown.reduce((sum, team) => sum + team.completed, 0),
+        shown.reduce((sum, team) => sum + team.stopped, 0),
+      ],
+    });
+    expect(sees.completed).toBeLessThan(view.counts.completed);
+  });
 });
 
 describe("what is kept of the interviews", () => {
