@@ -1,4 +1,9 @@
 import {
+  addDays,
+  addWorkingDays,
+  dayOf,
+} from "@grasp-os/shared/admin/org-record";
+import {
   leadWaitWorkingDays,
   minTalkedShown,
   minTeamShown,
@@ -15,7 +20,9 @@ import type {
 // The onboarding's rules, as pure functions of what the store holds: whose
 // links are due, and what the company's admin may see of where the
 // interviews stand. Ported from the prototype (grasplabs/prototype,
-// packages/grasp: src/lib/org-record.ts).
+// packages/grasp: src/lib/org-record.ts) and adapted to Grasp OS's own
+// roster and plan; the days it counts in are the admin model's own
+// (@grasp-os/shared/admin/org-record).
 
 /** Where one interview stands, without what was said in it. */
 export interface InterviewState {
@@ -23,33 +30,6 @@ export interface InterviewState {
   startedAt: string | null;
   completedAt: string | null;
 }
-
-/** The day an ISO time falls on, as an ISO day. */
-export const dayOf = (time: string): string => time.slice(0, 10);
-
-/** The ISO day `count` days after `day`. */
-export const addDays = (day: string, count: number): string => {
-  const date = new Date(`${dayOf(day)}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + count);
-  return date.toISOString().slice(0, 10);
-};
-
-const saturday = 6;
-const sunday = 0;
-
-/** The ISO day `count` working days after `day`: weekends don't count. */
-export const addWorkingDays = (day: string, count: number): string => {
-  let at = dayOf(day);
-  let left = count;
-  while (left > 0) {
-    at = addDays(at, 1);
-    const weekday = new Date(`${at}T12:00:00Z`).getUTCDay();
-    if (weekday !== saturday && weekday !== sunday) {
-      left -= 1;
-    }
-  }
-  return at;
-};
 
 /** The Monday (UTC) of the week `day` falls in, as an ISO day. */
 export const mondayOf = (day: string): string => {
