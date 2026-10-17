@@ -845,7 +845,7 @@ const inspectDefinition = async (
   by: Acting,
   workflow: Pick<Live, "name">,
   definition: string,
-  modules: CompiledModules | undefined
+  modules?: CompiledModules
 ): Promise<
   | { ok: true; checked: CheckedWorkflow; bindings: PinnedBinding[] }
   | { ok: false; problems: WorkflowDefinitionProblem[] }
@@ -1631,13 +1631,7 @@ export const definitionProblems = async (
   workflow: Pick<Live, "name">,
   definition: string
 ): Promise<WorkflowDefinitionProblem[]> => {
-  const inspected = await inspectDefinition(
-    env,
-    by,
-    workflow,
-    definition,
-    undefined
-  );
+  const inspected = await inspectDefinition(env, by, workflow, definition);
   return inspected.ok ? [] : inspected.problems;
 };
 

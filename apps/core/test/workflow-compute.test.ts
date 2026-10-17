@@ -15,6 +15,10 @@ import { z } from "zod";
 import type { Acting } from "../src/auth/identity.ts";
 import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
+import {
+  editWorkflowDraft,
+  publishWorkflowDraft,
+} from "../src/workflow-drafts.ts";
 import { jsonTextDepth, runCompute } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
@@ -527,6 +531,30 @@ describe("a JSON workflow's compute modules", () => {
         "binding.unknown_contract"
       );
     }
+  });
+
+  it("finds a local binding in a draft a problem, as a draft publishes its definition without modules", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, totalModules);
+    const draft = await editWorkflowDraft(env, by, workflow.id, {
+      expectedRevision: 0,
+      source: definitionOf(workflow.name, { version: "1.1.0" }),
+    });
+    expect({
+      problems: draft.problems.map(({ code }) => code),
+      // Still the current version, which was published with modules.
+      checkpoint: draft.checkpoint?.revision,
+      published: await outcome(
+        publishWorkflowDraft(env, by, workflow.id, {
+          revision: 1,
+          basedOn: 1,
+        })
+      ),
+    }).toStrictEqual({
+      problems: ["binding.unknown_contract"],
+      checkpoint: 0,
+      published: "workflow.draft_unchecked",
+    });
   });
 
   it("makes other modules another program, and another publication of the same version", async () => {
