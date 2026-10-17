@@ -60,9 +60,11 @@ export interface Fixture {
 /** A builder's App `name` with `files` as its first version, and a store for it. */
 export const appWith = async (
   files: Record<string, string>,
-  name = "Notes"
+  name = "Notes",
+  /** Who creates it: a new builder unless given. */
+  by?: Identity
 ): Promise<Fixture> => {
-  const owner = await person("builder");
+  const owner = by ?? (await person("builder"));
   const { id } = await createApp(env, owner, { name });
   await commitFiles(env, owner, id, files, "First version");
   return { owner, app: id, store: await createStore(env, owner) };

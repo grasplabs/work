@@ -248,6 +248,83 @@ const runIds = (result: OperationResult): string[] =>
 const codeOf = (result: OperationResult): string =>
   result.ok ? "ok" : result.error.code;
 
+/** A greeting workflow `owner` publishes at version 1. */
+const greetingOf = async (owner: Identity) => {
+  const workflow = await createWorkflowResource(
+    env,
+    owner,
+    `greet-${unique()}`
+  );
+  await publishWorkflowVersion(env, owner, workflow.id, {
+    definition: definitionOf(workflow.name),
+    basedOn: null,
+  });
+  return workflow;
+};
+
+/**
+ * The Requests App sealed and current, `members` given the user role in
+ * it, and `workflowId` bound as `followUp` with the App's `start` grant.
+ */
+const requestsApp = async (
+  admin: Identity,
+  members: readonly Identity[],
+  workflowId: string,
+  owner?: Identity
+) => {
+  const fixture = await appWith(files(), "Requests", owner);
+  const release = await seal(fixture);
+  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  for (const member of members) {
+    // oxlint-disable-next-line no-await-in-loop -- a row each
+    await env.DB.prepare(
+      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+    )
+      .bind(fixture.app, member.userId, fixture.owner.userId, Date.now())
+      .run();
+  }
+  const binding = await bindWorkflowToApp(env, fixture.owner, workflowId, {
+    app: fixture.app,
+    alias: "followUp",
+    version: 1,
+  });
+  const asked = await requestPermission(
+    env,
+    fixture.owner,
+    {
+      subject: { type: "app", appId: fixture.app },
+      object: { type: "workflow", workflowId },
+      actions: ["start"],
+      binding: "FOLLOW_UP",
+    },
+    rolesOf(fixture.owner)
+  );
+  await grantPermission(env, admin, asked.id, { version: 1 });
+  return { ...fixture, release, binding: binding.id };
+};
+
+/** `count` runs of `workflowId` App `app` started for `principal`, as their rows. */
+const startedRuns = async (
+  app: string,
+  workflowId: string,
+  principal: string,
+  count: number
+): Promise<void> => {
+  const statements = Array.from({ length: count }, (_, index) => {
+    const id = crypto.randomUUID();
+    const at = Date.UTC(2026, 0, 1) + index * 1000;
+    return [
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, 1, 'm', ?, 1, 'h', ?)"
+      ).bind(id, app, `key-${id}`, workflowId, principal, at),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at, ended_at) VALUES (?, ?, 1, 'm', 'b', ?, 'completed', ?, ?)"
+      ).bind(id, workflowId, principal, at, at + 500),
+    ];
+  });
+  await env.DB.batch(statements.flat());
+};
+
 describe("a workflow reference's queries", { timeout: 120_000 }, () => {
   it("list only the runs this App started for the person, of the workflow it binds, newest first, page by page", async () => {
     const admin = await person("admin");
@@ -463,5 +540,107 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     expect(codeOf(await ask(bob, references.runs, { pagination: {} }))).toBe(
       "resource.unavailable"
     );
+  });
+
+  it("keep each App's runs its own, answer a window of more than a page, and follow access, revocation and rebinding", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await greetingOf(owner);
+    const first = await requestsApp(admin, [bob], workflow.id, owner);
+    const second = await requestsApp(admin, [bob], workflow.id, owner);
+    // 150 runs of Bob's through the first App, 3 through the second.
+    await startedRuns(first.app, workflow.id, bob.userId, 150);
+    await startedRuns(second.app, workflow.id, bob.userId, 3);
+    const runs = await queryReference(first.release, "followUp", "runs");
+    const ask = async (input: unknown, window?: number) => {
+      const request = JSON.stringify({
+        reference: runs,
+        input,
+        ...(window === undefined ? {} : { window: { extent: window } }),
+      });
+      const { result } =
+        window === undefined
+          ? await callAppFunction(env, bob, first.app, request)
+          : await callScreenFunction(
+              env,
+              bob,
+              first.app,
+              request,
+              Date.now() + 30_000,
+              async () => {
+                // A window's pages cost nothing here.
+              }
+            );
+      return result;
+    };
+    const askSecond = async () => {
+      const answer = await callAppFunction(
+        env,
+        bob,
+        second.app,
+        JSON.stringify({
+          reference: await queryReference(second.release, "followUp", "runs"),
+          input: { pagination: {} },
+        })
+      );
+      return answer.result;
+    };
+    const firstPage = await ask({ pagination: {} });
+    const cursor = firstPage.ok
+      ? z.object({ nextCursor: z.string() }).parse(firstPage.value).nextCursor
+      : "";
+    const plan = await env.DB.prepare(
+      "EXPLAIN QUERY PLAN SELECT runs.id FROM workflow_resource_runs AS runs JOIN workflow_start_receipts AS receipts ON receipts.id = runs.id WHERE runs.workflow_resource_id = ? AND receipts.invoker_type = 'app' AND receipts.invoker_id = ? AND receipts.principal_id = ? AND runs.principal_id = ? ORDER BY runs.created_at DESC, runs.id DESC LIMIT 51"
+    )
+      .bind(workflow.id, first.app, bob.userId, bob.userId)
+      .all<{ detail: string }>();
+    expect({
+      window: runIds(await ask({}, 500)).length,
+      firstPage: runIds(firstPage).length,
+      secondApp: runIds(await askSecond()).length,
+      indexed: plan.results.some(({ detail }) =>
+        detail.includes("workflow_resource_runs_principal_idx")
+      ),
+    }).toStrictEqual({
+      window: 150,
+      firstPage: 50,
+      secondApp: 3,
+      indexed: true,
+    });
+
+    // The alias bound to another workflow: none of the old one's runs,
+    // whatever place in their list a cursor names.
+    const other = await greetingOf(owner);
+    await bindWorkflowToApp(env, owner, other.id, {
+      app: first.app,
+      alias: "followUp",
+      version: 1,
+    });
+    const rebound = {
+      fresh: runIds(await ask({ pagination: {} })),
+      oldCursor: runIds(await ask({ pagination: { cursor } })),
+    };
+
+    // A release revoked while current answers nothing.
+    await env.DB.prepare(
+      "UPDATE sdk_release_manifests SET revoked_at = ? WHERE app_id = ? AND version = 1"
+    )
+      .bind(Date.now(), first.app)
+      .run();
+    const revoked = codeOf(await ask({ pagination: {} }));
+
+    // Nor to someone no longer in the App.
+    await env.DB.prepare(
+      "DELETE FROM app_members WHERE app_id = ? AND member_id = ?"
+    )
+      .bind(second.app, bob.userId)
+      .run();
+    const removed = codeOf(await askSecond());
+    expect({ rebound, revoked, removed }).toStrictEqual({
+      rebound: { fresh: [], oldCursor: [] },
+      revoked: "version.revoked",
+      removed: "app.not_found",
+    });
   });
 });

@@ -51,6 +51,9 @@ import { windowPages } from "./query-windows.ts";
 // - Arguments or answers outside the contract: arguments are checked by
 //   the generated descriptor, answers too before they leave, projected
 //   field by field: a run row carries no input, output or error.
+// - Cost: one person's runs of a workflow are read through
+//   `workflow_resource_runs_principal_idx` (workflow ID, principal,
+//   created at, ID), never a scan of everyone's runs of it.
 
 const queryPath =
   /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})\.queries\.(?<name>runs|history|decisions|decision)$/u;
@@ -282,7 +285,9 @@ const runsPage = async (
       // Admitted is when it was started; a queued run hasn't begun.
       startedAt: status === "queued" ? null : row.createdAt.getTime(),
       finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
-      canWatch: true,
+      // Nothing of a run can be followed through an App yet: its history
+      // refuses (GRA-695) and nothing keeps it fresh (GRA-696).
+      canWatch: false,
     };
   });
   const lastRow = shown.at(-1);
@@ -438,17 +443,26 @@ export const readWorkflowWindow = async (
   if (owed > 0) {
     await window.charge(owed, windowPages(window.extent) + owed);
   }
-  // Each record as the query's own pages carry it.
-  const checkedPage = checked(
-    query.returns,
-    page.hasMore && page.last !== undefined
-      ? { items: page.items, nextCursor: page.last, hasMore: true }
-      : { items: page.items, nextCursor: null, hasMore: false },
-    "contract.invalid_return"
-  );
-  const items =
-    isObject(checkedPage) && Array.isArray(checkedPage.items)
+  // Each record as the query's own pages carry it: checked in pages of
+  // the most a page holds, since a window holds more than one page.
+  const items: Json[] = [];
+  for (let start = 0; start < page.items.length; start += queryMaxResults) {
+    const checkedPage = checked(
+      query.returns,
+      {
+        items: page.items.slice(start, start + queryMaxResults),
+        nextCursor: null,
+        hasMore: false,
+      },
+      "contract.invalid_return"
+    );
+    const checkedItems: unknown = isObject(checkedPage)
       ? checkedPage.items
-      : [];
+      : undefined;
+    if (Array.isArray(checkedItems)) {
+      const list: readonly Json[] = checkedItems;
+      items.push(...list);
+    }
+  }
   return { ok: true, value: { items, hasMore: page.hasMore } };
 };
