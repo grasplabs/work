@@ -1,3 +1,4 @@
+import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
 import { leadWaitWorkingDays } from "@grasp-os/shared/onboarding";
 import type { Agreements, OnboardingView } from "@grasp-os/shared/onboarding";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
@@ -9,7 +10,7 @@ import type {
   StageView,
 } from "@grasp-os/shared/onboarding-staff";
 
-import { addWorkingDays, closesOn, dayOf, takingPart } from "./rules.ts";
+import { closesOn, takingPart } from "./rules.ts";
 import type { InterviewState } from "./rules.ts";
 
 // Grasp's onboarding area (GRA-319): where the onboarding stands as stages
