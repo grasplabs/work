@@ -6,7 +6,6 @@ import type {
 import type { Role } from "../roles.ts";
 import { stateWith } from "./admin-state.ts";
 import type { Agreed, Member, Org, OrgState } from "./onboarding-admin.ts";
-import { LISTEN_DAYS } from "./onboarding.ts";
 import { orgOfSnapshot } from "./org-adapter.ts";
 import { daysBetween, NEW_CLIENT, NOTHING_SAID } from "./org-record.ts";
 import type {
@@ -159,11 +158,11 @@ const createdOf = (snapshot: AdminSnapshot, client: AdminClient): string =>
 const doneOf = (snapshot: AdminSnapshot, client: AdminClient): CoreDone => {
   const plan = planOf(snapshot);
   const start = plan?.start ?? createdOf(snapshot, client).slice(0, 10);
-  // As the admin counts the days: from the start, up to the end of the interviews, none before the team is told.
+  // As the admin counts the days: from the start, up to the end of its own plan, none before the team is told.
   const today =
     plan === null
       ? 0
-      : Math.min(Math.max(daysBetween(start, snapshot.now), 0), LISTEN_DAYS);
+      : Math.min(Math.max(daysBetween(start, snapshot.now), 0), plan.days);
   const { agreements, gate, kickoff } = snapshot;
   const { openedAt } = gate;
   let conversation: OrgState["conversation"] = "none";

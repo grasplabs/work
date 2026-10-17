@@ -431,6 +431,54 @@ describe("an organization from core's admin snapshot", () => {
     ).toStrictEqual({ kind: "go", percent: 85, threshold: 80 });
   });
 
+  it("runs the interviews as long as core's plan, past the samples' fourteen days", () => {
+    // Six weeks planned; day 27 now. Tom finished on day 23 and Grasp's go came on day 20.
+    const long = adminOrgOf(
+      {
+        ...snapshot,
+        now: "2026-11-01T10:00:00Z",
+        plan: { ...snapshot.plan, start: "2026-10-05", days: 42 },
+        gate: {
+          ...snapshot.gate,
+          open: true,
+          closedSince: null,
+          openedAt: "2026-10-25T15:00:00.000Z",
+        },
+        links: snapshot.links.map((link) =>
+          link.person === "tom" ? { ...link, state: "completed" } : link
+        ),
+        interviews: snapshot.interviews.map((interview) =>
+          interview.person === "tom"
+            ? {
+                ...interview,
+                completedAt: "2026-10-28T10:00:00.000Z",
+                updatedAt: "2026-10-28T10:00:00.000Z",
+                agreed: true,
+                phase: "readback" as const,
+                stoppedAt: null,
+              }
+            : interview
+        ),
+      },
+      client
+    );
+    const view = adminViewOf(long.org, long.state, "2026-11-01");
+
+    expect({
+      day: view.day,
+      closed: view.closed,
+      opened: view.knowledge.opened,
+      talked: view.interviews.map((each) => each.id).toSorted(),
+      tom: view.people.find((each) => each.person.id === "tom")?.state,
+    }).toStrictEqual({
+      day: 27,
+      closed: false,
+      opened: 20,
+      talked: ["lisa", "tom"],
+      tom: "completed",
+    });
+  });
+
   it("counts the AI core counted, by day and by what it was for", () => {
     const { view } = shown();
 
