@@ -2,7 +2,12 @@ import { addDays, addMonths, monthOf } from "./admin-account.ts";
 import type { MemberView } from "./admin-account.ts";
 import { valuePerMonth, WEEKS_PER_MONTH } from "./hours.ts";
 import { TALK_SHARE } from "./interviews.ts";
-import { dateOn, RESEARCH_SOURCES, unit } from "./onboarding-admin.ts";
+import {
+  dateOn,
+  listenDays,
+  RESEARCH_SOURCES,
+  unit,
+} from "./onboarding-admin.ts";
 import type {
   Interview,
   Org,
@@ -12,7 +17,6 @@ import type {
   WorkEvidence,
   WorkRun,
 } from "./onboarding-admin.ts";
-import { LISTEN_DAYS } from "./onboarding.ts";
 import { present } from "./present.ts";
 
 /**
@@ -184,7 +188,8 @@ export const asOf = (view: OrgView, today: string): string => {
   if (!view.closed) {
     return dateOn(view.org, view.day);
   }
-  const closed = dateOn(view.org, LISTEN_DAYS);
+  // Counted up to the day its own plan closed: a six-week plan's AI is counted over six weeks.
+  const closed = dateOn(view.org, listenDays(view.org));
   return today > closed ? today : closed;
 };
 

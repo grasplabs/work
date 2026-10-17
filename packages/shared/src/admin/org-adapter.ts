@@ -21,8 +21,7 @@ import type {
   Timeline,
   Work,
 } from "./onboarding-admin.ts";
-import { LISTEN_DAYS } from "./onboarding.ts";
-import { daysBetween, METER_PURPOSES } from "./org-record.ts";
+import { daysBetween, METER_PURPOSES, PLAN_DAYS } from "./org-record.ts";
 import type {
   DrawnWork,
   HeldInterview,
@@ -206,10 +205,10 @@ const dayAt = (start: string, time: string | null | undefined) =>
 export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
   const { profile, roster, plan, client } = snapshot;
   const start = plan?.start ?? profile.created.slice(0, 10);
-  const today = Math.min(
-    Math.max(daysBetween(start, snapshot.now), 0),
-    LISTEN_DAYS
-  );
+  // Its interviews run as long as its plan says, from five days to six weeks; one not planned yet
+  // has the usual length a plan starts from.
+  const days = plan?.days ?? PLAN_DAYS;
+  const today = Math.min(Math.max(daysBetween(start, snapshot.now), 0), days);
   const people = roster?.people ?? [];
   const teams: OrgTeam[] = (roster?.teams ?? []).map((team) => {
     const lead = people.find((person) => person.id === team.lead);
@@ -452,6 +451,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     place: profile.place,
     sponsor: profile.sponsor.title || profile.sponsor.name,
     start,
+    days,
     teams,
     works,
     dropped: [],
