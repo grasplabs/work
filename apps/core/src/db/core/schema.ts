@@ -814,6 +814,7 @@ export const sdkResourceBindings = sqliteTable(
         "connector",
         "model",
         "decision",
+        "event",
       ],
     }).notNull(),
     targetId: text("target_id").notNull(),
@@ -2832,7 +2833,7 @@ export const workflowCatalogContracts = sqliteTable(
   {
     key: text().primaryKey(),
     kind: text({
-      enum: ["operation", "connector", "model", "decision"],
+      enum: ["operation", "connector", "model", "decision", "event"],
     }).notNull(),
     contract: text().notNull(),
     fingerprint: text().notNull(),
@@ -2860,7 +2861,7 @@ export const workflowBindingApprovals = sqliteTable(
       .references(() => workflowResources.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["operation", "connector", "model", "decision"],
+      enum: ["operation", "connector", "model", "decision", "event"],
     }).notNull(),
     contractId: text("contract_id").notNull(),
     fingerprint: text().notNull(),

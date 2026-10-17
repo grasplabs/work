@@ -7,6 +7,7 @@ import {
 import { profileLimits } from "@grasp-os/open-workflow/limits";
 import { validateWorkflow } from "@grasp-os/open-workflow/validate";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
+import { workflowReferenceLimits } from "@grasp-os/sdk/host";
 import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -57,6 +58,8 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
+import { boundEventsOf } from "./bound-workflow-events.ts";
+import type { PinnedEventBinding } from "./bound-workflow-events.ts";
 import {
   sdkReleasePins,
   sdkResourceBindings,
@@ -85,6 +88,7 @@ import {
 } from "./workflow-builds.ts";
 import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
+import type { ResolvedCatalogContract } from "./workflow-catalog.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
@@ -492,11 +496,18 @@ interface ResolvedWorkflow {
 
 /**
  * A version's contract, as stored: the SDK descriptors of its input and
- * output, and its parameters' descriptors, labels and sensitivity.
+ * output, its parameters' descriptors, labels and sensitivity, and its
+ * listen tasks, by task ID, each with the event binding it listens
+ * through and the types its filters name: what an App binding it may be
+ * held at, and sent (bound-workflow-events.ts).
  */
 const storedContractSchema = z.strictObject({
   input: z.json(),
   output: z.json(),
+  listens: z.record(
+    z.string(),
+    z.strictObject({ alias: z.string(), types: z.array(z.string()) })
+  ),
   params: z.record(
     z.string(),
     z.strictObject({
@@ -681,6 +692,72 @@ const descriptorAt = (
   return z.json().parse(schema.descriptor);
 };
 
+/** What is at JSON Pointer `pointer` in `value`, if anything. */
+const valueAt = (value: unknown, pointer: string): unknown => {
+  let node = value;
+  for (const segment of pointer.split("/").slice(1)) {
+    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+    node =
+      typeof node === "object" && node !== null && Object.hasOwn(node, key)
+        ? Reflect.get(node, key)
+        : undefined;
+  }
+  return node;
+};
+
+/** The literal types a listen's filters name, at `listen.to`. */
+const filterTypesOf = (to: unknown): string[] => {
+  const filters: unknown[] = [valueAt(to, "/one")];
+  for (const list of [valueAt(to, "/any"), valueAt(to, "/all")]) {
+    if (Array.isArray(list)) {
+      const items: readonly unknown[] = list;
+      filters.push(...items);
+    }
+  }
+  const types = new Set<string>();
+  for (const filter of filters) {
+    const type = valueAt(filter, "/with/type");
+    if (typeof type === "string") {
+      types.add(type);
+    }
+  }
+  return [...types].toSorted();
+};
+
+/**
+ * The listen tasks of a checked definition, by task ID (unique in the
+ * definition, and what a run's waits name), each with the event binding
+ * its `metadata.grasp.binding` names, which validation required to be a
+ * declared event binding, and the literal types its filters name, which
+ * validation required its contract to admit.
+ */
+const listensOf = (checked: CheckedWorkflow): StoredContract["listens"] => {
+  const listens: StoredContract["listens"] = {};
+  for (const task of checked.tasks) {
+    if (task.kind === "listen") {
+      const alias = valueAt(
+        checked.definition,
+        `${task.pointer}/metadata/grasp/binding`
+      );
+      if (
+        typeof alias !== "string" ||
+        checked.bindings.get(alias)?.kind !== "event"
+      ) {
+        throw new Error(
+          `A checked listen task has no event binding: ${task.id}`
+        );
+      }
+      listens[task.id] = {
+        alias,
+        types: filterTypesOf(
+          valueAt(checked.definition, `${task.pointer}/listen/to`)
+        ),
+      };
+    }
+  }
+  return listens;
+};
+
 /** The contract of a checked definition: what a caller of it relies on. */
 const contractOf = (checked: CheckedWorkflow): StoredContract => {
   const declared =
@@ -698,8 +775,42 @@ const contractOf = (checked: CheckedWorkflow): StoredContract => {
   return {
     input: descriptorAt(checked, "/input/schema"),
     output: descriptorAt(checked, "/output/schema"),
+    listens: listensOf(checked),
     params,
   };
+};
+
+/**
+ * Refuses a definition with more listen tasks an App's references would
+ * carry as event waits (those waiting only on a browser-callable type)
+ * than a reference holds: sealing an App bound to it would fail later,
+ * where the builder can't see why.
+ */
+const requireReferenceableListens = (
+  checked: CheckedWorkflow,
+  catalog: Map<string, ResolvedCatalogContract>
+): void => {
+  const bindings: PinnedEventBinding[] = [];
+  for (const [alias, binding] of checked.bindings) {
+    const events = catalog.get(binding.contract)?.contract.events;
+    if (binding.kind === "event" && events !== undefined) {
+      bindings.push({ alias, events });
+    }
+  }
+  const referenced = Object.keys(
+    boundEventsOf(bindings, listensOf(checked)).listens
+  ).length;
+  if (referenced > workflowReferenceLimits.listens) {
+    throw definitionInvalid([
+      {
+        code: "listen.too_many",
+        message: `More than ${workflowReferenceLimits.listens} tasks listen for events a screen sends, which an App's references can't hold.`,
+        pointer: "/do",
+        remedy:
+          "Listen for a screen's events in fewer tasks: a bounded loop of one listen covers repeats.",
+      },
+    ]);
+  }
 };
 
 /**
@@ -796,6 +907,7 @@ const checkDefinition = async (
     });
   }
   bindings.sort((a, b) => (a.alias < b.alias ? -1 : 1));
+  requireReferenceableListens(checked, catalog);
   return { checked, bindings };
 };
 

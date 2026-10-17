@@ -1,5 +1,9 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import {
+  jsonSchemaOf,
+  schemaFromDescriptor,
+  workflowReferenceLimits,
+} from "@grasp-os/sdk/host";
 import {
   releaseFormatVersion,
   releaseManifestSchema,
@@ -26,6 +30,7 @@ import {
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
+import { boundEventsOf } from "../src/bound-workflow-events.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { standingOf } from "../src/screen-trust.ts";
@@ -33,13 +38,17 @@ import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
-import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import {
+  publishCatalogContract,
+  resolveCatalogKeys,
+} from "../src/workflow-catalog.ts";
 import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
   publishWorkflowVersion,
   shareWorkflowResource,
+  versionContract,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import {
@@ -184,6 +193,14 @@ interface Draft {
   child?: string;
   /** Whether it waits an hour before it finishes. */
   waits?: boolean;
+  /**
+   * An event contract it listens through, as binding `jobEvents`, for
+   * `listensFor` (by default its `grasp.job.completed`).
+   */
+  events?: string;
+  listensFor?: string;
+  /** How many listen tasks it has, one after the other (1 by default). */
+  listenTasks?: number;
 }
 
 /**
@@ -198,6 +215,9 @@ const definitionOf = ({
   tokenSensitive = true,
   child,
   waits = false,
+  events,
+  listensFor = "grasp.job.completed",
+  listenTasks = 1,
 }: Draft): string =>
   JSON.stringify({
     document: {
@@ -235,6 +255,9 @@ const definitionOf = ({
                     contract: `${workflowNamespace}/${child}/1.0.0`,
                   },
                 }),
+            ...(events === undefined
+              ? {}
+              : { jobEvents: { kind: "event", contract: events } }),
           },
         },
       },
@@ -275,6 +298,18 @@ const definitionOf = ({
             },
           ]),
       ...(waits ? [{ pause: { wait: "PT1H" } }] : []),
+      ...(events === undefined
+        ? []
+        : Array.from({ length: listenTasks }, (_, index) => ({
+            [index === 0 ? "await-job" : `await-job-${index}`]: {
+              listen: {
+                to: { one: { with: { type: listensFor } } },
+                read: "data",
+              },
+              timeout: { after: { hours: 24 } },
+              metadata: { grasp: { binding: "jobEvents" } },
+            },
+          }))),
       { finish: { set: { status: "done" } } },
     ],
   });
@@ -460,6 +495,235 @@ describe("the host catalog", () => {
     }).toStrictEqual({
       bindings: [{ alias: "summary", kind: "model", contractId: key }],
       missing: "workflow.definition_invalid",
+    });
+  });
+});
+
+/** An event contract `admin` publishes: a job's completion and timeout. */
+const eventContract = async (admin: Person): Promise<string> => {
+  const key = `job-events-${unique()}`;
+  const data = JSON.stringify({
+    descriptorVersion: 1,
+    kind: "object",
+    presence: "required",
+    nullable: false,
+    fields: {
+      jobId: {
+        descriptorVersion: 1,
+        kind: "string",
+        presence: "required",
+        nullable: false,
+        trim: false,
+        email: false,
+      },
+    },
+  });
+  await publishCatalogContract(env, admin, {
+    key,
+    kind: "event",
+    events: {
+      "grasp.job.completed": { data, browser: true },
+      "grasp.job.timeout": { data, browser: false },
+    },
+  });
+  return key;
+};
+
+describe("event contracts", () => {
+  it("admit each event type only with its data's contract and whether a screen sends it", async () => {
+    const admin = await person("admin");
+    const data = JSON.stringify(emptyObject);
+    const publish = async (events: unknown) =>
+      await outcome(
+        publishCatalogContract(env, admin, {
+          key: `events-${unique()}`,
+          kind: "event",
+          events,
+        })
+      );
+    expect({
+      typed: await publish({ "grasp.job.done": { data, browser: true } }),
+      noData: await publish({ "grasp.job.done": { browser: true } }),
+      noSender: await publish({ "grasp.job.done": { data } }),
+      unreadableData: await publish({
+        "grasp.job.done": { data: "{}", browser: false },
+      }),
+      twoForScreens: await publish({
+        "grasp.job.done": { data, browser: true },
+        "grasp.job.failed": { data, browser: true },
+      }),
+      noTypes: await publish({}),
+      noEvents: await outcome(
+        publishCatalogContract(env, admin, {
+          key: `events-${unique()}`,
+          kind: "event",
+        })
+      ),
+    }).toStrictEqual({
+      typed: "ok",
+      noData: "workflow.contract_invalid",
+      noSender: "workflow.contract_invalid",
+      unreadableData: "workflow.contract_invalid",
+      twoForScreens: "workflow.contract_invalid",
+      noTypes: "workflow.contract_invalid",
+      noEvents: "workflow.contract_invalid",
+    });
+  });
+
+  it("record a version's listen tasks and the event binding each listens through, for a type the contract admits", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({ name: workflow.name, events }),
+      basedOn: null,
+    });
+    const [version] = await workflowVersions(env, ada, workflow.id);
+    const contract = await versionContract(env, workflow.id, 1);
+    const unadmitted = await outcome(
+      publishWorkflowVersion(env, ada, workflow.id, {
+        definition: definitionOf({
+          name: workflow.name,
+          version: "2.0.0",
+          events,
+          listensFor: "grasp.job.started",
+        }),
+        basedOn: 1,
+      })
+    );
+    expect({
+      bindings: version?.bindings.map(({ alias, kind, contractId }) => ({
+        alias,
+        kind,
+        contractId,
+      })),
+      listens: contract?.listens,
+      unadmitted,
+    }).toStrictEqual({
+      bindings: [{ alias: "jobEvents", kind: "event", contractId: events }],
+      listens: {
+        "await-job": { alias: "jobEvents", types: ["grasp.job.completed"] },
+      },
+      unadmitted: "workflow.definition_invalid",
+    });
+  });
+
+  it("make a listen task an App's event wait only when it waits on the type a screen sends", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({ name: workflow.name, events }),
+      basedOn: null,
+    });
+    // The same binding, waiting on the contract's other type, which no
+    // screen sends.
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({
+        name: workflow.name,
+        version: "2.0.0",
+        events,
+        listensFor: "grasp.job.timeout",
+      }),
+      basedOn: 1,
+    });
+    const catalog = await resolveCatalogKeys(env, [events]);
+    const contractEvents = catalog.get(events)?.contract.events ?? {};
+    const boundAt = async (version: number) => {
+      const contract = await versionContract(env, workflow.id, version);
+      return boundEventsOf(
+        [{ alias: "jobEvents", events: contractEvents }],
+        contract?.listens ?? {}
+      );
+    };
+    const sent = await boundAt(1);
+    const timeout = await boundAt(2);
+    expect({
+      sent: sent.listens,
+      timeout: timeout.listens,
+      events: Object.keys(timeout.events),
+    }).toStrictEqual({
+      sent: { "await-job": ["jobEvents"] },
+      timeout: {},
+      events: ["jobEvents"],
+    });
+  });
+
+  it("refuse a version with more listen tasks waiting on a screen's events than a reference holds", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    const publish = async (listenTasks: number, listensFor?: string) =>
+      await outcome(
+        publishWorkflowVersion(env, ada, workflow.id, {
+          definition: definitionOf({
+            name: workflow.name,
+            events,
+            listenTasks,
+            ...(listensFor === undefined ? {} : { listensFor }),
+          }),
+          basedOn: null,
+        })
+      );
+    expect({
+      tooMany: await publish(workflowReferenceLimits.listens + 1),
+      // Waits no screen's event: no reference carries them.
+      internal: await publish(
+        workflowReferenceLimits.listens + 1,
+        "grasp.job.timeout"
+      ),
+    }).toStrictEqual({
+      tooMany: "workflow.definition_invalid",
+      internal: "ok",
+    });
+  });
+
+  it("are approved for the version an admin reviewed, by an event target only", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({ name: workflow.name, events }),
+      basedOn: null,
+    });
+    const approve = async (by: Person, target: unknown) =>
+      await outcome(
+        approveWorkflowBinding(env, by, workflow.id, {
+          alias: "jobEvents",
+          target,
+          reviewed: { version: 1 },
+        })
+      );
+    expect({
+      builder: await approve(ada, { kind: "event" }),
+      wrongKind: await approve(admin, { kind: "model", model: allowedModel }),
+      extra: await approve(admin, { kind: "event", browser: true }),
+      approved: await approve(admin, { kind: "event" }),
+    }).toStrictEqual({
+      builder: "role.forbidden",
+      wrongKind: "workflow.binding_invalid",
+      extra: "workflow.binding_invalid",
+      approved: "ok",
     });
   });
 });
