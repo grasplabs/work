@@ -23,6 +23,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { maxAttemptTimeoutMs } from "@grasp-os/shared/workflows";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -36,7 +37,10 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
-import { createTriggerResource } from "../src/trigger-resources.ts";
+import {
+  createTriggerResource,
+  updateTriggerVersion,
+} from "../src/trigger-resources.ts";
 import { resolveUnknownOutcome } from "../src/unknown-outcomes.ts";
 import {
   approveWorkflowBinding,
@@ -50,6 +54,7 @@ import {
   publishWorkflowVersion,
   shareWorkflowResource,
   unshareWorkflowResource,
+  workflowDefinition,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -65,7 +70,7 @@ import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import { withQuotas } from "./quota-policies.ts";
-import { admittedFreely } from "./runs.ts";
+import { admittedFreely, runObject, woken } from "./runs.ts";
 import {
   outcome as resultOf,
   refusal,
@@ -936,6 +941,27 @@ const gatewayAnswering = (...replies: Parameters<typeof fakeGateway>) => {
   return gateway;
 };
 
+/** The name of the sleep run `run` is in, once it sleeps. */
+const sleepOf = async (run: string): Promise<string> =>
+  await vi.waitFor(
+    async () => {
+      const [step] = await runInDurableObject(
+        runObject(run),
+        (_object, state) =>
+          state.storage.sql
+            .exec<{ name: string }>(
+              "SELECT name FROM steps WHERE type = 'sleep' AND state = 'waiting'"
+            )
+            .toArray()
+      );
+      if (step === undefined) {
+        throw new Error(`Run ${run} isn't asleep yet`);
+      }
+      return step.name;
+    },
+    { timeout: 10_000, interval: 50 }
+  );
+
 /**
  * A workflow of `by`'s asking binding `summary` (the allowed model,
  * approved by `admin`) to greet its input's `who`, `before` its tasks
@@ -1158,6 +1184,95 @@ describe("grasp.model calls of JSON workflows", () => {
         code: "workflow.call_denied",
       })),
       requests: 0,
+    });
+  });
+
+  it("refuses the next call of a trigger's run once the trigger is moved off its version, and goes on while it still targets it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Each run's call answered, if it is made.
+    const hello = answer('{"line":"Hello Ada"}');
+    gatewayAnswering(hello, hello, hello, hello);
+    // A wait before its call that only the test ends, once the trigger
+    // moved: the call can't come before the move.
+    const waits = { hold: { wait: "P1D" } };
+    const runOf = async (move: (trigger: string) => Promise<void>) => {
+      const { workflow } = await greetingWorkflow(ada, admin, {
+        before: [waits],
+      });
+      // A version 2 to move the trigger to: its semantic version alone changed.
+      const first = z
+        .object({ document: z.looseObject({}) })
+        .loose()
+        .parse(JSON.parse(await workflowDefinition(env, ada, workflow.id, 1)));
+      await publishWorkflowVersion(env, ada, workflow.id, {
+        definition: JSON.stringify({
+          ...first,
+          document: { ...first.document, version: "1.0.1" },
+        }),
+        basedOn: 1,
+      });
+      const trigger = await createTriggerResource(env, ada, {
+        kind: "system",
+        workflowId: workflow.id,
+        version: 1,
+        config: {},
+      });
+      await granted(ada, admin, {
+        subject: {
+          type: "trigger",
+          triggerId: triggerIdSchema.parse(trigger.id),
+        },
+        object: {
+          type: "workflow",
+          workflowId: workflowResourceIdSchema.parse(workflow.id),
+        },
+        actions: ["start"],
+        binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+      });
+      const { runId } = await startWorkflow(
+        env,
+        { type: "trigger", triggerId: trigger.id },
+        workflow.id,
+        adaStart()
+      );
+      const run = runId ?? "";
+      // Asleep before its call; moved meanwhile; then woken.
+      const sleep = await sleepOf(run);
+      await move(trigger.id);
+      await woken(run, sleep);
+      return endOf(await ended(ada, workflow.id, run));
+    };
+    const moved = await runOf(async (trigger) => {
+      await updateTriggerVersion(env, ada, trigger, 2);
+    });
+    // A new trigger version with the same target, and a move away and
+    // back: it targets the run's workflow and version as the call is made.
+    const sameTarget = await runOf(async (trigger) => {
+      await updateTriggerVersion(env, ada, trigger, 1);
+    });
+    const movedBack = await runOf(async (trigger) => {
+      await updateTriggerVersion(env, ada, trigger, 2);
+      await updateTriggerVersion(env, ada, trigger, 1);
+    });
+    // Aimed at another workflow (no call does this today: a trigger keeps
+    // its workflow, so the database is written as one would).
+    const elsewhere = await runOf(async (trigger) => {
+      const other = await greetingWorkflow(ada, admin);
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO trigger_resource_versions (trigger_id, version, workflow_resource_id, workflow_resource_version, config_hash, principal_binding, created_at) SELECT trigger_id, version + 1, ?, 1, config_hash, principal_binding, ? FROM trigger_resource_versions WHERE trigger_id = ? AND version = (SELECT current_version FROM trigger_resources WHERE id = ?)"
+        ).bind(other.workflow.id, Date.now(), trigger, trigger),
+        env.DB.prepare(
+          "UPDATE trigger_resources SET current_version = current_version + 1 WHERE id = ?"
+        ).bind(trigger),
+      ]);
+    });
+    expect({ moved, elsewhere, sameTarget, movedBack }).toStrictEqual({
+      moved: { status: "failed", code: "workflow.call_denied" },
+      elsewhere: { status: "failed", code: "workflow.call_denied" },
+      sameTarget: { status: "completed", output: { status: "Hello Ada" } },
+      movedBack: { status: "completed", output: { status: "Hello Ada" } },
     });
   });
 
