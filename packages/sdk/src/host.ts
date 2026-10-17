@@ -1,5 +1,5 @@
 import { ValueDefinitionError } from "./value-descriptor.ts";
-import type { ValueSchema } from "./value-descriptor.ts";
+import type { ValueDescriptor, ValueSchema } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
 
@@ -83,6 +83,21 @@ const refuse: (message: string) => never = (message) => {
   throw new ValueDefinitionError("definition.invalid_descriptor", message);
 };
 
+/** The descriptor `text` holds, its structure checked (`readDescriptor`). */
+const descriptorRead = (text: string): ValueDescriptor => {
+  if (typeof text !== "string") {
+    return refuse("A descriptor is read from its JSON text.");
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // What the parser said quotes the text; the refusal doesn't.
+    return refuse("The descriptor isn't JSON.");
+  }
+  return readDescriptor(data, 1, { nodes: 0 });
+};
+
 /**
  * The schema a descriptor describes, read from its JSON text, e.g. as a
  * manifest stores it or a browser sent it.
@@ -99,18 +114,18 @@ const refuse: (message: string) => never = (message) => {
  */
 export const schemaFromDescriptor = (
   text: string
-): ValueSchema<unknown, unknown> => {
-  if (typeof text !== "string") {
-    return refuse("A descriptor is read from its JSON text.");
-  }
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    // What the parser said quotes the text; the refusal doesn't.
-    return refuse("The descriptor isn't JSON.");
-  }
-  return schemaOf(readDescriptor(data, 1, { nodes: 0 }));
+): ValueSchema<unknown, unknown> => schemaOf(descriptorRead(text));
+
+/**
+ * The descriptor in `text`, checked exactly as {@link schemaFromDescriptor}
+ * checks it, as data: what a host hands the reference generator from
+ * descriptors it holds as text (a catalog contract's, as a bound
+ * workflow's decision).
+ */
+export const descriptorFromText = (text: string): ValueDescriptor => {
+  const descriptor = descriptorRead(text);
+  schemaOf(descriptor);
+  return descriptor;
 };
 
 // An App's manifest as the host reads it back from what inspection or a
@@ -126,6 +141,7 @@ export {
   eventFingerprint,
   generatedPaths,
   generateModules,
+  readSealedWorkflows,
   serverModuleSource,
   symbolicModules,
   workflowFingerprint,

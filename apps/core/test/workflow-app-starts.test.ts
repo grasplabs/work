@@ -515,6 +515,7 @@ const fixture = async (waits = false): Promise<Fixture> => {
         schemaHash: zeros,
         operationManifestHash: zeros,
       },
+      workflows: [],
     },
   };
 };
