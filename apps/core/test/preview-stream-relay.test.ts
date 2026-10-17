@@ -2,7 +2,10 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { screenLimits } from "@grasp-os/shared/screens";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { relayPreviewStream } from "../src/preview-stream-relay.ts";
+import {
+  relayPreviewStream,
+  streamRecheckMs,
+} from "../src/preview-stream-relay.ts";
 
 // The relay of a preview's streaming action to its page
 // (preview-stream-relay.ts), on frames made here: how often it checks the
@@ -97,6 +100,43 @@ describe("a preview stream's relay", () => {
         delivered: [{ type: "refused", code: "app.preview_outdated" }],
       });
     });
+  });
+
+  it("hands on nothing after the timer's check refused, even a check already under way", async () => {
+    vi.useFakeTimers();
+    const delivered: unknown[] = [];
+    const first = Promise.withResolvers<null>();
+    let checks = 0;
+    relayPreviewStream(
+      linesOf([{ type: "result", seq: 1, result: { ok: true, value: 1 } }]),
+      {
+        deliver: async (frame) => {
+          delivered.push(frame);
+          return await Promise.resolve(null);
+        },
+        // The result's check waits; the timer's, meanwhile, refuses.
+        stillOpen: async () => {
+          checks += 1;
+          if (checks === 1) {
+            await first.promise;
+            return;
+          }
+          throw appErrors.create("app.preview_outdated");
+        },
+        cancel: async () => await Promise.resolve(true),
+        requestId: "request",
+      }
+    );
+    await vi.waitFor(() => {
+      expect(checks).toBe(1);
+    });
+    await vi.advanceTimersByTimeAsync(streamRecheckMs);
+    first.resolve(null);
+    await vi.advanceTimersByTimeAsync(0);
+    vi.useRealTimers();
+    expect(delivered.map(shapeOf)).toStrictEqual([
+      { type: "refused", code: "app.preview_outdated" },
+    ]);
   });
 
   it("refuses a result larger than a screen takes in one answer", async () => {
