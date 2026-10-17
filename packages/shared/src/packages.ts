@@ -545,13 +545,29 @@ export const packageBuildAnswerSchema = z.discriminatedUnion("ok", [
 export type PackageBuildAnswer = z.infer<typeof packageBuildAnswerSchema>;
 
 /** What a build of an approved graph asks for. */
-export const packageBuildRequestSchema = z.strictObject({
-  app: appIdSchema,
-  graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
-  target: dependencyTargetSchema,
-  /** The dependency policy generation the caller read. */
-  policyGeneration: z.int().nonnegative(),
-});
+export const packageBuildRequestSchema = z
+  .strictObject({
+    /** Whose graph: an App's or a workflow's (exactly one). */
+    app: appIdSchema.optional(),
+    workflow: workflowResourceIdSchema.optional(),
+    graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
+    target: dependencyTargetSchema,
+    /** The dependency policy generation the caller read. */
+    policyGeneration: z.int().nonnegative(),
+  })
+  .refine(
+    ({ app, workflow }) => (app === undefined) !== (workflow === undefined),
+    { message: "Either an App or a workflow, not both", path: ["app"] }
+  )
+  // A workflow's packages are for its compute modules only.
+  .refine(
+    ({ workflow, target }) =>
+      workflow === undefined || target === workflowDependencyTarget,
+    {
+      message: `A workflow's packages are for ${workflowDependencyTarget} only`,
+      path: ["target"],
+    }
+  );
 export type PackageBuildRequest = z.input<typeof packageBuildRequestSchema>;
 
 /**

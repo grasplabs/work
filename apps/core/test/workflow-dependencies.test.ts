@@ -8,6 +8,7 @@ import type { DependencyIntent } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   admitDependencies,
@@ -15,6 +16,7 @@ import {
 } from "../src/dependencies/requests.ts";
 import { mockIdp } from "./idp.ts";
 import { named, plain, publish } from "./npm.ts";
+import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -588,5 +590,268 @@ describe("packages for a workflow's compute modules", () => {
           selfDecided: detail.selfDecided,
         }))
     ).toStrictEqual([{ id: waiting.id, selfDecided: true }]);
+  });
+});
+
+/** `subject`'s package.json asking for one new package, resolved by `builder`. */
+const resolvedFor = async (
+  builder: Person,
+  subject: { app: string } | { workflow: string },
+  stats: string
+) => {
+  const { request } = await builder.api.dependencies.resolve({
+    ...subject,
+    sourceRevision: "rev-1",
+    purpose: "Compute the weighted median of the quarter.",
+    targets: ["computation"],
+    dependencies: { [stats]: "^1.0.0" },
+  });
+  return request;
+};
+
+/** `subject`'s `computation` build of `graphHash`, as the status reads now. */
+const buildFor = async (
+  builder: Person,
+  subject: { app: string } | { workflow: string },
+  graphHash: string,
+  target: DependencyRequest["targets"][number] = "computation"
+) => {
+  const { policyGeneration } = await builder.api.dependencies.status(subject);
+  return await builder.api.dependencies.build({
+    ...subject,
+    graphHash,
+    target,
+    policyGeneration,
+  });
+};
+
+/** The hashes `subject`'s lock of `graphHash` pins. */
+const pinsOf = async (
+  subject: { type: string; id: string },
+  graphHash: string
+): Promise<string[]> => {
+  const row = await env.DB.prepare(
+    "SELECT lock FROM dependency_locks WHERE subject_type = ? AND subject_id = ? AND graph_hash = ?"
+  )
+    .bind(subject.type, subject.id, graphHash)
+    .first<{ lock: string }>();
+  const lock = z
+    .object({
+      artifacts: z
+        .record(
+          z.string(),
+          z.record(z.string(), z.object({ hash: z.string() }))
+        )
+        .optional(),
+    })
+    .parse(JSON.parse(row?.lock ?? "{}"));
+  return Object.values(lock.artifacts ?? {}).flatMap((pins) =>
+    Object.values(pins).map(({ hash }) => hash)
+  );
+};
+
+describe("building a workflow's approved packages", () => {
+  it("builds the computation target for the workflow's builders, pinned in its own lock and served nowhere", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const { builder, workflow } = await builderWithWorkflow();
+    const stats = named("stats");
+    await publish(plain(stats, "1.0.0"));
+    const request = await resolvedFor(builder, { workflow }, stats);
+    const before = await outcome(
+      buildFor(builder, { workflow }, request.graphHash)
+    );
+    await decide(approver.api, request);
+
+    let built: Awaited<ReturnType<typeof buildFor>> | undefined;
+    const events = await auditedDuring(async () => {
+      built = await buildFor(builder, { workflow }, request.graphHash);
+    });
+
+    expect({
+      before,
+      address: built?.address,
+      approval: built?.approval,
+      pinned: await pinsOf(
+        { type: "workflow", id: workflow },
+        request.graphHash
+      ),
+      recorded: dependencyEvents(events).map(({ action, target, detail }) => ({
+        action,
+        target,
+        workflow: detail.workflow,
+        hash: detail.hash,
+      })),
+    }).toStrictEqual({
+      before: "dependency.approval_required",
+      address: null,
+      approval: request.id,
+      pinned: [built?.hash],
+      recorded: [
+        {
+          action: "dependency.built",
+          target: { type: "workflow_resource", id: workflow },
+          workflow,
+          hash: built?.hash,
+        },
+      ],
+    });
+  });
+
+  it("builds for neither another target, nor anyone but its builders, nor on an App's approval", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const { builder, workflow } = await builderWithWorkflow();
+    const { id: app } = await builder.api.apps.create({
+      name: `App ${unique()}`,
+    });
+    const follower = await personApi("builder");
+    await builder.api.workflowResources.share(workflow, {
+      type: "person",
+      id: follower.userId,
+      role: "user",
+    });
+    const stats = named("stats");
+    await publish(plain(stats, "1.0.0"));
+    const forApp = await resolvedFor(builder, { app }, stats);
+    await decide(approver.api, forApp);
+    const forWorkflow = await resolvedFor(builder, { workflow }, stats);
+    const { policyGeneration } = await builder.api.dependencies.status({
+      workflow,
+    });
+
+    const refused = {
+      // The same graph, approved for the App only.
+      onAppsApproval: await outcome(
+        buildFor(builder, { workflow }, forWorkflow.graphHash)
+      ),
+      browser: await outcome(
+        buildFor(builder, { workflow }, forWorkflow.graphHash, "browser")
+      ),
+      follower: await outcome(
+        follower.api.dependencies.build({
+          workflow,
+          graphHash: forWorkflow.graphHash,
+          target: "computation",
+          policyGeneration,
+        })
+      ),
+      both: await outcome(
+        builder.api.dependencies.build({
+          app,
+          workflow,
+          graphHash: forWorkflow.graphHash,
+          target: "computation",
+          policyGeneration,
+        })
+      ),
+    };
+    await decide(approver.api, forWorkflow);
+    const appBuild = await buildFor(builder, { app }, forApp.graphHash);
+    const workflowBuild = await buildFor(
+      builder,
+      { workflow },
+      forWorkflow.graphHash
+    );
+
+    expect({
+      sameGraph: forApp.graphHash === forWorkflow.graphHash,
+      refused,
+      sameBytes: appBuild.hash === workflowBuild.hash,
+      appPins: await pinsOf({ type: "app", id: app }, forApp.graphHash),
+      workflowPins: await pinsOf(
+        { type: "workflow", id: workflow },
+        forWorkflow.graphHash
+      ),
+    }).toStrictEqual({
+      sameGraph: true,
+      refused: {
+        onAppsApproval: "dependency.approval_required",
+        browser: "dependency.invalid",
+        follower: "role.forbidden",
+        both: "dependency.invalid",
+      },
+      sameBytes: true,
+      appPins: [appBuild.hash],
+      workflowPins: [workflowBuild.hash],
+    });
+  });
+
+  it("builds nothing once the workflow's graph is revoked", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const { builder, workflow } = await builderWithWorkflow();
+    const stats = named("stats");
+    await publish(plain(stats, "1.0.0"));
+    const request = await resolvedFor(builder, { workflow }, stats);
+    await decide(approver.api, request);
+    const { policyGeneration, endings } =
+      await approver.api.dependencies.impact(request.id);
+    await approver.api.dependencies.revoke(request.id, {
+      reviewed: {
+        graphHash: request.graphHash,
+        policyGeneration,
+        approvalsDigest: endings.revoke.digest,
+      },
+      reason: "Not to be used.",
+    });
+
+    await expect(
+      outcome(buildFor(builder, { workflow }, request.graphHash))
+    ).resolves.toBe("dependency.revoked");
+  });
+});
+
+describe("the approvers' list of what holds approvals", () => {
+  it("lists each App and workflow with approvals in force for approvers, by name, and nothing for anyone else", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const { builder, workflow, name } = await builderWithWorkflow();
+    const appName = `App ${unique()}`;
+    const { id: app } = await builder.api.apps.create({ name: appName });
+    const forWorkflow = await proposeAs(builder, proposalFor({ workflow }));
+    await decide(approver.api, forWorkflow);
+    const forApp = await proposeAs(
+      builder,
+      proposalFor({ app }, { targets: ["browser"] })
+    );
+    await decide(approver.api, forApp);
+    // Denied: nothing in force, so not listed.
+    const { builder: other, workflow: denied } = await builderWithWorkflow();
+    await decide(
+      approver.api,
+      await proposeAs(other, proposalFor({ workflow: denied })),
+      false
+    );
+
+    const queries = await recordedQueries(async () => {
+      await approver.api.dependencies.inForce();
+    });
+    const listed = await approver.api.dependencies.inForce();
+    const plans = await Promise.all(
+      queries
+        .filter(({ query }) => /from "dependency_requests"/iu.test(query))
+        .map(async (recorded) => await planOf(recorded))
+    );
+    const ours = listed.subjects
+      .filter(({ subject }) => [app, workflow, denied].includes(subject.id))
+      .map(({ subject, approvals }) => ({ subject, approvals }));
+
+    expect({
+      decides: listed.decides,
+      ours,
+      readsWhole: plans.some((plan) =>
+        plan.some((step) => fullScan.test(step))
+      ),
+      builder: await builder.api.dependencies.inForce(),
+    }).toStrictEqual({
+      decides: true,
+      ours: [
+        { subject: { type: "app", id: app, name: appName }, approvals: 1 },
+        { subject: { type: "workflow", id: workflow, name }, approvals: 1 },
+      ],
+      readsWhole: false,
+      builder: { decides: false, subjects: [] },
+    });
   });
 });

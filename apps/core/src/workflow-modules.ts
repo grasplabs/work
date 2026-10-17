@@ -50,7 +50,9 @@ import { buildComputeModules, withinBuildWait } from "./screens.ts";
 //   no Workers runtime, no other SDK entry and no package, type-checked
 //   against that SDK. A workflow's builders may have packages approved
 //   for its compute modules (`computation`, dependencies/subjects.ts),
-//   but none is imported yet: a later slice of GRA-665 builds them.
+//   and build them (packages/build.ts), but none is imported yet: imports
+//   come with sealing them into a version and admitting them at every
+//   start and compute call (slice 3 of GRA-665).
 // - The clock, randomness, timers and generated code. The isolate takes
 //   them away before any module of the workflow's evaluates (the SDK's
 //   compute-lockdown.ts), on the global object and every prototype of it,
