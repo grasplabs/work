@@ -9,6 +9,7 @@ import type {
 import type { DashboardApi } from "./dashboard.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
+import type { EmailPreferencesApi } from "./email-preferences.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
 import type { MembersApi } from "./members.ts";
@@ -72,6 +73,8 @@ export interface SessionApi {
   readonly chats: ChatsApi;
   /** The person's own dashboard: which widgets are on it, in what order. */
   readonly dashboard: DashboardApi;
+  /** The person's own choice of the emails Grasp sends them. */
+  readonly emailPreferences: EmailPreferencesApi;
   /** The person's own sessions: the browsers they are signed in on, and ending one. */
   readonly sessions: SessionsApi;
   /** Permissions of Apps and agents. */
