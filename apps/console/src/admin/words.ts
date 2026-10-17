@@ -7,11 +7,14 @@
  * its leads' and its works'), never anything someone wrote or said.
  */
 import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
+import type { Interviewer } from "@grasp-os/shared/admin/interviewer";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
+import type { Phase } from "@grasp-os/shared/admin/interviews";
 import { LISTEN_DAYS } from "@grasp-os/shared/admin/onboarding";
 import { dateOn, mayInvite } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   ContractState,
+  LinkState,
   Need,
   OrgView,
   Settler,
@@ -313,3 +316,38 @@ export const needLine = (need: Need, view: OrgView): string => {
     }
   }
 };
+
+/** Where someone stands with their link (the prototype's `link` words). */
+export const linkWords: Record<LinkState, string> = {
+  waiting: "No link yet",
+  invited: "Invited",
+  opened: "Opened",
+  progress: "Talking now",
+  incomplete: "Stopped halfway",
+  completed: "Completed",
+  expired: "Link expired",
+  away: "Away",
+};
+
+/** The parts of an interview, as the person going through it sees them named. */
+export const interviewPhaseWords: Record<Phase, string> = {
+  open: "Hello",
+  you: "You and AI",
+  anchor: "One real case",
+  story: "Your story",
+  steps: "Step by step",
+  exceptions: "When it goes differently",
+  numbers: "The numbers",
+  result: "Done right",
+  readback: "Reading it back",
+};
+
+/** The interviewers by name. */
+export const interviewerNames: Record<Interviewer, string> = {
+  stephen: "Stephen",
+  claire: "Claire",
+};
+
+/** So many of so many have had their interview: "3 of 9 talked". */
+export const talkedWords = (count: number, total: number): string =>
+  `${count} of ${total} talked`;
