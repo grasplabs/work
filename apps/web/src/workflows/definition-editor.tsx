@@ -64,11 +64,17 @@ const DraftStatus = ({ draft }: { draft: WorkflowDraft }) => {
       </p>
     );
   }
+  if (checkpoint === null) {
+    return (
+      <p className="text-muted-foreground">
+        {t`Revision ${revision} doesn't pass yet, and no revision has.`}
+      </p>
+    );
+  }
+  const passed = checkpoint.revision;
   return (
     <p className="text-muted-foreground">
-      {checkpoint === null
-        ? t`Revision ${revision} doesn't pass yet, and no revision has.`
-        : t`Revision ${revision} doesn't pass yet. The latest that passed is revision ${checkpoint.revision}.`}
+      {t`Revision ${revision} doesn't pass yet. The latest that passed is revision ${passed}.`}
     </p>
   );
 };

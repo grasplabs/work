@@ -5053,10 +5053,9 @@ msgstr "Examiner les applications de {name}"
 msgid "Revision {revision} doesn't pass yet, and no revision has."
 msgstr "La révision {revision} ne passe pas encore la vérification, et aucune révision ne l'a passée."
 
-#. placeholder {0}: checkpoint.revision
 #: src/workflows/definition-editor.tsx
-msgid "Revision {revision} doesn't pass yet. The latest that passed is revision {0}."
-msgstr "La révision {revision} ne passe pas encore la vérification. La dernière qui l'a passée est la révision {0}."
+msgid "Revision {revision} doesn't pass yet. The latest that passed is revision {passed}."
+msgstr "La révision {revision} ne passe pas encore la vérification. La dernière qui l'a passée est la révision {passed}."
 
 #: src/workflows/definition-editor.tsx
 msgid "Revision {revision} passes the profile and can be published."
