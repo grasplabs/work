@@ -25,12 +25,11 @@ type Builder = Parameters<typeof release>[0];
  * (`env.APP.callFunction`) and the test reads through a screen's call
  * (`sampleCall`):
  * - `counter.hit` counts how often a step's code really ran, and answers
- *   that count. It is an action: it reads the live count with a query
- *   (never answered from a receipt), then bumps the counter through
- *   receipted mutations until one answers above what it read. A step run
- *   again under the same key gets its earlier bumps' receipts, each at
- *   most what it read, and its next place is fresh: so a rerun counts,
- *   where a plain receipted mutation would answer 1 again (GRA-656's M2).
+ *   that count. Each run of the step's code names itself with an ID of
+ *   its own (`execution`, `hitCall`): an action's nested mutations take
+ *   keys derived from its input, so each run's bump is fresh and counts,
+ *   overlapping runs too, where a receipted mutation called under the
+ *   step's key would answer a rerun from its receipt (GRA-656's M2).
  * - `counter.hits` reads a counter; `counter.bump` adds one to it, once
  *   per call key: a test opens a gate with it, which a step waits on by
  *   reading `counter.hits` until it is above 0.
@@ -78,20 +77,10 @@ export const bump = mutation({
 });
 
 export const hit = action({
-  args: { name: v.string() },
+  args: { name: v.string(), execution: v.string() },
   returns: v.number(),
-  uses: [hits, bump],
-  handler: async (ctx, args) => {
-    const before = await ctx.runQuery(hits, { name: args.name });
-    // A step's attempts are at most five: a sixth place is never needed.
-    for (let place = 0; place < 6; place += 1) {
-      const counted = await ctx.runMutation(bump, { name: args.name });
-      if (counted > before) {
-        return counted;
-      }
-    }
-    throw new Error("The counter ran out of places");
-  },
+  uses: [bump],
+  handler: async (ctx, args) => await ctx.runMutation(bump, { name: args.name }),
 });
 
 export const book = mutation({
@@ -154,7 +143,11 @@ export const appCall = (
 
 /** Workflow code counting a run of `name` (code), answering the count. */
 export const hitCall = (name: string): string =>
-  appCall("counter.hit", "action", `{ name: ${name} }`);
+  appCall(
+    "counter.hit",
+    "action",
+    `{ name: ${name}, execution: crypto.randomUUID() }`
+  );
 
 /** Workflow code reading the counter `name` (code). */
 export const hitsCall = (name: string): string =>
@@ -214,7 +207,12 @@ export const openGate = async (
   app: string,
   name = "gate"
 ): Promise<void> => {
-  await sampleCall(by, app, "counter.bump", "mutation", { name });
+  const opened = await sampleCall(by, app, "counter.bump", "mutation", {
+    name,
+  });
+  if (typeof opened !== "number") {
+    throw new TypeError(`The gate didn't open: ${String(opened)}`);
+  }
 };
 
 /**
