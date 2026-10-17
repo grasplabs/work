@@ -69,11 +69,29 @@ describe("the admin snapshot as the console reads it", () => {
       works: [{ name: "Quotes" }],
       contract: { signed: true },
       integrations: [{ app: "hubspot" }],
+      usage: [
+        {
+          day: "2026-10-16",
+          use: {
+            dreams: {
+              "a-model": {
+                calls: 1,
+                tokensIn: 1,
+                kept: 0,
+                tokensOut: 1,
+                seconds: 0,
+              },
+            },
+          },
+        },
+      ],
       added: "a field this console doesn't know",
     });
 
     expect(adminSnapshotSchema.parse(newer)).toStrictEqual(
-      adminSnapshotSchema.parse(base)
+      adminSnapshotSchema.parse(
+        snapshot({ usage: [{ day: "2026-10-16", use: {} }] })
+      )
     );
   });
 });

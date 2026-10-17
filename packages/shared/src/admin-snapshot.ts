@@ -112,14 +112,27 @@ const meteredSchema = z.object({
   /** Seconds of Stephen's voice. */
   seconds: z.number().min(0),
 });
+type Metered = z.output<typeof meteredSchema>;
 
 /** One day's AI use, by purpose then model: the prototype's `MeterDay`. */
 export const adminUsageDaySchema = z.object({
   day: z.iso.date(),
-  use: z.partialRecord(
-    z.enum(METER_PURPOSES),
-    z.record(z.string(), meteredSchema)
-  ),
+  // A purpose this console doesn't know, from a newer core, is dropped
+  // rather than refusing the whole answer.
+  use: z
+    .record(z.string(), z.record(z.string(), meteredSchema))
+    .transform((use) => {
+      const known: Partial<
+        Record<(typeof METER_PURPOSES)[number], Record<string, Metered>>
+      > = {};
+      for (const purpose of METER_PURPOSES) {
+        const models = use[purpose];
+        if (models !== undefined) {
+          known[purpose] = models;
+        }
+      }
+      return known;
+    }),
 });
 
 // The roster, plan and agreements as the answer has them: their fields as
