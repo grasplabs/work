@@ -346,6 +346,27 @@ describe("an organization from core's admin snapshot", () => {
     });
   });
 
+  it("keeps an interview the kind it was held as, when the team's lead changed since", () => {
+    // Lisa talked as Sales's lead; the roster now names Tom.
+    const changed = adminOrgOf(
+      {
+        ...snapshot,
+        roster: snapshot.roster && {
+          ...snapshot.roster,
+          teams: snapshot.roster.teams.map((team) =>
+            team.id === "sales" ? { ...team, lead: "tom" } : team
+          ),
+        },
+      },
+      client
+    );
+    const view = adminViewOf(changed.org, changed.state, "2026-10-14");
+
+    expect(
+      Object.fromEntries(view.interviews.map((each) => [each.id, each.kind]))
+    ).toStrictEqual({ lisa: "lead", tom: "employee" });
+  });
+
   it("knows what core knows, against core's threshold, and stays closed without Grasp's go", () => {
     const { view } = shown();
 

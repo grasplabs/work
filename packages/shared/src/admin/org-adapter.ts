@@ -340,7 +340,8 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
       {
         id: person.id,
         person,
-        kind: person.lead ? "lead" : "employee",
+        // As it was held: a lead changed since leaves an interview as it was.
+        kind: interview.kind,
         work,
         day: dayAt(start, ended) ?? today,
         approved,
