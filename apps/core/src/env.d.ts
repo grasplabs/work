@@ -66,6 +66,11 @@ interface __BaseEnv_Env {
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
   DURABLE_OBJECT_JURISDICTION?: string;
   /**
+   * Tests only: a shorter bound on one load of a workflow build, before it
+   * is taken for abandoned (src/workflow-builds.ts).
+   */
+  WORKFLOW_BUILD_READ_MS?: string;
+  /**
    * Tests only: a shorter wait between a run's checks of a held side
    * effect (src/workflows/host.ts).
    */
