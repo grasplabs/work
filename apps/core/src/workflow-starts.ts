@@ -46,6 +46,7 @@ import { frozenParams } from "./workflow-params.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
+import { tellQueryFollowers } from "./workflows/run-changes.ts";
 
 // Starting an independent workflow (platform specification 13.2, 15.1, 24):
 // who may, for whom, and on which exact version. Every start is admitted
@@ -1133,6 +1134,9 @@ export const admitWorkflowStart = async (
     }
     // The same key, admitted as this ran.
   }
+  // Its run, if this admitted one, joins the person's runs an App's
+  // workflow queries list: those followed live read again.
+  await tellQueryFollowers(env, id);
   const admitted = await receiptOf(
     env,
     authorization.invoker,

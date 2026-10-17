@@ -528,10 +528,14 @@ export type RunWatcher = Rpc.Stub<(change: RunChange) => Promise<void>>;
  * A connection's callback for the App's revocations (`followAccess`):
  * called with `true` when its person's role in the App may have dropped,
  * so it checks their access again now (query-subscriptions.ts), and with
- * `false` only to see that it is still there. It throws once the
- * connection no longer follows the App.
+ * `false` only to see that it is still there. Called with `false, true`
+ * when the person's independent runs the App started changed
+ * (`workflowRunsChanged`), so its workflow queries read again. It throws
+ * once the connection no longer follows the App.
  */
-export type AccessWatcher = Rpc.Stub<(revoked: boolean) => void>;
+export type AccessWatcher = Rpc.Stub<
+  (revoked: boolean, runsChanged?: boolean) => void
+>;
 
 /**
  * Most connections of one person that follow the App's revocations at
@@ -1605,6 +1609,32 @@ export class App extends DurableObject<Env> {
   async #tellRevoked(id: string, onRevoked: AccessWatcher): Promise<void> {
     try {
       await onRevoked(true);
+    } catch {
+      this.#dropFollower(id);
+    }
+  }
+
+  /**
+   * Tells the connections of `userId` that follow the App's live queries
+   * that their independent runs the App started changed (run-changes.ts,
+   * `tellQueryFollowers`): each reads its workflow queries of the App
+   * again, as its person. Returns at once, with how many connections it
+   * told; a connection that is gone is dropped.
+   */
+  workflowRunsChanged(userId: string): number {
+    let told = 0;
+    for (const [id, follower] of this.#accessFollowers) {
+      if (follower.userId === userId) {
+        told += 1;
+        void this.#tellRunsChanged(id, follower.onRevoked);
+      }
+    }
+    return told;
+  }
+
+  async #tellRunsChanged(id: string, onRevoked: AccessWatcher): Promise<void> {
+    try {
+      await onRevoked(false, true);
     } catch {
       this.#dropFollower(id);
     }
