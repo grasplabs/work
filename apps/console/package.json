@@ -21,6 +21,7 @@
     "@tanstack/react-start": "catalog:",
     "drizzle-orm": "catalog:",
     "jose": "catalog:",
+    "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:"
