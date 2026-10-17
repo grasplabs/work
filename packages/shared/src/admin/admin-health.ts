@@ -1,11 +1,10 @@
 import type { AdminView } from "./admin-view.ts";
-import { KNOWLEDGE_SOURCES } from "./onboarding-admin.ts";
+import { KNOWLEDGE_SOURCES, listenDays } from "./onboarding-admin.ts";
 import type {
   KnowledgeSource,
   Need,
   WorkEvidence,
 } from "./onboarding-admin.ts";
-import { LISTEN_DAYS } from "./onboarding.ts";
 
 /**
  * How one organization is doing, in a few signals Grasp can act on before the company asks: its
@@ -262,11 +261,11 @@ export const healthOf = (view: AdminView): HealthSignal[] => {
     (need) => need.kind === "quiet" || need.kind === "lead"
   ).length;
   const talked = view.counts.completed;
-  // Halfway through the interviews, fewer than a third of the people asked having talked is worth a look.
+  // Halfway through the organization's own interviews, fewer than a third of the people asked having talked is worth a look.
   const behind =
     view.told &&
     !view.closed &&
-    view.day >= LISTEN_DAYS / 2 &&
+    view.day >= listenDays(view.org) / 2 &&
     view.asked > 0 &&
     talked / view.asked < 1 / 3;
   const known = view.works.filter(isKnown).length;
