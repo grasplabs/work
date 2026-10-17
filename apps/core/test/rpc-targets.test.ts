@@ -221,6 +221,50 @@ const calls = {
     await page.pushed;
     return subscription;
   },
+  "authenticate.chats.previewStream": async (chats, { app, userId, held }) => {
+    const { id } = await chats.create("Streamed");
+    const chatId = chatIdSchema.parse(id);
+    const chatsOf = workspace(env, personalWorkspaceId(userId));
+    await chatsOf.saveDraft(
+      chatId,
+      app,
+      1,
+      { "notes.md": "drafted" },
+      [],
+      0,
+      await openTestRun(chatsOf, chatId)
+    );
+    const pushed = Promise.withResolvers<true>();
+    const frames = new RpcStub(async () => {
+      pushed.resolve(true);
+      return await Promise.resolve(null);
+    });
+    // A draft that seals no release: the stream's refused result, pushed
+    // at once, ends it, and the hold is let go of after that.
+    const subscription = holding(
+      held,
+      await chats.previewStream(
+        id,
+        app,
+        1,
+        "stream",
+        JSON.stringify({
+          reference: {
+            resourceId: app,
+            resourceVersion: 1,
+            contractId: "notes.run",
+            fingerprint: "0".repeat(64),
+            kind: "action",
+          },
+          input: {},
+          idempotencyKey: crypto.randomUUID(),
+        }),
+        frames
+      )
+    );
+    await pushed.promise;
+    return subscription;
+  },
   "authenticate.chats.previewWatchQuery": async (
     chats,
     { app, userId, held }
@@ -500,6 +544,7 @@ describe("what a browser reaches over core's connection", () => {
         "authenticate.chats.watch: RunSubscription",
         "authenticate.screens.watchRuns: RunSubscription",
         "authenticate.chats.previewWatchQuery: RunSubscription",
+        "authenticate.chats.previewStream: RunSubscription",
       ])
     );
   });
