@@ -877,6 +877,21 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuses a migration's global declarations, which the rest of the server code would see", async () => {
+    await expect(
+      refusedSeal({
+        ...withOperation(
+          "export const title = (): string => document.title;\n"
+        ),
+        "migrations/0001-globals.ts":
+          "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["migrations/0001-globals.ts"],
+    });
+  });
+
   it("refuses a migration's directive that would reach the rest of the server code", async () => {
     // A migration's own type errors wait for GRA-690; what it would give
     // the whole program doesn't.
@@ -1502,6 +1517,30 @@ describe("screens", { timeout: 120_000 }, () => {
           (diagnostic) =>
             diagnostic.file === file &&
             diagnostic.message.startsWith("declare module")
+        ).length,
+    }).toStrictEqual({ ok: false, refused: 1 });
+  });
+
+  it("never declare globals, in a declaration file", async () => {
+    const built = await buildScreens(
+      env,
+      {
+        ...notesFiles(),
+        "screens/notes.tsx":
+          "export default function Notes() {\n  return null;\n}\n",
+        "globals.d.ts":
+          "export {};\ndeclare global {\n  var leak: number;\n}\n",
+      },
+      "app-test"
+    );
+    expect({
+      ok: built.ok,
+      refused: saidSchema
+        .parse(built)
+        .diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file === "globals.d.ts" &&
+            diagnostic.message.startsWith("declare global")
         ).length,
     }).toStrictEqual({ ok: false, refused: 1 });
   });

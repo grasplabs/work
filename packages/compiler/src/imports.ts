@@ -146,10 +146,12 @@ const stringArgument = (call: Call): string | undefined => {
     : undefined;
 };
 
-/** A `declare module` or `namespace`: named by a string, or an identifier. */
+/** A `declare module`, `declare global` or `namespace`: named by a string, or an identifier. */
 interface ModuleDeclaration {
-  id: { type: string; value?: unknown };
+  id: { type: string; value?: unknown; name?: string };
   loc?: Call["loc"];
+  /** Set on `declare global { … }`. */
+  global?: boolean;
 }
 
 /** A type's `import("…")` (`typeof import()`, `import("…").Name`). */
@@ -201,8 +203,23 @@ export const collectImports = (imports: ImportSite[]) => () => {
           TSImportType: (inner) => {
             collectImportType(inner.node);
           },
-          TSModuleDeclaration: ({ node: { id, loc } }) => {
-            if (id.type === "StringLiteral" && typeof id.value === "string") {
+          TSModuleDeclaration: ({ node: { id, loc, global } }) => {
+            // `declare global { … }`: what it declares, every file sees.
+            if (
+              global === true ||
+              (id.type === "Identifier" && id.name === "global")
+            ) {
+              imports.push({
+                specifier: undefined,
+                line: loc?.start.line,
+                names: undefined,
+                typeOnly: true,
+                ambient: true,
+              });
+            } else if (
+              id.type === "StringLiteral" &&
+              typeof id.value === "string"
+            ) {
               imports.push({
                 specifier: id.value,
                 line: loc?.start.line,
@@ -452,7 +469,9 @@ export const screenTypeImportError = (
   kit: Kit
 ): string | undefined => {
   if (ambient) {
-    return `declare module "${specifier ?? ""}" is never in a screen's files: it would declare, or shadow, a module the kit doesn't give the App. Import what the kit has instead.`;
+    return specifier === undefined
+      ? "declare global is never in a screen's files: it would declare globals the page doesn't give the App."
+      : `declare module "${specifier}" is never in a screen's files: it would declare, or shadow, a module the kit doesn't give the App. Import what the kit has instead.`;
   }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";

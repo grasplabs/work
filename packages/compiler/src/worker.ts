@@ -726,7 +726,9 @@ const compileAppCodeFile = (
       return [
         problem(
           "imports",
-          `declare module "${specifier ?? ""}" is never in an App's server code: it would declare, or shadow, a module the SDK doesn't give it.`,
+          specifier === undefined
+            ? "declare global is never in an App's server code: it would declare globals its isolate doesn't have, for every file."
+            : `declare module "${specifier}" is never in an App's server code: it would declare, or shadow, a module the SDK doesn't give it.`,
           line === undefined ? { file: path } : { file: path, line }
         ),
       ];
