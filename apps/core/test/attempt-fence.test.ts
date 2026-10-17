@@ -40,7 +40,7 @@ import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
 import { aroundEngine, endLiveRuns, runObject, sleeping } from "./runs.ts";
 import { outcome as codeOfCall, signedInApi, unique } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { v1AppWith, workflowFiles } from "./workflow-apps.ts";
 
 // What leaves the host for an attempt's code passes one fence
 // (attempt-host.ts): checked as each call starts and again as it returns,
@@ -289,7 +289,7 @@ describe(
   () => {
     it("hand back no decision's recipients and record no ask, cancelled at any stage", async () => {
       const admin = await personApi("admin");
-      const app = await appWith(admin, {});
+      const app = await v1AppWith(admin, {});
       const calls = { steps: { tidy: [] }, all: [] };
       // Opens the decision, then asks who it asks, armed only for the asking.
       const ask = async (attempt: AttemptHost, arm: () => void) => {
@@ -352,7 +352,7 @@ describe(
 
     it("open no decision, and record or tell of none, for a run cancelled as it opens", async () => {
       const admin = await personApi("admin");
-      const app = await appWith(admin, {});
+      const app = await v1AppWith(admin, {});
       const calls = { steps: { tidy: [] }, all: [] };
       const open = async (attempt: AttemptHost, arm: () => void) => {
         arm();
@@ -421,7 +421,7 @@ describe(
 
     it("hand back no attachment and record no read of it, cancelled at any stage", async () => {
       const builder = await personApi("builder");
-      const app = await appWith(builder, {});
+      const app = await v1AppWith(builder, {});
       const raw = new TextEncoder().encode(mail);
       const id = toHex(
         new Uint8Array(await crypto.subtle.digest("SHA-256", raw))
@@ -477,7 +477,7 @@ describe(
 
     it("hand back no collection document, cancelled at any stage, the collection's read included", async () => {
       const admin = await personApi("admin");
-      const app = await appWith(admin, {});
+      const app = await v1AppWith(admin, {});
       const { collectionId, noteId } = await collectionWithNote(admin.api, {
         name: "Handbook",
         access: "everyone",
@@ -608,7 +608,7 @@ const parkedRun = async (
 ) => {
   const builder = person ?? (await personApi("builder"));
   const identity = await builder.api.whoami();
-  const app = appIdSchema.parse(await appWith(builder, files));
+  const app = appIdSchema.parse(await v1AppWith(builder, files));
   const server = await mailConnection([], mailWithSearch);
   const mailGrant = permissionIdSchema.parse(
     await requestGranted(idp, builder, {
@@ -674,7 +674,7 @@ describe(
 
     it("acts only while the method still runs as its last check is made, the attempt's checked before", async () => {
       const builder = await personApi("builder");
-      const app = await appWith(
+      const app = await v1AppWith(
         builder,
         workflowFiles(
           "parks",
@@ -888,7 +888,7 @@ describe(
     it("starts no App call the attempt left queued once it has returned", async () => {
       const builder = await personApi("builder");
       const app = appIdSchema.parse(
-        await appWith(
+        await v1AppWith(
           builder,
           workflowFiles(
             "leaves",

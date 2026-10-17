@@ -8,6 +8,8 @@ import type { ModelBindingBudgetInput } from "@grasp-os/shared/resource-bindings
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
+import { callAppFunction } from "../src/app-functions.ts";
+import { loadRelease } from "../src/app-releases.ts";
 import { findApp } from "../src/apps.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { release, requestGranted } from "./apps.ts";
@@ -15,42 +17,203 @@ import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
 import { person } from "./sealed-apps.ts";
 
-/**
- * A registration of spec 8's layout beside an App's server, declaring a
- * text model resource for each of `bounds`' aliases, which its workflows'
- * AI steps go through (`step.llm`'s `binding`), each with that bound on
- * the answer. A step may ask twice, so each ask gets half. A binding
- * holds the whole bound to what its model can answer, as an action would
- * ask for all of it: at most 6,000 tokens on Llama 3.3.
- */
-export const modelRegistration = (
-  bounds: Record<string, number>
-): Record<string, string> => ({
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+/** Someone signed in, with their API. */
+type Builder = Parameters<typeof release>[0];
 
-export default defineSchema({});
+/**
+ * The sample App, of spec 8's layout, that a run test's workflows call
+ * (`env.APP.callFunction`) and the test reads through a screen's call
+ * (`sampleCall`):
+ * - `counter.hit` counts how often a step's code really ran, and answers
+ *   that count. Each run of the step's code names itself with an ID of
+ *   its own (`execution`, `hitCall`): an action's nested mutations take
+ *   keys derived from its input, so each run's bump is fresh and counts,
+ *   overlapping runs too, where a receipted mutation called under the
+ *   step's key would answer a rerun from its receipt (GRA-656's M2).
+ * - `counter.hits` reads a counter; `counter.bump` adds one to it, once
+ *   per call key: a test opens a gate with it, which a step waits on by
+ *   reading `counter.hits` until it is above 0.
+ * - `ledger.book` keeps an entry for whoever the call acts for, and
+ *   answers whose it is.
+ *
+ * It declares a text model resource for each of `models`' aliases, which
+ * its workflows' AI steps go through (`step.llm`'s `binding`), each with
+ * that bound on the answer. A step may ask twice, so each ask gets half.
+ * A binding holds the whole bound to what its model can answer, as an
+ * action would ask for all of it: at most 6,000 tokens on Llama 3.3.
+ */
+export const sampleApp = ({
+  models = {},
+}: { models?: Record<string, number> } = {}): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  counters: defineTable({ name: v.string(), count: v.number() }).index("by_name", ["name"]),
+  ledger: defineTable({ invoice: v.string(), total: v.number() }),
+});
+`,
+  "operations/sample.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "#grasp/server";
+
+export const hits = query({
+  args: { name: v.string() },
+  returns: v.number(),
+  handler: async (ctx, args) =>
+    (await ctx.db.query("counters").withIndex("by_name", (q) => q.eq("name", args.name)).first())?.count ?? 0,
+});
+
+export const bump = mutation({
+  args: { name: v.string() },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.query("counters").withIndex("by_name", (q) => q.eq("name", args.name)).first();
+    if (row === null) {
+      await ctx.db.insert("counters", { name: args.name, count: 1 });
+      return 1;
+    }
+    await ctx.db.patch("counters", row._id, { count: row.count + 1 }, { expectedRevision: row._rev });
+    return row.count + 1;
+  },
+});
+
+export const hit = action({
+  args: { name: v.string(), execution: v.string() },
+  returns: v.number(),
+  uses: [bump],
+  handler: async (ctx, args) => await ctx.runMutation(bump, { name: args.name }),
+});
+
+export const book = mutation({
+  args: { invoice: v.string(), total: v.number() },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    const id = await ctx.db.insert("ledger", args);
+    const entry = await ctx.db.get("ledger", id);
+    return "ledger-" + args.invoice + "-for-" + String(entry?._ownerId);
+  },
+});
 `,
   "app.ts": `import { app, resource } from "@grasp-os/sdk";
 
+import { book, bump, hit, hits } from "./operations/sample.ts";
 import schema from "./schema.ts";
 
-${Object.entries(bounds)
+${Object.entries(models)
   .map(
     ([alias, tokens]) =>
       `export const ${alias} = resource.model("${alias}", { maxOutputTokens: ${tokens} });\n`
   )
   .join("")}
 export default app({
-  name: "Models",
+  name: "Invoices",
   schema,
-  access: { tables: {} },
-  operations: {},
+  access: {
+    tables: {
+      counters: { read: "appMembers", write: "appMembers" },
+      ledger: { read: "owner", write: "owner" },
+    },
+  },
+  operations: { counter: { hit, hits, bump }, ledger: { book } },
   internalOperations: {},
   screens: [],
-  uses: [${Object.keys(bounds).join(", ")}],
+  uses: [${Object.keys(models).join(", ")}],
 });
 `,
 });
+
+/**
+ * The sample App (`sampleApp`), declaring a text model resource for each
+ * of `bounds`' aliases.
+ */
+export const modelRegistration = (
+  bounds: Record<string, number>
+): Record<string, string> => sampleApp({ models: bounds });
+
+/**
+ * Workflow code calling the sample App's function `path`, of `kind`, with
+ * the input `input` (code), as a step calls it: its value, or the
+ * function's refusal thrown, with its code.
+ */
+export const appCall = (
+  path: string,
+  kind: "query" | "mutation" | "action",
+  input: string
+): string =>
+  `((answer) => { if (!answer.ok) { throw Object.assign(new Error(answer.error.message), { code: answer.error.code }); } return answer.value; })(await env.APP.callFunction({ contractId: ${JSON.stringify(path)}, kind: ${JSON.stringify(kind)} }, ${input}))`;
+
+/** Workflow code counting a run of `name` (code), answering the count. */
+export const hitCall = (name: string): string =>
+  appCall(
+    "counter.hit",
+    "action",
+    `{ name: ${name}, execution: crypto.randomUUID() }`
+  );
+
+/** Workflow code reading the counter `name` (code). */
+export const hitsCall = (name: string): string =>
+  appCall("counter.hits", "query", `{ name: ${name} }`);
+
+/**
+ * What `by` gets calling the sample App's function `path` of `app`'s
+ * current version with `input`, as a screen calls it: its value, or the
+ * code it was refused with.
+ */
+export const sampleCall = async (
+  by: Builder,
+  app: string,
+  path: string,
+  kind: "query" | "mutation" | "action",
+  input: unknown
+): Promise<unknown> => {
+  const appId = appIdSchema.parse(app);
+  const { currentVersion } = await findApp(env, appId);
+  const current = await loadRelease(env, appId, currentVersion ?? 0);
+  const answered = await callAppFunction(
+    env,
+    await by.api.whoami(),
+    appId,
+    JSON.stringify({
+      reference: {
+        resourceId: appId,
+        resourceVersion: current.manifest.resourceVersion,
+        contractId: path,
+        fingerprint: current.fingerprints[path] ?? "",
+        kind,
+      },
+      input,
+    })
+  );
+  return answered.result.ok
+    ? answered.result.value
+    : `refused:${answered.result.error.code}`;
+};
+
+/** How often the sample App counted `name`, as `by` reads it. */
+export const hitsOf = async (
+  by: Builder,
+  app: string,
+  name: string
+): Promise<number> => {
+  const hits = await sampleCall(by, app, "counter.hits", "query", { name });
+  if (typeof hits !== "number") {
+    throw new TypeError(`The counter didn't read: ${String(hits)}`);
+  }
+  return hits;
+};
+
+/** Opens the gate `name` of the sample App (`counter.bump`), as `by`. */
+export const openGate = async (
+  by: Builder,
+  app: string,
+  name = "gate"
+): Promise<void> => {
+  const opened = await sampleCall(by, app, "counter.bump", "mutation", {
+    name,
+  });
+  if (typeof opened !== "number") {
+    throw new TypeError(`The gate didn't open: ${String(opened)}`);
+  }
+};
 
 /**
  * An admin's binding of App `app`'s model resource `alias` to `model`,
@@ -73,16 +236,14 @@ export const bindModel = async (
   });
 };
 
-/** Someone signed in, with their API. */
-type Builder = Parameters<typeof release>[0];
-
 /**
- * The sample App's server code: purchase orders, a ledger that books each
+ * The v1 sample server, for the run tests not moved onto the sample App
+ * yet (GRA-656's later slices): purchase orders, a ledger that books each
  * entry once per idempotency key, counters that show how often a step
  * really ran, and statistics points, recorded around a mail, by name, or
  * once a held search is let go.
  */
-export const server = `import { DurableObject } from "cloudflare:workers";
+export const v1Server = `import { DurableObject } from "cloudflare:workers";
 
 type Caller = { userId: string; idempotencyKey?: string };
 
@@ -209,13 +370,44 @@ export default workflowTests(definition, [
 `,
 });
 
-/** A new App with the sample server and `files`. */
+/**
+ * A new App of `builder`'s: the sample App (`sampleApp`), and `files`,
+ * current.
+ */
 export const appWith = async (
   builder: Builder,
   files: Record<string, string>
 ): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Invoices" });
-  await release(builder, id, { "app/server.ts": server, ...files });
+  await release(builder, id, { ...sampleApp(), ...files });
+  return id;
+};
+
+/**
+ * A new App of `builder`'s with only `files`, its workflows, and no App
+ * code to seal: for the tests of what making a version current does with
+ * its workflows alone, whose database races would otherwise land in the
+ * seal's writes.
+ */
+export const workflowsApp = async (
+  builder: Builder,
+  files: Record<string, string>
+): Promise<string> => {
+  const { id } = await builder.api.apps.create({ name: "Invoices" });
+  await release(builder, id, files);
+  return id;
+};
+
+/**
+ * A new App with the v1 sample server and `files`, for the run tests not
+ * moved onto the sample App yet; GRA-656's last slice removes it.
+ */
+export const v1AppWith = async (
+  builder: Builder,
+  files: Record<string, string>
+): Promise<string> => {
+  const { id } = await builder.api.apps.create({ name: "Invoices" });
+  await release(builder, id, { "app/server.ts": v1Server, ...files });
   return id;
 };
 

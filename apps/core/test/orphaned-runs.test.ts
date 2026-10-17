@@ -20,7 +20,7 @@ import {
   stepDone,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
+import { v1AppWith, runEvents, workflowFiles } from "./workflow-apps.ts";
 
 // A run's row keeps the start it is to send the engine until the engine
 // confirms it. A start that stopped in between (core stopped) leaves a
@@ -247,7 +247,7 @@ const counting = workflowFiles(
  */
 const lateStart = async (cancelled: boolean) => {
   const builder = await personApi("builder");
-  const app = await appWith(builder, counting);
+  const app = await v1AppWith(builder, counting);
   await serverBuilt(app, 1);
   const run = crypto.randomUUID();
   const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
@@ -329,7 +329,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("are sent again once they're old enough, however long ago, and run once", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const orphan = await orphanOf(builder, app, 20 * minute);
     // Left by a start as core went down for a month.
     const afterOutage = await orphanOf(builder, app, 30 * day);
@@ -365,7 +365,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("are found by an index, reading no table whole and sorting nothing", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     await orphanOf(builder, app, 20 * minute);
     // A fresh D1 has no statistics: SQLite goes by the queries alone.
     const stats = await env.DB.prepare(
@@ -398,7 +398,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("never include a run started as ever, however old", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const live = await builder.api.workflows.start(app, "waits");
     await rowSays(live.id, "running");
     await setAge(live.id, 20 * day);
@@ -424,7 +424,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("take a start the engine already has as the run it is: sent again, nothing runs twice", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const slow = await orphanOf(builder, app, 20 * minute);
     // The start reached the engine; its answer never reached core.
     await createInstance(app, slow);
@@ -455,7 +455,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("are marked failed once the engine still can't take them a quarter of an hour on, audited once, for their person to see", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const orphan = await orphanOf(builder, app, 20 * minute);
     const recent = await orphanOf(builder, app, 5 * minute);
 
@@ -488,7 +488,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("take no step when the engine gets their start after they were marked failed", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const orphan = await orphanOf(builder, app, 20 * minute);
 
     await whileRefusingStarts([orphan], async () => {
@@ -517,7 +517,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("give up a triggered run's key once marked failed, so its trigger delivered again starts a new run", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     // A delivery whose start stopped, with nothing delivering it again
     // since (triggers were off), and the engine unreachable for it.
     const key = `event:${crypto.randomUUID()}`;
@@ -544,7 +544,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("start a run whose start's confirmation can't be recorded, and let the engine record it", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const { db, refused } = refusingConfirmation();
 
     const run = await startRun(
@@ -577,7 +577,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("keep a start whose answer was lost as the one run, its trigger delivered again finding it", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const key = `event:${crypto.randomUUID()}`;
     const start = async () =>
       await startRun(env, {
@@ -615,7 +615,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("never give up a start the engine can't say it has no record of, however old", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const orphan = await orphanOf(builder, app, 20 * minute);
 
     await whileUnreachable([orphan], async () => {
@@ -634,7 +634,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("don't take a confirmation D1 couldn't record for a failed start, a quarter of an hour on", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const orphan = await orphanOf(builder, app, 20 * minute);
     const { db, refused } = refusingConfirmation();
 
@@ -650,7 +650,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("stop a run whose start reached the engine just after it said it had none, once marked failed", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const run = crypto.randomUUID();
     // The run's ID, as the start draws it.
     const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
@@ -725,7 +725,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("add up nothing of a step still out when its run's late start is marked failed, refusing its calls from then on", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, gatedCounting);
+    const app = await v1AppWith(builder, gatedCounting);
     await serverBuilt(app, 1);
     const run = crypto.randomUUID();
     const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
@@ -820,7 +820,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("end a run cancelled just after the engine said it had none as cancelled, keeping its key, with no failure notice", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const key = `event:${crypto.randomUUID()}`;
     const run = crypto.randomUUID();
     const start = async () =>
@@ -882,7 +882,7 @@ describe("starts core stopped in the middle of", () => {
 
   it("reach a later start past ones the engine keeps failing to take", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     // As many as a repair takes, first in ID order, young enough to be
     // tried again rather than given up.
     const unanswered = await Promise.all(
@@ -931,7 +931,7 @@ describe("starts core stopped in the middle of", () => {
   it("end a run cancelled before its start was sent as cancelled, though the cancel's request died before the engine heard of it", async () => {
     const builder = await personApi("builder");
     const identity = await builder.api.whoami();
-    const app = await appWith(builder, waiting);
+    const app = await v1AppWith(builder, waiting);
     const run = await orphanOf(builder, app, 0);
     // The cancel writes its tombstone, then fails as it tells the engine
     // to terminate the run.

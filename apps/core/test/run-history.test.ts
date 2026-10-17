@@ -11,7 +11,7 @@ import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, runObject } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 
 // A run's history, as Grasp's run pages read it (history.ts): projected
 // from the engine's journal, page by page. What could go wrong, tried
@@ -79,7 +79,7 @@ const flaky = workflowFiles(
     "count",
     { description: "Count", timeout: "1 second", retries: { limit: 2, delay: 1, backoff: "constant" } },
     async () => {
-      const tries = await env.APP.call("hit", "count");
+      const tries = await ${hitCall(`"count"`)};
       if (tries < 3) {
         await new Promise(() => {});
       }

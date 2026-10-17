@@ -28,14 +28,14 @@ import {
 } from "./runs.ts";
 import { refusal, signedInApi } from "./sign-in.ts";
 import {
-  appWith,
+  v1AppWith,
   bindModel,
   grantMail,
   invoiceMail,
   mailer,
   modelRegistration,
   runEvents,
-  server,
+  v1Server,
   workflowFiles,
 } from "./workflow-apps.ts";
 
@@ -211,7 +211,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
   it("run the sample invoice workflow end to end, and audit it", async () => {
     const builder = await personApi("builder");
     const reviewer = await personApi("admin");
-    const app = await appWith(builder, {
+    const app = await v1AppWith(builder, {
       ...modelRegistration({ extractor: 6000 }),
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
@@ -306,7 +306,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
 
   it("refuse binding a model that can't give the declared bound, though only an AI step uses it", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, {
+    const app = await v1AppWith(builder, {
       ...modelRegistration({ extractor: 6001 }),
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
@@ -321,7 +321,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
 
   it("keep the version they started on after a new one is current", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, versioned(1));
+    const app = await v1AppWith(builder, versioned(1));
     const first = await builder.api.workflows.start(app, "pinned");
     await stepDone(first.id, "$params");
     await stopped(first.id);
@@ -355,7 +355,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
 ${mailStep("after")}`,
         { after: "reached" }
       );
-    const app = await appWith(builder, version("First."));
+    const app = await v1AppWith(builder, version("First."));
     const permission = await requestGranted(idp, builder, outlook(app));
     // The attack: the builder's own code, which an admin's run starts on
     // and waits in; then harmless code, which an admin grants again for.
@@ -462,7 +462,7 @@ export class App extends DurableObject {
 
   it("fail the next step with a permission error once a permission is revoked mid-run", async () => {
     const admin = await personApi("admin");
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "mailer",
@@ -510,7 +510,7 @@ ${mailStep("after")}`,
 
   it("check a model's answer against the step's schema, formats included", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, {
+    const app = await v1AppWith(builder, {
       ...modelRegistration({ extractor: 6000 }),
       ...workflowFiles(
         "reader",
@@ -566,7 +566,7 @@ ${mailStep("after")}`,
   it("fail a triggered run once its App's owner has left, at its start or before its next step", async () => {
     const admin = await personApi("admin");
     const owner = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       owner,
       workflowFiles(
         "triggered",
@@ -611,7 +611,7 @@ ${mailStep("after")}`,
   it("fail a person's run once they have left, at its next load", async () => {
     const admin = await personApi("admin");
     const leaver = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       leaver,
       workflowFiles(
         "waiting",
@@ -637,7 +637,7 @@ ${mailStep("after")}`,
 
   it("run with only their App's permissions, no network, and reading in their App's restricted mode", async () => {
     const admin = await personApi("admin");
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "probe",
@@ -726,7 +726,7 @@ Object.hasOwn = (target, name) => {
   return realHasOwn(target, name);
 };
 `;
-    const app = await appWith(admin, {
+    const app = await v1AppWith(admin, {
       ...files,
       "workflows/taker.ts": `${takes}${files["workflows/taker.ts"]}`,
     });
@@ -744,7 +744,7 @@ Object.hasOwn = (target, name) => {
 
   it("sleep durably", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       workflowFiles(
         "sleeper",
@@ -780,7 +780,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
       return await refusal(builder.api.apps.versions.setCurrent(app, version));
     };
     const outcomes = [
-      await setCurrent({ "app/server.ts": server, ...failing }),
+      await setCurrent({ "app/server.ts": v1Server, ...failing }),
       await setCurrent({ "workflows/failing.workflow-tests.ts": null }),
     ];
     expect(
@@ -808,7 +808,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
     };
 
     const directly = await setCurrent({
-      "app/server.ts": server,
+      "app/server.ts": v1Server,
       ...greet,
       "workflows/greet.ts": importing("./greeting.ts"),
       "workflows/greeting.ts": helper,
@@ -875,7 +875,7 @@ import definition from "./rogue.ts";
 export default workflowTests(definition, [{ name: "fails", expect: { error: "bad" } }]);
 `,
     };
-    const app = await appWith(admin, rogue);
+    const app = await v1AppWith(admin, rogue);
     const run = await admin.api.workflows.start(app, "rogue");
     await finished(run.id);
     const logged = await allEvents();
@@ -912,7 +912,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
 
   it("stop for good when cancelled, running or paused, and not run a cancelled row again", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       workflowFiles(
         "cancellable",
@@ -1014,7 +1014,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
 
   it("audit a run whose start failed as failed", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       workflowFiles(
         "unstartable",
@@ -1069,7 +1069,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
     const starter = await personApi("builder");
     const other = await personApi("builder");
     const admin = await personApi("admin");
-    const app = await appWith(
+    const app = await v1AppWith(
       starter,
       workflowFiles(
         "private",
@@ -1111,7 +1111,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     // Calls between steps can't be read as a step's, so the workflow that
     // makes them is held to none: they are refused as outside a step
     // first. The one that makes its calls in its step is held to them.
-    const app = await appWith(admin, {
+    const app = await v1AppWith(admin, {
       ...workflowFiles(
         "outside",
         `  const codeOf = async (key) => {
@@ -1193,7 +1193,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     const owner = await personApi("builder");
     const starter = await personApi("builder");
     const mail = await mailConnection(["invalid", "invalid"]);
-    const app = await appWith(
+    const app = await v1AppWith(
       owner,
       mailer(`retries: { limit: 3, delay: 10, backoff: "constant" }`)
     );
@@ -1288,7 +1288,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
 
   it("stop at an error of the workflow's own without retrying it, reporting its input's shape but none of its data", async () => {
     const admin = await personApi("admin");
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "careless",
@@ -1336,7 +1336,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
   it("fail, recorded and reported, once a run has taken as many steps as it may", async () => {
     const admin = await personApi("admin");
     // More steps than the engine takes in one execution (vite.config.ts).
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "endless",

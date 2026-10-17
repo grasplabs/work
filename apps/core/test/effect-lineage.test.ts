@@ -14,7 +14,7 @@ import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
-import { appWith, server } from "./workflow-apps.ts";
+import { v1AppWith, v1Server } from "./workflow-apps.ts";
 
 // The runs a run's own mail starts, as its descendants: mail it sends
 // through a native mail connector to its App's own address starts its
@@ -109,7 +109,7 @@ export default workflowTests(definition, [{ name: "runs", input, mocks: { read: 
 });
 
 /** The App's server: the sample's, and `relay`, which sends `mail`. */
-const relayServer = server.replace(
+const relayServer = v1Server.replace(
   "export class App extends DurableObject {",
   `export class App extends DurableObject {
   async relay(caller: Caller, mail: unknown): Promise<unknown> {
@@ -202,7 +202,7 @@ const loopApp = async (
 ) => {
   const local = `loop-${crypto.randomUUID().slice(0, 8)}`;
   const connection = await connectShared(admin, aliased);
-  const app = await appWith(admin, {
+  const app = await v1AppWith(admin, {
     ...loop(local, connection.mailbox, send),
     ...(listening ? listen(local) : {}),
     ...files(local, connection.mailbox),
@@ -750,7 +750,7 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
       message(looping.address, { from: "ann@acme.test", subject })
     );
     const composio = await mailConnection();
-    const app = await appWith(admin, {
+    const app = await v1AppWith(admin, {
       "workflows/mailer.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("mailer", { params: {}, input: z.unknown() }, async (step, { env }) =>
@@ -939,7 +939,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { send: null },
     const admin = await personApi("admin");
     const local = `relay-${crypto.randomUUID().slice(0, 8)}`;
     const connection = await connectShared(admin);
-    const app = await appWith(admin, relayFiles(local, connection.mailbox));
+    const app = await v1AppWith(admin, relayFiles(local, connection.mailbox));
     const permissionId = await requestGranted(idp, admin, {
       subject: { type: "app", appId: app },
       object: { type: "connection", connectionId: connection.id },
