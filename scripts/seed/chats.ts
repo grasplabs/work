@@ -46,7 +46,7 @@ export const chats: ChatSeed[] = [
       {
         question: "How long do we have to acknowledge a complaint?",
         answer:
-          "Two working days, in writing, according to the complaints procedure in Procedures. Complaint acknowledgement sets that deadline when it registers a complaint, and asks compliance before offering compensation above €250.",
+          "Two working days, in writing, according to the complaints procedure in Procedures. Complaints sets that deadline when it registers a complaint, and asks compliance before offering compensation above €250.",
       },
     ],
   },
@@ -59,7 +59,7 @@ export const chats: ChatSeed[] = [
         question:
           "How many applications came in without a payslip in the last two weeks?",
         answer:
-          "Of the applications Application intake checked in the last two weeks, about two in five still had documents to chase, most often the payslip or the employer statement. Required documents in Procedures says to chase them by email the same day.",
+          "Of the applications Client onboarding checked in the last two weeks, about two in five still had documents to chase, most often the payslip or the employer statement. Required documents in Procedures says to chase them by email the same day.",
       },
       {
         question: "Draft a reminder I can send for a missing payslip.",
