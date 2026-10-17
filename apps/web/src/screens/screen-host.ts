@@ -700,6 +700,17 @@ const isLastFrame = (frame: unknown): boolean =>
     frame.type === "refused" ||
     frame.type === "closed");
 
+/** Tells the frame its stream's connection ended. Never throws. */
+const handedClosed = async (
+  onFrame: (frame: unknown) => Promise<unknown>
+): Promise<void> => {
+  try {
+    await onFrame({ type: "closed" });
+  } catch {
+    // The frame is gone.
+  }
+};
+
 /**
  * A preview of the chat's draft: its server calls go to the draft's
  * preview, what its screen reports to the chat's agent; it starts no
@@ -707,7 +718,7 @@ const isLastFrame = (frame: unknown): boolean =>
  * runs on its draft release (core's sealed-previews.ts): its function
  * calls and live queries go there, on a store of the preview's own.
  */
-const previewTarget = (
+export const previewTarget = (
   link: FrameLink,
   chatId: string,
   bundle: PreviewBundle
@@ -754,6 +765,18 @@ const previewTarget = (
             }
           })
         );
+        // The connection dropped before the last frame: the frame hears
+        // `closed`, as a live screen's stream does when its request ends,
+        // so it attaches again (on the next connection) rather than wait.
+        const stub: unknown = subscription;
+        if (stub instanceof RpcStub) {
+          stub.onRpcBroken(() => {
+            if (!ended) {
+              end();
+              void handedClosed(onFrame);
+            }
+          });
+        }
         return {
           release: () => {
             end();

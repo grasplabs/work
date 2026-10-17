@@ -196,6 +196,11 @@ export const relayPreviewStream = (
         await refuse(error);
         return;
       }
+      // The timer's check may have refused while this one waited: the
+      // refusal is the last frame.
+      if (done) {
+        return;
+      }
       if (!isResult(frame)) {
         // oxlint-disable-next-line no-await-in-loop -- the next only once the page took this one
         await deliver(frame);

@@ -1,6 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { portTransport } from "@grasp-os/shared/screen-port";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
-import { RpcStub } from "capnweb";
+import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { CoreLink } from "./core-link.ts";
@@ -10,7 +11,13 @@ import {
   draftsFor,
   saveDraft,
 } from "./form-drafts.ts";
-import { appScreen, callFunction, fileRefusal } from "./screen-host.ts";
+import {
+  appScreen,
+  callFunction,
+  fileRefusal,
+  previewTarget,
+} from "./screen-host.ts";
+import type { FrameLink } from "./tab-link.ts";
 
 // The page relaying a screen's function call to core: whatever comes back
 // that isn't core's JSON reaches the screen as a coded error, never as
@@ -685,5 +692,75 @@ describe("core's answer to a screen's file request", () => {
       undefined,
       undefined,
     ]);
+  });
+});
+
+/**
+ * Core, over a real Cap'n Web session, as far as a preview's stream
+ * reaches it: its chats are itself, and the hold on a stream it answers
+ * is one of its own, which only gets released.
+ */
+class PreviewCore extends RpcTarget {
+  released = false;
+
+  get chats(): this {
+    return this;
+  }
+
+  previewStream(): PreviewCore {
+    return this.released ? this : new PreviewCore();
+  }
+
+  release(): void {
+    this.released = true;
+  }
+}
+
+describe("a preview's stream through the page", () => {
+  it("tells the frame `closed` and ends once its connection drops before the last frame", async () => {
+    const { port1, port2 } = new MessageChannel();
+    // oxlint-disable-next-line no-new -- the session serves core's side
+    new RpcSession(portTransport(port1), new PreviewCore());
+    const core = new RpcSession<PreviewCore>(
+      portTransport(port2)
+    ).getRemoteMain();
+    const link = {
+      session: async () => await Promise.resolve(core),
+      person: async () => await Promise.resolve("ada"),
+      retrying: async <T>(run: (session: unknown) => Promise<T>) =>
+        await run(core),
+    };
+    // SAFETY: a preview's stream reaches only `chats.previewStream`, which
+    // this stand-in has.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+    const asLink = link as unknown as FrameLink;
+    const target = previewTarget(asLink, "chat", {
+      ...bundle,
+      revision: 1,
+      screens: ["home"],
+    });
+    const frames: unknown[] = [];
+    let ended = 0;
+    await target.streamFunction(
+      "stream",
+      "{}",
+      async (sent) => {
+        frames.push(sent);
+        return await Promise.resolve(null);
+      },
+      () => {
+        ended += 1;
+      }
+    );
+    // Core's side ends the session, as a dropped connection does.
+    port1.postMessage(null);
+    await vi.waitFor(() => {
+      expect({ frames, ended }).toStrictEqual({
+        frames: [{ type: "closed" }],
+        ended: 1,
+      });
+    });
+    port1.close();
+    port2.close();
   });
 });
