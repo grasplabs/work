@@ -1,5 +1,6 @@
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { env, exports } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { act, consoleDatabase } from "../src/db/act.ts";
@@ -57,19 +58,43 @@ const liveClient = async () => {
   return client;
 };
 
+/**
+ * A company whose first conversation Stephen read and of which 85% is
+ * known, past the 80% it opens at, with nothing signed yet: as the model
+ * has it, at the agreements, ready for Grasp's go, and with four things
+ * that need Grasp (the go, both agreements and the contract).
+ */
+const readySnapshot = (name: string): AdminSnapshot => {
+  const empty = emptyAdminSnapshot(name);
+  return {
+    ...empty,
+    kickoff: { at: empty.now, known: 0.5 },
+    gate: { ...empty.gate, known: 85, ready: true },
+  };
+};
+
+/** The overview's row for client `clientId`, in its table of organizations. */
+const rowOf = (html: string, clientId: string): string => {
+  const table = html.indexOf("<table");
+  const at = html.indexOf(`href="/admin/${clientId}"`, table);
+  return at === -1 || table === -1
+    ? ""
+    : html.slice(html.lastIndexOf("<tr", at), html.indexOf("</tr>", at));
+};
+
 /** The text of `html` between the admin's sidebar and the page beside it. */
 const sidebarOf = (html: string): string =>
   html.slice(html.indexOf('data-slot="sidebar"'), html.indexOf("<main"));
 
 describe("the admin's frame", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
-  // Only each test's own clients have a core: an earlier test's accounts
-  // are gone from the fake.
+  // Only each test's own clients are listed: an earlier test's accounts
+  // are gone from the fake, and the overview counts every client.
   beforeEach(async () => {
     await db
       .update(clients)
       .set({ status: "offboarded" })
-      .where(eq(clients.status, "active"));
+      .where(ne(clients.status, "offboarded"));
   });
 
   it("gives staff the admin's own sidebar with every organization, one not read now marked as such, and no console bar", async () => {
@@ -133,6 +158,98 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("lists every organization on the overview: one that answered with where it stands and what needs Grasp, one that didn't with why and no numbers", async () => {
+    const acme = await liveClient();
+    acme.account.admin = readySnapshot("Acme");
+    const down = await liveClient();
+    down.account.unhealthy = 1000;
+    const waiting = await recordClient("provisioning");
+
+    const { status, html } = await page("/admin");
+    const main = html.slice(html.indexOf("<main"));
+    const [acmeRow, downRow, waitingRow] = [acme, down, waiting].map(
+      ({ clientId }) => rowOf(main, clientId)
+    );
+    const acmeEntry = sidebarOf(html).slice(sidebarOf(html).indexOf(acme.name));
+
+    expect({
+      status,
+      title: main.includes("Organizations</h1>"),
+      // Where Acme stands, as the model works it out of its snapshot.
+      acme: [
+        "Agreed",
+        "Not signed yet",
+        "85% known. Ready for Grasp’s go",
+        "Being written",
+        'text-status-attention tabular-nums">4<',
+      ].map((text) => acmeRow?.includes(text)),
+      acmeNamed: acmeRow?.includes(acme.name),
+      // What needs Grasp at Acme, said, and a way to it.
+      goToGive: main.includes(
+        "85% of what Grasp needs is known: enough to open at 80%. The company comes in once Grasp gives its go."
+      ),
+      // The model has no such need for a company that answered nothing.
+      noTranscript: !main.includes("Bring in the first conversation"),
+      // A core that didn't answer says why, and nothing the model would.
+      down: {
+        named: downRow?.includes(down.name),
+        why: downRow?.includes("Unreachable"),
+        numbers: ["% known", "Being written", "€"].some((text) =>
+          (downRow ?? "").includes(text)
+        ),
+      },
+      waiting: {
+        named: waitingRow?.includes(waiting.name),
+        why: waitingRow?.includes("Not deployed"),
+        numbers: ["% known", "Being written", "€"].some((text) =>
+          (waitingRow ?? "").includes(text)
+        ),
+      },
+      // Only Acme is counted in the numbers above the list.
+      counted: main.includes(
+        "Counted from the 1 that answered now: 2 didn’t, and aren’t in these numbers."
+      ),
+      // In the sidebar, how many things need Grasp at Acme.
+      acmeCount: acmeEntry
+        .slice(0, acmeEntry.indexOf("</li>"))
+        .includes('4<span class="sr-only">things need Grasp</span>'),
+    }).toStrictEqual({
+      status: 200,
+      title: true,
+      acme: [true, true, true, true, true],
+      acmeNamed: true,
+      goToGive: true,
+      noTranscript: true,
+      down: { named: true, why: true, numbers: false },
+      waiting: { named: true, why: true, numbers: false },
+      counted: true,
+      acmeCount: true,
+    });
+  });
+
+  it("shows only the organizations in a phase when one is chosen", async () => {
+    const acme = await liveClient();
+    acme.account.admin = readySnapshot("Acme");
+    const empty = await liveClient();
+    empty.account.admin = emptyAdminSnapshot("Empty");
+    const waiting = await recordClient("provisioning");
+
+    const ready = await page("/admin?phase=ready");
+    const agreements = await page("/admin?phase=agreements");
+    const rows = (html: string) =>
+      [acme, empty, waiting].map(
+        ({ clientId }) => rowOf(html, clientId) !== ""
+      );
+
+    expect({
+      ready: rows(ready.html),
+      agreements: rows(agreements.html),
+    }).toStrictEqual({
+      ready: [true, false, false],
+      agreements: [false, true, false],
+    });
+  });
+
   it("opens an organization the console knows, and has no page for one it doesn't", async () => {
     const acme = await liveClient();
     acme.account.admin = emptyAdminSnapshot("Acme");
@@ -152,21 +269,24 @@ describe("the admin's frame", () => {
     acme.account.admin = emptyAdminSnapshot("Acme");
 
     const answers = await Promise.all(
-      ["/admin", "/admin/platform", `/admin/${acme.clientId}`].map(
-        async (path) => {
-          const response = await exports.default.fetch(
-            `https://console.grasp.test${path}`
-          );
-          return { status: response.status, body: await response.text() };
-        }
-      )
+      [
+        "/admin",
+        "/admin?phase=ready",
+        "/admin/platform",
+        `/admin/${acme.clientId}`,
+      ].map(async (path) => {
+        const response = await exports.default.fetch(
+          `https://console.grasp.test${path}`
+        );
+        return { status: response.status, body: await response.text() };
+      })
     );
 
     expect({
       answers,
       readers: acme.account.adminReaders,
     }).toStrictEqual({
-      answers: [403, 403, 403].map((status) => ({
+      answers: [403, 403, 403, 403].map((status) => ({
         status,
         body: "Forbidden",
       })),
