@@ -63,8 +63,20 @@ let kitCache:
       files: Record<string, string>;
       directories: Set<string>;
       parsed: Map<string, ts.SourceFile>;
+      /**
+       * How the kit's own files' imports resolve: kit files only, under
+       * `/node_modules`, where no App file is, so the same for every App
+       * and kept for the isolate. Only imports made by a kit file are
+       * resolved through it; an App file's go through a cache of its own
+       * check, never kept.
+       */
+      resolutions: ts.ModuleResolutionCache;
     }
   | undefined;
+
+/** A resolution cache, of paths as they are: the file system is in memory. */
+const resolutionCache = (): ts.ModuleResolutionCache =>
+  ts.createModuleResolutionCache("/", (path) => path, compilerOptions);
 
 const kitOf = (files: Record<string, string>) => {
   if (kitCache?.files !== files) {
@@ -72,10 +84,14 @@ const kitOf = (files: Record<string, string>) => {
       files,
       directories: directoriesOf(Object.keys(files)),
       parsed: new Map(),
+      resolutions: resolutionCache(),
     };
   }
   return kitCache;
 };
+
+/** Where the kit's packages are: no App file is under it. */
+const kitRoot = "/node_modules/";
 
 const severities: Partial<
   Record<ts.DiagnosticCategory, Diagnostic["severity"]>
@@ -107,19 +123,103 @@ const toDiagnostic = (diagnostic: ts.Diagnostic): Diagnostic | undefined => {
 };
 
 /**
+ * Whether an App file's import of `name` may resolve where it did: to
+ * one of the App's files by a relative path or by the `#grasp` mapping,
+ * or by name to one of the modules `allowed` lists. Whatever the syntax
+ * that names it (an ambient module's import, a re-export, a pragma), an
+ * App file reaches nothing else of the kit: not its packages' own files
+ * by path, not a module the kit holds but doesn't give the App. The
+ * kit's own files resolve as TypeScript does.
+ */
+const resolvesWithin = (
+  name: string,
+  resolved: ts.ResolvedModuleFull | undefined,
+  app: ReadonlyMap<string, string>,
+  allowed: ReadonlySet<string>
+): boolean => {
+  if (resolved === undefined) {
+    return false;
+  }
+  if (app.has(resolved.resolvedFileName)) {
+    return (
+      name.startsWith("./") ||
+      name.startsWith("../") ||
+      name === screenReferences.specifier
+    );
+  }
+  return allowed.has(name);
+};
+
+/** Where `/// <reference path>` in `file` points: a path from the App's root. */
+const referencedPath = (file: string, reference: string): string => {
+  const parts = reference.startsWith("/") ? [] : file.split("/").slice(0, -1);
+  for (const part of reference.split("/")) {
+    if (part === "..") {
+      parts.pop();
+    } else if (part !== "." && part !== "") {
+      parts.push(part);
+    }
+  }
+  return `/${parts.join("/")}`;
+};
+
+/**
+ * What an App file's triple-slash directives reach beyond its own files:
+ * a `/// <reference path>` only to another App file, never into the kit's
+ * node_modules, and no `/// <reference types>` at all. The import checks
+ * hold every import an App file writes; these are how it would name a
+ * module without one.
+ */
+const referenceErrors = (
+  file: ts.SourceFile,
+  app: ReadonlyMap<string, string>
+): Diagnostic[] => {
+  const at = (position: number) => {
+    const { line, character } = file.getLineAndCharacterOfPosition(position);
+    return { line: line + 1, column: character + 1 };
+  };
+  return [
+    ...file.referencedFiles
+      .filter(
+        ({ fileName }) => !app.has(referencedPath(file.fileName, fileName))
+      )
+      .map(({ fileName, pos }) => ({
+        rule: "imports",
+        severity: "error" as const,
+        message: `"${fileName}" is not one of the App's files: a reference path names only those.`,
+        file: file.fileName.slice(1),
+        ...at(pos),
+      })),
+    ...file.typeReferenceDirectives.map(({ fileName, pos }) => ({
+      rule: "imports",
+      severity: "error" as const,
+      message: `"${fileName}": App files reference no type packages; import what the kit has instead.`,
+      file: file.fileName.slice(1),
+      ...at(pos),
+    })),
+  ];
+};
+
+/**
  * Type-checks App files (paths relative to the App, e.g.
  * `screens/desk.tsx`) against the kit and the App's own declaration files
  * among them (e.g. its server's types), which are checked too.
  */
 export const typeCheck = (
   appFiles: Record<string, string>,
-  kitTypes: Record<string, string>
+  kitTypes: Record<string, string>,
+  allowed?: ReadonlySet<string>
 ): Diagnostic[] => {
   const kit = kitOf(kitTypes);
   const app = new Map(
     Object.entries(appFiles).map(([path, source]) => [`/${path}`, source])
   );
   const appDirectories = directoriesOf(app.keys());
+  // This check's own: App files' resolutions never outlive it.
+  const appResolutions = resolutionCache();
+  // The kit's cache holds only the kit's files' resolutions: should any
+  // App file sit under the kit's root, this check keeps none of its own.
+  const kitShared = ![...app.keys()].some((path) => path.startsWith(kitRoot));
   const readFile = (path: string): string | undefined =>
     app.get(path) ?? ownEntry(kit.files, path);
   const parse = (
@@ -159,12 +259,41 @@ export const typeCheck = (
       return kit.directories.has(directory) || appDirectories.has(directory);
     },
     getDirectories: () => [],
+    ...(allowed === undefined
+      ? {}
+      : {
+          resolveModuleNameLiterals: (
+            literals,
+            containingFile,
+            redirectedReference,
+            options
+          ) =>
+            literals.map(({ text }) => {
+              const fromKit =
+                containingFile.startsWith(kitRoot) && !app.has(containingFile);
+              const { resolvedModule } = ts.resolveModuleName(
+                text,
+                containingFile,
+                options,
+                host,
+                fromKit && kitShared ? kit.resolutions : appResolutions,
+                redirectedReference
+              );
+              return {
+                resolvedModule:
+                  fromKit || resolvesWithin(text, resolvedModule, app, allowed)
+                    ? resolvedModule
+                    : undefined,
+              };
+            }),
+        }),
   };
   const program = ts.createProgram([...app.keys()], compilerOptions, host);
   const checked = program
     .getSourceFiles()
     .filter((file) => app.has(file.fileName));
-  return [
+  const references = checked.flatMap((file) => referenceErrors(file, app));
+  const found = [
     ...program.getOptionsDiagnostics(),
     ...program.getGlobalDiagnostics(),
     ...checked.flatMap((file) => [
@@ -174,4 +303,5 @@ export const typeCheck = (
   ]
     .map((diagnostic) => toDiagnostic(diagnostic))
     .filter((diagnostic) => diagnostic !== undefined);
+  return [...found, ...references];
 };
