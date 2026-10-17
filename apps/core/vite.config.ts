@@ -313,6 +313,8 @@ export default coreProject({
     // The Brain baseline's larger scale sizes, on request only:
     // vite.brain-scale.config.ts.
     "test/brain-scale-sizes.test.ts",
+    // The Brain baseline, in a group of its own: vite.brain.config.ts.
+    "test/brain-baseline.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],
