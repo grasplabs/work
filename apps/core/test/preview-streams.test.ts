@@ -360,6 +360,14 @@ describe(
           key
         )
       );
+      // Another action under the same key, with the same input: never the
+      // run under way.
+      const otherAction = await follow(
+        builder,
+        seat,
+        "attach",
+        await streamRequest(builder, seat, "notes.slow", { topic: "jam" }, key)
+      );
       const unknown = await follow(
         builder,
         seat,
@@ -375,12 +383,14 @@ describe(
       expect({
         ends: [firstEnd, joinedEnd, await attached.ended],
         other: await other.ended,
+        otherAction: await otherAction.ended,
         unknown: await unknown.ended,
         // Run once, whoever followed it.
         preview: await previewTitles(builder, seat),
       }).toStrictEqual({
         ends: ["ok", "ok", "ok"],
         other: "submission.key_conflict",
+        otherAction: "submission.expired",
         unknown: "submission.expired",
         preview: ["Draft about jam"],
       });
