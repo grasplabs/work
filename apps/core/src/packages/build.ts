@@ -1078,7 +1078,7 @@ export const buildDependencies = async (
     packageBuildRequestSchema,
     input
   );
-  const builder = builderOf(asked.app);
+  const builder = builderOf(`app:${asked.app}`);
   if (by.staff) {
     throw dependencyErrors.create("dependency.forbidden");
   }

@@ -68,6 +68,7 @@ import {
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
 import {
   memberEntry,
   requireNotStaff,
@@ -2001,6 +2002,9 @@ export const deleteWorkflowResource = async (
       )
       .returning({ id: workflowResources.id }),
     outboxedIfChanged(db, entry(by, "workflow.deleted", workflow.id)),
+    // Packages asked for it wait for nobody once it is gone, and the locks
+    // only they named go, their files to cleanup (dependencies/requests.ts).
+    ...withdrawnWithWorkflow(db, by.actor ?? actorOf(by), workflow.id),
     // The releases its approvals kept (workflow-bindings.ts) go back to
     // their retention once it is deleted.
     db.delete(sdkReleasePins).where(

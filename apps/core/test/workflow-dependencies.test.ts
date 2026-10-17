@@ -397,6 +397,9 @@ describe("packages for a workflow's compute modules", () => {
   it("stores no request, lock, lease or refusal of a subject core doesn't have, nor moves one to another subject", async () => {
     const { builder, workflow } = await builderWithWorkflow();
     const request = await proposeAs(builder, proposalFor({ workflow }));
+    const { id: app } = await builder.api.apps.create({
+      name: `App ${unique()}`,
+    });
     const missing = crypto.randomUUID();
     // Each table's row of `request`'s graph, for the subject bound first.
     const { results: columns } = await env.DB.prepare(
@@ -414,6 +417,8 @@ describe("packages for a workflow's compute modules", () => {
       ["app", missing],
       // A workflow's ID named as an App's.
       ["app", workflow],
+      // Neither kind of subject, though the ID is an App's.
+      ["team", app],
     ] as const;
 
     const inserted = await Promise.all(
@@ -448,8 +453,109 @@ describe("packages for a workflow's compute modules", () => {
       ),
       moved: moved.map((said) => said.includes("keep their subject")),
     }).toStrictEqual({
-      inserted: Array.from({ length: 12 }, () => true),
+      inserted: Array.from({ length: 16 }, () => true),
       moved: [true, true],
     });
+  });
+
+  it("withdraws a deleted workflow's waiting request and drops the lock only it named", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const { builder, workflow } = await builderWithWorkflow();
+    const stats = named("stats");
+    await publish(plain(stats, "1.0.0"));
+    const { request } = await builder.api.dependencies.resolve({
+      workflow,
+      sourceRevision: "rev-1",
+      purpose: "Compute the weighted median of the quarter.",
+      targets: ["computation"],
+      dependencies: { [stats]: "^1.0.0" },
+    });
+    const locks = async () => {
+      const { results } = await env.DB.prepare(
+        "SELECT graph_hash FROM dependency_locks WHERE subject_type = 'workflow' AND subject_id = ?"
+      )
+        .bind(workflow)
+        .all();
+      return results.length;
+    };
+    const lockedBefore = await locks();
+
+    const events = await auditedDuring(async () => {
+      await builder.api.workflowResources.delete(workflow);
+    });
+    const waiting = await approver.api.dependencies.waiting();
+    const decided = await outcome(decide(approver.api, request));
+
+    expect({
+      lockedBefore,
+      lockedAfter: await locks(),
+      queued: waiting.requests.some(({ id }) => id === request.id),
+      decided,
+      withdrawn: dependencyEvents(events).map(({ action, target, detail }) => ({
+        action,
+        target,
+        workflow: detail.workflow,
+        reason: detail.reason,
+      })),
+    }).toStrictEqual({
+      lockedBefore: 1,
+      lockedAfter: 0,
+      queued: false,
+      decided: "dependency.not_found",
+      withdrawn: [
+        {
+          action: "dependency.withdrawn",
+          target: { type: "dependency_request", id: request.id },
+          workflow,
+          reason: "workflow.deleted",
+        },
+      ],
+    });
+  });
+
+  it("says when revoking a graph denies the revoker's own waiting request", async () => {
+    const admin = await personApi("admin");
+    const { builder, workflow } = await builderWithWorkflow();
+    await approverBy(admin, builder);
+    const approved = await proposeAs(builder, proposalFor({ workflow }));
+    await decide(builder.api, approved);
+    const retiring = await builder.api.dependencies.impact(approved.id);
+    await builder.api.dependencies.retire(approved.id, {
+      reviewed: {
+        graphHash: approved.graphHash,
+        policyGeneration: retiring.policyGeneration,
+        approvalsDigest: retiring.endings.retire.digest,
+      },
+      reason: "Replaced soon.",
+    });
+    // The retired graph asked for again: a request that waits for it.
+    const waiting = await proposeAs(
+      builder,
+      proposalFor({ workflow }, { sourceRevision: "rev-2" })
+    );
+    const { policyGeneration, endings } = await builder.api.dependencies.impact(
+      approved.id
+    );
+
+    const events = await auditedDuring(async () => {
+      await builder.api.dependencies.revoke(approved.id, {
+        reviewed: {
+          graphHash: approved.graphHash,
+          policyGeneration,
+          approvalsDigest: endings.revoke.digest,
+        },
+        reason: "A safer package does the same.",
+      });
+    });
+
+    expect(
+      dependencyEvents(events)
+        .filter(({ action }) => action === "dependency.denied")
+        .map(({ target, detail }) => ({
+          id: target?.id,
+          selfDecided: detail.selfDecided,
+        }))
+    ).toStrictEqual([{ id: waiting.id, selfDecided: true }]);
   });
 });

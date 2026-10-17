@@ -42,7 +42,8 @@ import { z } from "zod";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { proposeResolved } from "../dependencies/requests.ts";
-import { builtSubject, ofSubject } from "../dependencies/subjects.ts";
+import { builtSubject } from "../dependencies/subject-builders.ts";
+import { ofSubject } from "../dependencies/subjects.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
 import type { PackageBuilderRun } from "./builder.ts";
 import { verifiedTarball } from "./tarballs.ts";
@@ -821,7 +822,7 @@ export const resolveDependencies = async (
     input
   );
   const asked = subjectOfRef(intent);
-  const builder = builderOf(asked.id);
+  const builder = builderOf(`${asked.type}:${asked.id}`);
   if (by.staff) {
     throw dependencyErrors.create("dependency.forbidden");
   }

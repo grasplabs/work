@@ -87,14 +87,15 @@ import {
 } from "../packages/locks.ts";
 import { holdsApprove, holdsApproveSql } from "./approvers.ts";
 import { peerIssues } from "./peers.ts";
+import { dropPending } from "./pending.ts";
 import {
   advancePolicy,
   policyGeneration,
   policyGenerationSql,
 } from "./policy.ts";
+import { builtSubject } from "./subject-builders.ts";
 import {
   auditTargetOf,
-  builtSubject,
   ofSubject,
   subjectKey,
   subjectNames,
@@ -219,6 +220,7 @@ const notFound = () => dependencyErrors.create("dependency.not_found");
 type DependencyAction =
   | "requested"
   | "superseded"
+  | "withdrawn"
   | "approved"
   | "denied"
   | "retired"
@@ -291,7 +293,7 @@ const toRequests = async (
     if (names === "read") {
       throw error;
     }
-    log.warn("dependencies.subjectNameunread", errorFields(error));
+    log.warn("dependencies.names_unread", errorFields(error));
   }
   const personName = new Map(personNames.map(({ id, name }) => [id, name]));
   const person = (userId: string) => ({
@@ -410,54 +412,6 @@ const pendingFor = async (
       )
     )
     .get();
-
-/**
- * The statements that drop whatever request waits for `subject` as their batch
- * runs, replaced by `by`, with its audit event by `actor`: the event
- * first, written from the very row the delete then removes (one waits per
- * App at most), so it names what was removed whatever was read before,
- * and nothing is recorded when nothing waits. What `requestEntry` records
- * of a superseded request, as SQL.
- */
-const dropPending = (
-  db: DrizzleD1Database,
-  actor: AuditActor,
-  subject: DependencySubject,
-  by: string
-) => {
-  const waits = and(
-    ofSubject(dependencyRequests, subject),
-    eq(dependencyRequests.status, "pending")
-  );
-  const eventId = crypto.randomUUID();
-  const now = new Date();
-  const event = sql`json_object(
-    'id', ${eventId},
-    'at', ${now.toISOString()},
-    'source', 'core',
-    'actor', json(${JSON.stringify(actor)}),
-    'action', 'dependency.superseded',
-    'target', json_object('type', 'dependency_request', 'id', ${dependencyRequests.id}),
-    'provenance', json('[]'),
-    'detail', json_object(
-      ${dependencyRequests.subjectType}, ${dependencyRequests.subjectId},
-      'sourceRevision', ${dependencyRequests.sourceRevision},
-      'graphHash', ${dependencyRequests.graphHash},
-      'targets', (SELECT group_concat(value, ' ') FROM json_each(${dependencyRequests.targets})),
-      'direct', ${dependencyRequests.direct},
-      'packages', ${dependencyRequests.packages},
-      'by', ${by}
-    )
-  )`;
-  return [
-    db
-      .insert(auditOutbox)
-      .select(
-        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${dependencyRequests} WHERE ${waits}`
-      ),
-    db.delete(dependencyRequests).where(waits),
-  ] as const;
-};
 
 /** How grave each severity is, for which findings a list shows first. */
 const gravity: Record<DependencyFinding["severity"], number> = {
@@ -602,7 +556,10 @@ const attempt = async (
           graphHash,
           sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${standing.id} AND ${dependencyRequests.status} = 'approved')`
         ),
-        ...dropPending(db, actor, subject, standing.id),
+        ...dropPending(db, actor, subject, {
+          action: "superseded",
+          by: standing.id,
+        }),
         ...lockFirst,
         ...unusedLockStatements(db, subject),
       ],
@@ -1506,6 +1463,7 @@ const denyWaiting = (
       'direct', ${dependencyRequests.direct},
       'packages', ${dependencyRequests.packages},
       'requestedBy', ${dependencyRequests.requestedBy},
+      'selfDecided', json(CASE WHEN ${dependencyRequests.requestedBy} = ${by.userId} THEN 'true' ELSE 'false' END),
       'policyGeneration', ${generation},
       'reason', ${reason},
       'revocation', ${revocation}

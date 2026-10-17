@@ -3,26 +3,21 @@ import {
   dependencySubjectRefSchema,
   subjectOfRef,
 } from "@grasp-os/shared/dependencies";
-import type {
-  DependencySubject,
-  NamedDependencySubject,
-} from "@grasp-os/shared/dependencies";
-import { and, eq, inArray } from "drizzle-orm";
+import type { DependencySubject } from "@grasp-os/shared/dependencies";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
-import { appFor } from "../apps.ts";
-import type { Acting } from "../auth/identity.ts";
 import { apps, workflowResources } from "../db/core/schema.ts";
-import { requireWorkflowRole } from "../workflow-resources.ts";
 
 // Whose packages a request, an approval, a lock or a build is: an App, or
 // an independent workflow resource, whose compute modules may use only
 // the `computation` target (GRA-665). The same approvers decide both, in
 // the same queue; an approval is its subject's alone, so an App's covers
 // no workflow, and a workflow's no App. Who may ask is the subject's own
-// builders: an App's (`appFor`), or a workflow's (`requireWorkflowRole`).
+// builders (subject-builders.ts). Nothing here reads who someone is, so
+// the workflow registry can use it without a cycle.
 
 /** The columns of a table's subject (`subject_type`, `subject_id`). */
 interface SubjectColumns {
@@ -35,9 +30,10 @@ export const ofSubject = (
   table: SubjectColumns,
   subject: DependencySubject
 ): SQL =>
-  // A subject's two columns: both always set (migration 0097).
+  // Never on the ID alone: and() of two conditions is never undefined,
+  // and should it be, nothing matches.
   and(eq(table.subjectType, subject.type), eq(table.subjectId, subject.id)) ??
-  eq(table.subjectId, subject.id);
+  sql`0`;
 
 /** A subject's key, for maps of them. */
 export const subjectKey = (subject: DependencySubject): string =>
@@ -59,29 +55,6 @@ export const auditTargetOf = (
   type: subject.type === "app" ? "app" : "workflow_resource",
   id: subject.id,
 });
-
-/**
- * `subject`, for one of its builders, with its name: `app.not_found` or
- * `workflow.resource_unavailable` for anyone with no role in it, and
- * `role.forbidden` for one who only uses it.
- */
-export const builtSubject = async (
-  env: Env,
-  by: Acting,
-  subject: DependencySubject
-): Promise<NamedDependencySubject> => {
-  if (subject.type === "app") {
-    const { id, name } = await appFor(env, by, subject.id, "builder");
-    return { type: "app", id, name };
-  }
-  const { id, name } = await requireWorkflowRole(
-    env,
-    by,
-    subject.id,
-    "builder"
-  );
-  return { type: "workflow", id, name };
-};
 
 /**
  * The subject a caller names (`{ app }` or `{ workflow }`), or

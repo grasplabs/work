@@ -7117,6 +7117,10 @@ msgstr "With {person}"
 msgid "With the board"
 msgstr "With the board"
 
+#: src/activity/audit-words.ts
+msgid "Withdrew a request for packages"
+msgstr "Withdrew a request for packages"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
 msgstr "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
