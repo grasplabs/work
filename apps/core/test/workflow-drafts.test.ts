@@ -412,13 +412,23 @@ describe("a workflow's draft", () => {
       },
     });
     const read = await workflowDraft({ ...env, DB: racing }, ada, workflow.id);
-    // The edit landed while it read, and whichever state it read, its
-    // checkpoint is never newer than its text.
+    // The edit landed while it read, and it read one of the two states
+    // that were ever saved: before the edit, or after it.
+    const state = {
+      revision: read.revision,
+      checkpoint: read.checkpoint?.revision ?? null,
+    };
+    const saved = [
+      { revision: 2, checkpoint: 1 },
+      { revision: 3, checkpoint: 3 },
+    ];
     expect({
       landed,
-      consistent:
-        read.checkpoint === null || read.checkpoint.revision <= read.revision,
-    }).toStrictEqual({ landed: true, consistent: true });
+      saved: saved.some(
+        (one) =>
+          one.revision === state.revision && one.checkpoint === state.checkpoint
+      ),
+    }).toStrictEqual({ landed: true, saved: true });
   });
 
   it("finds a contract too large for a version, so a draft that passes publishes", async () => {
