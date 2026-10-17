@@ -220,7 +220,8 @@ const referencedPath = (file: string, reference: string): string => {
 /**
  * What an App file's triple-slash directives reach beyond its own files:
  * a `/// <reference path>` only to another App file, never into the kit's
- * node_modules, and no `/// <reference types>` at all. The import checks
+ * node_modules, and no `/// <reference types>` or `/// <reference lib>`
+ * at all. The import checks
  * hold every import an App file writes; these are how it would name a
  * module without one.
  */
@@ -248,6 +249,15 @@ const referenceErrors = (
       rule: "imports",
       severity: "error" as const,
       message: `"${fileName}": App files reference no type packages; import what the kit has instead.`,
+      file: file.fileName.slice(1),
+      ...at(pos),
+    })),
+    // Its lib is its target's: a `/// <reference lib>` would add one, such
+    // as the DOM to server code, whose isolate has none.
+    ...file.libReferenceDirectives.map(({ fileName, pos }) => ({
+      rule: "imports",
+      severity: "error" as const,
+      message: `"${fileName}": App files reference no libs; their target's lib is the one they run with.`,
       file: file.fileName.slice(1),
       ...at(pos),
     })),

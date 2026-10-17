@@ -805,6 +805,10 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       '/// <reference path="../node_modules/@grasp-os/sdk/src/client.ts" />\nexport const extra = 1;\n',
     ],
     [
+      "a lib it references, the DOM's",
+      '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
+    ],
+    [
       "an ambient module that shadows the SDK's",
       'declare module "@grasp-os/sdk" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
     ],
