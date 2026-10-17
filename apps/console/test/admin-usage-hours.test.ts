@@ -153,6 +153,36 @@ describe("an organization's AI use and hours", () => {
     });
   });
 
+  it("names this month's figure after the month core is on, even before anything is used in it", async () => {
+    const snapshot = usedSnapshot();
+    const [used] = snapshot.usage;
+    // The same use, forty days before core's day: in an earlier month.
+    const earlier = new Date(Date.parse(snapshot.now) - 40 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const base = await liveClient({
+      ...snapshot,
+      usage: used === undefined ? [] : [{ ...used, day: earlier }],
+    });
+
+    const { status, html } = await page(`${base}/ai-use`);
+
+    expect({
+      status,
+      thisMonth: html.includes(`>${monthName(snapshot.now)}</span>`),
+      // This month took nothing; everything so far is the earlier month's.
+      nothingYet: html.includes(">€0.00<"),
+      inAll: html.includes(">€24<"),
+      since: html.includes(`since ${monthName(earlier)}`),
+    }).toStrictEqual({
+      status: 200,
+      thisMonth: true,
+      nothingYet: true,
+      inAll: true,
+      since: true,
+    });
+  });
+
   it("says nothing is used yet where core counted nothing, with the way to the first conversation", async () => {
     const base = await liveClient(emptyAdminSnapshot("Acme"));
 

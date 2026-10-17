@@ -700,8 +700,9 @@ export const AiUse = () => {
     contract.status === "signed" && contract.aiIncluded > 0
       ? contract.aiIncluded
       : null;
-  // The month the tile on the contract is about: the one picked, or the one that runs.
-  const shown = month ?? usage.months.at(-1)?.month;
+  // The month the tile on the contract is about: the one picked, or the one
+  // the view is counted to, which `thisMonth` is, used in or not.
+  const shown = month ?? view.asOf.slice(0, 7);
   const inMonth = month === null ? usage.thisMonth : now.total;
   const over = covered !== null && inMonth.spend > covered;
   const first = usage.months[0]?.month;
@@ -729,7 +730,7 @@ export const AiUse = () => {
         <div className="bg-border grid grid-cols-2 gap-px @3xl:grid-cols-4">
           <Figure
             attention={over}
-            label={shown === undefined ? "This month" : formatMonth(shown)}
+            label={formatMonth(shown)}
             ring={
               covered === null
                 ? undefined
