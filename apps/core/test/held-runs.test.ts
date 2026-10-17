@@ -107,16 +107,19 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     if (held === undefined || heldSearch === undefined) {
       throw new Error("Nothing held");
     }
-    // Asleep between its checks, with nothing of it running.
+    // Asleep between its checks, with nothing of it running: seen so in
+    // one look at both. Each check runs it briefly (from 250 ms apart in
+    // tests), so a later look may land on one; this is the assertion, not
+    // a look kept for later.
     await vi.waitFor(
       async () => {
-        await expect(liveStatus(run.id)).resolves.toBe("waiting");
-        await expect(liveStatus(search.id)).resolves.toBe("waiting");
+        await expect(
+          Promise.all([liveStatus(run.id), liveStatus(search.id)])
+        ).resolves.toStrictEqual(["waiting", "waiting"]);
       },
       { timeout: 10_000, interval: 100 }
     );
     const before = {
-      live: [await liveStatus(run.id), await liveStatus(search.id)],
       server: await mail.did(),
       searched: await mail.searched(),
     };
@@ -141,7 +144,6 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
         { mode: "workflow", restricted: true },
       ],
       before: {
-        live: ["waiting", "waiting"],
         server: { calls: 0, sent: [] },
         searched: [],
       },
