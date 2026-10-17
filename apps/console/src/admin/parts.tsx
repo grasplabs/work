@@ -91,3 +91,107 @@ export const KnowledgeDots = ({
     </span>
   );
 };
+
+/**
+ * A titled panel of a section: its title, what it shows under it, and
+ * beside them what can be done there (`action`); where there is no room
+ * beside them, that goes under the title, so the line under it keeps its
+ * width. Ported from the prototype's `SettingsSection`.
+ */
+export const Panel = ({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children?: ReactNode;
+}) => (
+  <section className="bg-card overflow-hidden rounded-xl border text-sm">
+    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-5 py-4">
+      <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
+        <h2 className="font-medium">{title}</h2>
+        {description === undefined ? null : (
+          <p className="text-muted-foreground">{description}</p>
+        )}
+      </div>
+      {action}
+    </div>
+    {children}
+  </section>
+);
+
+/** A share of something as a small ring, filled as far as `value` is of `of`. */
+const Ring = ({ value, of }: { value: number; of: number }) => {
+  const share = of > 0 ? Math.min(Math.max(value / of, 0), 1) : 0;
+  return (
+    <span className="flex-none">
+      <span className="sr-only">{`${Math.round(share * 100)}%`}</span>
+      <svg aria-hidden className="size-5 -rotate-90" viewBox="0 0 36 36">
+        <circle
+          className="stroke-border"
+          cx="18"
+          cy="18"
+          fill="none"
+          r="15.9155"
+          strokeWidth="4"
+        />
+        {share > 0 ? (
+          <circle
+            className="stroke-foreground"
+            cx="18"
+            cy="18"
+            fill="none"
+            r="15.9155"
+            strokeDasharray={`${share * 100} 100`}
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
+        ) : null}
+      </svg>
+    </span>
+  );
+};
+
+/**
+ * One number with what it counts, a line under it, and a ring where the
+ * number is a share of something. The ring stands beside the label, so the
+ * number has the whole tile, however narrow.
+ */
+export const Figure = ({
+  label,
+  value,
+  sub,
+  ring,
+  attention = false,
+}: {
+  label: string;
+  value: ReactNode;
+  sub?: string;
+  ring?: { value: number; of: number };
+  attention?: boolean;
+}) => (
+  <div className="bg-card grid grid-cols-[minmax(0,1fr)_auto] content-start gap-x-2 gap-y-0.5 px-4 py-4 sm:px-5">
+    <span className="text-muted-foreground flex min-h-5 items-center text-xs">
+      {label}
+    </span>
+    {ring !== undefined && ring.of > 0 ? (
+      <Ring of={ring.of} value={ring.value} />
+    ) : null}
+    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium text-balance tabular-nums">
+      {value}
+    </span>
+    {sub === undefined ? null : (
+      <span
+        className={cn(
+          "col-span-2 row-start-3 text-xs",
+          attention ? "text-status-attention" : "text-muted-foreground"
+        )}
+      >
+        {sub}
+      </span>
+    )}
+  </div>
+);

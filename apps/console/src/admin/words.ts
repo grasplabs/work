@@ -49,8 +49,14 @@ export const formatDate = (iso: string): string => {
   return `${day} ${month} ${year}`;
 };
 
+/** "2026-09-02" as "2 Sep". */
+export const formatDay = (iso: string): string => {
+  const { month, day } = partsOf(iso);
+  return `${day} ${month}`;
+};
+
 /** "2026-09" as "Sep 2026". */
-const formatMonth = (iso: string): string => {
+export const formatMonth = (iso: string): string => {
   const { year, month } = partsOf(`${iso}-01`);
   return `${month} ${year}`;
 };
@@ -79,6 +85,31 @@ export const euro = (amount: number): string =>
 
 /** Hours and the like, as whole numbers. */
 export const whole = (value: number): string => wholeNumber.format(value);
+
+const oneDecimal = new Intl.NumberFormat("en", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+/** Tokens, said short: "17.2 million", "312 thousand", or the number itself. */
+export const tokens = (count: number): string => {
+  if (count >= 1e6) {
+    return `${oneDecimal.format(count / 1e6)} million`;
+  }
+  if (count >= 1e3) {
+    return `${whole(count / 1e3)} thousand`;
+  }
+  return whole(count);
+};
+
+const wholePercent = new Intl.NumberFormat("en", {
+  style: "percent",
+  maximumFractionDigits: 0,
+});
+
+/** A share, 0.42, as "42%". */
+export const formatPercent = (share: number): string =>
+  wholePercent.format(share);
 
 /** "a, b and c". */
 export const formatList = (items: string[]): string =>
