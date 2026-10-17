@@ -1451,7 +1451,18 @@ export class FileHost {
       const due = this.#db
         .select({ key: fileWrites.key, issuedAt: fileWrites.issuedAt })
         .from(fileWrites)
-        .where(lte(fileWrites.issuedAt, now - purgeGraceMs))
+        .where(
+          and(
+            lte(fileWrites.issuedAt, now - purgeGraceMs),
+            // A removal that failed waits a retry's wait, however often
+            // the store's activity brings the alarm forward.
+            or(
+              isNull(fileWrites.removeTriedAt),
+              isNotNull(fileWrites.removedAt),
+              lte(fileWrites.removeTriedAt, now - removalRetryMs)
+            )
+          )
+        )
         // Writes whose removal is still owed (not looked at yet, or a
         // removal that failed) first: those removed already, kept for a
         // late put, never crowd them out of a page.

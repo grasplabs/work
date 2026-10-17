@@ -2617,7 +2617,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
       }
     );
     const kept = await storedObjects(release);
-    await sweepIn(release, purgeGraceMs + 2);
+    // Past the retry's wait, R2 working again.
+    await sweepIn(release, purgeGraceMs + removalRetryMs + 2);
     expect({
       failed: due.failed instanceof Error,
       // Due again a retry's wait after it was tried: never only once the
@@ -2634,6 +2635,63 @@ describe("an App's files", { timeout: 120_000 }, () => {
       kept: 1,
       after: [],
     });
+  });
+
+  it("tries a failed removal again only after the retry's wait, however often the alarm comes", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const tried = { deletes: 0 };
+    const counted = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "delete") {
+          return async () => {
+            tried.deletes += 1;
+            await Promise.resolve();
+            throw new Error("R2 is unavailable.");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const seen: number[] = [];
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (instance: DataStore, state) => {
+        await instance.admitChunk(
+          storeId,
+          builder.userId,
+          "attachments",
+          file,
+          0,
+          bytes.length
+        );
+        const host = new StoreHost(state, { ...env, FILES: counted });
+        const at = Date.now() + purgeGraceMs + 1;
+        // The first sweep tries and fails; one a second later, as a busy
+        // store's alarm comes, tries nothing; one past the wait tries again.
+        for (const offset of [0, 1000, removalRetryMs + 1]) {
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- one sweep after another
+            await host.files.sweep(storeId, at + offset);
+          } catch {
+            // Its removal failed, as arranged.
+          }
+          seen.push(tried.deletes);
+        }
+      }
+    );
+    expect(seen).toStrictEqual([1, 1, 2]);
   });
 
   it("tries again a failed removal behind a full page of writes removed already and kept for late puts", async () => {
@@ -2684,7 +2742,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       }
     );
     const kept = await storedObjects(release);
-    await sweepIn(release, purgeGraceMs + 3);
+    await sweepIn(release, purgeGraceMs + removalRetryMs + 3);
     expect({ kept, after: await storedObjects(release) }).toStrictEqual({
       kept: [late],
       after: [],
