@@ -77,6 +77,7 @@ import {
   dependencyPolicy,
   dependencyRequests,
   users,
+  workflowResources,
 } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import {
@@ -498,6 +499,29 @@ const newRequest = (
   endedReason: null,
 });
 
+/**
+ * The statement that fails a proposal's batch (`failUnless`) unless its
+ * subject is still there as it runs: a workflow deleted after `propose`
+ * checked it gets no request or lock, which its deletion's batch
+ * (`withdrawnWithWorkflow`, pending.ts) would have withdrawn had it come
+ * first. An App's rows go with the App.
+ */
+const stillThere = (
+  db: DrizzleD1Database,
+  subject: DependencySubject,
+  graphHash: string
+) =>
+  subject.type === "workflow"
+    ? [
+        failUnless(
+          db,
+          subject,
+          graphHash,
+          sql`EXISTS (SELECT 1 FROM ${workflowResources} WHERE ${workflowResources.id} = ${subject.id} AND ${workflowResources.deletedAt} IS NULL)`
+        ),
+      ]
+    : [];
+
 /** One attempt's outcome: the request it answers with, and its batch. */
 interface Attempt {
   request: Listed;
@@ -532,6 +556,7 @@ const attempt = async (
           limits: resolved.limits,
         }),
   ]);
+  const live = stillThere(db, subject, graphHash);
   const lockFirst = written?.statements ?? [];
   const lock = written?.lock;
   const standing = approvals.find((row) => covers(row, proposal.targets));
@@ -550,6 +575,7 @@ const attempt = async (
       request: standing,
       lock,
       statements: [
+        ...live,
         failUnless(
           db,
           subject,
@@ -572,7 +598,11 @@ const attempt = async (
     waiting.targets === targets &&
     (await sameReview(db, waiting.id, snapshot))
   ) {
-    return { request: waiting, lock, statements: lockFirst };
+    return {
+      request: waiting,
+      lock,
+      statements: lockFirst.length === 0 ? [] : [...live, ...lockFirst],
+    };
   }
   const row = newRequest(checked, by, latest?.id ?? null, generation);
   const superseded = waiting
@@ -597,6 +627,7 @@ const attempt = async (
     // The request it replaces goes first, so its lock gives up its room to
     // this one's (`lockStatements`).
     statements: [
+      ...live,
       ...superseded,
       ...lockFirst,
       db.insert(dependencyRequests).values(row),
@@ -700,6 +731,9 @@ const propose = async (
       if (!(isUniqueViolation(error) || lockGuardFailed(error))) {
         throw error;
       }
+      // Or the subject went as it ran (`stillThere`): refused as gone.
+      // oxlint-disable-next-line no-await-in-loop
+      await builtSubject(env, by, subject);
     }
   }
   throw dependencyErrors.create("dependency.stale");

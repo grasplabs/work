@@ -15,6 +15,7 @@ import {
 } from "../src/dependencies/requests.ts";
 import { mockIdp } from "./idp.ts";
 import { named, plain, publish } from "./npm.ts";
+import { racingDb } from "./racing-db.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Packages for an independent workflow's compute modules (GRA-665), from
@@ -511,6 +512,36 @@ describe("packages for a workflow's compute modules", () => {
           reason: "workflow.deleted",
         },
       ],
+    });
+  });
+
+  it("stores no request for a workflow deleted as the proposal lands", async () => {
+    const { builder, workflow } = await builderWithWorkflow();
+    let raced = false;
+    const db = racingDb(async () => {
+      if (!raced) {
+        raced = true;
+        await builder.api.workflowResources.delete(workflow);
+      }
+    });
+
+    const proposed = await outcome(
+      proposeForTests(
+        { ...env, DB: db },
+        await builder.api.whoami(),
+        proposalFor({ workflow })
+      )
+    );
+    const { results } = await env.DB.prepare(
+      "SELECT id FROM dependency_requests WHERE subject_type = 'workflow' AND subject_id = ?"
+    )
+      .bind(workflow)
+      .all();
+
+    expect({ raced, proposed, stored: results.length }).toStrictEqual({
+      raced: true,
+      proposed: "workflow.resource_unavailable",
+      stored: 0,
     });
   });
 
