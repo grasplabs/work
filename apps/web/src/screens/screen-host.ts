@@ -743,6 +743,9 @@ export const previewTarget = (
     streamFunction: async (what, request, onFrame, onEnded) =>
       await on(link, async ({ chats }) => {
         let ended = false;
+        // A last frame came, even if the frame hasn't taken it yet: no
+        // `closed` goes after it.
+        let lastCame = false;
         const end = (): void => {
           if (!ended) {
             ended = true;
@@ -756,10 +759,12 @@ export const previewTarget = (
           what,
           request,
           forCore(async (frame: unknown) => {
+            const last = isLastFrame(frame);
+            lastCame ||= last;
             try {
               return await onFrame(frame);
             } finally {
-              if (isLastFrame(frame)) {
+              if (last) {
                 end();
               }
             }
@@ -771,7 +776,7 @@ export const previewTarget = (
         const stub: unknown = subscription;
         if (stub instanceof RpcStub) {
           stub.onRpcBroken(() => {
-            if (!ended) {
+            if (!(ended || lastCame)) {
               end();
               void handedClosed(onFrame);
             }
