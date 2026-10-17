@@ -123,6 +123,37 @@ const deepFreeze = (value: JsonValue): JsonValue => {
 };
 
 /**
+ * Counts what the workflow's own actions reach as used, as a task's call
+ * would be: sealed and approved with the rest. A use of a binding the
+ * definition doesn't declare, of another kind, or of its own modules is
+ * refused.
+ */
+const markActionUses = (checker: Checker): void => {
+  for (const binding of checker.bindings.values()) {
+    if (!binding.referenced) {
+      continue;
+    }
+    for (const use of binding.contract?.uses ?? []) {
+      const used = checker.bindings.get(use.alias);
+      if (
+        used === undefined ||
+        used.kind !== use.kind ||
+        used.contractKey.startsWith("local:")
+      ) {
+        checker.report.error(
+          "binding.unknown_use",
+          { pointer: binding.pointer },
+          `Declare a ${use.kind} binding \`${use.alias}\` of the host catalog for the action to use.`,
+          { expected: `a ${use.kind} binding` }
+        );
+        continue;
+      }
+      used.referenced = true;
+    }
+  }
+};
+
+/**
  * Validates workflow.json, given as its text or its UTF-8 bytes. `options`
  * are the host's: its catalog of approved contracts, the module manifest of
  * the workflow's own code, and its ceilings.
@@ -173,6 +204,7 @@ export const validateWorkflow = async (
         checkReferences(checker, slot, compiled);
       }
     }
+    markActionUses(checker);
     // Advice last, once every check has run.
     for (const binding of checker.bindings.values()) {
       if (!binding.referenced) {

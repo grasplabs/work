@@ -111,6 +111,12 @@ export interface Effect {
   readonly fence: AttemptFence;
   /** Throws unless its attempt still holds its lease, nothing awaited. */
   readonly requireHolds: () => void;
+  /**
+   * Whether one of the workflow's own actions makes it (resource-action.ts):
+   * a restricted run's action makes no connector call, whose held decision
+   * would outlive the action that can't wait for it.
+   */
+  readonly fromAction?: boolean;
 }
 
 /** A task's call, its arguments built by the host (resource-host.ts). */
@@ -772,6 +778,15 @@ export const makeCall = async (
   };
   let output: Json;
   try {
+    // Refused before anything is decided or sent, and kept as the call's
+    // receipt: connect would hold it for a decision no action waits for.
+    if (
+      effect.fromAction === true &&
+      run.restricted &&
+      call.name === "grasp.connector"
+    ) {
+      throw workflowResourceErrors.create("workflow.action_restricted");
+    }
     await requireCallAuthority(env, run, binding);
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.

@@ -61,6 +61,7 @@ import {
 } from "./host.ts";
 import type { Busy, LoadWait, RunStep } from "./host.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import { callAction } from "./resource-action.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import { makeCall } from "./resource-calls.ts";
@@ -270,6 +271,11 @@ export interface ResourceHostHooks {
   attemptCall?: (call: Promise<unknown>, stepDone: Promise<unknown>) => void;
   /** Hears, once, that the isolate asked for what generated code never does. */
   tampered: (error: { name: string; message: string; code?: string }) => void;
+  /**
+   * The run's own sandbox session on-prem, once open: the parent of the
+   * sessions its actions run in (resource-action.ts).
+   */
+  sessionId?: () => string | undefined;
   /** The activation's fuel for expressions: {@link activationFuel} if unset. */
   activationFuel?: number;
   /**
@@ -550,6 +556,8 @@ export const maxResultBytes = platformLimits.stepPayloadBytes;
 const triedOnce = new Set<SealedCall["name"]>([
   "grasp.operation",
   "grasp.model",
+  // An action's effects aren't proven idempotent as a whole: once.
+  "grasp.action",
 ]);
 
 /**
@@ -764,7 +772,8 @@ const templatesOf = (call: SealedCall): SealedTemplate[] => {
     }
     case "grasp.operation":
     case "grasp.connector":
-    case "grasp.compute": {
+    case "grasp.compute":
+    case "grasp.action": {
       return [call.arguments];
     }
     case "grasp.model": {
@@ -2212,6 +2221,9 @@ export class ResourceRunHost
         attempt.deadline
       );
     }
+    if (call.name === "grasp.action") {
+      return await this.#action(attempt, task, call, passed);
+    }
     const built = await this.#builtCall(attempt, call, passed);
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
       key: stepIdempotencyKey(this.#run.runId, `task:${task.id}`),
@@ -2228,6 +2240,55 @@ export class ResourceRunHost
     });
   }
 
+  /**
+   * `#made`'s work for an action task: the action run in the modules'
+   * sandbox (resource-action.ts), each of its resource calls one of the
+   * run's named calls, as a task's own: its lineage's host call first,
+   * then `makeCall`, under its step's key and its ordinal.
+   */
+  async #action(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    call: Extract<SealedCall, { name: "grasp.action" }>,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<Json> {
+    const input = await this.#built(attempt, call.arguments, frame, frame.size);
+    const stepKey = stepIdempotencyKey(this.#run.runId, `task:${task.id}`);
+    return await callAction(
+      this.#env,
+      this.#run.build.compute,
+      this.#run.build.sdk,
+      call,
+      input,
+      attempt.deadline,
+      {
+        // The workflow's actions apart from its runs, as a child of the
+        // run's own session on-prem (resource-action.ts).
+        owner: `workflow-action:${this.#run.workflowId}`,
+        parent: this.#hooks.sessionId?.(),
+        make: async (built, ordinal) => {
+          this.#requireCurrent(attempt);
+          await attempt.admission.hostCall();
+          this.#requireCurrent(attempt);
+          return await makeCall(this.#env, this.#run.calling, task.id, built, {
+            key: `${stepKey}:${ordinal}`,
+            deadline: attempt.deadline,
+            fence: {
+              run: this.#run.runId,
+              key: attempt.key,
+              number: attempt.number,
+              generation: attempt.generation,
+            },
+            requireHolds: () => {
+              this.#requireCurrent(attempt);
+            },
+            fromAction: true,
+          });
+        },
+      }
+    );
+  }
+
   /** `call`'s parts built (`#built`), as resource-calls.ts makes it. */
   async #builtCall(
     attempt: StepAttempt,
@@ -2238,7 +2299,8 @@ export class ResourceRunHost
           | "grasp.now"
           | "grasp.random"
           | "grasp.sleepUntil"
-          | "grasp.compute";
+          | "grasp.compute"
+          | "grasp.action";
       }
     >,
     frame: { input: Json; output: Json; size: number }

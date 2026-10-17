@@ -103,7 +103,7 @@ export const maxTaskExpressions = 64;
 export const maxStepExpressions = 128;
 
 /** The generator's identity: part of every build it makes. */
-export const generatorVersion = "grasp-open-workflow-ts/4";
+export const generatorVersion = "grasp-open-workflow-ts/5";
 
 /** Where the generated module is among a version's files. */
 export const generatedPath = ".grasp/workflow.ts";
@@ -180,6 +180,18 @@ export type GeneratedCall =
       /** The workflow's own module its binding names: `code/<file>.ts`. */
       readonly module: string;
       /** The module's export the binding names. */
+      readonly export: string;
+      readonly arguments: CallTemplate;
+    }
+  | {
+      /**
+       * A `grasp.operation` call of a binding to one of the workflow's own
+       * actions (`local:code/<file>.ts#<export>`): run by the host in the
+       * modules' sandbox, never through the catalog.
+       */
+      readonly name: "grasp.action";
+      readonly binding: string;
+      readonly module: string;
       readonly export: string;
       readonly arguments: CallTemplate;
     };
@@ -1308,9 +1320,23 @@ const callOf = (
     }
     case "grasp.operation": {
       const operationArguments = part("arguments");
-      return operationArguments === undefined
-        ? undefined
-        : { name: "grasp.operation", binding, arguments: operationArguments };
+      const local = localContract.exec(
+        emitter.checked.bindings.get(binding)?.contract ?? ""
+      )?.groups;
+      if (operationArguments === undefined) {
+        return undefined;
+      }
+      // One of the workflow's own actions, sealed as the module and export
+      // validation resolved against its module manifest.
+      return local?.module === undefined || local.export === undefined
+        ? { name: "grasp.operation", binding, arguments: operationArguments }
+        : {
+            name: "grasp.action",
+            binding,
+            module: local.module,
+            export: local.export,
+            arguments: operationArguments,
+          };
     }
     case "grasp.connector": {
       // The only call a sensitive parameter may reach, as a binding

@@ -23,6 +23,8 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
+  actionUseAliasPattern,
+  actionUseKinds,
   workflowModuleLimits,
   workflowModulePattern,
 } from "@grasp-os/shared/workflow-modules";
@@ -231,6 +233,17 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     binding: aliasSchema,
     // The workflow's own module and export its binding names, as the
     // generator sealed them (generate.ts).
+    module: z.string().regex(workflowModulePattern).max(256),
+    export: z
+      .string()
+      .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
+      .max(256),
+    arguments: templateSchema,
+  }),
+  z.strictObject({
+    name: z.literal("grasp.action"),
+    binding: aliasSchema,
+    // One of the workflow's own actions, as the generator sealed it.
     module: z.string().regex(workflowModulePattern).max(256),
     export: z
       .string()
@@ -698,10 +711,26 @@ const computeFileSchema = z.strictObject({
   contracts: z
     .record(
       z.string().max(512),
-      z.strictObject({
-        input: z.string().max(workflowModuleLimits.descriptorChars),
-        output: z.string().max(workflowModuleLimits.descriptorChars),
-      })
+      z.discriminatedUnion("kind", [
+        z.strictObject({
+          kind: z.literal("compute"),
+          input: z.string().max(workflowModuleLimits.descriptorChars),
+          output: z.string().max(workflowModuleLimits.descriptorChars),
+        }),
+        z.strictObject({
+          kind: z.literal("operation"),
+          input: z.string().max(workflowModuleLimits.descriptorChars),
+          output: z.string().max(workflowModuleLimits.descriptorChars),
+          uses: z
+            .array(
+              z.strictObject({
+                alias: z.string().regex(actionUseAliasPattern),
+                kind: z.enum(actionUseKinds),
+              })
+            )
+            .max(workflowModuleLimits.actionUses),
+        }),
+      ])
     )
     .refine(
       (contracts) =>
@@ -785,7 +814,16 @@ const loadedModules = (
     contracts: new Map(
       Object.entries(file.contracts).map(([key, contract]) => [
         key,
-        Object.freeze({ ...contract }),
+        Object.freeze({
+          ...contract,
+          ...(contract.kind === "operation"
+            ? {
+                uses: Object.freeze(
+                  contract.uses.map((use) => Object.freeze({ ...use }))
+                ),
+              }
+            : {}),
+        }),
       ])
     ),
     sources: Object.freeze(sources),
@@ -898,12 +936,23 @@ const verifiedBuild = async (
   const compute = loadedModules(computeText, computeModules, moduleSources);
   // Every calculation a task calls is one the seal holds, of a module it
   // compiled: checked once here, so a run never looks one up in vain.
-  const callsSealed = tasks.tasks.every(
-    (task) =>
+  const callsSealed = tasks.tasks.every((task) => {
+    if (
       task.kind !== "call" ||
-      task.call.name !== "grasp.compute" ||
-      compute?.contracts.has(`${task.call.module}#${task.call.export}`) === true
-  );
+      (task.call.name !== "grasp.compute" && task.call.name !== "grasp.action")
+    ) {
+      return true;
+    }
+    // A calculation's contract for a compute task, an action's for an
+    // action task, never the other.
+    const sealed = compute?.contracts.get(
+      `${task.call.module}#${task.call.export}`
+    );
+    return (
+      sealed?.kind ===
+      (task.call.name === "grasp.compute" ? "compute" : "operation")
+    );
+  });
   if (compute === undefined || !callsSealed) {
     throw corrupt(id, version, "compute modules");
   }
