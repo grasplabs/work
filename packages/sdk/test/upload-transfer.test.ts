@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { clientError, GraspError } from "../src/client-error.ts";
@@ -254,6 +254,8 @@ describe("an upload's transfer", () => {
 
   it("tells the views of a file once it is deleted, and only once core recorded it", async () => {
     const outcomes = ["refused", "deleted", "stopped"];
+    const finished = Promise.withResolvers<null>();
+    const sentSignal: unknown[] = [];
     const client = new GraspClient({
       call: async () => await Promise.reject(new Error("No calls here")),
       watch: async () => await Promise.reject(new Error("No follows here")),
@@ -273,12 +275,9 @@ describe("an upload's transfer", () => {
             );
           }
           if (outcome === "stopped") {
-            // Sent; the caller stops waiting before core's answer.
-            const { promise, reject } = Promise.withResolvers<never>();
-            signal?.addEventListener("abort", () => {
-              reject(signal.reason);
-            });
-            await promise;
+            // Sent: it runs to its end, whoever stops waiting for it.
+            sentSignal.push(signal);
+            await finished.promise;
           }
         },
       },
@@ -292,18 +291,26 @@ describe("an upload's transfer", () => {
     const refused = await codeOf(client.files.delete(files, { id }));
     const toldAfterRefusal = [...told];
     await client.files.delete(files, { id });
-    // A deletion sent whose caller stopped waiting may still go through:
-    // its views read it again.
+    // A deletion whose caller stopped waiting goes through all the same:
+    // its views read it again once core recorded it, never before.
     const other = crypto.randomUUID();
     const stopping = new AbortController();
-    const stopped = client.files.delete(
-      files,
-      { id: other },
-      { signal: stopping.signal }
+    const stopped = codeOf(
+      client.files.delete(files, { id: other }, { signal: stopping.signal })
     );
     stopping.abort();
-    await Promise.allSettled([stopped]);
+    const stoppedCode = await stopped;
+    const toldWhileRunning = [...told];
+    finished.resolve(null);
+    await vi.waitFor(() => {
+      expect(told).toHaveLength(2);
+    });
     stop();
+    expect({ stoppedCode, toldWhileRunning, sentSignal }).toStrictEqual({
+      stoppedCode: "file.stopped",
+      toldWhileRunning: [`attachments/${id}`],
+      sentSignal: [undefined],
+    });
     expect({ refused, toldAfterRefusal, told }).toStrictEqual({
       refused: "file.referenced",
       toldAfterRefusal: [],

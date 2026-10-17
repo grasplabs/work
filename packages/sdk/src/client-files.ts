@@ -154,6 +154,10 @@ export const fileFailure = (error: unknown): GraspError => {
     : clientError("operation.unreachable");
 };
 
+/** The refusal a caller hears once it stopped waiting for its call. */
+const stoppedWaiting = (): Error =>
+  Object.assign(new Error("Stopped waiting."), { code: "file.stopped" });
+
 /** The platform's file transport, or a refusal when it gave none. */
 const required = (transport: FileTransport | undefined): FileTransport => {
   if (transport === undefined) {
@@ -170,7 +174,10 @@ export interface DownloadOptions {
 
 /** Options of a deletion. */
 export interface DeleteOptions {
-  /** Stops waiting; a deletion already sent still goes through. */
+  /**
+   * Stops waiting; a deletion already sent still goes through, and the
+   * views of the file read it again once core recorded it.
+   */
   readonly signal?: AbortSignal;
   /**
    * The caller's key for this deletion: 1 to 128 printable ASCII
@@ -304,18 +311,53 @@ export class ClientFiles {
     const { id } = readFileRef(file);
     const { signal, idempotencyKey } = readSignal(options, signalAndKey);
     const startedUnder = this.#generation();
+    const transport = required(this.#transport);
+    // Stopped before it was sent: nothing is sent, so nothing is done.
+    if (signal?.aborted === true) {
+      throw this.#failure(stoppedWaiting(), startedUnder);
+    }
+    // Sent, the deletion runs to its own end whatever the caller's signal
+    // (which only stops the caller waiting): its views read the file
+    // again once core answered, never before core recorded it.
+    const deleting = this.#deleting(transport, alias, id, idempotencyKey);
+    const { promise: stopped, resolve: stop } =
+      Promise.withResolvers<"stopped">();
+    const onAbort = (): void => {
+      stop("stopped");
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    let outcome: { readonly failed?: unknown } | "stopped";
     try {
-      await required(this.#transport).delete(alias, id, idempotencyKey, signal);
+      outcome = await Promise.race([deleting, stopped]);
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
+    if (outcome === "stopped") {
+      throw this.#failure(stoppedWaiting(), startedUnder);
+    }
+    if ("failed" in outcome) {
+      throw this.#failure(outcome.failed, startedUnder);
+    }
+  }
+
+  /**
+   * Deletes file `id` through `alias` to its end, then has its views read
+   * it again (`deleted`); settles with why it failed, never rejecting.
+   */
+  async #deleting(
+    transport: FileTransport,
+    alias: string,
+    id: string,
+    idempotencyKey: string | undefined
+  ): Promise<{ readonly failed?: unknown }> {
+    try {
+      await transport.delete(alias, id, idempotencyKey);
     } catch (error) {
-      // Stopped waiting, though a deletion already sent still goes
-      // through: its views read it again too, and show what core says.
-      if (signal?.aborted === true) {
-        this.#deleted(`${alias}/${id}`);
-      }
-      throw this.#failure(error, startedUnder);
+      return { failed: error };
     }
     // Shown nowhere as it was: each view of it reads it again.
     this.#deleted(`${alias}/${id}`);
+    return {};
   }
 
   /** What `useFile` reads: the description and preview of `file`. */
