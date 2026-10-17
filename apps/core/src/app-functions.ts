@@ -46,6 +46,7 @@ import type {
   BindingCaller,
   InvocationProvenance,
   InvocationSources,
+  RunOrigin,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
 import { appWorkflowStarts } from "./workflow-start-intents.ts";
@@ -96,6 +97,8 @@ interface FunctionCaller {
    * between that and it.
    */
   readonly requireHolds?: (() => void) | undefined;
+  /** For a call from a workflow run's chain: the run (`BindingCaller.runOrigin`). */
+  readonly runOrigin?: RunOrigin | undefined;
 }
 
 /**
@@ -133,6 +136,7 @@ export const invocationFor = async (
     fromRun = false,
     appCalls,
     requireHolds,
+    runOrigin,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -166,6 +170,7 @@ export const invocationFor = async (
     ...(agent === undefined ? {} : { agent }),
     ...(appCalls === undefined ? {} : { appCalls }),
     ...(requireHolds === undefined ? {} : { requireHolds }),
+    ...(runOrigin === undefined ? {} : { runOrigin }),
   });
   const store =
     release.store === null
@@ -562,7 +567,44 @@ interface FunctionCallOptions {
   readonly appCalls?: { used: number };
   /** A run's lease, for a call from its chain (`FunctionCaller.requireHolds`). */
   readonly requireHolds?: () => void;
+  /** The run a call from its chain started from (`FunctionCaller.runOrigin`). */
+  readonly runOrigin?: RunOrigin;
+  /**
+   * The calling invocation's sources, for a call from another App's
+   * function (`AppFunctionCall`): the call reads into them. None, and it
+   * starts with its own.
+   */
+  readonly sources?: InvocationSources;
 }
+
+/**
+ * The call `request`, refused as `contract.invalid_request` when it isn't
+ * of `kind` (when given), or reads a window but isn't a query of a caller
+ * that may (`windowed`).
+ */
+const callAllowed = (
+  request: unknown,
+  {
+    kind,
+    windowed,
+  }: {
+    kind: FunctionRequest["reference"]["kind"] | undefined;
+    windowed: boolean;
+  }
+): FunctionRequest => {
+  const call = readFunctionRequest(request);
+  if (kind !== undefined && call.reference.kind !== kind) {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  // A window is a screen's, and a query's only.
+  if (
+    call.window !== undefined &&
+    (!windowed || call.reference.kind !== "query")
+  ) {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  return call;
+};
 
 /** `callAppFunction`, with all of its options. */
 const callFunction = async (
@@ -584,6 +626,8 @@ const callFunction = async (
     fromRun,
     appCalls,
     requireHolds,
+    runOrigin,
+    sources = invocationSources(),
   } = options;
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
@@ -594,17 +638,7 @@ const callFunction = async (
   });
   let call: FunctionRequest;
   try {
-    call = readFunctionRequest(request);
-    if (kind !== undefined && call.reference.kind !== kind) {
-      throw operationErrors.create("contract.invalid_request");
-    }
-    // A window is a screen's, and a query's only.
-    if (
-      call.window !== undefined &&
-      (chargeWindow === undefined || call.reference.kind !== "query")
-    ) {
-      throw operationErrors.create("contract.invalid_request");
-    }
+    call = callAllowed(request, { kind, windowed: chargeWindow !== undefined });
   } catch (error) {
     return refused(error);
   }
@@ -624,7 +658,6 @@ const callFunction = async (
     return refused(error);
   }
   try {
-    const sources = invocationSources();
     const invocation = await invocationFor(env, release, {
       by,
       requestId,
@@ -636,6 +669,7 @@ const callFunction = async (
       fromRun,
       appCalls,
       requireHolds,
+      runOrigin,
       // Another App's function, as this call of one runs: its role
       // checked, the chain carried on.
       callApp: async (person, called, appRequest, appOptions) =>

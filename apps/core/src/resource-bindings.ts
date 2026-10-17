@@ -68,7 +68,12 @@ import type {
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
-import { appAdapter, appServes } from "./resource-apps.ts";
+import {
+  appAdapter,
+  currentReleaseOf,
+  declaredFingerprints,
+  servedIn,
+} from "./resource-apps.ts";
 import { connectorAdapter, contractReader } from "./resource-connector.ts";
 import type {
   ConnectionGrantRow,
@@ -674,14 +679,15 @@ const reviewContractAsksMax = 50;
 
 /**
  * The most other Apps one review considers as an app resource's choices,
- * newest first: each is checked against the declaration by reading its
- * current release, `reviewAppChecksAtOnce` at a time. An App past it can
+ * newest first: each one's current release is read once for the whole
+ * review, `reviewAppChecksAtOnce` at a time, and checked against each
+ * app resource's declaration in memory. An App past it can
  * still be bound by its ID (`approve` checks any App the same way); the
  * review says some were left out.
  */
 const reviewAppCandidatesMax = 100;
 
-/** How many of a review's candidate Apps are checked at once. */
+/** How many of a review's candidate Apps' releases are read at once. */
 const reviewAppChecksAtOnce = 10;
 
 /**
@@ -755,14 +761,59 @@ interface ReviewGrants {
   ) => Promise<{ ids: string[]; truncated: boolean }>;
   /**
    * The other Apps an app resource may be bound to, newest first, at most
-   * `reviewAppCandidatesMax`, read once for the review; and whether there
-   * were more.
+   * `reviewAppCandidatesMax`, each with its current release (undefined
+   * once it has none), read once for the review; and whether there were
+   * more.
    */
   readonly apps: () => Promise<{
-    apps: { appId: AppId; name: string }[];
+    apps: ReviewedApp[];
     truncated: boolean;
   }>;
 }
+
+/** Another App a review considers for an app resource, with its current release. */
+interface ReviewedApp {
+  readonly appId: AppId;
+  readonly name: string;
+  readonly release: Release | undefined;
+}
+
+/**
+ * The other Apps `app`'s app resources may be bound to, newest first, at
+ * most `reviewAppCandidatesMax`, each with its current release, read
+ * `reviewAppChecksAtOnce` at a time; and whether there were more.
+ */
+const reviewedApps = async (
+  env: Env,
+  app: AppId
+): Promise<{ apps: ReviewedApp[]; truncated: boolean }> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id, name: apps.name })
+    .from(apps)
+    .where(sql`${apps.id} <> ${app} AND ${apps.currentVersion} IS NOT NULL`)
+    .orderBy(desc(apps.createdAt))
+    .limit(reviewAppCandidatesMax + 1);
+  const candidates = rows
+    .slice(0, reviewAppCandidatesMax)
+    .map(({ id, name }) => ({ appId: appIdSchema.parse(id), name }));
+  const reviewed: ReviewedApp[] = [];
+  for (
+    let start = 0;
+    start < candidates.length;
+    start += reviewAppChecksAtOnce
+  ) {
+    const batch = candidates.slice(start, start + reviewAppChecksAtOnce);
+    // oxlint-disable-next-line no-await-in-loop -- a few at a time, bounded
+    const read = await Promise.all(
+      batch.map(async (candidate) => ({
+        ...candidate,
+        release: await currentReleaseOf(env, candidate.appId),
+      }))
+    );
+    reviewed.push(...read);
+  }
+  return { apps: reviewed, truncated: rows.length > reviewAppCandidatesMax };
+};
 
 /** The App's grants and their collections' names, read once for a review. */
 const reviewGrants = async (
@@ -790,26 +841,10 @@ const reviewGrants = async (
           .from(collections)
           .where(inList(collections.id, ids));
   const platform = new Map<PlatformAction, Promise<string[]>>();
-  let others:
-    | Promise<{ apps: { appId: AppId; name: string }[]; truncated: boolean }>
-    | undefined;
-  const readOthers = async () => {
-    const rows = await drizzle(env.DB)
-      .select({ id: apps.id, name: apps.name })
-      .from(apps)
-      .where(sql`${apps.id} <> ${app} AND ${apps.currentVersion} IS NOT NULL`)
-      .orderBy(desc(apps.createdAt))
-      .limit(reviewAppCandidatesMax + 1);
-    return {
-      apps: rows
-        .slice(0, reviewAppCandidatesMax)
-        .map(({ id, name }) => ({ appId: appIdSchema.parse(id), name })),
-      truncated: rows.length > reviewAppCandidatesMax,
-    };
-  };
+  let others: Promise<{ apps: ReviewedApp[]; truncated: boolean }> | undefined;
   return {
     apps: async () => {
-      others ??= readOthers();
+      others ??= reviewedApps(env, app);
       return await others;
     },
     platform: async (action) => {
@@ -917,27 +952,20 @@ const choicesFor = async (
     };
   }
   if (declaration["~resource"] === "app") {
-    const others = await grants.apps();
-    // Every candidate is checked, a few at a time, so an older App that
-    // serves the declaration is offered as a newer one is.
-    const serving: { appId: AppId; name: string }[] = [];
-    for (
-      let start = 0;
-      start < others.apps.length;
-      start += reviewAppChecksAtOnce
-    ) {
-      const batch = others.apps.slice(start, start + reviewAppChecksAtOnce);
-      // oxlint-disable-next-line no-await-in-loop -- a few at a time, bounded
-      const checked = await Promise.all(
-        batch.map(
-          async (other) =>
-            [other, await appServes(env, other.appId, declaration)] as const
-        )
-      );
-      serving.push(
-        ...checked.filter(([, serves]) => serves).map(([other]) => other)
-      );
-    }
+    // Every candidate's release, read once for the review, checked in
+    // memory: an older App that serves the declaration is offered as a
+    // newer one is, however many app resources the App declares.
+    const [others, declared] = await Promise.all([
+      grants.apps(),
+      declaredFingerprints(declaration),
+    ]);
+    const serving = others.apps
+      .filter(
+        ({ release }) =>
+          release !== undefined &&
+          servedIn(release, declaration, declared) !== undefined
+      )
+      .map(({ appId, name }) => ({ appId, name }));
     return { kind: "app", apps: serving, truncated: others.truncated };
   }
   if (declaration["~resource"] === "store") {

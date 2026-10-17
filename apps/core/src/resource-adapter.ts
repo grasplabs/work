@@ -230,6 +230,21 @@ export interface BindingCaller {
    * down the chain, so a call can't fan out past `appCallLimits.calls`.
    */
   readonly appCalls?: { used: number };
+  /**
+   * For an invocation called, through other Apps, from a workflow run's
+   * (resource-apps.ts): the run, as the audit log names it, and whose
+   * person share of the model requests in flight it takes. A model
+   * request down the chain is the run's (resource-model.ts): it counts
+   * against the run's workflow and lineage budgets, and meets the rules
+   * for its workflow, besides the called App's own binding caps.
+   */
+  readonly runOrigin?: RunOrigin;
+}
+
+/** The workflow run a chain of calls between Apps started from. */
+export interface RunOrigin {
+  readonly actor: AuditActor;
+  readonly shareSubject?: string;
 }
 
 /** How an app resource calls another App's function (`BindingCaller.callApp`). */
@@ -251,6 +266,15 @@ export type AppFunctionCall = (
     readonly appCalls: { used: number };
     /** For a run's chain: its lease, checked just before each commit. */
     readonly requireHolds?: () => void;
+    /** For a run's chain: the run (`BindingCaller.runOrigin`). */
+    readonly runOrigin?: RunOrigin;
+    /**
+     * The calling invocation's sources (`BindingCaller.sources`), which
+     * the called function reads into and its model and connector requests
+     * are judged by: what the caller read, an EU-only or sensitive
+     * connection's data included, is in what it may pass on.
+     */
+    readonly sources: InvocationSources;
   }
 ) => Promise<{
   readonly result: OperationResult;

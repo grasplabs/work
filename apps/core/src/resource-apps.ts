@@ -19,7 +19,7 @@ import { appResourceBindings } from "./db/core/schema.ts";
 import type {
   BindingCaller,
   DeclarationOf,
-  InvocationProvenance,
+  RunOrigin,
   ResourceAdapter,
 } from "./resource-adapter.ts";
 import { isRestricted, restrict } from "./restricted.ts";
@@ -60,8 +60,11 @@ import { consumerFailure, declaredFingerprint } from "./store-operations.ts";
 //   role, an agent's permission, a run's lease) and this binding, still
 //   active (`stillAllowed`).
 // - Data and restriction crossing unseen: restricted mode follows the data
-//   both ways, each flag set before the data moves (restricted.ts); what
-//   the called function read joins the calling invocation's provenance.
+//   both ways, each flag set before the data moves (restricted.ts); the
+//   called function reads into the calling invocation's own sources, so
+//   its model and connector requests meet the rules for everything the
+//   chain read (an EU-only or sensitive connection's data included), and
+//   a run's chain meets the run's budgets and rules (`runOrigin`).
 // - Unseen: every call this binding serves is recorded before it runs
 //   (`app.call`), as the caller's actor, with the called App, function and
 //   version, and once more with why when the called App refuses it. The called App audits what it does as for any of its calls.
@@ -76,42 +79,61 @@ interface ServedFunctions {
 }
 
 /**
- * Each function `declaration` lists, served by App `callee`'s current
- * release public, of the declared kind and with exactly the declared
- * contract; undefined when any isn't, or the App has no current release.
+ * App `callee`'s current release; undefined when it has none, or there
+ * is no such App.
  */
-const servedBy = async (
+export const currentReleaseOf = async (
   env: Env,
-  callee: AppId,
-  declaration: DeclarationOf<"app">
-): Promise<ServedFunctions | undefined> => {
-  let release: Release;
+  callee: AppId
+): Promise<Release | undefined> => {
   try {
     const found = await findApp(env, callee);
     if (found.currentVersion === null) {
       return undefined;
     }
-    release = await loadRelease(env, found.id, found.currentVersion);
+    return await loadRelease(env, found.id, found.currentVersion);
   } catch (error) {
     if (isExpectedError(error)) {
       return undefined;
     }
     throw error;
   }
+};
+
+/** The fingerprint of each function `declaration` lists, as declared. */
+export const declaredFingerprints = async (
+  declaration: DeclarationOf<"app">
+): Promise<Record<string, string>> =>
+  Object.fromEntries(
+    await Promise.all(
+      Object.entries(declaration.functions).map(
+        async ([path, shape]) =>
+          [path, await declaredFingerprint(shape)] as const
+      )
+    )
+  );
+
+/**
+ * Each function `declared` names (`declaredFingerprints`), served by
+ * `release` public, of the kind `declaration` declares and with exactly
+ * the declared contract; undefined when any isn't.
+ */
+export const servedIn = (
+  release: Release,
+  declaration: DeclarationOf<"app">,
+  declared: Readonly<Record<string, string>>
+): ServedFunctions | undefined => {
   const fingerprints: Record<string, string> = {};
   for (const [path, shape] of Object.entries(declaration.functions)) {
     const operation = Object.hasOwn(release.app.operations, path)
       ? release.app.operations[path]
       : undefined;
-    // One after the other: a digest is quick, and the first that isn't
-    // served as declared settles it.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    const declared = await declaredFingerprint(shape);
     const served = release.fingerprints[path];
     if (
       operation?.visibility !== "public" ||
       operation.kind !== shape.kind ||
-      served !== declared
+      served === undefined ||
+      served !== declared[path]
     ) {
       return undefined;
     }
@@ -121,14 +143,20 @@ const servedBy = async (
 };
 
 /**
- * Whether App `callee`'s current release serves every function
- * `declaration` lists, exactly as declared: what an admin's choices offer.
+ * Each function `declaration` lists, served by App `callee`'s current
+ * release public, of the declared kind and with exactly the declared
+ * contract; undefined when any isn't, or the App has no current release.
  */
-export const appServes = async (
+const servedBy = async (
   env: Env,
   callee: AppId,
   declaration: DeclarationOf<"app">
-): Promise<boolean> => (await servedBy(env, callee, declaration)) !== undefined;
+): Promise<ServedFunctions | undefined> => {
+  const release = await currentReleaseOf(env, callee);
+  return release === undefined
+    ? undefined
+    : servedIn(release, declaration, await declaredFingerprints(declaration));
+};
 
 /**
  * Refuses a call of App `callee` from `caller` that would go round (an
@@ -164,18 +192,30 @@ const personOf = async (caller: Calling) => {
   return { userId, role, teams: await teamsOf(caller.env.DB, userId) };
 };
 
-/** Notes what the called function read in the calling invocation's sources. */
-const noteRead = (
-  caller: BindingCaller,
-  provenance: InvocationProvenance | null
-): void => {
-  if (provenance === null) {
-    return;
+/**
+ * The workflow run `caller`'s chain started from, if any: the run whose
+ * budgets and rules a model request down the chain meets
+ * (`BindingCaller.runOrigin`).
+ */
+const runOriginOf = (caller: BindingCaller): RunOrigin | undefined => {
+  if (caller.runOrigin !== undefined) {
+    return caller.runOrigin;
   }
-  caller.sources.note(provenance);
-  for (const { connectionId, resources } of provenance.connections) {
-    caller.sources.noteConnection(connectionId, resources);
+  if (caller.context.type !== "run") {
+    return undefined;
   }
+  return {
+    actor: caller.actor,
+    ...(caller.shareSubject === undefined
+      ? {}
+      : { shareSubject: caller.shareSubject }),
+  };
+};
+
+/** The `runOrigin` option for a call from `caller`, when its chain has one. */
+const runOriginField = (caller: BindingCaller): { runOrigin?: RunOrigin } => {
+  const runOrigin = runOriginOf(caller);
+  return runOrigin === undefined ? {} : { runOrigin };
 };
 
 /** Calls `path` of `callee` with `args`, for `caller`, through binding `pin`. */
@@ -274,6 +314,13 @@ const callFor = async (
       fromRun: caller.fromRun === true || caller.context.type === "run",
       ...(caller.agent === undefined ? {} : { agent: caller.agent }),
       appCalls: caller.appCalls ?? { used: 1 },
+      // What the caller read is in what it passes on: the called function
+      // reads into the caller's own sources, so its model and connector
+      // requests are judged by everything the chain read (an EU-only or
+      // sensitive connection's data included), and the caller's by what
+      // it read in turn.
+      sources: caller.sources,
+      ...runOriginField(caller),
       ...(caller.requireHolds === undefined
         ? {}
         : { requireHolds: caller.requireHolds }),
@@ -300,7 +347,6 @@ const callFor = async (
       },
     }
   );
-  noteRead(caller, answer.provenance);
   await carryRestricted();
   if (!answer.result.ok) {
     // Refused by the called App or its host: recorded again, with why, so
