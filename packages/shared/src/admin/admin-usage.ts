@@ -4,7 +4,10 @@ import { valuePerMonth, WEEKS_PER_MONTH } from "./hours.ts";
 import { TALK_SHARE } from "./interviews.ts";
 import { dateOn, RESEARCH_SOURCES, unit } from "./onboarding-admin.ts";
 import type {
+  Interview,
+  Org,
   OrgView,
+  Telling,
   Work,
   WorkEvidence,
   WorkRun,
@@ -558,6 +561,22 @@ export interface Value {
 }
 
 /**
+ * What `interview` told about the piece of work `id`. At a real organization,
+ * everyone who told about it counts, whatever they were asked about, as its
+ * record counts them (`recordOf`); in a sample, only who was asked about it.
+ */
+const tellingAbout = (
+  org: Org,
+  interview: Interview,
+  id: string
+): Telling | null => {
+  if (org.real) {
+    return org.real.told.get(`${interview.person.id}/${id}`) ?? null;
+  }
+  return interview.work?.id === id ? interview.telling : null;
+};
+
+/**
  * The hours in each piece of work, from what the people who do it said: how many they handle a
  * week and how long a normal one takes, averaged over the ones who gave both and counted for
  * everyone who does the work. Once Grasp is open, what the workflows free of that.
@@ -568,10 +587,9 @@ export const valueOf = (view: OrgView, day: string): Value => {
   const works = view.works.map((evidence): WorkHours => {
     const { work } = evidence;
     const own = view.interviews.flatMap((interview) => {
-      const telling =
-        interview.approved && interview.work?.id === work.id
-          ? interview.telling
-          : null;
+      const telling = interview.approved
+        ? tellingAbout(org, interview, work.id)
+        : null;
       if (
         !telling?.volume ||
         !telling.takes ||

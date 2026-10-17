@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { organizationOf } from "../../src/admin/admin-organization.ts";
-import { PRICES } from "../../src/admin/admin-usage.ts";
+import { PRICES, valueOf } from "../../src/admin/admin-usage.ts";
 import { adminViewOf } from "../../src/admin/admin-view.ts";
+import type { InterviewFact } from "../../src/admin/interview-turn.ts";
+import { stephenOf } from "../../src/admin/onboarding-admin-record.ts";
 import { meteredOf, orgOfSnapshot } from "../../src/admin/org-adapter.ts";
 import { NEW_CLIENT, NOTHING_SAID } from "../../src/admin/org-record.ts";
 import type {
@@ -10,6 +12,15 @@ import type {
   HeldInterview,
   StaffSnapshot,
 } from "../../src/admin/org-record.ts";
+
+/** A fact Stephen wrote down, taken out in the read-back when `out`. */
+const fact = (id: string, out = false): InterviewFact => ({
+  id,
+  tag: "step",
+  text: `Fact ${id}`,
+  record: "",
+  ...(out ? { out: true } : {}),
+});
 
 const person = (
   id: string,
@@ -288,6 +299,58 @@ describe("a real organization as the admin reads it", () => {
     );
     expect(read.needs).not.toContainEqual({ kind: "transcript" });
     expect(read.stage).toBe("leads");
+  });
+
+  it("counts every fact Stephen wrote down, and the ones the person took out once", () => {
+    const lisa = held("lisa", "employee", "2026-10-05T11:00:00Z", 4);
+    const told = orgOfSnapshot({
+      ...snapshot,
+      interviews: [
+        held("daan", "lead", "2026-10-05T09:30:00Z"),
+        {
+          ...lisa,
+          progress: {
+            ...lisa.progress,
+            facts: [
+              fact("a"),
+              fact("b"),
+              fact("c"),
+              fact("d"),
+              fact("e", true),
+            ],
+          },
+        },
+      ],
+    });
+    const seen = adminViewOf(told, told.seed, "2026-10-06");
+    const interview = seen.interviews.find((each) => each.id === "lisa");
+    expect({
+      facts: interview?.facts,
+      out: interview?.out,
+      approved: stephenOf(seen).approved,
+    }).toStrictEqual({ facts: 5, out: 1, approved: 0.8 });
+  });
+
+  it("counts the hours of a piece of work from everyone who told about it, whatever they were asked about", () => {
+    const people = snapshot.roster?.people ?? [];
+    // Lisa was asked about no work of her own, and told about handling tickets.
+    const elsewhere = orgOfSnapshot({
+      ...snapshot,
+      roster: {
+        teams: snapshot.roster?.teams ?? [],
+        people: people.map((each) =>
+          each.id === "lisa" ? { ...each, work: null } : each
+        ),
+      },
+    });
+    const seen = adminViewOf(elsewhere, elsewhere.seed, "2026-10-06");
+    const tickets = valueOf(seen, "2026-10-06").works.find(
+      (each) => each.evidence.work.id === "w-tickets"
+    );
+    expect({
+      said: tickets?.said,
+      known: tickets?.hours !== null,
+    }).toStrictEqual({ said: 1, known: true });
   });
 
   it("carries what someone said of their interview", () => {

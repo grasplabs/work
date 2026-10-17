@@ -329,7 +329,9 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
         typed: interview.progress.mode === "type",
         telling,
         filled: telling ? filledBy(telling) : [],
-        facts: facts.filter((fact) => fact.out !== true).length,
+        // Every fact written down, as a sample interview counts them;
+        // `out` says how many of those the person took out again.
+        facts: facts.length,
         out: facts.filter((fact) => fact.out === true).length,
         mistakes: 0,
         kinds: [],
