@@ -73,27 +73,92 @@ const clocklessDate = (): DateConstructor =>
     },
   } as ProxyHandler<DateConstructor>);
 
-/** The globals a calculation has no use for, taken away entirely. */
-const removedGlobals = [
-  "crypto",
-  "Crypto",
-  "SubtleCrypto",
-  "CryptoKey",
-  "performance",
-  "Performance",
-  "setTimeout",
-  "setInterval",
-  "clearTimeout",
-  "clearInterval",
-  "scheduler",
-  "fetch",
-  "caches",
-  "WebSocket",
-  "EventSource",
-  "Temporal",
-  "WeakRef",
-  "FinalizationRegistry",
-] as const;
+/**
+ * The globals a calculation keeps: the ECMAScript intrinsics (some of them
+ * replaced above, such as `Date`, `eval` and `Function`), and a few Web
+ * APIs that are pure functions of their arguments. Every other own
+ * property of the global object and its prototypes is taken away: an
+ * allowlist, since the platform's globals keep growing, and one that is
+ * a clock (`File`'s `lastModified`, `PerformanceMark`), randomness
+ * (`FormData`'s boundaries) or a way out is easy to miss in a denylist.
+ * `Object.prototype` is left as the language has it.
+ */
+const keptGlobals: ReadonlySet<string> = new Set([
+  // Values and functions of the global object.
+  "globalThis",
+  "Infinity",
+  "NaN",
+  "undefined",
+  "eval",
+  "isFinite",
+  "isNaN",
+  "parseFloat",
+  "parseInt",
+  "decodeURI",
+  "decodeURIComponent",
+  "encodeURI",
+  "encodeURIComponent",
+  "escape",
+  "unescape",
+  // Constructors and namespaces.
+  "AggregateError",
+  "Array",
+  "ArrayBuffer",
+  "BigInt",
+  "BigInt64Array",
+  "BigUint64Array",
+  "Boolean",
+  "DataView",
+  "Date",
+  "Error",
+  "EvalError",
+  "Float16Array",
+  "Float32Array",
+  "Float64Array",
+  "Function",
+  "Int16Array",
+  "Int32Array",
+  "Int8Array",
+  "Intl",
+  "Iterator",
+  "JSON",
+  "Map",
+  "Math",
+  "Number",
+  "Object",
+  "Promise",
+  "Proxy",
+  "RangeError",
+  "ReferenceError",
+  "Reflect",
+  "RegExp",
+  "Set",
+  "String",
+  "Symbol",
+  "SyntaxError",
+  "TypeError",
+  "URIError",
+  "Uint16Array",
+  "Uint32Array",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "WeakMap",
+  "WeakSet",
+  // Pure Web APIs: answers that depend on their arguments alone.
+  "TextEncoder",
+  "TextDecoder",
+  "URL",
+  "URLSearchParams",
+  "atob",
+  "btoa",
+  "structuredClone",
+]);
+
+/** The global's own properties, and its prototypes', that aren't kept. */
+const removableOf = (level: object): string[] =>
+  Reflect.ownKeys(level).filter(
+    (key): key is string => typeof key === "string" && !keptGlobals.has(key)
+  );
 
 /**
  * The global object and its prototypes, as they are now: where a global
@@ -110,6 +175,10 @@ const globalChain = (): object[] => {
   }
   return chain;
 };
+
+/** The global and its prototypes, `Object.prototype` left as it is. */
+const platformLevels = (): object[] =>
+  globalChain().filter((level) => level !== Object.prototype);
 
 /**
  * The prototypes whose `constructor` generates code from text: `Function`
@@ -161,11 +230,37 @@ const probesRefuse = (): boolean =>
   codeConstructors.every((prototype) =>
     generatesNothing(Reflect.get(prototype, "constructor"))
   ) &&
-  globalChain().every((level) =>
-    removedGlobals.every((key) => Reflect.get(level, key) === undefined)
+  // A clock and randomness the platform's classes would have had.
+  refuses(() =>
+    Reflect.get(
+      Reflect.construct(Reflect.get(globalThis, "File"), [[], "a"]),
+      "lastModified"
+    )
+  ) &&
+  refuses(() =>
+    Reflect.get(
+      Reflect.construct(Reflect.get(globalThis, "PerformanceMark"), ["a"]),
+      "startTime"
+    )
+  ) &&
+  refuses(() => Reflect.construct(Reflect.get(globalThis, "FormData"), [])) &&
+  platformLevels().every((level) =>
+    removableOf(level).every((key) => Reflect.get(level, key) === undefined)
   );
 
 const lockdown = (): boolean => {
+  // Each global read first, before anything is replaced: workerd makes
+  // some (`process` among them) as they are first read, from intrinsics
+  // such as `Function` that are about to be.
+  for (const level of platformLevels()) {
+    for (const key of removableOf(level)) {
+      try {
+        Reflect.get(level, key);
+      } catch {
+        // Taken away below either way.
+      }
+    }
+  }
   const sealed: boolean[] = [];
   // The prototypes the real functions live on, as they are now: reachable
   // from instances a module may still hold.
@@ -210,11 +305,13 @@ const lockdown = (): boolean => {
           typeof formatGetter === "function"
             ? apply(formatGetter, this, [])
             : undefined;
-        return (...args: unknown[]): unknown => {
-          if (args[0] === undefined || typeof bound !== "function") {
+        // The date alone, by name: `args[0]` of no arguments would be
+        // looked up on `Array.prototype`, where module code could put one.
+        return (date?: unknown): unknown => {
+          if (date === undefined || typeof bound !== "function") {
             return unavailable("the clock")();
           }
-          const formatted: unknown = apply(bound, undefined, args);
+          const formatted: unknown = apply(bound, undefined, [date]);
           return formatted;
         };
       },
@@ -227,14 +324,11 @@ const lockdown = (): boolean => {
     seal(
       dateFormat,
       "formatToParts",
-      function datelessFormatToParts(
-        this: unknown,
-        ...args: unknown[]
-      ): unknown {
-        if (args[0] === undefined || typeof formatToParts !== "function") {
+      function datelessFormatToParts(this: unknown, date?: unknown): unknown {
+        if (date === undefined || typeof formatToParts !== "function") {
           return unavailable("the clock")();
         }
-        const parts: unknown = apply(formatToParts, this, args);
+        const parts: unknown = apply(formatToParts, this, [date]);
         return parts;
       }
     )
@@ -248,14 +342,11 @@ const lockdown = (): boolean => {
       seal(prototype, "constructor", generating)
     )
   );
-  const chain = globalChain();
-  for (const key of removedGlobals) {
-    sealed.push(seal(globalThis, key));
-    // And on each prototype that has it as its own, as workerd's globals.
-    for (const level of chain.slice(1)) {
-      if (Object.hasOwn(level, key)) {
-        sealed.push(seal(level, key));
-      }
+  // Everything not kept, on the global and on each prototype of it but
+  // `Object.prototype` (workerd keeps most of its globals there).
+  for (const level of platformLevels()) {
+    for (const key of removableOf(level)) {
+      sealed.push(seal(level, key));
     }
   }
   return sealed.every(Boolean) && probesRefuse();

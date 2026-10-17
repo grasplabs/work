@@ -242,6 +242,45 @@ const interceptions = [
     }
     throw new Error("no clock");
   })()`,
+  // A date looked up on Array.prototype when none is given: to format,
+  // and to format to parts.
+  `(() => {
+    Object.defineProperty(Array.prototype, "0", { value: 0, configurable: true });
+    try {
+      const text: unknown = Reflect.apply(Reflect.get(new Intl.DateTimeFormat(), "format"), undefined, []);
+      if (typeof text !== "string") {
+        throw new Error("no clock");
+      }
+      return text.length;
+    } finally {
+      Reflect.deleteProperty(Array.prototype, "0");
+    }
+  })()`,
+  `(() => {
+    Object.defineProperty(Array.prototype, "0", { value: 0, configurable: true });
+    try {
+      const formatter = new Intl.DateTimeFormat();
+      const parts: unknown = Reflect.apply(Reflect.get(formatter, "formatToParts"), formatter, []);
+      if (!Array.isArray(parts)) {
+        throw new Error("no clock");
+      }
+      return parts.length;
+    } finally {
+      Reflect.deleteProperty(Array.prototype, "0");
+    }
+  })()`,
+  // The platform's classes that read the clock, or make random values.
+  'Number(Reflect.get(Reflect.construct(Reflect.get(globalThis, "File"), [[], "a"]), "lastModified"))',
+  'Number(Reflect.get(Reflect.construct(Reflect.get(globalThis, "PerformanceMark"), ["a"]), "startTime"))',
+  `(() => {
+    const response: unknown = Reflect.construct(Reflect.get(globalThis, "Response"), [Reflect.construct(Reflect.get(globalThis, "FormData"), [])]);
+    const headers: unknown = Reflect.get(Object(response), "headers");
+    const type: unknown = Reflect.apply(Reflect.get(Object(headers), "get"), headers, ["content-type"]);
+    if (typeof type !== "string") {
+      throw new Error("no randomness");
+    }
+    return type.length;
+  })()`,
 ];
 
 /** `innermost` inside `levels` arrays, as JSON text. */
