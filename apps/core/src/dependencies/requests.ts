@@ -13,6 +13,7 @@ import {
   dependencyImpactListed,
   dependencyMaxBytes,
   dependencyProposalSchema,
+  dependencySubjectsListed,
   subjectOfRef,
   dependencySummaryDirect,
   dependencySummaryFindings,
@@ -32,6 +33,7 @@ import type {
   DependencyReview,
   DependencyStatus,
   DependencySubject,
+  DependencySubjectsInForce,
   DependencyTarget,
   NamedDependencySubject,
 } from "@grasp-os/shared/dependencies";
@@ -1335,6 +1337,49 @@ export const dependencyApprovals = async (
     decides,
     subject,
     approvals: await toRequests(env, rows),
+  };
+};
+
+/**
+ * Every App and workflow holding approvals in force (approved or
+ * retired), each by its name now, how many it holds and when the newest
+ * was decided, newest first, at most {@link dependencySubjectsListed}: for
+ * someone who holds `dependencies.approve` now, who may end them; nothing
+ * for anyone else. Where an approver finds a workflow's approvals, which
+ * have no page of their workflow's to be on.
+ */
+export const dependencySubjectsInForce = async (
+  env: Env,
+  by: Identity
+): Promise<DependencySubjectsInForce> => {
+  if (!(await holdsApprove(env, by))) {
+    return { decides: false, subjects: [] };
+  }
+  const db = drizzle(env.DB);
+  const decidedAt = sql<number>`MAX(${dependencyRequests.decidedAt})`;
+  const rows = await db
+    .select({
+      subjectType: dependencyRequests.subjectType,
+      subjectId: dependencyRequests.subjectId,
+      approvals: count(),
+      decidedAt,
+    })
+    .from(dependencyRequests)
+    .where(inArray(dependencyRequests.status, ["approved", "retired"]))
+    .groupBy(dependencyRequests.subjectType, dependencyRequests.subjectId)
+    .orderBy(desc(decidedAt), dependencyRequests.subjectId)
+    .limit(dependencySubjectsListed);
+  const names = await subjectNames(db, rows.map(subjectOfRow));
+  return {
+    decides: true,
+    subjects: rows.map((row) => {
+      const subject = subjectOfRow(row);
+      return {
+        subject: { ...subject, name: names.get(subjectKey(subject)) ?? "" },
+        approvals: row.approvals,
+        decidedAt: new Date(row.decidedAt).toISOString(),
+      };
+    }),
   };
 };
 
