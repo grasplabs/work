@@ -14,6 +14,7 @@
     "./apps": "./src/apps.ts",
     "./audit": "./src/audit.ts",
     "./audit-log": "./src/audit-log.ts",
+    "./brain": "./src/brain.ts",
     "./capability": "./src/capability.ts",
     "./chat": "./src/chat.ts",
     "./chunks": "./src/chunks.ts",

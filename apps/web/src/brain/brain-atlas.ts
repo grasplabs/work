@@ -1,3 +1,4 @@
+import type { Workspace } from "@grasp-os/shared/brain";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, t } from "@lingui/core/macro";
 
@@ -11,7 +12,6 @@ import {
 } from "./brain.ts";
 import type { Brain, Note } from "./brain.ts";
 import { latest } from "./history.ts";
-import type { Workspace } from "./workspace.ts";
 
 /**
  * The brain as an atlas: the same notes as the vault, in the same six parts as its navigation,
