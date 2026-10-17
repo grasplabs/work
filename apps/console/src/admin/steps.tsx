@@ -590,7 +590,14 @@ const Leads = ({ view }: { view: OrgView }) => {
                 </span>
               </span>
               <span className="min-w-0">
-                {leadLine(view, lead, team.people.length - 1)}
+                {leadLine(
+                  view,
+                  lead,
+                  // Who is away gets no link.
+                  team.people.filter(
+                    (each) => !each.person.lead && each.state !== "away"
+                  ).length
+                )}
               </span>
             </li>
           ))}

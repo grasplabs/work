@@ -248,7 +248,8 @@ describe("an organization's onboarding in the admin", () => {
       ),
       leads: [
         "Lisa de Vries",
-        "Talked on 5 Oct 2026. 2 colleagues got a link.",
+        // Ann is away, so only Tom got a link.
+        "Talked on 5 Oct 2026. 1 colleague got a link.",
         "Otto Smit",
         "Opened. The team waits for this interview.",
         "1 lead can still be reminded. Sending the reminder isn’t in the console yet.",
