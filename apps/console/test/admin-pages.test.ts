@@ -367,6 +367,27 @@ describe("the admin's frame", () => {
     }).toStrictEqual({ waiting: true, talking: true });
   });
 
+  it("counts an organization's days to its own plan beside its page", async () => {
+    const company = await liveClient();
+    company.account.admin = toldSnapshot("Company", {
+      days: 21,
+      daysIn: 3,
+      leadTalked: true,
+    });
+
+    const { status, html } = await page(
+      `/admin/organizations/${company.clientId}`
+    );
+
+    expect({
+      status,
+      days: /Day (?:<!-- -->)?\d+(?:<!-- -->)? of (?:<!-- -->)?21/u.test(html),
+    }).toStrictEqual({
+      status: 200,
+      days: true,
+    });
+  });
+
   it("shows only the organizations in a phase when one is chosen", async () => {
     const acme = await liveClient();
     acme.account.admin = readySnapshot("Acme");
