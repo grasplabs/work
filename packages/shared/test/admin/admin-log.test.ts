@@ -87,6 +87,7 @@ describe("the log of an organization as one list", () => {
         told: new Map(),
         interviews: [],
         sent: new Map(),
+        heard: new Map(),
         talking: new Set<string>(),
         transcripts: new Map(),
         links: new Map(),

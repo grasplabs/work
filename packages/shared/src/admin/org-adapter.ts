@@ -288,6 +288,21 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     }
   }
 
+  // A team's lead is heard the day they agreed to their interview. Links that went out without
+  // them, once the team had waited long enough, are not the lead talking; only a team with no lead
+  // to wait for (none named, or away) counts from the day its links went out.
+  const heard = new Map<string, number>();
+  for (const team of roster?.teams ?? []) {
+    const lead = people.find((person) => person.id === team.lead);
+    const day =
+      lead && !lead.away
+        ? dayAt(start, held.get(lead.id)?.completed)
+        : (sent.get(team.id) ?? null);
+    if (day !== null) {
+      heard.set(team.id, day);
+    }
+  }
+
   const talking = new Set(
     snapshot.links
       .filter((link) => link.state === "progress")
@@ -309,6 +324,11 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
         : "story";
     }
     const ended = interview.completed ?? interview.updated;
+    // From the start to the end is how long they talked only in one go: once they left and came
+    // back, the time away is in it too, and the snapshot does not say how long they talked.
+    const cameBack =
+      interview.stopped !== null &&
+      Date.parse(ended) > Date.parse(interview.stopped.at);
     return [
       {
         id: person.id,
@@ -318,14 +338,16 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
         day: dayAt(start, ended) ?? today,
         approved,
         stoppedAt,
-        minutes: Math.max(
-          1,
-          Math.round(
-            (Date.parse(ended) -
-              (interview.progress.startedAt ?? Date.parse(ended))) /
-              60_000
-          )
-        ),
+        minutes: cameBack
+          ? null
+          : Math.max(
+              1,
+              Math.round(
+                (Date.parse(ended) -
+                  (interview.progress.startedAt ?? Date.parse(ended))) /
+                  60_000
+              )
+            ),
         typed: interview.progress.mode === "type",
         telling,
         filled: telling ? filledBy(telling) : [],
@@ -359,6 +381,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     told,
     interviews: interviews.toSorted((a, b) => b.day - a.day),
     sent,
+    heard,
     talking,
     transcripts: new Map(
       snapshot.interviews.map((interview) => [

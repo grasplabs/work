@@ -147,10 +147,14 @@ const NOTED: Record<string, LogTopic> = {
   redraw: "work",
 };
 
-/** What the Worker noted with its time takes the place of the same thing told by its day. */
+/**
+ * What the Worker noted with its time takes the place of the same thing told by its day. A reminder
+ * is not among it: the Worker notes none, so the day a link says one went is the only place it is
+ * told (one sent by hand is told by hand instead, below).
+ */
 const TOLD_BY_WORKER: ReadonlySet<(LogEvent | AccountEvent)["kind"]> = new Set<
   (LogEvent | AccountEvent)["kind"]
->(["told", "lead", "reminded", "talked"]);
+>(["told", "lead", "talked"]);
 
 /** Who did what the Worker noted, and what it is about. */
 const byWorker = (

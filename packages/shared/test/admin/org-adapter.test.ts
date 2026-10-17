@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { logItemsOf } from "../../src/admin/admin-log.ts";
 import { organizationOf } from "../../src/admin/admin-organization.ts";
+import { todosAt } from "../../src/admin/admin-todo.ts";
 import { PRICES, valueOf } from "../../src/admin/admin-usage.ts";
 import { adminViewOf } from "../../src/admin/admin-view.ts";
 import type { InterviewFact } from "../../src/admin/interview-turn.ts";
@@ -262,6 +264,102 @@ describe("a real organization as the admin reads it", () => {
       people: 5,
       asked: 4,
       talked: 2,
+    });
+  });
+
+  it("waits for a lead who has not talked, though their team's links went out without them", () => {
+    // Mark has not talked; after waiting for him, his team's links went out anyway.
+    const without = orgOfSnapshot({
+      ...snapshot,
+      roster: {
+        teams: snapshot.roster?.teams ?? [],
+        people: [
+          ...(snapshot.roster?.people ?? []),
+          person("sanne", "Sanne Smit", "t-mortgage"),
+        ],
+      },
+      links: [...snapshot.links, link("sanne", "invited")],
+    });
+    const seen = adminViewOf(without, without.seed, "2026-10-06");
+    const mortgage = seen.teams.find((team) => team.team.id === "t-mortgage");
+    expect({
+      out: mortgage?.sent,
+      heard: mortgage?.heard,
+      stage: seen.stages.leads,
+      talked: todosAt(seen, "leads").find(
+        (todo) => todo.kind === "leadTalked" && todo.person === "mark"
+      )?.done,
+      leadsHeard: seen.knowledge.sources.find(
+        (each) => each.source === "leadsHeard"
+      )?.known,
+    }).toStrictEqual({
+      out: 0,
+      heard: null,
+      stage: "now",
+      talked: false,
+      leadsHeard: 0.5,
+    });
+  });
+
+  it("logs a reminder that went by itself, and one sent by hand once", () => {
+    const reminded = orgOfSnapshot({
+      ...snapshot,
+      links: snapshot.links.map((each) =>
+        each.person === "tim"
+          ? { ...each, reminded: "2026-10-06T07:00:00Z" }
+          : each
+      ),
+    });
+    const reminders = (byHand: boolean) =>
+      logItemsOf(
+        adminViewOf(
+          reminded,
+          byHand ? { ...reminded.seed, reminded: { tim: 1 } } : reminded.seed,
+          "2026-10-06"
+        ),
+        byHand
+          ? [{ what: "reminded", count: 1, at: Date.parse(snapshot.now) }]
+          : []
+      ).flatMap((item) => {
+        if (item.source.from === "company") {
+          return item.source.event.kind === "reminded" ? [item.actor] : [];
+        }
+        return item.source.from === "hand" ? [item.actor] : [];
+      });
+    expect([reminders(false), reminders(true)]).toStrictEqual([
+      ["itself"],
+      ["grasp"],
+    ]);
+  });
+
+  it("knows how long an interview took only when it went in one go", () => {
+    // Lisa talked from nine, left at ten past, and came back the next morning to finish.
+    const lisa = held("lisa", "employee", "2026-10-06T08:20:00Z");
+    const back = orgOfSnapshot({
+      ...snapshot,
+      interviews: [
+        held("daan", "lead", "2026-10-05T09:30:00Z"),
+        {
+          ...lisa,
+          progress: { ...lisa.progress, mode: "talk" },
+          stopped: { at: "2026-10-05T09:10:00Z", phase: "story" },
+        },
+      ],
+    });
+    const seen = adminViewOf(back, back.seed, "2026-10-06");
+    const stephen = stephenOf(seen);
+    expect({
+      lisa: seen.interviews.find((each) => each.id === "lisa")?.minutes,
+      daan: seen.interviews.find((each) => each.id === "daan")?.minutes,
+      lengths: stephen.lengths.reduce((sum, each) => sum + each.count, 0),
+      employee: stephen.length.employee,
+      heard: seen.usage.matrix.interviews.ears.heard,
+    }).toStrictEqual({
+      lisa: null,
+      daan: 30,
+      lengths: 1,
+      employee: 0,
+      heard: 0,
     });
   });
 

@@ -165,6 +165,7 @@ describe("the AI an organization used", () => {
       told: new Map(),
       interviews: [],
       sent: new Map(),
+      heard: new Map(),
       talking: new Set<string>(),
       transcripts: new Map(),
       links: new Map(),
@@ -241,6 +242,7 @@ describe("the AI an organization used", () => {
       told: new Map(),
       interviews: view.interviews,
       sent: new Map(),
+      heard: new Map(),
       talking: new Set<string>(),
       transcripts: new Map(),
       links: new Map(),
@@ -317,7 +319,7 @@ describe("the AI an organization used", () => {
     const view = at(noordkade);
     const voice = view.interviews
       .filter((interview) => !interview.typed)
-      .reduce((sum, interview) => sum + interview.minutes, 0);
+      .reduce((sum, interview) => sum + (interview.minutes ?? 0), 0);
     const usage = used(noordkade);
     expect(
       usage.purposes.interviews.spoken + usage.purposes.interviews.heard

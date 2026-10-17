@@ -245,7 +245,7 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
 export interface StephenStats {
   /** Every interview he held that was agreed to, the leads' too. */
   held: number;
-  /** The minutes he was in an interview, the ones that stopped halfway too. */
+  /** The minutes he was in an interview, the ones that stopped halfway too; of the ones whose length is known. */
   minutes: number;
   /** The share of the agreed interviews that went by voice, 0 to 1; the rest were typed. */
   byVoice: number;
@@ -313,8 +313,13 @@ const average = (of: (interview: Interview) => number, over: Interview[]) =>
     ? 0
     : over.reduce((sum, interview) => sum + of(interview), 0) / over.length;
 
+/** How long an interview took, of one whose length is known. */
+const minutesOf = (interview: Interview) => interview.minutes ?? 0;
+
 export const stephenOf = (view: OrgView): StephenStats => {
   const finished = view.interviews.filter((interview) => interview.approved);
+  // Lengths are counted over the interviews whose length is known.
+  const timed = finished.filter((interview) => interview.minutes !== null);
   const employees = finished.filter(
     (interview) => interview.kind === "employee"
   );
@@ -351,7 +356,7 @@ export const stephenOf = (view: OrgView): StephenStats => {
   return {
     held: finished.length,
     minutes: view.interviews.reduce(
-      (sum, interview) => sum + interview.minutes,
+      (sum, interview) => sum + minutesOf(interview),
       0
     ),
     byVoice: average((interview) => (interview.typed ? 0 : 1), finished),
@@ -391,19 +396,22 @@ export const stephenOf = (view: OrgView): StephenStats => {
     }),
     length: {
       lead: average(
-        (interview) => interview.minutes,
-        finished.filter((interview) => interview.kind === "lead")
+        minutesOf,
+        timed.filter((interview) => interview.kind === "lead")
       ),
-      employee: average((interview) => interview.minutes, employees),
+      employee: average(
+        minutesOf,
+        timed.filter((interview) => interview.kind === "employee")
+      ),
     },
     lengths: [...LENGTH_STEPS, null].map((upTo, index) => {
       const from = index === 0 ? 0 : (LENGTH_STEPS[index - 1] ?? 0);
       return {
         upTo,
-        count: finished.filter(
+        count: timed.filter(
           (interview) =>
-            interview.minutes > from &&
-            (upTo === null || interview.minutes <= upTo)
+            minutesOf(interview) > from &&
+            (upTo === null || minutesOf(interview) <= upTo)
         ).length,
       };
     }),

@@ -336,14 +336,17 @@ export const usageOf = (
   for (const interview of view.interviews) {
     const on = dateOn(org, interview.day);
     const counted = countedFrom !== null && on >= countedFrom;
+    // How long it took is unknown for someone who came back after leaving: nothing is worked out from it then.
+    const { minutes } = interview;
     if (!counted) {
       // Every interview, the ones that stopped halfway too, and the drawing that follows one that was agreed to.
       const length =
-        interview.minutes *
-        (0.85 + 0.3 * unit(`${org.id}/${interview.id}/tokens`));
+        minutes === null
+          ? 0
+          : minutes * (0.85 + 0.3 * unit(`${org.id}/${interview.id}/tokens`));
       for (const model of MODELS) {
         const minute = INTERVIEW_MINUTE[model];
-        if (minute) {
+        if (minute && length > 0) {
           usedOn(on, "interviews", model, {
             tokensIn: Math.round(length * minute.tokensIn),
             tokensOut: Math.round(length * minute.tokensOut),
@@ -359,17 +362,17 @@ export const usageOf = (
         );
       }
     }
-    if (interview.typed) {
+    if (interview.typed || minutes === null) {
       continue;
     }
     // By voice, Stephen speaks a fifth of the time. His voice is counted where the Worker counts; how long he listened is always worked out from how long people talked.
     if (!counted) {
       usedOn(on, "interviews", "voice", {
-        spoken: interview.minutes * TALK_SHARE,
+        spoken: minutes * TALK_SHARE,
       });
     }
     usedOn(on, "interviews", "ears", {
-      heard: interview.minutes * (1 - TALK_SHARE),
+      heard: minutes * (1 - TALK_SHARE),
     });
   }
 

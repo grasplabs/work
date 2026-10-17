@@ -264,7 +264,10 @@ describe("Stephen at an organization", () => {
         agreed.filter((interview) => interview.kind === "employee").length
       );
       expect(stats.minutes).toBe(
-        view.interviews.reduce((sum, interview) => sum + interview.minutes, 0)
+        view.interviews.reduce(
+          (sum, interview) => sum + (interview.minutes ?? 0),
+          0
+        )
       );
       for (const share of [stats.filled, stats.approved, stats.byVoice]) {
         expect(share).toBeGreaterThan(0);

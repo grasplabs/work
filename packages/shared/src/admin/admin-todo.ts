@@ -146,7 +146,7 @@ export const todosAt = (view: OrgView, stage: Stage): Todo[] => {
           ? [
               {
                 kind: "leadTalked",
-                done: team.sent !== null,
+                done: team.heard !== null,
                 team: team.team.id,
                 person: team.lead.person.id,
                 name: team.lead.person.name,

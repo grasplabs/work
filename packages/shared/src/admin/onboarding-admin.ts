@@ -520,6 +520,8 @@ export interface RealHappened {
   interviews: Interview[];
   /** The day each team's own links went out, by team. */
   sent: Map<string, number>;
+  /** The day each team's lead agreed to their interview, by team; a team with no lead to wait for, the day its links went out. */
+  heard: Map<string, number>;
   /** Who is in their interview right now. */
   talking: Set<string>;
   /** What was said in each interview and what Stephen wrote down, by person. */
@@ -1353,7 +1355,8 @@ export interface Interview {
   /** Read back and agreed to: only then its facts count. */
   approved: boolean;
   stoppedAt: Phase | null;
-  minutes: number;
+  /** How long it took; unknown where they came back after leaving, since the time away was not talking. */
+  minutes: number | null;
   typed: boolean;
   telling: Telling | null;
   /** The review afterwards: the fields it filled, the facts written down, how many the person took out, and Stephen's own mistakes. */
@@ -1770,7 +1773,7 @@ export const hypothesesOf = (
   const index = org.teams.indexOf(team);
   const leadTalked =
     told &&
-    (org.real ? org.real.sent.has(team.id) : leadDay(team, index) <= day);
+    (org.real ? org.real.heard.has(team.id) : leadDay(team, index) <= day);
   const known = told ? evidenceAt(org, day) : [];
   const works = org.works
     .filter((work) => work.team === team.id)
@@ -1825,6 +1828,8 @@ export interface TeamView {
   asked: number;
   /** The day the team's own links went out. */
   sent: number | null;
+  /** The day the team's lead was heard: at a real organization their links can go out without them. */
+  heard: number | null;
   works: WorkEvidence[];
   next: TeamNext;
 }
@@ -2221,10 +2226,13 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     }
     const lead = people.find((each) => each.person.lead) ?? null;
     let sent: number | null = null;
+    let heard: number | null = null;
     if (org.real) {
       sent = org.real.sent.get(team.id) ?? null;
+      heard = org.real.heard.get(team.id) ?? null;
     } else if (told && leadDay(team, index) <= day) {
       sent = leadDay(team, index);
+      heard = sent;
     }
     const waiting = people.length - counts.completed - counts.away;
     const next = nextOf({ off, leadsKnown, told, closed, sent, waiting, lead });
@@ -2236,6 +2244,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
       counts,
       asked: people.length - counts.away,
       sent,
+      heard,
       works: works.filter((work) => work.team === team.id),
       next,
     };
@@ -2252,7 +2261,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
 
   const read = state.conversation === "read";
   const invited = mayInvite(state.agreed);
-  const leadsTalked = told && taking.every((team) => team.sent !== null);
+  const leadsTalked = told && taking.every((team) => team.heard !== null);
 
   // What Grasp knows, source by source, as the company's own onboarding counts it.
   const skipped = org.skipped ?? [];
@@ -2260,7 +2269,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     ? VISION_FIELDS.filter((field) => vision.fields[field]).length /
       VISION_FIELDS.length
     : 0;
-  const leads = taking.filter((team) => team.sent !== null).length;
+  const leads = taking.filter((team) => team.heard !== null).length;
   const members = people.filter(
     (each) => !each.person.lead && each.state !== "away"
   );
