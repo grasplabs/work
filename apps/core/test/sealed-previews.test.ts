@@ -89,6 +89,16 @@ export const late = action({
   },
 });
 
+/** Writes a line with \`console\`, as text the draft's code chose. */
+export const chatty = query({
+  args: { said: v.string().max(200) },
+  returns: v.null(),
+  handler: (_ctx, args) => {
+    console.log("chatty says", args.said);
+    return null;
+  },
+});
+
 /** Asks the App's model: an outside system. */
 export const consult = action({
   args: {},
@@ -98,14 +108,14 @@ export const consult = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { consult, create, late, list, titles, writer } from "./operations/notes.ts";
+import { chatty, consult, create, late, list, titles, writer } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, late, consult, list } },
+  operations: { notes: { create, titles, late, consult, list, chatty } },
   internalOperations: {},
   screens: [],
   uses: [writer],
@@ -960,5 +970,49 @@ export class App extends DurableObject {
       first: { titles: ["one", "two"], hasMore: true },
       more: { titles: ["one", "two", "three"], hasMore: false },
     });
+  });
+
+  it("hands the agent's check what the draft's functions write with console, for that chat's preview alone", async () => {
+    const { builder, app, chatId, revision } = await setUp();
+    const other = await signedInApi(idp, "builder");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: other.userId,
+      role: "builder",
+    });
+    const theirs = await chatWithDraft(other, app, {
+      "operations/notes.ts": notesFiles("drafted")["operations/notes.ts"] ?? "",
+    });
+    await builder.api.chats.previewFunction(
+      chatId,
+      app,
+      revision,
+      await requestFor(builder, { chatId, app, revision }, "notes.chatty", {
+        said: "the total is missing",
+      })
+    );
+    await vi.waitFor(async () => {
+      const { logs } = await chatsOf(builder).previewReports(
+        chatId,
+        app,
+        revision,
+        0
+      );
+      expect(logs).toStrictEqual([
+        expect.objectContaining({
+          level: "log",
+          message: "chatty says the total is missing",
+          method: "notes.chatty",
+        }),
+      ]);
+    });
+    // Nothing of it in another person's preview of the same App.
+    const { logs: otherLogs } = await chatsOf(other).previewReports(
+      theirs.chatId,
+      app,
+      theirs.revision,
+      0
+    );
+    expect(otherLogs).toStrictEqual([]);
   });
 });
