@@ -2974,6 +2974,35 @@ export const workflowResourceParams = sqliteTable(
 );
 
 /**
+ * The draft of each independent workflow's next definition, as its
+ * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
+ * `revision` counting them from 1. An edit names the revision it read and
+ * inserts the next one, so of two concurrent edits the second is refused
+ * and the first stays. `source` is the text as edited, JSON or not;
+ * `problems` the profile's diagnostics of it (empty for one that passes),
+ * so a row with `checked` set is a checkpoint: a definition that passed,
+ * which the editor's diagram shows and which may be published. Only the
+ * latest row and the latest checkpoint are kept.
+ */
+export const workflowResourceDrafts = sqliteTable(
+  "workflow_resource_drafts",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    source: text().notNull(),
+    checked: integer({ mode: "boolean" }).notNull(),
+    problems: text().notNull(),
+    editedBy: text("edited_by").notNull(),
+    editedAt: timestamp("edited_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
  * Which exact version of an independent workflow each App binds, by an
  * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
  * version and grants nothing: starting it still takes the App's own
