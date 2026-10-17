@@ -650,8 +650,10 @@ const answeredWorkflowQuery = async (
     refused,
     stillAllowed,
     chargeWindow,
+    deadline,
   }: {
     by: Pick<Identity, "userId" | "role">;
+    deadline: number;
     caller: { app: string; userId: string };
     query: ResolvedWorkflowQuery;
     call: FunctionRequest;
@@ -674,6 +676,11 @@ const answeredWorkflowQuery = async (
       release.manifest.resourceVersion
     );
     await operationRoles(env, by, appIdSchema.parse(caller.app));
+    // The call's deadline, as its invocation would hold it: past it,
+    // nothing is read.
+    if (Date.now() >= deadline) {
+      throw operationErrors.create("operation.deadline_exceeded");
+    }
     const result =
       call.window === undefined
         ? await callWorkflowQuery(env, caller, query, call.input)
@@ -763,6 +770,7 @@ const callFunction = async (
       refused,
       stillAllowed,
       chargeWindow,
+      deadline,
     });
   }
   try {
