@@ -290,6 +290,11 @@ export const originsOf = (
         what: "What the company connected",
         read: integrations,
       },
+      {
+        source: "composio",
+        what: "What its workflows still need connected",
+        read: false,
+      },
     ],
     usage: [fromCore],
     value: [

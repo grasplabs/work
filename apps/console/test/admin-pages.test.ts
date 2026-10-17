@@ -102,6 +102,31 @@ const columnEntryOf = (column: string, title: string): string => {
     : column.slice(column.lastIndexOf("<a", at), column.indexOf("</a>", at));
 };
 
+/** What an Integrations section says, part by part. */
+const integrationsOf = ({
+  status,
+  html,
+}: {
+  status: number;
+  html: string;
+}) => ({
+  status,
+  nothing: html.includes("Nothing connected yet</h2>"),
+  waits: html.includes("Grasp waits on the company’s own admin."),
+  connected: html.includes("What the company connected</h2>"),
+  notReported: html.includes(
+    "The company’s own Grasp doesn’t report what it connected yet."
+  ),
+  stillToConnect: html.includes("Still to connect</h2>"),
+  fromComposio: html.includes(
+    "Once Composio is connected, this fills in by itself."
+  ),
+  source: html.includes(
+    "What the company connected: the company’s own Grasp doesn’t hold it yet. What its workflows still need connected: from Composio, once it is connected."
+  ),
+  toCome: html.includes("This section isn’t in the console yet."),
+});
+
 describe("the admin's frame", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
   // Only each test's own clients are listed: an earlier test's accounts
@@ -440,6 +465,67 @@ describe("the admin's frame", () => {
       },
       usage: [true, true],
       setup: [true, true],
+    });
+  });
+
+  it("shows what a company connected only once it signed in, says core doesn't report its connections yet, and that what is still to connect comes from Composio", async () => {
+    const before = await liveClient();
+    before.account.admin = emptyAdminSnapshot("Before");
+    const signed = await liveClient();
+    const empty = emptyAdminSnapshot("Signed");
+    // Its directory is in, with every team's lead named: past its sign-in.
+    signed.account.admin = {
+      ...empty,
+      roster: {
+        teams: [
+          { id: "sales", name: "Sales", lead: "lea", does: "", off: false },
+        ],
+        people: [
+          {
+            id: "lea",
+            name: "Lea Lund",
+            email: "",
+            team: "sales",
+            title: "",
+            away: false,
+          },
+        ],
+      },
+    };
+
+    const beforePage = await page(
+      `/admin/organizations/${before.clientId}/integrations`
+    );
+    const signedPage = await page(
+      `/admin/organizations/${signed.clientId}/integrations`
+    );
+
+    expect({
+      before: integrationsOf(beforePage),
+      signed: integrationsOf(signedPage),
+    }).toStrictEqual({
+      before: {
+        status: 200,
+        nothing: true,
+        waits: true,
+        connected: false,
+        notReported: false,
+        stillToConnect: true,
+        fromComposio: true,
+        source: true,
+        toCome: false,
+      },
+      signed: {
+        status: 200,
+        nothing: false,
+        waits: false,
+        connected: true,
+        notReported: true,
+        stillToConnect: true,
+        fromComposio: true,
+        source: true,
+        toCome: false,
+      },
     });
   });
 
