@@ -1,8 +1,10 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -12,6 +14,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import {
@@ -180,107 +183,214 @@ const latestRuns = (
     .items.map(({ run, status }) => `${run.runId}: ${status}`);
 };
 
+/**
+ * The Requests App sealed and current, its screen approved and opened by
+ * its builder, `followUp` bound with the App's `start` grant; and the
+ * builder's screen following their runs of it, once its first push came.
+ */
+const followingRuns = async (
+  /** Called with the App's ID before its screen follows. */
+  beforeFollow?: (app: string) => Promise<void>
+) => {
+  const admin = await signedIn("admin");
+  const builder = await signedIn("builder");
+  const workflow = await createWorkflowResource(
+    env,
+    builder.acting,
+    `greet-${unique()}`
+  );
+  await publishWorkflowVersion(env, builder.acting, workflow.id, {
+    definition: definitionOf(workflow.name),
+    basedOn: null,
+  });
+  const fixture = await appWith(files(), "Requests", builder.acting);
+  await seal(fixture);
+  await setCurrentVersion(env, builder.acting, fixture.app, 1);
+  await bindWorkflowToApp(env, builder.acting, workflow.id, {
+    app: fixture.app,
+    alias: "followUp",
+    version: 1,
+  });
+  const asked = await requestPermission(
+    env,
+    builder.acting,
+    {
+      subject: { type: "app", appId: fixture.app },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: "FOLLOW_UP",
+    },
+    rolesOf(builder.acting)
+  );
+  await grantPermission(env, admin.acting, asked.id, { version: 1 });
+  const review = await admin.api.screenTrust.review(fixture.app);
+  await admin.api.screenTrust.approve(fixture.app, {
+    version: review.version,
+    generation: review.generation,
+    artifacts: builtArtifacts(review.screens),
+  });
+  const { lease } = await builder.api.screens.open(fixture.app, "desk");
+  await builder.api.screens.present(fixture.app, lease);
+  const release = await loadRelease(env, fixture.app, 1);
+
+  await beforeFollow?.(fixture.app);
+  // The screen follows the person's runs: none yet.
+  const follower = pageFollower();
+  const subscription = await builder.api.screens.watchQuery(
+    fixture.app,
+    lease,
+    JSON.stringify({
+      reference: await queryReference(release, "followUp", "runs"),
+      input: { pagination: {} },
+    }),
+    follower.callback
+  );
+  await vi.waitFor(
+    () => {
+      expect(follower.received.length).toBeGreaterThan(0);
+    },
+    { timeout: 30_000, interval: 50 }
+  );
+  return {
+    builder: builder.acting,
+    workflow: workflow.id,
+    app: fixture.app,
+    release,
+    follower,
+    subscription,
+  };
+};
+
+/** Starts a run of `followUp` for `by` through the App's action: its ID. */
+const kickOff = async (
+  by: Acting & Identity,
+  app: string,
+  release: Awaited<ReturnType<typeof loadRelease>>
+): Promise<string> => {
+  const started = await callAppFunction(
+    env,
+    by,
+    app,
+    JSON.stringify({
+      reference: {
+        resourceId: release.manifest.resourceId,
+        resourceVersion: release.manifest.resourceVersion,
+        contractId: "requests.kickOff",
+        fingerprint: release.fingerprints["requests.kickOff"] ?? "",
+        kind: "action",
+      },
+      input: { who: "Ada" },
+    })
+  );
+  return started.result.ok
+    ? z.object({ runId: z.string() }).parse(started.result.value).runId
+    : "";
+};
+
+/** Once the latest push to `follower` shows exactly `runs`. */
+const showing = async (
+  follower: ReturnType<typeof pageFollower>,
+  runs: string[]
+): Promise<void> => {
+  await vi.waitFor(
+    () => {
+      expect(latestRuns(follower.received)).toStrictEqual(runs);
+    },
+    { timeout: 30_000, interval: 50 }
+  );
+};
+
 describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
   it("show a run the App starts for the person, then each change of its status, with no subscribing again", async () => {
-    const admin = await signedIn("admin");
-    const builder = await signedIn("builder");
-    const workflow = await createWorkflowResource(
-      env,
-      builder.acting,
-      `greet-${unique()}`
-    );
-    await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition: definitionOf(workflow.name),
-      basedOn: null,
-    });
-    const fixture = await appWith(files(), "Requests", builder.acting);
-    await seal(fixture);
-    await setCurrentVersion(env, builder.acting, fixture.app, 1);
-    await bindWorkflowToApp(env, builder.acting, workflow.id, {
-      app: fixture.app,
-      alias: "followUp",
-      version: 1,
-    });
-    const asked = await requestPermission(
-      env,
-      builder.acting,
-      {
-        subject: { type: "app", appId: fixture.app },
-        object: { type: "workflow", workflowId: workflow.id },
-        actions: ["start"],
-        binding: "FOLLOW_UP",
-      },
-      rolesOf(builder.acting)
-    );
-    await grantPermission(env, admin.acting, asked.id, { version: 1 });
-    const review = await admin.api.screenTrust.review(fixture.app);
-    await admin.api.screenTrust.approve(fixture.app, {
-      version: review.version,
-      generation: review.generation,
-      artifacts: builtArtifacts(review.screens),
-    });
-    const { lease } = await builder.api.screens.open(fixture.app, "desk");
-    await builder.api.screens.present(fixture.app, lease);
-    const release = await loadRelease(env, fixture.app, 1);
-
-    // The screen follows the person's runs: none yet.
-    const follower = pageFollower();
-    const subscription = await builder.api.screens.watchQuery(
-      fixture.app,
-      lease,
-      JSON.stringify({
-        reference: await queryReference(release, "followUp", "runs"),
-        input: { pagination: {} },
-      }),
-      follower.callback
-    );
-    await vi.waitFor(
-      () => {
-        expect(follower.received.length).toBeGreaterThan(0);
-      },
-      { timeout: 30_000, interval: 50 }
-    );
+    const { builder, workflow, app, release, follower, subscription } =
+      await followingRuns();
     const before = latestRuns(follower.received);
 
     // The App starts one for them: the screen shows it running, pushed to
     // the same subscription.
-    const started = await callAppFunction(
-      env,
-      builder.acting,
-      fixture.app,
-      JSON.stringify({
-        reference: {
-          resourceId: release.manifest.resourceId,
-          resourceVersion: release.manifest.resourceVersion,
-          contractId: "requests.kickOff",
-          fingerprint: release.fingerprints["requests.kickOff"] ?? "",
-          kind: "action",
-        },
-        input: { who: "Ada" },
-      })
-    );
-    const runId = started.result.ok
-      ? z.object({ runId: z.string() }).parse(started.result.value).runId
-      : "";
-    await vi.waitFor(
-      () => {
-        expect(latestRuns(follower.received)).toStrictEqual([
-          `${runId}: running`,
-        ]);
-      },
-      { timeout: 30_000, interval: 50 }
-    );
+    const runId = await kickOff(builder, app, release);
+    await showing(follower, [`${runId}: running`]);
     // Cancelled while it waits: the screen shows that too.
-    await terminateResourceRun(env, builder.acting, workflow.id, runId);
-    await vi.waitFor(
-      () => {
-        expect(latestRuns(follower.received)).toStrictEqual([
-          `${runId}: cancelled`,
-        ]);
-      },
-      { timeout: 30_000, interval: 50 }
-    );
+    await terminateResourceRun(env, builder, workflow, runId);
+    await showing(follower, [`${runId}: cancelled`]);
     await subscription.release();
     expect(before).toStrictEqual([]);
+  });
+
+  it("reads them again once its connection follows the App again, so a run change made in between isn't missed", async () => {
+    // The host takes the connection on as usual, then lets go of it (as a
+    // restart does), and holds its following again until the test lets
+    // it: the run changes in between, with no connection to tell.
+    const ids: string[] = [];
+    const gate = {
+      open: false,
+      ids,
+      undo: (): void => {
+        // Nothing patched yet.
+      },
+    };
+    const { builder, app, release, follower, subscription } =
+      await followingRuns(async (appId) => {
+        await runInDurableObject(
+          appHost(env, appIdSchema.parse(appId)),
+          (instance) => {
+            // SAFETY: an App's object's prototype holds its methods.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            const methods = Object.getPrototypeOf(instance) as Record<
+              string,
+              (...args: unknown[]) => Promise<unknown>
+            >;
+            const original = methods.followAccess;
+            if (original === undefined) {
+              throw new Error("An App's object follows access");
+            }
+            methods.followAccess = async function followAccess(
+              this: unknown,
+              ...args
+            ) {
+              if (gate.ids.length > 0) {
+                while (!gate.open) {
+                  // oxlint-disable-next-line no-await-in-loop -- until the test lets it
+                  await scheduler.wait(20);
+                }
+              }
+              const id = z.string().parse(await original.apply(this, args));
+              gate.ids.push(id);
+              return id;
+            };
+            gate.undo = () => {
+              methods.followAccess = original;
+            };
+          }
+        );
+      });
+    // Let go of by the host: the connection follows again, held.
+    await runInDurableObject(
+      appHost(env, appIdSchema.parse(app)),
+      (instance) => {
+        Reflect.apply(Reflect.get(instance, "unfollowAccess"), instance, [
+          gate.ids[0],
+        ]);
+      }
+    );
+    const runId = await kickOff(builder, app, release);
+    await vi.waitFor(
+      async () => {
+        const status = await env.DB.prepare(
+          "SELECT status FROM workflow_resource_runs WHERE id = ?"
+        )
+          .bind(runId)
+          .first<string>("status");
+        expect(status).toBe("running");
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    gate.open = true;
+    try {
+      await showing(follower, [`${runId}: running`]);
+    } finally {
+      gate.undo();
+      await subscription.release();
+    }
   });
 });
