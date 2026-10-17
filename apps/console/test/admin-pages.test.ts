@@ -24,8 +24,10 @@ const db = consoleDatabase(env.DB);
 const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** A client recorded as `status`, on a new account in the fake. */
-const recordClient = async (status: "provisioning" | "active") => {
-  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
+const recordClient = async (
+  status: "provisioning" | "active",
+  clientId = `client-${crypto.randomUUID().slice(0, 8)}`
+) => {
   const account = cloudflare.addAccount(`Acme ${clientId}`);
   const now = new Date();
   await act(
@@ -76,7 +78,7 @@ const readySnapshot = (name: string): AdminSnapshot => {
 /** The overview's row for client `clientId`, in its table of organizations. */
 const rowOf = (html: string, clientId: string): string => {
   const table = html.indexOf("<table");
-  const at = html.indexOf(`href="/admin/${clientId}"`, table);
+  const at = html.indexOf(`href="/admin/organizations/${clientId}"`, table);
   return at === -1 || table === -1
     ? ""
     : html.slice(html.lastIndexOf("<tr", at), html.indexOf("</tr>", at));
@@ -141,7 +143,9 @@ describe("the admin's frame", () => {
       acmeUnread: acmeEntry?.entry.includes("unreachable"),
       downUnreachable: downEntry?.entry.includes("unreachable"),
       waitingNotDeployed: waitingEntry?.entry.includes("not deployed"),
-      opensAcme: html.includes(`href="/admin/${acme.clientId}"`),
+      opensAcme: html.includes(`href="/admin/organizations/${acme.clientId}"`),
+      // Its mark explains itself while the sidebar is open, too.
+      downExplained: downEntry?.entry.includes('data-slot="tooltip-trigger"'),
       // The console's own bar is not part of the admin.
       consoleBar: html.includes('aria-label="Console"'),
       readers: acme.account.adminReaders,
@@ -153,6 +157,7 @@ describe("the admin's frame", () => {
       downUnreachable: true,
       waitingNotDeployed: true,
       opensAcme: true,
+      downExplained: true,
       consoleBar: false,
       readers: ["staff@grasp.test"],
     });
@@ -254,14 +259,26 @@ describe("the admin's frame", () => {
     const acme = await liveClient();
     acme.account.admin = emptyAdminSnapshot("Acme");
 
-    const known = await page(`/admin/${acme.clientId}`);
-    const unknown = await page("/admin/client-unknown");
+    // Named like one of the admin's sections, and still its own page.
+    const platform = await recordClient("provisioning", "platform");
+
+    const known = await page(`/admin/organizations/${acme.clientId}`);
+    const named = await page("/admin/organizations/platform");
+    const unknown = await page("/admin/organizations/client-unknown");
 
     expect({
       known: known.status,
       title: known.html.includes(`${acme.name}</h1>`),
+      named: named.status,
+      namedTitle: named.html.includes(`${platform.name}</h1>`),
       unknown: unknown.status,
-    }).toStrictEqual({ known: 200, title: true, unknown: 404 });
+    }).toStrictEqual({
+      known: 200,
+      title: true,
+      named: 200,
+      namedTitle: true,
+      unknown: 404,
+    });
   });
 
   it("gives a request Access doesn't vouch for nothing, asking no core", async () => {
@@ -273,7 +290,7 @@ describe("the admin's frame", () => {
         "/admin",
         "/admin?phase=ready",
         "/admin/platform",
-        `/admin/${acme.clientId}`,
+        `/admin/organizations/${acme.clientId}`,
       ].map(async (path) => {
         const response = await exports.default.fetch(
           `https://console.grasp.test${path}`

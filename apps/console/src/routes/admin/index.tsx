@@ -82,7 +82,7 @@ const NameLink = ({
   <Link
     className="focus-visible:ring-ring/50 flex flex-col rounded-sm outline-none after:absolute after:inset-0 hover:underline focus-visible:ring-3"
     params={{ clientId: id }}
-    to="/admin/$clientId"
+    to="/admin/organizations/$clientId"
   >
     <span className="font-medium">{name}</span>
     {children}
@@ -373,7 +373,12 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
             <Button
               aria-label={`Open at ${name}: ${text}`}
               nativeButton={false}
-              render={<Link params={{ clientId: id }} to="/admin/$clientId" />}
+              render={
+                <Link
+                  params={{ clientId: id }}
+                  to="/admin/organizations/$clientId"
+                />
+              }
               size="sm"
               variant="ghost"
             >
