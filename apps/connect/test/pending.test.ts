@@ -1261,6 +1261,41 @@ describe("a side effect from chat", () => {
     });
   });
 
+  it("of an independent run are all dropped once its retention is over, whichever App its calls reached", async () => {
+    const anna = someone();
+    const [reached, other] = await Promise.all([
+      addConnection(),
+      addConnection(),
+    ]);
+    // A restricted independent run called App A, whose export called App
+    // B: B's call carries the run's key, under B.
+    const run = `run-${crypto.randomUUID()}`;
+    const appB = appFor(anna.userId, "app-b");
+    const signed = { restricted: true, origin: runOrigin };
+    await retried(
+      callAs(
+        appB,
+        { ...mail(reached), idempotencyKey: `${run}:task:send` },
+        signed
+      )
+    );
+    // Another run's call, under the same App: not this run's.
+    await retried(
+      callAs(
+        appB,
+        { ...mail(other), idempotencyKey: "run-other:task:send" },
+        signed
+      )
+    );
+    await exports.default.dropForEndedRuns({
+      runs: [{ workflowId: "workflow-1", runId: run }],
+    });
+    const waiting = await waitingFor(anna);
+    expect(
+      waiting.map(({ connectionId }) => connectionId).toSorted()
+    ).toStrictEqual([other]);
+  });
+
   it("from a run that read nothing restricted isn't held", async () => {
     const anna = someone();
     const connectionId = await addConnection();

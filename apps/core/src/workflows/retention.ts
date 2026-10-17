@@ -17,7 +17,7 @@ import {
   workflowDecisions,
   workflowRuns,
 } from "../db/core/schema.ts";
-import { chunks, inList } from "../db/d1.ts";
+import { chunks } from "../db/d1.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
 
 // Retention of workflow runs. A run reads what its person may read (a
@@ -385,9 +385,9 @@ export const sweepWorkflowStartDetails = async (
   // while its side effect was held leaves the action, with its exact
   // input, until its person confirms it, which they may never do. Only a
   // restricted run's side effects are held: its own, under the workflow,
-  // and those of the App exports it called, under each App, keyed by its
-  // step as the run's own are. A sweep that fails here marks nothing, and
-  // the next does it again.
+  // and those of every App its calls reached, keyed by its steps as its
+  // own are, which connect drops by the run (`dropForEndedRuns`). A sweep
+  // that fails here marks nothing, and the next does it again.
   const heldOf = await db
     .select({ runId: receipts.id, workflowId: receipts.workflowResourceId })
     .from(receipts)
@@ -399,25 +399,9 @@ export const sweepWorkflowStartDetails = async (
           WHERE run.id = ${receipts.id})`
       )
     );
-  for (const batch of chunks(heldOf, sweptPerBatch)) {
-    // The Apps whose exports each run's start froze a binding to.
+  for (const runs of chunks(heldOf, sweptPerBatch)) {
     // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-    const called = await db.all<{ runId: string; appId: string }>(
-      sql`SELECT DISTINCT receipt.id AS runId, held.object_id AS appId
-        FROM ${receipts} AS receipt, json_each(receipt.bindings) AS bound
-        JOIN permissions AS held
-          ON held.id = json_extract(bound.value, '$.target.permissionId')
-            AND held.object_type = 'app'
-        WHERE json_extract(bound.value, '$.target.kind') = 'operation'
-          AND ${inList(
-            sql`receipt.id`,
-            batch.map(({ runId }) => runId)
-          )}`
-    );
-    for (const runs of chunks([...batch, ...called], sweptPerBatch)) {
-      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await env.CONNECT.dropForEndedRuns({ runs });
-    }
+    await env.CONNECT.dropForEndedRuns({ runs });
   }
   await db.batch([
     // A start's run has its receipt's ID (resource-runs.ts).

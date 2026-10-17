@@ -679,6 +679,8 @@ interface StepAttempt {
    * the step then ends as held, whatever the isolate made of the answer.
    */
   held: boolean;
+  /** Whether it collects a held call's outcome (`StepRun.collecting`). */
+  collecting: boolean;
   /** Its admission: what admits each evaluation as a host call. */
   admission: AttemptAdmission;
 }
@@ -696,6 +698,13 @@ interface StepRun {
   entering: boolean;
   /** Its wait for load since its last admission (host.ts, `LoadWait`). */
   wait: LoadWait;
+  /**
+   * Whether its attempts collect a held connector call's decided outcome
+   * (`#waitWhileHeld`): from the first rerun after a hold, its attempts
+   * take none of the lineage's host calls (`#hostCall`), and are admitted
+   * though it has none left (quotas.ts, `QuotaAttempt.collecting`).
+   */
+  collecting: boolean;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
@@ -1090,6 +1099,7 @@ export class ResourceRunHost
           taskStart,
           entering,
           wait: loadWaitStart,
+          collecting: false,
         };
         const attemptStep = async (context: unknown): Promise<unknown> =>
           await this.#attempt(run, context, fn, stepDone.promise);
@@ -1112,6 +1122,17 @@ export class ResourceRunHost
           marker = markerOf(recorded), round += 1
         ) {
           if (marker === undefined) {
+            // Only a connector call is held for its person, and connect
+            // answers its rerun what the person decided, under the same
+            // key: the attempt that was held took the host calls of its
+            // call and of everything it evaluated, and the rerun repeats
+            // that work only to collect the outcome, sending nothing new.
+            // So its attempts take none (GRA-570): a lineage that ran out
+            // while the person decided still gets the effect they let out.
+            // The wait's own checks and sleeps stay steps of the run's.
+            run.collecting =
+              step.task?.kind === "call" &&
+              step.task.call.name === "grasp.connector";
             // oxlint-disable-next-line no-await-in-loop -- one round at a time
             await this.#waitWhileHeld(stepName, round);
             // oxlint-disable-next-line no-await-in-loop -- one round at a time
@@ -1119,7 +1140,7 @@ export class ResourceRunHost
             // oxlint-disable-next-line no-await-in-loop -- one round at a time
             recorded = await this.#step.do(
               `${stepName}:held:${round}:run`,
-              configOf(step),
+              engineConfigOf(step),
               attemptStep
             );
             continue;
@@ -1307,7 +1328,8 @@ export class ResourceRunHost
       this.#activationFuel -= attemptFuel;
     }
     const admitted = await settle(
-      async () => await this.#admit(told, lease, run.name, run.wait)
+      async () =>
+        await this.#admit(told, lease, run.name, run.wait, run.collecting)
     );
     if (admitted.ok && "settle" in admitted.value) {
       return admitted.value;
@@ -1352,8 +1374,20 @@ export class ResourceRunHost
       until: undefined,
       untilAsked: false,
       held: false,
+      collecting: run.collecting,
       admission,
     };
+  }
+
+  /**
+   * One of `attempt`'s lineage's host calls, unless it collects a held
+   * connector call's decided outcome (`StepRun.collecting`), whose host
+   * calls the attempt that was held already took.
+   */
+  static async #hostCall(attempt: StepAttempt): Promise<void> {
+    if (!attempt.collecting) {
+      await attempt.admission.hostCall();
+    }
   }
 
   /** The host `attempt`'s function gets in the isolate. */
@@ -1433,10 +1467,12 @@ export class ResourceRunHost
     told: z.infer<typeof attemptContextSchema>,
     lease: AttemptLease,
     step: string,
-    wait: LoadWait
+    wait: LoadWait,
+    collecting: boolean
   ): Promise<AttemptAdmission | Busy> {
     try {
       return await this.#hooks.admitAttempt({
+        ...(collecting ? { collecting: true } : {}),
         key: told.idempotencyKey,
         step,
         number: told.attempt,
@@ -1932,7 +1968,7 @@ export class ResourceRunHost
     // One of its lineage's host calls, before any of core's CPU goes on
     // it: a lineage with none left evaluates nothing more, in this
     // activation or any later one.
-    await attempt.admission.hostCall();
+    await ResourceRunHost.#hostCall(attempt);
     this.#requireCurrent(attempt);
     const expressionCompiled = await this.#compiled(expression);
     // Compiling awaited: an attempt over meanwhile evaluates nothing.
@@ -2110,7 +2146,15 @@ export class ResourceRunHost
         return answer;
       } catch (error) {
         attempt.call = "failed";
-        attempt.held ||= connectErrors.codeOf(error) === "connect.held";
+        // Only a connector call's hold makes the step wait and run again:
+        // connect keeps its answer under the step's key, so a rerun sends
+        // nothing new. An App export can answer `connect.held` too (a call
+        // of its own held, in a restricted App), but its step is tried
+        // once (`triedOnce`): running it again would run the App's code
+        // again, so it fails with the code, as any other answer.
+        attempt.held ||=
+          task.call.name === "grasp.connector" &&
+          connectErrors.codeOf(error) === "connect.held";
         throw error;
       }
     });
@@ -2134,7 +2178,7 @@ export class ResourceRunHost
     // One of its lineage's host calls, before anything of it is built or
     // sent, and before a model call takes its place: a lineage with none
     // left makes no more calls, in this attempt or any later one.
-    await attempt.admission.hostCall();
+    await ResourceRunHost.#hostCall(attempt);
     this.#requireCurrent(attempt);
     const { call } = task;
     if (call.name === "grasp.now") {

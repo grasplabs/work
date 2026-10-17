@@ -964,10 +964,13 @@ export const dropForEndedRun = async (
  * while a side effect of it was held leaves the action, with its exact
  * input, until its person comes to confirm it (`dropForEndedRun`), which
  * they may never do. A held action's idempotency key starts with its
- * run's ID (`stepIdempotencyKey`), and its subject is the run's App, or
- * for an independent workflow's run the workflow: one read per subject,
- * by the index of its held actions. Each is recorded as
- * `connection.action.dropped` with reason `run.ended`, by core itself.
+ * run's ID (`stepIdempotencyKey`). An App's run's actions are its App's:
+ * one read per App, by the index of its held actions. An independent
+ * workflow's run's are its workflow's, and those of every App its calls
+ * reached, however many hops on (an export calling another App's carries
+ * the run's key on): dropped by the run, whatever their subject, so none
+ * is missed. Each is recorded as `connection.action.dropped` with reason
+ * `run.ended`, by core itself.
  */
 export const dropForEndedRuns = async (
   env: Env,
@@ -991,22 +994,31 @@ export const dropForEndedRuns = async (
     bySubject.set(`${type}:${id}`, subject);
   }
   for (const { type, id: subjectId, runs } of bySubject.values()) {
+    // An independent run's, by the run alone; an App run's, by its App.
+    const ofSubject =
+      type === "workflow"
+        ? sql`1`
+        : sql`${pendingActions.subjectType} = ${type} AND ${pendingActions.subjectId} = ${subjectId}`;
     // oxlint-disable-next-line no-await-in-loop -- one subject at a time, each recorded
     await dropPendingActions(
       env,
-      sql`${pendingActions.subjectType} = ${type} AND ${pendingActions.subjectId} = ${subjectId} AND ${pendingActions.mode} = 'workflow' AND substr(${pendingActions.idempotencyKey}, 1, instr(${pendingActions.idempotencyKey}, ':') - 1) IN ${runs}`,
+      sql`${ofSubject} AND ${pendingActions.mode} = 'workflow' AND substr(${pendingActions.idempotencyKey}, 1, instr(${pendingActions.idempotencyKey}, ':') - 1) IN ${runs}`,
       "run.ended",
       null
     );
     // Its calls of unknown outcome stay obligations of their person (the
     // effect may have happened), but nothing keeps their inputs past the
     // run's retention either: listed on, by what they were, without it.
+    const callsOfSubject =
+      type === "workflow"
+        ? sql`1`
+        : sql`${idempotentCalls.subjectType} = ${type} AND ${idempotentCalls.subjectId} = ${subjectId}`;
     // oxlint-disable-next-line no-await-in-loop -- one subject at a time
     await drizzle(env.DB)
       .update(idempotentCalls)
       .set({ input: null })
       .where(
-        sql`${idempotentCalls.subjectType} = ${type} AND ${idempotentCalls.subjectId} = ${subjectId} AND ${idempotentCalls.input} IS NOT NULL AND substr(${idempotentCalls.idempotencyKey}, 1, instr(${idempotentCalls.idempotencyKey}, ':') - 1) IN ${runs}`
+        sql`${callsOfSubject} AND ${idempotentCalls.input} IS NOT NULL AND substr(${idempotentCalls.idempotencyKey}, 1, instr(${idempotentCalls.idempotencyKey}, ':') - 1) IN ${runs}`
       );
   }
 };

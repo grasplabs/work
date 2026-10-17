@@ -9,7 +9,6 @@ import {
 } from "@grasp-os/shared/app-releases";
 import type {
   ConnectorContract,
-  EndedRuns,
   PendingAction,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -477,12 +476,18 @@ const mailingWorkflow = async (
     to = "${ $workflow.input.who }",
     plan = [],
     sharing,
+    plain = false,
   }: {
     before?: unknown[];
     to?: string;
     plan?: Parameters<typeof mailConnection>[0];
     /** Another alias, sorted first, approved for the same permission. */
     sharing?: string;
+    /**
+     * It ends with its send, whose answer its `output.as` makes the
+     * run's output: nothing after the send is admitted or evaluated.
+     */
+    plain?: boolean;
   } = {}
 ) => {
   const key = await mailContract(admin);
@@ -527,11 +532,14 @@ const mailingWorkflow = async (
             operation: "mail.send",
             arguments: { to, subject: "${ $params.token }" },
           },
-          export: { as: "${ {sent: .messageId} }" },
+          ...(plain
+            ? { output: { as: "${ {status: .messageId} }" } }
+            : { export: { as: "${ {sent: .messageId} }" } }),
         },
       },
-      pause,
-      { finish: { set: { status: "${ $context.sent }" } } },
+      ...(plain
+        ? []
+        : [pause, { finish: { set: { status: "${ $context.sent }" } } }]),
     ],
   });
   const mail = await mailConnection(plan);
@@ -2216,6 +2224,46 @@ describe("runs started by a restricted App", () => {
     });
   });
 
+  it("collect a held send's outcome once confirmed, though their lineage has no host calls left", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      to: "Ada",
+      plain: true,
+    });
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    // One host call, the send's own: the attempt that was held takes it,
+    // and the lineage has none left. The rerun that collects what Ada
+    // decided is admitted all the same, and takes none, its output.as
+    // included: it repeats the held attempt's work, sending nothing new.
+    const { runId, run } = await withQuotas(
+      { lineageHostCalls: 1 },
+      async () => {
+        const id = await starter.start(serving);
+        const held = await heldFor(ada, id);
+        await confirmPendingAction(env, ada, held.id, held.inputHash);
+        return { runId: id, run: await ended(ada, workflow.id, id) };
+      }
+    );
+    const lineage = await env.DB.prepare(
+      "SELECT host_calls AS hostCalls FROM run_lineages WHERE root_run_id = ?"
+    )
+      .bind(runId)
+      .first<{ hostCalls: number }>();
+    const sent = await mail.did();
+    expect({
+      end: endOf(run),
+      calls: sent.calls,
+      hostCalls: lineage?.hostCalls,
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "message-1" } },
+      calls: 1,
+      hostCalls: 1,
+    });
+  });
+
   it("are judged by the model gateway's data rules as restricted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -2263,34 +2311,8 @@ describe("runs started by a restricted App", () => {
     const runId = await starter.start();
     const end = endOf(await ended(admin, workflowId, runId));
     const events = await allEvents();
-    // Past its retention, the sweep asks connect to drop what it holds of
-    // the run under the App it called too: the export's own calls are
-    // keyed by the run's step, under the App.
-    const asked: unknown[] = [];
-    const recording: Env = {
-      ...env,
-      CONNECT: new Proxy(env.CONNECT, {
-        get: (target, name): unknown =>
-          name === "dropForEndedRuns"
-            ? async (request: EndedRuns) => {
-                asked.push(...request.runs);
-                await target.dropForEndedRuns(request);
-              }
-            : Reflect.get(target, name),
-      }),
-    };
-    await sweepRunDetails(recording, new Date(Date.now() + 31 * 86_400_000));
     expect({
       end,
-      sweptUnderDesk: asked.some(
-        (entry) =>
-          typeof entry === "object" &&
-          entry !== null &&
-          "appId" in entry &&
-          entry.appId === desk &&
-          "runId" in entry &&
-          entry.runId === runId
-      ),
       called: await appCalled(runId),
       deskRestricted: await appHost(env, desk).isRestricted(),
       entered: events
@@ -2301,7 +2323,6 @@ describe("runs started by a restricted App", () => {
         .map(({ provenance }) => provenance),
     }).toStrictEqual({
       end: { status: "completed", output: { status: "called" } },
-      sweptUnderDesk: true,
       called: true,
       deskRestricted: true,
       entered: [[`workflow_run:${runId}`]],
@@ -2568,6 +2589,7 @@ const activationOf = async (
         principal: by.userId,
         invoker: { type: "person", id: by.userId, appVersion: null },
         bindings,
+        restricted: false,
       },
       maxModelCalls: 1,
     },
