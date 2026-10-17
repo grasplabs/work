@@ -23,7 +23,7 @@ import {
 } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import {
-  appWith,
+  v1AppWith,
   grantMail,
   invoiceMail,
   mailer,
@@ -175,7 +175,7 @@ describe("workflow runs under failure", { timeout: 60_000 }, () => {
   it("send each mail once when a side-effect step is killed before or after its call, and retried", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "killed",
@@ -223,7 +223,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   it("have their App's methods mail with the step's key only, once across a retry", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "app-mailer",
@@ -272,7 +272,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   it("never send again when the engine loses a finished side-effect step and runs it anew", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "forgetful",
@@ -320,7 +320,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
   it("add a step's statistics points up once, as it completes: never an abandoned attempt's, nor when the engine runs the step anew, nor past the day's rows, and keep none for an ended run", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, {
+    const app = await v1AppWith(builder, {
       // The first attempt hangs at the mail server, outside the App, until
       // the engine gave up on it and the second began; then it calls on,
       // late.
@@ -593,7 +593,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
   it("refuse what an App method a step's attempt started does once another activation ran the step again", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       // The first attempt's App call waits at the mail server while the
       // run is restarted from the step, which runs again and completes.
@@ -651,7 +651,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
   it("give up a step's App call that waits behind another past its attempt's time, never running it", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       workflowFiles(
         "queued",
@@ -703,7 +703,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
   it("retry a step whose App call its attempt's time cut off, running or waiting its turn, and stop the run when the App's own time cuts it off", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, {
+    const app = await v1AppWith(builder, {
       // Its first attempt's second call holds the App, at the mail server,
       // past the attempt's time.
       ...cutOff(
@@ -838,7 +838,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
   it("go on after a crash without running finished steps again, also when resumed at once, and retry a step killed mid-way", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       workflowFiles(
         "durable",
@@ -888,7 +888,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
   it("go on past a sleep after a crash during it, without running finished steps again", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       workflowFiles(
         "sleeper",
@@ -925,7 +925,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
   it("record a step paused mid-way once, as completed, not as failed", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       workflowFiles(
         "blocking",
@@ -989,7 +989,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
   it("record a step failure the workflow caught once, not again on every later execution", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
+    const app = await v1AppWith(
       builder,
       workflowFiles(
         "caught",
@@ -1025,7 +1025,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   it("take a start delivered again under the run's ID as the run it is, sending once", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "started",
@@ -1074,7 +1074,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   it("send once when a side-effect step is killed while its call is still out, and retried until that call's answer is in", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection(["slow"]);
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       workflowFiles(
         "patient",
@@ -1126,7 +1126,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     // As a native connector's 429 comes back from connect: nothing done
     // (connect's own tests run that end to end).
     const mail = await mailConnection(["unavailable", "unavailable"]);
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       mailer(`retries: { limit: 3, delay: 10, backoff: "constant" }`)
     );
@@ -1157,7 +1157,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       "unavailable",
       "unavailable",
     ]);
-    const app = await appWith(
+    const app = await v1AppWith(
       admin,
       mailer(`retries: { limit: 2, delay: 10, backoff: "constant" }`)
     );

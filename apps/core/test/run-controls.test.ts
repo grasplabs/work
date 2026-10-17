@@ -4,7 +4,6 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { repairControls, settleControls } from "../src/workflows/controls.ts";
 import { markRunCancelled, runEngine } from "../src/workflows/engine.ts";
 import {
@@ -25,7 +24,14 @@ import {
   woken,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import {
+  appWith,
+  hitCall,
+  hitsCall,
+  hitsOf,
+  openGate,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // Pausing, resuming and cancelling a run from an App's screens, as the
 // host admits each request with a durable receipt (controls.ts). What
@@ -47,7 +53,7 @@ const napper = workflowFiles(
   "napper",
   `  await step.do("first", { description: "First" }, async () => null);
   await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("after", { description: "After" }, async () => await env.APP.call("hit", "after"));`,
+  return await step.do("after", { description: "After" }, async () => await ${hitCall(`"after"`)});`,
   { first: null, after: 1 }
 );
 
@@ -58,43 +64,16 @@ const napper = workflowFiles(
 const gated = workflowFiles(
   "gated",
   `  await step.do("first", { description: "First" }, async () => {
-    await env.APP.call("hit", "entered");
-    while ((await env.APP.call("hits", "gate")) === 0) {
+    await ${hitCall(`"entered"`)};
+    while ((await ${hitsCall(`"gate"`)}) === 0) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     return null;
   });
   await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("after", { description: "After" }, async () => await env.APP.call("hit", "after"));`,
+  return await step.do("after", { description: "After" }, async () => await ${hitCall(`"after"`)});`,
   { first: null, after: 1 }
 );
-
-/** How often the App counted `name`. */
-const hitsOf = async (
-  app: string,
-  userId: string,
-  name: string
-): Promise<number> => {
-  const hits = await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
-  return Number(hits);
-};
-
-/** Lets the gated run's first step end. */
-const openGate = async (app: string, userId: string): Promise<void> => {
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hit",
-    ["gate"]
-  );
-};
 
 /** The run's receipts, oldest first. */
 const receiptsOf = async (run: string) => {
@@ -195,7 +174,7 @@ describe(
         resumed: { kind: resumed.kind, state: resumed.state },
         kept: kept === deadline,
         status: await shown(builder, app, run),
-        after: await hitsOf(app, builder.userId, "after"),
+        after: await hitsOf(builder, app, "after"),
         receipts: await receiptStates(run),
         requested: await requested(run),
       }).toStrictEqual({
@@ -220,9 +199,7 @@ describe(
       const builder = await personApi("builder");
       const app = await appWith(builder, gated);
       const { id: run } = await builder.api.screens.startRun(app, "gated");
-      await until(
-        async () => (await hitsOf(app, builder.userId, "entered")) > 0
-      );
+      await until(async () => (await hitsOf(builder, app, "entered")) > 0);
 
       // Twice at once, then once more: one request.
       const [first, second] = await Promise.all([
@@ -233,7 +210,7 @@ describe(
       const resume = await outcome(
         builder.api.screens.control(app, run, "resume")
       );
-      await openGate(app, builder.userId);
+      await openGate(builder, app);
       await until(async () => (await shown(builder, app, run)) === "paused");
       await until(async () => {
         const receipts = await receiptsOf(run);
@@ -246,7 +223,7 @@ describe(
         resume,
         receipts: await receiptStates(run),
         requested: await requested(run),
-        after: await hitsOf(app, builder.userId, "after"),
+        after: await hitsOf(builder, app, "after"),
       }).toStrictEqual({
         first: "admitted",
         same: true,
@@ -261,14 +238,12 @@ describe(
       const builder = await personApi("builder");
       const app = await appWith(builder, gated);
       const { id: run } = await builder.api.screens.startRun(app, "gated");
-      await until(
-        async () => (await hitsOf(app, builder.userId, "entered")) > 0
-      );
+      await until(async () => (await hitsOf(builder, app, "entered")) > 0);
 
       const pause = await builder.api.screens.control(app, run, "pause");
       const cancel = await builder.api.screens.control(app, run, "cancel");
       // The step its activation had out ends, late: it starts nothing more.
-      await openGate(app, builder.userId);
+      await openGate(builder, app);
       await finished(run);
       const late = await outcome(
         builder.api.screens.control(app, run, "pause")
@@ -282,7 +257,7 @@ describe(
         again: { kind: again.kind, state: again.state },
         status: await shown(builder, app, run),
         receipts: await receiptStates(run),
-        after: await hitsOf(app, builder.userId, "after"),
+        after: await hitsOf(builder, app, "after"),
       }).toStrictEqual({
         pause: "admitted",
         cancel: "applied",
@@ -412,7 +387,7 @@ describe(
         paused: paused.state,
         resumed: { kind: resumed.kind, state: resumed.state },
         stillPaused,
-        after: await hitsOf(app, builder.userId, "after"),
+        after: await hitsOf(builder, app, "after"),
       }).toStrictEqual({
         paused: "applied",
         resumed: { kind: "resume", state: "applied" },

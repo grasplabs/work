@@ -24,8 +24,8 @@ import { engineOfTest } from "./run-host.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import {
-  server,
-  appWith,
+  v1Server,
+  v1AppWith,
   grantMail,
   invoiceMail,
   mailer,
@@ -215,8 +215,8 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
   it("run a call a step's review shows, and refuse and audit it from a step whose review doesn't", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const shown = await appWith(admin, mailer(""));
-    const hidden = await appWith(admin, mailer(""));
+    const shown = await v1AppWith(admin, mailer(""));
+    const hidden = await v1AppWith(admin, mailer(""));
     for (const app of [shown, hidden]) {
       // oxlint-disable-next-line no-await-in-loop -- one grant at a time
       await grantMail(idp, admin, app, mail.id);
@@ -258,7 +258,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": server, ...mailer("") },
+      { "app/server.ts": v1Server, ...mailer("") },
       "Mailer"
     );
     const reviewedKept = await admin.api.apps.versions.review(app, version);
@@ -318,7 +318,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": server, ...files },
+      { "app/server.ts": v1Server, ...files },
       "Guarded"
     );
     const { workflows } = await admin.api.apps.versions.review(app, version);
@@ -361,7 +361,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": server, ...files, "workflows/tidy.ts": source },
+      { "app/server.ts": v1Server, ...files, "workflows/tidy.ts": source },
       "Tidy"
     );
     const { workflows } = await admin.api.apps.versions.review(app, version);
@@ -427,7 +427,7 @@ queueMicrotask(() => {
       'import { workflow, z } from "@grasp-os/sdk/workflow";\n',
       `import { appServer, workflow, z } from "@grasp-os/sdk/workflow";\n${swaps}`
     );
-    const app = await appWith(admin, {
+    const app = await v1AppWith(admin, {
       ...files,
       "workflows/tidy.ts": source,
     });
@@ -494,7 +494,7 @@ queueMicrotask(() => {
 
   it("start no App method, nor an export, for a step attempt that no longer holds by the time the App would start it", async () => {
     const admin = await personApi("admin");
-    const app = await appWith(admin, {});
+    const app = await v1AppWith(admin, {});
     // An attempt the engine let go of (or never had): its run holds no
     // lease for it, as when it was let go during the App's reads.
     const fence = {
@@ -522,7 +522,7 @@ queueMicrotask(() => {
   it("send no connection call whose attempt the engine gave up on while it was authorized and signed", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await appWith(admin, {});
+    const app = await v1AppWith(admin, {});
     await grantMail(idp, admin, app, mail.id);
     let giveUp: (() => void) | undefined;
     // Core's database, giving the attempt up once the call is checked
@@ -768,7 +768,7 @@ queueMicrotask(() => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": server, ...mailer("") },
+      { "app/server.ts": v1Server, ...mailer("") },
       "Mailer"
     );
     // Its source reads as one step, `send`, calling MAIL.
@@ -830,7 +830,7 @@ queueMicrotask(() => {
     const admin = await personApi("admin");
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const files: Record<string, string> = {
-      "app/server.ts": server,
+      "app/server.ts": v1Server,
       ...mailer(""),
     };
     const { version: first } = await admin.api.apps.files.commit(
@@ -922,7 +922,10 @@ queueMicrotask(() => {
       "import { workflow, z }",
       "import { appServer, workflow, z }"
     );
-    const app = await appWith(admin, { ...files, "workflows/tidy.ts": source });
+    const app = await v1AppWith(admin, {
+      ...files,
+      "workflows/tidy.ts": source,
+    });
     // Its review shows `tidy` alone, as a describer that missed `evil`
     // would have kept it.
     await describedAs(app, {

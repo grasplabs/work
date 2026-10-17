@@ -10,7 +10,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { queueLiveMs } from "../src/workflows/admission.ts";
 import { admitAttempt } from "../src/workflows/quotas.ts";
@@ -33,7 +32,13 @@ import {
   stopped,
 } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
-import { appWith, invoiceMail, workflowFiles } from "./workflow-apps.ts";
+import {
+  appWith,
+  hitCall,
+  hitsOf,
+  invoiceMail,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // Fair admission of the client's workflow attempts (admission.ts): how
 // many run at once, in all, for one person and of one App, each held to
@@ -265,16 +270,6 @@ const failedWith = async (run: string): Promise<unknown> => {
       action === "workflow.run.failed" && target?.id === run
   )?.detail.error;
 };
-
-/** How many times the App's server counted `name` (its `hits`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
 
 /** The places `run` holds in the client's queue now. */
 const placesOf = async (run: string): Promise<number> =>
@@ -1246,7 +1241,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       ...workflowFiles(
         "counted",
         `  await step.do("work", { description: "Work" }, async () => {
-    await env.APP.call("hit", "work");
+    await ${hitCall(`"work"`)};
     return 1;
   });
   return 1;`,
@@ -1275,7 +1270,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         await finished(run.id);
         return {
           failed: await failedWith(run.id),
-          hits: await hitsOf(app, builder.userId, "work"),
+          hits: await hitsOf(builder, app, "work"),
         };
       }
     );
@@ -1550,7 +1545,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       ...workflowFiles(
         "counted",
         `  await step.do("work", { description: "Work" }, async () => {
-    await env.APP.call("hit", "work");
+    await ${hitCall(`"work"`)};
     return 1;
   });
   return 1;`,
@@ -1576,7 +1571,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       await finished(run.id);
       return {
         failed: await failedWith(run.id),
-        hits: await hitsOf(app, builder.userId, "work"),
+        hits: await hitsOf(builder, app, "work"),
       };
     });
 
@@ -1591,7 +1586,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       ...workflowFiles(
         "counted",
         `  await step.do("work", { description: "Work" }, async () => {
-    await env.APP.call("hit", "work");
+    await ${hitCall(`"work"`)};
     return 1;
   });
   return 1;`,
@@ -1623,7 +1618,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         return {
           failed: (await failedWith(run.id)) ?? null,
           status: await liveStatus(run.id),
-          hits: await hitsOf(app, builder.userId, "work"),
+          hits: await hitsOf(builder, app, "work"),
         };
       }
     );

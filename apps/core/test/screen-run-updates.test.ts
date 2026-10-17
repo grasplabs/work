@@ -10,7 +10,7 @@ import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appCall, appWith, workflowFiles } from "./workflow-apps.ts";
 
 // Run status, live: a screen follows its App's runs of a workflow
 // (`screens.watchRuns`), and core tells it each time one starts, waits for
@@ -180,13 +180,13 @@ describe("run status on screens", { timeout: 60_000 }, () => {
 
   it("tells a screen when a run fails", async () => {
     const builder = await personApi("builder");
-    // Its one step calls a method the App doesn't have, which no retry
+    // Its one step calls a function the App doesn't have, which no retry
     // fixes; its test mocks the step, so it passes activation.
     const app = await appWith(
       builder,
       workflowFiles(
         "failing",
-        `  return await step.do("work", { description: "Work", retries: { limit: 0 } }, async () => await env.APP.call("missing"));`,
+        `  return await step.do("work", { description: "Work", retries: { limit: 0 } }, async () => await ${appCall("counter.missing", "query", "{}")});`,
         { work: 1 }
       )
     );
