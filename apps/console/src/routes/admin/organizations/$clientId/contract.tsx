@@ -26,12 +26,7 @@ import { CheckIcon, ChevronDownIcon, FileTextIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useOrganization } from "../../../../admin/organization.tsx";
-import {
-  contractWords,
-  euro,
-  euros,
-  formatDate,
-} from "../../../../admin/words.ts";
+import { contractWords, euros, formatDate } from "../../../../admin/words.ts";
 
 /** An invoice's amount, always to the cent. */
 const cents = new Intl.NumberFormat("en", {
@@ -300,10 +295,13 @@ const Terms = ({ view }: { view: AdminView }) => {
   );
 };
 
-/** How many people may come in and how much AI use the fee covers, beside what is taken of each. */
+/**
+ * How many people may come in, beside the seats taken, and how much AI use
+ * the fee covers. Not what was used: where core hasn't counted it, the
+ * model only works it out.
+ */
 const Gives = ({ view }: { view: AdminView }) => {
   const { contract, seats } = view;
-  const spent = euro(view.usage.thisMonth.spend);
   const draft = contract.status === "draft";
   return (
     <Part
@@ -315,7 +313,7 @@ const Gives = ({ view }: { view: AdminView }) => {
           {`${draft ? "None agreed yet" : contract.seats}; ${seats.used} ${plural(seats.used, "is", "are")} taken.`}
         </Line>
         <Line label="AI use a month">
-          {`${draft ? "None agreed yet" : euros(contract.aiIncluded)}; ${spent} was used this month.`}
+          {draft ? "None agreed yet" : euros(contract.aiIncluded)}
         </Line>
       </dl>
     </Part>
@@ -349,12 +347,21 @@ const Stands = ({ agreement }: { agreement: AgreementView }) => {
 };
 
 /** The agreements that have to be in place before anyone is invited, and who else handles the data. */
-const Agreements = ({ view }: { view: AdminView }) => {
+const Agreements = ({
+  view,
+  recorded,
+}: {
+  view: AdminView;
+  recorded: boolean;
+}) => {
   const open = view.agreements.filter(
     (agreement) => agreement.state === "open" || agreement.state === "waiting"
   ).length;
   let description = "All three are in place.";
-  if (view.told) {
+  if (!recorded) {
+    description =
+      "Nothing is recorded of them yet. Without all three, nobody is invited.";
+  } else if (view.told) {
     description = "The team is told, so these stay as they were agreed.";
   } else if (open > 0) {
     description = `Without all three, nobody is invited. ${open} ${plural(open, "is", "are")} still open.`;
@@ -380,7 +387,13 @@ const Agreements = ({ view }: { view: AdminView }) => {
             >
               <span>{agreementWords[agreement.what]}</span>
               <span className="text-xs">
-                <Stands agreement={agreement} />
+                {recorded ? (
+                  <Stands agreement={agreement} />
+                ) : (
+                  <span className="text-status-attention">
+                    Not recorded yet
+                  </span>
+                )}
               </span>
               {paper.length > 0 ? (
                 <span className="text-muted-foreground truncate text-xs">
@@ -476,13 +489,15 @@ const Invoices = ({ view }: { view: AdminView }) => (
 );
 
 const Contract = () => {
-  const { view } = useOrganization();
+  const { admin, view } = useOrganization();
+  // Until staff say where the agreements stand, core holds none, and the model's "no works council" is only its default.
+  const recorded = admin.snapshot.agreements !== null;
   return (
     <>
       <Summary view={view} />
       <Terms view={view} />
       <Gives view={view} />
-      <Agreements view={view} />
+      <Agreements recorded={recorded} view={view} />
       <Invoices view={view} />
     </>
   );

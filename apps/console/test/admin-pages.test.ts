@@ -502,9 +502,13 @@ describe("the admin's frame", () => {
           "Once Rooms is connected, this fills in by itself."
         ),
       ],
-      gives: partOf("What it gives the company").includes(
-        "None agreed yet; 2 are taken."
-      ),
+      gives: [
+        partOf("What it gives the company").includes(
+          "None agreed yet; 2 are taken."
+        ),
+        // What the model works out of AI use isn't what was used: the AI use section says what it is.
+        partOf("What it gives the company").includes("was used this month"),
+      ],
       agreements: {
         open: partOf("Agreed before the first interview").includes(
           "Without all three, nobody is invited. 2 are still open."
@@ -534,7 +538,7 @@ describe("the admin's frame", () => {
         fee: false,
       },
       terms: [true, true],
-      gives: true,
+      gives: [true, false],
       agreements: {
         open: true,
         processing: true,
@@ -544,6 +548,26 @@ describe("the admin's frame", () => {
       },
       invoices: true,
     });
+  });
+
+  it("says the agreements aren't recorded yet while core holds nothing of them, instead of reading that as no works council", async () => {
+    const acme = await liveClient();
+    acme.account.admin = emptyAdminSnapshot("Acme");
+
+    const { html } = await page(
+      `/admin/organizations/${acme.clientId}/contract`
+    );
+    const at = html.indexOf(">Agreed before the first interview</h2>");
+    const part =
+      at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));
+
+    expect({
+      description: part.includes(
+        "Nothing is recorded of them yet. Without all three, nobody is invited."
+      ),
+      notRecorded: part.split("Not recorded yet").length - 1,
+      noCouncil: part.includes("No works council"),
+    }).toStrictEqual({ description: true, notRecorded: 3, noCouncil: false });
   });
 
   it("shows an organization whose core didn't answer by its name and why, with no sections", async () => {
