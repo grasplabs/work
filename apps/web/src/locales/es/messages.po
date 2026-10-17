@@ -1323,6 +1323,7 @@ msgctxt "log filter: what"
 msgid "Anything"
 msgstr "Todo"
 
+#: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
 msgid "App"
 msgstr "Aplicación"
@@ -7149,6 +7150,7 @@ msgstr "Calculó cómo se usa el conocimiento"
 msgid "Worked out what could be improved"
 msgstr "Calculó lo que podría mejorarse"
 
+#: src/dashboard/dependency-requests.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx

@@ -49,6 +49,7 @@ import {
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
 import type { Admitted } from "../dependencies/requests.ts";
+import { ofSubject } from "../dependencies/subjects.ts";
 import { windowedAccessEnd } from "../screen-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
@@ -62,7 +63,10 @@ import { verifiedTarball } from "./tarballs.ts";
 // the lock's tarballs, checked against their integrity, bundled with
 // esbuild-wasm in the package builder's isolate (no network, no bindings,
 // nothing of the packages run), into an artifact core checks byte for
-// byte before keeping it. What could go wrong, and what stops it:
+// byte before keeping it. Only an App's graph builds here: a workflow's
+// packages (`computation`) are approved and locked, but nothing builds
+// them for a compute module yet, so every lock and lease below is an
+// App's. What could go wrong, and what stops it:
 //
 // - Building what nobody approved, or more of it: every build asks
 //   `admitDependencies` first, for this App, graph and target under the
@@ -222,7 +226,7 @@ export const lockOf = async (
     .from(dependencyLocks)
     .where(
       and(
-        eq(dependencyLocks.appId, app),
+        ofSubject(dependencyLocks, { type: "app", id: app }),
         eq(dependencyLocks.graphHash, graphHash)
       )
     )
@@ -471,7 +475,7 @@ const pin = async (
         .set({ lock: stored })
         .where(
           and(
-            eq(dependencyLocks.appId, app),
+            ofSubject(dependencyLocks, { type: "app", id: app }),
             eq(dependencyLocks.graphHash, graphHash),
             eq(dependencyLocks.lock, current.stored),
             stillAdmitted(admitted)
@@ -497,7 +501,7 @@ const pin = async (
       db
         .insert(packageCleanups)
         .select(
-          sql`SELECT value, 'build', ${Date.now()} FROM json_each(${JSON.stringify(dropped)}) WHERE EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${dependencyLocks.appId} = ${app} AND ${dependencyLocks.graphHash} = ${graphHash} AND ${dependencyLocks.lock} = ${stored})`
+          sql`SELECT value, 'build', ${Date.now()} FROM json_each(${JSON.stringify(dropped)}) WHERE EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${ofSubject(dependencyLocks, { type: "app", id: app })} AND ${dependencyLocks.graphHash} = ${graphHash} AND ${dependencyLocks.lock} = ${stored})`
         )
         .onConflictDoUpdate({
           target: packageCleanups.key,
@@ -558,7 +562,7 @@ const touchPin = async (
       .set({ lock: stored })
       .where(
         and(
-          eq(dependencyLocks.appId, app),
+          ofSubject(dependencyLocks, { type: "app", id: app }),
           eq(dependencyLocks.graphHash, graphHash),
           eq(dependencyLocks.lock, read.stored)
         )
@@ -676,7 +680,11 @@ const addressOf = async (
     return null;
   }
   const now = Date.now();
-  await holdLockFor(env, { app, graphHash, until: windowedAccessEnd(now) });
+  await holdLockFor(env, {
+    subject: { type: "app", id: app },
+    graphHash,
+    until: windowedAccessEnd(now),
+  });
   return await packageArtifactAddress(env, { app, graphHash, hash }, now);
 };
 
@@ -700,7 +708,7 @@ interface Leased {
 /** That `lease` is the row of `leased`. */
 const leaseRow = ({ app, graphHash, target }: Leased): SQL | undefined =>
   and(
-    eq(dependencyBuildLeases.appId, app),
+    ofSubject(dependencyBuildLeases, { type: "app", id: app }),
     eq(dependencyBuildLeases.graphHash, graphHash),
     eq(dependencyBuildLeases.target, target)
   );
@@ -729,7 +737,8 @@ const takeLease = async (
   const taken = await drizzle(env.DB)
     .insert(dependencyBuildLeases)
     .values({
-      appId: leased.app,
+      subjectType: "app",
+      subjectId: leased.app,
       graphHash: leased.graphHash,
       target: leased.target,
       holder,
@@ -737,7 +746,8 @@ const takeLease = async (
     })
     .onConflictDoUpdate({
       target: [
-        dependencyBuildLeases.appId,
+        dependencyBuildLeases.subjectType,
+        dependencyBuildLeases.subjectId,
         dependencyBuildLeases.graphHash,
         dependencyBuildLeases.target,
       ],
