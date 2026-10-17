@@ -109,6 +109,27 @@ describe("the order of the list", () => {
   });
 });
 
+describe("the rollout of a build", () => {
+  it("reaches the companies ring by ring, whatever order they are listed in", () => {
+    const rolling = build({
+      stage: "rollout",
+      work: {
+        session: "s",
+        branch: "b",
+        minutes: 1,
+        cost: 1,
+        release: "r004812-3f9c2ab",
+        rollout: [
+          { org: "b", ring: 2, status: "pending", live: null },
+          { org: "a", ring: 0, status: "pending", live: null },
+        ],
+      },
+    });
+    expect(nextRing(rolling)).toBe(0);
+    expect(needsGrasp(rolling)).toBeTruthy();
+  });
+});
+
 describe("the console’s rollout", () => {
   const rollout: Rollout = {
     id: "ro-418",

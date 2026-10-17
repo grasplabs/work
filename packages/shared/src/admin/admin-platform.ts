@@ -215,7 +215,7 @@ export const behindOf = (
   releases: readonly Release[]
 ): number => {
   const runs = releaseOf(platform);
-  if (runs === null) {
+  if (runs === null || runs === "") {
     return 0;
   }
   const newest = releases.toSorted(

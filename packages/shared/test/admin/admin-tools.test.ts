@@ -72,7 +72,14 @@ describe("the admin’s tools", () => {
           : {};
       expect(call(tool.name, input).failed).toBeUndefined();
     }
-    expect(call("delete_organization").failed).toBeTruthy();
+    for (const name of [
+      "delete_organization",
+      "toString",
+      "__proto__",
+      "constructor",
+    ]) {
+      expect(call(name).failed).toBeTruthy();
+    }
   });
 
   it("lists one phase when asked, and refuses a phase there is not", () => {
