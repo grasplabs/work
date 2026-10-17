@@ -416,9 +416,6 @@ describe("the admin's frame", () => {
           columnOf(contract.html, acme.name),
           "Overview"
         ).includes('aria-current="page"'),
-        toCome: contract.html.includes(
-          "This section isn’t in the console yet."
-        ),
       },
       usage: [
         usage.html.includes("AI use</h1>"),
@@ -436,10 +433,116 @@ describe("the admin's frame", () => {
         source: true,
         current: true,
         overviewCurrent: false,
-        toCome: true,
       },
       usage: [true, true],
       setup: [true, true],
+    });
+  });
+
+  it("shows an organization's contract as still being written, its agreements as core has them, and no invoices", async () => {
+    const acme = await liveClient();
+    const empty = emptyAdminSnapshot("Acme");
+    acme.account.admin = {
+      ...empty,
+      agreements: {
+        processing: true,
+        assessment: false,
+        council: "waiting",
+        processingOn: "2026-09-02",
+      },
+      members: [
+        {
+          userId: "user-anna",
+          name: "Anna",
+          email: "anna@acme.test",
+          role: "admin",
+          joinedAt: "2026-09-03T09:00:00.000Z",
+        },
+        {
+          userId: "user-bram",
+          name: "Bram",
+          email: "bram@acme.test",
+          role: "user",
+          joinedAt: "2026-09-04T09:00:00.000Z",
+        },
+      ],
+    };
+
+    const { status, html } = await page(
+      `/admin/organizations/${acme.clientId}/contract`
+    );
+    /** The part of the page titled `title`, up to the next part. */
+    const partOf = (title: string): string => {
+      const at = html.indexOf(`>${title}</h2>`);
+      return at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));
+    };
+    /** The agreement named `name`, up to the next one. */
+    const agreementOf = (name: string): string => {
+      const part = partOf("Agreed before the first interview");
+      const at = part.indexOf(name);
+      return at === -1 ? "" : part.slice(at, part.indexOf("</li>", at));
+    };
+
+    expect({
+      status,
+      toCome: html.includes("This section isn’t in the console yet."),
+      summary: {
+        contract: html.includes("Being written"),
+        notSent: html.includes("not sent yet"),
+        seats: html.includes("taken; the contract gives none yet"),
+        // A draft has no agreed term or fee: the model's placeholders aren't shown.
+        runs: html.includes("Still runs"),
+        fee: html.includes("Fee a month"),
+      },
+      terms: [
+        partOf("The terms").includes(
+          "Nothing is agreed yet: the contract is still being written."
+        ),
+        partOf("The terms").includes(
+          "Once Rooms is connected, this fills in by itself."
+        ),
+      ],
+      gives: partOf("What it gives the company").includes(
+        "None agreed yet; 2 are taken."
+      ),
+      agreements: {
+        open: partOf("Agreed before the first interview").includes(
+          "Without all three, nobody is invited. 2 are still open."
+        ),
+        processing: agreementOf("Agreement on handling data").includes(
+          "In place since 2 Sep 2026"
+        ),
+        assessment: agreementOf(
+          "The company’s look at the risks to its people"
+        ).includes("Not signed yet"),
+        council: agreementOf("Works council").includes("Still deciding"),
+        others: partOf("Agreed before the first interview").includes(
+          "Who else handles the data"
+        ),
+      },
+      invoices: partOf("Invoices").includes(
+        "None yet. There is no signed contract."
+      ),
+    }).toStrictEqual({
+      status: 200,
+      toCome: false,
+      summary: {
+        contract: true,
+        notSent: true,
+        seats: true,
+        runs: false,
+        fee: false,
+      },
+      terms: [true, true],
+      gives: true,
+      agreements: {
+        open: true,
+        processing: true,
+        assessment: true,
+        council: true,
+        others: true,
+      },
+      invoices: true,
     });
   });
 

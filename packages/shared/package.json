@@ -29,6 +29,7 @@
     "./admin/onboarding-admin-record": "./src/admin/onboarding-admin-record.ts",
     "./admin/org-adapter": "./src/admin/org-adapter.ts",
     "./admin/org-record": "./src/admin/org-record.ts",
+    "./admin/present": "./src/admin/present.ts",
     "./admin/trail": "./src/admin/trail.ts",
     "./agent": "./src/agent.ts",
     "./app-file-limits": "./src/app-file-limits.ts",
