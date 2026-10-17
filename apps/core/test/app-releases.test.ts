@@ -842,7 +842,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a line the type check is told to ignore, in a block comment",
-      "/**\n * @ts-ignore\n */\nexport const title = (): string => document.title;\n",
+      "/***@ts-ignore*/\nexport const title = (): string => document.title;\n",
     ],
     [
       "a file the type check is told to skip, in another case",
