@@ -1,7 +1,7 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import { storeIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, StoreId, WorkflowId } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
@@ -49,6 +49,13 @@ import type {
   RunOrigin,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
+import {
+  callWorkflowQuery,
+  isWorkflowQueryPath,
+  readWorkflowWindow,
+  workflowQueryOf,
+} from "./workflow-reference-queries.ts";
+import type { ResolvedWorkflowQuery } from "./workflow-reference-queries.ts";
 import { appWorkflowStarts } from "./workflow-start-intents.ts";
 import type { CallingAgent } from "./workflow-start-intents.ts";
 
@@ -612,6 +619,94 @@ const callAllowed = (
   return call;
 };
 
+/**
+ * What `reference` names in `release`: a public function's path, or a
+ * workflow reference's query, which is core's to answer, never the App's
+ * (workflow-reference-queries.ts). No App function shadows one: the SDK
+ * keeps the top-level `workflows` segment for the platform, so a release
+ * that registers a function there never seals.
+ */
+const referenceIn = async (
+  release: Release,
+  reference: FunctionRequest["reference"]
+): Promise<{
+  path: string;
+  workflowQuery: ResolvedWorkflowQuery | undefined;
+}> =>
+  isWorkflowQueryPath(reference.contractId)
+    ? {
+        path: reference.contractId,
+        workflowQuery: await workflowQueryOf(release, reference),
+      }
+    : { path: publicOperationOf(release, reference), workflowQuery: undefined };
+
+/** A workflow reference's query, answered as `callFunction` answers a call. */
+const answeredWorkflowQuery = async (
+  env: Env,
+  {
+    by,
+    caller,
+    query,
+    call,
+    release,
+    refused,
+    stillAllowed,
+    chargeWindow,
+    deadline,
+  }: {
+    by: Pick<Identity, "userId" | "role">;
+    deadline: number;
+    caller: { app: string; userId: string };
+    query: ResolvedWorkflowQuery;
+    call: FunctionRequest;
+    release: Release;
+    refused: (error: unknown) => FunctionAnswer;
+    stillAllowed: FunctionCallOptions["stillAllowed"];
+    chargeWindow: FunctionCallOptions["chargeWindow"];
+  }
+): Promise<FunctionAnswer> => {
+  try {
+    // The gate every call's invocation passes before it reads, as late as
+    // it can be: the caller's own check (an agent's permission, say), the
+    // release not revoked, and the person's role in the App, read again
+    // now, so a revocation or a role lost since the call began reads
+    // nothing.
+    await stillAllowed?.();
+    await requireNotRevoked(
+      env,
+      appIdSchema.parse(caller.app),
+      release.manifest.resourceVersion
+    );
+    await operationRoles(env, by, appIdSchema.parse(caller.app));
+    // The call's deadline, as its invocation would hold it: past it,
+    // nothing is read.
+    if (Date.now() >= deadline) {
+      throw operationErrors.create("operation.deadline_exceeded");
+    }
+    const result =
+      call.window === undefined
+        ? await callWorkflowQuery(env, caller, query, call.input)
+        : await readWorkflowWindow(env, caller, query, call.input, {
+            extent: call.window.extent,
+            charge:
+              chargeWindow ??
+              (async () => {
+                await Promise.reject(
+                  operationErrors.create("contract.invalid_request")
+                );
+              }),
+          });
+    return {
+      result,
+      provenance: null,
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
+
 /** `callAppFunction`, with all of its options. */
 const callFunction = async (
   env: Env,
@@ -651,18 +746,34 @@ const callFunction = async (
   }
   let release: Release;
   let path: string;
+  let appId: string;
+  let workflowQuery: ResolvedWorkflowQuery | undefined;
   try {
     // Anyone without a role in the App learns nothing of it.
     const found = await appFor(env, by, app, "user");
     if (found.currentVersion === null) {
       throw versionErrors.create("version.not_sealed");
     }
+    appId = found.id;
     // The release of the App's current version: its manifest names the
     // App and the version the reference must name.
     release = await loadRelease(env, found.id, found.currentVersion);
-    path = publicOperationOf(release, call.reference);
+    ({ path, workflowQuery } = await referenceIn(release, call.reference));
   } catch (error) {
     return refused(error);
+  }
+  if (workflowQuery !== undefined) {
+    return await answeredWorkflowQuery(env, {
+      by,
+      caller: { app: appId, userId: by.userId },
+      query: workflowQuery,
+      call,
+      release,
+      refused,
+      stillAllowed,
+      chargeWindow,
+      deadline,
+    });
   }
   try {
     const invocation = await invocationFor(env, release, {
