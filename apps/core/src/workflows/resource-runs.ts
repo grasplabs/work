@@ -53,6 +53,7 @@ import {
 } from "./resource-host.ts";
 import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
+import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
@@ -276,6 +277,9 @@ export const projectResourceRun = async (
         ]
       : []),
   ]);
+  if (status !== row.status) {
+    await tellQueryFollowers(env, id);
+  }
 };
 
 /** Sends `row`'s start to the engine; throws when the engine didn't take it. */
@@ -411,6 +415,7 @@ const startAbandoned = async (
     }),
     owedTermination(db, row.id, "failed", now),
   ]);
+  await tellQueryFollowers(env, row.id);
 };
 
 /**
@@ -467,6 +472,7 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
           eq(workflowResourceRuns.status, "starting")
         )
       );
+    await tellQueryFollowers(env, row.id);
     return;
   }
   if (row.startAttempts >= maxStartAttempts || pastStarting) {
@@ -954,6 +960,9 @@ const cancelStarting = async (
     outboxedIfChanged(db, terminatedEntry(by, row, "cancelled")),
     owedTermination(db, row.id, "cancelled", now),
   ]);
+  if (cancelled.length > 0) {
+    await tellQueryFollowers(env, row.id);
+  }
   return cancelled.length > 0;
 };
 
