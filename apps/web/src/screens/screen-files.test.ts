@@ -373,6 +373,29 @@ describe("a screen's file port", () => {
     }
   });
 
+  it("counts activation for a download only while the frame has the focus", () => {
+    const frame = {};
+    const page: { active: boolean; focused: unknown } = {
+      active: false,
+      focused: {},
+    };
+    const gesture = frameGesture(frame, {
+      events: new EventTarget(),
+      active: () => page.active,
+      focused: () => page.focused,
+      now: () => 0,
+    });
+    try {
+      // Activation from no input of the page's own: only focus decides.
+      page.active = true;
+      const elsewhere = gesture.take();
+      page.focused = frame;
+      expect([elsewhere, gesture.take()]).toStrictEqual([false, true]);
+    } finally {
+      gesture.close();
+    }
+  });
+
   it("counts the click that opened a frame for none of its downloads, however soon the person clicks on in the frame", () => {
     const frame = {};
     const page = { now: 0 };
