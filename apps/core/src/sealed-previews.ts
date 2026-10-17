@@ -542,7 +542,11 @@ export class SealedPreviews {
       // Settled, it keeps no snapshot: its readers get its result next.
       live.progress = null;
       wake(live);
-      this.#kept(running, name, live);
+      // A dropped preview keeps no receipt: nothing can attach to it, and
+      // it would take the place of a current preview's.
+      if (this.#running.get(nameOf(chatId, app)) === running) {
+        this.#kept(running, name, live);
+      }
     };
     this.#ctx.waitUntil(run());
     return readerOf(live);

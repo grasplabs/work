@@ -700,6 +700,66 @@ describe(
       });
     });
 
+    it("keeps no receipt of a dropped preview's runs, which would push out a current one's", async () => {
+      const { builder, app, chatId, revision } = await setUp();
+      const kept = { chatId, app, revision };
+      const other = await chatWithDraft(builder, app, {
+        "operations/notes.ts": notesFiles("other")["operations/notes.ts"] ?? "",
+      });
+      const dropped = { chatId: other.chatId, app, revision: other.revision };
+      // Five receipts of one chat's preview.
+      const requests: string[] = [];
+      for (let at = 0; at < 5; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one run after the other
+        const request = await streamRequest(
+          builder,
+          kept,
+          "notes.draft",
+          { topic: `kept ${String(at)}` },
+          crypto.randomUUID()
+        );
+        requests.push(request);
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const followed = await follow(builder, kept, "stream", request);
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await followed.ended;
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await followed.subscription.release();
+      }
+      // The other chat's preview runs as many as the object runs at once,
+      // then its draft changes under them.
+      const running = [];
+      for (let at = 0; at < streamMaxRunning; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one start after the other
+        const request = await streamRequest(
+          builder,
+          dropped,
+          "notes.slow",
+          { title: `dropped ${String(at)}` },
+          crypto.randomUUID()
+        );
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        running.push(await follow(builder, dropped, "stream", request));
+      }
+      await other.write(
+        {
+          "operations/notes.ts":
+            notesFiles("changed")["operations/notes.ts"] ?? "",
+        },
+        other.revision
+      );
+      for (const followed of running) {
+        // oxlint-disable-next-line no-await-in-loop -- each ends
+        await followed.ended;
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await followed.subscription.release();
+      }
+      // Their runs settle once stopped, keeping nothing.
+      await scheduler.wait(2000);
+      const reread = await follow(builder, kept, "attach", requests[0] ?? "");
+      await expect(reread.ended).resolves.toBe("ok");
+    });
+
     it("reads again only what runs: an attach or a cancel of a preview not running seals nothing", async () => {
       const { builder, app, chatId, revision } = await setUp();
       const seat = { chatId, app, revision };
