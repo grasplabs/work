@@ -26,7 +26,7 @@ import {
   Link,
   useNavigate,
 } from "@tanstack/react-router";
-import { ArrowRightIcon } from "lucide-react";
+import { ArrowRightIcon, PlusIcon } from "lucide-react";
 
 import { AdminPage } from "../../admin/page.tsx";
 import { KnowledgeDots, StageBar, Tile } from "../../admin/parts.tsx";
@@ -413,9 +413,9 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
  * works it out of what its core answered (src/admin/views.ts). One whose
  * core didn't answer is listed with why, and nothing else.
  *
- * Left out, as the console has no source for them yet: adding an
- * organization, exporting them, and the prototype's line on which are
- * past the milestone and still closed.
+ * Left out, as the console has no source for them yet: exporting them,
+ * and the prototype's line on which are past the milestone and still
+ * closed.
  */
 const Overview = () => {
   const navigate = useNavigate();
@@ -432,6 +432,15 @@ const Overview = () => {
         );
   return (
     <AdminPage
+      action={
+        <Button
+          nativeButton={false}
+          render={<Link to="/admin/new-organization" />}
+        >
+          <PlusIcon data-icon="inline-start" />
+          New organization
+        </Button>
+      }
       description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
       overview
       title="Organizations"

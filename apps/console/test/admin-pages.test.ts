@@ -304,6 +304,72 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("offers to add an organization from the overview: by hand, with Attio and Rooms shown but not yet to start from, on the newest release", async () => {
+    await publishRelease({ notes: "feat(core): older" });
+    const newest = await publishRelease({ notes: "feat(core): newest" });
+    await importReleases(env.RELEASES, db);
+
+    const overview = await page("/admin");
+    const { status, html } = await page("/admin/new-organization");
+    const main = html.slice(html.indexOf("<main"));
+    /** The choice `label` makes, up to the next one. */
+    const choiceOf = (label: string): string => {
+      const at = main.indexOf(label);
+      const start = main.lastIndexOf("<label", at);
+      return main.slice(start, main.indexOf("</label>", at));
+    };
+    const [hand, attio, rooms] = [
+      "By hand",
+      "A deal won in Attio",
+      "A proposal signed in Rooms",
+    ].map((label) => {
+      const choice = choiceOf(label);
+      return {
+        chosen: choice.includes('aria-checked="true"'),
+        disabled: choice.includes('aria-disabled="true"'),
+      };
+    });
+    const selected = main.slice(
+      main.lastIndexOf("<option", main.indexOf(" selected")),
+      main.indexOf("</option>", main.indexOf(" selected"))
+    );
+
+    expect({
+      link: overview.html.includes('href="/admin/new-organization"'),
+      status,
+      title: main.includes("New organization</h1>"),
+      choices: { hand, attio, rooms },
+      why: [
+        "Not yet: the console isn&#x27;t connected to Attio.",
+        "Not yet: the console isn&#x27;t connected to Rooms.",
+      ].map((text) => main.includes(text)),
+      fields: [
+        "name",
+        "clientId",
+        "admins",
+        "domains",
+        "entraTenantId",
+        "googleHostedDomain",
+        "releaseId",
+        "ring",
+        "accountId",
+      ].every((field) => main.includes(`name="${field}"`)),
+      newest: selected.includes(`value="${newest.id}"`),
+    }).toStrictEqual({
+      link: true,
+      status: 200,
+      title: true,
+      choices: {
+        hand: { chosen: true, disabled: false },
+        attio: { chosen: false, disabled: true },
+        rooms: { chosen: false, disabled: true },
+      },
+      why: [true, true],
+      fields: true,
+      newest: true,
+    });
+  });
+
   it("gives a request Access doesn't vouch for nothing, asking no core", async () => {
     const acme = await liveClient();
     acme.account.admin = emptyAdminSnapshot("Acme");
@@ -313,6 +379,7 @@ describe("the admin's frame", () => {
         "/admin",
         "/admin?phase=ready",
         "/admin/platform",
+        "/admin/new-organization",
         `/admin/organizations/${acme.clientId}`,
       ].map(async (path) => {
         const response = await exports.default.fetch(
@@ -326,7 +393,7 @@ describe("the admin's frame", () => {
       answers,
       readers: acme.account.adminReaders,
     }).toStrictEqual({
-      answers: [403, 403, 403, 403].map((status) => ({
+      answers: [403, 403, 403, 403, 403].map((status) => ({
         status,
         body: "Forbidden",
       })),
