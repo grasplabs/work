@@ -96,6 +96,7 @@ const kindLabels: Readonly<
   store: msg`Store`,
   statistics: msg`Statistics`,
   guests: msg`Guests`,
+  app: msg`Another domain`,
 };
 
 const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
@@ -202,6 +203,10 @@ const BoundTo = ({
   if (target.kind === "guests") {
     const { permissionId: permission } = target;
     return <Trans>Permission {permission}</Trans>;
+  }
+  if (target.kind === "app") {
+    const { appId: domain } = target;
+    return <Trans>Domain {domain}</Trans>;
   }
   if (target.kind === "statistics") {
     const { permissionId: permission } = target;
@@ -325,6 +330,12 @@ const NothingToChoose = ({
     guests: (
       <Trans>
         The domain has no permission to invite guests. Grant one first.
+      </Trans>
+    ),
+    app: (
+      <Trans>
+        No other domain serves every function it declares, public and exactly as
+        declared.
       </Trans>
     ),
   };
@@ -591,6 +602,15 @@ const BindForm = ({
           {choices.permissions.map(({ permissionId: permission }) => (
             <NativeSelectOption key={permission} value={permission}>
               {t`Permission ${permission}`}
+            </NativeSelectOption>
+          ))}
+        </Choice>
+      ) : null}
+      {choices.kind === "app" ? (
+        <Choice label={t`Domain`} onChange={setPicked} value={picked}>
+          {choices.apps.map(({ appId, name }) => (
+            <NativeSelectOption key={appId} value={appId}>
+              {name}
             </NativeSelectOption>
           ))}
         </Choice>

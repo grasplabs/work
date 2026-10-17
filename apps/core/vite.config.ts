@@ -118,6 +118,7 @@ export const screenTests = [
   "test/rpc-targets.test.ts",
   "test/statistics.test.ts",
   "test/guests.test.ts",
+  "test/app-function-calls.test.ts",
 ];
 
 /** Core's Worker test setup, shared by each of core's test projects. */

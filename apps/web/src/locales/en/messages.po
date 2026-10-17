@@ -1267,6 +1267,10 @@ msgstr "An app is what this domain's team works in, standing on its workflows an
 msgid "An app nobody approved was refused the domain's data"
 msgstr "An app nobody approved was refused the domain's data"
 
+#: src/engines/resource-bindings.tsx
+msgid "Another domain"
+msgstr "Another domain"
+
 #: src/activity/pending.tsx
 msgid "Another domain already keeps {type} records here: this domain's won't apply."
 msgstr "Another domain already keeps {type} records here: this domain's won't apply."
@@ -2369,6 +2373,7 @@ msgid "Doesn't build now"
 msgstr "Doesn't build now"
 
 #: src/dashboard/runs-widget.tsx
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -2382,6 +2387,7 @@ msgid "domain {app}, version {version}"
 msgstr "domain {app}, version {version}"
 
 #: src/connections/connection-list.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Domain {domain}"
 msgstr "Domain {domain}"
 
@@ -3812,6 +3818,10 @@ msgstr "No model is set up for this deployment yet."
 #: src/workflows/triggers.tsx
 msgid "No next run"
 msgstr "No next run"
+
+#: src/engines/resource-bindings.tsx
+msgid "No other domain serves every function it declares, public and exactly as declared."
+msgstr "No other domain serves every function it declares, public and exactly as declared."
 
 #: src/engines/package-approvals.tsx
 msgid "No packages are approved for this domain."

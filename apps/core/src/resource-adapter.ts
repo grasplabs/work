@@ -5,14 +5,18 @@ import type { ConnectorContract } from "@grasp-os/shared/connect";
 import type { AppId, ConnectionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Provenance } from "@grasp-os/shared/knowledge";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type {
   BindingTarget,
   ModelBindingBudget,
 } from "@grasp-os/shared/resource-bindings";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { ResourceContext } from "./operations.ts";
+import type { CallingAgent } from "./workflow-start-intents.ts";
 
 // How a resource binding reaches its provider (resource-bindings.ts): one
 // adapter per kind of declaration. An adapter runs in core, never in App
@@ -194,7 +198,64 @@ export interface BindingCaller {
    * binding (`resourceBindingsFor` makes it).
    */
   readonly counts?: Map<string, number>;
+  /**
+   * The Apps whose calls this invocation was made through, its own App
+   * last (resource-apps.ts): a call of another App's function refuses one
+   * already in it, and one past the deepest chain.
+   */
+  readonly chain?: readonly AppId[];
+  /**
+   * Calls a public function of another App as a screen's call of it runs,
+   * for `by`, carrying the chain and the caller's own checks
+   * (app-functions.ts, `callFunction`): given by core's invocation, so an
+   * app resource reaches the called App only as that does.
+   */
+  readonly callApp?: AppFunctionCall;
+  /**
+   * Whether this invocation is a workflow run's, or was called, through
+   * other Apps, from one (resource-apps.ts): the Apps it calls start no
+   * workflows, as a run's own call starts none (a run starting another
+   * is a child run of its own, within its lineage's limits).
+   */
+  readonly fromRun?: boolean;
+  /**
+   * The agent whose call this invocation is, or was called, through other
+   * Apps, from (agent-apps.ts): named on what the Apps it calls start, and
+   * on the record of each call.
+   */
+  readonly agent?: CallingAgent;
+  /**
+   * How many calls of other Apps' functions the whole call this
+   * invocation belongs to has made, its first App's included: one count
+   * down the chain, so a call can't fan out past `appCallLimits.calls`.
+   */
+  readonly appCalls?: { used: number };
 }
+
+/** How an app resource calls another App's function (`BindingCaller.callApp`). */
+export type AppFunctionCall = (
+  by: {
+    readonly userId: string;
+    readonly role: Role;
+    readonly teams: Identity["teams"];
+  },
+  app: AppId,
+  request: string,
+  options: {
+    readonly deadline: number;
+    readonly stillAllowed: () => Promise<void>;
+    readonly parentSession?: string;
+    readonly chain: readonly AppId[];
+    readonly fromRun: boolean;
+    readonly agent?: CallingAgent;
+    readonly appCalls: { used: number };
+    /** For a run's chain: its lease, checked just before each commit. */
+    readonly requireHolds?: () => void;
+  }
+) => Promise<{
+  readonly result: OperationResult;
+  readonly provenance: InvocationProvenance | null;
+}>;
 
 /** A declaration of one kind, as an adapter is given it. */
 export type DeclarationOf<Kind extends AnyResource["~resource"]> = Extract<

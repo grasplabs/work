@@ -1450,6 +1450,11 @@ const allowedRequest = (
     allowed = allowsStatistics(declaration, method, args);
   } else if (declaration["~resource"] === "guests") {
     allowed = allowsGuests(declaration, method, args);
+  } else if (declaration["~resource"] === "app") {
+    const { functions } = declaration;
+    allowed = isNamedCall(method, args, (path) =>
+      Object.hasOwn(functions, path)
+    );
   } else {
     allowed = method === "read" && args.length === 0;
   }
@@ -1467,6 +1472,24 @@ const isNormalized = (descriptor: unknown, result: Json): boolean => {
     normalized !== undefined &&
     canonicalJson(normalized) === canonicalJson(result)
   );
+};
+
+/**
+ * Whether `result` is the return the declared operation or function `args`
+ * names declares, already normalized, as the store's or the called App's
+ * own contract answered it (`allowedRequest` found the path).
+ */
+const returnsDeclared = (
+  shapes: Readonly<Record<string, { readonly returns: unknown }>>,
+  args: readonly Json[],
+  result: Json
+): boolean => {
+  const [path] = args;
+  const shape =
+    typeof path === "string" && Object.hasOwn(shapes, path)
+      ? shapes[path]
+      : undefined;
+  return shape !== undefined && isNormalized(shape.returns, result);
 };
 
 /**
@@ -1490,14 +1513,7 @@ const checkedResourceResult = (
         ? typeof result === "string"
         : isNormalized(structuredOutput, result);
   } else if (declaration["~resource"] === "store") {
-    // The declared operation's return, already normalized, as the store's
-    // own contract answered it (`allowedRequest` found the path).
-    const [path] = args;
-    const shape =
-      typeof path === "string" && Object.hasOwn(declaration.operations, path)
-        ? declaration.operations[path]
-        : undefined;
-    valid = shape !== undefined && isNormalized(shape.returns, result);
+    valid = returnsDeclared(declaration.operations, args, result);
   } else if (declaration["~resource"] === "knowledge") {
     valid = (
       method === "search" ? knowledgeHitsSchema : knowledgeDocumentSchema
@@ -1509,6 +1525,8 @@ const checkedResourceResult = (
         method === "read" ||
         method === "revoke") &&
       guestResults[method].safeParse(result).success;
+  } else if (declaration["~resource"] === "app") {
+    valid = returnsDeclared(declaration.functions, args, result);
   } else if (declaration["~resource"] === "statistics") {
     valid =
       method === "record"
@@ -1568,7 +1586,7 @@ const exhaustedDetailsSchema = z.object({
 
 /** Which bound of a resource's a request reached, and when to ask again. */
 const limitDetailsSchema = z.strictObject({
-  limit: z.enum(["call", "minute", "day", "open"]),
+  limit: z.enum(["call", "minute", "day", "open", "cycle", "depth", "calls"]),
   retryAfterSeconds: z.int().positive().max(60).optional(),
 });
 
