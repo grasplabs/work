@@ -752,20 +752,28 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       }
       const chat = chatIdOf(chatId);
       const chats = this.#chatsOf(by.userId);
-      const frames = await chats.previewStream(
-        chat,
-        by.userId,
-        id,
-        revision,
-        request,
-        what === "attach"
-      );
+      // Its slot taken before anything is awaited, as `watch` takes one:
+      // starts made at once can't each find room.
       const relayed: { stop?: () => void } = {};
       const toPage = callbackFor(onFrame, this.#stillOpen, refusals, () => {
         this.#watches.delete(toPage);
         relayed.stop?.();
       });
       this.#watches.add(toPage);
+      let frames: ReadableStream<Uint8Array>;
+      try {
+        frames = await chats.previewStream(
+          chat,
+          by.userId,
+          id,
+          revision,
+          request,
+          what === "attach"
+        );
+      } catch (error) {
+        toPage[Symbol.dispose]();
+        throw error;
+      }
       relayed.stop = relayPreviewStream(frames, {
         deliver: toPage,
         // The session still theirs, the App still theirs to build, and the
@@ -775,8 +783,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           if (now.userId !== by.userId) {
             throw authErrors.create("auth.unauthenticated");
           }
-          const draft = await chats.draft(chat, id);
-          if (draft.revision !== revision) {
+          if ((await chats.draftRevision(chat, id)) !== revision) {
             throw appErrors.create("app.preview_outdated");
           }
           if (!(await buildsNow(this.#env, now, id))) {

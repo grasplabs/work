@@ -12,13 +12,14 @@ import { refusalOf } from "./app-functions.ts";
 // connection (chats-rpc.ts), as a live screen's relay does over its
 // request (app-function-route.ts). Threat model, and how each is closed:
 //
-// - Progress reaches someone who no longer gets the preview: before every
-//   frame it hands on, at most every `streamRecheckMs` on a timer, frames
-//   or not, and always before the result, the relay checks (`stillOpen`)
-//   that the connection's session is still the person's, that they still
-//   build the App and that the draft is still at the stream's revision.
-//   A refusal ends the relay with a `refused` frame carrying it, and
-//   cancels the invocation at once.
+// - Progress reaches someone who no longer gets the preview: the relay
+//   checks (`stillOpen`) that the connection's session is still the
+//   person's, that they still build the App and that the draft is still
+//   at the stream's revision: every `streamRecheckMs` on a timer, frames
+//   or not; before a progress frame when the last check is older than
+//   that; and always before the result, as a live screen's relay does. A
+//   refusal cancels the invocation at once, then ends the relay with a
+//   `refused` frame carrying it, never waiting on the page to cancel.
 // - The page is flooded, or holds core: frames go one at a time, the next
 //   read only once the page took the last, and the invocation's reader
 //   sends the newest progress it hasn't seen when asked (whole
@@ -65,6 +66,18 @@ const letGo = async (
   }
 };
 
+/** Hands `frame` to the page, not waiting on it. Never throws. */
+const handedOver = async (
+  deliver: (frame: unknown) => Promise<unknown>,
+  frame: unknown
+): Promise<void> => {
+  try {
+    await deliver(frame);
+  } catch {
+    // The page is gone.
+  }
+};
+
 /** Whether `frame` is the invocation's result. */
 const isResult = (
   frame: unknown
@@ -87,6 +100,12 @@ export const relayPreviewStream = (
   let buffered = "";
   let done = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** When `stillOpen` last held. */
+  let checkedAt = Date.now();
+  const checked = async (): Promise<void> => {
+    await stillOpen();
+    checkedAt = Date.now();
+  };
   const stop = (): void => {
     if (done) {
       return;
@@ -100,11 +119,8 @@ export const relayPreviewStream = (
       return;
     }
     stop();
-    try {
-      await deliver({ type: "refused", error: refusalOf(error, requestId) });
-    } catch {
-      // The page is gone: the invocation is cancelled all the same.
-    }
+    // Cancelled first: a page that never takes the refusal holds up
+    // nothing.
     try {
       await cancel();
     } catch (cancelError) {
@@ -113,11 +129,15 @@ export const relayPreviewStream = (
         ...errorFields(cancelError),
       });
     }
+    void handedOver(deliver, {
+      type: "refused",
+      error: refusalOf(error, requestId),
+    });
   };
   // Runs on a timer nobody awaits: it never throws.
   const check = async (): Promise<void> => {
     try {
-      await stillOpen();
+      await checked();
     } catch (error) {
       await refuse(error);
       return;
@@ -165,9 +185,12 @@ export const relayPreviewStream = (
       }
       const frame = frameOf(line);
       try {
-        // Checked before each frame is handed on, the result included.
-        // oxlint-disable-next-line no-await-in-loop -- one frame after another
-        await stillOpen();
+        // Checked before the result, and before progress once the last
+        // check is older than `streamRecheckMs`.
+        if (isResult(frame) || Date.now() - checkedAt >= streamRecheckMs) {
+          // oxlint-disable-next-line no-await-in-loop -- one frame after another
+          await checked();
+        }
       } catch (error) {
         // oxlint-disable-next-line no-await-in-loop -- the last
         await refuse(error);
