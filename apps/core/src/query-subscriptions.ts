@@ -16,6 +16,7 @@ import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 
 import { operationRoles } from "./app-access.ts";
 import {
+  callsWorkflowQuery,
   evaluateAppQuery,
   refusalOf,
   windowExtentOf,
@@ -268,6 +269,11 @@ interface Evaluation {
   readonly cost: number;
   /** Whether it reads a paginated list's window (query-windows.ts). */
   readonly window: boolean;
+  /**
+   * Whether it is a workflow reference's query, read again when the
+   * person's runs of the App change (`#runsChanged`): it reads no store.
+   */
+  readonly followsRuns: boolean;
   /** How long it waited for budget last, to wait longer next time. */
   budgetWaitMs: number;
   /** Reads in a row that writes tore (`maxTornReads`). */
@@ -584,6 +590,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       charged: false,
       cost: costOf(request),
       window: windowExtentOf(request) !== undefined,
+      followsRuns: callsWorkflowQuery(request),
       budgetWaitMs: 0,
       torn: 0,
       reads: 0,
@@ -1343,7 +1350,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       }
     };
     const watcher = Object.assign(
-      (revoked: boolean): void => {
+      (revoked: boolean, runsChanged = false): void => {
         // Once it no longer follows, it says it is gone, so the host drops
         // it even if core's word that it let go never arrived.
         if (!current()) {
@@ -1351,6 +1358,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         }
         if (revoked) {
           this.#revoked(app);
+        }
+        if (runsChanged) {
+          this.#runsChanged(app);
         }
       },
       {
@@ -1436,6 +1446,19 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     for (const evaluation of this.#evaluations.values()) {
       if (evaluation.app === app) {
         void this.#recheck(evaluation, seen);
+      }
+    }
+  }
+
+  /**
+   * The person's independent runs `app` started changed (run-changes.ts):
+   * each of the App's workflow queries followed here is read again, as a
+   * write to a table it read would read it, gathered and charged alike.
+   */
+  #runsChanged(app: AppId): void {
+    for (const evaluation of this.#evaluations.values()) {
+      if (evaluation.app === app && evaluation.followsRuns) {
+        this.#changed(evaluation);
       }
     }
   }
