@@ -333,6 +333,8 @@ export const runInvocationFor = async (
     deadline,
     runId,
     authorize,
+    // No `workflows`: a run's call starts no workflow (operations.ts,
+    // `Invocation.workflows`), so its step can't open a lineage of its own.
     resources: keyedUnderRun(bindings, runId, requireHolds),
   };
 };

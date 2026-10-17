@@ -139,6 +139,14 @@ export type StartInvoker =
   | { type: "person"; person: Acting }
   | { type: "app"; authority: Authority }
   | { type: "agent"; authority: Authority; context?: WorkContext }
+  /**
+   * Nothing dispatches independent triggers yet. Once something does, a
+   * trigger fired by an event a workflow run caused (its mail, a connector
+   * event its call caused, a record its step wrote) must start its run as
+   * that run's descendant, as App triggers' stamped mail and events do
+   * (inbound-email.ts, connector-events.ts), or it opens a lineage of its
+   * own past the run's limits (GRA-692).
+   */
   | { type: "trigger"; triggerId: string };
 
 /**
