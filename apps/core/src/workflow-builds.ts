@@ -23,6 +23,10 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
+  workflowModuleLimits,
+  workflowModulePattern,
+} from "@grasp-os/shared/workflow-modules";
+import {
   openWorkflowProtocol,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
@@ -39,6 +43,7 @@ import {
 } from "./db/core/schema.ts";
 import { releaseReservations } from "./release-retention.ts";
 import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
+import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
 // its definition, validated at publication, lowered into SDK TypeScript
@@ -83,6 +88,11 @@ import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
 //   build share one only for as long as a load may take (`sharedRun`), and
 //   only a load that verified every byte keeps its build (`verified`); a
 //   failure keeps nothing (`loadWorkflowBuild`).
+// - The workflow's own compute modules changed or swapped. Their source,
+//   compiled code and contracts are artifacts of the build like the rest,
+//   the compiled code and contracts covered by its identity; loading
+//   checks every compute task names a sealed contract of a sealed module
+//   (`loadedModules`). Running them is workflow-modules.ts's.
 
 /** Where the definition, exactly as published, is among the artifacts. */
 const definitionArtifact = "source/workflow.json";
@@ -93,6 +103,15 @@ const sourceMapArtifact = "source-map.json";
 /** Where the compiled module and the SDK modules are among the artifacts. */
 const moduleDir = "modules/";
 const sdkDir = "sdk/";
+/**
+ * The workflow's own compute modules: their source as published (export
+ * only, so outside the identity, as the definition is), their compiled
+ * code, and the contracts read from them (workflow-modules.ts).
+ */
+const sourceDir = "source/";
+const moduleSourceDir = `${sourceDir}code/`;
+const computeDir = "compute/";
+const computeArtifact = "compute.json";
 
 /**
  * The generated module's flat name, as the compiler names it and core's
@@ -207,6 +226,18 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     name: z.literal("grasp.sleepUntil"),
     timestamp: templateSchema,
   }),
+  z.strictObject({
+    name: z.literal("grasp.compute"),
+    binding: aliasSchema,
+    // The workflow's own module and export its binding names, as the
+    // generator sealed them (generate.ts).
+    module: z.string().regex(workflowModulePattern).max(256),
+    export: z
+      .string()
+      .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
+      .max(256),
+    arguments: templateSchema,
+  }),
 ]);
 
 export type SealedCall = z.infer<typeof sealedCallSchema>;
@@ -305,7 +336,7 @@ const identityOf = async (build: {
       artifacts: build.artifacts
         .filter(
           ({ path }) =>
-            path !== definitionArtifact && path !== sourceMapArtifact
+            !path.startsWith(sourceDir) && path !== sourceMapArtifact
         )
         .map(({ path, sha256, bytes }) => ({ path, sha256, bytes })),
     })
@@ -327,13 +358,16 @@ export interface CompiledBuild {
  * makes a build that isn't executable, naming them. Generated code that
  * doesn't build is the platform's fault, never the definition's: it is
  * logged and refused (`workflow.build_failed`), and nothing is published.
+ * The workflow's own compute modules (`compiled`, workflow-modules.ts),
+ * already built and inspected, are sealed with it.
  */
 export const compileWorkflow = async (
   env: Env,
   checked: CheckedWorkflow,
   definition: string,
   /** Whose build it is: the workflow resource's ID. */
-  whose: string
+  whose: string,
+  compiled?: CompiledModules
 ): Promise<CompiledBuild> => {
   const generated = generateWorkflow(checked);
   if (!generated.ok) {
@@ -460,6 +494,26 @@ export const compileWorkflow = async (
   }
   for (const [name, code] of Object.entries(sdk.modules)) {
     texts.set(`${sdkDir}${name}`, code);
+  }
+  if (compiled !== undefined) {
+    for (const [path, source] of Object.entries(compiled.sources)) {
+      texts.set(`${sourceDir}${path}`, source);
+    }
+    for (const [name, code] of Object.entries(compiled.modules)) {
+      texts.set(`${computeDir}${name}`, code);
+    }
+    texts.set(
+      computeArtifact,
+      canonicalJson({
+        paths: Object.keys(compiled.sources).toSorted(),
+        contracts: Object.fromEntries(
+          [...compiled.contracts].map(([key, contract]) => [
+            key,
+            { ...contract },
+          ])
+        ),
+      })
+    );
   }
   const artifacts: ReleaseArtifact[] = [];
   const bytes = new Map<string, Uint8Array>();
@@ -616,7 +670,44 @@ export interface LoadedBuild {
   readonly limits: WorkflowLimits;
   /** The generated TypeScript, for export. */
   readonly source: string;
+  /** The workflow's own compute modules (workflow-modules.ts). */
+  readonly compute: LoadedModules;
 }
+
+/** A version's compute modules, as sealed. */
+export interface LoadedModules {
+  /** Their compiled code, by flat name. */
+  readonly modules: Readonly<Record<string, string>>;
+  /** Every module's path (`code/<file>.ts`). */
+  readonly paths: readonly string[];
+  /** Each calculation's contract, by `code/<file>.ts#<export>`. */
+  readonly contracts: ReadonlyMap<string, ComputeContract>;
+  /** The modules as published, by path, for export. */
+  readonly sources: Readonly<Record<string, string>>;
+}
+
+/** A sealed contract's key: `code/<file>.ts#<export>`. */
+const sealedContractKey =
+  /^(?<module>code\/[^#]+\.ts)#[A-Za-z_$][A-Za-z0-9_$]*$/u;
+
+/** The compute modules' contracts, as `compute.json` seals them. */
+const computeFileSchema = z.strictObject({
+  paths: z
+    .array(z.string().max(workflowModuleLimits.pathChars))
+    .max(workflowModuleLimits.files),
+  contracts: z
+    .record(
+      z.string().max(512),
+      z.strictObject({
+        input: z.string().max(workflowModuleLimits.descriptorChars),
+        output: z.string().max(workflowModuleLimits.descriptorChars),
+      })
+    )
+    .refine(
+      (contracts) =>
+        Object.keys(contracts).length <= workflowModuleLimits.contracts
+    ),
+});
 
 const corrupt = (id: string, version: number, what: string): Error => {
   log.error("workflow.build_corrupt", { workflow: id, version, what });
@@ -640,6 +731,65 @@ const artifactText = async (
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
     bytes
   );
+};
+
+/**
+ * The compute modules `text` (`compute.json`, absent for none) seals, with
+ * their compiled code and sources: undefined when they don't agree, a
+ * module named that the build doesn't hold, or a contract of a module
+ * that isn't one.
+ */
+const loadedModules = (
+  text: string | undefined,
+  modules: Record<string, string>,
+  sources: Record<string, string>
+): LoadedModules | undefined => {
+  if (text === undefined) {
+    return Object.keys(modules).length === 0 &&
+      Object.keys(sources).length === 0
+      ? Object.freeze({
+          modules: Object.freeze({}),
+          paths: Object.freeze([]),
+          contracts: new Map(),
+          sources: Object.freeze({}),
+        })
+      : undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const file = computeFileSchema.safeParse(parsed).data;
+  const compiledAll =
+    file !== undefined &&
+    file.paths.every(
+      (path) =>
+        Object.hasOwn(modules, appModuleName(path)) &&
+        Object.hasOwn(sources, path)
+    );
+  const contractsOfPaths =
+    file !== undefined &&
+    Object.keys(file.contracts).every((key) => {
+      // `code/<file>.ts#<export>` exactly, of one of the sealed modules.
+      const module = sealedContractKey.exec(key)?.groups?.module;
+      return module !== undefined && file.paths.includes(module);
+    });
+  if (file === undefined || !compiledAll || !contractsOfPaths) {
+    return undefined;
+  }
+  return Object.freeze({
+    modules: Object.freeze(modules),
+    paths: Object.freeze([...file.paths]),
+    contracts: new Map(
+      Object.entries(file.contracts).map(([key, contract]) => [
+        key,
+        Object.freeze({ ...contract }),
+      ])
+    ),
+    sources: Object.freeze(sources),
+  });
 };
 
 /**
@@ -701,7 +851,10 @@ const verifiedBuild = async (
   }
   const modules: Record<string, string> = {};
   const sdk: Record<string, string> = {};
+  const computeModules: Record<string, string> = {};
+  const moduleSources: Record<string, string> = {};
   let tasksText: string | undefined;
+  let computeText: string | undefined;
   let source: string | undefined;
   for (const entry of build.artifacts) {
     // One after the other: a build has a few dozen, and a failure stops
@@ -715,6 +868,12 @@ const verifiedBuild = async (
       modules[entry.path.slice(moduleDir.length)] = text;
     } else if (entry.path.startsWith(sdkDir)) {
       sdk[entry.path.slice(sdkDir.length)] = text;
+    } else if (entry.path.startsWith(computeDir)) {
+      computeModules[entry.path.slice(computeDir.length)] = text;
+    } else if (entry.path.startsWith(moduleSourceDir)) {
+      moduleSources[entry.path.slice(sourceDir.length)] = text;
+    } else if (entry.path === computeArtifact) {
+      computeText = text;
     } else if (entry.path === tasksArtifact) {
       tasksText = text;
     } else if (entry.path === generatedPath) {
@@ -736,6 +895,18 @@ const verifiedBuild = async (
   if (tasks.expressions.some(({ slot }, index) => slot !== index)) {
     throw corrupt(id, version, "expression table");
   }
+  const compute = loadedModules(computeText, computeModules, moduleSources);
+  // Every calculation a task calls is one the seal holds, of a module it
+  // compiled: checked once here, so a run never looks one up in vain.
+  const callsSealed = tasks.tasks.every(
+    (task) =>
+      task.kind !== "call" ||
+      task.call.name !== "grasp.compute" ||
+      compute?.contracts.has(`${task.call.module}#${task.call.export}`) === true
+  );
+  if (compute === undefined || !callsSealed) {
+    throw corrupt(id, version, "compute modules");
+  }
   // Shared by every load of the version in this isolate: frozen, so no
   // caller changes what another runs.
   return Object.freeze({
@@ -750,6 +921,7 @@ const verifiedBuild = async (
       tasks.expressions.map((expression) => Object.freeze(expression))
     ),
     source,
+    compute,
   });
 };
 

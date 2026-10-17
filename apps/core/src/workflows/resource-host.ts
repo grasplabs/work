@@ -61,6 +61,7 @@ import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import { makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
+import { callCompute } from "./resource-compute.ts";
 
 // The host a run of an independent workflow's sealed build runs against
 // (resource-runs.ts): the calls the generated code's SDK makes
@@ -730,7 +731,8 @@ const templatesOf = (call: SealedCall): SealedTemplate[] => {
       return [];
     }
     case "grasp.operation":
-    case "grasp.connector": {
+    case "grasp.connector":
+    case "grasp.compute": {
       return [call.arguments];
     }
     case "grasp.model": {
@@ -2049,6 +2051,19 @@ export class ResourceRunHost
       this.#modelCalls += 1;
       this.#modelCallsMade.add(task.id);
     }
+    if (call.name === "grasp.compute") {
+      // A calculation of the workflow's own sealed modules: no binding of
+      // the catalog, no authority to decide again, nothing outside core's
+      // sandbox (resource-compute.ts).
+      return await callCompute(
+        this.#env,
+        this.#run.build.compute,
+        this.#run.build.sdk,
+        call,
+        await this.#built(attempt, call.arguments, passed, passed.size),
+        attempt.deadline
+      );
+    }
     const built = await this.#builtCall(attempt, call, passed);
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
       key: stepIdempotencyKey(this.#run.runId, `task:${task.id}`),
@@ -2070,7 +2085,13 @@ export class ResourceRunHost
     attempt: StepAttempt,
     call: Exclude<
       SealedCall,
-      { name: "grasp.now" | "grasp.random" | "grasp.sleepUntil" }
+      {
+        name:
+          | "grasp.now"
+          | "grasp.random"
+          | "grasp.sleepUntil"
+          | "grasp.compute";
+      }
     >,
     frame: { input: Json; output: Json; size: number }
   ): Promise<BuiltCall> {

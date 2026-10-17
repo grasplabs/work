@@ -25,6 +25,7 @@ export type { KitModules } from "./kit.ts";
 export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type {
   AppCodeBuild,
+  ComputeModulesBuild,
   OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
@@ -44,6 +45,7 @@ export {
 export {
   appCodeLimitErrors,
   buildFiles,
+  computeModuleErrors,
   limitErrors,
   openWorkflowEntry,
   openWorkflowErrors,

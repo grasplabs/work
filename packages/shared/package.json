@@ -85,6 +85,7 @@
     "./uploads": "./src/uploads.ts",
     "./value-bounds": "./src/value-bounds.ts",
     "./value-depth": "./src/value-depth.ts",
+    "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
     "./workflows": "./src/workflows.ts"
   },

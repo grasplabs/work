@@ -9,6 +9,7 @@ import {
   kitModules,
   screenRuntime,
   limitErrors,
+  computeModuleErrors,
   openWorkflowErrors,
   serverFiles,
   workflowFiles,
@@ -16,6 +17,7 @@ import {
 import type {
   AppCodeBuild,
   Diagnostic,
+  ComputeModulesBuild,
   OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
@@ -99,7 +101,11 @@ const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
     return appCodeLimitErrors;
   }
   // A JSON workflow's generated module: one file, held to its own bound.
-  return kind === "open-workflow" ? openWorkflowErrors : limitErrors;
+  if (kind === "open-workflow") {
+    return openWorkflowErrors;
+  }
+  // A JSON workflow's compute modules: held to their own bounds.
+  return kind === "compute" ? computeModuleErrors : limitErrors;
 };
 
 /** A build refused before it started, or one that failed. */
@@ -122,6 +128,7 @@ const compilerMethods = {
   app: "buildAppCode",
   "app-tests": "buildAppTests",
   "open-workflow": "buildOpenWorkflow",
+  compute: "buildComputeModules",
 } as const;
 
 /** The kinds of build, by the compiler's method each runs. */
@@ -166,7 +173,15 @@ const compiled = async (
     const built = await runner.run("compiler", compilerMethods[kind], [files]);
     return { built, cache: true };
   } catch (error) {
-    if (!(error instanceof PlatformBoundError) || kind === "open-workflow") {
+    // A JSON workflow's generated module is never its author's to fix,
+    // and a stop of compute modules that the load made (a deadline, a
+    // crash) isn't either: both are thrown on, for the caller to answer
+    // as a build to try again (`workflow.build_slow`).
+    if (
+      !(error instanceof PlatformBoundError) ||
+      kind === "open-workflow" ||
+      (kind === "compute" && !error.own)
+    ) {
       throw error;
     }
     const failed: FailedBuild = {
@@ -175,7 +190,7 @@ const compiled = async (
         {
           rule: "compile",
           severity: "error",
-          message: `The compiler was stopped before it finished: ${error.message} Simplify the App's types (a type that recurses without end holds the type checker).`,
+          message: `The compiler was stopped before it finished: ${error.message} Simplify the ${kind === "compute" ? "modules'" : "App's"} types (a type that recurses without end holds the type checker).`,
         },
       ],
     };
@@ -386,6 +401,26 @@ export const buildOpenWorkflow = async (
   await cachedBuild<OpenWorkflowBuild>(
     env,
     "open-workflow",
+    files,
+    (all) => all,
+    whose
+  );
+
+/**
+ * Builds a JSON workflow's compute modules (`code/<file>.ts`,
+ * workflow-modules.ts) into ES modules, in the compiler's isolate,
+ * type-checked against `@grasp-os/sdk/compute`. Cached in R2 like the
+ * others.
+ */
+export const buildComputeModules = async (
+  env: BuildEnv,
+  files: AppFiles,
+  /** Whose build it is: the independent workflow's ID. */
+  whose: string
+): Promise<ComputeModulesBuild> =>
+  await cachedBuild<ComputeModulesBuild>(
+    env,
+    "compute",
     files,
     (all) => all,
     whose
