@@ -36,7 +36,8 @@ import { workflowRoleSql } from "../workflow-roles.ts";
 // - the permission that approval names (a connector's or an operation's)
 //   is still active and still the workflow's own;
 // - for a start by code, the `start` grant that let it start still holds:
-//   a trigger still live and enabled, with its own grant active; an App's
+//   a trigger still live and enabled, its current version still targeting
+//   the run's workflow and version, with its own grant active; an App's
 //   grant still active for the App version that started it, approved;
 //   an agent's own grant still active. An agent's grant may be one of a
 //   chat's own, and a receipt keeps no chat, so any active `start` grant
@@ -147,9 +148,16 @@ const invokerSql = (run: CallingRun): SQL => {
       if (!trigger.success) {
         return sql`0`;
       }
+      // Still live and enabled, and its current version still targets
+      // this run's workflow and version: a trigger moved to another
+      // version stands behind that version's runs, not this one's.
       return sql`(EXISTS (SELECT 1 FROM trigger_resources AS live
+          JOIN trigger_resource_versions AS aim
+            ON aim.trigger_id = live.id AND aim.version = live.current_version
           WHERE live.id = ${trigger.data} AND live.deleted_at IS NULL
-            AND live.enabled = 1)
+            AND live.enabled = 1
+            AND aim.workflow_resource_id = ${run.workflowId}
+            AND aim.workflow_resource_version = ${run.version})
         AND EXISTS (SELECT 1 FROM permissions WHERE ${allowingPermissionSql(
           { type: "trigger", triggerId: trigger.data },
           undefined,
