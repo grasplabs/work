@@ -514,6 +514,19 @@ const sendsAndLeaves = action({
   },
 });
 
+/** A streaming action that saves a note without waiting for it, and returns. */
+const savesAndLeaves = action({
+  args: { title: v.string() },
+  returns: v.null(),
+  stream: v.object({ done: v.number() }),
+  uses: [create],
+  handler: async (ctx, args) => {
+    await ctx.emit({ done: 0 });
+    void ctx.runMutation(create, { title: args.title });
+    return null;
+  },
+});
+
 /** A streaming action that emits `count` snapshots, then answers how many. */
 const emitsMany = action({
   args: { count: v.number().integer().min(0) },
@@ -577,6 +590,7 @@ const notesApp = app({
       savesWhileStreaming,
       sendsWhileStreaming,
       sendsAndLeaves,
+      savesAndLeaves,
       emitsMany,
       savesThenSends,
       fanOut,
@@ -1584,6 +1598,117 @@ describe("cancelling a streaming action", () => {
     expect({ code: codeOf(result), sent }).toStrictEqual({
       code: "operation.outcome_unknown",
       sent: 1,
+    });
+  });
+
+  it("answers once a request it left running at the cancel has settled, never cutting it off", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    let settled = false;
+    const resources = bindingsOf({
+      mail: bound("connector", "microsoft-365.mail@1", async () => {
+        cancel();
+        await scheduler.wait(300);
+        settled = true;
+        return { mailbox: "m-1", sent: true };
+      }),
+    });
+    const result = await call(
+      fixture,
+      "action",
+      "actions.sendsAndLeaves",
+      { to: "ada@acme.test" },
+      { progress: sink, cancelled: signal, resources }
+    );
+    // Its tail kept alive until it settled: never cut off with the
+    // object the call ran in (GRA-701).
+    const settledByAnswer = settled;
+    expect({ code: codeOf(result), settledByAnswer }).toStrictEqual({
+      code: "operation.outcome_unknown",
+      settledByAnswer: true,
+    });
+  });
+
+  it("answers once a commit it left running at the cancel has landed", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    const committing: Fixture = {
+      ...fixture,
+      store: {
+        ...fixture.store,
+        commit: async (request) => {
+          cancel();
+          await scheduler.wait(300);
+          return await fixture.store.commit(request);
+        },
+      },
+    };
+    const result = await call(
+      committing,
+      "action",
+      "actions.savesAndLeaves",
+      { title: "Maybe" },
+      { progress: sink, cancelled: signal }
+    );
+    const notesByAnswer = await noteCount(fixture);
+    expect({ code: codeOf(result), notesByAnswer }).toStrictEqual({
+      code: "operation.outcome_unknown",
+      notesByAnswer: 2,
+    });
+  });
+
+  it("answers once a request it left running past its deadline has settled", async () => {
+    const fixture = await notes();
+    let settled = false;
+    const resources = bindingsOf({
+      mail: bound("connector", "microsoft-365.mail@1", async () => {
+        await scheduler.wait(800);
+        settled = true;
+        return { mailbox: "m-1", sent: true };
+      }),
+    });
+    const result = await call(
+      fixture,
+      "action",
+      "actions.sendsAndLeaves",
+      { to: "ada@acme.test" },
+      { progress: cancellable().sink, resources, within: 400 }
+    );
+    const settledByAnswer = settled;
+    expect({ code: codeOf(result), settledByAnswer }).toStrictEqual({
+      code: "operation.unfinished_call",
+      settledByAnswer: true,
+    });
+  });
+
+  it("waits for what it left under way at a cancel no more than a moment", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    let settled = false;
+    const resources = bindingsOf({
+      mail: bound("connector", "microsoft-365.mail@1", async () => {
+        cancel();
+        await scheduler.wait(5000);
+        settled = true;
+        return { mailbox: "m-1", sent: true };
+      }),
+    });
+    const started = Date.now();
+    const result = await call(
+      fixture,
+      "action",
+      "actions.sendsAndLeaves",
+      { to: "ada@acme.test" },
+      { progress: sink, cancelled: signal, resources }
+    );
+    expect({
+      code: codeOf(result),
+      settledByAnswer: settled,
+      answeredWithinAMoment: Date.now() - started < 3000,
+    }).toStrictEqual({
+      code: "operation.outcome_unknown",
+      settledByAnswer: false,
+      answeredWithinAMoment: true,
     });
   });
 
