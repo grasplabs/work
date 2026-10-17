@@ -44,6 +44,7 @@ import { Route as ShellSettingsApprovalsRouteImport } from './routes/_shell.sett
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
+import { Route as ShellSettingsNotificationsRouteImport } from './routes/_shell.settings.notifications'
 import { Route as ShellSettingsOutcomesRouteImport } from './routes/_shell.settings.outcomes'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
@@ -237,6 +238,12 @@ const ShellSettingsModelsRoute = ShellSettingsModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsNotificationsRoute =
+  ShellSettingsNotificationsRouteImport.update({
+    id: '/notifications',
+    path: '/notifications',
+    getParentRoute: () => ShellSettingsRoute,
+  } as any)
 const ShellSettingsOutcomesRoute = ShellSettingsOutcomesRouteImport.update({
   id: '/outcomes',
   path: '/outcomes',
@@ -347,6 +354,7 @@ export interface FileRoutesByFullPath {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
@@ -396,6 +404,7 @@ export interface FileRoutesByTo {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
@@ -449,6 +458,7 @@ export interface FileRoutesById {
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
+  '/_shell/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/_shell/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/settings/spend': typeof ShellSettingsSpendRoute
@@ -502,6 +512,7 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/members'
     | '/settings/models'
+    | '/settings/notifications'
     | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/spend'
@@ -551,6 +562,7 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/members'
     | '/settings/models'
+    | '/settings/notifications'
     | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/spend'
@@ -603,6 +615,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/audit'
     | '/_shell/settings/members'
     | '/_shell/settings/models'
+    | '/_shell/settings/notifications'
     | '/_shell/settings/outcomes'
     | '/_shell/settings/profile'
     | '/_shell/settings/spend'
@@ -887,6 +900,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsModelsRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/settings/notifications': {
+      id: '/_shell/settings/notifications'
+      path: '/notifications'
+      fullPath: '/settings/notifications'
+      preLoaderRoute: typeof ShellSettingsNotificationsRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/settings/outcomes': {
       id: '/_shell/settings/outcomes'
       path: '/outcomes'
@@ -1024,6 +1044,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
+  ShellSettingsNotificationsRoute: typeof ShellSettingsNotificationsRoute
   ShellSettingsOutcomesRoute: typeof ShellSettingsOutcomesRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
   ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
@@ -1035,6 +1056,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsModelsRoute: ShellSettingsModelsRoute,
+  ShellSettingsNotificationsRoute: ShellSettingsNotificationsRoute,
   ShellSettingsOutcomesRoute: ShellSettingsOutcomesRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
   ShellSettingsSpendRoute: ShellSettingsSpendRoute,

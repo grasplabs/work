@@ -25,6 +25,7 @@
     "./decisions": "./src/decisions.ts",
     "./dependencies": "./src/dependencies.ts",
     "./deployment-config": "./src/deployment-config.ts",
+    "./email-preferences": "./src/email-preferences.ts",
     "./encoding": "./src/encoding.ts",
     "./error-namespaces": "./src/error-namespaces.ts",
     "./error-reports": "./src/error-reports.ts",
