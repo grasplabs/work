@@ -31,6 +31,7 @@ import {
   maxAppTestSuites,
   strayTestFileMessage,
   strayTestFiles,
+  typeImportError,
 } from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
@@ -44,6 +45,7 @@ import {
   rewriteCodeImports,
   generatedWorkflowCode,
   rewriteImports,
+  screenTypeImportError,
   serverCode,
   workflowCode,
 } from "./imports.ts";
@@ -179,7 +181,8 @@ const messageIn = (path: string, error: unknown): string =>
 const compileFile = (
   path: string,
   source: string,
-  files: ReadonlySet<string>
+  files: ReadonlySet<string>,
+  typeFiles: ReadonlySet<string>
 ): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   let compiled: string;
@@ -198,7 +201,10 @@ const compileFile = (
   }
   const errors: Diagnostic[] = [];
   for (const site of imports) {
-    const message = importError(site, path, files, kit);
+    // A type may also name the App's declarations (`typeFiles`).
+    const message = site.typeOnly
+      ? screenTypeImportError(site, path, typeFiles, kit)
+      : importError(site, path, files, kit);
     if (message !== undefined) {
       errors.push(
         problem(
@@ -227,6 +233,38 @@ const compileFile = (
       errors: [problem("imports", messageIn(path, error), { file: path })],
     };
   }
+};
+
+/**
+ * Why an App's declaration file (`*.d.ts`) can't import what it does:
+ * all it imports is types, held to what a screen's types may name
+ * (`screenTypeImportError`) among `typeFiles`.
+ */
+const declarationImportErrors = (
+  path: string,
+  source: string,
+  typeFiles: ReadonlySet<string>
+): Diagnostic[] => {
+  const imports: ImportSite[] = [];
+  try {
+    stripTypes(source, path, [collectImports(imports)]);
+  } catch (error) {
+    const message = messageIn(path, error);
+    return [problem("compile", message, { file: path, ...locationOf(error) })];
+  }
+  return imports.flatMap((site) => {
+    const { line } = site;
+    const message = screenTypeImportError(site, path, typeFiles, kit);
+    return message === undefined
+      ? []
+      : [
+          problem(
+            "imports",
+            message,
+            line === undefined ? { file: path } : { file: path, line }
+          ),
+        ];
+  });
 };
 
 /** These modules and every module they import, through `importsOf`. */
@@ -299,6 +337,17 @@ const buildCss = async (
 };
 
 /**
+ * What a screen's type check resolves an App file's imports to by name:
+ * the kit's modules, its icons, and the JSX runtime the compile names.
+ * Nothing else of the kit, however a file names it (type-check.ts).
+ */
+const screenModules: ReadonlySet<string> = new Set([
+  ...kit.imports,
+  "lucide-react",
+  "react/jsx-runtime",
+]);
+
+/**
  * Type-checks the App against the kit's types and lints it against the
  * kit's design system.
  */
@@ -312,7 +361,7 @@ export const checkScreens = (files: Record<string, string>): Diagnostic[] => {
   const own = Object.fromEntries(
     Object.entries(app).filter(([path]) => path !== screenReferences.path)
   );
-  return [...typeCheck(app, kit.types), ...lint(own, kit)];
+  return [...typeCheck(app, kit.types, screenModules), ...lint(own, kit)];
 };
 
 /**
@@ -347,16 +396,26 @@ export const buildScreens = async (
     return { ok: false, diagnostics: clashes };
   }
   const known = new Set(paths);
+  // What a type may name: the build's files and its declarations.
+  const typeFiles = new Set(Object.keys(app));
   const modules: Record<string, string> = {};
   const imports = new Map<string, ModuleImports>();
   const errors: Diagnostic[] = [];
   for (const [path, source] of sources) {
-    const result = compileFile(path, source, known);
+    const result = compileFile(path, source, known, typeFiles);
     if ("code" in result) {
       modules[appModuleName(path)] = result.code;
       imports.set(appModuleName(path), result.imported);
     } else {
       errors.push(...result.errors);
+    }
+  }
+  // The App's declarations aren't modules, but they name modules for
+  // their types: held to what a screen must never reach, as a screen's
+  // own types are.
+  for (const [path, source] of Object.entries(app)) {
+    if (declarationFile.test(path)) {
+      errors.push(...declarationImportErrors(path, source, typeFiles));
     }
   }
   // The checks would only say it again, less clearly.
@@ -417,8 +476,13 @@ const compileCodeFile = (
       ],
     };
   }
-  const errors = imports.flatMap(({ specifier, line }) => {
-    const message = codeImportError(kind, specifier, path, files);
+  const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
+    const message = codeImportError(
+      kind,
+      { specifier, typeOnly, ambient },
+      path,
+      files
+    );
     return message === undefined
       ? []
       : [
@@ -560,6 +624,15 @@ export type AppCodeBuild =
   | { ok: true; modules: Record<string, string> }
   | { ok: false; diagnostics: Diagnostic[] };
 
+/** `typeImportError` for App code, as `appCodeImport` answers. */
+const typeImportErrorAsResult = (
+  path: string,
+  specifier: string | undefined
+): { module: undefined } | { error: string } => {
+  const error = typeImportError(path, specifier, false);
+  return error === undefined ? { module: undefined } : { error };
+};
+
 /** Compiles one file of an App's server code, or says why it can't be. */
 const compileAppCodeFile = (
   path: string,
@@ -578,8 +651,15 @@ const compileAppCodeFile = (
       ],
     };
   }
-  const errors = imports.flatMap(({ specifier, line }) => {
-    const resolved = appCodeImport(path, specifier, files);
+  const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
+    // A type is erased: held only to what no App code may name. An ambient
+    // module's types are stripped with the rest (GRA-675 checks them).
+    if (ambient) {
+      return [];
+    }
+    const resolved = typeOnly
+      ? typeImportErrorAsResult(path, specifier)
+      : appCodeImport(path, specifier, files);
     return "error" in resolved
       ? [
           problem(
