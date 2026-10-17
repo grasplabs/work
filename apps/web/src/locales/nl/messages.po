@@ -453,6 +453,10 @@ msgstr "{moreFindings, plural, one {En nog # bevinding: toon alle pakketten om d
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# daarvan veranderde later, in een volgend gesprek met het bestuur.} other {# daarvan veranderden later, in volgende gesprekken met het bestuur.}}"
 
+#: src/engines/resource-bindings.tsx
+msgid "{name} ({appId})"
+msgstr "{name} ({appId})"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp-medewerker)"

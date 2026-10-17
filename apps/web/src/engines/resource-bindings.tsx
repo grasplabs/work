@@ -610,7 +610,8 @@ const BindForm = ({
         <Choice label={t`Domain`} onChange={setPicked} value={picked}>
           {choices.apps.map(({ appId, name }) => (
             <NativeSelectOption key={appId} value={appId}>
-              {name}
+              {/* Names needn't be unique: the ID tells two apart. */}
+              {t`${name} (${appId})`}
             </NativeSelectOption>
           ))}
         </Choice>
