@@ -233,16 +233,22 @@ export const callAction = async (
   const timeout = setTimeout(() => {
     timer.reject(actionFailed());
   }, remaining);
-  let settled: Awaited<typeof outcome>;
+  let settled: Awaited<typeof outcome> | undefined;
   try {
     settled = await Promise.race([outcome, timer.promise]);
+  } catch {
+    // The deadline won: settled stays undefined, the action failed.
   } finally {
     clearTimeout(timeout);
     host.end();
   }
-  // A refusal of one of its calls stands, whatever the action made of it.
+  // A refusal of one of its calls stands, whatever the action made of it,
+  // and even when the deadline ended it.
   if (host.refusal !== undefined) {
     throw host.refusal;
+  }
+  if (settled === undefined) {
+    throw actionFailed();
   }
   if (!settled.ok) {
     // The sandbox not answering at all is the platform's, never the action's.

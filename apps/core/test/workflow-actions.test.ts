@@ -6,7 +6,10 @@ import type { Json } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowNamespace,
+  workflowResourceErrors,
+} from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -411,6 +414,57 @@ describe("a JSON workflow's own actions", () => {
       expect(parsed.code).toBe("workflow.definition_invalid");
       expect(JSON.stringify(parsed.details)).toContain("binding.unknown_use");
     }
+  });
+
+  it("fails with a refusal the action swallowed, even when its deadline ends it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await actingWorkflow(
+      ada,
+      admin,
+      notifyModule(`try {
+      await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" });
+    } catch {
+      // Swallowed, then waits on a call that never answers.
+    }
+    await ctx.resources.mail.call("mail.send", { to: args.to, subject: "two" });
+    return { status: "late" };`)
+    );
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    let calls = 0;
+    const code = await outcome(
+      callAction(
+        env,
+        build.compute,
+        build.sdk,
+        {
+          name: "grasp.action",
+          binding: "notify",
+          module: "code/notify.ts",
+          export: "notify",
+          arguments: { literal: null },
+        },
+        { to: "Ada" },
+        Date.now() + 2000,
+        {
+          owner: `workflow-resource:${workflow.id}`,
+          make: async (): Promise<Json> => {
+            calls += 1;
+            if (calls === 1) {
+              throw workflowResourceErrors.create("workflow.call_denied");
+            }
+            // oxlint-disable-next-line promise/avoid-new -- a call that never answers
+            return await new Promise<never>(() => {
+              // Never answers.
+            });
+          },
+        }
+      )
+    );
+    expect({ code, calls }).toStrictEqual({
+      code: "workflow.call_denied",
+      calls: 2,
+    });
   });
 
   it("holds an action to the uses its version sealed, and to its calls' cap, whatever its module claims", async () => {
