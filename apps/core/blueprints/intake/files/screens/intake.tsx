@@ -1,3 +1,5 @@
+import type { Id } from "@grasp-os/sdk";
+import { useAction, useClient, useQuery } from "@grasp-os/sdk/react";
 import { useWorkflow } from "@grasp-os/sdk/screen";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -11,11 +13,13 @@ import {
 } from "@grasp-os/ui/components/table";
 import { useEffect, useRef, useState } from "react";
 
+import { api } from "#grasp";
+
 import { DraftEditor } from "../components/draft-editor";
 import type { EditorResult } from "../components/draft-editor";
 import { Extractions } from "../components/extractions";
-import { ask, originLabels, refusal, settle } from "../components/intake";
-import type { DraftSummary, OpenedDraft, Overview } from "../components/intake";
+import { isDraftId, originLabels, refusal, settle } from "../components/intake";
+import type { GuestChat, OpenedDraft } from "../components/intake";
 import { NotesForm } from "../components/notes-form";
 import type { NotesInput } from "../components/notes-form";
 import { Stakeholders } from "../components/stakeholders";
@@ -32,11 +36,11 @@ type View =
   | { kind: "open"; opened: OpenedDraft; problem: string };
 
 /** What a run of `extract` answers once it has kept its draft. */
-const draftOfRun = (output: unknown): string | undefined =>
+const draftOfRun = (output: unknown): Id<"drafts"> | undefined =>
   typeof output === "object" &&
   output !== null &&
   "draft" in output &&
-  typeof output.draft === "string"
+  isDraftId(output.draft)
     ? output.draft
     : undefined;
 
@@ -71,34 +75,33 @@ const IntakeHeader = ({
   </div>
 );
 
-/** Why intake shows nothing, when it can't be taken here. */
-const AccessNote = ({ overview }: { overview: Overview | null }) => {
-  if (overview?.access === "none") {
-    return (
-      <p className="text-muted-foreground text-sm">
-        Intake needs the Playbook: an admin approves its permission first.
-      </p>
-    );
-  }
-  if (overview?.access === "ok" && !overview.writable) {
-    return (
-      <p className="text-muted-foreground text-sm">
-        Only admins take intake: they change the Playbook.
-      </p>
-    );
-  }
-  return null;
-};
+/** What the intake shows the person (operations/chats.ts `overview`). */
+interface Overview {
+  /** Whether they may review drafts: intake is the App's builders'. */
+  writable: boolean;
+  /** Stakeholder chats; null while the App can't invite anyone. */
+  chats: GuestChat[] | null;
+}
 
-/** The drafts waiting for review, newest first. */
-const DraftList = ({
-  drafts,
-  onOpen,
-}: {
-  drafts: DraftSummary[];
-  onOpen: (id: string) => void;
-}) =>
-  drafts.length === 0 ? (
+/** Why intake shows nothing, when it isn't the person's to take. */
+const AccessNote = ({ overview }: { overview: Overview | null }) =>
+  overview?.writable === false ? (
+    <p className="text-muted-foreground text-sm">
+      Only the App&apos;s builders take intake.
+    </p>
+  ) : null;
+
+/**
+ * The drafts waiting for review, newest first, kept up to date as they
+ * are kept, saved or discarded. Mounted only for someone who may review
+ * them: the store refuses anyone else, which a query throws.
+ */
+const DraftList = ({ onOpen }: { onOpen: (id: Id<"drafts">) => void }) => {
+  const drafts = useQuery(api.drafts.list, {});
+  if (drafts === undefined) {
+    return <p className="text-muted-foreground text-sm">Loading drafts…</p>;
+  }
+  return drafts.length === 0 ? (
     <p className="text-muted-foreground text-sm">No drafts wait for review.</p>
   ) : (
     <Table aria-label="Drafts">
@@ -114,14 +117,7 @@ const DraftList = ({
       <TableBody>
         {drafts.map((draft) => (
           <TableRow key={draft.id}>
-            <TableCell>
-              {draft.title}
-              {draft.status === "saving" ? (
-                <Badge variant="secondary" className="ml-2">
-                  saving
-                </Badge>
-              ) : null}
-            </TableCell>
+            <TableCell>{draft.title}</TableCell>
             <TableCell>{originLabels[draft.origin]}</TableCell>
             <TableCell>{draft.date}</TableCell>
             <TableCell>{draft.statements}</TableCell>
@@ -141,17 +137,60 @@ const DraftList = ({
       </TableBody>
     </Table>
   );
+};
+
+/**
+ * The sources saved most recently, newest first, kept up to date as more
+ * are saved. Mounted only for someone who may review drafts, as the list.
+ */
+const SavedList = () => {
+  const saved = useQuery(api.drafts.saved, {});
+  if (saved === undefined || saved.length === 0) {
+    return null;
+  }
+  return (
+    <Table aria-label="Saved sources">
+      <TableHeader>
+        <TableRow>
+          <TableHead>Saved source</TableHead>
+          <TableHead>Medium</TableHead>
+          <TableHead>Date</TableHead>
+          <TableHead>From</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {saved.map((source) => (
+          <TableRow key={source._id}>
+            <TableCell>
+              {source.title}
+              {source.guest ? (
+                <Badge variant="secondary" className="ml-2">
+                  stakeholder&apos;s words
+                </Badge>
+              ) : null}
+            </TableCell>
+            <TableCell>{mediumLabels[source.medium]}</TableCell>
+            <TableCell>{source.date}</TableCell>
+            <TableCell>{source.from}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+};
 
 /**
  * Intake: sources and the statements taken from them, reviewed and edited
- * as drafts before they are saved to the Playbook.
+ * as drafts before they are saved, in the App's own store.
  */
 const Intake = () => {
+  const client = useClient();
+  const loadOverview = useAction(api.chats.overview);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [view, setView] = useState<View>({ kind: "list" });
   const [problem, setProblem] = useState("");
   const [notice, setNotice] = useState("");
-  // Each listing and opening asked for, numbered: an answer to any but
+  // Each overview and opening asked for, numbered: an answer to any but
   // the latest, arriving late, is dropped, as it would show what the
   // person moved away from.
   const listings = useRef(0);
@@ -165,7 +204,7 @@ const Intake = () => {
   const list = async (): Promise<void> => {
     listings.current += 1;
     const asked = listings.current;
-    const answer = await ask<Overview>("overview");
+    const answer = await settle(async () => await loadOverview({}));
     if (asked !== listings.current) {
       return;
     }
@@ -182,7 +221,7 @@ const Intake = () => {
     const first = async (): Promise<void> => {
       listings.current += 1;
       const asked = listings.current;
-      const answer = await ask<Overview>("overview");
+      const answer = await settle(async () => await loadOverview({}));
       if (!mounted || asked !== listings.current) {
         return;
       }
@@ -196,19 +235,20 @@ const Intake = () => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [loadOverview]);
 
-  const showList = async (): Promise<void> => {
+  const showList = (): void => {
     openings.current += 1;
     setView({ kind: "list" });
-    await list();
   };
 
-  const open = async (id: string): Promise<void> => {
+  const open = async (id: Id<"drafts">): Promise<void> => {
     openings.current += 1;
     const asked = openings.current;
     setNotice("");
-    const answer = await ask<OpenedDraft>("draft", id);
+    const answer = await settle(
+      async () => await client.query(api.drafts.get, { id })
+    );
     if (asked !== openings.current) {
       return;
     }
@@ -216,8 +256,22 @@ const Intake = () => {
       setProblem(refusal(answer.error));
       return;
     }
+    if (answer.ok === null) {
+      setProblem(refusal("intake.not_found"));
+      return;
+    }
+    const { _id, _rev, origin, source, statements } = answer.ok;
     setProblem("");
-    setView({ kind: "open", opened: answer.ok, problem: "" });
+    setView({
+      kind: "open",
+      opened: {
+        id: _id,
+        revision: _rev,
+        origin,
+        draft: { source, statements },
+      },
+      problem: "",
+    });
   };
 
   /**
@@ -234,9 +288,7 @@ const Intake = () => {
     }
     const { id } = started.ok;
     setReading((runs) => [{ id, title }, ...runs]);
-    openings.current += 1;
-    setView({ kind: "list" });
-    await list();
+    showList();
     return undefined;
   };
 
@@ -256,7 +308,7 @@ const Intake = () => {
     await open(draft);
   };
 
-  const onResult = async (result: EditorResult): Promise<void> => {
+  const onResult = (result: EditorResult): void => {
     switch (result.kind) {
       case "kept": {
         openings.current += 1;
@@ -265,24 +317,19 @@ const Intake = () => {
           opened: result.opened,
           problem: result.problem ?? "",
         });
-        await list();
         return;
       }
       case "saved": {
         const { statements } = result.saved;
         setNotice(
-          `Saved to the Playbook: ${statements} ${statements === 1 ? "statement" : "statements"} and their source.`
+          `Saved: ${statements} ${statements === 1 ? "statement" : "statements"} and their source.`
         );
-        await showList();
+        showList();
         return;
       }
       case "discarded": {
-        setNotice(
-          result.saving
-            ? "Discarded. Records its save already wrote stay in the Playbook."
-            : "Discarded."
-        );
-        await showList();
+        setNotice("Discarded.");
+        showList();
         return;
       }
       default: {
@@ -293,7 +340,7 @@ const Intake = () => {
 
   const writable = overview?.writable === true;
   // Stakeholder chats, while the App may invite: null otherwise.
-  const chats = overview?.guests ?? null;
+  const chats = overview?.chats ?? null;
   // The lists, for someone who takes intake, while nothing is open.
   const listing = view.kind === "list" && writable;
   return (
@@ -318,9 +365,6 @@ const Intake = () => {
       {listing ? (
         <Extractions
           started={reading}
-          onReady={() => {
-            void list();
-          }}
           onReview={(run) => {
             void review(run);
           }}
@@ -346,20 +390,18 @@ const Intake = () => {
       ) : null}
       {listing ? (
         <DraftList
-          drafts={overview?.drafts ?? []}
           onOpen={(id) => {
             void open(id);
           }}
         />
       ) : null}
+      {listing ? <SavedList /> : null}
       {view.kind === "notes" ? (
         <NotesForm
           onStart={async (input) =>
             await startReading(input, input.source.title)
           }
-          onBack={() => {
-            void showList();
-          }}
+          onBack={showList}
         />
       ) : null}
       {view.kind === "new" || view.kind === "open" ? (
@@ -367,16 +409,12 @@ const Intake = () => {
           key={
             view.kind === "new"
               ? `new:${view.count}`
-              : `${view.opened.id}@${view.opened.version}`
+              : `${view.opened.id}@${view.opened.revision}`
           }
           opened={view.kind === "new" ? null : view.opened}
           problem={view.kind === "new" ? "" : view.problem}
-          onResult={(result) => {
-            void onResult(result);
-          }}
-          onBack={() => {
-            void showList();
-          }}
+          onResult={onResult}
+          onBack={showList}
         />
       ) : null}
     </main>
