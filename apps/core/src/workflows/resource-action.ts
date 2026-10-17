@@ -281,8 +281,17 @@ export const callAction = async (
     // No call from now on; every one made settles before the task records,
     // within the attempt's deadline: a call the action didn't wait for
     // still has its effect and its receipt, or its refusal, in this step.
-    state.live = false;
-    await Promise.race([Promise.allSettled(state.made), timer.promise]);
+    // Until none is left: one made while waiting is waited for too.
+    const drained = (async () => {
+      // An array's iterator reads its length at each step, so a call made
+      // while waiting is waited for too.
+      for (const made of state.made) {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, as made
+        await Promise.allSettled([made]);
+      }
+      state.live = false;
+    })();
+    await Promise.race([drained, timer.promise]);
     callsDone = true;
   } catch {
     // The deadline won: the action failed, or a call of it outlived it.

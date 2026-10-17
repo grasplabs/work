@@ -519,6 +519,46 @@ describe("a JSON workflow's own actions", () => {
     });
   });
 
+  it("waits for a call the action started from one it didn't wait for", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // The second call starts only once the first, never waited for, answers.
+    const { workflow } = await actingWorkflow(
+      ada,
+      admin,
+      notifyModule(`void ctx.resources.mail
+      .call("mail.send", { to: args.to, subject: "first" })
+      .then(async () => await ctx.resources.mail.call("mail.send", { to: args.to, subject: "second" }));
+    return { status: "answered" };`)
+    );
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const done: string[] = [];
+    const answered = await callAction(
+      env,
+      build.compute,
+      build.sdk,
+      notifyCall,
+      { to: "Ada" },
+      Date.now() + 30_000,
+      {
+        owner: `workflow-action:${workflow.id}`,
+        make: async (built: BuiltCall): Promise<Json> => {
+          await scheduler.wait(100);
+          done.push(
+            built.name === "grasp.connector"
+              ? z.object({ subject: z.string() }).parse(built.arguments).subject
+              : ""
+          );
+          return { messageId: "m" };
+        },
+      }
+    );
+    expect({ answered, done }).toStrictEqual({
+      answered: { status: "answered" },
+      done: ["first", "second"],
+    });
+  });
+
   it("refuses arguments past a step's payload as a call's refusal, and hands the action no host error's detail", async () => {
     const admin = await person("admin");
     const ada = await person("builder");

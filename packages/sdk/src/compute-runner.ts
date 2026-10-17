@@ -39,8 +39,6 @@ const { stringify } = JSON;
  */
 const { entries, freeze, getOwnPropertyDescriptor, hasOwn, keys } = Object;
 const { apply, get: reflectGet } = Reflect;
-/** `Promise.allSettled`, as it was when the runner loaded. */
-const allSettled = Promise.allSettled.bind(Promise);
 const regexpExec: unknown = getOwnPropertyDescriptor(
   RegExp.prototype,
   "exec"
@@ -248,16 +246,31 @@ export const runAction = async (
   // Every call made, so the action answers only once each has settled:
   // one it didn't wait for still reaches the host within its step.
   const made: Promise<unknown>[] = [];
-  const callHost = async (alias: string, call: unknown): Promise<unknown> => {
+  // The very promise the action gets: what it chains on it is a reaction
+  // registered before the runner's own wait, so a call it starts there is
+  // made before the runner looks again.
+  // oxlint-disable-next-line typescript/promise-function-async -- the very promise, not a new one
+  const callHost = (alias: string, call: unknown): Promise<unknown> => {
     const calling: Promise<unknown> = (async () => {
       const answer: unknown = await apply(hostCall, host, [alias, call]);
       return answer;
     })();
     made.push(calling);
-    return await calling;
+    return calling;
   };
+  // Until none is left: a call started while waiting is waited for too.
+  // By index, awaiting each: no array method or iterator module code could
+  // have replaced.
   const settled = async (): Promise<void> => {
-    await allSettled(made);
+    // oxlint-disable-next-line typescript/prefer-for-of -- by index: no iterator module code could replace
+    for (let index = 0; index < made.length; index += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, as made
+        await made[index];
+      } catch {
+        // Its refusal is the host's to keep.
+      }
+    }
   };
   const resources: Record<string, unknown> = {};
   for (const use of uses) {
@@ -269,12 +282,13 @@ export const runAction = async (
     resources[alias] = freeze(
       kind === "connector"
         ? {
-            call: async (operation: unknown, args: unknown) =>
-              await callHost(alias, { operation, arguments: args }),
+            // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+            call: (operation: unknown, args: unknown) =>
+              callHost(alias, { operation, arguments: args }),
           }
         : {
-            call: async (args: unknown) =>
-              await callHost(alias, { arguments: args }),
+            // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+            call: (args: unknown) => callHost(alias, { arguments: args }),
           }
     );
   }
