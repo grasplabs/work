@@ -67,13 +67,13 @@ export default app({
  * An ask's code that keeps its recipients and whether it is the reminder
  * in the approval App (`approvals.remember`), failing as it refuses.
  */
-export const remember = `        const remembered = await env.APP.callFunction({ contractId: "approvals.remember", kind: "mutation" }, { recipients, reminder });
+export const remember = `        const remembered = (await env.APP.callFunction({ contractId: "approvals.remember", kind: "mutation" }, { recipients: recipients.map(({ userId, name, email, link }) => ({ userId, name, email, link })), reminder })) as { ok: true } | { ok: false; error: { message: string; code: string } };
         if (!remembered.ok) {
           throw Object.assign(new Error(remembered.error.message), { code: remembered.error.code });
         }`;
 
 /** A workflow that waits for one decision and returns how it ended. */
-export const approval = `import { workflow, z } from "@grasp-os/sdk/workflow";
+export const approval = `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "approval",
@@ -84,7 +84,7 @@ export default workflow(
   async (step, { input, env }) =>
     await step.decision("review", {
       description: "Approve the invoice",
-      from: input.from,
+      from: input.from as Person,
       ask: async ({ recipients, reminder }) => {
 ${remember}
       },

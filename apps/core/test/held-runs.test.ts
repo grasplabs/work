@@ -92,7 +92,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
       // input leaves for a third party: a side effect's step, with its key.
       ...workflowFiles(
         "search",
-        `  return await step.do("search", { description: "Search the mail", sideEffect: true, input: { query: "INV-7" }, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse((await env.MAIL.call("mail.search", input, { idempotencyKey })).output));`,
+        `  return await step.do("search", { description: "Search the mail", sideEffect: true, input: { query: "INV-7" }, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse(((await env.MAIL.call("mail.search", input, { idempotencyKey })) as { output: string }).output));`,
         { search: null }
       ),
     });
@@ -225,23 +225,23 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     const app = await appWith(admin, {
       ...workflowFiles(
         "via-app",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mail", "action", "{}")}));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mail", "action", "{}", "string")}));`,
         { send: null }
       ),
       // Its App function records statistics points before the mail is
       // held: the step records them again once it is confirmed.
       ...workflowFiles(
         "counted",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mailCounted", "action", "{}")}));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mailCounted", "action", "{}", "string")}));`,
         { send: null }
       ),
       ...workflowFiles(
         "caught",
         `  return await step.do("send", { description: "Send", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => {
     try {
-      return JSON.parse((await env.MAIL.call("mail.send", input, { idempotencyKey })).output);
+      return JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output);
     } catch (error) {
-      return { caught: error.code };
+      return { caught: (error as { code?: string }).code };
     }
   });`,
         { send: null }
@@ -346,7 +346,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     const app = await appWith(admin, {
       ...workflowFiles(
         "via-app",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mail", "action", "{}")}));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mail", "action", "{}", "string")}));`,
         { send: null }
       ),
       ...mailer(`retries: { limit: 0 }`),

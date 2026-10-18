@@ -953,7 +953,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const relay = workflowFiles(
       "relay",
       `  return await step.do("ask", { description: "Ask the desk" }, async () =>
-    await appExports<{ sendThenList: (input: object) => unknown }>(env.DESK).sendThenList({})
+    await appExports<{ sendThenList: (input: object) => { sent: string; listed: string } }>(env.DESK).sendThenList({})
   );`,
       { ask: { sent: "ok", listed: "ok" } }
     );
@@ -962,10 +962,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       Object.fromEntries(
         Object.entries(relay).map(([path, text]) => [
           path,
-          text.replace(
-            "import { workflow, z }",
-            "import { appExports, workflow, z }"
-          ),
+          text.replace(" workflow, z }", " appExports, workflow, z }"),
         ])
       )
     );

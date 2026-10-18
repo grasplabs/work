@@ -42,9 +42,19 @@ describe("decisions past their deadline", { timeout: 60_000 }, () => {
     // go on, then asks who may answer, as a reminder late in a run does.
     const { id: app } = await builder.api.apps.create({ name: "Late" });
     await release(builder, app, {
-      "workflows/late.ts": `export default {
+      "workflows/late.ts": `import type { WorkflowDefinition } from "@grasp-os/sdk/workflow";
+
+// Past the SDK: the engine as the host hands it to a run's code.
+type Engine = {
+  do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>;
+  sleep: (name: string, milliseconds: number) => Promise<void>;
+  openDecision: (request: object) => Promise<{ decision: string }>;
+  decisionRecipients: (decision: string, reminder: boolean) => Promise<unknown[]>;
+};
+
+export default {
   metadata: { id: "late", params: [] },
-  run: async (engine) => {
+  run: async (engine: Engine) => {
     const { decision } = await engine.do("open", {}, async () =>
       await engine.openDecision({ step: "open", from: "role:admin", description: "Late", timeout: 500 })
     );
@@ -52,7 +62,7 @@ describe("decisions past their deadline", { timeout: 60_000 }, () => {
     const before = await engine.do("before", {}, async () => await engine.decisionRecipients(decision, true));
     return before.length;
   },
-};
+} as unknown as WorkflowDefinition<number>;
 `,
       "workflows/late.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
 import definition from "./late.ts";

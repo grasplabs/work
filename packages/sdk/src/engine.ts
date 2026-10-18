@@ -46,7 +46,12 @@ export interface DecisionRecipient {
   link: string;
 }
 
-/** A method of a binding: it takes JSON and answers with it. */
+/**
+ * A method of a binding: it takes JSON and answers with it. The answer is
+ * typed `unknown`, as a binding's name doesn't say what it is (a
+ * connection, an App, a collection): a workflow's code narrows what it
+ * reads, to the answer's shape or to `Json` to return it from a step.
+ */
 export type BindingMethod = (...args: Json[]) => Promise<unknown>;
 
 /**

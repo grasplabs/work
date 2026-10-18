@@ -1058,14 +1058,14 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     });
     const { app } = await guestApp(builder, {
       ...guestFiles(),
-      "workflows/inviter.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/inviter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("inviter", { params: {}, input: z.object({ chat: z.string() }) }, async (step, { env, input }) =>
   await step.do("ask", { description: "Invite", sideEffect: true, input: null, retries: { limit: 0 } }, async () => ({
-    invited: await env.APP.callFunction(${reference("invite")}, ${inviteInput}),
-    listed: await env.APP.callFunction(${reference("list")}, {}),
-    read: await env.APP.callFunction(${reference("read")}, { id: input.chat }),
-    revoked: await env.APP.callFunction(${reference("revoke")}, { id: input.chat }),
+    invited: (await env.APP.callFunction(${reference("invite")}, ${inviteInput})) as Json,
+    listed: (await env.APP.callFunction(${reference("list")}, {})) as Json,
+    read: (await env.APP.callFunction(${reference("read")}, { id: input.chat })) as Json,
+    revoked: (await env.APP.callFunction(${reference("revoke")}, { id: input.chat })) as Json,
   }))
 );
 `,

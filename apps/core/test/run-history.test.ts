@@ -83,12 +83,12 @@ const flaky = workflowFiles(
       if (tries < 3) {
         await new Promise(() => {});
       }
-      return { input, tries };
+      return { input: input as Json, tries };
     }
   );
   await step.sleep("nap", { description: "Nap", duration: 1 });
   await step.do("check", { description: "Check", retries: { limit: 0 } }, async () => {
-    throw Object.assign(new Error("Customer " + counted.input.secret + " is blocked"), { code: "customer.blocked" });
+    throw Object.assign(new Error("Customer " + (counted.input as { secret: string }).secret + " is blocked"), { code: "customer.blocked" });
   });`,
   { count: { input: {}, tries: 3 }, check: null }
 );
@@ -328,13 +328,13 @@ describe("a run's history", { timeout: 60_000 }, () => {
       // Keyed by the customer: the key is the App's data.
       ...workflowFiles(
         "keyed",
-        `  await step.do("charge", { description: "Charge", key: String(input?.customer) }, async () => 1);`,
+        `  await step.do("charge", { description: "Charge", key: String((input as { customer?: string } | undefined)?.customer) }, async () => 1);`,
         { charge: 1 }
       ),
       // A name made of the input: the review can't read the steps.
       ...workflowFiles(
         "dynamic",
-        `  await step.do("charge-" + String(input?.customer), { description: "Charge" }, async () => 1);`,
+        `  await step.do("charge-" + String((input as { customer?: string } | undefined)?.customer), { description: "Charge" }, async () => 1);`,
         { "charge-undefined": 1 }
       ),
     });

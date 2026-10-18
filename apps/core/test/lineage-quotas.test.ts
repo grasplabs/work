@@ -121,7 +121,7 @@ const failedWith = async (run: string): Promise<unknown> => {
 /** A step that takes about `ms`, then returns 1. */
 const working = (name: string, ms: number) =>
   `  await step.do("${name}", { description: "Work" }, async () => {
-    await scheduler.wait(${ms});
+    await new Promise((resolve) => setTimeout(resolve, ${ms}));
     return 1;
   });`;
 
@@ -466,14 +466,21 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     // Written by hand, past the SDK: the host is the boundary, not the SDK.
     const app = await appWith(builder, {
-      "workflows/wide.ts": `export default {
+      "workflows/wide.ts": `import type { WorkflowDefinition } from "@grasp-os/sdk/workflow";
+
+// Past the SDK: the engine as the host hands it to a run's code.
+type Engine = {
+  do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>;
+};
+
+export default {
   metadata: { id: "wide", params: [] },
-  run: async (engine) => {
-    const outcome = async (name, options) => {
+  run: async (engine: Engine) => {
+    const outcome = async (name: string, options: object) => {
       try {
         return await engine.do(name, options, async () => "ran");
       } catch (error) {
-        return error.code ?? error.message;
+        return (error as { code?: string }).code ?? (error as { message?: string }).message;
       }
     };
     return {
@@ -482,7 +489,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       within: await outcome("within", { timeout: 60_000, retries: { limit: 4 } }),
     };
   },
-};
+} as unknown as WorkflowDefinition<unknown>;
 `,
       "workflows/wide.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
 import definition from "./wide.ts";
@@ -630,7 +637,7 @@ ${working("c", 10)}
       workflowFiles(
         "slow",
         `  await step.do("work", { description: "Work" }, async () => {
-    await scheduler.wait(3000);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     return 1;
   });
   return 1;`,
