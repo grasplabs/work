@@ -1327,7 +1327,7 @@ export class ResourceRunHost
           step.task?.kind === "call" &&
           step.task.call.name === "grasp.action"
         ) {
-          await this.#packagesAdmitted();
+          await this.#actionPackagesAdmitted();
         }
         ran();
         call = fn(this.#attemptHostOf(attempt));
@@ -2306,6 +2306,22 @@ export class ResourceRunHost
         this.#run.workflowId,
         packages.graphHash
       );
+    }
+  }
+
+  /**
+   * `#packagesAdmitted` for an action's attempt, before it is told to have
+   * run: a refusal ends the run as a step's error does (never tried
+   * again, so a graph approved again meanwhile runs nothing it refused);
+   * anything else is tried again, as an attempt that never started.
+   */
+  async #actionPackagesAdmitted(): Promise<void> {
+    try {
+      await this.#packagesAdmitted();
+    } catch (error) {
+      throw workflowResourceErrors.codeOf(error) === "workflow.packages_revoked"
+        ? toStepError(forIsolate(error))
+        : error;
     }
   }
 
