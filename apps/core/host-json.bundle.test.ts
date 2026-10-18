@@ -59,7 +59,20 @@ const run = async (
   const closed = Promise.withResolvers<unknown>();
   running.child.once("close", closed.resolve);
   closing.push(closed.promise);
-  await running;
+  try {
+    await running;
+  } catch (error) {
+    // Node's message has the command and its stderr; Wrangler may say why
+    // on stdout instead.
+    const stdout: unknown =
+      typeof error === "object" && error !== null
+        ? Reflect.get(error, "stdout")
+        : undefined;
+    if (error instanceof Error && typeof stdout === "string" && stdout !== "") {
+      throw new Error(`${error.message}\n${stdout}`, { cause: error });
+    }
+    throw error;
+  }
 };
 
 const wrangler = path.join(here, "node_modules/wrangler/bin/wrangler.js");
