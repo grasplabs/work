@@ -666,15 +666,20 @@ describe("a JSON workflow's compute modules", () => {
     });
   });
 
-  it("keeps a draft's modules only with the revisions it keeps, and drops them with the workflow", async () => {
+  it("keeps a draft's modules and their inspections only with the revisions it keeps, and drops them with the workflow", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
-    const source = definitionOf(workflow.name);
-    // A checkpoint, then two that don't pass: the first of those goes.
-    for (const [revision, modules] of [
-      totalModules,
-      { "code/total.ts": "export const total = ;\n" },
-      { "code/other.ts": "export const other = ;\n" },
+    const passing = definitionOf(workflow.name);
+    const failing = definitionOf(workflow.name, {
+      contract: "local:code/total.ts#missing",
+    });
+    // A checkpoint, then two whose modules pass and whose definition
+    // doesn't, then one whose modules don't build: the middle two go.
+    for (const [revision, [source, modules]] of [
+      [passing, totalModules],
+      [failing, totalModules],
+      [failing, totalModules],
+      [passing, { "code/other.ts": "export const other = ;\n" }],
     ].entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one edit after the other
       await editWorkflowDraft(env, by, workflow.id, {
@@ -683,19 +688,38 @@ describe("a JSON workflow's compute modules", () => {
         modules,
       });
     }
-    const stored = async (): Promise<string[]> => {
-      const { results } = await env.DB.prepare(
-        "SELECT revision, path FROM workflow_resource_draft_modules WHERE workflow_resource_id = ? ORDER BY revision, path"
-      )
-        .bind(workflow.id)
-        .all<{ revision: number; path: string }>();
-      return results.map(({ revision, path }) => `${revision} ${path}`);
+    const stored = async (): Promise<{
+      modules: string[];
+      inspections: number[];
+    }> => {
+      const [modules, inspections] = await env.DB.batch<{
+        revision: number;
+        path?: string;
+      }>([
+        env.DB.prepare(
+          "SELECT revision, path FROM workflow_resource_draft_modules WHERE workflow_resource_id = ? ORDER BY revision, path"
+        ).bind(workflow.id),
+        env.DB.prepare(
+          "SELECT revision FROM workflow_resource_draft_inspections WHERE workflow_resource_id = ? ORDER BY revision"
+        ).bind(workflow.id),
+      ]);
+      return {
+        modules: (modules?.results ?? []).map(
+          ({ revision, path }) => `${revision} ${path ?? ""}`
+        ),
+        inspections: (inspections?.results ?? []).map(
+          ({ revision }) => revision
+        ),
+      };
     };
     const kept = await stored();
     await deleteWorkflowResource(env, by, workflow.id);
     expect({ kept, deleted: await stored() }).toStrictEqual({
-      kept: ["1 code/sum.ts", "1 code/total.ts", "3 code/other.ts"],
-      deleted: [],
+      kept: {
+        modules: ["1 code/sum.ts", "1 code/total.ts", "4 code/other.ts"],
+        inspections: [1],
+      },
+      deleted: { modules: [], inspections: [] },
     });
   });
 
