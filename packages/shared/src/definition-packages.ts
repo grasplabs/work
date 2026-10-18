@@ -56,9 +56,9 @@ export const appBindingKinds = [
  * - `missing`: the workflow, or the version pinned, is gone;
  * - `forbidden`: whoever exported doesn't build the workflow;
  * - `not_executable`: the version pinned has no build to run;
- * - `sensitive_constraint`: the version's sensitive parameter constrains
- *   its value in its schema (`const`, `enum`, a bound or a pattern), which
- *   could give it away: a package never carries one.
+ * - `sensitive_constraint`: the version's sensitive parameter pins its
+ *   value in its schema, or nearly (`const`, `enum`, `pattern`, bounds
+ *   that leave one value or length), which would give it away.
  */
 export const unresolvedReasons = [
   "unbound",
@@ -113,7 +113,7 @@ export const definitionPackageSchema = z.strictObject({
     z.strictObject({
       provenance: z.strictObject({
         /**
-         * The version's manifest hash, null when a default was withheld:
+         * The version's manifest hash, null when anything was withheld:
          * it hashes what was published, which would let a holder test
          * guesses at what was withheld.
          */
@@ -121,7 +121,7 @@ export const definitionPackageSchema = z.strictObject({
         /** The SHA-256 of `workflow.json` as exported. */
         definitionHash: sha256Schema,
         evaluatorHash: sha256Schema,
-        /** The build's identity, null when a default was withheld, as above. */
+        /** The build's identity, null when anything was withheld, as above. */
         buildHash: sha256Schema.nullable(),
         profile: z.string().min(1).max(128),
       }),
@@ -132,6 +132,12 @@ export const definitionPackageSchema = z.strictObject({
       files: filesSchema,
       /** The parameters whose defaults `workflow.json` no longer carries. */
       withheldDefaults: z.array(z.string().min(1).max(128)),
+      /**
+       * The sensitive parameters whose bounds (minimum, maximum, length,
+       * items) `workflow.json` no longer carries: the destination's own
+       * to set again.
+       */
+      withheldConstraints: z.array(z.string().min(1).max(128)),
       /** Each workflow it binds, by alias: that version's key, if packaged. */
       workflows: z.record(aliasSchema, workflowKeySchema.nullable()),
       /** Each catalog contract it binds, by alias: its kind. */

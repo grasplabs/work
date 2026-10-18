@@ -138,12 +138,21 @@ const refusedSchema = z.object({ code: z.string(), details: z.unknown() });
 const keys = (value: object): string[] => Object.keys(value).toSorted();
 
 describe("exporting an App's definition", { timeout: 120_000 }, () => {
-  it("packages the sealed release and each version it binds once, with only what its allow-list names and no sensitive default", async () => {
+  it("packages the sealed release and each version it binds once, with only what its allow-list names and no sensitive default or bound", async () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app, store } = fixture;
     const apiKey = `api-key-${unique()}`;
     const region = `region-${unique()}`;
+    // Long enough that no hash in the package holds it by chance.
+    const floor =
+      1_000_000_000_000 + Math.floor(Math.random() * 1_000_000_000_000);
     const workflow = await published(owner, {
+      retries: {
+        schema: { type: "integer", minimum: floor },
+        label: "Retries",
+        required: true,
+        sensitive: true,
+      },
       apiKey: {
         schema: { type: "string" },
         label: "API key",
@@ -228,6 +237,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         "bindings",
         "files",
         "provenance",
+        "withheldConstraints",
         "withheldDefaults",
         "workflows",
       ],
@@ -277,12 +287,15 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       .first<{ definition_json_hash: string; manifest_hash: string }>();
     expect({
       withheld: entry.withheldDefaults.toSorted(),
+      constraints: entry.withheldConstraints,
+      retries: params.retries?.schema,
       apiKey: params.apiKey,
       region: params.settings?.schema.properties?.region,
       pageSize: params.pageSize?.default,
       secrets: [
         apiKey,
         region,
+        String(floor),
         asPublished?.definition_json_hash ?? "unpublished",
         asPublished?.manifest_hash ?? "unpublished",
       ].filter((secret) => text.includes(secret)),
@@ -299,6 +312,8 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       ),
     }).toStrictEqual({
       withheld: ["apiKey", "settings"],
+      constraints: ["retries"],
+      retries: { type: "integer" },
       apiKey: {
         schema: { type: "string" },
         label: "API key",

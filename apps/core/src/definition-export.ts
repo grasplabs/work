@@ -36,11 +36,11 @@ import type { ExportedBinding } from "./workflow-resources.ts";
 //   nothing that holds one is read: no connection, permission or approval
 //   (a binding is its alias and kind), no parameter value, no record,
 //   member, guest, run, decision or audit row. A workflow's sensitive
-//   parameters' defaults, which its definition holds, are withheld
-//   (`withheldDefaults`), and so is every hash over the definition as
-//   published, which would let a holder test guesses at them; one whose
-//   schema constrains its value (`const`, `enum`, a bound, a pattern)
-//   isn't packaged at all. The sealed generated files, which name this
+//   parameters' defaults and bounds, which its definition holds, are
+//   withheld (`withheldDefaults`, `withheldConstraints`), and so is every
+//   hash over what was published, which would let a holder test guesses
+//   at them; one whose schema pins its value, or nearly (`const`, `enum`,
+//   `pattern`, bounds that leave one value or length), isn't packaged. The sealed generated files, which name this
 //   deployment's resources, are only their hashes. What builders wrote
 //   into source is scanned for known secret formats, and the export is
 //   refused, naming the file, if one turns up: a scan, not a guarantee.
@@ -93,44 +93,93 @@ const schemaNodes = (node: unknown, into: JsonObject[] = []): JsonObject[] => {
   return into;
 };
 
-/** The keywords that bound or pin a value, whatever their arguments. */
-const valueKeywords = [
-  "const",
-  "enum",
+/** The keywords that pin a value, whatever their arguments. */
+const pinningKeywords = ["const", "enum", "pattern"];
+
+/** The keywords that only bound a value, unless they pin it between them. */
+const boundKeywords = [
   "minimum",
   "maximum",
   "exclusiveMinimum",
   "exclusiveMaximum",
-  "pattern",
+  "minLength",
+  "maxLength",
+  "minItems",
+  "maxItems",
 ];
 
-/**
- * Whether schema `node` constrains its value enough to give a sensitive
- * one away: pins it (`const`, `enum`), bounds it or its pattern, or fixes
- * its length exactly. Conservative: a bound alone counts, as a pair of
- * bounds can pin a value.
- */
-const constraining = (node: JsonObject): boolean =>
-  valueKeywords.some((keyword) => Object.hasOwn(node, keyword)) ||
-  (node.minLength !== undefined && node.minLength === node.maxLength) ||
-  (node.minItems !== undefined && node.minItems === node.maxItems);
+/** `value` as a number, or undefined. */
+const numberOf = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
-/** A definition with its sensitive defaults withheld, and whose they were. */
+/**
+ * Whether schema `node`'s bounds leave its value at most one: equal
+ * bounds, or an integer range with one integer in it, or none.
+ */
+const boundsPin = (node: JsonObject): boolean => {
+  const inclusiveLow = numberOf(node.minimum);
+  const exclusiveLow = numberOf(node.exclusiveMinimum);
+  const inclusiveHigh = numberOf(node.maximum);
+  const exclusiveHigh = numberOf(node.exclusiveMaximum);
+  const lows = [inclusiveLow, exclusiveLow].filter((low) => low !== undefined);
+  const highs = [inclusiveHigh, exclusiveHigh].filter(
+    (high) => high !== undefined
+  );
+  if (lows.length > 0 && highs.length > 0) {
+    const low = Math.max(...lows);
+    const high = Math.min(...highs);
+    if (high <= low) {
+      return true;
+    }
+    if (node.type === "integer") {
+      // The integers the range admits, each end as tight as it is given.
+      const first =
+        exclusiveLow !== undefined && exclusiveLow === low
+          ? Math.floor(low) + 1
+          : Math.ceil(low);
+      const last =
+        exclusiveHigh !== undefined && exclusiveHigh === high
+          ? Math.ceil(high) - 1
+          : Math.floor(high);
+      if (last - first < 1) {
+        return true;
+      }
+    }
+  }
+  return (
+    (node.minLength !== undefined && node.minLength === node.maxLength) ||
+    (node.minItems !== undefined && node.minItems === node.maxItems)
+  );
+};
+
+/**
+ * Whether schema `node` pins its value, or nearly, so it would give a
+ * sensitive one away: `const`, `enum` or `pattern`, or bounds that leave
+ * at most one value or one length (`boundsPin`).
+ */
+const pinning = (node: JsonObject): boolean =>
+  pinningKeywords.some((keyword) => Object.hasOwn(node, keyword)) ||
+  boundsPin(node);
+
+/** A definition with what of its sensitive parameters was withheld. */
 interface Withheld {
   readonly text: string;
-  readonly withheld: string[];
+  /** The parameters whose defaults were withheld. */
+  readonly defaults: string[];
+  /** The parameters whose bounds were withheld. */
+  readonly constraints: string[];
 }
 
 /**
- * `definition` without a default for any parameter that is sensitive,
- * every one that doesn't say `sensitive: false`, as the profile treats
- * them: the parameter's own default and any in its schema go, and a
- * parameter that had its own is required instead. `sensitive_constraint`
- * for a sensitive parameter whose schema constrains its value
- * (`constraining`), which could give it away. Untouched, as published,
- * when nothing is withheld.
+ * `definition` without anything that gives away the value of a parameter
+ * that is sensitive, every one that doesn't say `sensitive: false`, as
+ * the profile treats them: its own default and any in its schema go (a
+ * parameter that had its own is required instead), and so do the bounds
+ * in its schema. `sensitive_constraint` for one whose schema pins its
+ * value (`pinning`), which nothing withheld would keep: the version isn't
+ * packaged. Untouched, as published, when nothing is withheld.
  */
-const withholdDefaults = (
+const withholdSensitive = (
   definition: string
 ): Withheld | "sensitive_constraint" => {
   const parsed: unknown = JSON.parse(definition);
@@ -142,13 +191,14 @@ const withholdDefaults = (
       ? parsed.document.metadata.grasp
       : undefined;
   const params = isObject(grasp?.params) ? grasp.params : {};
-  const withheld: string[] = [];
+  const defaults: string[] = [];
+  const constraints: string[] = [];
   for (const [name, param] of Object.entries(params)) {
     if (!isObject(param) || param.sensitive === false) {
       continue;
     }
     const nodes = schemaNodes(param.schema);
-    if (nodes.some(constraining)) {
+    if (nodes.some(pinning)) {
       return "sensitive_constraint";
     }
     const ownDefault = Object.hasOwn(param, "default");
@@ -161,12 +211,23 @@ const withholdDefaults = (
       for (const node of withDefault) {
         Reflect.deleteProperty(node, "default");
       }
-      withheld.push(name);
+      defaults.push(name);
+    }
+    const bounded = nodes.filter((node) =>
+      boundKeywords.some((keyword) => Object.hasOwn(node, keyword))
+    );
+    if (bounded.length > 0) {
+      for (const node of bounded) {
+        for (const keyword of boundKeywords) {
+          Reflect.deleteProperty(node, keyword);
+        }
+      }
+      constraints.push(name);
     }
   }
-  return withheld.length === 0
-    ? { text: definition, withheld }
-    : { text: JSON.stringify(parsed, null, 2), withheld };
+  return defaults.length === 0 && constraints.length === 0
+    ? { text: definition, defaults, constraints }
+    : { text: JSON.stringify(parsed, null, 2), defaults, constraints };
 };
 
 type PackagedWorkflow = DefinitionPackage["workflows"][string];
@@ -309,11 +370,13 @@ class WorkflowGraph {
     if (found.status !== "found") {
       return { reason: found.status };
     }
-    const definition = withholdDefaults(found.definition);
+    const definition = withholdSensitive(found.definition);
     if (definition === "sensitive_constraint") {
       return { reason: definition };
     }
     const key = `${workflowNamespace}/${found.name}/${found.definitionVersion}`;
+    const intact =
+      definition.defaults.length === 0 && definition.constraints.length === 0;
     const files = this.#budget(`workflows/${key}`, {
       ...found.files,
       "workflow.json": definition.text,
@@ -323,17 +386,17 @@ class WorkflowGraph {
       entry: {
         provenance: {
           // Each hashes what was published, the definition or code
-          // generated from it: a holder could test guesses at a withheld
-          // default against it.
-          manifestHash:
-            definition.withheld.length === 0 ? found.manifestHash : null,
+          // generated from it: a holder could test guesses at what was
+          // withheld against it.
+          manifestHash: intact ? found.manifestHash : null,
           definitionHash: await sha256Hex(definition.text),
           evaluatorHash: found.evaluatorHash,
-          buildHash: definition.withheld.length === 0 ? found.buildHash : null,
+          buildHash: intact ? found.buildHash : null,
           profile: found.profile,
         },
         files,
-        withheldDefaults: definition.withheld,
+        withheldDefaults: definition.defaults,
+        withheldConstraints: definition.constraints,
       },
       bindings: found.bindings,
     });
