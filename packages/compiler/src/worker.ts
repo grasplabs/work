@@ -499,8 +499,8 @@ const compileCodeFile = (
     };
   }
   // What would steer the type check of code whose types are checked
-  // (`buildWorkflows`, `buildComputeModules`) rather than be checked by it: a triple-slash
-  // directive reaches the whole program (a workflow's
+  // (`buildWorkflows`, `buildComputeModules`) rather than be checked by it:
+  // a triple-slash directive reaches the whole program (a workflow's
   // `/// <reference lib="dom" />` would give every workflow the DOM), and
   // a suppression switches the check off.
   const steering =
