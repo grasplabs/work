@@ -1061,6 +1061,59 @@ describe("a purge of content", setUpTime, () => {
     });
   });
 
+  it("purges a document whose type this release doesn't know, which then saves as a type it does", async () => {
+    const admin = await personOf("admin");
+    const name = `Visser${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "tasks/offboard.md",
+      `# Offboard\n${name} returns the laptop.`
+    );
+    // As an App once declared it: a `task`, which nothing declares now.
+    const task = `---\ntype: task\nstatus: open\n---\n# Offboard\n${name} returns the laptop.`;
+    await env.KNOWLEDGE.batch([
+      env.KNOWLEDGE.prepare(
+        "UPDATE versions SET text = ? WHERE document_id = ?"
+      ).bind(task, document.id),
+      env.KNOWLEDGE.prepare("UPDATE documents SET type = ? WHERE id = ?").bind(
+        "task",
+        document.id
+      ),
+    ]);
+
+    await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "offboarding",
+    });
+    const read = await admin.api.knowledge.getDocument(document.id);
+    const saved = await admin.api.knowledge.saveDocument({
+      collectionId: handbook.id,
+      path: "tasks/offboard.md",
+      text: "---\ntype: doc\n---\n# Offboard\nThe laptop is returned.",
+      ifVersion: read.currentVersion,
+    });
+
+    expect({
+      texts: await versionTexts(document.id),
+      saved: { type: saved.type, version: saved.currentVersion },
+    }).toStrictEqual({
+      texts: [
+        // The version it held, rewritten, and the version the purge saves.
+        "---\ntype: task\nstatus: open\n---\n# Offboard\n(removed) returns the laptop.",
+        "---\ntype: task\nstatus: open\n---\n# Offboard\n(removed) returns the laptop.",
+        "---\ntype: doc\n---\n# Offboard\nThe laptop is returned.",
+      ],
+      saved: { type: "doc", version: 3 },
+    });
+  });
+
   it("removes a term as a whole word, in any case and next to punctuation, and counts where it is inside a longer word", async () => {
     const admin = await personOf("admin");
     const handbook = await admin.api.knowledge.createCollection({
