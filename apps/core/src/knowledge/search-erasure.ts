@@ -391,6 +391,13 @@ export const collectionCheckCaps = {
   liveLookups: 1000,
 } as const;
 
+/**
+ * The longest token whose keys are worked out: a longer one (a key, a
+ * hash, text without spaces) has as many trigrams as characters when it
+ * holds a digit, and is left to the rebuild.
+ */
+const maxTokenLength = 256;
+
 /** Versions' text read at once: no more than the character cap in all. */
 const versionsPerRead = 20;
 
@@ -421,8 +428,9 @@ const notAscii = /\P{ASCII}/u;
  * tokenizers' reading of a token can't be worked out exactly: a character
  * that isn't plain ASCII in it, right beside it (JavaScript's Unicode
  * tables aren't SQLite's, which might join the two), or in a trigram of
- * its neighbours (JavaScript's case folding isn't SQLite's). "capped" as
- * soon as `into` holds more than `maxKeys`.
+ * its neighbours (JavaScript's case folding isn't SQLite's). "capped" for
+ * a token longer than `maxTokenLength`, and as soon as `into` holds more
+ * than `maxKeys`, checked after each key.
  */
 export const addCollectionKeys = (
   value: string,
@@ -432,8 +440,10 @@ export const addCollectionKeys = (
   // Code points, as the tokenizers count characters.
   // oxlint-disable-next-line typescript/no-misused-spread -- code points are meant
   const characters = [...value];
-  const add = (key: IndexKey) => {
+  /** Adds `key`, saying whether `into` is past the cap now. */
+  const added = (key: IndexKey): boolean => {
     into.set(`${key.table}:${key.key}`, key);
+    return into.size > maxKeys;
   };
   let start = 0;
   while (start < characters.length) {
@@ -444,6 +454,9 @@ export const addCollectionKeys = (
         tokenCharacter.test(characters[end] ?? "")
       ) {
         end += 1;
+        if (end - start > maxTokenLength) {
+          return "capped";
+        }
       }
       const token = characters.slice(start, end).join("");
       const beside = `${characters[start - 1] ?? ""}${characters[end] ?? ""}`;
@@ -451,7 +464,9 @@ export const addCollectionKeys = (
         return "unknown";
       }
       for (const key of keysOfToken(token.toLowerCase())) {
-        add(key);
+        if (added(key)) {
+          return "capped";
+        }
       }
       if (token.length < 3) {
         const first = Math.max(0, end - 3);
@@ -461,15 +476,16 @@ export const addCollectionKeys = (
           if (notAscii.test(trigram)) {
             return "unknown";
           }
-          add({
-            table: "search_trigrams",
-            key: `0${trigram.toLowerCase()}`,
-            least: 3,
-          });
+          if (
+            added({
+              table: "search_trigrams",
+              key: `0${trigram.toLowerCase()}`,
+              least: 3,
+            })
+          ) {
+            return "capped";
+          }
         }
-      }
-      if (into.size > maxKeys) {
-        return "capped";
       }
       start = end;
     } else {
@@ -532,10 +548,15 @@ const readCollection = async (
   collectionId: string,
   valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
-  // How much there is, before any text is read.
+  // How much there is, before any text is read: no more of the history
+  // than one version past the cap.
   const [size] = await db.all<{ versions: number; characters: number }>(sql`
-    SELECT count(*) AS versions, coalesce(sum(length(v.text)), 0) AS characters
-    FROM versions AS v WHERE ${versionInCollection(collectionId)}
+    SELECT count(*) AS versions, coalesce(sum(size), 0) AS characters
+    FROM (
+      SELECT length(v.text) AS size FROM versions AS v
+      WHERE ${versionInCollection(collectionId)}
+      LIMIT ${collectionCheckCaps.versions + 1}
+    )
   `);
   const counts = {
     versions: size?.versions ?? 0,
@@ -574,6 +595,10 @@ const readCollection = async (
         AND v.number = json_extract(read.value, '$[1]')
       JOIN documents AS d ON d.id = v.document_id
     `);
+    // A version gone meanwhile (the collection changing): rebuilt.
+    if (rows.length !== page.length) {
+      return { kind: "unknown" };
+    }
     for (const row of rows) {
       const values = valuesOf(row.path, row.text);
       if (values === undefined) {

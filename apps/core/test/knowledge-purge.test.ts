@@ -2395,6 +2395,14 @@ describe("a personal purge's search index", setUpTime, () => {
       { "short.md": `# Short\n${"1 ".repeat(300_000)}` },
       { "short.md": `# Short\n${"2 ".repeat(300_000)}` },
     ]);
+    // One token of a mebibyte with a digit: as many trigrams as characters.
+    const long = await purgeLogged([
+      { "long.md": `# Long\n${stem}1${"x".repeat(1_000_000)}` },
+    ]);
+    // One token of letters longer than it works out, of a key of its own.
+    const longWord = await purgeLogged([
+      { "word.md": `# Word\n${stem}${"x".repeat(300)}` },
+    ]);
     const outcomeOf = ({ rebuilds, lines }: typeof many) => ({
       capped: lines.some((line) =>
         line.includes("knowledge.purge.collection_check_capped")
@@ -2402,9 +2410,16 @@ describe("a personal purge's search index", setUpTime, () => {
       leaked: lines.filter((line) => line.includes(stem)),
       rebuilds,
     });
-    expect({ many: outcomeOf(many), short: outcomeOf(short) }).toStrictEqual({
+    expect({
+      many: outcomeOf(many),
+      short: outcomeOf(short),
+      long: outcomeOf(long),
+      longWord: outcomeOf(longWord),
+    }).toStrictEqual({
       many: { capped: true, leaked: [], rebuilds: 1 },
       short: { capped: true, leaked: [], rebuilds: 1 },
+      long: { capped: true, leaked: [], rebuilds: 1 },
+      longWord: { capped: true, leaked: [], rebuilds: 1 },
     });
   });
 });
