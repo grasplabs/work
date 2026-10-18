@@ -2,6 +2,7 @@ import type {
   WorkflowDraft,
   WorkflowResource,
   WorkflowResourceVersion,
+  WorkflowVersionAction,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
 import {
@@ -22,7 +23,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
 
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, formatList } from "../format.ts";
 import {
   NotLoadedState,
   PageLoading,
@@ -38,6 +39,35 @@ import { TestRun } from "../workflows/test-run.tsx";
 // its definition as a draft they edit, check and publish; for everyone
 // with a role, its published versions. Core decides who sees what: the
 // draft is read only for builders, as it can hold a sensitive default.
+// Each version shows what its own actions may call, as sealed with it
+// (GRA-709): each binding they use, and a connector's exact operations.
+
+/** What a version's own actions may call: each action, then its uses. */
+const ActionEffects = ({ actions }: { actions: WorkflowVersionAction[] }) => {
+  if (actions.length === 0) {
+    return (
+      <span className="text-muted-foreground">
+        <Trans>None</Trans>
+      </span>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-1">
+      {actions.map((action) => (
+        <li className="flex flex-wrap items-center gap-1" key={action.binding}>
+          <code>{action.binding}</code>
+          {action.uses.map((use) => (
+            <Badge key={use.alias} variant="outline">
+              {use.kind === "connector"
+                ? `${use.alias}: ${formatList(use.operations)}`
+                : use.alias}
+            </Badge>
+          ))}
+        </li>
+      ))}
+    </ul>
+  );
+};
 
 const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
   const { t } = useLingui();
@@ -55,6 +85,7 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
           <TableHead>{t`Version`}</TableHead>
           <TableHead>{t`Definition version`}</TableHead>
           <TableHead>{t`Published`}</TableHead>
+          <TableHead>{t`Actions`}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -63,6 +94,9 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
             <TableCell>{version.version}</TableCell>
             <TableCell>{version.definitionVersion}</TableCell>
             <TableCell>{formatDateTime(version.createdAt)}</TableCell>
+            <TableCell>
+              <ActionEffects actions={version.actions} />
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>

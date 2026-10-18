@@ -19,6 +19,7 @@ import {
   requireBuilder,
   roleErrors,
 } from "@grasp-os/shared/roles";
+import { actionUsesSchema } from "@grasp-os/shared/workflow-modules";
 import {
   catalogBindingKinds,
   catalogKeySchema,
@@ -37,6 +38,7 @@ import type {
   WorkflowResourceVersion,
   WorkflowRole,
   WorkflowBinders,
+  WorkflowVersionAction,
   WorkflowVersionBinding,
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
@@ -95,6 +97,7 @@ import {
   compileModules,
   moduleLookup,
   modulesHashOf,
+  versionActionsOf,
 } from "./workflow-modules.ts";
 import type { CompiledModules } from "./workflow-modules.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
@@ -1006,25 +1009,67 @@ const sealedBuildOf = (
   }
 };
 
-/** A version's row, as the registry answers it. */
-const versionOf = (
+/** Where a version's manifest says what its actions may do (GRA-709). */
+const manifestActionsSchema = z.object({
+  actions: z.array(
+    z.strictObject({
+      binding: z.string(),
+      module: z.string(),
+      export: z.string(),
+      uses: actionUsesSchema,
+    })
+  ),
+});
+
+/**
+ * What version `row`'s actions may do, as its manifest seals it: a
+ * manifest without them is malformed, as one without its build is.
+ */
+const sealedActionsOf = (
+  row: typeof workflowResourceVersions.$inferSelect
+): WorkflowVersionAction[] => {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(row.manifest);
+  } catch {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  const parsed = manifestActionsSchema.safeParse(manifest);
+  if (!parsed.success) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return parsed.data.actions;
+};
+
+/**
+ * A version's row, as the registry answers it: only once its manifest
+ * still hashes to what was sealed, since what its actions may do and its
+ * build are read from it (`workflow.version_corrupt` otherwise).
+ */
+const versionOf = async (
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: WorkflowVersionBinding[]
-): WorkflowResourceVersion => ({
-  resourceId: row.workflowResourceId,
-  version: row.version,
-  definitionVersion: row.definitionVersion,
-  profile: row.profileVersion,
-  definitionHash: row.definitionJsonHash,
-  contractHash: row.contractHash,
-  manifestHash: row.manifestHash,
-  bindings,
-  build: buildSummary(
-    sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
-  ),
-  author: row.authorId,
-  createdAt: row.createdAt.toISOString(),
-});
+): Promise<WorkflowResourceVersion> => {
+  if ((await sha256Hex(row.manifest)) !== row.manifestHash) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return {
+    resourceId: row.workflowResourceId,
+    version: row.version,
+    definitionVersion: row.definitionVersion,
+    profile: row.profileVersion,
+    definitionHash: row.definitionJsonHash,
+    contractHash: row.contractHash,
+    manifestHash: row.manifestHash,
+    bindings,
+    actions: sealedActionsOf(row),
+    build: buildSummary(
+      sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
+    ),
+    author: row.authorId,
+    createdAt: row.createdAt.toISOString(),
+  };
+};
 
 /** The bindings of the versions of `id`, by version. */
 export const bindingsOf = async (
@@ -1187,7 +1232,7 @@ const publishedAs = async (
   }
   const bindings = await bindingsOf(env, id);
   return {
-    version: versionOf(row, bindings.get(row.version) ?? []),
+    version: await versionOf(row, bindings.get(row.version) ?? []),
     modulesHash: sealedModulesHash(row),
   };
 };
@@ -1263,6 +1308,8 @@ interface Publication {
   compiled: CompiledBuild;
   /** The hash of the modules published with it, null for none. */
   modulesHash: string | null;
+  /** What its own actions may do, from the contracts its build seals. */
+  actions: WorkflowVersionAction[];
 }
 
 /**
@@ -1284,6 +1331,7 @@ const writeVersion = async (
     bindings,
     compiled,
     modulesHash,
+    actions,
   } = publication;
   // Bounded when the definition was checked (`inspectDefinition`).
   const contractText = canonicalJson(contractOf(checked));
@@ -1304,6 +1352,22 @@ const writeVersion = async (
     evaluatorHash: jqProvenance.sha256,
     contractHash,
     bindings: bindings.map((binding) => ({ ...binding })),
+    // What its own actions may do, as its build seals them (GRA-709): read
+    // back for review, never derived again.
+    actions: actions.map((action) => ({
+      binding: action.binding,
+      module: action.module,
+      export: action.export,
+      uses: action.uses.map((use) =>
+        use.kind === "connector"
+          ? {
+              alias: use.alias,
+              kind: use.kind,
+              operations: [...use.operations],
+            }
+          : { alias: use.alias, kind: use.kind }
+      ),
+    })),
     // What the version runs, sealed with it: its build's artifacts by
     // hash, and its executable identity (workflow-builds.ts).
     build: compiled.build,
@@ -1424,6 +1488,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
+    actions,
     build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
@@ -1562,6 +1627,7 @@ const publish = async (
       bindings,
       compiled,
       modulesHash,
+      actions: versionActionsOf(checked.bindings, modules),
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
@@ -1657,12 +1723,15 @@ export const workflowVersions = async (
     .orderBy(desc(workflowResourceVersions.version));
   const bindings = await bindingsOf(env, workflow.id);
   const visible = await visibleTo(env, by, [...bindings.values()].flat());
-  return rows.map((row) =>
-    versionOf(
-      row,
-      (bindings.get(row.version) ?? []).map(
-        (binding) => visible.get(binding) ?? binding
-      )
+  return await Promise.all(
+    rows.map(
+      async (row) =>
+        await versionOf(
+          row,
+          (bindings.get(row.version) ?? []).map(
+            (binding) => visible.get(binding) ?? binding
+          )
+        )
     )
   );
 };

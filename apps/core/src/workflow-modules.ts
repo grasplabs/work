@@ -16,6 +16,7 @@ import {
 } from "@grasp-os/shared/workflow-modules";
 import type { ActionUse, SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import type { WorkflowVersionAction } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
@@ -234,6 +235,54 @@ export class Inspect extends WorkerEntrypoint {
 /** A key of the manifest: `local:code/<file>.ts#<export>`. */
 const manifestKey =
   /^local:(?<module>code\/[^#]+\.ts)#(?<export>[A-Za-z_$][A-Za-z0-9_$]*)$/u;
+
+/**
+ * What the version's own actions may do (GRA-709), from `modules`, the
+ * contracts sealed into its compute.json in the same publication: one
+ * entry per local operation binding the checked definition keeps, by
+ * alias. A binding without its action's contract is the platform's fault:
+ * validation resolved it against these same contracts.
+ */
+export const versionActionsOf = (
+  bindings: ReadonlyMap<
+    string,
+    { readonly kind: string; readonly contract: string }
+  >,
+  modules: CompiledModules | undefined
+): WorkflowVersionAction[] => {
+  const actions: WorkflowVersionAction[] = [];
+  for (const [alias, binding] of bindings) {
+    const groups = manifestKey.exec(binding.contract)?.groups;
+    if (binding.kind !== "operation" || groups === undefined) {
+      continue;
+    }
+    const contract = modules?.contracts.get(
+      `${groups.module}#${groups.export}`
+    );
+    if (
+      groups.module === undefined ||
+      groups.export === undefined ||
+      contract?.kind !== "operation"
+    ) {
+      throw new Error(`Binding ${alias} names no sealed action`);
+    }
+    actions.push({
+      binding: alias,
+      module: groups.module,
+      export: groups.export,
+      uses: (contract.uses ?? []).map((use) =>
+        use.kind === "connector"
+          ? {
+              alias: use.alias,
+              kind: use.kind,
+              operations: [...use.operations],
+            }
+          : { alias: use.alias, kind: use.kind }
+      ),
+    });
+  }
+  return actions.toSorted((a, b) => (a.binding < b.binding ? -1 : 1));
+};
 
 const descriptorObject = z.record(z.string(), z.json());
 
