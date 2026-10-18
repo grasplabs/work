@@ -11,6 +11,7 @@ import { action, doc, internalMutation, mutation, query } from "#grasp/server";
 import {
   decisionMax,
   figureFields,
+  figuresMax,
   maturityMax,
   narrativeMax,
   signalFields,
@@ -189,6 +190,10 @@ export const take = action({
           seen.add(item.id);
           read.push(item);
         }
+      }
+      // More than a snapshot holds: refused (freeze.ts) without reading on.
+      if (read.length > figuresMax) {
+        break;
       }
       cursor = page.nextCursor;
     } while (cursor !== null);

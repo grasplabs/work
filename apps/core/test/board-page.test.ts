@@ -659,8 +659,7 @@ describe("the board page", { timeout: 90_000 }, () => {
       take: refused,
       // Neither the map nor the statistics were read for them.
       read: events.filter(
-        ({ action }) =>
-          action === "statistics.read" || action.startsWith("app.function")
+        ({ action }) => action === "statistics.read" || action === "app.call"
       ).length,
       write: codeOf(
         await call(member, app, "snapshots.write", "mutation", {
@@ -749,6 +748,37 @@ describe("the board page", { timeout: 90_000 }, () => {
       figures: snapshot.figures,
       figuresPage: items(figuresPage),
     }).toStrictEqual({ mapPage: 50, figures: 60, figuresPage: 50 });
+  });
+
+  it("refuses a map of more workflows than a snapshot holds, reading no more of it than it takes to tell", async () => {
+    const { admin, app, map } = await setUp({ bindStatistics: false });
+    const add = async (index: number): Promise<void> => {
+      await saveWorkflow(admin, map, {
+        title: `Workflow ${index}`,
+        state: "drawn",
+        steps: [],
+      });
+    };
+    for (let index = 0; index < 301; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one workflow at a time
+      await add(index);
+    }
+    let taken = "";
+    const events = await auditedDuring(async () => {
+      taken = codeOf(await take(admin, app));
+    });
+    expect({
+      taken,
+      // Six pages of 50 tell it has more than 250: the seventh isn't read.
+      mapReads: events.filter(
+        ({ action, target }) => action === "app.call" && target?.id === map
+      ).length,
+      listed: await listed(admin, app),
+    }).toStrictEqual({
+      taken: "board.too_many_workflows",
+      mapReads: 6,
+      listed: [],
+    });
   });
 
   it("takes no snapshot of a map nobody bound it to", async () => {
