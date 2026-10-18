@@ -547,28 +547,32 @@ const readCollection = async (
   ) {
     return loggedCapped(counts);
   }
-  const listed = await db.all<{ pair: string }>(sql`
-    SELECT ${versionPair} AS pair FROM versions AS v
+  const listed = await db.all<{ documentId: string; number: number }>(sql`
+    SELECT v.document_id AS documentId, v.number AS number FROM versions AS v
     WHERE ${versionInCollection(collectionId)}
     ORDER BY v.document_id, v.number
     LIMIT ${collectionCheckCaps.versions + 1}
   `);
-  const versions = listed.map(({ pair }) => pair);
+  const versions = listed.map(
+    ({ documentId, number }) => `${documentId}:${number}`
+  );
   if (versions.length > collectionCheckCaps.versions) {
     return loggedCapped({ versions: versions.length });
   }
   const keys = new Map<string, IndexKey>();
   let characters = 0;
-  for (let at = 0; at < versions.length; at += versionsPerRead) {
+  for (let at = 0; at < listed.length; at += versionsPerRead) {
+    const page = listed
+      .slice(at, at + versionsPerRead)
+      .map(({ documentId, number }) => [documentId, number]);
+    // By the versions' primary key, one lookup each: never a scan.
     // oxlint-disable-next-line no-await-in-loop -- one page after another
     const rows = await db.all<{ path: string; text: string }>(sql`
       SELECT d.path AS path, v.text AS text
-      FROM versions AS v JOIN documents AS d ON d.id = v.document_id
-      WHERE ${versionPair} IN (
-        SELECT value FROM json_each(${JSON.stringify(
-          versions.slice(at, at + versionsPerRead)
-        )})
-      )
+      FROM json_each(${JSON.stringify(page)}) AS read
+      JOIN versions AS v ON v.document_id = json_extract(read.value, '$[0]')
+        AND v.number = json_extract(read.value, '$[1]')
+      JOIN documents AS d ON d.id = v.document_id
     `);
     for (const row of rows) {
       const values = valuesOf(row.path, row.text);
