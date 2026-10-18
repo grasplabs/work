@@ -2444,6 +2444,13 @@ const letGo = async (
 };
 
 /**
+ * The longest App code waits to hear of a refused use while its evidence
+ * is kept (`keepEvidence`): long enough for an outboxed write, short of
+ * holding the call.
+ */
+export const useEvidenceWaitMs = 2000;
+
+/**
  * Keeps the evidence of a use refused at the host's admission
  * (`refusedUses`) as `operation`'s code asked it: the call's first, through
  * `Invocation.refusedUse`, before the refusal reaches App code. A failure
@@ -2464,14 +2471,35 @@ const keepEvidence = async (
   }
   run.evidence.kept = true;
   const errorCode = operationErrors.codeOf(error) ?? "resource.not_allowed";
+  const keeping = (async () => {
+    try {
+      await keep({ function: operation.path, ...refused, errorCode });
+    } catch (keepError) {
+      log.error("app.use.audit_failed", {
+        requestId: run.invocation.requestId,
+        errorCode,
+        ...errorFields(keepError),
+      });
+    }
+  })();
+  // Waited for no longer than `useEvidenceWaitMs`, nor past the call's
+  // deadline: a write still under way then goes on, and App code hears of
+  // the refusal, so a hung write never holds the App's call. The deadline
+  // alone wouldn't do: the run is stopped there anyway (`runHandler`).
+  const waited = Promise.withResolvers<null>();
+  const giveUp = setTimeout(
+    () => {
+      waited.resolve(null);
+    },
+    Math.max(
+      0,
+      Math.min(useEvidenceWaitMs, run.invocation.deadline - Date.now())
+    )
+  );
   try {
-    await keep({ function: operation.path, ...refused, errorCode });
-  } catch (keepError) {
-    log.error("app.use.audit_failed", {
-      requestId: run.invocation.requestId,
-      errorCode,
-      ...errorFields(keepError),
-    });
+    await Promise.race([keeping, waited.promise]);
+  } finally {
+    clearTimeout(giveUp);
   }
 };
 

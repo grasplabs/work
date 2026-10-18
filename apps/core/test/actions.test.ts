@@ -38,6 +38,7 @@ import {
   callMaxDepth,
   callMaxResourceRequests,
   callOperation,
+  useEvidenceWaitMs,
 } from "../src/operations.ts";
 import type {
   BoundResource,
@@ -2324,7 +2325,7 @@ describe("evidence of a refused use", () => {
     });
   });
 
-  it("is kept for a mutation asking a resource it can't use, and is no part of a refusal the hook couldn't keep", async () => {
+  it("is kept for a mutation asking a resource it can't use, and is no part of a refusal the hook couldn't keep, nor held by one that hangs", async () => {
     const fixture = await notes();
     const heard: UseRefusal[] = [];
     const asked = await call(
@@ -2363,6 +2364,33 @@ describe("evidence of a refused use", () => {
         ),
       }
     );
+    // A hook that never settles holds App code no longer than the wait
+    // for evidence: the action hears of its refusal and answers.
+    const started = Date.now();
+    const hung = await call(
+      fixture,
+      "action",
+      "actions.sendMail",
+      { to: "ada@acme.test" },
+      {
+        within: 20_000,
+        resources: bindingsOf({
+          mail: bound("connector", "microsoft-365.mail@1", messageSent),
+        }),
+        refusedUse: async () => {
+          await Promise.withResolvers<null>().promise;
+        },
+        run: misusing("actions.sendMail", async (channel) => {
+          try {
+            await channel.resource("nope", "search", [{}]);
+          } catch {
+            // Swallowed.
+          }
+          return { mailbox: "m" };
+        }),
+      }
+    );
+    const tookMs = Date.now() - started;
     // A hook that fails leaves the refusal as it was.
     const failing = await call(
       fixture,
@@ -2386,6 +2414,8 @@ describe("evidence of a refused use", () => {
       heard,
       startsUnlisted: codeOf(startsUnlisted),
       workflowHeard,
+      hung: codeOf(hung),
+      heldNoLonger: tookMs < useEvidenceWaitMs + 5000,
       failing: codeOf(failing),
     }).toStrictEqual({
       asked: "operation.no_resources",
@@ -2406,6 +2436,8 @@ describe("evidence of a refused use", () => {
           errorCode: "operation.no_resources",
         },
       ],
+      hung: "ok",
+      heldNoLonger: true,
       failing: "operation.no_resources",
     });
   });
