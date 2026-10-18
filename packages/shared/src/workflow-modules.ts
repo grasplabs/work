@@ -12,7 +12,7 @@ export const workflowModulePattern =
   /^code\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.ts$/u;
 
 /** The kinds of the workflow's own bindings an action may use. */
-export const actionUseKinds = ["connector", "operation"] as const;
+export const actionUseKinds = ["connector", "operation", "model"] as const;
 export type ActionUseKind = (typeof actionUseKinds)[number];
 
 /** An alias an action uses: a binding alias, as the profile names them. */
@@ -44,25 +44,41 @@ export const workflowModuleLimits = {
   operationChars: 256,
 } as const;
 
+/** A connector binding's use: the exact operations it calls, each once. */
+export const connectorUseSchema = z.strictObject({
+  alias: z.string().regex(actionUseAliasPattern),
+  kind: z.literal("connector"),
+  operations: z
+    .array(z.string().min(1).max(workflowModuleLimits.operationChars))
+    .min(1)
+    .max(workflowModuleLimits.actionUseOperations)
+    .refine((operations) => new Set(operations).size === operations.length),
+});
+
+/** An operation binding's use: an App export, one operation, nothing more. */
+export const operationUseSchema = z.strictObject({
+  alias: z.string().regex(actionUseAliasPattern),
+  kind: z.literal("operation"),
+});
+
 /**
  * A binding an action declares it uses, as its sealed contract holds it
  * (GRA-704): a connector's with the exact operations it calls, each once;
- * an operation binding's (an App export, one operation) with nothing more.
- * The host refuses a call of any other operation.
+ * an operation binding's (an App export, one operation) with nothing more;
+ * a model binding's with the shape its calls answer. The host refuses a
+ * call of any other operation.
  */
 export const actionUseSchema = z.discriminatedUnion("kind", [
+  connectorUseSchema,
+  operationUseSchema,
+  // A model binding's: the descriptor of what each of its calls answers,
+  // as canonical JSON, sealed with the action's contract (GRA-700): the
+  // host sends it, and checks every answer against it, never a shape the
+  // action makes up as it runs.
   z.strictObject({
     alias: z.string().regex(actionUseAliasPattern),
-    kind: z.literal("connector"),
-    operations: z
-      .array(z.string().min(1).max(workflowModuleLimits.operationChars))
-      .min(1)
-      .max(workflowModuleLimits.actionUseOperations)
-      .refine((operations) => new Set(operations).size === operations.length),
-  }),
-  z.strictObject({
-    alias: z.string().regex(actionUseAliasPattern),
-    kind: z.literal("operation"),
+    kind: z.literal("model"),
+    output: z.string().min(1).max(workflowModuleLimits.descriptorChars),
   }),
 ]);
 
@@ -76,7 +92,8 @@ export type SealedUse =
       readonly kind: "connector";
       readonly operations: readonly string[];
     }
-  | { readonly alias: string; readonly kind: "operation" };
+  | { readonly alias: string; readonly kind: "operation" }
+  | { readonly alias: string; readonly kind: "model"; readonly output: string };
 
 /** An action's uses: each alias once, at most `actionUses` of them. */
 export const actionUsesSchema = z

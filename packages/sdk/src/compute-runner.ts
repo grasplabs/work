@@ -218,6 +218,41 @@ const failureOf = (error: unknown, fallback: string): string => {
 };
 
 /**
+ * What one declared use gives an action, each call one of `callHost`'s:
+ * the host checks each against the sealed contract again, so this is a
+ * convenience, never the boundary.
+ */
+const resourceOf = (
+  kind: unknown,
+  alias: string,
+  callHost: (alias: string, call: unknown) => Promise<unknown>
+): object => {
+  if (kind === "connector") {
+    return {
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      call: (operation: unknown, args: unknown) =>
+        callHost(alias, { operation, arguments: args }),
+    };
+  }
+  if (kind === "model") {
+    return {
+      // Its two fields read once each, as data: what reaches the host is
+      // plain values, never the object the action made.
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      generate: (request: unknown) =>
+        callHost(alias, {
+          instructions: exportOf(request, "instructions"),
+          input: exportOf(request, "input"),
+        }),
+    };
+  }
+  return {
+    // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+    call: (args: unknown) => callHost(alias, { arguments: args }),
+  };
+};
+
+/**
  * Runs the action `request` names on its arguments, its resources each a
  * call of `host`'s: the handler's answer as JSON text, or why it failed.
  * `ctx.resources` holds the aliases the action declared, and nothing
@@ -279,18 +314,7 @@ export const runAction = async (
     if (typeof alias !== "string") {
       continue;
     }
-    resources[alias] = freeze(
-      kind === "connector"
-        ? {
-            // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
-            call: (operation: unknown, args: unknown) =>
-              callHost(alias, { operation, arguments: args }),
-          }
-        : {
-            // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
-            call: (args: unknown) => callHost(alias, { arguments: args }),
-          }
-    );
+    resources[alias] = freeze(resourceOf(kind, alias, callHost));
   }
   const ctx = freeze({ resources: freeze(resources) });
   try {

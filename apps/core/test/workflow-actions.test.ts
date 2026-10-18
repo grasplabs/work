@@ -503,6 +503,11 @@ describe("a JSON workflow's own actions", () => {
       ['[resource.operation("mail")]', { kind: "connector", contract: key }],
       // Uses the workflow's own action: never one of its own modules.
       ['[resource.operation("notify")]', { kind: "connector", contract: key }],
+      // Uses `mail` as a model, which the definition binds a connector.
+      [
+        '[resource.model("mail", { output: v.object({ line: v.string() }) })]',
+        { kind: "connector", contract: key },
+      ],
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const workflow = await createWorkflowResource(
