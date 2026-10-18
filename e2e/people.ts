@@ -177,6 +177,7 @@ const cast = {
   notesLanguage: { builder: "builder" },
   signOutFailure: { member: "user" },
   workflowEditor: { builder: "builder" },
+  workflowDiagram: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },
