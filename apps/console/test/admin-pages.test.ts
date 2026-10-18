@@ -516,12 +516,12 @@ describe("the admin's frame", () => {
       ),
       title: html.includes(`${acme.name}</h1>`),
       known: column.includes("85% known. Ready for Grasp’s go"),
-      // The go and the agreements wait under Steps, the contract under Contract.
+      // The go and the agreements wait under Steps; a contract core doesn't hold waits nowhere.
       waits: ["Steps", "Contract", "Members", "Interviews"].map((title) =>
         columnEntryOf(column, title).includes("Something waits for Grasp")
       ),
       source: html.includes("From the company’s own Grasp."),
-      // Every need of Acme, with where it is settled.
+      // Every need of Acme, with where it is settled; none for a contract nobody knows of yet.
       needs: [
         "85% of what Grasp needs is known: enough to open at 80%. The company comes in once Grasp gives its go.",
         "The contract is still being written.",
@@ -535,11 +535,34 @@ describe("the admin's frame", () => {
       onOverview: true,
       title: true,
       known: true,
-      waits: [true, true, false, false],
+      waits: [true, false, false, false],
       source: true,
-      needs: [true, true],
+      needs: [true, false],
       opensContract: true,
     });
+  });
+
+  it("sends what needs Grasp at a paused organization to its steps", async () => {
+    const paused = await liveClient();
+    paused.account.admin = {
+      ...toldSnapshot("Paused", { days: 14, daysIn: 3, leadTalked: true }),
+      paused: true,
+    };
+
+    const { status, html } = await page(
+      `/admin/organizations/${paused.clientId}`
+    );
+    const main = html.slice(html.indexOf("<main"));
+    const at = main.indexOf("The interviews are paused");
+    const item = at === -1 ? "" : main.slice(at, main.indexOf("</li>", at));
+
+    expect({
+      status,
+      paused: at !== -1,
+      toSteps: item.includes(
+        `href="/admin/organizations/${paused.clientId}/steps"`
+      ),
+    }).toStrictEqual({ status: 200, paused: true, toSteps: true });
   });
 
   it("shows a section under its own path, titled, saying where what it shows comes from", async () => {
