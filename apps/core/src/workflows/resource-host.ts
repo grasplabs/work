@@ -1319,6 +1319,16 @@ export class ResourceRunHost
       if (attempt === undefined) {
         call = Promise.reject(cpuLimitKill());
       } else {
+        // An action is tried once: its packages are admitted before it is
+        // told to have run, so a check that can't answer for a moment
+        // leaves it to a later attempt, never a failure kept for good.
+        if (
+          step.kind === "task" &&
+          step.task?.kind === "call" &&
+          step.task.call.name === "grasp.action"
+        ) {
+          await this.#packagesAdmitted();
+        }
         ran();
         call = fn(this.#attemptHostOf(attempt));
       }
@@ -2244,10 +2254,11 @@ export class ResourceRunHost
       this.#modelCalls += 1;
       this.#modelCallsMade.add(task.id);
     }
-    if (call.name === "grasp.compute" || call.name === "grasp.action") {
+    if (call.name === "grasp.compute") {
       // Its modules' approved packages admitted again first, under the
       // policy generation now: a graph revoked since fails the run here,
-      // never retried (decision 4, GRA-665).
+      // never retried (decision 4, GRA-665). An action's were admitted as
+      // its attempt began (`#attemptOf`).
       await this.#packagesAdmitted();
     }
     if (call.name === "grasp.compute") {
