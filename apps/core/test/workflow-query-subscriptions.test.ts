@@ -329,8 +329,9 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
         // Nothing patched yet.
       },
     };
-    const { builder, app, release, follower, subscription } =
-      await followingRuns(async (appId) => {
+    let stopFollowing: (() => Promise<void>) | undefined;
+    try {
+      const following = await followingRuns(async (appId) => {
         await runInDurableObject(
           appHost(env, appIdSchema.parse(appId)),
           (instance) => {
@@ -364,33 +365,38 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
           }
         );
       });
-    // Let go of by the host: the connection follows again, held.
-    await runInDurableObject(
-      appHost(env, appIdSchema.parse(app)),
-      (instance) => {
-        Reflect.apply(Reflect.get(instance, "unfollowAccess"), instance, [
-          gate.ids[0],
-        ]);
-      }
-    );
-    const runId = await kickOff(builder, app, release);
-    await vi.waitFor(
-      async () => {
-        const status = await env.DB.prepare(
-          "SELECT status FROM workflow_resource_runs WHERE id = ?"
-        )
-          .bind(runId)
-          .first<string>("status");
-        expect(status).toBe("running");
-      },
-      { timeout: 30_000, interval: 50 }
-    );
-    gate.open = true;
-    try {
+      const { builder, app, follower, subscription } = following;
+      stopFollowing = async () => {
+        await subscription.release();
+      };
+      // Let go of by the host: the connection follows again, held.
+      await runInDurableObject(
+        appHost(env, appIdSchema.parse(app)),
+        (instance) => {
+          Reflect.apply(Reflect.get(instance, "unfollowAccess"), instance, [
+            gate.ids[0],
+          ]);
+        }
+      );
+      const runId = await kickOff(builder, app, following.release);
+      await vi.waitFor(
+        async () => {
+          const status = await env.DB.prepare(
+            "SELECT status FROM workflow_resource_runs WHERE id = ?"
+          )
+            .bind(runId)
+            .first<string>("status");
+          expect(status).toBe("running");
+        },
+        { timeout: 30_000, interval: 50 }
+      );
+      gate.open = true;
       await showing(follower, [`${runId}: running`]);
     } finally {
+      // Whatever failed, nothing stays held or patched for later tests.
+      gate.open = true;
       gate.undo();
-      await subscription.release();
+      await stopFollowing?.();
     }
   });
 });
