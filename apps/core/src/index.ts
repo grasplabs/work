@@ -9,8 +9,6 @@ import { refreshDailySignals } from "./daily-signals.ts";
 import { handleRequest } from "./entry.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
-import { drainSubmissionOutbox } from "./knowledge/outbox.ts";
-import { sweepReceipts } from "./knowledge/receipts.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
@@ -131,7 +129,6 @@ export default {
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
             sweepBuilds(env, new Date(controller.scheduledTime)),
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
-            sweepReceipts(env, new Date(controller.scheduledTime)),
             sweepReleases(env, new Date(controller.scheduledTime)),
             sweepTestFixtures(env, new Date(controller.scheduledTime)),
             sweepTokenKeys(env, new Date(controller.scheduledTime)),
@@ -139,7 +136,6 @@ export default {
           ]
         : [
             drainAuditOutboxes(env),
-            drainSubmissionOutbox(env),
             retryDisconnects(env),
             retryAccessRevocations(env),
             sweepUploads(env),

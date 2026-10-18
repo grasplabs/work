@@ -294,10 +294,6 @@ msgstr "{doc} in {where} is {late, plural, one {# day} other {# days}} past its 
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# document} other {# documents}}"
 
-#: src/activity/pending.tsx
-msgid "{domain} already keeps {type} records here: this domain's won't apply."
-msgstr "{domain} already keeps {type} records here: this domain's won't apply."
-
 #: src/dashboard/dependency-requests.tsx
 msgid "{domain} doesn't get these packages."
 msgstr "{domain} doesn't get these packages."
@@ -1283,10 +1279,6 @@ msgstr "An app nobody approved was refused the domain's data"
 #: src/engines/resource-bindings.tsx
 msgid "Another domain"
 msgstr "Another domain"
-
-#: src/activity/pending.tsx
-msgid "Another domain already keeps {type} records here: this domain's won't apply."
-msgstr "Another domain already keeps {type} records here: this domain's won't apply."
 
 #: src/activity/pending.tsx
 msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
@@ -7575,10 +7567,6 @@ msgstr "Works council heard, where there is one"
 msgctxt "settings group"
 msgid "Workspace"
 msgstr "Workspace"
-
-#: src/activity/pending.tsx
-msgid "Would keep {claimed} records here"
-msgstr "Would keep {claimed} records here"
 
 #: src/chat/builds-state.ts
 msgid "Would run after approval"

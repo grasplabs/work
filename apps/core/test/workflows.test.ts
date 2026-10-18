@@ -386,15 +386,14 @@ ${mailStep("after")}`,
       personApi("admin"),
       personApi("builder"),
     ]);
-    // Server code that saves a record for its caller, into a collection
-    // everyone reads, which only admins change.
+    // Server code that reads a collection for its caller, under a
+    // permission that also lets it write there: one that changes things.
     const savingServer = `import { DurableObject } from "cloudflare:workers";
 
 export class App extends DurableObject {
-  async save(caller: unknown, path: string): Promise<unknown> {
-    const record = { type: "doc", title: "Finance" };
-    const saved = await (this.env as any).NOTES.saveRecord(caller, { path, ifVersion: 0, record, body: "" });
-    return saved.currentVersion;
+  async save(caller: unknown): Promise<unknown> {
+    const page = await (this.env as any).NOTES.listDocuments(caller);
+    return page.documents.length;
   }
 }
 `;
@@ -402,15 +401,14 @@ export class App extends DurableObject {
       name: `Notes ${crypto.randomUUID().slice(0, 8)}`,
       access: "everyone",
     });
-    const path = `teams/finance-${crypto.randomUUID().slice(0, 8)}.md`;
     const version = (mark: string) => ({
       "app/server.ts": savingServer,
       ...workflowFiles(
         "saver",
         `  // ${mark}
   await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("save", { description: "Save", retries: { limit: 0 } }, async () => (await env.APP.call("save", ${JSON.stringify(path)})) as Json);`,
-        { save: 1 }
+  return await step.do("save", { description: "Save", retries: { limit: 0 } }, async () => (await env.APP.call("save")) as Json);`,
+        { save: 0 }
       ),
     });
     const { id: app } = await builder.api.apps.create({ name: "Saver" });
@@ -447,8 +445,8 @@ export class App extends DurableObject {
     }).toMatchObject({
       attacked: { version: 2, status: "failed" },
       failedStep: { step: "save", errorCode: "permission.denied" },
-      // The run on the version the admin granted for saves.
-      approved: { version: 3, status: "completed", output: 1 },
+      // The run on the version the admin granted for reads the collection.
+      approved: { version: 3, status: "completed", output: 0 },
     });
   });
 

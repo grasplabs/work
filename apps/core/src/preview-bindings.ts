@@ -3,11 +3,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import type { GuestChat } from "@grasp-os/shared/guests";
 import { guestErrors } from "@grasp-os/shared/guests";
 import type { AppId } from "@grasp-os/shared/ids";
-import type {
-  DocumentPage,
-  RecordPage,
-  SearchResults,
-} from "@grasp-os/shared/knowledge";
+import type { DocumentPage, SearchResults } from "@grasp-os/shared/knowledge";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { platformActionSchema } from "@grasp-os/shared/permissions";
 import type { Permission, PlatformAction } from "@grasp-os/shared/permissions";
@@ -33,14 +29,10 @@ import { activeOrRequestedPermissions } from "./permissions.ts";
 // - A connection (`OUTLOOK`): every call refused, reads too. A preview
 //   reaches no outside system: a read would carry out what the draft
 //   sends, and bring back what the person's mailbox holds.
-// - A collection (`HANDBOOK`): an empty collection. A list, a search or a
-//   page of records finds nothing, a document named isn't found,
-//   `canWrite` is false and the App owns none of its record types
-//   (`ownedTypes`): the two hints say the same, that nothing can be
-//   written here, so code that asks before it writes stops where it
-//   would for someone who can't write, and a write (`saveRecord`) is
-//   refused. Nothing of Knowledge is read, a type's declaration neither,
-//   so nothing real reaches the preview's screens, or what they report.
+// - A collection (`HANDBOOK`): an empty collection. A list or a search
+//   finds nothing and a document named isn't found. Nothing of Knowledge
+//   is read, so nothing real reaches the preview's screens, or what they
+//   report.
 // - Another App's exports: every call refused. That App's code and data
 //   are real, whatever its export says it does.
 // - Statistics (`STATISTICS`, and the platform's under a grant): a point
@@ -126,31 +118,6 @@ export class PreviewCollection extends WorkerEntrypoint<Env> {
   // oxlint-disable-next-line class-methods-use-this -- a preview's stubs answer the same, whoever holds them
   follow(): never {
     throw notFound();
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- a preview's stubs answer the same, whoever holds them
-  getRecord(): never {
-    throw notFound();
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- a preview's stubs answer the same, whoever holds them
-  listRecords(): RecordPage {
-    return { records: [], unreadable: [], next: null, provenance: nothingRead };
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- a preview's stubs answer the same, whoever holds them
-  canWrite(): boolean {
-    return false;
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- a preview's stubs answer the same, whoever holds them
-  ownedTypes(): string[] {
-    return [];
-  }
-
-  // oxlint-disable-next-line class-methods-use-this -- a preview's stubs answer the same, whoever holds them
-  saveRecord(): never {
-    return refuse();
   }
 }
 
