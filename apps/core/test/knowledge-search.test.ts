@@ -563,12 +563,60 @@ const corpusTables = new Set([
   "search_trigrams",
 ]);
 
+/** Words that may follow a table where an alias could stand. */
+const keywords = [
+  "AS",
+  "CROSS",
+  "FULL",
+  "GROUP",
+  "INNER",
+  "JOIN",
+  "LEFT",
+  "LIMIT",
+  "NATURAL",
+  "ON",
+  "ORDER",
+  "OUTER",
+  "RIGHT",
+  "UNION",
+  "USING",
+  "WHERE",
+  "WINDOW",
+];
+
+/**
+ * A table a query names after FROM or JOIN, and the alias it gives it, if
+ * any: never a keyword, which starts the next clause (another JOIN, ON).
+ */
+const namedPattern = new RegExp(
+  String.raw`\b(?:FROM|JOIN)\s+"?(?<table>\w+)"?(?:\s+(?:AS\s+)?"?(?!(?:${keywords.join("|")})\b)(?<alias>\w+)"?)?`,
+  "giu"
+);
+
+/**
+ * The corpus table each name in `query`'s plan stands for: the table
+ * itself, or an alias the query gave it, which SQLite's plan prints in
+ * its place.
+ */
+const corpusNamesOf = (query: string): Map<string, string> => {
+  const names = new Map([...corpusTables].map((table) => [table, table]));
+  for (const { groups } of query.matchAll(namedPattern)) {
+    const table = groups?.table ?? "";
+    const alias = groups?.alias ?? "";
+    if (corpusTables.has(table) && alias !== "") {
+      names.set(alias, table);
+    }
+  }
+  return names;
+};
+
 /** A step of a query plan that reads a table whole, or an index none of it. */
 const scanPattern =
   /^SCAN (?<table>\S+)(?: VIRTUAL TABLE INDEX \d+:(?<constraints>\S*))?/u;
 
 /**
- * The corpus tables `statement` reads whole, by SQLite's plan for it: a
+ * The corpus tables `statement` reads whole, by SQLite's plan for it (an
+ * alias resolved to its table): a
  * table scanned row by row, or a full-text index scanned without a MATCH
  * or rowid constraint (FTS5's `M` and `=`).
  */
@@ -576,10 +624,11 @@ const tablesReadWhole = async ({ query, values }: Bound): Promise<string[]> => {
   const { results } = await env.KNOWLEDGE.prepare(`EXPLAIN QUERY PLAN ${query}`)
     .bind(...values)
     .all<{ detail: string }>();
+  const names = corpusNamesOf(query);
   return results.flatMap(({ detail }) => {
     const step = scanPattern.exec(detail)?.groups;
-    const table = step?.table ?? "";
-    if (!corpusTables.has(table)) {
+    const table = names.get(step?.table ?? "");
+    if (table === undefined) {
       return [];
     }
     const constrained = /[M=]/u.test(step?.constraints ?? "");
