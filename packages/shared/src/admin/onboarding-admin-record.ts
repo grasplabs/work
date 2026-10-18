@@ -6,6 +6,7 @@ import {
   dateOn,
   DELETE_DAYS,
   factsSaid,
+  listenDays,
   PARKED_PARTS,
   PLATFORM_PARTS,
   tellingOf,
@@ -22,7 +23,6 @@ import type {
   Work,
   WorkEvidence,
 } from "./onboarding-admin.ts";
-import { LISTEN_DAYS } from "./onboarding.ts";
 import { present } from "./present.ts";
 
 /**
@@ -425,7 +425,7 @@ export type PersonEvent = { day: number } & (
   | { what: "stopped"; phase: Phase }
 );
 
-/** One person's two weeks so far, in the order things happened; nothing before the team is told. */
+/** One person's part in the interviews so far, in the order things happened; nothing before the team is told. */
 export const personLog = (view: OrgView, id: string): PersonEvent[] => {
   const person = view.people.find((each) => each.person.id === id);
   const timeline = timelinesOf(view.org).get(id);
@@ -458,7 +458,7 @@ export const personLog = (view: OrgView, id: string): PersonEvent[] => {
   if (by(timeline.completed)) {
     events.push({ what: "completed", day: timeline.completed });
   } else if (view.closed) {
-    events.push({ what: "expired", day: LISTEN_DAYS });
+    events.push({ what: "expired", day: listenDays(view.org) });
   }
   // Of what happened on the same day, in the order it can happen.
   const order: PersonEvent["what"][] = [
@@ -625,7 +625,7 @@ export const logOf = (view: OrgView): LogEvent[] => {
     if (view.closed) {
       events.push({
         kind: "closed",
-        on: on(LISTEN_DAYS),
+        on: on(listenDays(org)),
         talked: view.counts.completed,
         people: view.asked,
         order: 6,
