@@ -291,7 +291,37 @@ export interface ResourceHostHooks {
    * then, as none is known never to have started.
    */
   triedOnce?: TriedOnceMarks;
+  /**
+   * The model calls the run's actions made, across its activations
+   * (run-object.ts, `modelCallsIn`). Unset, a count of this activation's
+   * alone.
+   */
+  modelCalls?: ActionModelCalls;
 }
+
+/**
+ * The model calls a run's actions made (GRA-700), kept with the run: an
+ * action step's record holds only its answer, and a failed attempt none,
+ * so its calls can't be counted from records on a replay. Each is kept,
+ * by its call's key, before it goes out.
+ */
+export interface ActionModelCalls {
+  /** How many were kept. */
+  count: () => number;
+  /** Keeps one, with its call's key: each time it is kept, as made. */
+  keep: (key: string) => void;
+}
+
+/** A count of one activation's alone (`ResourceHostHooks.modelCalls` unset). */
+const activationModelCalls = (): ActionModelCalls => {
+  const kept: string[] = [];
+  return {
+    count: () => kept.length,
+    keep: (key) => {
+      kept.push(key);
+    },
+  };
+};
 
 /**
  * What a run keeps of the attempts of its steps tried once (`triedOnce`),
@@ -930,14 +960,18 @@ export class ResourceRunHost
    */
   readonly #deadlines = new Map<string, number>();
   /**
-   * The model calls the run has made: those its replayed steps recorded,
-   * as this activation reached them, and those this activation made
-   * itself, each counted as it is asked for (`#made`), before anything is
-   * awaited. Each new one is held to `maxModelCalls`.
+   * The model calls of the run's JSON model tasks: those its replayed steps
+   * recorded, as this activation reached them, and those this activation
+   * made itself, each counted as it is asked for (`#made`), before
+   * anything is awaited. Its actions' model calls are counted apart, kept
+   * with the run (`#actionModelCalls`); each new call is held to
+   * `maxModelCalls` against both (`#modelCallsUsed`).
    */
   #modelCalls = 0;
   /** The model tasks whose call this activation made, counted then. */
   readonly #modelCallsMade = new Set<string>();
+  /** The model calls of the run's actions, kept across its activations. */
+  readonly #actionModelCalls: ActionModelCalls;
   /** What the run keeps of its tried-once steps' attempts. */
   readonly #triedOnce: TriedOnceMarks;
 
@@ -954,6 +988,7 @@ export class ResourceRunHost
     this.#hooks = hooks;
     this.#activationFuel = hooks.activationFuel ?? activationFuel;
     this.#triedOnce = hooks.triedOnce ?? activationMarks();
+    this.#actionModelCalls = hooks.modelCalls ?? activationModelCalls();
     this.#readableParams = Object.fromEntries(
       run.build.params.flatMap((name) =>
         Object.hasOwn(run.params, name)
@@ -2200,7 +2235,7 @@ export class ResourceRunHost
       return this.#refuse(`Task "${task.id}" makes no call.`);
     }
     if (call.name === "grasp.model") {
-      if (this.#modelCalls >= this.#run.maxModelCalls) {
+      if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
         throw workflowResourceErrors.create("workflow.model_call_limit", {
           limit: this.#run.maxModelCalls,
         });
@@ -2270,6 +2305,33 @@ export class ResourceRunHost
           this.#requireCurrent(attempt);
           await attempt.admission.hostCall();
           this.#requireCurrent(attempt);
+          // Taken once the call is admitted, as a model task's, and with
+          // nothing awaited between it and the call going out: one refused
+          // at admission takes none.
+          if (built.name === "grasp.model") {
+            try {
+              this.#reserveModelCall(
+                `${stepKey}:${attempt.number}:${attempt.generation}:${ordinal}`
+              );
+            } catch (error) {
+              // Refused before it is a named call, so no receipt of
+              // `makeCall`'s: kept as the evidence an action's call
+              // refused at admission leaves, naming its declared binding.
+              // That write never rejects (it logs one it can't keep), so
+              // the refusal below always stands.
+              await auditAdmissionRefusal(this.#env, this.#run.calling, {
+                build: this.#run.build.hash,
+                task: task.id,
+                attempt: attempt.number,
+                generation: attempt.generation,
+                call: built.binding,
+                errorCode:
+                  workflowResourceErrors.codeOf(error) ?? "internal.unexpected",
+                reason: "model_call_limit",
+              });
+              throw error;
+            }
+          }
           return await makeCall(this.#env, this.#run.calling, task.id, built, {
             key: `${stepKey}:${ordinal}`,
             deadline: attempt.deadline,
@@ -2301,6 +2363,33 @@ export class ResourceRunHost
         },
       }
     );
+  }
+
+  /**
+   * Takes one of the run's `maxModelCalls` for an action's model call keyed
+   * `key`, synchronously, against the count the run keeps (read again
+   * now), so two at once, in this activation or another, never both take
+   * the last; kept with the run before the call goes out, so a replay of
+   * its step, or of a failed attempt, still counts it (GRA-700). Refused
+   * (`workflow.model_call_limit`) once none is left.
+   */
+  #reserveModelCall(key: string): void {
+    if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
+      throw workflowResourceErrors.create("workflow.model_call_limit", {
+        limit: this.#run.maxModelCalls,
+      });
+    }
+    this.#actionModelCalls.keep(key);
+  }
+
+  /**
+   * The model calls the run has made, read now: its JSON model tasks', and
+   * its actions' as the run keeps them, read again from that store each
+   * time, so it alone says how many there were, whichever activation
+   * made them.
+   */
+  #modelCallsUsed(): number {
+    return this.#modelCalls + this.#actionModelCalls.count();
   }
 
   /** `call`'s parts built (`#built`), as resource-calls.ts makes it. */

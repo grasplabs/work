@@ -10,19 +10,27 @@ import type { Infer, InferInput, ObjectSchema, ValueShape } from "./values.ts";
 // `local:code/<file>.ts#<export>`. It lives in the workflow's own `code/`
 // modules, beside its calculations, and reaches nothing but the bindings
 // it declares in `uses`: other bindings of the same workflow, by alias,
-// and of a connector only the operations it names (GRA-704).
+// of a connector only the operations it names (GRA-704), and of a model
+// only the shape it declared its answers take (GRA-700).
 //
 // ```ts
 // import { action, resource, v } from "@grasp-os/sdk/action";
 //
 // const mail = resource.connector("mail", { operations: ["mail.send"] });
+// const writer = resource.model("writer", {
+//   output: v.object({ subject: v.string().max(200) }),
+// });
 //
 // export const notify = action({
-//   args: { to: v.string().email(), subject: v.string().max(200) },
+//   args: { to: v.string().email(), topic: v.string().max(200) },
 //   returns: v.object({ sent: v.boolean() }),
-//   uses: [mail],
+//   uses: [mail, writer],
 //   handler: async (ctx, args) => {
-//     await ctx.resources.mail.call("mail.send", { to: args.to, subject: args.subject });
+//     const { subject } = await ctx.resources.writer.generate({
+//       instructions: "Write a short subject line for this topic.",
+//       input: { topic: args.topic },
+//     });
+//     await ctx.resources.mail.call("mail.send", { to: args.to, subject });
 //     return { sent: true };
 //   },
 // });
@@ -43,7 +51,7 @@ export { v } from "./values.ts";
 export type { Infer, InferInput } from "./values.ts";
 
 /** The kinds of binding an action may use in this release. */
-export type UseKind = "connector" | "operation";
+export type UseKind = "connector" | "operation" | "model";
 
 /**
  * A binding an action declares it uses: its alias and kind, and of a
@@ -53,14 +61,19 @@ export interface Use<
   Alias extends string,
   Kind extends UseKind,
   Operation extends string = never,
+  Output extends AnySchema = AnySchema,
 > {
   readonly "~use": {
     readonly alias: Alias;
     readonly kind: Kind;
     readonly operations: readonly string[];
+    /** A model use's: the descriptor of what its calls answer. */
+    readonly output?: ValueDescriptor;
   };
   /** Types only: the operations a connector use declared, by name. */
   readonly "~operation"?: Operation;
+  /** Types only: the schema a model use's answers take. */
+  readonly "~output"?: Output;
 }
 
 /** Any declared use. */
@@ -81,10 +94,29 @@ export interface OperationResource {
   readonly call: (args: JsonValue) => Promise<JsonValue>;
 }
 
+/** What one call of a model binding sends. */
+export interface ModelRequest {
+  /** What the model is asked to do, as text. */
+  readonly instructions: string;
+  /** What it works on: any JSON value. */
+  readonly input: JsonValue;
+}
+
+/**
+ * A model binding, as an action calls it: the binding's own model, each
+ * answer of the shape the use declared, checked by the host.
+ */
+export interface ModelResource<Output extends AnySchema = AnySchema> {
+  /** Asks the binding's model, once: its answer, of the declared shape. */
+  readonly generate: (request: ModelRequest) => Promise<Infer<Output>>;
+}
+
 /** What a use gives an action. */
 type ResourceOf<U extends AnyUse> = U["~use"]["kind"] extends "connector"
   ? ConnectorResource<Exclude<U["~operation"], undefined>>
-  : OperationResource;
+  : U["~use"]["kind"] extends "model"
+    ? ModelResource<Exclude<U["~output"], undefined>>
+    : OperationResource;
 
 /** What an action's handler gets besides its arguments. */
 export interface ActionCtx<Uses extends readonly AnyUse[]> {
@@ -131,6 +163,7 @@ interface DeclaredUse {
   readonly alias: string;
   readonly kind: UseKind;
   readonly operations: readonly string[];
+  readonly output?: ValueDescriptor;
 }
 
 /** The uses `resource` declared: what makes a value one. */
@@ -185,22 +218,33 @@ const isDeclaredUse = (value: unknown): value is DeclaredUse =>
   "alias" in value &&
   typeof value.alias === "string" &&
   "kind" in value &&
-  (value.kind === "connector" || value.kind === "operation") &&
+  (value.kind === "connector" ||
+    value.kind === "operation" ||
+    value.kind === "model") &&
   "operations" in value &&
   Array.isArray(value.operations);
 
-const declareUse = <Alias extends string, Kind extends UseKind>(
+const declareUse = <
+  Alias extends string,
+  Kind extends UseKind,
+  Output extends AnySchema = AnySchema,
+>(
   kind: Kind,
   alias: Alias,
-  operations: readonly string[]
-): Use<Alias, Kind> => {
+  operations: readonly string[],
+  output?: ValueDescriptor
+): Use<Alias, Kind, never, Output> => {
   if (typeof alias !== "string" || !aliasPattern.test(alias)) {
     return refuse(
       "A resource's alias is a binding alias: letters, digits and _."
     );
   }
-  const declared = freeze({ alias, kind, operations });
-  const use: Use<Alias, Kind> = freeze({ "~use": declared });
+  const declared = freeze(
+    output === undefined
+      ? { alias, kind, operations }
+      : { alias, kind, operations, output }
+  );
+  const use: Use<Alias, Kind, never, Output> = freeze({ "~use": declared });
   if (typeof weakSet === "function") {
     apply(weakSet, declaredUses, [use, declared]);
   }
@@ -211,6 +255,12 @@ const declareUse = <Alias extends string, Kind extends UseKind>(
 export interface ConnectorUseOptions<Operation extends string> {
   /** The exact operations of the connector the action calls. */
   readonly operations: readonly Operation[];
+}
+
+/** What a model use declares besides its alias. */
+export interface ModelUseOptions<Output extends AnySchema> {
+  /** The shape every answer of the binding's model takes for this action. */
+  readonly output: Output;
 }
 
 /** The workflow's own bindings an action may declare it uses, by kind. */
@@ -234,6 +284,28 @@ export const resource = freeze({
   // An App export is one operation: nothing more to declare.
   operation: <const Alias extends string>(alias: Alias) =>
     declareUse("operation", alias, []),
+  model: <const Alias extends string, const Output extends AnySchema>(
+    alias: Alias,
+    options: ModelUseOptions<Output>
+  ): Use<Alias, "model", never, Output> => {
+    const property =
+      typeof options === "object" && options !== null
+        ? getOwnPropertyDescriptor(options, "output")
+        : undefined;
+    // A value, read once: never a getter that answers differently later.
+    if (property === undefined || !("value" in property)) {
+      return refuse(
+        "Declare the shape a model's answers take: `{ output: v.object(...) }`."
+      );
+    }
+    // Throws for anything but a `v` schema. Its type is the declared one.
+    return declareUse<Alias, "model", Output>(
+      "model",
+      alias,
+      [],
+      descriptorOf(property.value)
+    );
+  },
 });
 
 /** What `action` is declared with. */
@@ -261,7 +333,12 @@ export type ContractUse =
       readonly kind: "connector";
       readonly operations: readonly string[];
     }
-  | { readonly alias: string; readonly kind: "operation" };
+  | { readonly alias: string; readonly kind: "operation" }
+  | {
+      readonly alias: string;
+      readonly kind: "model";
+      readonly output: ValueDescriptor;
+    };
 
 /** An action's contract, as the host's manifest records it. */
 export interface ActionContract {
@@ -328,14 +405,20 @@ const usesOf = (value: unknown): ActionContract["uses"] => {
         return refuse(`An action uses \`${use.alias}\` once.`);
       }
       seen.add(use.alias);
-      return use.kind === "connector"
-        ? freeze({
-            alias: use.alias,
-            kind: use.kind,
-            // Frozen as `resource` copied it.
-            operations: use.operations,
-          })
-        : freeze({ alias: use.alias, kind: use.kind });
+      if (use.kind === "connector") {
+        return freeze({
+          alias: use.alias,
+          kind: use.kind,
+          // Frozen as `resource` copied it.
+          operations: use.operations,
+        });
+      }
+      if (use.kind === "model") {
+        return use.output === undefined
+          ? refuse("Declare the shape a model's answers take.")
+          : freeze({ alias: use.alias, kind: use.kind, output: use.output });
+      }
+      return freeze({ alias: use.alias, kind: use.kind });
     })
   );
 };
