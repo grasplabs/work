@@ -18,10 +18,12 @@ import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import {
   editWorkflowDraft,
   publishWorkflowDraft,
+  workflowDraft,
 } from "../src/workflow-drafts.ts";
 import { jsonTextDepth, runCompute } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
+  deleteWorkflowResource,
   publishWorkflowVersion,
   workflowSource,
   workflowVersions,
@@ -533,28 +535,127 @@ describe("a JSON workflow's compute modules", () => {
     }
   });
 
-  it("finds a local binding in a draft a problem, as a draft publishes its definition without modules", async () => {
+  it("starts a draft from the modules its current version sealed, and publishes a draft's own modules with it", async () => {
     const by = await builder();
     const { workflow } = await published(by, totalModules);
+    const started = await workflowDraft(env, by, workflow.id);
+    // The draft changes a module, and the definition still calls it.
+    const changed = {
+      ...totalModules,
+      "code/sum.ts": `${sumModule}// counted again\n`,
+    };
     const draft = await editWorkflowDraft(env, by, workflow.id, {
       expectedRevision: 0,
       source: definitionOf(workflow.name, { version: "1.1.0" }),
+      modules: changed,
     });
+    await publishWorkflowDraft(env, by, workflow.id, {
+      revision: 1,
+      basedOn: 1,
+    });
+    const { files } = await workflowSource(env, by, workflow.id, 2);
+    const [latest] = await workflowVersions(env, by, workflow.id);
     expect({
-      problems: draft.problems.map(({ code }) => code),
-      // Still the current version, which was published with modules.
+      started: started.modules,
+      version: [latest?.version, latest?.build.executable],
+      problems: draft.problems,
       checkpoint: draft.checkpoint?.revision,
+      modules: draft.modules,
+      sealed: files["code/sum.ts"],
+    }).toStrictEqual({
+      started: totalModules,
+      version: [2, true],
+      problems: [],
+      checkpoint: 1,
+      modules: changed,
+      sealed: changed["code/sum.ts"],
+    });
+  });
+
+  it("checks a draft's local bindings against its own modules, and keeps modules that don't build with their problems", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
+    const source = definitionOf(workflow.name);
+    // Without the module it binds, its binding is unknown.
+    const bare = await editWorkflowDraft(env, by, workflow.id, {
+      expectedRevision: 0,
+      source,
+      modules: {},
+    });
+    // A module that doesn't build is kept, with where the build says.
+    const broken = { "code/total.ts": "export const total = ;\n" };
+    const failing = await editWorkflowDraft(env, by, workflow.id, {
+      expectedRevision: 1,
+      source,
+      modules: broken,
+    });
+    const read = await workflowDraft(env, by, workflow.id);
+    expect({
+      bare: bare.problems.map(({ code }) => code),
+      failing: failing.problems
+        .map(({ code, pointer }) => `${code} ${pointer}`)
+        .filter((problem) => problem.startsWith("modules.")),
+      checkpoint: failing.checkpoint,
+      kept: read.modules,
       published: await outcome(
         publishWorkflowDraft(env, by, workflow.id, {
-          revision: 1,
-          basedOn: 1,
+          revision: 2,
+          basedOn: null,
         })
       ),
     }).toStrictEqual({
-      problems: ["binding.unknown_contract"],
-      checkpoint: 0,
+      bare: ["binding.unknown_contract"],
+      failing: ["modules.invalid /modules/code~1total.ts"],
+      checkpoint: null,
+      kept: broken,
       published: "workflow.draft_unchecked",
     });
+  });
+
+  it("keeps a draft's modules only with the revisions it keeps, and drops them with the workflow", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
+    const source = definitionOf(workflow.name);
+    // A checkpoint, then two that don't pass: the first of those goes.
+    for (const [revision, modules] of [
+      totalModules,
+      { "code/total.ts": "export const total = ;\n" },
+      { "code/other.ts": "export const other = ;\n" },
+    ].entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one edit after the other
+      await editWorkflowDraft(env, by, workflow.id, {
+        expectedRevision: revision,
+        source,
+        modules,
+      });
+    }
+    const stored = async (): Promise<string[]> => {
+      const { results } = await env.DB.prepare(
+        "SELECT revision, path FROM workflow_resource_draft_modules WHERE workflow_resource_id = ? ORDER BY revision, path"
+      )
+        .bind(workflow.id)
+        .all<{ revision: number; path: string }>();
+      return results.map(({ revision, path }) => `${revision} ${path}`);
+    };
+    const kept = await stored();
+    await deleteWorkflowResource(env, by, workflow.id);
+    expect({ kept, deleted: await stored() }).toStrictEqual({
+      kept: ["1 code/sum.ts", "1 code/total.ts", "3 code/other.ts"],
+      deleted: [],
+    });
+  });
+
+  it("refuses an edit that doesn't say which modules the draft carries", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, totalModules);
+    await expect(
+      outcome(
+        editWorkflowDraft(env, by, workflow.id, {
+          expectedRevision: 0,
+          source: definitionOf(workflow.name, { version: "1.1.0" }),
+        })
+      )
+    ).resolves.toBe("workflow.resource_invalid");
   });
 
   it("makes other modules another program, and another publication of the same version", async () => {
