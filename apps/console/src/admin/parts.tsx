@@ -68,17 +68,18 @@ export const KnowledgeDots = ({
 }) => {
   const filled = Math.floor((knowledge.percent / 100) * count + dotSlack);
   const gate = Math.round((knowledge.threshold / 100) * count);
+  const mark = (
+    <span
+      aria-hidden
+      className="bg-foreground mx-0.5 block h-3.5 w-px flex-none"
+    />
+  );
   return (
     <span className="flex items-center gap-1">
       <span className="sr-only">{label}</span>
       {Array.from({ length: count }, (_, at) => (
         <Fragment key={at}>
-          {at === gate ? (
-            <span
-              aria-hidden
-              className="bg-foreground mx-0.5 block h-3.5 w-px flex-none"
-            />
-          ) : null}
+          {at === gate ? mark : null}
           <span
             aria-hidden
             className={cn(
@@ -88,6 +89,8 @@ export const KnowledgeDots = ({
           />
         </Fragment>
       ))}
+      {/* Where Grasp opens only once every dot is filled, the mark stands after the last. */}
+      {gate >= count ? mark : null}
     </span>
   );
 };
