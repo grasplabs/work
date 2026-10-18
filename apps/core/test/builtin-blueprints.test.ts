@@ -21,6 +21,7 @@ import {
   release,
 } from "../src/builtins.ts";
 import type { Release } from "../src/builtins.ts";
+import { withDraftReferences } from "../src/draft-references.ts";
 import { buildScreens } from "../src/screens.ts";
 import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -267,16 +268,17 @@ describe("the built-in blueprints", () => {
           describeWorkflow(source);
         }
       }
-      // Its screens pass the compiler's checks, as they do when opened.
+      // Its screens pass the compiler's checks, with the references they
+      // import (`#grasp`), as they do when saved and opened.
       if (
         Object.keys(blueprint.files).some((path) => path.startsWith("screens/"))
       ) {
         // oxlint-disable-next-line no-await-in-loop -- as above
-        const screens = await buildScreens(
-          env,
-          { ...blueprint.files },
-          "app-test"
-        );
+        const files = await withDraftReferences(env, created.app.id, 1, {
+          ...blueprint.files,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        const screens = await buildScreens(env, files, created.app.id);
         if (!screens.ok || screens.diagnostics.length > 0) {
           throw new Error(
             `The screens of ${blueprint.id} don't pass: ${JSON.stringify(screens.diagnostics)}`
