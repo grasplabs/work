@@ -273,7 +273,8 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     }
   }
 
-  // A team's own links went out the day its lead finished, or the day its first member's did.
+  // A team's own links went out the day its first member's did; a team of its lead alone, the day
+  // its lead finished.
   const sent = new Map<string, number>();
   for (const team of roster?.teams ?? []) {
     const lead = present(team.lead) ? held.get(team.lead) : undefined;
@@ -286,10 +287,10 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
         : []
     );
     let day: number | null = null;
-    if (present(lead?.completed)) {
-      day = dayAt(start, lead.completed);
-    } else if (out.length > 0) {
+    if (out.length > 0) {
       day = Math.min(...out);
+    } else if (members.length === 0 && present(lead?.completed)) {
+      day = dayAt(start, lead.completed);
     }
     if (day !== null) {
       sent.set(team.id, day);
@@ -372,9 +373,10 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
       },
     ];
   });
-  // One in five of the finished ones is read by a person at Grasp, in the order they came in.
+  // One in five of the finished ones is read by a person at Grasp, in the order they came in: of
+  // those whose words the admin has, as core sends none.
   for (const [index, interview] of interviews
-    .filter((each) => each.approved)
+    .filter((each) => each.approved && held.get(each.id)?.counted === undefined)
     .toSorted((a, b) => a.day - b.day)
     .entries()) {
     interview.toRead = index % 5 === 0;
@@ -416,6 +418,8 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     // A snapshot from before the Worker counted has none.
     metered: meteredOf(snapshot.usage ?? []),
     ...(snapshot.known === undefined ? {} : { known: snapshot.known }),
+    ...(snapshot.paused === undefined ? {} : { paused: snapshot.paused }),
+    ...(snapshot.unknown === undefined ? {} : { unknown: snapshot.unknown }),
   };
 
   const skipped: ("sources" | "documents" | "pulse")[] = [
