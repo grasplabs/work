@@ -1092,16 +1092,26 @@ describe("stored versions", () => {
     )
       .bind(definitionOf({ name: child.name, status: "tampered" }), child.id)
       .run();
-    // A manifest that lost what its actions may do is malformed too: no
-    // version is listed as doing nothing for want of the record. And one
-    // whose list was changed, however well formed, no longer hashes to
-    // what was sealed: review never shows less than the build allows.
+    // A manifest that lost what its actions may do is malformed, even
+    // with its hash written to match: no version is listed as doing
+    // nothing for want of the record. And one whose list was changed,
+    // however well formed, no longer hashes to what was sealed: review
+    // never shows less than the build allows.
     const bare = await workflowOf(ada, "bare");
     await publish(ada, bare.id, definitionOf({ name: bare.name }));
-    await env.DB.prepare(
-      "UPDATE workflow_resource_versions SET manifest = json_remove(manifest, '$.actions') WHERE workflow_resource_id = ?"
+    const sealed = await env.DB.prepare(
+      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ?"
     )
       .bind(bare.id)
+      .first<{ manifest: string }>();
+    const { actions: _dropped, ...withoutActions } = z
+      .record(z.string(), z.json())
+      .parse(JSON.parse(sealed?.manifest ?? "{}"));
+    const rehashed = canonicalJson(withoutActions);
+    await env.DB.prepare(
+      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ?"
+    )
+      .bind(rehashed, await sha256Hex(rehashed), bare.id)
       .run();
     const altered = await workflowOf(ada, "altered");
     await publish(ada, altered.id, definitionOf({ name: altered.name }));
