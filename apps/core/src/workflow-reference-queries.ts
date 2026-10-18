@@ -330,18 +330,24 @@ const runsPage = async (
   };
 };
 
-/** An engine event ID: where a history page goes on from. */
-const sequencePattern = /^\d{1,15}$/u;
+/** An engine event ID, as `historyEntries` writes one: plain digits. */
+const sequencePattern = /^\d{1,16}$/u;
 
 /** Where a history page starts: after the event `cursor` names, or the start. */
 const sequenceOf = (cursor: unknown): number => {
   if (cursor === null || cursor === undefined) {
     return 0;
   }
-  if (typeof cursor !== "string" || !sequencePattern.test(cursor)) {
+  const sequence =
+    typeof cursor === "string" && sequencePattern.test(cursor)
+      ? Number(cursor)
+      : Number.NaN;
+  // Any event ID the engine can write: a safe integer, so it reads back
+  // exactly.
+  if (!Number.isSafeInteger(sequence)) {
     throw dataErrors.create("data.invalid_cursor");
   }
-  return Number(cursor);
+  return sequence;
 };
 
 /**

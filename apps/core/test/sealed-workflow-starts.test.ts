@@ -931,6 +931,19 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ownBadCursor: codeOf(
         await ask(bob, { runId: bobs, pagination: { cursor: "x" } })
       ),
+      // Any event ID the engine can write, and none past it.
+      lastCursor: pageOf(
+        await ask(bob, {
+          runId: bobs,
+          pagination: { cursor: String(Number.MAX_SAFE_INTEGER) },
+        })
+      ).items.length,
+      pastCursor: codeOf(
+        await ask(bob, {
+          runId: bobs,
+          pagination: { cursor: "9007199254740992" },
+        })
+      ),
       carolOwn: pageOf(await ask(carol, { runId: carols, pagination: {} }))
         .items.length,
       unknownCode: unknown === "ok" ? "ok" : unknown.code,
@@ -941,6 +954,8 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       carolsWithBadCursor: unknown,
       carolsWindow: unknown,
       ownBadCursor: "data.invalid_cursor",
+      lastCursor: 0,
+      pastCursor: "data.invalid_cursor",
       carolOwn: 5,
       unknownCode: "workflow.run_unavailable",
     });
