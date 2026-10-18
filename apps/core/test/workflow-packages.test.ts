@@ -30,6 +30,10 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import type { StepError } from "../src/workflows/code.ts";
+import type { RunStep } from "../src/workflows/host.ts";
+import { ResourceRunHost } from "../src/workflows/resource-host.ts";
+import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import {
   requirePackagesAdmitted,
@@ -37,6 +41,7 @@ import {
 } from "../src/workflows/sealed-packages.ts";
 import { noise, publish } from "./npm.ts";
 import { racingDb } from "./racing-db.ts";
+import { admittedFreely } from "./runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { auditedDuring, outcome, refusal, unique } from "./sign-in.ts";
 
@@ -331,6 +336,166 @@ const outcomesOf = (events: AuditEvent[], actions: readonly string[]) =>
       reason: detail.reason ?? null,
       failureCode: detail.failureCode ?? null,
     }));
+
+/** Marks of tried-once attempts as a run's object keeps them, in memory. */
+const keptMarks = (): TriedOnceMarks => {
+  const unstarted = new Set<string>();
+  const failures = new Map<string, StepError>();
+  return {
+    markUnstarted: (key, attempt) => {
+      unstarted.add(`${attempt}:${key}`);
+    },
+    unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
+    keepFailure: (key, attempt, error) => {
+      failures.set(`${attempt}:${key}`, error);
+    },
+    failureOf: (key, attempt) => failures.get(`${attempt}:${key}`),
+  };
+};
+
+/**
+ * Core's database with every read of the dependency policy failing, as D1
+ * can for a moment: the package check can't answer.
+ */
+const policyUnreadable = (): D1Database =>
+  new Proxy(env.DB, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string) => {
+          if (query.includes("dependency_policy")) {
+            throw new Error("D1 is unavailable for a moment.");
+          }
+          return target.prepare(query);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+
+/**
+ * A host of one activation of run `runId` of version 1 of workflow `id`
+ * for `by`, on `runEnv`, as the engine gives its steps: each under a key
+ * of `runKey`'s and the step's, at the attempt `attempts` says (the
+ * first unless given), what each failed with heard in `failed`.
+ */
+const activationOf = async (
+  by: Identity,
+  id: string,
+  {
+    runId,
+    runKey,
+    marks,
+    failed,
+    runEnv = env,
+    attempts = {},
+    activationFuel,
+  }: {
+    runId: string;
+    runKey: string;
+    marks: TriedOnceMarks;
+    /** What each attempt failed with, as the engine heard it: its name and code. */
+    failed: unknown[];
+    runEnv?: Env;
+    attempts?: Record<string, number>;
+    /** The activation's fuel, if not the host's own. */
+    activationFuel?: number;
+  }
+): Promise<ResourceRunHost> => {
+  const manifest = await env.DB.prepare(
+    "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+  )
+    .bind(id)
+    .first<{ hash: string }>();
+  const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
+  const step: RunStep = {
+    do: async (name, _config, fn) => {
+      try {
+        return await fn({
+          attempt: attempts[name] ?? 1,
+          idempotencyKey: `key:${runKey}:${name}`,
+        });
+      } catch (error) {
+        const code: unknown =
+          error instanceof Error ? Reflect.get(error, "code") : undefined;
+        failed.push({
+          name: error instanceof Error ? error.name : "unknown",
+          code: code ?? null,
+        });
+        throw error;
+      }
+    },
+    sleep: async () => {
+      await Promise.resolve();
+    },
+    sleepUntil: async () => {
+      await Promise.resolve();
+    },
+    waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+  };
+  return new ResourceRunHost(
+    runEnv,
+    step,
+    {
+      runId,
+      workflowId: id,
+      version: 1,
+      principal: by.userId,
+      input: { who: "Ada" },
+      params: {},
+      createdAt: Date.now(),
+      build,
+      calling: {
+        runId,
+        workflowId: id,
+        version: 1,
+        principal: by.userId,
+        invoker: { type: "person", id: by.userId, appVersion: null },
+        bindings: new Map(),
+        restricted: false,
+      },
+      maxModelCalls: 1,
+    },
+    {
+      leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+      tampered: () => {},
+      admitAttempt: admittedFreely,
+      triedOnce: marks,
+      ...(activationFuel === undefined ? {} : { activationFuel }),
+    }
+  );
+};
+
+/** What a step captures: Ada's input, and no context. */
+const adaData = { input: { input: { who: "Ada" }, context: {} } };
+
+/**
+ * A workflow of a new builder's whose action `doubled` imports an approved
+ * package, its version published and a run of it held asleep before the
+ * action: what an activation of that run is made with.
+ */
+const actionRunWith = async () => {
+  const admin = await approver();
+  const pkg = await doubling();
+  const { builder, workflow, request } = await workflowWith(pkg);
+  await approve(admin, request);
+  await publishWorkflowVersion(
+    env,
+    builder,
+    workflow.id,
+    {
+      definition: actionDefinitionOf(workflow.name, "PT1H"),
+      basedOn: null,
+      modules: { "code/doubled.ts": actionUsing(pkg) },
+      packages: { graphHash: request.graphHash },
+    },
+    sealPackages
+  );
+  const runId = await started(builder, workflow.id);
+  return { admin, builder, workflow, request, runId };
+};
 
 describe("a workflow's modules importing approved packages", () => {
   it("seals the approved package into the version and runs it", async () => {
@@ -1039,5 +1204,113 @@ describe("a workflow's modules importing approved packages", () => {
         message.includes("can't be imported here")
       ),
     }).toStrictEqual({ code: "workflow.modules_invalid", importRefused: true });
+  });
+
+  it("tries an action again, as never started, while its package check can't answer", async () => {
+    const { builder, workflow, runId } = await actionRunWith();
+    const runKey = unique();
+    const marks = keptMarks();
+    const failed: unknown[] = [];
+    const ran: string[] = [];
+    const doubled = async (host: ResourceRunHost, label: string) =>
+      await host.do("task:doubled", adaData, async (attempt) => {
+        ran.push(label);
+        const now = await attempt.call({ input: { who: "Ada" } });
+        return now.ok
+          ? { ok: true as const, value: { output: now.value } }
+          : { ok: false as const, error: now.error };
+      });
+
+    const first = await doubled(
+      await activationOf(builder, workflow.id, {
+        runId,
+        runKey,
+        marks,
+        failed,
+        runEnv: { ...env, DB: policyUnreadable() },
+      }),
+      "first attempt"
+    );
+    // The step's retry, in the next activation, the policy readable again.
+    const retried = await doubled(
+      await activationOf(builder, workflow.id, {
+        runId,
+        runKey,
+        marks,
+        failed,
+        attempts: { "task:doubled": 2 },
+      }),
+      "retry"
+    );
+
+    expect({
+      first: first.ok,
+      failed,
+      retried,
+      ran,
+    }).toStrictEqual({
+      first: false,
+      // Retryable, as an attempt that never started: never a refusal.
+      failed: [{ name: "Error", code: null }],
+      retried: { ok: true, value: { output: { status: "12" } } },
+      // The action ran once, in the retry.
+      ran: ["retry"],
+    });
+  });
+
+  it("ends an action refused for its revoked packages as a step error the engine never tries again", async () => {
+    const { admin, builder, workflow, request, runId } = await actionRunWith();
+    await end(admin, request, "revoked");
+    const failed: unknown[] = [];
+    const ran: string[] = [];
+
+    const host = await activationOf(builder, workflow.id, {
+      runId,
+      runKey: unique(),
+      marks: keptMarks(),
+      failed,
+    });
+    const settled = await host.do("task:doubled", adaData, async () => {
+      ran.push("action");
+      return await Promise.resolve({ ok: true, value: { output: null } });
+    });
+
+    expect({ ok: settled.ok, failed, ran }).toStrictEqual({
+      ok: false,
+      failed: [
+        { name: "NonRetryableError", code: "workflow.packages_revoked" },
+      ],
+      ran: [],
+    });
+  });
+
+  it("gives an action's share of the activation's fuel back when its package check fails", async () => {
+    const { builder, workflow, runId } = await actionRunWith();
+    const failed: unknown[] = [];
+    const ran: string[] = [];
+    // Fuel for one attempt: the action's, while its check runs.
+    const host = await activationOf(builder, workflow.id, {
+      runId,
+      runKey: unique(),
+      marks: keptMarks(),
+      failed,
+      runEnv: { ...env, DB: policyUnreadable() },
+      activationFuel: 2 ** 27,
+    });
+    await host.do("task:doubled", adaData, async () => {
+      ran.push("action");
+      return await Promise.resolve({ ok: true, value: { output: null } });
+    });
+    // The next step of the same activation: funded only if it came back.
+    await host.do("task:answer", adaData, async () => {
+      ran.push("answer");
+      return await Promise.resolve({ ok: true, value: { output: null } });
+    });
+
+    expect({ failed: failed[0], ran }).toStrictEqual({
+      failed: { name: "Error", code: null },
+      // Run, not cut off as a CPU stop for want of fuel.
+      ran: ["answer"],
+    });
   });
 });
