@@ -9,19 +9,20 @@ import type { Infer, InferInput, ObjectSchema, ValueShape } from "./values.ts";
 // JSON workflow calls through a `grasp.operation` binding to
 // `local:code/<file>.ts#<export>`. It lives in the workflow's own `code/`
 // modules, beside its calculations, and reaches nothing but the bindings
-// it declares in `uses`: other bindings of the same workflow, by alias.
+// it declares in `uses`: other bindings of the same workflow, by alias,
+// and of a connector only the operations it names (GRA-704).
 //
 // ```ts
 // import { action, resource, v } from "@grasp-os/sdk/action";
 //
-// const mail = resource.connector("mail");
+// const mail = resource.connector("mail", { operations: ["mail.send"] });
 //
 // export const notify = action({
 //   args: { to: v.string().email(), subject: v.string().max(200) },
 //   returns: v.object({ sent: v.boolean() }),
 //   uses: [mail],
 //   handler: async (ctx, args) => {
-//     await ctx.resources.mail.call("send", { to: args.to, subject: args.subject });
+//     await ctx.resources.mail.call("mail.send", { to: args.to, subject: args.subject });
 //     return { sent: true };
 //   },
 // });
@@ -44,18 +45,32 @@ export type { Infer, InferInput } from "./values.ts";
 /** The kinds of binding an action may use in this release. */
 export type UseKind = "connector" | "operation";
 
-/** A binding an action declares it uses: its alias and kind. */
-export interface Use<Alias extends string, Kind extends UseKind> {
-  readonly "~use": { readonly alias: Alias; readonly kind: Kind };
+/**
+ * A binding an action declares it uses: its alias and kind, and of a
+ * connector the operations it calls.
+ */
+export interface Use<
+  Alias extends string,
+  Kind extends UseKind,
+  Operation extends string = never,
+> {
+  readonly "~use": {
+    readonly alias: Alias;
+    readonly kind: Kind;
+    readonly operations: readonly Operation[];
+  };
 }
 
 /** Any declared use. */
-export type AnyUse = Use<string, UseKind>;
+export type AnyUse = Use<string, UseKind, string>;
 
 /** A connector binding, as an action calls it. */
-export interface ConnectorResource {
-  /** Calls `operation` of the connector the binding serves, with `args`. */
-  readonly call: (operation: string, args: JsonValue) => Promise<JsonValue>;
+export interface ConnectorResource<Operation extends string = string> {
+  /**
+   * Calls `operation` of the connector the binding serves, with `args`:
+   * one the use declared, or the host refuses it.
+   */
+  readonly call: (operation: Operation, args: JsonValue) => Promise<JsonValue>;
 }
 
 /** An operation binding (an approved App export), as an action calls it. */
@@ -64,19 +79,16 @@ export interface OperationResource {
   readonly call: (args: JsonValue) => Promise<JsonValue>;
 }
 
-/** What each kind of use gives an action. */
-interface ResourceOfKind {
-  readonly connector: ConnectorResource;
-  readonly operation: OperationResource;
-}
+/** What a use gives an action. */
+type ResourceOf<U extends AnyUse> = U["~use"]["kind"] extends "connector"
+  ? ConnectorResource<U["~use"]["operations"][number]>
+  : OperationResource;
 
 /** What an action's handler gets besides its arguments. */
 export interface ActionCtx<Uses extends readonly AnyUse[]> {
   /** Exactly the bindings `uses` declares, by alias. */
   readonly resources: {
-    readonly [
-      U in Uses[number] as U["~use"]["alias"]
-    ]: ResourceOfKind[U["~use"]["kind"]];
+    readonly [U in Uses[number] as U["~use"]["alias"]]: ResourceOf<U>;
   };
 }
 
@@ -112,31 +124,119 @@ const weakSet: unknown = Reflect.getOwnPropertyDescriptor(
   "set"
 )?.value;
 
-/** The uses `resource` declared: what makes a value one. */
-const declaredUses = new WeakMap<object, { alias: string; kind: UseKind }>();
+/** A use as `resource` recorded it, out of module code's reach. */
+interface DeclaredUse {
+  readonly alias: string;
+  readonly kind: UseKind;
+  readonly operations: readonly string[];
+}
 
-const declareUse = <Alias extends string, Kind extends UseKind>(
+/** The uses `resource` declared: what makes a value one. */
+const declaredUses = new WeakMap<object, DeclaredUse>();
+
+/** The most operations one connector use declares. */
+const maxOperations = 64;
+/** The longest operation name. */
+const maxOperationChars = 256;
+
+/**
+ * `value`'s operations, copied: a non-empty list of distinct names, so
+ * nothing the module keeps can change what was declared.
+ */
+const operationsOf = <Operation extends string>(
+  value: readonly Operation[]
+): readonly Operation[] => {
+  // Typed, but whatever module code passed: checked as it is.
+  const passed: unknown = value;
+  if (
+    !Array.isArray(passed) ||
+    passed.length === 0 ||
+    passed.length > maxOperations
+  ) {
+    return refuse(
+      `A connector's \`operations\` list the 1 to ${maxOperations} operations the action calls.`
+    );
+  }
+  const copy: Operation[] = [];
+  const seen = new Set<string>();
+  for (const operation of value) {
+    const name: unknown = operation;
+    if (
+      typeof name !== "string" ||
+      name.length === 0 ||
+      name.length > maxOperationChars ||
+      seen.has(name)
+    ) {
+      return refuse(
+        "Name each operation of a connector's `operations` once, exactly."
+      );
+    }
+    seen.add(name);
+    copy.push(operation);
+  }
+  return freeze(copy);
+};
+
+/** Whether `value` is a record `declareUse` kept. */
+const isDeclaredUse = (value: unknown): value is DeclaredUse =>
+  typeof value === "object" &&
+  value !== null &&
+  "alias" in value &&
+  typeof value.alias === "string" &&
+  "kind" in value &&
+  (value.kind === "connector" || value.kind === "operation") &&
+  "operations" in value &&
+  Array.isArray(value.operations);
+
+const declareUse = <
+  Alias extends string,
+  Kind extends UseKind,
+  Operation extends string,
+>(
   kind: Kind,
-  alias: Alias
-): Use<Alias, Kind> => {
+  alias: Alias,
+  operations: readonly Operation[]
+): Use<Alias, Kind, Operation> => {
   if (typeof alias !== "string" || !aliasPattern.test(alias)) {
     return refuse(
       "A resource's alias is a binding alias: letters, digits and _."
     );
   }
-  const use = freeze({ "~use": freeze({ alias, kind }) });
+  const declared = freeze({ alias, kind, operations });
+  const use: Use<Alias, Kind, Operation> = freeze({ "~use": declared });
   if (typeof weakSet === "function") {
-    apply(weakSet, declaredUses, [use, { alias, kind }]);
+    apply(weakSet, declaredUses, [use, declared]);
   }
   return use;
 };
 
+/** What a connector use declares besides its alias. */
+export interface ConnectorUseOptions<Operation extends string> {
+  /** The exact operations of the connector the action calls. */
+  readonly operations: readonly Operation[];
+}
+
 /** The workflow's own bindings an action may declare it uses, by kind. */
 export const resource = freeze({
-  connector: <const Alias extends string>(alias: Alias) =>
-    declareUse("connector", alias),
+  connector: <const Alias extends string, const Operation extends string>(
+    alias: Alias,
+    options: ConnectorUseOptions<Operation>
+  ): Use<Alias, "connector", Operation> => {
+    const property =
+      typeof options === "object" && options !== null
+        ? getOwnPropertyDescriptor(options, "operations")
+        : undefined;
+    // A value, read once: never a getter that answers differently later.
+    if (property === undefined || !("value" in property)) {
+      return refuse(
+        "Declare the operations a connector's action calls: `{ operations: [...] }`."
+      );
+    }
+    return declareUse("connector", alias, operationsOf(options.operations));
+  },
+  // An App export is one operation: nothing more to declare.
   operation: <const Alias extends string>(alias: Alias) =>
-    declareUse("operation", alias),
+    declareUse<Alias, "operation", never>("operation", alias, []),
 });
 
 /** What `action` is declared with. */
@@ -157,11 +257,20 @@ export interface ActionDefinition<
   ) => Promise<InferInput<Returns>> | InferInput<Returns>;
 }
 
+/** A use, as an action's contract records it. */
+export type ContractUse =
+  | {
+      readonly alias: string;
+      readonly kind: "connector";
+      readonly operations: readonly string[];
+    }
+  | { readonly alias: string; readonly kind: "operation" };
+
 /** An action's contract, as the host's manifest records it. */
 export interface ActionContract {
   readonly input: ValueDescriptor;
   readonly output: ValueDescriptor;
-  readonly uses: readonly { readonly alias: string; readonly kind: UseKind }[];
+  readonly uses: readonly ContractUse[];
 }
 
 /** A declared action, as `action` answers it. */
@@ -207,27 +316,29 @@ const usesOf = (value: unknown): ActionContract["uses"] => {
   const seen = new Set<string>();
   return freeze(
     Array.from(value, (item: unknown) => {
+      // The brand's record, never the object: a lookalike or a use
+      // changed since `resource` made it reads as nothing.
       const use: unknown =
         typeof item === "object" &&
         item !== null &&
         typeof weakGet === "function"
           ? apply(weakGet, declaredUses, [item])
           : undefined;
-      if (
-        typeof use !== "object" ||
-        use === null ||
-        !("alias" in use) ||
-        typeof use.alias !== "string" ||
-        !("kind" in use) ||
-        (use.kind !== "connector" && use.kind !== "operation")
-      ) {
+      if (!isDeclaredUse(use)) {
         return refuse("Declare each resource an action uses with `resource`.");
       }
       if (seen.has(use.alias)) {
         return refuse(`An action uses \`${use.alias}\` once.`);
       }
       seen.add(use.alias);
-      return freeze({ alias: use.alias, kind: use.kind });
+      return use.kind === "connector"
+        ? freeze({
+            alias: use.alias,
+            kind: use.kind,
+            // Frozen as `resource` copied it.
+            operations: use.operations,
+          })
+        : freeze({ alias: use.alias, kind: use.kind });
     })
   );
 };

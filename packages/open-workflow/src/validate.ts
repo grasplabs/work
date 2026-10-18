@@ -149,6 +149,18 @@ const markActionUses = (checker: Checker): void => {
         continue;
       }
       used.referenced = true;
+      // Exactly the operations its catalog contract names (GRA-704): what
+      // the host lets the action call, and nothing it might add later.
+      for (const operation of use.operations ?? []) {
+        if (used.contract?.operations?.has(operation) !== true) {
+          checker.report.error(
+            "binding.unknown_operation",
+            { pointer: binding.pointer },
+            `Declare only operations \`${use.alias}\`'s contract names: it has no \`${operation}\`.`,
+            { expected: "an operation of the binding's contract" }
+          );
+        }
+      }
     }
   }
 };

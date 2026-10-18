@@ -23,8 +23,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
-  actionUseAliasPattern,
-  actionUseKinds,
+  actionUsesSchema,
   workflowModuleLimits,
   workflowModulePattern,
 } from "@grasp-os/shared/workflow-modules";
@@ -45,6 +44,7 @@ import {
 } from "./db/core/schema.ts";
 import { releaseReservations } from "./release-retention.ts";
 import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
+import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
@@ -721,14 +721,7 @@ const computeFileSchema = z.strictObject({
           kind: z.literal("operation"),
           input: z.string().max(workflowModuleLimits.descriptorChars),
           output: z.string().max(workflowModuleLimits.descriptorChars),
-          uses: z
-            .array(
-              z.strictObject({
-                alias: z.string().regex(actionUseAliasPattern),
-                kind: z.enum(actionUseKinds),
-              })
-            )
-            .max(workflowModuleLimits.actionUses),
+          uses: actionUsesSchema,
         }),
       ])
     )
@@ -818,9 +811,7 @@ const loadedModules = (
           ...contract,
           ...(contract.kind === "operation"
             ? {
-                uses: Object.freeze(
-                  contract.uses.map((use) => Object.freeze({ ...use }))
-                ),
+                uses: Object.freeze(contract.uses.map(sealedUse)),
               }
             : {}),
         }),

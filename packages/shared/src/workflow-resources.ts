@@ -604,7 +604,7 @@ export interface WorkflowBinders {
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 5;
+export const openWorkflowProtocol = 6;
 
 /**
  * Something of a definition the code generator doesn't lower yet: its

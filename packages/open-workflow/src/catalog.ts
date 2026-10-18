@@ -51,7 +51,17 @@ export interface CatalogContract {
    * bindings it reaches, by alias and kind. Validation counts each as
    * referenced, so it is sealed and approved like one a task names.
    */
-  uses?: readonly { alias: string; kind: BindingKind }[];
+  uses?: readonly ContractUse[];
+}
+
+/**
+ * A use of a workflow's own action: an alias and a kind, and of a
+ * connector the exact operations it calls (GRA-704).
+ */
+export interface ContractUse {
+  readonly alias: string;
+  readonly kind: BindingKind;
+  readonly operations?: readonly string[];
 }
 
 /** Looks a contract key up; `undefined` when there is no such contract. */
@@ -88,7 +98,7 @@ export interface ResolvedContract {
   >;
   workflow?: { namespace: string; name: string; version: string };
   /** A workflow's own action: the other bindings it reaches. */
-  uses?: readonly { readonly alias: string; readonly kind: BindingKind }[];
+  uses?: readonly ContractUse[];
 }
 
 class CatalogError extends Error {
@@ -267,7 +277,53 @@ const maxUses = 32;
 /** An alias, as the profile's bindings name them. */
 const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
-/** An action's `uses`: each an alias and a binding kind, each alias once. */
+/** The most operations an action declares of one connector. */
+const maxUseOperations = 64;
+
+/**
+ * A use's operations: a connector's must list 1 to `maxUseOperations`
+ * distinct names; any other kind's none.
+ */
+const readUseOperations = (
+  use: unknown,
+  kind: BindingKind
+): readonly string[] | undefined => {
+  const value = ownData(use, "operations");
+  if (kind !== "connector") {
+    return value === undefined
+      ? undefined
+      : refuse("operations on a use that isn't a connector's");
+  }
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > maxUseOperations
+  ) {
+    return refuse(
+      `a connector's use without 1 to ${maxUseOperations} operations`
+    );
+  }
+  const seen = new Set<string>();
+  return Object.freeze(
+    Array.from(value, (operation: unknown) => {
+      if (
+        typeof operation !== "string" ||
+        operation.length === 0 ||
+        operation.length > catalogLimits.nameLength ||
+        seen.has(operation)
+      ) {
+        return refuse("an operation that isn't a name, each once");
+      }
+      seen.add(operation);
+      return operation;
+    })
+  );
+};
+
+/**
+ * An action's `uses`: each an alias and a binding kind, each alias once,
+ * a connector's with its operations.
+ */
 const readUses = (value: unknown): ResolvedContract["uses"] => {
   if (value === undefined) {
     return undefined;
@@ -289,7 +345,10 @@ const readUses = (value: unknown): ResolvedContract["uses"] => {
         return refuse("a use that isn't an alias and a kind, each alias once");
       }
       seen.add(alias);
-      return Object.freeze({ alias, kind });
+      const operations = readUseOperations(use, kind);
+      return Object.freeze(
+        operations === undefined ? { alias, kind } : { alias, kind, operations }
+      );
     })
   );
 };
