@@ -68,8 +68,12 @@ import {
   readSealedWorkflows,
 } from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
-import { definitionPackageSchema } from "@grasp-os/shared/definition-packages";
+import {
+  definitionPackageSchema,
+  workflowKeyParts,
+} from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
+import { exactVersionSchema } from "@grasp-os/shared/dependencies";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { LockedPackage } from "@grasp-os/shared/packages";
 import { z } from "zod";
@@ -109,8 +113,6 @@ const refuse = (message: string): never => {
 };
 
 const drivePattern = /^[A-Za-z]:/u;
-const workflowKeyPattern =
-  /^workspace\/(?<name>[a-z0-9-]+)\/(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/u;
 
 /** Characters no segment holds: separators, Windows' reserved, controls. */
 // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
@@ -233,13 +235,10 @@ export const readCatalog = (
   return catalog;
 };
 
-const exactVersionPattern =
-  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
-
 /** `name`'s exact catalog version, or a refusal. */
 const pinned = (catalog: ReadonlyMap<string, string>, name: string): string => {
   const version = catalog.get(name);
-  if (version === undefined || !exactVersionPattern.test(version)) {
+  if (version === undefined || !exactVersionSchema.safeParse(version).success) {
     return refuse(`${name}: the catalog pins no exact version of it.`);
   }
   return version;
@@ -397,12 +396,12 @@ const planWorkflows = (
   workflows: DefinitionPackage["workflows"]
 ): void => {
   for (const [key, workflow] of Object.entries(workflows)) {
-    const groups = workflowKeyPattern.exec(key)?.groups;
-    if (groups?.name === undefined || groups.version === undefined) {
+    const parts = workflowKeyParts(key);
+    if (parts === undefined) {
       refuse("A workflow's key isn't one a package names workflows by.");
       return;
     }
-    const base = `workflows/${groups.name}/${groups.version}`;
+    const base = `workflows/${parts.name}/${parts.version}`;
     for (const [file, text] of Object.entries(workflow.files)) {
       project.add(`${base}/${safePath(file, key)}`, text);
     }

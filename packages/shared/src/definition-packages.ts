@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { catalogBindingKinds } from "./workflow-resources.ts";
+import { exactVersionSchema } from "./dependencies.ts";
+import {
+  catalogBindingKinds,
+  workflowNameSchema,
+  workflowNamespace,
+} from "./workflow-resources.ts";
 
 // A definition package: an App's current sealed release and
 // the exact workflow versions it binds, as portable source another
@@ -25,11 +30,39 @@ export const definitionPackageMaxBytes = 16 * 1024 * 1024;
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
 
+const workflowKeyPattern =
+  /^(?<namespace>[^/]+)\/(?<name>[^/]+)\/(?<version>[^/]+)$/u;
+
+/**
+ * The name and version a workflow version's key names
+ * (`workflowKeySchema`), or undefined when it isn't one.
+ */
+export const workflowKeyParts = (
+  key: string
+): { name: string; version: string } | undefined => {
+  const groups = workflowKeyPattern.exec(key)?.groups;
+  if (
+    groups?.namespace !== workflowNamespace ||
+    groups.name === undefined ||
+    groups.version === undefined ||
+    !workflowNameSchema.safeParse(groups.name).success ||
+    !exactVersionSchema.safeParse(groups.version).success
+  ) {
+    return undefined;
+  }
+  return { name: groups.name, version: groups.version };
+};
+
 /**
  * A workflow version's key in a package: `workspace/<name>/<version>`, the
  * contract key definitions bind it by, its definition's semantic version.
  */
-const workflowKeySchema = z.string().min(1).max(256);
+const workflowKeySchema = z
+  .string()
+  .max(256)
+  .refine((key) => workflowKeyParts(key) !== undefined, {
+    message: "A workflow's key: workspace/<name>/<version>",
+  });
 
 /** Text files by path. */
 const filesSchema = z.record(z.string().min(1).max(512), z.string());

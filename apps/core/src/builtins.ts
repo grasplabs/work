@@ -100,11 +100,10 @@ export const fingerprintOf = async (of: Release): Promise<string> =>
     canonicalJson({
       schema: coreSchema,
       blueprints: of.blueprints.map(
-        ({ id, name, description, collections, permissions, files }) => ({
+        ({ id, name, description, permissions, files }) => ({
           id,
           name,
           description,
-          collections: [...collections],
           permissions: [...permissions],
           files: { ...files },
         })

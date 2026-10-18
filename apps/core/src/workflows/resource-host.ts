@@ -2255,8 +2255,6 @@ export class ResourceRunHost
       // its attempt begins (`#attemptOf`), and again before each of its
       // calls (`#action`).
       await this.#packagesAdmitted();
-    }
-    if (call.name === "grasp.compute") {
       // A calculation of the workflow's own sealed modules: no binding of
       // the catalog, no authority to decide again, nothing outside core's
       // sandbox (resource-compute.ts).

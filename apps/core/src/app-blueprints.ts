@@ -40,7 +40,6 @@ import {
   blueprints,
   permissions,
 } from "./db/core/schema.ts";
-import { ensureCollection } from "./knowledge/collections.ts";
 import { appMemoryPath } from "./knowledge/memory-files.ts";
 import { declarableOf, declaredRequests, toPermission } from "./permissions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -80,12 +79,6 @@ import { workflowCallsIn } from "./workflows/code.ts";
 // creating asks for permissions, which staff never do for a client.
 
 type Row = typeof blueprints.$inferSelect;
-
-/**
- * The owner of the collections the built-ins declare: nobody's, open to
- * everyone, changed by admins only (`canWrite` in knowledge).
- */
-const releaseOwner = "grasp";
 
 /** A copy's AGENTS.md in place of its blueprint's (see above). */
 const copiedMemory = (name: string): string =>
@@ -463,9 +456,7 @@ const deleteReplacedTrees = async (
  * other, under its folder's name, which never changes: created if it
  * isn't there, or changed if its name, description, code or what it
  * declares each App created from it asks for differ from what's stored,
- * in one audited batch, so installing it again writes nothing. The
- * collections it declares are created first, in Knowledge's database,
- * each only if it isn't there yet, and audited only then. Apps created
+ * in one audited batch, so installing it again writes nothing. Apps created
  * from it earlier keep their code and their permissions. The trees of its
  * earlier releases are deleted once its row names the new one.
  *
@@ -547,26 +538,6 @@ export const installBuiltinBlueprint = async (
         ),
       ]
     : [];
-  // The collections its copies ask for, before anything asks for them:
-  // each is created once, by the first install that declares it, and
-  // shared by every App created from a blueprint that names it. Nothing
-  // deletes such a collection once created.
-  for (const collection of builtin.collections) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    await ensureCollection(
-      env,
-      {
-        ...collection,
-        owner: releaseOwner,
-        access: "everyone",
-        sensitive: false,
-        source: "here",
-        createdAt: now,
-      },
-      { type: "system" },
-      { builtin: builtin.id }
-    );
-  }
   const [first, ...rest] = [...created, ...changed];
   if (first !== undefined) {
     await auditedBatch(env, db, [first, ...rest]);
