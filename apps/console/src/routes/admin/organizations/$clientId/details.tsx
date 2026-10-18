@@ -236,14 +236,18 @@ const Paper = ({
 
 /** Its papers: as it stands on the contract and on every invoice. */
 const Papers = () => {
-  const { company } = useOrganization().view;
+  const { company, unknown } = useOrganization().view;
   return (
     <Part
       about="As it stands on the contract and on every invoice."
       title="Its papers"
     >
       <dl className="grid gap-5 border-t px-5 py-5 sm:grid-cols-2">
-        <Paper label="Name on the contract" value={company.legalName} />
+        {/* Without a contract, the model's name for it is only the company's own. */}
+        <Paper
+          label="Name on the contract"
+          value={unknown.contract ? "" : company.legalName}
+        />
         <Paper label="Website" value={company.url} />
         <Paper label="Company register number" value={company.register} />
         <Paper label="VAT number" value={company.vat} />

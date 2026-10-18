@@ -157,8 +157,9 @@ describe("an organization's details", () => {
       contacts: [true, true, true, true],
       writes: false,
       calls: true,
+      // Core holds no contract, so the name it stands under there isn't known.
       papers: [
-        "Noordkade",
+        "Not known yet",
         "Not known yet",
         "Not known yet",
         "Not known yet",
