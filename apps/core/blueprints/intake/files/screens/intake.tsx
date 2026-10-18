@@ -1,5 +1,5 @@
 import type { Id } from "@grasp-os/sdk";
-import { useAction, useClient, useQuery } from "@grasp-os/sdk/react";
+import { useClient, useQuery } from "@grasp-os/sdk/react";
 import { useWorkflow } from "@grasp-os/sdk/screen";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -18,7 +18,13 @@ import { api } from "#grasp";
 import { DraftEditor } from "../components/draft-editor";
 import type { EditorResult } from "../components/draft-editor";
 import { Extractions } from "../components/extractions";
-import { isDraftId, originLabels, refusal, settle } from "../components/intake";
+import {
+  isDraftId,
+  mediumLabels,
+  originLabels,
+  refusal,
+  settle,
+} from "../components/intake";
 import type { GuestChat, OpenedDraft } from "../components/intake";
 import { NotesForm } from "../components/notes-form";
 import type { NotesInput } from "../components/notes-form";
@@ -185,7 +191,6 @@ const SavedList = () => {
  */
 const Intake = () => {
   const client = useClient();
-  const loadOverview = useAction(api.chats.overview);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [view, setView] = useState<View>({ kind: "list" });
   const [problem, setProblem] = useState("");
@@ -204,7 +209,9 @@ const Intake = () => {
   const list = async (): Promise<void> => {
     listings.current += 1;
     const asked = listings.current;
-    const answer = await settle(async () => await loadOverview({}));
+    const answer = await settle(
+      async () => await client.action(api.chats.overview, {})
+    );
     if (asked !== listings.current) {
       return;
     }
@@ -221,7 +228,9 @@ const Intake = () => {
     const first = async (): Promise<void> => {
       listings.current += 1;
       const asked = listings.current;
-      const answer = await settle(async () => await loadOverview({}));
+      const answer = await settle(
+        async () => await client.action(api.chats.overview, {})
+      );
       if (!mounted || asked !== listings.current) {
         return;
       }
@@ -235,7 +244,7 @@ const Intake = () => {
     return () => {
       mounted = false;
     };
-  }, [loadOverview]);
+  }, [client]);
 
   const showList = (): void => {
     openings.current += 1;

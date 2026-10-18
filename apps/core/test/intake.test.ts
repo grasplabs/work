@@ -372,6 +372,15 @@ describe("the intake", { timeout: 60_000 }, () => {
       keptDate: await kept({ source: { ...draft.source, date: "21-09-2026" } }),
       untitled: await kept({ source: { ...draft.source, title: "   " } }),
       untagged: await kept({ statements: [{ ...statement, tags: [] }] }),
+      // Each field within its limit, all at their longest more than a call
+      // carries (128 KiB), as much as the store keeps of one record.
+      tooLarge: await kept({
+        source: { ...draft.source, notes: "€".repeat(30_000) },
+        statements: Array.from({ length: 90 }, () => ({
+          ...statement,
+          quote: "€".repeat(1000),
+        })),
+      }),
       // More statements than a save writes in one commit.
       tooMany: await kept({
         statements: Array.from({ length: 91 }, () => statement),
@@ -391,6 +400,7 @@ describe("the intake", { timeout: 60_000 }, () => {
       created: "intake.invalid",
       proposed: "intake.invalid",
       keptDate: "intake.invalid",
+      tooLarge: "contract.input_too_large",
       untitled: "contract.invalid_args",
       untagged: "contract.invalid_args",
       tooMany: "contract.invalid_args",

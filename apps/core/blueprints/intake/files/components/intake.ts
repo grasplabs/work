@@ -194,6 +194,9 @@ export const refusal = (code: string): string => {
     case "contract.invalid_args": {
       return "That doesn't fit: check every statement has text and a tag, the source a title and a date that exists, and that the notes and quotes aren't too long to keep.";
     }
+    case "contract.input_too_large": {
+      return "This draft is too long to keep: shorten its notes, quotes or statements.";
+    }
     case "intake.no_statements": {
       return "Add a statement to save.";
     }
