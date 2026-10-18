@@ -66,8 +66,10 @@ const calls = (tokensIn: number, tokensOut: number, seconds = 0) => ({
  * A company whose core counted, today: Stephen reading the first
  * conversation with the careful model (2 million tokens read, 200
  * thousand written: €15) and interviewing with the quick one (1 million
- * read, 200 thousand written: €6) and his voice (20 minutes: €3). €24 in
- * all, with nothing signed.
+ * read, 200 thousand written: €6), his voice (20 minutes: €3), and
+ * core's own default model, which has no price (500 thousand read, 100
+ * thousand written: its tokens count, not its cost). €24 in all, with
+ * nothing signed.
  */
 const usedSnapshot = (): AdminSnapshot => {
   const empty = emptyAdminSnapshot("Acme");
@@ -81,6 +83,7 @@ const usedSnapshot = (): AdminSnapshot => {
           interviews: {
             "claude-sonnet-5-5": calls(1_000_000, 200_000),
             voice: calls(0, 0, 1200),
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast": calls(500_000, 100_000),
           },
         },
       },
@@ -120,8 +123,8 @@ describe("an organization's AI use and hours", () => {
       spend: html.split(">€24<").length - 1,
       contract: has("no signed contract yet"),
       tokens: [
-        has(">3.4 million<"),
-        has("3.0 million read, 400 thousand written"),
+        has(">4.0 million<"),
+        has("3.5 million read, 500 thousand written"),
       ],
       voice: [has(">20<"), has("20 spoken, 0 heard")],
       // The numbers, by use: reading and interviews cost, the rest nothing.
@@ -129,11 +132,15 @@ describe("an organization's AI use and hours", () => {
         has(">€15<"),
         has(">€9.00<"),
         has("Every interview Stephen held"),
+        // The unpriced model's tokens are among the interviews'.
+        has("1.5 million read, 300 thousand written"),
       ],
       shares: [has(">63%<"), has(">25%<"), has(">13%<")],
       prices: [
         has("€5 a million tokens read, €25 written"),
         has("€0.15 a minute"),
+        has("Other models (not priced)"),
+        has("No price: its tokens count, its cost doesn’t"),
       ],
       toCome: has("This section isn’t in the console yet."),
     }).toStrictEqual({
@@ -146,9 +153,9 @@ describe("an organization's AI use and hours", () => {
       contract: true,
       tokens: [true, true],
       voice: [true, true],
-      byUse: [true, true, true],
+      byUse: [true, true, true, true],
       shares: [true, true, true],
-      prices: [true, true],
+      prices: [true, true, true, true],
       toCome: false,
     });
   });

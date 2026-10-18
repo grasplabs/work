@@ -82,6 +82,8 @@ const modelShade: Record<Model, ChartColor> = {
   haiku: "chart-3",
   voice: "chart-4",
   ears: "chart-2",
+  // Never in a chart: it has no price, so no share of what was spent.
+  other: "chart-2",
 };
 const purposeShade: Record<Purpose, ChartColor> = {
   interviews: "chart-1",
@@ -146,6 +148,10 @@ const modelWords: Record<Model, { label: string; what: string }> = {
   ears: {
     label: "Stephen’s ears",
     what: "What he hears, written down as it is said, by the minute.",
+  },
+  other: {
+    label: MODEL_NAMES.other,
+    what: "Any other model the company’s Grasp calls, such as its own default. Its tokens count; with no price, it adds nothing to the cost.",
   },
 };
 
@@ -626,28 +632,35 @@ const UseRow = ({
   );
 };
 
+/** What one model is counted at: a minute, a million tokens read and written, or nothing it has a price for. */
+const priceLine = (model: Model): string => {
+  const price = PRICES[model];
+  if (price.minute > 0) {
+    return `${euro(price.minute)} a minute`;
+  }
+  if (price.tokensIn + price.tokensOut > 0) {
+    return `${euros(price.tokensIn)} a million tokens read, ${euros(price.tokensOut)} written`;
+  }
+  return "No price: its tokens count, its cost doesn’t";
+};
+
 /** What each model is counted at: a million tokens read and written, or a minute. */
 const Prices = () => (
   <ul className="bg-border grid gap-px border-t sm:grid-cols-2 xl:grid-cols-3">
-    {MODELS.map((model) => {
-      const price = PRICES[model];
-      return (
-        <li className="bg-card flex flex-col gap-0.5 px-5 py-3" key={model}>
-          <span className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className={cn("size-2 rounded-xs", swatch[modelShade[model]])}
-            />
-            {modelWords[model].label}
-          </span>
-          <span className="text-muted-foreground text-xs">
-            {price.minute > 0
-              ? `${euro(price.minute)} a minute`
-              : `${euros(price.tokensIn)} a million tokens read, ${euros(price.tokensOut)} written`}
-          </span>
-        </li>
-      );
-    })}
+    {MODELS.map((model) => (
+      <li className="bg-card flex flex-col gap-0.5 px-5 py-3" key={model}>
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className={cn("size-2 rounded-xs", swatch[modelShade[model]])}
+          />
+          {modelWords[model].label}
+        </span>
+        <span className="text-muted-foreground text-xs">
+          {priceLine(model)}
+        </span>
+      </li>
+    ))}
   </ul>
 );
 
