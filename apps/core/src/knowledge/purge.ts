@@ -101,8 +101,8 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // trying terms one by one leaves a trace.
 //
 // What a purge doesn't reach: paths (a document named after someone keeps
-// its name; a `[[link]]` or a record field naming it is rewritten like
-// any text, and then names no document), the Grasp skills (the release's text,
+// its name; a `[[link]]` or a frontmatter field naming it is rewritten
+// like any text, and then names no document), the Grasp skills (the release's text,
 // which the next sync puts back: a purge naming one is refused), the App
 // itself (its name, description and versions' AGENTS.md: a purge naming
 // the App's entry in the Apps collection is refused while what indexing
@@ -989,9 +989,10 @@ const purgeDocument = async (
     ifVersion: at,
     message: "Personal data removed",
     restoredFrom: null,
-    // What a record keeps from version to version, such as a workflow's
-    // link, a term is removed from too, and a record no App declares any
-    // more, or that no longer fits its type, is purged all the same.
+    // A term is removed from the frontmatter a document keeps from
+    // version to version too, and a document of a type the platform no
+    // longer knows, or whose frontmatter no longer fits its type, is
+    // purged all the same (`parseBaseFields`).
     purge: true,
     also: [
       ...(changed === undefined
