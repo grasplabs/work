@@ -25,7 +25,7 @@ import type {
   Stage,
 } from "@grasp-os/workflow-expressions/evaluate";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
-import { RpcTarget } from "cloudflare:workers";
+import { RpcTarget, waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 
 import { memberRole } from "../auth/identity.ts";
@@ -2285,14 +2285,19 @@ export class ResourceRunHost
             fromAction: true,
           });
         },
+        // The request's own work until it is written: `callAction` waits
+        // for it only until the attempt's deadline, and a write it stopped
+        // waiting for still finishes rather than ending with the call.
         refused: async (refusal) => {
-          await auditAdmissionRefusal(this.#env, this.#run.calling, {
+          const writing = auditAdmissionRefusal(this.#env, this.#run.calling, {
             build: this.#run.build.hash,
             task: task.id,
             attempt: attempt.number,
             generation: attempt.generation,
             ...refusal,
           });
+          waitUntil(writing);
+          await writing;
         },
       }
     );
