@@ -85,6 +85,13 @@
       "when": 1792279168421,
       "tag": "0011_search_secure_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792319183140,
+      "tag": "0012_search_rebuilds",
+      "breakpoints": true
     }
   ]
 }

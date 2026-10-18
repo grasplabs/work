@@ -205,6 +205,61 @@ const saveOver = async (
   });
 };
 
+/**
+ * A word whose token joined with さん heads a page of the words index, as
+ * a document holds it, with its plain twin in another document: its
+ * directory entry is the plain word and the first byte of さ, which the
+ * word's own key can't find (search-erasure.ts). `entriesLeft` counts
+ * that entry. Letters only: a word with a digit is held to a stricter
+ * check of its own.
+ */
+const joinedWordHeadingAPage = async (admin: Person) => {
+  const handbook = await admin.api.knowledge.createCollection({
+    name: "Handbook",
+    access: "everyone",
+  });
+  const stem = `zq${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+  const words = Array.from(
+    { length: 2000 },
+    (_, at) => `${stem}${lettersOf(at, 3)}`
+  );
+  const joined = await saveOver(
+    admin,
+    handbook.id,
+    "joined.md",
+    `# Words\n${words.map((word) => `${word}さん`).join(" ")}`
+  );
+  // The stem alone first: one term more before the pairs, so pages, which
+  // fill a pair at a time here, begin on a joined word.
+  await saveOver(
+    admin,
+    handbook.id,
+    "plain.md",
+    `# Words\n${stem} ${words.join(" ")}`
+  );
+  await env.KNOWLEDGE.prepare(
+    "INSERT INTO search_words (search_words) VALUES ('optimize')"
+  ).run();
+  const entryOf = (word: string) => `${hexOf(`0${word}`)}E3`;
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT hex(term) AS entry FROM search_words_idx WHERE hex(term) LIKE ?"
+  )
+    .bind(`${hexOf(`0${stem}`)}%E3`)
+    .all<{ entry: string }>();
+  const word = words.find((one) =>
+    results.some(({ entry }) => entry === entryOf(one))
+  );
+  const entriesLeft = async () => {
+    const left = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS n FROM search_words_idx WHERE hex(term) = ?"
+    )
+      .bind(entryOf(word ?? ""))
+      .first<{ n: number }>();
+    return left?.n;
+  };
+  return { joined, word, entriesLeft };
+};
+
 describe("a personal purge", setUpTime, () => {
   it("removes the person's USER.md and every version, from everywhere", async () => {
     const admin = await personOf("admin");
@@ -613,64 +668,121 @@ describe("a purge of content", setUpTime, () => {
 
   it("leaves nothing of a term the index held as part of a longer token, beside a script written without spaces", async () => {
     const admin = await personOf("admin");
-    const handbook = await admin.api.knowledge.createCollection({
-      name: "Handbook",
-      access: "everyone",
-    });
-    // The same words twice: plain in one document, and in the other
-    // followed by さん, which the index joins to them ("zq…さん"), and the
-    // purge doesn't. Enough to fill pages, so some page begins with a
-    // joined word right after its plain twin: its directory entry is the
-    // plain word and the first byte of さ. Letters only: a word with a
-    // digit is held to a stricter check of its own.
-    const stem = `zq${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
-    const words = Array.from(
-      { length: 2000 },
-      (_, at) => `${stem}${lettersOf(at, 3)}`
-    );
-    const joined = await saveOver(
-      admin,
-      handbook.id,
-      "joined.md",
-      `# Words\n${words.map((word) => `${word}さん`).join(" ")}`
-    );
-    // The stem alone first: one term more before the pairs, so pages,
-    // which fill a pair at a time here, begin on a joined word.
-    await saveOver(
-      admin,
-      handbook.id,
-      "plain.md",
-      `# Words\n${stem} ${words.join(" ")}`
-    );
-    await env.KNOWLEDGE.prepare(
-      "INSERT INTO search_words (search_words) VALUES ('optimize')"
-    ).run();
-    const entryOf = (word: string) => `${hexOf(`0${word}`)}E3`;
-    const { results } = await env.KNOWLEDGE.prepare(
-      "SELECT hex(term) AS entry FROM search_words_idx WHERE hex(term) LIKE ?"
-    )
-      .bind(`${hexOf(`0${stem}`)}%E3`)
-      .all<{ entry: string }>();
-    const word = words.find((one) =>
-      results.some(({ entry }) => entry === entryOf(one))
-    );
+    const { joined, word, entriesLeft } = await joinedWordHeadingAPage(admin);
     await purged(admin, {
       type: "content",
       documentIds: [joined.id],
       terms: [word ?? ""],
       reason: "other",
     });
-    const left = await env.KNOWLEDGE.prepare(
-      "SELECT count(*) AS n FROM search_words_idx WHERE hex(term) = ?"
-    )
-      .bind(entryOf(word ?? ""))
-      .first<{ n: number }>();
     const read = await admin.api.knowledge.getDocument(joined.id);
     expect({
       found: word !== undefined,
       removed: !read.version.text.includes(`${word}さん`),
-      entriesLeft: left?.n,
+      entriesLeft: await entriesLeft(),
     }).toStrictEqual({ found: true, removed: true, entriesLeft: 0 });
+  });
+
+  it("rebuilds when run again for a term beside a script, though its text is rewritten already", async () => {
+    const admin = await personOf("admin");
+    const { joined, word, entriesLeft } = await joinedWordHeadingAPage(admin);
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [joined.id],
+      terms: [word ?? ""],
+      reason: "other",
+    };
+    // The first run's rebuild fails, once its rewrites committed.
+    let failed = false;
+    let failNext = false;
+    const failing = await apiWith(admin, {
+      prepare: (query) => {
+        if (!failed && query.includes("VALUES ('rebuild')")) {
+          failNext = true;
+        }
+      },
+      beforeBatch: () => {
+        if (failNext) {
+          failNext = false;
+          failed = true;
+          throw new Error("D1 is unavailable");
+        }
+      },
+    });
+    const { token } = await failing.knowledge.preparePurge(input);
+    const first = await outcome(failing.knowledge.purge(input, token));
+    const read = await admin.api.knowledge.getDocument(joined.id);
+    const again = await purged(admin, input);
+    expect({
+      found: word !== undefined,
+      first,
+      rewrittenFirst: !read.version.text.includes(`${word}さん`),
+      again: again.result.versions,
+      entriesLeft: await entriesLeft(),
+    }).toStrictEqual({
+      found: true,
+      first: "knowledge.purge_index_pending",
+      rewrittenFirst: true,
+      again: 0,
+      entriesLeft: 0,
+    });
+  });
+
+  it("rebuilds for a term its frontmatter joins to a script, written as an escape", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    for (let at = 0; at < 60; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await saveOver(
+        admin,
+        handbook.id,
+        `filler-${at}.md`,
+        `# Filler ${at}\nText ${unique()}.`
+      );
+    }
+    /** Purges `name` from a new document with `title`, saying what it wrote. */
+    const purgeTitled = async (name: string, title: string) => {
+      const document = await saveOver(
+        admin,
+        handbook.id,
+        `${name}.md`,
+        `---\ntitle: "${title}"\n---\nAbout leave.`
+      );
+      const counting = await countingWrites(admin);
+      const input: PurgeInput = {
+        type: "content",
+        documentIds: [document.id],
+        terms: [name],
+        reason: "other",
+      };
+      const { token } = await counting.api.knowledge.preparePurge(input);
+      await counting.api.knowledge.purge(input, token);
+      const read = await admin.api.knowledge.getDocument(document.id);
+      return {
+        written: counting.written.rows,
+        removed: !read.version.text.includes(name),
+      };
+    };
+    const nameOf = () =>
+      `Visser${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+    // A plain title: the purge's own check, no rebuild.
+    const plainName = nameOf();
+    const plain = await purgeTitled(plainName, plainName);
+    // YAML decodes this title to "<name>さん", one token to the index, though
+    // the text as written has the name next to a backslash.
+    const escapedName = nameOf();
+    const escaped = await purgeTitled(
+      escapedName,
+      `${escapedName}\\u3055\\u3093`
+    );
+    // A rebuild writes a row for each section the index holds, at least.
+    expect({
+      removed: plain.removed && escaped.removed,
+      rebuilt: escaped.written - plain.written >= (await indexedSections()),
+    }).toStrictEqual({ removed: true, rebuilt: true });
   });
 
   it("never logs a purged term, though checking the index for it fails", async () => {

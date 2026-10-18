@@ -245,6 +245,19 @@ export const uploadCleanups = sqliteTable("upload_cleanups", {
 });
 
 /**
+ * Rebuilds of the full-text index a content purge needs and hasn't
+ * finished (knowledge/search-erasure.ts): recorded with the purge's audit
+ * event, before anything changes, when a term was part of a longer token
+ * the purge's own check can't find; cleared by the rebuild that ran after
+ * it. Run again, a purge whose text is rewritten already still rebuilds.
+ */
+export const searchRebuilds = sqliteTable("search_rebuilds", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  /** When the purge that needs it recorded it, ms. */
+  owedAt: integer("owed_at").notNull(),
+});
+
+/**
  * The daily computations of the usage signals (knowledge/signals.ts), one
  * row per attempt, as core's `improvement_signal_computations` has them
  * (src/daily-claims.ts).

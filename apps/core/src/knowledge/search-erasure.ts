@@ -1,6 +1,8 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import { sql } from "drizzle-orm";
+import { lte, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+
+import { searchRebuilds } from "../db/knowledge/schema.ts";
 
 // Taking purged terms out of the full-text index (0001_search.sql) for
 // good, at a cost bounded by the terms, not by the corpus. Threat model
@@ -35,17 +37,38 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 /**
  * Drops deleted rows' terms from the search index's pages for good, by
- * rebuilding it from its content. Throws when it fails.
+ * rebuilding it from its content, and clears the rebuilds purges recorded
+ * as owed before it began (`searchRebuilds`), in the same transaction:
+ * one that fails leaves them owed. Throws when it fails.
  */
 export const rebuildSearchIndex = async (
   db: DrizzleD1Database
 ): Promise<void> => {
+  const startedAt = Date.now();
   await db.batch([
     db.run(sql`INSERT INTO search_words (search_words) VALUES ('rebuild')`),
     db.run(
       sql`INSERT INTO search_trigrams (search_trigrams) VALUES ('rebuild')`
     ),
+    db.delete(searchRebuilds).where(lte(searchRebuilds.owedAt, startedAt)),
   ]);
+};
+
+/**
+ * The statement that records a rebuild as owed, for a purge's batch that
+ * records it before anything changes: a purge that then fails, or whose
+ * rebuild does, leaves it owed, and the next one rebuilds.
+ */
+export const rebuildOwed = (db: DrizzleD1Database) =>
+  db.insert(searchRebuilds).values({ owedAt: Date.now() });
+
+/** Whether a purge recorded a rebuild that hasn't run since. */
+const anyRebuildOwed = async (db: DrizzleD1Database): Promise<boolean> => {
+  const owed = await db
+    .select({ id: searchRebuilds.id })
+    .from(searchRebuilds)
+    .limit(1);
+  return owed.length > 0;
 };
 
 /** Whether `secure-delete` is on for both search tables. */
@@ -264,9 +287,10 @@ export const errorNameOf = (error: unknown): string =>
  * deleted the rows that held them: when every delete was a secure one
  * (`secure`, from `secureDeleteReady` before the writes), the terms'
  * tokens are known (`tokensKnown`: no occurrence was part of a longer
- * token, as one beside a script written without spaces is, "東京Visser")
- * and no page separator holds a token of them, there is nothing left to
- * do; otherwise the index is rebuilt. Throws when the rebuild fails.
+ * token, as one beside a script written without spaces is, "東京Visser"),
+ * no purge recorded a rebuild still owed (`rebuildOwed`), and no page
+ * separator holds a token of them, there is nothing left to do;
+ * otherwise the index is rebuilt. Throws when the rebuild fails.
  */
 export const eraseFromSearchIndex = async (
   db: DrizzleD1Database,
@@ -276,7 +300,7 @@ export const eraseFromSearchIndex = async (
   const keys = secure && tokensKnown ? indexKeysOf(terms) : undefined;
   if (keys !== undefined) {
     try {
-      if (!(await separatorsHold(db, keys))) {
+      if (!(await anyRebuildOwed(db)) && !(await separatorsHold(db, keys))) {
         return;
       }
     } catch (error) {

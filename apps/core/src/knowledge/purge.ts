@@ -34,10 +34,12 @@ import { entryNow } from "./apps-collection.ts";
 import type { CollectionRow } from "./collections.ts";
 import { checkedText, personWriter, writeVersion } from "./documents.ts";
 import type { DocumentRow } from "./documents.ts";
+import { parseBaseFields } from "./frontmatter.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
   eraseFromSearchIndex,
   errorNameOf,
+  rebuildOwed,
   rebuildSearchIndex,
   secureDeleteReady,
 } from "./search-erasure.ts";
@@ -555,6 +557,34 @@ const besideLongerToken = (text: string, matcher: Matcher): boolean => {
   return false;
 };
 
+/**
+ * Whether a term in what the search index holds of a version's `text` is
+ * part of a longer token (`besideLongerToken`): its text, and its
+ * frontmatter's title, description and a skill's name as YAML decodes
+ * them ("Visser\u3055\u3093" is "Visserさん"). When the frontmatter doesn't
+ * read, a term anywhere in the text can't be told about, so it counts.
+ */
+const besideInIndexed = (
+  path: string,
+  text: string,
+  matcher: Matcher
+): boolean => {
+  let decoded: unknown[];
+  try {
+    const { frontmatter } = parseBaseFields(path, text);
+    decoded = [
+      frontmatter.title,
+      frontmatter.description,
+      "name" in frontmatter ? frontmatter.name : undefined,
+    ];
+  } catch {
+    return matcher.anywhere.test(text);
+  }
+  return [text, ...decoded].some(
+    (value) => typeof value === "string" && besideLongerToken(value, matcher)
+  );
+};
+
 /** A version's text and message, rewritten if they change. */
 const rewritten = (
   row: { text: string; message: string | null },
@@ -787,7 +817,9 @@ const rewriteVersions = async (
       .orderBy(asc(versions.number))
       .limit(versionsPerPage);
     const rows = page.map((row) => ({ row, changed: rewritten(row, matcher) }));
-    beside ||= rows.some(({ row }) => besideLongerToken(row.text, matcher));
+    beside ||= rows.some(({ row }) =>
+      besideInIndexed(document.path, row.text, matcher)
+    );
     joined += joinedIn(
       rows.flatMap(({ row, changed }) => {
         const { text, message } = changed ?? row;
@@ -837,7 +869,7 @@ const countDocument = async (
   db: DrizzleD1Database,
   named: Named,
   matcher: Matcher
-): Promise<{ counts: Counts; joined: number }> => {
+): Promise<{ counts: Counts; joined: number; beside: boolean }> => {
   const { document } = named;
   const saved = await requireSavable(env, db, named, matcher);
   const inVersions = await rewriteVersions(
@@ -858,6 +890,7 @@ const countDocument = async (
       versions: inVersions.changed,
     },
     joined: inVersions.joined + inSaved,
+    beside: inVersions.beside,
   };
 };
 
@@ -907,17 +940,12 @@ const purgeDocument = async (
   person: Identity,
   named: Named,
   matcher: Matcher
-): Promise<{ counts: Counts; beside: boolean }> => {
+): Promise<Counts> => {
   const { document, collection } = named;
   const at = document.currentVersion;
   const earlier = await rewriteVersions(db, document, at - 1, matcher, true);
   const current = await versionOf(db, document, at);
   const changed = current && rewritten(current, matcher);
-  // A term the search index holds as part of a longer token, in this
-  // version or one before (indexed once, deleted by a save since).
-  const beside =
-    earlier.beside ||
-    (current !== undefined && besideLongerToken(current.text, matcher));
   const changedVersions = earlier.changed + (changed === undefined ? 0 : 1);
   const counts: Counts = {
     documents: changedVersions > 0 ? 1 : 0,
@@ -928,7 +956,7 @@ const purgeDocument = async (
     // an image in a PDF, which extraction never read): its originals go
     // all the same.
     await db.batch(forgetUploads(db, uploadsNamed(document)));
-    return { counts, beside };
+    return counts;
   }
   const text = changed?.text ?? current.text;
   await writeVersion(env, personWriter(person), {
@@ -959,7 +987,7 @@ const purgeDocument = async (
       ...forgetUploads(db, uploadsNamed(document)),
     ],
   });
-  return { counts, beside };
+  return counts;
 };
 
 /**
@@ -972,16 +1000,18 @@ const contentCounts = async (
   db: DrizzleD1Database,
   named: Named[],
   matcher: Matcher
-): Promise<{ counts: Counts; joined: number }> => {
+): Promise<{ counts: Counts; joined: number; tokensKnown: boolean }> => {
   const counts: Counts[] = [];
   let joined = 0;
+  let tokensKnown = true;
   for (const one of named) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
     const document = await countDocument(env, db, one, matcher);
     counts.push(document.counts);
     joined += document.joined;
+    tokensKnown &&= !document.beside;
   }
-  return { counts: sum(counts), joined };
+  return { counts: sum(counts), joined, tokensKnown };
 };
 
 /**
@@ -1000,7 +1030,10 @@ const purgeContent = async (
   const db = drizzle(env.KNOWLEDGE);
   const named = await documentsNamed(db, input);
   const matcher = matcherOf(input.terms, { countJoined: false });
-  await contentCounts(env, db, named, matcher);
+  // Read before anything changes: whether a term is part of a longer
+  // token anywhere, so the index needs rebuilding, is recorded with the
+  // purge, and a run again after its text is rewritten still knows.
+  const { tokensKnown } = await contentCounts(env, db, named, matcher);
   // Before anything is deleted: so the purge's deletes are secure ones,
   // which leave nothing in the index's pages (search-erasure.ts).
   const secure = await secureDeleteReady(db);
@@ -1019,14 +1052,12 @@ const purgeContent = async (
         purgeId
       )
     ),
+    ...(tokensKnown ? [] : [rebuildOwed(db)]),
   ]);
   const done: Counts[] = [];
-  let tokensKnown = true;
   for (const one of named) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
-    const purged = await purgeDocument(env, db, person, one, matcher);
-    done.push(purged.counts);
-    tokensKnown &&= !purged.beside;
+    done.push(await purgeDocument(env, db, person, one, matcher));
   }
   await cleanUpOriginals(env);
   await cleanSearchIndex(async () => {
