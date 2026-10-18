@@ -42,6 +42,11 @@
  *   notices list each direct dependency with the licence its lock or
  *   installed package declares when it reads as an SPDX expression,
  *   "unknown" otherwise.
+ * - It checks outside Grasp but fails on it, or the other way round: each
+ *   kind of code gets a tsconfig of the compiler's own options for it
+ *   (`planTypeCheck`), the project pins the compiler's TypeScript, and its
+ *   check is the compiler's (standalone-check.ts), which refuses what the
+ *   platform's build refuses before its check.
  */
 import {
   existsSync,
@@ -68,6 +73,17 @@ import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { LockedPackage } from "@grasp-os/shared/packages";
 import { z } from "zod";
+
+import { screenReferences } from "../packages/compiler/src/kit.ts";
+import { tsconfigOptions } from "../packages/compiler/src/tsconfig.ts";
+import {
+  appCodeTarget,
+  compilerOptions,
+  computeTarget,
+  generatedTarget,
+  workflowTarget,
+} from "../packages/compiler/src/type-check.ts";
+import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
 
 /** The workspace packages a project vendors, each with what it depends on. */
 const vendored = ["shared", "sdk", "ui"] as const;
@@ -181,13 +197,27 @@ const newPlan = (): Plan => {
 const jsonText = (value: unknown): string =>
   `${JSON.stringify(value, null, 2)}\n`;
 
-/** The exact versions `pnpm-workspace.yaml`'s `catalog:` pins, by name. */
-export const readCatalog = (text: string): Map<string, string> => {
+/**
+ * The exact versions `pnpm-workspace.yaml`'s catalog pins, by name: its
+ * default `catalog:`, or with `named`, that catalog under `catalogs:`.
+ */
+export const readCatalog = (
+  text: string,
+  named?: string
+): Map<string, string> => {
   const catalog = new Map<string, string>();
+  // The default catalog's entries are indented once; a named catalog's
+  // once more, under its name.
   let inCatalog = false;
+  let inCatalogs = false;
   for (const line of text.split("\n")) {
     if (/^\S/u.test(line)) {
-      inCatalog = line.trim() === "catalog:";
+      inCatalog = named === undefined && line.trim() === "catalog:";
+      inCatalogs = named !== undefined && line.trim() === "catalogs:";
+      continue;
+    }
+    if (inCatalogs && /^ {2}\S/u.test(line)) {
+      inCatalog = line.trim() === `${named}:`;
       continue;
     }
     const entry =
@@ -213,6 +243,29 @@ const pinned = (catalog: ReadonlyMap<string, string>, name: string): string => {
     return refuse(`${name}: the catalog pins no exact version of it.`);
   }
   return version;
+};
+
+/**
+ * The TypeScript the platform type-checks App code with: the compiler's
+ * own, as its package names it from the catalog (`catalog:typescript6`),
+ * exactly. TypeScript 7, the repo's toolchain, has no JavaScript API.
+ */
+const platformTypescript = (repo: string, catalogText: string): string => {
+  const spec = z
+    .object({ dependencies: z.object({ typescript: z.string() }) })
+    .parse(
+      JSON.parse(
+        readFileSync(path.join(repo, "packages/compiler/package.json"), "utf-8")
+      )
+    ).dependencies.typescript;
+  const named = /^catalog:(?<name>.*)$/u.exec(spec)?.groups?.name;
+  if (named === undefined) {
+    return refuse("The compiler names TypeScript by no catalog.");
+  }
+  return pinned(
+    readCatalog(catalogText, named === "" ? undefined : named),
+    "typescript"
+  );
 };
 
 const packageJsonSchema = z.looseObject({
@@ -533,31 +586,115 @@ const planVendored = (
   }
 };
 
-/** The project's TypeScript configuration: the references by their names. */
-const tsconfig = {
-  compilerOptions: {
-    target: "es2024",
-    lib: ["es2024", "esnext.disposable", "dom", "dom.iterable"],
-    module: "preserve",
-    moduleResolution: "bundler",
-    moduleDetection: "force",
-    jsx: "react-jsx",
-    resolveJsonModule: true,
-    allowImportingTsExtensions: true,
-    verbatimModuleSyntax: true,
-    isolatedModules: true,
-    noEmit: true,
-    strict: true,
-    noUncheckedIndexedAccess: true,
-    skipLibCheck: true,
-    types: [],
-    paths: {
-      "#grasp": ["./app/.grasp/references.ts"],
-      "#grasp/server": ["./app/.grasp/server.ts"],
-      "#grasp/server-references": ["./app/.grasp/server-references.ts"],
-    },
+/**
+ * Where the compiler's check of a standalone project is: the check itself
+ * and what it reads of the platform's own steering refusals, each written
+ * as the compiler has it (standalone-check.ts).
+ */
+const compilerSource = "packages/compiler/src";
+const checkFiles = {
+  "grasp/check.ts": "standalone-check.ts",
+  "grasp/steering.ts": "steering.ts",
+} as const;
+
+/** Server code as spec 8 lays it out, as the platform's check reads it. */
+const serverCodeIncludes = [
+  "app.ts",
+  "schema.ts",
+  "values.ts",
+  "operations/**/*.ts",
+  "migrations/*.ts",
+  ".grasp/*.ts",
+];
+
+/**
+ * A tsconfig for one kind of code: the compiler's options for it
+ * (type-check.ts, as a tsconfig writes them), the files it checks, and
+ * under `grasp` what the project's check holds them to besides: their
+ * kind, and the modules they may resolve by name (`TypeTarget.allowed`).
+ */
+const kindConfig = (
+  kind: string,
+  target: TypeTarget,
+  files: { include: string[]; exclude?: string[] }
+) => ({
+  compilerOptions: tsconfigOptions(target.options),
+  ...files,
+  grasp: {
+    kind,
+    ...(target.allowed === undefined
+      ? {}
+      : { allowed: [...target.allowed].toSorted() }),
   },
-  include: ["app", "workflows"],
+});
+
+/**
+ * The project's tsconfigs, one a kind of code, each as the platform checks
+ * it, and the root tsconfig.json that lists them (an editor's, and the
+ * check's): the App's screens with the DOM and JSX; its server code and
+ * workflows with a worker's lib and no DOM; and each workflow version's
+ * compute modules likewise, and the module the host generated from it.
+ */
+const planTypeCheck = (project: Plan): void => {
+  const configs: Record<string, ReturnType<typeof kindConfig>> = {
+    "app/tsconfig.screens.json": kindConfig(
+      "screens",
+      // Screens resolve whatever the kit holds: the kit's list is the
+      // compiler's build output, not a module this can read.
+      { options: compilerOptions, mapped: new Set() },
+      {
+        include: [
+          "screens/*.tsx",
+          "components/**/*.ts",
+          "components/**/*.tsx",
+          "*.d.ts",
+          screenReferences.path,
+        ],
+      }
+    ),
+    "app/tsconfig.server.json": kindConfig("server", appCodeTarget, {
+      include: [...serverCodeIncludes, "tests/**/*.ts"],
+      exclude: ["**/*.d.ts"],
+    }),
+    "app/tsconfig.workflows.json": kindConfig("workflows", workflowTarget, {
+      include: ["workflows/**/*.ts", ...serverCodeIncludes],
+      exclude: ["**/*.d.ts"],
+    }),
+  };
+  const versions = new Set(
+    [...project.files.keys()].flatMap((file) => {
+      const version = /^(?<base>workflows\/[^/]+\/[^/]+)\//u.exec(file)?.groups
+        ?.base;
+      return version === undefined ? [] : [version];
+    })
+  );
+  for (const base of versions) {
+    if (
+      [...project.files.keys()].some((file) => file.startsWith(`${base}/code/`))
+    ) {
+      configs[`${base}/tsconfig.json`] = kindConfig("compute", computeTarget, {
+        include: ["code/**/*.ts"],
+        exclude: ["**/*.d.ts"],
+      });
+    }
+    if (project.files.has(`${base}/.grasp/workflow.ts`)) {
+      configs[`${base}/tsconfig.generated.json`] = kindConfig(
+        "generated",
+        generatedTarget,
+        { include: [".grasp/workflow.ts"] }
+      );
+    }
+  }
+  for (const [file, config] of Object.entries(configs)) {
+    project.add(file, jsonText(config));
+  }
+  project.add(
+    "tsconfig.json",
+    jsonText({
+      files: [],
+      references: Object.keys(configs).map((file) => ({ path: `./${file}` })),
+    })
+  );
 };
 
 /** A licence as an SPDX expression may be written: anything else is unknown. */
@@ -610,9 +747,11 @@ export const planProject = async (
 
   const notices: Notice[] = [];
   const pins = appDependencies(definition.app.files, notices);
-  const catalog = readCatalog(
-    readFileSync(path.join(input.repo, "pnpm-workspace.yaml"), "utf-8")
+  const catalogText = readFileSync(
+    path.join(input.repo, "pnpm-workspace.yaml"),
+    "utf-8"
   );
+  const catalog = readCatalog(catalogText);
   const vendoring: Vendoring = {
     repo: input.repo,
     catalog,
@@ -622,10 +761,12 @@ export const planProject = async (
   for (const name of vendored) {
     planVendored(project, name, vendoring);
   }
+  const typescriptVersion = platformTypescript(input.repo, catalogText);
   for (const name of [...projectDependencies, ...projectDevDependencies]) {
     notices.push({
       name,
-      version: pinned(catalog, name),
+      version:
+        name === "typescript" ? typescriptVersion : pinned(catalog, name),
       licence: installedLicence(input.repo, "sdk", name),
       from: "the project",
     });
@@ -639,7 +780,10 @@ export const planProject = async (
       version: `${definition.app.version}.0.0`,
       private: true,
       type: "module",
-      scripts: { typecheck: "tsc --noEmit -p .", build: "tsc --noEmit -p ." },
+      scripts: {
+        typecheck: "node grasp/check.ts",
+        build: "node grasp/check.ts",
+      },
       dependencies: {
         ...Object.fromEntries(
           vendored.map((name) => [
@@ -650,13 +794,22 @@ export const planProject = async (
         ...pins.direct,
         ...pinnedAll(projectDependencies),
       },
-      devDependencies: pinnedAll(projectDevDependencies),
+      devDependencies: {
+        ...pinnedAll(projectDevDependencies),
+        typescript: typescriptVersion,
+      },
       ...(Object.keys(pins.overrides).length === 0
         ? {}
         : { overrides: pins.overrides }),
     })
   );
-  project.add("tsconfig.json", jsonText(tsconfig));
+  planTypeCheck(project);
+  for (const [file, source] of Object.entries(checkFiles)) {
+    project.add(
+      file,
+      readFileSync(path.join(input.repo, compilerSource, source), "utf-8")
+    );
+  }
   project.add(
     "grasp-project.json",
     jsonText({

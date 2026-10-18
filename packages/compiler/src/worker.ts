@@ -26,12 +26,10 @@ import {
   appCodeFiles,
   appCodeImport,
   appCodeKind,
-  generatedModules,
   appTestFiles,
   isAppLayout,
   isAppTestSuite,
   maxAppTestSuites,
-  serverSdkImports,
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
@@ -49,11 +47,9 @@ import {
   rewriteAppCodeImports,
   rewriteCodeImports,
   computeCodeWith,
-  computeSdkImports,
   generatedWorkflowCode,
   rewriteImports,
   screenTypeImportError,
-  sdkImports,
   serverCode,
   workflowCode,
 } from "./imports.ts";
@@ -85,7 +81,13 @@ import {
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
-import { screenTarget, serverTarget, typeCheck } from "./type-check.ts";
+import {
+  appCodeTarget,
+  computeTarget,
+  screenTarget,
+  typeCheck,
+  workflowTarget,
+} from "./type-check.ts";
 
 /**
  * What a page loads to run one screen, by flat name: of the App's modules,
@@ -359,45 +361,6 @@ const buildCss = async (
 const screensTarget = screenTarget(
   new Set([...kit.imports, "lucide-react", "react/jsx-runtime"])
 );
-
-/**
- * How an App's server code is type-checked (type-check.ts): the
- * generated modules by their aliases, and by name the SDK's modules it
- * and they import: its root, the server constructors, the database's
- * types the constructors name, and nothing else.
- */
-const appCodeTarget = serverTarget(
-  generatedModules,
-  new Set([
-    ...serverSdkImports,
-    "@grasp-os/sdk/database",
-    // Its tests' (app-code.ts): what the source checks give tests alone.
-    "@grasp-os/sdk/testing",
-  ])
-);
-
-/**
- * How an App's workflows are type-checked (type-check.ts): no DOM, which
- * their isolate doesn't have, no JSX, each file a module of its own; by
- * name only the SDK's workflow modules they may import, and those the
- * App's server code their types may name imports (`appCodeTarget`'s),
- * with its generated modules by their aliases. A workflow's values reach
- * none of the server's: its build holds them to `sdkImports`.
- */
-const workflowTarget = serverTarget(
-  generatedModules,
-  new Set([...sdkImports, ...serverSdkImports, "@grasp-os/sdk/database"])
-);
-
-/**
- * How a JSON workflow's compute modules are type-checked (type-check.ts):
- * a worker's lib and no DOM, which their isolate doesn't have, no JSX,
- * each file a module of its own; and by name only the SDK's modules they
- * may import (`computeSdkImports`), with their own files. An approved
- * package entry resolves to no file, so to the ambient module the host
- * declares for it (`buildComputeModules`), never to anything of the kit.
- */
-const computeTarget = serverTarget({}, new Set(computeSdkImports));
 
 /**
  * Type-checks the App's screens against the kit's types and lints them

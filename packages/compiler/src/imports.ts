@@ -13,6 +13,7 @@ import {
   sdkRoot,
 } from "./kit.ts";
 import type { Kit } from "./kit.ts";
+import { directiveIn } from "./steering.ts";
 
 /** An import in a source file, as written. */
 export interface ImportSite {
@@ -290,52 +291,6 @@ export interface DirectiveSite {
 }
 
 /**
- * A triple-slash directive TypeScript obeys: `/// <reference …/>`,
- * `/// <amd-module …/>` or `/// <amd-dependency …/>`. Any other tag in a
- * `///` comment (`/// <summary>`) is a comment to it.
- */
-const tripleSlash = /^\/\s*<(?:reference|amd-module|amd-dependency)\b/iu;
-
-/**
- * A comment that switches the type check off for the whole file: a
- * `@ts-nocheck` pragma, which TypeScript reads in any case
- * (`@ts-NoCheck`). Refused wherever a comment holds it, stricter than
- * TypeScript, which reads it only where a pragma goes.
- */
-const fileSuppression = /@ts-nocheck\b/iu;
-
-/**
- * A comment line that switches the type check off for the next line: one
- * that starts, after any `/` or `*` and space, with `@ts-ignore` or
- * `@ts-expect-error`, where TypeScript reads them (in a line comment, or
- * on any line of a block comment). A comment that only mentions one
- * (`// Do not use @ts-ignore here.`) is prose to it, and to the build.
- */
-// No word boundary after it, as TypeScript has none: it reads
-// `// @ts-ignoreX` as `@ts-ignore`.
-const lineSuppression = /^[\s/*]*@ts-(?:ignore|expect-error)/iu;
-
-/**
- * Where TypeScript ends a line: `\r\n`, `\r`, `\n`, U+2028 and U+2029.
- * A block comment's suppression is read from its lines as TypeScript
- * splits them (`/* x\r @ts-ignore *\/` suppresses), never only on `\n`.
- */
-const lineTerminator = /\r\n?|\n|\u2028|\u2029/u;
-
-/** The suppression `comment` holds where TypeScript would obey it, if any. */
-const suppressionIn = (comment: string): string | undefined =>
-  fileSuppression.exec(comment)?.[0] ??
-  comment
-    .split(lineTerminator)
-    .map((line) =>
-      lineSuppression
-        .exec(line)?.[0]
-        .trim()
-        .replace(/^[\s/*]*/u, "")
-    )
-    .find((found) => found !== undefined);
-
-/**
  * A Babel plugin that lists into `directives` every comment of a file
  * TypeScript would obey as a directive to its type check rather than
  * read as a comment: a triple-slash directive (`/// <reference lib>`,
@@ -349,14 +304,12 @@ export const collectDirectives = (directives: DirectiveSite[]) => () => ({
       state: { file: { ast: { comments?: Comment[] | null } } }
     ) => {
       for (const { type, value, loc } of state.file.ast.comments ?? []) {
-        const line = loc?.start.line;
-        if (type === "CommentLine" && tripleSlash.test(value)) {
-          directives.push({ directive: `//${value}`.trim(), line });
-        } else {
-          const directive = suppressionIn(value);
-          if (directive !== undefined) {
-            directives.push({ directive, line });
-          }
+        const directive = directiveIn(
+          type === "CommentLine" ? "line" : "block",
+          value
+        );
+        if (directive !== undefined) {
+          directives.push({ directive, line: loc?.start.line });
         }
       }
     },
