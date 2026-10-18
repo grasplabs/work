@@ -1093,13 +1093,22 @@ describe("stored versions", () => {
       .bind(definitionOf({ name: child.name, status: "tampered" }), child.id)
       .run();
     // A manifest that lost what its actions may do is malformed too: no
-    // version is listed as doing nothing for want of the record.
+    // version is listed as doing nothing for want of the record. And one
+    // whose list was changed, however well formed, no longer hashes to
+    // what was sealed: review never shows less than the build allows.
     const bare = await workflowOf(ada, "bare");
     await publish(ada, bare.id, definitionOf({ name: bare.name }));
     await env.DB.prepare(
       "UPDATE workflow_resource_versions SET manifest = json_remove(manifest, '$.actions') WHERE workflow_resource_id = ?"
     )
       .bind(bare.id)
+      .run();
+    const altered = await workflowOf(ada, "altered");
+    await publish(ada, altered.id, definitionOf({ name: altered.name }));
+    await env.DB.prepare(
+      `UPDATE workflow_resource_versions SET manifest = json_set(manifest, '$.actions', json('[{"binding":"notify","module":"code/notify.ts","export":"notify","uses":[]}]')) WHERE workflow_resource_id = ?`
+    )
+      .bind(altered.id)
       .run();
     const parent = await workflowOf(ada, "parent");
     expect({
@@ -1108,10 +1117,12 @@ describe("stored versions", () => {
         publish(ada, parent.id, bindingDefinition(parent.name, child.name))
       ),
       actions: await outcome(workflowVersions(env, ada, bare.id)),
+      alteredActions: await outcome(workflowVersions(env, ada, altered.id)),
     }).toStrictEqual({
       definition: "workflow.version_corrupt",
       binding: "workflow.version_corrupt",
       actions: "workflow.version_corrupt",
+      alteredActions: "workflow.version_corrupt",
     });
   });
 

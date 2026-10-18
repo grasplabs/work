@@ -1041,26 +1041,35 @@ const sealedActionsOf = (
   return parsed.data.actions;
 };
 
-/** A version's row, as the registry answers it. */
-const versionOf = (
+/**
+ * A version's row, as the registry answers it: only once its manifest
+ * still hashes to what was sealed, since what its actions may do and its
+ * build are read from it (`workflow.version_corrupt` otherwise).
+ */
+const versionOf = async (
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: WorkflowVersionBinding[]
-): WorkflowResourceVersion => ({
-  resourceId: row.workflowResourceId,
-  version: row.version,
-  definitionVersion: row.definitionVersion,
-  profile: row.profileVersion,
-  definitionHash: row.definitionJsonHash,
-  contractHash: row.contractHash,
-  manifestHash: row.manifestHash,
-  bindings,
-  actions: sealedActionsOf(row),
-  build: buildSummary(
-    sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
-  ),
-  author: row.authorId,
-  createdAt: row.createdAt.toISOString(),
-});
+): Promise<WorkflowResourceVersion> => {
+  if ((await sha256Hex(row.manifest)) !== row.manifestHash) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return {
+    resourceId: row.workflowResourceId,
+    version: row.version,
+    definitionVersion: row.definitionVersion,
+    profile: row.profileVersion,
+    definitionHash: row.definitionJsonHash,
+    contractHash: row.contractHash,
+    manifestHash: row.manifestHash,
+    bindings,
+    actions: sealedActionsOf(row),
+    build: buildSummary(
+      sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
+    ),
+    author: row.authorId,
+    createdAt: row.createdAt.toISOString(),
+  };
+};
 
 /** The bindings of the versions of `id`, by version. */
 export const bindingsOf = async (
@@ -1223,7 +1232,7 @@ const publishedAs = async (
   }
   const bindings = await bindingsOf(env, id);
   return {
-    version: versionOf(row, bindings.get(row.version) ?? []),
+    version: await versionOf(row, bindings.get(row.version) ?? []),
     modulesHash: sealedModulesHash(row),
   };
 };
@@ -1714,12 +1723,15 @@ export const workflowVersions = async (
     .orderBy(desc(workflowResourceVersions.version));
   const bindings = await bindingsOf(env, workflow.id);
   const visible = await visibleTo(env, by, [...bindings.values()].flat());
-  return rows.map((row) =>
-    versionOf(
-      row,
-      (bindings.get(row.version) ?? []).map(
-        (binding) => visible.get(binding) ?? binding
-      )
+  return await Promise.all(
+    rows.map(
+      async (row) =>
+        await versionOf(
+          row,
+          (bindings.get(row.version) ?? []).map(
+            (binding) => visible.get(binding) ?? binding
+          )
+        )
     )
   );
 };
