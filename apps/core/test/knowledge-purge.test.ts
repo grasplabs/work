@@ -1096,6 +1096,8 @@ describe("a purge of content", setUpTime, () => {
   });
 
   it("rebuilds for an ID's trigram that heads a page and only the purged document held", async () => {
+    // First: a rebuild re-pages the index.
+    await payOwedRebuilds();
     const admin = await personOf("admin");
     const handbook = await admin.api.knowledge.createCollection({
       name: "Handbook",
@@ -1151,7 +1153,6 @@ describe("a purge of content", setUpTime, () => {
         }
       }
     }
-    await payOwedRebuilds();
     const watching = await watchingPurge(admin);
     const input: PurgeInput = {
       type: "content",
@@ -1245,6 +1246,8 @@ describe("a purge of content", setUpTime, () => {
   });
 
   it("doesn't rebuild for an ID whose trigram heads a page that other text still holds", async () => {
+    // First: a rebuild re-pages the index.
+    await payOwedRebuilds();
     const admin = await personOf("admin");
     const handbook = await admin.api.knowledge.createCollection({
       name: "Handbook",
@@ -1289,7 +1292,6 @@ describe("a purge of content", setUpTime, () => {
       `# Ticket\nCase ${id}.`
     );
     await saveOver(admin, handbook.id, "kept.md", `# Kept\nCase ${id}.`);
-    await payOwedRebuilds();
     const watching = await watchingPurge(admin);
     const input: PurgeInput = {
       type: "content",
