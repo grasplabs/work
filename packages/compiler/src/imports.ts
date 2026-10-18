@@ -7,6 +7,7 @@ import {
   appModuleName,
   kitModuleName,
   ownEntry,
+  packageModuleName,
   screenReferences,
   screenRootNames,
   sdkRoot,
@@ -731,9 +732,9 @@ export const generatedWorkflowCode: CodeKind = {
  * calculations' (`@grasp-os/sdk/compute`) and actions'
  * (`@grasp-os/sdk/action`), and nothing else of the platform: no Workers
  * runtime, no workflow engine, no server or database constructors, and
- * no packages (approved packages are GRA-665). A calculation gets only the
- * value it is called with; an action, its arguments and the bindings it
- * declares.
+ * no packages but the approved ones a version seals (`computeCodeWith`).
+ * A calculation gets only the value it is called with; an action, its
+ * arguments and the bindings it declares.
  */
 export const computeSdkImports = [
   "@grasp-os/sdk/compute",
@@ -751,6 +752,25 @@ export const computeCode: CodeKind = {
     computeSdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
   ),
 };
+
+/**
+ * Compute modules that may also import `packages`, the entries of the
+ * approved graph their version seals (GRA-665), each by its own name and
+ * loaded under its own flat name (`packageModuleName`). Nothing else.
+ */
+export const computeCodeWith = (packages: readonly string[]): CodeKind =>
+  packages.length === 0
+    ? computeCode
+    : {
+        ...computeCode,
+        imports: new Map([
+          ...computeCode.imports,
+          ...packages.map((entry): [string, string] => [
+            entry,
+            packageModuleName(entry),
+          ]),
+        ]),
+      };
 
 const javascriptExtension = /\.js$/u;
 

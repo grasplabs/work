@@ -46,7 +46,7 @@ import {
   codeImportError,
   rewriteAppCodeImports,
   rewriteCodeImports,
-  computeCode,
+  computeCodeWith,
   generatedWorkflowCode,
   rewriteImports,
   screenTypeImportError,
@@ -73,6 +73,7 @@ import {
 } from "./inputs.ts";
 import {
   appModuleName,
+  computePackagesFile,
   kitModuleName,
   kitStylesheet,
   ownEntry,
@@ -649,25 +650,74 @@ export type ComputeModulesBuild =
   | { ok: false; diagnostics: Diagnostic[] };
 
 /**
+ * The approved package entries core named among a compute build's files
+ * (`computePackagesFile`), or why that list can't be read. Core writes
+ * it; a workflow publishes only `code/`.
+ */
+const computePackagesOf = (
+  listed: string | undefined
+): { ok: true; packages: string[] } | { ok: false; message: string } => {
+  if (listed === undefined) {
+    return { ok: true, packages: [] };
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(listed);
+  } catch {
+    return { ok: false, message: "The approved packages aren't a list." };
+  }
+  const packages = Array.isArray(value)
+    ? value.filter(
+        (entry): entry is string =>
+          typeof entry === "string" && entry.length > 0 && entry.length <= 214
+      )
+    : [];
+  return Array.isArray(value) && packages.length === value.length
+    ? { ok: true, packages }
+    : { ok: false, message: "The approved packages aren't a list of names." };
+};
+
+/**
  * Builds a JSON workflow's compute modules (`code/<file>.ts`): compiled as
- * App workflow code is, importing only each other and
- * `@grasp-os/sdk/compute` (`computeCode`), and type-checked against that
- * SDK's declarations, as generated workflow code is (spec 19.1). Their
+ * App workflow code is, importing only each other,
+ * `@grasp-os/sdk/compute` and the approved package entries their version
+ * seals, if any (`computeCodeWith`, named by core in
+ * `computePackagesFile`), and type-checked against that SDK's
+ * declarations, as generated workflow code is (spec 19.1), each package
+ * entry as a module of no declared types (a package carries none). Their
  * errors are their author's.
  */
 export const buildComputeModules = (
-  files: Record<string, string>
+  input: Record<string, string>
 ): ComputeModulesBuild => {
+  const { [computePackagesFile]: listed, ...files } = input;
+  const named = computePackagesOf(listed);
+  if (!named.ok) {
+    return {
+      ok: false,
+      diagnostics: [
+        { rule: "limits", severity: "error", message: named.message },
+      ],
+    };
+  }
   const wrong = computeModuleErrors(files);
   if (wrong.length > 0) {
     return { ok: false, diagnostics: wrong };
   }
-  const built = compileCode(computeCode, files);
+  const built = compileCode(computeCodeWith(named.packages), files);
   if (!built.ok) {
     return built;
   }
-  const diagnostics = typeCheck(files, kit.types).filter((diagnostic) =>
-    isError(diagnostic)
+  const declared: Record<string, string> =
+    named.packages.length === 0
+      ? {}
+      : {
+          ".grasp/packages.d.ts": named.packages
+            .map((entry) => `declare module ${JSON.stringify(entry)};`)
+            .join("\n"),
+        };
+  const diagnostics = typeCheck({ ...files, ...declared }, kit.types).filter(
+    (diagnostic) => isError(diagnostic)
   );
   return diagnostics.length > 0 ? { ok: false, diagnostics } : built;
 };

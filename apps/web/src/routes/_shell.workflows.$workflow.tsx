@@ -20,7 +20,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
 
 import { formatDateTime, formatList } from "../format.ts";
@@ -130,6 +130,17 @@ const WorkflowResourceView = ({
                 <Trans>Version {currentVersion}</Trans>
               )}
             </Badge>
+            {/* Its approved packages, for its builders: read there, and
+                retired or revoked by whoever may approve packages. */}
+            {resource.role === "builder" ? (
+              <Link
+                className="hover:underline focus-visible:underline"
+                params={{ workflow: resource.id }}
+                to="/settings/packages/workflows/$workflow"
+              >
+                <Trans>Packages</Trans>
+              </Link>
+            ) : null}
           </div>
         </div>
         <TabsList variant="line">

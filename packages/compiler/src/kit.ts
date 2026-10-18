@@ -139,6 +139,23 @@ export const kitModuleName = (specifier: string): string =>
 
 const typescriptExtension = /\.tsx?$/u;
 
+/**
+ * The flat name an approved package's entry is loaded under in a JSON
+ * workflow's compute isolate, e.g. `pkg~date-fns~format.js`: a namespace
+ * of its own, so no package module is ever an SDK, runner or workflow
+ * module (GRA-665).
+ */
+export const packageModuleName = (entry: string): string =>
+  `pkg~${entry.replaceAll("/", "~")}.js`;
+
+/**
+ * Where core names, among a compute build's files, the approved package
+ * entries its modules may import (a JSON list of their names): never a
+ * file a workflow publishes (only `code/` is), and part of what the build
+ * is cached by, as every file is.
+ */
+export const computePackagesFile = ".grasp/packages.json";
+
 /** The flat name of an App file's module, e.g. `app~screens~desk.js`. */
 export const appModuleName = (path: string): string =>
   `app~${path.replace(typescriptExtension, "").replaceAll("/", "~")}.js`;

@@ -67,6 +67,7 @@ import type { CallingRun } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
+import { requirePackagesAdmitted } from "./sealed-packages.ts";
 
 // The host a run of an independent workflow's sealed build runs against
 // (resource-runs.ts): the calls the generated code's SDK makes
@@ -2243,6 +2244,12 @@ export class ResourceRunHost
       this.#modelCalls += 1;
       this.#modelCallsMade.add(task.id);
     }
+    if (call.name === "grasp.compute" || call.name === "grasp.action") {
+      // Its modules' approved packages admitted again first, under the
+      // policy generation now: a graph revoked since fails the run here,
+      // never retried (decision 4, GRA-665).
+      await this.#packagesAdmitted();
+    }
     if (call.name === "grasp.compute") {
       // A calculation of the workflow's own sealed modules: no binding of
       // the catalog, no authority to decide again, nothing outside core's
@@ -2273,6 +2280,22 @@ export class ResourceRunHost
         this.#requireCurrent(attempt);
       },
     });
+  }
+
+  /**
+   * Admits the approved graph the run's version seals, if it seals one,
+   * for the call about to load its modules (workflows/sealed-packages.ts):
+   * `workflow.packages_revoked` once it is revoked.
+   */
+  async #packagesAdmitted(): Promise<void> {
+    const { packages } = this.#run.build;
+    if (packages !== undefined) {
+      await requirePackagesAdmitted(
+        this.#env,
+        this.#run.workflowId,
+        packages.graphHash
+      );
+    }
   }
 
   /**

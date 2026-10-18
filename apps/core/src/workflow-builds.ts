@@ -46,6 +46,7 @@ import { releaseReservations } from "./release-retention.ts";
 import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
 import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
+import { sealedPackagesSchema } from "./workflows/package-seal.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
 // its definition, validated at publication, lowered into SDK TypeScript
@@ -685,7 +686,18 @@ export interface LoadedBuild {
   readonly source: string;
   /** The workflow's own compute modules (workflow-modules.ts). */
   readonly compute: LoadedModules;
+  /**
+   * The approved graph its modules import, if any (GRA-665): every start
+   * and call admits it again (workflows/sealed-packages.ts). Its entries'
+   * modules are among `compute.modules`.
+   */
+  readonly packages: { readonly graphHash: string } | undefined;
 }
+
+/** Where a version's manifest seals the approved packages its modules import. */
+const manifestPackagesSchema = z.object({
+  packages: sealedPackagesSchema.optional(),
+});
 
 /** A version's compute modules, as sealed. */
 export interface LoadedModules {
@@ -868,7 +880,7 @@ const verifiedBuild = async (
   id: string,
   version: number,
   build: SealedBuild
-): Promise<LoadedBuild> => {
+): Promise<Omit<LoadedBuild, "packages">> => {
   if (!build.executable) {
     throw corrupt(id, version, "not executable");
   }
@@ -1003,13 +1015,32 @@ export const loadWorkflowBuild = async (
     return kept;
   }
   let build: SealedBuild;
+  let packages: z.infer<typeof manifestPackagesSchema>["packages"];
   try {
     build = buildOf(row.manifest);
+    ({ packages } = manifestPackagesSchema.parse(JSON.parse(row.manifest)));
   } catch {
     throw corrupt(id, version, "build");
   }
   return await sharedRun(verifying, hash, buildReadMs(env, build), async () => {
-    const loaded = await verifiedBuild(env, id, version, build);
+    const built = await verifiedBuild(env, id, version, build);
+    // Every entry it seals loads as a module of its build, under its
+    // identity: none named that the build doesn't hold.
+    if (
+      packages !== undefined &&
+      !Object.values(packages.entries).every((name) =>
+        Object.hasOwn(built.compute.modules, name)
+      )
+    ) {
+      throw corrupt(id, version, "packages");
+    }
+    const loaded: LoadedBuild = Object.freeze({
+      ...built,
+      packages:
+        packages === undefined
+          ? undefined
+          : Object.freeze({ graphHash: packages.graphHash }),
+    });
     // A load that ran on past being taken for abandoned keeps what is
     // there already: the same build, as the hash is the same.
     if (!verified.has(hash)) {

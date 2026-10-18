@@ -102,7 +102,16 @@ import {
   sealedUse,
   versionActionsOf,
 } from "./workflow-modules.ts";
-import type { CompiledModules, ModuleContracts } from "./workflow-modules.ts";
+import type {
+  CompiledModules,
+  ModuleContracts,
+  ModulePackages,
+} from "./workflow-modules.ts";
+import type {
+  PackageSealer,
+  SealedPackageManifest,
+  SealedPackages,
+} from "./workflows/package-seal.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
@@ -1354,6 +1363,8 @@ interface Publication {
   modulesHash: string | null;
   /** What its own actions may do, from the contracts its build seals. */
   actions: WorkflowVersionAction[];
+  /** The approved packages its modules import, if any (GRA-665). */
+  packages: SealedPackageManifest | undefined;
 }
 
 /**
@@ -1376,6 +1387,7 @@ const writeVersion = async (
     compiled,
     modulesHash,
     actions,
+    packages,
   } = publication;
   // Bounded when the definition was checked (`inspectDefinition`).
   const contractText = canonicalJson(contractOf(checked));
@@ -1408,6 +1420,10 @@ const writeVersion = async (
     // What the version runs, sealed with it: its build's artifacts by
     // hash, and its executable identity (workflow-builds.ts).
     build: compiled.build,
+    // The approved graph its modules import, which every start and call
+    // admits again (workflows/sealed-packages.ts); the entries' code is
+    // among the build's artifacts.
+    ...(packages === undefined ? {} : { packages }),
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
@@ -1565,27 +1581,69 @@ const requireStaffKeepsBindings = async (
   }
 };
 
+/**
+ * Refuses a publication that names packages it can't seal: one whose
+ * caller seals none (only a builder's own publication does, the RPC's),
+ * or with no modules to import them.
+ */
+const requireSealable = (
+  asked: { graphHash: string } | undefined,
+  sealer: PackageSealer | undefined,
+  sources: Readonly<Record<string, string>>
+): void => {
+  if (asked === undefined) {
+    return;
+  }
+  if (sealer === undefined) {
+    throw workflowResourceErrors.create("workflow.packages_invalid", {
+      reason: "This publication can't seal packages.",
+    });
+  }
+  if (Object.keys(sources).length === 0) {
+    throw workflowResourceErrors.create("workflow.packages_invalid", {
+      reason: "Packages are for the workflow's modules, and it has none.",
+    });
+  }
+};
+
+/** What modules of `sealed`'s may import, for their build (`compileModules`). */
+const packagesOf = (
+  sealed: SealedPackages | undefined
+): ModulePackages | undefined =>
+  sealed === undefined
+    ? undefined
+    : {
+        entries: Object.keys(sealed.manifest.entries),
+        modules: sealed.modules,
+      };
+
 /** `publishWorkflowVersion`, answering bindings as pinned. */
 const publish = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  sealer: PackageSealer | undefined
 ): Promise<WorkflowResourceVersion> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const {
     definition,
     basedOn,
     modules: sources = {},
+    packages: asked,
   } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     publishSchema,
     input
   );
-  // Its modules are part of what is published: the same definition with
-  // other modules is another publication.
+  requireSealable(asked, sealer, sources);
+  // Its modules are part of what is published, and so are the packages
+  // they import: the same definition with other modules or packages is
+  // another publication.
   const modulesHash =
-    Object.keys(sources).length === 0 ? null : await modulesHashOf(sources);
+    Object.keys(sources).length === 0
+      ? null
+      : await modulesHashOf(sources, asked?.graphHash);
   // A retry of a publication that was saved answers the saved version
   // before its bindings are resolved again: the builder may have lost
   // their role in a workflow it binds since, or that workflow been
@@ -1599,12 +1657,18 @@ const publish = async (
   if (saved !== undefined) {
     return saved;
   }
+  // The approved graph sealed first (admitted for this workflow as a new
+  // use, built, each entry's module read): its modules import them.
+  const sealed =
+    asked === undefined
+      ? undefined
+      : await sealer?.(env, by, workflow.id, asked.graphHash);
   // Built and inspected first: validation resolves `local:` bindings
   // against what they export.
   const modules =
     modulesHash === null
       ? undefined
-      : await compileModules(env, sources, workflow.id);
+      : await compileModules(env, sources, workflow.id, packagesOf(sealed));
   const { checked, bindings } = await checkDefinition(
     env,
     by,
@@ -1658,6 +1722,7 @@ const publish = async (
       compiled,
       modulesHash,
       actions: versionActionsOf(checked.bindings, modules),
+      packages: sealed?.manifest,
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
@@ -1741,9 +1806,15 @@ export const publishWorkflowVersion = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /**
+   * Seals the approved packages the input names (`sealPackages`): only a
+   * builder's own publication passes it; without it, a publication that
+   * names packages is refused.
+   */
+  sealer?: PackageSealer
 ): Promise<WorkflowResourceVersion> =>
-  await seenBy(env, by, await publish(env, by, id, input));
+  await seenBy(env, by, await publish(env, by, id, input, sealer));
 
 /** Every version of workflow `id`, newest first, for anyone with a role. */
 export const workflowVersions = async (

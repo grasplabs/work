@@ -10,6 +10,7 @@ import {
   screenRuntime,
   limitErrors,
   computeModuleErrors,
+  computePackagesFile,
   openWorkflowErrors,
   serverFiles,
   workflowFiles,
@@ -106,8 +107,13 @@ const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
   if (kind === "open-workflow") {
     return openWorkflowErrors;
   }
-  // A JSON workflow's compute modules: held to their own bounds.
-  return kind === "compute" ? computeModuleErrors : limitErrors;
+  // A JSON workflow's compute modules: held to their own bounds, the list
+  // of approved packages core names beside them apart (`computePackagesFile`).
+  if (kind === "compute") {
+    return ({ [computePackagesFile]: _packages, ...modules }) =>
+      computeModuleErrors(modules);
+  }
+  return limitErrors;
 };
 
 /** A build refused before it started, or one that failed. */
