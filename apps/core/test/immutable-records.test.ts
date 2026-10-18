@@ -334,6 +334,11 @@ describe("immutable records", () => {
       const replaceInto = await refusal(
         insertSql("REPLACE", spec.table, { rowid, ...spec.row(fresh) })
       );
+      // Nor rowid -1, which every insert that names none has to its
+      // triggers: a row there would match, and refuse, them all.
+      const reserved = await refusal(
+        insertSql("INSERT", spec.table, { rowid: -1, ...spec.row(fresh) })
+      );
       const after = await rowsOf(spec.table);
       // The old row still there, its key is still taken: nothing can be
       // written under it in its place.
@@ -343,11 +348,13 @@ describe("immutable records", () => {
       expect({
         replace: refusedBy(replace, spec.table, "rowid"),
         replaceInto: refusedBy(replaceInto, spec.table, "rowid"),
+        reserved: reserved.includes(`${spec.table} keep rowid -1`),
         unchanged: JSON.stringify(after) === JSON.stringify(before),
         again: again.includes(`UNIQUE constraint failed: ${spec.table}.`),
       }).toStrictEqual({
         replace: true,
         replaceInto: true,
+        reserved: true,
         unchanged: true,
         again: true,
       });
@@ -447,6 +454,9 @@ describe("immutable records", () => {
           db
         )
       ),
+      reserved: await refusal(
+        insertSql("INSERT", "sections", { rowid: -1, ...section(1) }, "", db)
+      ),
     };
     const after = await state();
     // A new section is still written, and indexed.
@@ -461,12 +471,14 @@ describe("immutable records", () => {
       replace: refusedBy(outcomes.replace, "sections", "document_id"),
       upsert: refusedBy(outcomes.upsert, "sections", "document_id"),
       rowid: refusedBy(outcomes.rowid, "sections", "rowid"),
+      reserved: outcomes.reserved.includes("sections keep rowid -1"),
       unchanged: after === before,
       indexed: indexed.map(({ position }) => position),
     }).toStrictEqual({
       replace: true,
       upsert: true,
       rowid: true,
+      reserved: true,
       unchanged: true,
       indexed: [0, 1],
     });
