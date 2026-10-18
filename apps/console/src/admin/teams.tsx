@@ -734,16 +734,9 @@ const TeamFigures = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
   } else if (each.asked < people) {
     peopleSub = `${people - each.asked} ${people - each.asked === 1 ? "is" : "are"} away`;
   }
-  // The day the first colleague's link really went out: the team's own day
-  // is its lead's, and the colleagues' links can wait longer than that.
-  const firstSent = each.people
-    .filter((one) => one !== each.lead)
-    .flatMap((one) => (one.sent === null ? [] : [one.sent]))
-    .toSorted((a, b) => a - b)
-    .at(0);
   let linksSub = each.off ? "Does not take part" : "No links out yet";
-  if (firstSent !== undefined) {
-    linksSub = `Links out since ${formatDate(dateOn(view.org, firstSent))}`;
+  if (each.sent !== null) {
+    linksSub = `Links out since ${formatDate(dateOn(view.org, each.sent))}`;
   }
   return (
     <div className="@container border-t">
