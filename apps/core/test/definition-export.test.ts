@@ -1,5 +1,7 @@
 import { generatedPath } from "@grasp-os/open-workflow/generate";
+import { readAppManifest } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalText } from "@grasp-os/shared/json";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -213,7 +215,16 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       workflowFiles: keys(entry.files),
     }).toStrictEqual({
       root: ["app", "formatVersion", "unresolved", "workflows"],
-      app: ["bindings", "files", "provenance", "store", "version", "workflows"],
+      app: [
+        "bindings",
+        "files",
+        "manifest",
+        "provenance",
+        "store",
+        "version",
+        "workflowContracts",
+        "workflows",
+      ],
       provenance: [
         "compilerVersion",
         "contractHash",
@@ -250,7 +261,15 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       ],
       workflowFiles: [generatedPath, "workflow.json"].toSorted(),
     });
-    expect(keys(exported.app.files)).toStrictEqual(keys(files()));
+    // The source, and the registration the seal read from it, which the
+    // SDK reads back as it was sealed.
+    expect({
+      files: keys(exported.app.files),
+      manifest: canonicalText(readAppManifest(exported.app.manifest)),
+    }).toStrictEqual({
+      files: keys(files()),
+      manifest: canonicalText(release.app),
+    });
 
     // Both aliases name the one version, packaged once; the unbound alias
     // is listed, so activation blocks on it.
@@ -259,6 +278,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       manifestHash: exported.app.provenance.manifestHash,
       bindings: exported.app.bindings,
       workflows: exported.app.workflows,
+      contracts: exported.app.workflowContracts,
       packaged: keys(exported.workflows),
       unresolved: exported.unresolved,
       nested: { workflows: entry.workflows, bindings: entry.bindings },
@@ -267,6 +287,12 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       manifestHash: release.manifestHash,
       bindings: { writer: "model" },
       workflows: { followUp: key, later: null, remind: key },
+      // What the references type of each packaged one, never of the
+      // unbound alias.
+      contracts: {
+        followUp: { events: {}, listens: {}, decisions: {} },
+        remind: { events: {}, listens: {}, decisions: {} },
+      },
       packaged: [key],
       unresolved: [{ at: "app", alias: "later", reason: "unbound" }],
       nested: { workflows: {}, bindings: {} },
@@ -391,12 +417,14 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const exported = await exportAppDefinition(env, owner, app);
     expect({
       workflows: exported.app.workflows,
+      contracts: exported.app.workflowContracts,
       packaged: exported.workflows,
       unresolved: exported.unresolved.toSorted((a, b) =>
         a.alias < b.alias ? -1 : 1
       ),
     }).toStrictEqual({
       workflows: { followUp: null, later: null, remind: null },
+      contracts: {},
       packaged: {},
       unresolved: [
         { at: "app", alias: "followUp", reason: "forbidden" },
