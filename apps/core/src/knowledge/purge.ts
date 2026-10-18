@@ -39,6 +39,7 @@ import { personalCollectionId } from "./memory-files.ts";
 import {
   eraseFromSearchIndex,
   errorNameOf,
+  owedWritesDone,
   rebuildOwed,
   rebuildSearchIndex,
   secureDeleteReady,
@@ -1052,12 +1053,16 @@ const purgeContent = async (
         purgeId
       )
     ),
-    ...(tokensKnown ? [] : [rebuildOwed(db)]),
+    ...(tokensKnown ? [] : [rebuildOwed(db, purgeId)]),
   ]);
   const done: Counts[] = [];
   for (const one of named) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
     done.push(await purgeDocument(env, db, person, one, matcher));
+  }
+  if (!tokensKnown) {
+    // A rebuild from now on covers this purge's writes.
+    await owedWritesDone(db, purgeId);
   }
   await cleanUpOriginals(env);
   await cleanSearchIndex(async () => {

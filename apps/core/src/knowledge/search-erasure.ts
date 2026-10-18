@@ -1,5 +1,5 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import { lte, sql } from "drizzle-orm";
+import { eq, lte, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { searchRebuilds } from "../db/knowledge/schema.ts";
@@ -36,10 +36,19 @@ import { searchRebuilds } from "../db/knowledge/schema.ts";
 // the setting or `%_idx`); each refusal falls back to the rebuild, logged.
 
 /**
+ * How long after a purge recorded a rebuild as owed its writes are surely
+ * over, whether or not it got to mark them done (a purge whose request
+ * died): a rebuild after that clears it too.
+ */
+export const owedRebuildStaleMs = 60 * 60_000;
+
+/**
  * Drops deleted rows' terms from the search index's pages for good, by
- * rebuilding it from its content, and clears the rebuilds purges recorded
- * as owed before it began (`searchRebuilds`), in the same transaction:
- * one that fails leaves them owed. Throws when it fails.
+ * rebuilding it from its content, and clears, in the same transaction, the
+ * rebuilds purges owe whose writes were done before it began
+ * (`searchRebuilds`): never one whose purge may still be writing, which a
+ * rebuild before its writes doesn't cover. One that fails leaves them
+ * owed. Throws when it fails.
  */
 export const rebuildSearchIndex = async (
   db: DrizzleD1Database
@@ -50,17 +59,38 @@ export const rebuildSearchIndex = async (
     db.run(
       sql`INSERT INTO search_trigrams (search_trigrams) VALUES ('rebuild')`
     ),
-    db.delete(searchRebuilds).where(lte(searchRebuilds.owedAt, startedAt)),
+    db
+      .delete(searchRebuilds)
+      .where(
+        or(
+          lte(searchRebuilds.writesDoneAt, startedAt),
+          lte(searchRebuilds.owedAt, startedAt - owedRebuildStaleMs)
+        )
+      ),
   ]);
 };
 
 /**
- * The statement that records a rebuild as owed, for a purge's batch that
- * records it before anything changes: a purge that then fails, or whose
- * rebuild does, leaves it owed, and the next one rebuilds.
+ * The statement that records rebuild `id` as owed, for a purge's batch
+ * that records it before anything changes: a purge that then fails, or
+ * whose rebuild does, leaves it owed, and the next one rebuilds.
  */
-export const rebuildOwed = (db: DrizzleD1Database) =>
-  db.insert(searchRebuilds).values({ owedAt: Date.now() });
+export const rebuildOwed = (db: DrizzleD1Database, id: string) =>
+  db.insert(searchRebuilds).values({ id, owedAt: Date.now() });
+
+/**
+ * Marks owed rebuild `id`'s purge's writes done: a rebuild from now on
+ * covers them, and clears it.
+ */
+export const owedWritesDone = async (
+  db: DrizzleD1Database,
+  id: string
+): Promise<void> => {
+  await db
+    .update(searchRebuilds)
+    .set({ writesDoneAt: Date.now() })
+    .where(eq(searchRebuilds.id, id));
+};
 
 /** Whether a purge recorded a rebuild that hasn't run since. */
 const anyRebuildOwed = async (db: DrizzleD1Database): Promise<boolean> => {
@@ -175,7 +205,7 @@ const keysOfToken = (token: string): IndexKey[] => {
  * characters: every token in the words index; one of three characters or
  * fewer, or with a digit, also in the words index's prefix indexes; one
  * of three, or each three characters of one with a digit, in the trigram
- * index. Undefined for a number shorter than three characters, which the
+ * index. Undefined for a token shorter than three characters, which the
  * trigrams spanning its neighbours hold whole, and unless every term is plain
  * ASCII, whose tokens are exactly its runs of letters and digits, folded
  * to lower case (as `unicode61` and `trigram` fold them); anything else
@@ -195,10 +225,10 @@ export const indexKeysOf = (
         .filter((token) => token !== "")
     )
   );
-  // A number shorter than a trigram is held whole by the trigrams that
-  // span it and its neighbours (" 12", "-12"), whose neighbours the
+  // A token shorter than a trigram is held whole by the trigrams that
+  // span it and its neighbours (" jo", "-12"), whose neighbours the
   // purge's terms don't say: rebuilt.
-  if ([...tokens].some((token) => digit.test(token) && token.length < 3)) {
+  if ([...tokens].some((token) => token.length < 3)) {
     return undefined;
   }
   return [...tokens].flatMap(keysOfToken);

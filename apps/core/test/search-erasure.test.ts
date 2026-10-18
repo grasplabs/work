@@ -1,7 +1,15 @@
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { holdsAny, indexKeysOf } from "../src/knowledge/search-erasure.ts";
+import {
+  holdsAny,
+  indexKeysOf,
+  owedRebuildStaleMs,
+  owedWritesDone,
+  rebuildOwed,
+  rebuildSearchIndex,
+} from "../src/knowledge/search-erasure.ts";
 
 // What a purge leaves of a term in the search index's page directory
 // (search-erasure.ts, threat model in GRA-693): the rule that decides
@@ -20,6 +28,14 @@ const holds = (
     keys,
     keys.map(({ key }) => ({ key, separator }))
   );
+};
+
+/** The rebuilds purges owe, by ID. */
+const owed = async (): Promise<string[]> => {
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT id FROM search_rebuilds ORDER BY id"
+  ).all<{ id: string }>();
+  return results.map(({ id }) => id);
 };
 
 describe("a purged term's page separators", () => {
@@ -72,7 +88,7 @@ describe("a purged term's page separators", () => {
     });
   });
 
-  it("are checked only for terms whose tokens are known exactly: plain ASCII, and no number shorter than a trigram", () => {
+  it("are checked only for terms whose tokens are known exactly: plain ASCII, and no token shorter than a trigram", () => {
     expect({
       ascii: indexKeysOf(["Visser", "tom.visser@acme.test"]) === undefined,
       pin: indexKeysOf(["4821"]) === undefined,
@@ -81,12 +97,42 @@ describe("a purged term's page separators", () => {
       // Held whole by the trigrams spanning its neighbours (" 12"), which
       // a purge's terms don't say.
       shortNumber: indexKeysOf(["Room 12"]),
+      shortWord: indexKeysOf(["Jo"]),
     }).toStrictEqual({
       ascii: false,
       pin: false,
       accented: undefined,
       otherScript: undefined,
       shortNumber: undefined,
+      shortWord: undefined,
+    });
+  });
+
+  it("stay owed a rebuild until one runs after the purge's writes are done, or surely over", async () => {
+    const db = drizzle(env.KNOWLEDGE);
+    // A purge still writing, one whose writes are done, and one that
+    // recorded its rebuild long ago and never said (its request died).
+    await db.batch([
+      rebuildOwed(db, "a-writing"),
+      rebuildOwed(db, "b-done"),
+      rebuildOwed(db, "c-died"),
+    ]);
+    await owedWritesDone(db, "b-done");
+    await env.KNOWLEDGE.prepare(
+      "UPDATE search_rebuilds SET owed_at = owed_at - ? WHERE id = 'c-died'"
+    )
+      .bind(owedRebuildStaleMs + 1000)
+      .run();
+    const before = await owed();
+    // Another purge's rebuild, before the first purge's writes are done.
+    await rebuildSearchIndex(db);
+    const afterRebuild = await owed();
+    await owedWritesDone(db, "a-writing");
+    await rebuildSearchIndex(db);
+    expect({ before, afterRebuild, afterAll: await owed() }).toStrictEqual({
+      before: ["a-writing", "b-done", "c-died"],
+      afterRebuild: ["a-writing"],
+      afterAll: [],
     });
   });
 });

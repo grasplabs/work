@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3339bcac-2111-4b84-a26b-89373aad3d66",
+  "id": "84e377fe-9c39-463b-9b9d-6aca673af035",
   "prevId": "a587589a-1734-4761-83ac-a4df34c060db",
   "tables": {
     "app_entries": {
@@ -674,16 +674,23 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "integer",
+          "type": "text",
           "primaryKey": true,
           "notNull": true,
-          "autoincrement": true
+          "autoincrement": false
         },
         "owed_at": {
           "name": "owed_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "writes_done_at": {
+          "name": "writes_done_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
