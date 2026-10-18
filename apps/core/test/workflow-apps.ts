@@ -34,7 +34,7 @@ type Builder = Parameters<typeof release>[0];
  *   per call key: a test opens a gate with it, which a step waits on by
  *   reading `counter.hits` until it is above 0.
  * - `ledger.book` keeps an entry for whoever the call acts for, and
- *   answers whose it is.
+ *   answers whose it is; `ledger.purchaseOrder` finds a purchase order.
  *
  * It declares a text model resource for each of `models`' aliases, which
  * its workflows' AI steps go through (`step.llm`'s `binding`), each with
@@ -81,6 +81,12 @@ export const hit = action({
   returns: v.number(),
   uses: [bump],
   handler: async (ctx, args) => await ctx.runMutation(bump, { name: args.name }),
+});
+
+export const purchaseOrder = query({
+  args: { number: v.string() },
+  returns: v.union(v.object({ amount: v.number() }), v.null()),
+  handler: async (_ctx, args) => (args.number === "PO-1" ? { amount: 800_000 } : null),
 });
 
 export const book = mutation({
@@ -210,7 +216,7 @@ export const mailCounted = action({
   "app.ts": `import { app, resource } from "@grasp-os/sdk";
 
 import { mail, mailCounted, mailOwnKey, point, pointAfter, points, search, send, stats } from "./operations/effects.ts";
-import { book, bump, hit, hits } from "./operations/sample.ts";
+import { book, bump, hit, hits, purchaseOrder } from "./operations/sample.ts";
 import schema from "./schema.ts";
 
 ${Object.entries(models)
@@ -230,7 +236,7 @@ export default app({
   },
   operations: {
     counter: { hit, hits, bump },
-    ledger: { book },
+    ledger: { book, purchaseOrder },
     stats: { point, points, pointAfter },
     mail: { mail, mailOwnKey, mailCounted },
   },

@@ -7,7 +7,6 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { fakeGateway } from "./ai-gateway.ts";
@@ -27,14 +26,18 @@ import {
   woken,
 } from "./runs.ts";
 import { refusal, signedInApi } from "./sign-in.ts";
-import { v1AppWith, v1Server } from "./v1-app-server.ts";
 import {
+  appCall,
+  appWith,
   bindModel,
   grantMail,
+  hitCall,
+  hitsOf,
   invoiceMail,
   mailer,
   modelRegistration,
   runEvents,
+  sampleApp,
   workflowFiles,
 } from "./workflow-apps.ts";
 
@@ -63,12 +66,9 @@ const extractionModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 /**
  * The sample invoice workflow, as an App ships it: it matches the purchase
  * order, reads the total with a model, asks a reviewer above a threshold
- * and books the invoice, through its App's server code, typed by the
- * App's own class (`appServer`).
+ * and books the invoice, through its App's functions.
  */
-const invoiceWorkflow = `import { appServer, money, person, workflow, z } from "@grasp-os/sdk/workflow";
-
-import type { App } from "../app/server.ts";
+const invoiceWorkflow = `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "invoice-approval",
@@ -83,7 +83,7 @@ export default workflow(
     const order = await step.do(
       "match-po",
       { description: "Find the purchase order the invoice refers to", locked: true, input: input.purchaseOrder },
-      async ({ input: number }) => await appServer<App>(env).purchaseOrder(number)
+      async ({ input: number }) => await ${appCall("ledger.purchaseOrder", "query", "{ number }")}
     );
     if (!order) {
       return { status: "unmatched" };
@@ -115,7 +115,7 @@ export default workflow(
         locked: true,
         input: { invoice: input.number, total: extracted.total },
       },
-      async ({ idempotencyKey, input: booking }) => await appServer<App>(env).book(booking, idempotencyKey)
+      async ({ input: booking }) => await ${appCall("ledger.book", "mutation", "booking")}
     );
     return { status: "booked", entry };
   }
@@ -176,16 +176,6 @@ const listedStatus = async (
   return runs.find(({ id }) => id === run)?.status;
 };
 
-/** How often the App counted `name` (its server's `hit`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
-
 /** A run a trigger started, which acts for the App's owner. */
 const triggered = async (app: string, workflow: string) =>
   await startRun(env, {
@@ -210,7 +200,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
   it("run the sample invoice workflow end to end, and audit it", async () => {
     const builder = await personApi("builder");
     const reviewer = await personApi("admin");
-    const app = await v1AppWith(builder, {
+    const app = await appWith(builder, {
       ...modelRegistration({ extractor: 6000 }),
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
@@ -305,7 +295,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
 
   it("refuse binding a model that can't give the declared bound, though only an AI step uses it", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, {
+    const app = await appWith(builder, {
       ...modelRegistration({ extractor: 6001 }),
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
@@ -320,7 +310,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
 
   it("keep the version they started on after a new one is current", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, versioned(1));
+    const app = await appWith(builder, versioned(1));
     const first = await builder.api.workflows.start(app, "pinned");
     await stepDone(first.id, "$params");
     await stopped(first.id);
@@ -354,7 +344,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
 ${mailStep("after")}`,
         { after: "reached" }
       );
-    const app = await v1AppWith(builder, version("First."));
+    const app = await appWith(builder, version("First."));
     const permission = await requestGranted(idp, builder, outlook(app));
     // The attack: the builder's own code, which an admin's run starts on
     // and waits in; then harmless code, which an admin grants again for.
@@ -388,6 +378,9 @@ ${mailStep("after")}`,
     });
   });
 
+  // The v1 App server's methods and their bindings: they go with the
+  // server (GRA-645); run-functions.test.ts holds a sealed function's run
+  // to its approved version.
   it("refuse a run on a version no admin approved its App's server methods, which run the approved current one", async () => {
     const [admin, builder] = await Promise.all([
       personApi("admin"),
@@ -461,7 +454,7 @@ export class App extends DurableObject {
 
   it("fail the next step with a permission error once a permission is revoked mid-run", async () => {
     const admin = await personApi("admin");
-    const app = await v1AppWith(
+    const app = await appWith(
       admin,
       workflowFiles(
         "mailer",
@@ -509,7 +502,7 @@ ${mailStep("after")}`,
 
   it("check a model's answer against the step's schema, formats included", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, {
+    const app = await appWith(builder, {
       ...modelRegistration({ extractor: 6000 }),
       ...workflowFiles(
         "reader",
@@ -565,13 +558,13 @@ ${mailStep("after")}`,
   it("fail a triggered run once its App's owner has left, at its start or before its next step", async () => {
     const admin = await personApi("admin");
     const owner = await personApi("builder");
-    const app = await v1AppWith(
+    const app = await appWith(
       owner,
       workflowFiles(
         "triggered",
-        `  await step.do("first", { description: "First" }, async () => await env.APP.call("hit", "first"));
+        `  await step.do("first", { description: "First" }, async () => await ${hitCall(`"first"`)});
   await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("book", { description: "Book" }, async () => await env.APP.call("hit", "book"));`,
+  return await step.do("book", { description: "Book" }, async () => await ${hitCall(`"book"`)});`,
         { first: 1, book: 1 }
       )
     );
@@ -583,7 +576,7 @@ ${mailStep("after")}`,
     await woken(midWay.id);
     await finished(midWay.id);
     await rejoin();
-    const booked = await hitsOf(app, owner.userId, "book");
+    const booked = await hitsOf(owner, app, "book");
 
     // Offboarded by an admin before the run starts.
     await admin.api.members.remove(owner.userId);
@@ -610,7 +603,7 @@ ${mailStep("after")}`,
   it("fail a person's run once they have left, at its next load", async () => {
     const admin = await personApi("admin");
     const leaver = await personApi("builder");
-    const app = await v1AppWith(
+    const app = await appWith(
       leaver,
       workflowFiles(
         "waiting",
@@ -636,7 +629,7 @@ ${mailStep("after")}`,
 
   it("run with only their App's permissions, no network, and reading in their App's restricted mode", async () => {
     const admin = await personApi("admin");
-    const app = await v1AppWith(
+    const app = await appWith(
       admin,
       workflowFiles(
         "probe",
@@ -696,9 +689,9 @@ ${mailStep("after")}`,
     const files = workflowFiles(
       "taker",
       `  return await step.do("take", { description: "Take" }, async () => {
-    const bindings = taken.find((one) => typeof one?.APP?.call === "function");
+    const bindings = taken.find((one) => typeof one?.APP?.callFunction === "function");
     if (bindings !== undefined) {
-      await bindings.APP.call("hit", "taken");
+      await bindings.APP.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "taken", execution: crypto.randomUUID() });
     }
     return bindings === undefined ? "nothing" : "bindings";
   });`,
@@ -725,7 +718,7 @@ Object.hasOwn = (target, name) => {
   return realHasOwn(target, name);
 };
 `;
-    const app = await v1AppWith(admin, {
+    const app = await appWith(admin, {
       ...files,
       "workflows/taker.ts": `${takes}${files["workflows/taker.ts"]}`,
     });
@@ -737,13 +730,13 @@ Object.hasOwn = (target, name) => {
     expect({
       status,
       output,
-      hits: await hitsOf(app, admin.userId, "taken"),
+      hits: await hitsOf(admin, app, "taken"),
     }).toStrictEqual({ status: "completed", output: "nothing", hits: 0 });
   });
 
   it("sleep durably", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(
+    const app = await appWith(
       builder,
       workflowFiles(
         "sleeper",
@@ -779,7 +772,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
       return await refusal(builder.api.apps.versions.setCurrent(app, version));
     };
     const outcomes = [
-      await setCurrent({ "app/server.ts": v1Server, ...failing }),
+      await setCurrent({ ...sampleApp(), ...failing }),
       await setCurrent({ "workflows/failing.workflow-tests.ts": null }),
     ];
     expect(
@@ -807,7 +800,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
     };
 
     const directly = await setCurrent({
-      "app/server.ts": v1Server,
+      ...sampleApp(),
       ...greet,
       "workflows/greet.ts": importing("./greeting.ts"),
       "workflows/greeting.ts": helper,
@@ -874,7 +867,7 @@ import definition from "./rogue.ts";
 export default workflowTests(definition, [{ name: "fails", expect: { error: "bad" } }]);
 `,
     };
-    const app = await v1AppWith(admin, rogue);
+    const app = await appWith(admin, rogue);
     const run = await admin.api.workflows.start(app, "rogue");
     await finished(run.id);
     const logged = await allEvents();
@@ -911,12 +904,12 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
 
   it("stop for good when cancelled, running or paused, and not run a cancelled row again", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(
+    const app = await appWith(
       builder,
       workflowFiles(
         "cancellable",
         `  await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("after", { description: "After" }, async () => await env.APP.call("hit", "after"));`,
+  return await step.do("after", { description: "After" }, async () => await ${hitCall(`"after"`)});`,
         { after: 1 }
       )
     );
@@ -993,7 +986,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
       ).length,
       afterLoad,
       leftOverRow,
-      after: await hitsOf(app, builder.userId, "after"),
+      after: await hitsOf(builder, app, "after"),
       raced,
       racedAudited: events.filter(
         ({ action, target }) =>
@@ -1013,7 +1006,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
 
   it("audit a run whose start failed as failed", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(
+    const app = await appWith(
       builder,
       workflowFiles(
         "unstartable",
@@ -1068,7 +1061,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
     const starter = await personApi("builder");
     const other = await personApi("builder");
     const admin = await personApi("admin");
-    const app = await v1AppWith(
+    const app = await appWith(
       starter,
       workflowFiles(
         "private",
@@ -1110,7 +1103,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     // Calls between steps can't be read as a step's, so the workflow that
     // makes them is held to none: they are refused as outside a step
     // first. The one that makes its calls in its step is held to them.
-    const app = await v1AppWith(admin, {
+    const app = await appWith(admin, {
       ...workflowFiles(
         "outside",
         `  const codeOf = async (key) => {
@@ -1192,7 +1185,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     const owner = await personApi("builder");
     const starter = await personApi("builder");
     const mail = await mailConnection(["invalid", "invalid"]);
-    const app = await v1AppWith(
+    const app = await appWith(
       owner,
       mailer(`retries: { limit: 3, delay: 10, backoff: "constant" }`)
     );
@@ -1287,7 +1280,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
 
   it("stop at an error of the workflow's own without retrying it, reporting its input's shape but none of its data", async () => {
     const admin = await personApi("admin");
-    const app = await v1AppWith(
+    const app = await appWith(
       admin,
       workflowFiles(
         "careless",
@@ -1299,7 +1292,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
       retries: { limit: 3, delay: 10 },
     },
     async () => {
-      await env.APP.call("hit", "check");
+      await ${hitCall(`"check"`)};
       throw new Error("Customer c-1 is blocked");
     }
   );`,
@@ -1312,7 +1305,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     const { failure } = await admin.api.workflows.status(run.id);
     expect({
       failure,
-      attempts: await hitsOf(app, admin.userId, "check"),
+      attempts: await hitsOf(admin, app, "check"),
     }).toMatchObject({
       failure: {
         step: "check",
@@ -1335,7 +1328,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
   it("fail, recorded and reported, once a run has taken as many steps as it may", async () => {
     const admin = await personApi("admin");
     // More steps than the engine takes in one execution (vite.config.ts).
-    const app = await v1AppWith(
+    const app = await appWith(
       admin,
       workflowFiles(
         "endless",

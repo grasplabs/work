@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import worker from "../src/index.ts";
-import { requestGranted } from "./apps.ts";
+import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -15,6 +15,7 @@ import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 import { v1AppWith, v1Server } from "./v1-app-server.ts";
+import { appWith, hitCall } from "./workflow-apps.ts";
 
 // The runs a run's own mail starts, as its descendants: mail it sends
 // through a native mail connector to its App's own address starts its
@@ -108,7 +109,11 @@ export default workflowTests(definition, [{ name: "runs", input, mocks: { read: 
 `,
 });
 
-/** The App's server: the sample's, and `relay`, which sends `mail`. */
+/**
+ * The v1 App server of `loop`'s `app` sends: the v1 sample's, and `relay`,
+ * which sends `mail` with its caller's key. Only the v1 server's own test
+ * uses it (GRA-645); a connector resource's sends have theirs below.
+ */
 const relayServer = v1Server.replace(
   "export class App extends DurableObject {",
   `export class App extends DurableObject {
@@ -152,7 +157,6 @@ const input = { id: "m", stored: null, from: { name: "", address: "a@b.test" }, 
 
 export default workflowTests(definition, [{ name: "runs", input, mocks: { send: { sent: true } }, expect: {} }]);
 `,
-  "app/server.ts": relayServer,
 });
 
 /**
@@ -202,11 +206,15 @@ const loopApp = async (
 ) => {
   const local = `loop-${crypto.randomUUID().slice(0, 8)}`;
   const connection = await connectShared(admin, aliased);
-  const app = await v1AppWith(admin, {
+  const workflows = {
     ...loop(local, connection.mailbox, send),
     ...(listening ? listen(local) : {}),
     ...files(local, connection.mailbox),
-  });
+  };
+  const app =
+    send === "app"
+      ? await v1AppWith(admin, { ...workflows, "app/server.ts": relayServer })
+      : await appWith(admin, workflows);
   await requestGranted(idp, admin, {
     subject: { type: "app", appId: app },
     object: { type: "connection", connectionId: connection.id },
@@ -543,7 +551,7 @@ export default workflow("fresh", { params: {}, input: z.unknown() }, async (step
     { description: "Mail a new domain", sideEffect: true, timeout: "1 second", retries: { limit: 1, delay: "5 seconds" }, input: { mailbox: "${mailbox}", subject: "${subject}", body: "Hi.", to: ["${to}"] } },
     async ({ idempotencyKey, input: mail }) => {
       await env.MAIL.call("mail.send", mail, { idempotencyKey });
-      if ((await env.APP.call("hit", "${subject}")) === 1) {
+      if ((await ${hitCall(`"${subject}"`)}) === 1) {
         // Runs out of time, so the step is tried again.
         await new Promise((resolve) => setTimeout(resolve, 3000));
       }
@@ -666,6 +674,8 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
     }).toStrictEqual({ status: "completed", sent: [[true]] });
   });
 
+  // The v1 App server's: it goes with the server (GRA-645); the
+  // connector resource's sends below are the sealed functions'.
   it("join its lineage when it sends through its App's server code", async () => {
     const admin = await personApi("admin");
     const looping = await loopApp(admin, "app");
@@ -750,7 +760,7 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
       message(looping.address, { from: "ann@acme.test", subject })
     );
     const composio = await mailConnection();
-    const app = await v1AppWith(admin, {
+    const app = await appWith(admin, {
       "workflows/mailer.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("mailer", { params: {}, input: z.unknown() }, async (step, { env }) =>
@@ -939,7 +949,8 @@ export default workflowTests(definition, [{ name: "runs", mocks: { send: null },
     const admin = await personApi("admin");
     const local = `relay-${crypto.randomUUID().slice(0, 8)}`;
     const connection = await connectShared(admin);
-    const app = await v1AppWith(admin, relayFiles(local, connection.mailbox));
+    const { id: app } = await admin.api.apps.create({ name: "Relay" });
+    await release(admin, app, relayFiles(local, connection.mailbox));
     const permissionId = await requestGranted(idp, admin, {
       subject: { type: "app", appId: app },
       object: { type: "connection", connectionId: connection.id },
