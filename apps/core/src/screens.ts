@@ -5,6 +5,7 @@ import {
   appModuleName,
   buildFiles,
   compilerVersion,
+  generatedFolder,
   isAppLayout,
   kitModuleName,
   kitModules,
@@ -539,12 +540,19 @@ export const buildAppTests = async (
 /**
  * What a workflow build reads (`workflowBuildFiles`): the App's
  * workflows, and the server code their types may name, with the host's
- * generated modules as inspection has them (no App's version holds
- * `.grasp/`): the constructors, the same for every App, and stand-ins for
- * the references.
+ * generated modules as inspection has them: the constructors, the same
+ * for every App, and stand-ins for the references. Everything under
+ * `.grasp/` is the host's: a save refuses an App's own file there (no
+ * path segment starts with a dot, `appPathSchema`), and whatever a
+ * version holds there anyway is dropped here, so only the host's
+ * modules, and the binding names it gives, reach the type check.
  */
 const workflowInputs = (files: AppFiles): AppFiles => {
-  const selected = workflowBuildFiles(files);
+  const selected = Object.fromEntries(
+    Object.entries(workflowBuildFiles(files)).filter(
+      ([path]) => !path.startsWith(generatedFolder)
+    )
+  );
   return isAppLayout(selected)
     ? {
         ...selected,

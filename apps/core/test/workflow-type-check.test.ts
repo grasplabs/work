@@ -469,6 +469,64 @@ describe(
       ]);
     });
 
+    it("take a workflow's binding types only from the host: an App's own files where the host puts them are refused when saved and change nothing when built", async () => {
+      // What an App would write there to type a name it holds no
+      // permission for as answering anything.
+      const planted = {
+        ".grasp/workflow-env.ts": `declare module "@grasp-os/sdk/workflow" {
+  interface WorkflowBindings {
+    readonly ARCHIVE: { call(...args: unknown[]): Promise<any> };
+  }
+}
+export {};
+`,
+        ".grasp/workflow-bindings.json": JSON.stringify({
+          ARCHIVE: "connection",
+        }),
+      };
+      const declaration = planted[".grasp/workflow-env.ts"];
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Planted" });
+      const saved = await Promise.all(
+        Object.entries(planted).map(
+          async ([path, source]) =>
+            await codeOf(
+              builder.api.apps.files.commit(
+                app,
+                { ...sampleApp(), [path]: source },
+                "Planted"
+              )
+            )
+        )
+      );
+      const files = {
+        ...sampleApp(),
+        ...checked('    return (await env.ARCHIVE.call("find", {})).output;'),
+      };
+      const plantedAt: Record<string, string>[] = [
+        planted,
+        { ".grasp/workflow-env.ts": declaration },
+        {
+          ".grasp/workflow-bindings.json":
+            planted[".grasp/workflow-bindings.json"],
+        },
+        // Anywhere else the host puts its modules, too.
+        { ".grasp/extra.ts": declaration },
+      ];
+      const builtWith = await Promise.all(
+        plantedAt.map(async (more) => await built({ ...files, ...more }))
+      );
+      expect({ saved, builtWith }).toStrictEqual({
+        saved: ["app.invalid", "app.invalid"],
+        builtWith: [
+          { ok: false, files: ["workflows/checked.ts"], warned: [] },
+          { ok: false, files: ["workflows/checked.ts"], warned: [] },
+          { ok: false, files: ["workflows/checked.ts"], warned: [] },
+          { ok: false, files: ["workflows/checked.ts"], warned: [] },
+        ],
+      });
+    });
+
     it("type a workflow's calls of its App's functions by the App's own operations", async () => {
       await expect(
         Promise.all(

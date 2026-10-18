@@ -39,6 +39,7 @@ export {
   appCodeFiles,
   appCodeKind,
   appTestFiles,
+  generatedFolder,
   generatedModules,
   isAppLayout,
   isAppTestSuite,

@@ -972,7 +972,9 @@ export const buildWorkflows = (
   files: Record<string, string>
 ): WorkflowBuild => {
   const read = workflowFiles(files);
-  const context = workflowTypeContext(files);
+  // The bindings' declaration is only ever the compiler's own
+  // (`workflowEnvOf`), never a file it was given at its path.
+  const { [workflowEnvPath]: _given, ...context } = workflowTypeContext(files);
   const tooMuch = appCodeLimitErrors({ ...context, ...read });
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
