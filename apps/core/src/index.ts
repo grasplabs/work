@@ -17,6 +17,7 @@ import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
+import { sweepBuilds } from "./screens.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { repairControls } from "./workflows/controls.ts";
@@ -105,7 +106,8 @@ export default {
   // chats 30 days after they ended (see src/guests.ts), and the details
   // of workflow runs that ended longer ago than their retention (see
   // src/workflows/retention.ts), and screens' staged builds 30 days
-  // after they were last staged (see src/screen-frame.ts), and npm
+  // after they were last staged (see src/screen-frame.ts), and cached
+  // builds 30 days after they were last used (see src/screens.ts), and npm
   // tarballs and package builds no lock names any more (see
   // src/packages/cleanup.ts), and sealed App releases nothing keeps any
   // more, with the artifacts no other release names (see
@@ -127,6 +129,7 @@ export default {
             sweepGuestChats(env, new Date(controller.scheduledTime)),
             sweepRunDetails(env, new Date(controller.scheduledTime)),
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
+            sweepBuilds(env, new Date(controller.scheduledTime)),
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
             sweepReceipts(env, new Date(controller.scheduledTime)),
             sweepReleases(env, new Date(controller.scheduledTime)),
