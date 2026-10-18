@@ -37,11 +37,14 @@ import type { DocumentRow } from "./documents.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
+  collectionFingerprint,
+  collectionPlan,
+  eraseCollectionFromSearchIndex,
   eraseFromSearchIndex,
   errorNameOf,
   owedWritesDone,
   rebuildOwed,
-  rebuildSearchIndex,
+  rebuildOwedIfChanged,
   secureDeleteReady,
 } from "./search-erasure.ts";
 import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
@@ -78,8 +81,10 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // the index's pages, and the pages' directory is checked for a term left
 // behind; the index is rebuilt from what it holds now when one is, or
 // when that can't be told (a term that isn't plain ASCII, a platform that
-// refuses secure deletes), and always after a personal purge, whose
-// terms the purge doesn't know. The cleanup runs after the data is
+// refuses secure deletes). A personal purge, whose terms it doesn't name,
+// reads what the index holds of the collection before deleting it and
+// checks the tokens of that text the same way, up to caps past which it
+// rebuilds. The cleanup runs after the data is
 // committed, and on every purge, also one with nothing left to change, so
 // when it fails (`knowledge.purge_index_pending`) running the purge again
 // finishes it.
@@ -306,8 +311,13 @@ const personalScope = async (
  * The sections go first, row by row, so the triggers take them out of the
  * search index; the rest in the order they refer to one another. The
  * originals of files uploaded to it are recorded for deleting in the same
- * batch, and deleted from R2 right after (uploads.ts). The search index is
- * rebuilt after, also when nothing was left to delete.
+ * batch, and deleted from R2 right after (uploads.ts). Nothing of the
+ * collection is left in the search index after (search-erasure.ts): what
+ * it holds of the collection is read before the batch, and its tokens
+ * checked after, also when nothing was left to delete. The batch records
+ * a rebuild as owed, so a run again after the check or rebuild fails,
+ * with the collection gone, still rebuilds, and another when the
+ * collection changed since it was read.
  */
 const purgePersonal = async (
   env: Env,
@@ -318,7 +328,14 @@ const purgePersonal = async (
   const { collectionId, documentIds, counts } = await personalScope(db, input);
   const purgeId = crypto.randomUUID();
   const inCollection = documentsIn(db, collectionId);
+  const secure = await secureDeleteReady(db);
+  const fingerprint = await collectionFingerprint(db, collectionId);
+  const plan = secure
+    ? await collectionPlan(db, collectionId)
+    : ({ kind: "unknown" } as const);
   await auditedBatch(env, db, [
+    rebuildOwed(db, purgeId, { writesDone: true }),
+    rebuildOwedIfChanged(db, `${purgeId}:changed`, collectionId, fingerprint),
     db.delete(sections).where(inArray(sections.documentId, inCollection)),
     db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
     db.delete(versions).where(inArray(versions.documentId, inCollection)),
@@ -338,9 +355,8 @@ const purgePersonal = async (
     ),
   ]);
   await cleanUpOriginals(env);
-  // Whole documents go, whose tokens the purge doesn't know: rebuilt.
   await cleanSearchIndex(async () => {
-    await rebuildSearchIndex(db);
+    await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
   });
   return { purgeId, ...counts };
 };

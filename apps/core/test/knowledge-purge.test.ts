@@ -260,6 +260,97 @@ const joinedWordHeadingAPage = async (admin: Person, before = "") => {
   return { joined, word, entriesLeft };
 };
 
+/** `value`'s own member `key`, bound to it when a method. */
+const member = (value: object, key: string | symbol): unknown => {
+  const found: unknown = Reflect.get(value, key);
+  return typeof found === "function" ? found.bind(value) : found;
+};
+
+/**
+ * `person`'s API on a connection that adds up the rows each batch writes
+ * (as `countingWrites`), and runs `beforeRead` once, as a personal purge
+ * first reads what the search index holds of the collection: a change
+ * made after the purge began reading.
+ */
+const watchingPurge = async (
+  person: Person,
+  { beforeRead }: { beforeRead?: () => Promise<void> } = {}
+) => {
+  const real = env.KNOWLEDGE;
+  const written = { rows: 0 };
+  let pending = beforeRead;
+  const knowledge: D1Database = {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      const run = pending;
+      if (run === undefined || !query.includes("JOIN search_words AS w")) {
+        return statement;
+      }
+      pending = undefined;
+      return new Proxy(statement, {
+        get: (target, key) =>
+          key === "bind"
+            ? (...values: unknown[]) =>
+                new Proxy(target.bind(...values), {
+                  get: (bound, method) =>
+                    method === "all" || method === "raw"
+                      ? async () => {
+                          await run();
+                          return method === "all"
+                            ? await bound.all()
+                            : await bound.raw();
+                        }
+                      : member(bound, method),
+                })
+            : member(target, key),
+      });
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      const results = await real.batch<T>(statements);
+      for (const { meta } of results) {
+        written.rows += meta.changes;
+      }
+      return results;
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+  const { core } = await openRpc(person.session, {
+    coreEnv: { ...env, KNOWLEDGE: knowledge },
+  });
+  return { api: core.authenticate(), written };
+};
+
+/** A person whose Personal collection holds `files`, by path. */
+const leaverWith = async (files: Record<string, string>) => {
+  const leaver = await personOf("user");
+  const { personal } = await leaver.api.memory.collections();
+  for (const [path, text] of Object.entries(files)) {
+    // oxlint-disable-next-line no-await-in-loop -- one document at a time
+    await saveOver(leaver, personal, path, text);
+  }
+  return { leaver, personal };
+};
+
+/** Purges `leaver`'s Personal collection as `admin`, saying what it wrote. */
+const purgeCounted = async (
+  admin: Person,
+  leaver: Person,
+  watch: Parameters<typeof watchingPurge>[1] = {}
+) => {
+  const counting = await watchingPurge(admin, watch);
+  const input: PurgeInput = {
+    type: "personal",
+    userId: leaver.userId,
+    reason: "offboarding",
+  };
+  const { token } = await counting.api.knowledge.preparePurge(input);
+  await counting.api.knowledge.purge(input, token);
+  return counting.written.rows;
+};
+
 describe("a personal purge", setUpTime, () => {
   it("removes the person's USER.md and every version, from everywhere", async () => {
     const admin = await personOf("admin");
@@ -434,6 +525,221 @@ describe("a personal purge", setUpTime, () => {
       },
       held: [],
     });
+  });
+});
+
+describe("a personal purge's search index", setUpTime, () => {
+  it("writes no more to it however large the corpus, though the person's words are everyone's", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const common = "the plan for the team meeting is a note on leave and pay";
+    /** Purges a new person's notes, in everyone's words and their name. */
+    const purgeOne = async () => {
+      const name = `leaver${unique()}`;
+      const { leaver } = await leaverWith({
+        "notes.md": `# Notes\n${common} with ${name}.\n\n## More\n${common}, ${name}.`,
+      });
+      return await purgeCounted(admin, leaver);
+    };
+    // Secure deletes turned on first, as any purge does.
+    await purgeOne();
+    const small = await purgeOne();
+    const before = await indexedSections();
+    for (let at = 0; at < 150; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await saveOver(
+        admin,
+        handbook.id,
+        `other-${at}.md`,
+        `# Other ${at}\n${common} ${unique()}.\n\n## Part\n${common} ${unique()}.\n\n## Last\n${common} ${unique()}.`
+      );
+    }
+    // In one segment, as FTS5's own merges put them in time: pages headed
+    // by everyone's words.
+    await env.KNOWLEDGE.prepare(
+      "INSERT INTO search_words (search_words) VALUES ('optimize')"
+    ).run();
+    await env.KNOWLEDGE.prepare(
+      "INSERT INTO search_trigrams (search_trigrams) VALUES ('optimize')"
+    ).run();
+    const added = (await indexedSections()) - before;
+    const large = await purgeOne();
+    // A rebuild writes at least a row for each section the index holds.
+    expect({
+      grewBy: large - small,
+      bound: large - small < added / 4,
+    }).toMatchObject({ bound: true });
+  });
+
+  it("drops a word of the person's from the page directory, where it was the first term of a page", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    // Words in order, alternating between the person's notes and a
+    // document of the handbook: a page holds both, so it isn't emptied
+    // when the person's go, and its directory entry, made from its first
+    // word, stays.
+    const stem = `zq${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+    const words = Array.from(
+      { length: 3000 },
+      (_, at) => `${stem}${lettersOf(at, 3)}`
+    );
+    const { leaver } = await leaverWith({
+      "even.md": `# Words\n${words.filter((_, at) => at % 2 === 0).join(" ")}`,
+    });
+    await saveOver(
+      admin,
+      handbook.id,
+      "odd.md",
+      `# Words\n${words.filter((_, at) => at % 2 === 1).join(" ")}`
+    );
+    await env.KNOWLEDGE.prepare(
+      "INSERT INTO search_words (search_words) VALUES ('optimize')"
+    ).run();
+    const { results } = await env.KNOWLEDGE.prepare(
+      "SELECT CAST(term AS TEXT) AS term FROM search_words_idx WHERE CAST(term AS TEXT) LIKE ?"
+    )
+      .bind(`0${stem}%`)
+      .all<{ term: string }>();
+    const leading = words.find(
+      (word, at) =>
+        at % 2 === 0 && results.some(({ term }) => term === `0${word}`)
+    );
+    const heldBefore = leading === undefined ? [] : await holding(leading);
+    await purgeCounted(admin, leaver);
+    expect({
+      found: leading !== undefined,
+      heldBefore: heldBefore.includes("search_words_idx.term"),
+      heldAfter: await holding(leading ?? ""),
+    }).toStrictEqual({ found: true, heldBefore: true, heldAfter: [] });
+  });
+
+  it("rebuilds for a word next to a character it can't fold, and when run again after that fails", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    for (let at = 0; at < 60; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await saveOver(
+        admin,
+        handbook.id,
+        `filler-${at}.md`,
+        `# Filler ${at}\nText ${unique()}.`
+      );
+    }
+    const name = `Visser${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+    // A plain person: checked, no rebuild.
+    const plain = await leaverWith({ "notes.md": `# Notes\nAsk ${name}.` });
+    const plainWritten = await purgeCounted(admin, plain.leaver);
+    const { leaver } = await leaverWith({
+      "notes.md": `# Notes\nAsk ${name}さん.`,
+    });
+    const input: PurgeInput = {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    };
+    // The first run's rebuild fails, once its deletes committed.
+    let failed = false;
+    let failNext = false;
+    const failing = await apiWith(admin, {
+      prepare: (query) => {
+        if (!failed && query.includes("VALUES ('rebuild')")) {
+          failNext = true;
+        }
+      },
+      beforeBatch: () => {
+        if (failNext) {
+          failNext = false;
+          failed = true;
+          throw new Error("D1 is unavailable");
+        }
+      },
+    });
+    const { token } = await failing.knowledge.preparePurge(input);
+    const first = await outcome(failing.knowledge.purge(input, token));
+    const again = await purgeCounted(admin, leaver);
+    const sections = await indexedSections();
+    expect({
+      plainChecked: plainWritten < sections,
+      first,
+      againRebuilt: again >= sections,
+    }).toStrictEqual({
+      plainChecked: true,
+      first: "knowledge.purge_index_pending",
+      againRebuilt: true,
+    });
+  });
+
+  it("rebuilds when the collection changes while the purge reads it", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    for (let at = 0; at < 60; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await saveOver(
+        admin,
+        handbook.id,
+        `filler-${at}.md`,
+        `# Filler ${at}\nText ${unique()}.`
+      );
+    }
+    const name = `late${unique()}`;
+    const { leaver, personal } = await leaverWith({
+      "notes.md": "# Notes\nAsk me.",
+    });
+    const written = await purgeCounted(admin, leaver, {
+      beforeRead: async () => {
+        await saveOver(leaver, personal, "notes.md", `# Notes\nAsk ${name}.`);
+      },
+    });
+    expect({
+      rebuilt: written >= (await indexedSections()),
+      held: await holding(name),
+    }).toStrictEqual({ rebuilt: true, held: [] });
+  });
+
+  it("rebuilds past its caps, logging counts and never a word", async () => {
+    const admin = await personOf("admin");
+    const stem = `capped${lettersOf(Math.floor(Math.random() * 26 ** 4), 4)}`;
+    const words = Array.from(
+      { length: 21_000 },
+      (_, at) => `${stem}${lettersOf(at, 4)}`
+    );
+    const { leaver } = await leaverWith({
+      "many.md": `# Many\n${words.join(" ")}`,
+    });
+    const logged: unknown[] = [];
+    const spies = (["log", "info", "warn", "error"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+        logged.push(args);
+      })
+    );
+    let written = 0;
+    try {
+      written = await purgeCounted(admin, leaver);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+    const lines = logged.map((args) => JSON.stringify(args));
+    expect({
+      capped: lines.some((line) =>
+        line.includes("knowledge.purge.collection_check_capped")
+      ),
+      leaked: lines.filter((line) => line.includes(stem)),
+      rebuilt: written >= (await indexedSections()),
+    }).toStrictEqual({ capped: true, leaked: [], rebuilt: true });
   });
 });
 

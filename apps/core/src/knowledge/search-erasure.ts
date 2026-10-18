@@ -1,5 +1,5 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import { eq, lte, or, sql } from "drizzle-orm";
+import { eq, lte, ne, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { searchRebuilds } from "../db/knowledge/schema.ts";
@@ -30,6 +30,14 @@ import { searchRebuilds } from "../db/knowledge/schema.ts";
 //
 // Nothing a lookup carries (the terms) is ever logged: a failed query's
 // error repeats its parameters, so only the error's name is.
+//
+// A personal purge deletes a whole collection, whose terms it doesn't
+// name: it reads what the index holds of the collection before deleting
+// it, and checks the tokens of that text (threat model in GRA-696). Its
+// common words ("the", single letters) head pages all the time, so a
+// separator that holds one of its tokens counts only when no live row
+// still holds the token: then it reveals nothing the index doesn't. That
+// check is capped; past the caps, the index is rebuilt.
 //
 // Secure deletes are turned on by the migration `0011_search_secure_delete`,
 // with a rebuild. Remote D1 may refuse what local workerd allows (reading
@@ -73,10 +81,20 @@ export const rebuildSearchIndex = async (
 /**
  * The statement that records rebuild `id` as owed, for a purge's batch
  * that records it before anything changes: a purge that then fails, or
- * whose rebuild does, leaves it owed, and the next one rebuilds.
+ * whose rebuild does, leaves it owed, and the next one rebuilds. With
+ * `writesDone`, the purge's writes are that batch's own, done when it
+ * commits.
  */
-export const rebuildOwed = (db: DrizzleD1Database, id: string) =>
-  db.insert(searchRebuilds).values({ id, owedAt: Date.now() });
+export const rebuildOwed = (
+  db: DrizzleD1Database,
+  id: string,
+  { writesDone = false }: { writesDone?: boolean } = {}
+) => {
+  const now = Date.now();
+  return db
+    .insert(searchRebuilds)
+    .values({ id, owedAt: now, ...(writesDone ? { writesDoneAt: now } : {}) });
+};
 
 /**
  * Marks owed rebuild `id`'s purge's writes done: a rebuild from now on
@@ -92,11 +110,18 @@ export const owedWritesDone = async (
     .where(eq(searchRebuilds.id, id));
 };
 
-/** Whether a purge recorded a rebuild that hasn't run since. */
-const anyRebuildOwed = async (db: DrizzleD1Database): Promise<boolean> => {
+/**
+ * Whether a purge recorded a rebuild that hasn't run since, other than
+ * `except`'s own.
+ */
+const anyRebuildOwed = async (
+  db: DrizzleD1Database,
+  except?: string
+): Promise<boolean> => {
   const owed = await db
     .select({ id: searchRebuilds.id })
     .from(searchRebuilds)
+    .where(except === undefined ? undefined : ne(searchRebuilds.id, except))
     .limit(1);
   return owed.length > 0;
 };
@@ -343,6 +368,338 @@ export const eraseFromSearchIndex = async (
     } catch (error) {
       // Not readable here (a platform that refuses it): rebuilt instead.
       // The error's name only: its message repeats the lookup's terms.
+      log.warn("knowledge.purge.index_check_failed", {
+        errorName: errorNameOf(error),
+      });
+    }
+  }
+  await rebuildSearchIndex(db);
+};
+
+// Personal purges: a whole collection.
+
+/** How far a personal purge checks a collection's tokens before it rebuilds instead. */
+export const collectionCheckCaps = {
+  /** Characters of indexed text read. */
+  characters: 2 * 1024 * 1024,
+  /** Distinct page-directory keys looked up. */
+  keys: 20_000,
+  /** Lookups of whether a live row still holds a token. */
+  liveLookups: 1000,
+} as const;
+
+/** Rows of the index read at once. */
+const rowsPerRead = 50;
+
+/** Keys looked up in one query. */
+const keysPerLookup = 500;
+
+/** Lookups of live rows in one batch. */
+const liveLookupsPerBatch = 50;
+
+/**
+ * What `unicode61` may take as part of a token: a letter, a digit, a
+ * private-use character, or a mark (which `remove_diacritics` drops or
+ * keeps). Taking a mark for part of one only sends more text to the rebuild.
+ */
+const tokenCharacter = /[\p{L}\p{N}\p{Co}\p{M}]/u;
+
+/** A token whose characters are all plain ASCII letters and digits. */
+const asciiToken = /^[A-Za-z0-9]+$/u;
+
+/**
+ * The page-directory keys of the tokens in one value of an indexed column,
+ * as `indexKeysOf` gives for a term's, and, for a token shorter than three
+ * characters, the trigrams that span it whole with its neighbours (" jo",
+ * "jo."), which the text says here. Undefined when a token holds a
+ * character that isn't plain ASCII, whose folding is SQLite's own: rebuilt.
+ */
+export const collectionKeysOf = (value: string): IndexKey[] | undefined => {
+  // Code points, as the tokenizers count characters.
+  // oxlint-disable-next-line typescript/no-misused-spread -- code points are meant
+  const characters = [...value];
+  const keys: IndexKey[] = [];
+  let start = 0;
+  while (start < characters.length) {
+    if (tokenCharacter.test(characters[start] ?? "")) {
+      let end = start;
+      while (
+        end < characters.length &&
+        tokenCharacter.test(characters[end] ?? "")
+      ) {
+        end += 1;
+      }
+      const token = characters.slice(start, end).join("");
+      if (!asciiToken.test(token)) {
+        return undefined;
+      }
+      keys.push(...keysOfToken(token.toLowerCase()));
+      if (token.length < 3) {
+        const first = Math.max(0, end - 3);
+        const last = Math.min(start, characters.length - 3);
+        for (let at = first; at <= last; at += 1) {
+          keys.push({
+            table: "search_trigrams",
+            key: `0${characters
+              .slice(at, at + 3)
+              .join("")
+              .toLowerCase()}`,
+            least: 3,
+          });
+        }
+      }
+      start = end;
+    } else {
+      start += 1;
+    }
+  }
+  return keys;
+};
+
+/** What a personal purge's check counted, logged when it stops at a cap. */
+interface CheckCounts {
+  characters?: number;
+  keys: number;
+  liveLookups?: number;
+}
+
+/**
+ * What a personal purge read of its collection before deleting it: the
+ * page-directory keys of its tokens, or why they aren't checked (a token
+ * that isn't plain ASCII; a cap reached, with the counts).
+ */
+export type CollectionPlan =
+  | { readonly kind: "keys"; readonly keys: readonly IndexKey[] }
+  | { readonly kind: "unknown" }
+  | { readonly kind: "capped"; readonly counts: CheckCounts };
+
+/** Logs that a personal purge's check reached a cap: counts only. */
+const loggedCapped = (counts: CheckCounts): CollectionPlan => {
+  log.warn("knowledge.purge.collection_check_capped", { ...counts });
+  return { kind: "capped", counts };
+};
+
+/**
+ * Reads what the search index holds of `collectionId`'s documents, a page
+ * of rows at a time, and gives the keys of its tokens (`CollectionPlan`).
+ * Stops at `collectionCheckCaps`.
+ */
+export const collectionPlan = async (
+  db: DrizzleD1Database,
+  collectionId: string
+): Promise<CollectionPlan> => {
+  const keys = new Map<string, IndexKey>();
+  let characters = 0;
+  let after = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const rows = await db.all<{
+      id: number;
+      title: string | null;
+      description: string | null;
+      headings: string | null;
+      text: string | null;
+    }>(sql`
+      SELECT r.id AS id, w.title AS title, w.description AS description,
+        w.headings AS headings, w.text AS text
+      FROM search_rows AS r JOIN search_words AS w ON w.rowid = r.id
+      WHERE r.document_id IN (
+        SELECT id FROM documents WHERE collection_id = ${collectionId}
+      ) AND r.id > ${after}
+      ORDER BY r.id LIMIT ${rowsPerRead}
+    `);
+    for (const row of rows) {
+      for (const value of [
+        row.title,
+        row.description,
+        row.headings,
+        row.text,
+      ]) {
+        if (value !== null) {
+          characters += value.length;
+          const ofValue = collectionKeysOf(value);
+          if (ofValue === undefined) {
+            return { kind: "unknown" };
+          }
+          for (const key of ofValue) {
+            keys.set(`${key.table}:${key.key}`, key);
+          }
+        }
+      }
+      after = row.id;
+    }
+    if (
+      characters > collectionCheckCaps.characters ||
+      keys.size > collectionCheckCaps.keys
+    ) {
+      return loggedCapped({ characters, keys: keys.size });
+    }
+    if (rows.length < rowsPerRead) {
+      return { kind: "keys", keys: [...keys.values()] };
+    }
+  }
+};
+
+/**
+ * The (document, version) pairs of `collectionId`'s sections, as one
+ * string: a save to the collection changes it.
+ */
+const collectionVersions = (collectionId: string) => sql`(
+  SELECT coalesce(group_concat(pair, ',' ORDER BY pair), '') FROM (
+    SELECT DISTINCT document_id || ':' || version AS pair FROM sections
+    WHERE document_id IN (
+      SELECT id FROM documents WHERE collection_id = ${collectionId}
+    )
+  )
+)`;
+
+/** `collectionId`'s versions now (`collectionVersions`), read before `collectionPlan`. */
+export const collectionFingerprint = async (
+  db: DrizzleD1Database,
+  collectionId: string
+): Promise<string> => {
+  const [row] = await db.all<{ versions: string }>(
+    sql`SELECT ${collectionVersions(collectionId)} AS versions`
+  );
+  return row?.versions ?? "";
+};
+
+/**
+ * The statement, for the batch that deletes `collectionId`, that records a
+ * rebuild as owed (`id`) when the collection changed since `fingerprint`
+ * was read: what `collectionPlan` read then isn't all the batch deletes.
+ * Its writes are the batch's, done when it commits.
+ */
+export const rebuildOwedIfChanged = (
+  db: DrizzleD1Database,
+  id: string,
+  collectionId: string,
+  fingerprint: string
+) => {
+  const now = Date.now();
+  // Builders, not `db.run`: drizzle's D1 batch can't bind a raw
+  // statement's parameters.
+  return db.insert(searchRebuilds).select(
+    db
+      .select({
+        id: sql<string>`${id}`.as("id"),
+        owedAt: sql<number>`${now}`.as("owed_at"),
+        writesDoneAt: sql<number>`${now}`.as("writes_done_at"),
+      })
+      .from(sql`(SELECT 1)`)
+      .where(sql`${collectionVersions(collectionId)} IS NOT ${fingerprint}`)
+  );
+};
+
+/** A held separator, and the FTS5 query that finds a live row explaining it. */
+interface Held {
+  readonly table: IndexKey["table"];
+  readonly query: string;
+}
+
+/**
+ * The query for a live row that holds what separator `found` holds of its
+ * key, each one lookup however large the index: the trigram itself, in
+ * the trigram index; the separator's prefix, in a prefix index, when it
+ * has the two or three characters the prefix indexes keep; otherwise the
+ * key's whole token, as a term. Never a longer prefix, whose query merges
+ * every term that starts with it.
+ */
+const liveQueryOf = (table: IndexKey["table"], found: Found): Held => {
+  const token = found.key.slice(1);
+  if (table === "search_trigrams") {
+    return { table, query: `"${token.replaceAll('"', '""')}"` };
+  }
+  const prefix = (found.separator ?? "").slice(1);
+  return !found.key.startsWith("0") && prefix.length >= 2
+    ? { table, query: `"${prefix}"*` }
+    : { table, query: `"${token}"` };
+};
+
+/**
+ * Whether the search index still holds something of `keys`' tokens that
+ * no live row explains, after their rows' secure deletes: "clean" when
+ * not, "rebuild" when it does, "capped" when finding out took more than
+ * `collectionCheckCaps` allows.
+ */
+const collectionLeft = async (
+  db: DrizzleD1Database,
+  keys: readonly IndexKey[]
+): Promise<"clean" | "rebuild" | "capped"> => {
+  const held = new Map<string, Held>();
+  for (const table of ["search_words", "search_trigrams"] as const) {
+    const ofTable = keys.filter((key) => key.table === table);
+    for (let at = 0; at < ofTable.length; at += keysPerLookup) {
+      const chunk = ofTable.slice(at, at + keysPerLookup);
+      // oxlint-disable-next-line no-await-in-loop -- one chunk at a time
+      const found = await separatorsOf(
+        db,
+        table,
+        chunk.map(({ key }) => key)
+      );
+      const least = new Map(chunk.map((key) => [key.key, key.least]));
+      for (const one of found) {
+        if (holdsToken(one, least.get(one.key) ?? 1)) {
+          const live = liveQueryOf(table, one);
+          held.set(`${live.table}:${live.query}`, live);
+        }
+      }
+    }
+  }
+  if (held.size > collectionCheckCaps.liveLookups) {
+    loggedCapped({ keys: keys.length, liveLookups: held.size });
+    return "capped";
+  }
+  const lookups = [...held.values()];
+  for (let at = 0; at < lookups.length; at += liveLookupsPerBatch) {
+    // Builders, not `db.all`: drizzle's D1 batch can't bind a raw
+    // statement's parameters.
+    const [first, ...rest] = lookups
+      .slice(at, at + liveLookupsPerBatch)
+      .map(({ table, query }) =>
+        db
+          .select({ live: sql<number>`1` })
+          .from(sql.raw(table))
+          .where(sql`${sql.raw(table)} MATCH ${query}`)
+          .limit(1)
+      );
+    if (first !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+      const results = await db.batch([first, ...rest]);
+      if (results.some((rows) => rows.length === 0)) {
+        return "rebuild";
+      }
+    }
+  }
+  return "clean";
+};
+
+/**
+ * Leaves nothing of a deleted collection's text in the search index, after
+ * the batch that deleted it, which recorded its own rebuild as owed (`id`,
+ * so a purge run again after this fails still rebuilds). Clears that
+ * record and returns when every delete was a secure one, the plan read the
+ * collection's keys, no other purge owes a rebuild (a change to the
+ * collection meanwhile included: `rebuildOwedIfChanged`), and nothing of
+ * the keys is left that no live row explains; rebuilds otherwise. Throws
+ * when the rebuild fails.
+ */
+export const eraseCollectionFromSearchIndex = async (
+  db: DrizzleD1Database,
+  plan: CollectionPlan,
+  { secure, id }: { secure: boolean; id: string }
+): Promise<void> => {
+  if (secure && plan.kind === "keys") {
+    try {
+      if (
+        !(await anyRebuildOwed(db, id)) &&
+        (await collectionLeft(db, plan.keys)) === "clean"
+      ) {
+        await db.delete(searchRebuilds).where(eq(searchRebuilds.id, id));
+        return;
+      }
+    } catch (error) {
+      // The error's name only: its message repeats the lookup's tokens.
       log.warn("knowledge.purge.index_check_failed", {
         errorName: errorNameOf(error),
       });
