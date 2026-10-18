@@ -853,8 +853,10 @@ describe("the approvers' list of what holds approvals", () => {
     expect({
       decides: listed.decides,
       ours,
+      // By the subject index, in its order: a page stops once it is full,
+      // reading neither the table whole nor sorting what it read.
       readsWhole: plans.some((plan) =>
-        plan.some((step) => fullScan.test(step))
+        plan.some((step) => fullScan.test(step) || step.includes("TEMP B-TREE"))
       ),
       builder: await builder.api.dependencies.inForce(),
     }).toStrictEqual({

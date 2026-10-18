@@ -29,8 +29,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // its approvals are retired or revoked: an App's own page, or the
 // workflow's approvals here, since a workflow has no page of its own.
 // Core lists nothing to anyone else; it checks the permission on every
-// call. A page at a time, the newest decision first, each next page
-// asked for: older approvals are there however many there are.
+// call. A page at a time, each next page asked for: every App and
+// workflow is there however many there are.
 
 const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
   const { t } = useLingui();
@@ -47,13 +47,16 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
       async (session) => await session.dependencies.inForce(next)
     );
     if (page !== undefined) {
-      setShown((before) => ({
-        ...page,
-        subjects: [...before.subjects, ...page.subjects],
-      }));
+      // A page refused (the permission was taken away since) replaces the
+      // list, which then says why; any other adds to it.
+      setShown((before) =>
+        page.decides
+          ? { ...page, subjects: [...before.subjects, ...page.subjects] }
+          : page
+      );
     }
   };
-  if (!listed.decides) {
+  if (!shown.decides) {
     return (
       <p className="text-muted-foreground border-t px-5 py-4">
         <Trans>

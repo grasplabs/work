@@ -570,7 +570,7 @@ export const dependencySubjectsListed = 100;
 /**
  * The Apps and workflows that hold approvals in force (approved or
  * retired), for someone who holds `dependencies.approve` now: each by its
- * name, with how many approvals it holds, the newest decision first.
+ * name, with how many approvals it holds, a page at a time by subject.
  */
 export interface DependencySubjectsInForce {
   /** Whether the reader holds `dependencies.approve` now; none listed otherwise. */
