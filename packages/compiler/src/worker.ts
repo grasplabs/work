@@ -363,7 +363,12 @@ const screensTarget = screenTarget(
  */
 const appCodeTarget = serverTarget(
   generatedModules,
-  new Set([...serverSdkImports, "@grasp-os/sdk/database"])
+  new Set([
+    ...serverSdkImports,
+    "@grasp-os/sdk/database",
+    // Its tests' (app-code.ts): what the source checks give tests alone.
+    "@grasp-os/sdk/testing",
+  ])
 );
 
 /**
@@ -802,41 +807,6 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
 };
 
 /**
- * An App's server code of spec 8's layout built (`buildAppCode`), then
- * type-checked against the SDK's server side, with the host's generated
- * modules (`.grasp/`) among its files: what it would build to, or why it
- * fails, its type errors included. No DOM: its isolate has none. A seal
- * holds its release to this before anything is sealed (app-releases.ts);
- * a build alone, as the seal's first, symbolic inspection makes it,
- * doesn't, since its generated modules are stand-ins without types.
- */
-export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
-  const built = buildAppCode(files);
-  if (!built.ok) {
-    return built;
-  }
-  // Not yet its migrations' own type errors: the SDK types a migration's
-  // row as any record, not as the table's previous shape, so a migration
-  // that spreads its row fails to check (GRA-690). What a migration names
-  // beyond its file (`rule: "imports"`) is refused all the same. Their
-  // imports are held by the build all the same, and they run where they
-  // reach nothing whatever their types say.
-  const diagnostics = typeCheck(
-    appCodeFiles(files),
-    kit.types,
-    appCodeTarget
-  ).filter(
-    ({ file, rule }) =>
-      file === undefined ||
-      appCodeKind(file) !== "migration" ||
-      !rule.startsWith("TS")
-  );
-  return diagnostics.some((diagnostic) => isError(diagnostic))
-    ? { ok: false, diagnostics }
-    : built;
-};
-
-/**
  * Builds an App's tests (`tests/**`), each held to what a test may import
  * (app-code.ts): only the test files become modules. The schema and
  * values they import, and the `#grasp` references, are the release's own
@@ -888,6 +858,54 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
   return errors.length > 0
     ? { ok: false, diagnostics: errors }
     : { ok: true, modules };
+};
+
+/**
+ * An App's server code of spec 8's layout built (`buildAppCode`), then
+ * type-checked against the SDK's server side, with the host's generated
+ * modules (`.grasp/`) among its files: what it would build to, or why it
+ * fails, its type errors included. No DOM: its isolate has none. A seal
+ * holds its release to this before anything is sealed (app-releases.ts);
+ * a build alone, as the seal's first, symbolic inspection makes it,
+ * doesn't, since its generated modules are stand-ins without types.
+ */
+export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
+  const built = buildAppCode(files);
+  if (!built.ok) {
+    return built;
+  }
+  // Its tests, checked in the same program: their `#grasp` is the
+  // references generated for this very release, which exist only here.
+  // Only tests that build (`buildAppTests`: what a test may import and
+  // name, no directive, suppression or ambient module) join it, so none
+  // can steer the server code's check; tests that don't build are
+  // refused where they run, as a version is made current (app-tests.ts).
+  const candidates = Object.fromEntries(
+    Object.entries(files).filter(([path]) => appCodeKind(path) === "test")
+  );
+  const tests =
+    Object.keys(candidates).length > 0 && buildAppTests(files).ok
+      ? candidates
+      : {};
+  // Not yet its migrations' own type errors: the SDK types a migration's
+  // row as any record, not as the table's previous shape, so a migration
+  // that spreads its row fails to check (GRA-690). What a migration names
+  // beyond its file (`rule: "imports"`) is refused all the same. Their
+  // imports are held by the build all the same, and they run where they
+  // reach nothing whatever their types say.
+  const diagnostics = typeCheck(
+    { ...appCodeFiles(files), ...tests },
+    kit.types,
+    appCodeTarget
+  ).filter(
+    ({ file, rule }) =>
+      file === undefined ||
+      appCodeKind(file) !== "migration" ||
+      !rule.startsWith("TS")
+  );
+  return diagnostics.some((diagnostic) => isError(diagnostic))
+    ? { ok: false, diagnostics }
+    : built;
 };
 
 export default class ScreenCompiler extends WorkerEntrypoint {
