@@ -228,6 +228,13 @@ export const catalogContractSchema = z
         z.strictObject({
           input: z.string().max(256 * 1024),
           output: z.string().max(256 * 1024),
+          /**
+           * That the operation only reads, as the admin who publishes the
+           * contract states it (GRA-718): what a version's review relies
+           * on to leave it out of the writes a model may steer. Missing,
+           * it is taken for a write.
+           */
+          readOnly: z.boolean().optional(),
         })
       )
       .optional(),
@@ -587,6 +594,27 @@ export interface WorkflowVersionAction {
 }
 
 /**
+ * A use whose writes a model's answers may steer, by its binding's alias:
+ * a connector's, with each of its operations that may write; or an
+ * operation binding's (an App's export), which may always write, as its
+ * contract states nothing about reading only.
+ */
+export type SteeredWrite =
+  | { alias: string; kind: "connector"; operations: string[] }
+  | { alias: string; kind: "operation" };
+
+/**
+ * One of a version's own actions as its review shows it (GRA-718): as
+ * sealed, and, when it asks a model, each of its uses that may write, which
+ * the model's answers may steer. Empty when it asks no model, or only
+ * reads. It covers the action's own uses only, never a workflow's own
+ * model task whose answer feeds a later task's call.
+ */
+export interface WorkflowActionReview extends WorkflowVersionAction {
+  modelSteeredWrites: SteeredWrite[];
+}
+
+/**
  * Why a deletion was refused with `workflow.resource_bound`, in its
  * details: the workflows whose current version binds it that the caller
  * may see, and how many more there are that they may not.
@@ -656,7 +684,7 @@ export interface WorkflowResourceVersion {
   manifestHash: string;
   bindings: WorkflowVersionBinding[];
   /** What its own actions may do, as sealed with it, by binding. */
-  actions: WorkflowVersionAction[];
+  actions: WorkflowActionReview[];
   build: WorkflowVersionBuild;
   author: string;
   createdAt: string;

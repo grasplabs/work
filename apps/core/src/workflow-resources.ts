@@ -38,6 +38,8 @@ import type {
   WorkflowResourceVersion,
   WorkflowRole,
   WorkflowBinders,
+  SteeredWrite,
+  WorkflowActionReview,
   WorkflowVersionAction,
   WorkflowVersionBinding,
   WorkflowVersionSource,
@@ -1085,12 +1087,158 @@ const sealedActionsOf = (
   return parsed.data.actions;
 };
 
+/** Whether `action` asks a model (GRA-700). */
+const asksModel = (action: WorkflowVersionAction): boolean =>
+  action.uses.some(({ kind }) => kind === "model");
+
+/** What a review reads of a version's binding: which contract it pinned. */
+type PinnedContract = Pick<
+  WorkflowVersionBinding,
+  "alias" | "kind" | "contractId" | "fingerprint"
+>;
+
+/** Where a version's manifest seals what its bindings pinned (`writeVersion`). */
+const manifestBindingsSchema = z.object({
+  bindings: z.array(
+    z.object({
+      alias: z.string(),
+      kind: z.enum(["workflow", ...catalogBindingKinds]),
+      contractId: z.string().nullable(),
+      fingerprint: z.string(),
+    })
+  ),
+});
+
+/**
+ * What version `row`'s bindings pinned, as its manifest seals them, never
+ * as a table that can be changed says: a review reads only what the
+ * version's hash covers.
+ */
+const sealedBindingsOf = (
+  row: typeof workflowResourceVersions.$inferSelect
+): PinnedContract[] => {
+  const parsed = manifestBindingsSchema.safeParse(JSON.parse(row.manifest));
+  if (!parsed.success) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return parsed.data.bindings.map(
+    ({ alias, kind, contractId, fingerprint }) => ({
+      alias,
+      kind,
+      contractId,
+      fingerprint,
+    })
+  );
+};
+
+/** Reads catalog contracts by key: those the catalog holds intact. */
+type CatalogLookup = (
+  keys: readonly string[]
+) => Promise<Map<string, ResolvedCatalogContract>>;
+
+/**
+ * A lookup that reads each catalog key once, however many reviews of one
+ * answer ask for it, concurrently or not: a listing of many versions
+ * pinning the same contract reads and hashes it once.
+ */
+const catalogOnce = (env: Env): CatalogLookup => {
+  // Each key, by the read that loads it: set before anything is awaited,
+  // so a review asking at the same time shares that read.
+  const reads = new Map<
+    string,
+    Promise<Map<string, ResolvedCatalogContract>>
+  >();
+  return async (keys) => {
+    const missing = [...new Set(keys)].filter((key) => !reads.has(key));
+    if (missing.length > 0) {
+      const read = resolveCatalogKeys(env, missing);
+      for (const key of missing) {
+        reads.set(key, read);
+      }
+    }
+    const found = new Map<string, ResolvedCatalogContract>();
+    for (const key of keys) {
+      // oxlint-disable-next-line no-await-in-loop -- each read shared, once
+      const read = await reads.get(key);
+      const contract = read?.get(key);
+      if (contract !== undefined) {
+        found.set(key, contract);
+      }
+    }
+    return found;
+  };
+};
+
+/**
+ * `actions` as a version's review shows them (GRA-718): for each that asks
+ * a model, its uses that may write, which the model's answers may steer.
+ * A connector's operation counts as a write unless the catalog contract
+ * its binding pinned states it is read-only, and only while the catalog
+ * still holds that exact contract (its fingerprint the one the version
+ * sealed): a binding, contract or operation that isn't there, or a
+ * contract that changed, counts as a write. An operation binding's use (an
+ * App's export) always counts: its contract states nothing about reading.
+ * So the flag shows whenever a write can't be ruled out. Read from the
+ * version as sealed and the catalog, never inspected again.
+ */
+const reviewedActions = async (
+  lookup: CatalogLookup,
+  actions: readonly WorkflowVersionAction[],
+  bindings: readonly PinnedContract[]
+): Promise<WorkflowActionReview[]> => {
+  const connectorOf = (alias: string): PinnedContract | undefined =>
+    bindings.find(
+      (binding) => binding.alias === alias && binding.kind === "connector"
+    );
+  const keys = actions.filter(asksModel).flatMap((action) =>
+    action.uses.flatMap((use) => {
+      const contractId =
+        use.kind === "connector" ? connectorOf(use.alias)?.contractId : null;
+      return typeof contractId === "string" ? [contractId] : [];
+    })
+  );
+  const catalog = await lookup(keys);
+  const readOnly = (alias: string, operation: string): boolean => {
+    const binding = connectorOf(alias);
+    if (binding === undefined || binding.contractId === null) {
+      return false;
+    }
+    const contract = catalog.get(binding.contractId);
+    return (
+      contract !== undefined &&
+      contract.fingerprint === binding.fingerprint &&
+      contract.contract.operations?.[operation]?.readOnly === true
+    );
+  };
+  const steered = (
+    use: WorkflowVersionAction["uses"][number]
+  ): SteeredWrite[] => {
+    if (use.kind === "operation") {
+      return [{ alias: use.alias, kind: "operation" }];
+    }
+    if (use.kind !== "connector") {
+      return [];
+    }
+    const operations = use.operations.filter(
+      (operation) => !readOnly(use.alias, operation)
+    );
+    return operations.length === 0
+      ? []
+      : [{ alias: use.alias, kind: "connector", operations }];
+  };
+  return actions.map((action) => ({
+    ...action,
+    modelSteeredWrites: asksModel(action) ? action.uses.flatMap(steered) : [],
+  }));
+};
+
 /**
  * A version's row, as the registry answers it: only once its manifest
  * still hashes to what was sealed, since what its actions may do and its
  * build are read from it (`workflow.version_corrupt` otherwise).
  */
 const versionOf = async (
+  lookup: CatalogLookup,
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: WorkflowVersionBinding[]
 ): Promise<WorkflowResourceVersion> => {
@@ -1106,7 +1254,11 @@ const versionOf = async (
     contractHash: row.contractHash,
     manifestHash: row.manifestHash,
     bindings,
-    actions: sealedActionsOf(row),
+    actions: await reviewedActions(
+      lookup,
+      sealedActionsOf(row),
+      sealedBindingsOf(row)
+    ),
     build: buildSummary(
       sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
     ),
@@ -1276,7 +1428,11 @@ const publishedAs = async (
   }
   const bindings = await bindingsOf(env, id);
   return {
-    version: await versionOf(row, bindings.get(row.version) ?? []),
+    version: await versionOf(
+      catalogOnce(env),
+      row,
+      bindings.get(row.version) ?? []
+    ),
     modulesHash: sealedModulesHash(row),
   };
 };
@@ -1414,6 +1570,8 @@ const writeVersion = async (
     throw definitionInvalid([tooLargeProblem(actions)]);
   }
   const manifestHash = await sha256Hex(manifest);
+  // Before anything is written: a publication that lands answers it.
+  const reviewed = await reviewedActions(catalogOnce(env), actions, bindings);
   const createdAt = new Date();
   const db = drizzle(env.DB);
   // This publication's own reservations: another publishing the same
@@ -1518,7 +1676,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
-    actions,
+    actions: reviewed,
     build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
@@ -1759,10 +1917,13 @@ export const workflowVersions = async (
     .orderBy(desc(workflowResourceVersions.version));
   const bindings = await bindingsOf(env, workflow.id);
   const visible = await visibleTo(env, by, [...bindings.values()].flat());
+  // One lookup for the whole listing: each contract read once.
+  const lookup = catalogOnce(env);
   return await Promise.all(
     rows.map(
       async (row) =>
         await versionOf(
+          lookup,
           row,
           (bindings.get(row.version) ?? []).map(
             (binding) => visible.get(binding) ?? binding

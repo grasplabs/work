@@ -7587,6 +7587,14 @@ msgstr "Would run after approval"
 msgid "Write your answer"
 msgstr "Write your answer"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
+msgstr "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Writes a model may steer: {target}"
+msgstr "Writes a model may steer: {target}"
+
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Writing"

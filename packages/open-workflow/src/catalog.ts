@@ -34,7 +34,15 @@ export interface CatalogContract {
   response?: DescriptorText;
   /** connector: the operations it allows, by name. */
   operations?: Readonly<
-    Record<string, { input: DescriptorText; output: DescriptorText }>
+    Record<
+      string,
+      {
+        input: DescriptorText;
+        output: DescriptorText;
+        /** That it only reads, as its publisher states (never checked here). */
+        readOnly?: boolean;
+      }
+    >
   >;
   /**
    * event: the event types it admits, each with the descriptor of its data
