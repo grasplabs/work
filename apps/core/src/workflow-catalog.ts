@@ -52,7 +52,11 @@ const storedSchema = z.strictObject({
   operations: z
     .record(
       z.string(),
-      z.strictObject({ input: z.string(), output: z.string() })
+      z.strictObject({
+        input: z.string(),
+        output: z.string(),
+        readOnly: z.boolean().optional(),
+      })
     )
     .optional(),
   events: z

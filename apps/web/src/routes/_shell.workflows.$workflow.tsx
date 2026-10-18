@@ -1,13 +1,15 @@
 import type {
+  SteeredWrite,
   WorkflowDraft,
   WorkflowResource,
+  WorkflowActionReview,
   WorkflowResourceVersion,
-  WorkflowVersionAction,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -40,10 +42,29 @@ import { TestRun } from "../workflows/test-run.tsx";
 // with a role, its published versions. Core decides who sees what: the
 // draft is read only for builders, as it can hold a sensitive default.
 // Each version shows what its own actions may call, as sealed with it
-// (GRA-709): each binding they use, and a connector's exact operations.
+// (GRA-709): each binding they use, and a connector's exact operations;
+// and, for one that asks a model, the writes its answers may steer
+// (GRA-718), which no reviewer should have to piece together.
+
+/**
+ * One use whose writes a model's answers may steer (GRA-718), as its
+ * neighbouring use badge names it: a connector's alias and the operations
+ * that may write; an App export's alias alone, as any of it may write.
+ */
+const SteeredWriteBadge = ({ write }: { write: SteeredWrite }) => {
+  const target =
+    write.kind === "connector"
+      ? `${write.alias}: ${formatList(write.operations)}`
+      : write.alias;
+  return (
+    <Badge variant="destructive">
+      <Trans>Writes a model may steer: {target}</Trans>
+    </Badge>
+  );
+};
 
 /** What a version's own actions may call: each action, then its uses. */
-const ActionEffects = ({ actions }: { actions: WorkflowVersionAction[] }) => {
+const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
   if (actions.length === 0) {
     return (
       <span className="text-muted-foreground">
@@ -63,6 +84,9 @@ const ActionEffects = ({ actions }: { actions: WorkflowVersionAction[] }) => {
                 : use.alias}
             </Badge>
           ))}
+          {action.modelSteeredWrites.map((write) => (
+            <SteeredWriteBadge key={write.alias} write={write} />
+          ))}
         </li>
       ))}
     </ul>
@@ -80,6 +104,12 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
   }
   return (
     <Table>
+      <TableCaption>
+        <Trans>
+          Writes a model may steer cover the uses of each action alone, not a
+          model task of the workflow whose answer a later task passes on.
+        </Trans>
+      </TableCaption>
       <TableHeader>
         <TableRow>
           <TableHead>{t`Version`}</TableHead>

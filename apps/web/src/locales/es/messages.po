@@ -7587,6 +7587,14 @@ msgstr "Se ejecutaría tras la aprobación"
 msgid "Write your answer"
 msgstr "Escribe tu respuesta"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
+msgstr "Las escrituras que un modelo puede dirigir cubren solo los usos de cada acción, no una tarea de modelo del flujo cuya respuesta pasa una tarea posterior."
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Writes a model may steer: {target}"
+msgstr "Escrituras que un modelo puede dirigir: {target}"
+
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Escribiendo"
