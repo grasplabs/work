@@ -472,7 +472,11 @@ const matcherOf = (
  * a term can't overlap the marker (`purgeTermSchema`), so each pass
  * replaces text outside the markers, or markers with fewer of them.
  */
-const without = (text: string, matcher: Matcher): string => {
+const without = (
+  text: string,
+  matcher: Matcher,
+  visit?: (current: string, index: number, length: number) => void
+): string => {
   if (!matcher.anywhere.test(text)) {
     return text;
   }
@@ -481,6 +485,7 @@ const without = (text: string, matcher: Matcher): string => {
     let next = "";
     let end = 0;
     for (const { index, 0: found } of current.matchAll(matcher.remove)) {
+      visit?.(current, index, found.length);
       next += `${current.slice(end, index)}${purgedMarker}`;
       end = index + found.length;
     }
@@ -541,21 +546,18 @@ const characterAt = (text: string, index: number): string =>
  * spaces ("東京Visser", "Visserさん"), which the purge removes the term from
  * but whose token holds the term and isn't the term's own. The index's
  * check of a term's tokens (search-erasure.ts) can't find that token, so
- * the index is rebuilt then.
+ * the index is rebuilt then. It looks at every term `without` removes, in
+ * each of its passes: "Visser" in "Foo.Visserさん" is removed only once
+ * "Foo." is.
  */
 const besideLongerToken = (text: string, matcher: Matcher): boolean => {
-  if (!matcher.anywhere.test(text)) {
-    return false;
-  }
-  for (const { index, 0: found } of text.matchAll(matcher.remove)) {
-    if (
-      otherTokenCharacter.test(characterBefore(text, index)) ||
-      otherTokenCharacter.test(characterAt(text, index + found.length))
-    ) {
-      return true;
-    }
-  }
-  return false;
+  let beside = false;
+  without(text, matcher, (current, index, length) => {
+    beside ||=
+      otherTokenCharacter.test(characterBefore(current, index)) ||
+      otherTokenCharacter.test(characterAt(current, index + length));
+  });
+  return beside;
 };
 
 /**

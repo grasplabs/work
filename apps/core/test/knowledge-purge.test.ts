@@ -213,7 +213,7 @@ const saveOver = async (
  * that entry. Letters only: a word with a digit is held to a stricter
  * check of its own.
  */
-const joinedWordHeadingAPage = async (admin: Person) => {
+const joinedWordHeadingAPage = async (admin: Person, before = "") => {
   const handbook = await admin.api.knowledge.createCollection({
     name: "Handbook",
     access: "everyone",
@@ -227,7 +227,7 @@ const joinedWordHeadingAPage = async (admin: Person) => {
     admin,
     handbook.id,
     "joined.md",
-    `# Words\n${words.map((word) => `${word}さん`).join(" ")}`
+    `# Words\n${words.map((word) => `${before}${word}さん`).join(" ")}`
   );
   // The stem alone first: one term more before the pairs, so pages, which
   // fill a pair at a time here, begin on a joined word.
@@ -673,6 +673,28 @@ describe("a purge of content", setUpTime, () => {
       type: "content",
       documentIds: [joined.id],
       terms: [word ?? ""],
+      reason: "other",
+    });
+    const read = await admin.api.knowledge.getDocument(joined.id);
+    expect({
+      found: word !== undefined,
+      removed: !read.version.text.includes(`${word}さん`),
+      entriesLeft: await entriesLeft(),
+    }).toStrictEqual({ found: true, removed: true, entriesLeft: 0 });
+  });
+
+  it("leaves nothing of a term beside a script that only a term removed before it left whole", async () => {
+    const admin = await personOf("admin");
+    // "Foo." joins the term on its left, so the term is removed only once
+    // "Foo." is; the index reads "Foo." as its own token either way.
+    const { joined, word, entriesLeft } = await joinedWordHeadingAPage(
+      admin,
+      "Foo."
+    );
+    await purged(admin, {
+      type: "content",
+      documentIds: [joined.id],
+      terms: ["Foo.", word ?? ""],
       reason: "other",
     });
     const read = await admin.api.knowledge.getDocument(joined.id);
