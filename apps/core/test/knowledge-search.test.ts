@@ -507,26 +507,31 @@ const recordingReads = async (person: Person) => {
     rows: 0,
     statements: [],
   };
+  // Each statement is kept as it runs, bound or not, however it runs;
+  // the rows it read are added where D1 says (`all`, `run`, a batch).
   const recorded = (
     statement: D1PreparedStatement,
-    query: string
+    query: string,
+    values: unknown[] = []
   ): D1PreparedStatement =>
     new Proxy(statement, {
       get: (target, property) => {
         if (property === "bind") {
-          return (...values: unknown[]) => {
-            made.statements.push({ query, values });
-            return recorded(target.bind(...values), query);
-          };
+          return (...bound: unknown[]) =>
+            recorded(target.bind(...bound), query, bound);
         }
-        if (property === "all") {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "all" || property === "run") {
           return async () => {
+            made.statements.push({ query, values });
             const result = await target.all();
             made.rows += result.meta.rows_read;
             return result;
           };
         }
-        const value: unknown = Reflect.get(target, property);
+        if (property === "first" || property === "raw") {
+          made.statements.push({ query, values });
+        }
         return typeof value === "function"
           ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
           : value;
@@ -668,7 +673,15 @@ describe("search speed", { timeout: 300_000 }, () => {
       const whole = await Promise.all(
         recording.made.statements.map(tablesReadWhole)
       );
-      return { readWhole: whole.flat(), rows: recording.made.rows };
+      return {
+        readWhole: whole.flat(),
+        rows: recording.made.rows,
+        // Its own full-text statement was seen: what's asserted of the
+        // statements is of the search's.
+        seen: recording.made.statements.some(({ query: made }) =>
+          made.includes("search_words")
+        ),
+      };
     };
     const everyQuery = [
       "vakantiedagen",
@@ -684,18 +697,26 @@ describe("search speed", { timeout: 300_000 }, () => {
     const rare = ["vakantiedagen", "pensioenregeling", "reiskostenvergoedng"];
 
     const readWhole: Record<string, string[]> = {};
+    const seen: Record<string, boolean> = {};
     const rows: Record<string, boolean> = {};
     for (const query of everyQuery) {
       // oxlint-disable-next-line no-await-in-loop -- one search at a time
       const found = await searched(query);
       readWhole[query] = found.readWhole;
+      seen[query] = found.seen;
       if (rare.includes(query)) {
         rows[query] = found.rows < sections / 10;
       }
     }
 
-    expect({ sections: sections >= 5000, readWhole, rows }).toStrictEqual({
+    expect({
+      sections: sections >= 5000,
+      seen,
+      readWhole,
+      rows,
+    }).toStrictEqual({
       sections: true,
+      seen: Object.fromEntries(everyQuery.map((query) => [query, true])),
       // Through the indexes, however many sections match: a word in
       // thousands of them costs what they match, never the whole corpus.
       readWhole: Object.fromEntries(everyQuery.map((query) => [query, []])),
