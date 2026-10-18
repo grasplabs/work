@@ -34,7 +34,12 @@ import {
   callAction,
   maxActionCalls,
 } from "../src/workflows/resource-action.ts";
-import { makeCall } from "../src/workflows/resource-calls.ts";
+import type { ActionEffects } from "../src/workflows/resource-action.ts";
+import type { CallingRun } from "../src/workflows/resource-authority.ts";
+import {
+  auditAdmissionRefusal,
+  makeCall,
+} from "../src/workflows/resource-calls.ts";
 import type { BuiltCall } from "../src/workflows/resource-calls.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
@@ -357,6 +362,14 @@ const hearing =
     await Promise.resolve();
   };
 
+/** A binding that is down: any use of it throws. */
+const down = <T extends object>(binding: T): T =>
+  new Proxy(binding, {
+    get: () => {
+      throw new Error("Unavailable");
+    },
+  });
+
 describe("a JSON workflow's own actions", () => {
   it("calls the bindings it declares, each an effect of its own, once even across a replay", async () => {
     const admin = await person("admin");
@@ -604,6 +617,94 @@ describe("a JSON workflow's own actions", () => {
         },
       ],
       receipts: [],
+    });
+  });
+
+  it("keeps an admission refusal standing when its evidence can't be kept", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await actingWorkflow(
+      ada,
+      admin,
+      notifyModule(
+        `try {
+      await ctx.resources.mail.call(["mail", "archive"].join("."), { to: args.to });
+    } catch {
+      // Swallowed.
+    }
+    return { status: "swallowed" };`,
+        // Its operations a list of strings: any name type-checks.
+        `(() => {
+    const operations: string[] = ["mail.send"];
+    return [resource.connector("mail", { operations })];
+  })()`
+      )
+    );
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const run: CallingRun = {
+      runId: `run-${unique()}`,
+      workflowId: workflow.id,
+      version: 1,
+      principal: ada.userId,
+      invoker: { type: "person", id: ada.userId, appVersion: null },
+      bindings: new Map(),
+      restricted: false,
+    };
+    const refusedBy = async (refused: ActionEffects["refused"]) =>
+      await outcome(
+        callAction(
+          env,
+          build.compute,
+          build.sdk,
+          notifyCall,
+          { to: "Ada" },
+          Date.now() + 5000,
+          {
+            owner: `workflow-action:${workflow.id}`,
+            make: async (): Promise<Json> =>
+              await Promise.resolve({ messageId: "m" }),
+            refused,
+          }
+        )
+      );
+    // The audit log's database down: the write fails, and is logged.
+    const logged = vi.spyOn(console, "error").mockReturnValue();
+    let code: unknown;
+    let thrown: unknown;
+    let events: unknown[] = [];
+    try {
+      code = await refusedBy(async (said) => {
+        await auditAdmissionRefusal({ ...env, DB: down(env.DB) }, run, {
+          build: build.hash,
+          task: "notify",
+          attempt: 1,
+          generation: 1,
+          ...said,
+        });
+      });
+      // A hook that throws, all the same, never takes the refusal's place.
+      thrown = await refusedBy(async () => {
+        await Promise.resolve();
+        throw new Error("Unavailable");
+      });
+      events = logged.mock.calls.map(([fields]: unknown[]) =>
+        typeof fields === "object" && fields !== null && "event" in fields
+          ? fields.event
+          : undefined
+      );
+    } finally {
+      logged.mockRestore();
+    }
+    expect({
+      code,
+      thrown,
+      logged: events.filter((event) => event === "workflow.call.audit_failed")
+        .length,
+    }).toStrictEqual({
+      code: "workflow.call_denied",
+      thrown: "workflow.call_denied",
+      // Once by the write that failed, once by the hook that threw.
+      logged: 2,
     });
   });
 

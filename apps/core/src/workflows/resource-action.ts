@@ -1,4 +1,5 @@
 import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { passedBound } from "@grasp-os/shared/value-bounds";
@@ -388,12 +389,17 @@ export const callAction = async (
   // kept as evidence first.
   if (state.refusal !== undefined) {
     if (state.admission !== undefined) {
-      await effects.refused({
-        ...state.admission,
-        errorCode:
-          workflowResourceErrors.codeOf(state.refusal) ??
-          "workflow.call_denied",
-      });
+      const errorCode =
+        workflowResourceErrors.codeOf(state.refusal) ?? "workflow.call_denied";
+      // Never in the refusal's place, whatever keeping it came to.
+      try {
+        await effects.refused({ ...state.admission, errorCode });
+      } catch (error) {
+        log.error("workflow.call.audit_failed", {
+          errorCode,
+          ...errorFields(error),
+        });
+      }
     }
     throw state.refusal;
   }
