@@ -166,7 +166,7 @@ const SavedList = () => {
       </TableHeader>
       <TableBody>
         {saved.map((source) => (
-          <TableRow key={source._id}>
+          <TableRow key={source.id}>
             <TableCell>
               {source.title}
               {source.guest ? (

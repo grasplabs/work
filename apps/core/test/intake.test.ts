@@ -86,7 +86,17 @@ const summarySchema = z.object({
   createdAt: z.number(),
 });
 
-const sourceSchema = z
+const sourceSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  medium: z.string(),
+  date: z.string(),
+  from: z.string(),
+  guest: z.boolean(),
+  createdAt: z.number(),
+});
+
+const savedSourceSchema = z
   .object({
     _id: z.string(),
     title: z.string(),
@@ -155,6 +165,12 @@ const sourcesOf = async (person: Person, app: AppId) =>
   z
     .array(sourceSchema)
     .parse(valueOf(await call(person, app, "drafts.saved", "query")));
+
+/** A saved source as `person` reads it whole, notes and all. */
+const sourceOf = async (person: Person, app: AppId, id: string) =>
+  savedSourceSchema.parse(
+    valueOf(await call(person, app, "drafts.source", "query", { id }))
+  );
 
 /** A saved source's statements, by their text, as their fields. */
 const statementsOf = async (person: Person, app: AppId, source: string) =>
@@ -275,7 +291,8 @@ describe("the intake", { timeout: 60_000 }, () => {
         })
       )
     );
-    const [source] = await sourcesOf(admin, app);
+    const [listedSource] = await sourcesOf(admin, app);
+    const source = await sourceOf(admin, app, saved.source);
 
     expect({
       listed: listed.map(({ title: shown, origin, statements, revision }) => ({
@@ -293,7 +310,12 @@ describe("the intake", { timeout: 60_000 }, () => {
       keptAgain,
       before,
       saved: saved.statements,
-      source: source && {
+      listedSource: listedSource && {
+        id: listedSource.id,
+        title: listedSource.title,
+        guest: listedSource.guest,
+      },
+      source: {
         title: source.title,
         medium: source.medium,
         date: source.date,
@@ -325,6 +347,8 @@ describe("the intake", { timeout: 60_000 }, () => {
       // Nothing is saved before someone saves it.
       before: [],
       saved: 1,
+      // Listed without its notes.
+      listedSource: { id: saved.source, title, guest: false },
       source: {
         title,
         medium: "interview",
@@ -562,6 +586,39 @@ describe("the intake", { timeout: 60_000 }, () => {
     });
   });
 
+  it("lists saved sources without their notes, so long notes never stop the list", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await copyOf(admin);
+    const draft = interview(`Long ${unique()}`);
+    const long = { ...draft.source, notes: "n".repeat(30_000) };
+    // More than a query may answer (256 KiB) were their notes listed.
+    const saveLong = async (): Promise<void> => {
+      const id = await created(admin, app, { ...draft, source: long });
+      valueOf(
+        await call(admin, app, "drafts.save", "mutation", {
+          id,
+          expectedRevision: 1,
+          ...draft,
+          source: long,
+        })
+      );
+    };
+    for (let count = 0; count < 10; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one save at a time
+      await saveLong();
+    }
+    const listed = await sourcesOf(admin, app);
+    const [first] = listed;
+    const whole =
+      first === undefined ? null : await sourceOf(admin, app, first.id);
+    expect({ listed: listed.length, notes: whole?.notes.length }).toStrictEqual(
+      {
+        listed: 10,
+        notes: 30_000,
+      }
+    );
+  });
+
   it("marks a source a stakeholder's only when it saves their draft, however it was edited", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin);
@@ -597,7 +654,7 @@ describe("the intake", { timeout: 60_000 }, () => {
     const marks = async ({ source }: { source: string }) => {
       const sources = await sourcesOf(admin, app);
       return {
-        source: sources.find(({ _id }) => _id === source)?.guest,
+        source: sources.find(({ id }) => id === source)?.guest,
         statements: await statementsOf(admin, app, source).then((found) =>
           found.map(({ guest }) => guest)
         ),

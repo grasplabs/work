@@ -11,6 +11,7 @@ import {
   reviewer,
   save,
   saved,
+  source,
   statementsOf,
 } from "./operations/drafts.ts";
 import schema from "./schema.ts";
@@ -53,6 +54,7 @@ export default app({
       list,
       get,
       saved,
+      source,
       statementsOf,
       create,
       propose,

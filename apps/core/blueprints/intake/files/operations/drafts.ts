@@ -2,7 +2,12 @@ import { AppError, v } from "@grasp-os/sdk";
 
 import { doc, mutation, query } from "#grasp/server";
 
-import { draftFields, draftOrigins, statementsMax } from "../schema.ts";
+import {
+  draftFields,
+  draftOrigins,
+  sourceMedia,
+  statementsMax,
+} from "../schema.ts";
 
 // Drafts of a source and the statements taken from it, reviewed and
 // edited before they are saved as a `source` and its `statements`. Each
@@ -97,16 +102,49 @@ export const get = query({
   handler: async (ctx, args) => await ctx.db.get("drafts", args.id),
 });
 
-/** The sources saved most recently, newest first. */
+/** A saved source as the screen lists it: without its notes. */
+const savedSummary = v.object({
+  id: v.id("sources"),
+  title: v.string(),
+  medium: v.enum(sourceMedia),
+  date: v.string(),
+  from: v.string(),
+  guest: v.boolean(),
+  createdAt: v.timestamp(),
+});
+
+/**
+ * The sources saved most recently, newest first, as the screen lists
+ * them: their notes, 30,000 characters each at most, are left out, so a
+ * list of them stays within what a query may answer. `source` reads one
+ * whole.
+ */
 export const saved = query({
   args: {},
-  returns: v.array(doc("sources")).max(savedListed),
-  handler: async (ctx) =>
-    await ctx.db
+  returns: v.array(savedSummary).max(savedListed),
+  handler: async (ctx) => {
+    const sources = await ctx.db
       .query("sources")
       .withIndex("by_created")
       .order("desc")
-      .take(savedListed),
+      .take(savedListed);
+    return sources.map((found) => ({
+      id: found._id,
+      title: found.title,
+      medium: found.medium,
+      date: found.date,
+      from: found.from,
+      guest: found.guest,
+      createdAt: found._createdAt,
+    }));
+  },
+});
+
+/** A saved source, with its notes; null when there is none. */
+export const source = query({
+  args: { id: v.id("sources") },
+  returns: doc("sources").nullable(),
+  handler: async (ctx, args) => await ctx.db.get("sources", args.id),
 });
 
 /** A saved source's statements. */
@@ -249,13 +287,16 @@ export const save = mutation({
       );
     }
     const guest = stored.origin === "guest";
-    const source = await ctx.db.insert("sources", { ...args.source, guest });
+    const savedSource = await ctx.db.insert("sources", {
+      ...args.source,
+      guest,
+    });
     for (const statement of args.statements) {
       // oxlint-disable-next-line no-await-in-loop -- staged in order, committed together
       await ctx.db.insert("statements", {
         ...statement,
         tags: tagsInOrder(statement.tags),
-        source,
+        source: savedSource,
         date: args.source.date,
         guest,
       });
@@ -263,6 +304,6 @@ export const save = mutation({
     await ctx.db.delete("drafts", args.id, {
       expectedRevision: args.expectedRevision,
     });
-    return { source, statements: args.statements.length };
+    return { source: savedSource, statements: args.statements.length };
   },
 });
