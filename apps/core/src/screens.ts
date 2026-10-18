@@ -367,7 +367,11 @@ const cachedBuild = async <Build>(
   // cache is read: a deployment where nothing compiles has nothing cached
   // to serve.
   const runner = platformRunner(env, whose);
-  const cacheKey = `${kind}-builds/${await buildKey(files)}.json`;
+  // Under the call the build is, as well as its kind: a change to which
+  // compiler call a kind makes (`compilerCalls`) builds again, rather than
+  // serving what the old call built for as long as it is kept.
+  const [callMethod, callTarget] = compilerCalls[kind];
+  const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
   const cached = await env.FILES.get(cacheKey);

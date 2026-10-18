@@ -1158,14 +1158,16 @@ export default class AppCompiler extends WorkerEntrypoint {
   }
 
   /**
-   * What `build(target, files)` says, without its output: every
-   * diagnostic, its warnings included. Derived from the build itself, so
-   * it is never clean where the build refuses.
+   * What `build(target, files)` says, without its output: every diagnostic
+   * the build gives (a passing screens build carries its lint warnings;
+   * other passing builds carry none). Derived from the build itself, so it
+   * is never clean where the build refuses.
    */
   async check(
     target: CompileTarget,
     files: Record<string, string>
   ): Promise<Diagnostic[]> {
+    knownTarget(targetBuilds, target, "check");
     const built = await this.build(target, files);
     return "diagnostics" in built ? built.diagnostics : [];
   }

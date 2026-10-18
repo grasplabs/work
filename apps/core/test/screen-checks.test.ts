@@ -330,15 +330,19 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
         async ([method = "", target]) =>
           await callStub(compiler, method, [target, typicalApp]).then(
             () => "answered",
-            (error: unknown) => (error instanceof Error ? error.name : "thrown")
+            // What refused it, and which method says so.
+            (error: unknown) =>
+              error instanceof Error
+                ? `${error.name}: ${error.message.split(" ")[0] ?? ""}`
+                : "thrown"
           )
       )
     );
     expect(refusals).toStrictEqual([
-      "TypeError",
-      "TypeError",
-      "TypeError",
-      "TypeError",
+      "TypeError: build",
+      "TypeError: check",
+      "TypeError: inspect",
+      "TypeError: inspect",
     ]);
   });
 
