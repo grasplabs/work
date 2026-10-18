@@ -388,17 +388,34 @@ export const callAction = async (
   // and even when the deadline ended it; the host's own admission's is
   // kept as evidence first.
   if (state.refusal !== undefined) {
-    if (state.admission !== undefined) {
+    const { admission } = state;
+    if (admission !== undefined) {
       const errorCode =
         workflowResourceErrors.codeOf(state.refusal) ?? "workflow.call_denied";
-      // Never in the refusal's place, whatever keeping it came to.
+      // Never in the refusal's place, whatever keeping it came to, and
+      // waited for no longer than the attempt's deadline: a write still
+      // under way then goes on, but the refusal doesn't wait for it.
+      const keeping = (async () => {
+        try {
+          await effects.refused({ ...admission, errorCode });
+        } catch (error) {
+          log.error("workflow.call.audit_failed", {
+            errorCode,
+            ...errorFields(error),
+          });
+        }
+      })();
+      const waited = Promise.withResolvers<null>();
+      const giveUp = setTimeout(
+        () => {
+          waited.resolve(null);
+        },
+        Math.max(0, deadline - Date.now())
+      );
       try {
-        await effects.refused({ ...state.admission, errorCode });
-      } catch (error) {
-        log.error("workflow.call.audit_failed", {
-          errorCode,
-          ...errorFields(error),
-        });
+        await Promise.race([keeping, waited.promise]);
+      } finally {
+        clearTimeout(giveUp);
       }
     }
     throw state.refusal;

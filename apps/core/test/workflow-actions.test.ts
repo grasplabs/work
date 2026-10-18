@@ -671,6 +671,7 @@ describe("a JSON workflow's own actions", () => {
     const logged = vi.spyOn(console, "error").mockReturnValue();
     let code: unknown;
     let thrown: unknown;
+    let hung: unknown;
     let events: unknown[] = [];
     try {
       code = await refusedBy(async (said) => {
@@ -687,6 +688,11 @@ describe("a JSON workflow's own actions", () => {
         await Promise.resolve();
         throw new Error("Unavailable");
       });
+      // Nor one that never settles: the refusal waits no longer than the
+      // attempt's deadline.
+      hung = await refusedBy(async () => {
+        await Promise.withResolvers<null>().promise;
+      });
       events = logged.mock.calls.map(([fields]: unknown[]) =>
         typeof fields === "object" && fields !== null && "event" in fields
           ? fields.event
@@ -698,11 +704,13 @@ describe("a JSON workflow's own actions", () => {
     expect({
       code,
       thrown,
+      hung,
       logged: events.filter((event) => event === "workflow.call.audit_failed")
         .length,
     }).toStrictEqual({
       code: "workflow.call_denied",
       thrown: "workflow.call_denied",
+      hung: "workflow.call_denied",
       // Once by the write that failed, once by the hook that threw.
       logged: 2,
     });
