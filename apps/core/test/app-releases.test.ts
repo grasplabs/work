@@ -907,6 +907,62 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuses a test that runs a streaming action as one that answers once", async () => {
+    // A streaming action runs only for a screen following it (spec
+    // 10.7.6): a test principal's `action` answers once, so its type
+    // refuses one, as the host does (`operation.mode_mismatch`).
+    const streamed = {
+      ...notesFiles(),
+      "operations/streams.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const once = action({ args: {}, returns: v.number(), handler: async () => 1 });
+
+export const progress = action({
+  args: {},
+  returns: v.number(),
+  stream: v.object({ done: v.number() }),
+  handler: async (ctx) => {
+    await ctx.emit({ done: 1 });
+    return 1;
+  },
+});
+`,
+      "app.ts": (notesFiles()["app.ts"] ?? "")
+        .replace(
+          'import schema from "./schema.ts";',
+          'import { once, progress } from "./operations/streams.ts";\nimport schema from "./schema.ts";'
+        )
+        .replace(
+          "operations: { notes: { get, create, tally } },",
+          "operations: { notes: { get, create, tally }, streams: { once, progress } },"
+        ),
+    };
+    const running = (reference: string): Record<string, string> => ({
+      ...streamed,
+      "tests/helper.ts": `import type { api } from "#grasp";
+import type { TestPrincipal } from "@grasp-os/sdk/testing";
+
+export const run = async (principal: TestPrincipal, refs: typeof api, flag: boolean): Promise<number> =>
+  await principal.action(${reference}, {});
+`,
+    });
+    await expect(
+      Promise.all(
+        [
+          "refs.streams.once",
+          "refs.streams.progress",
+          // Either one: it may stream, so it is refused as well.
+          "flag ? refs.streams.once : refs.streams.progress",
+        ].map(async (reference) => await refusedSeal(running(reference)))
+      )
+    ).resolves.toStrictEqual([
+      { code: "ok", files: [] },
+      { code: "version.build_failed", files: ["tests/helper.ts"] },
+      { code: "version.build_failed", files: ["tests/helper.ts"] },
+    ]);
+  });
+
   it("seals tests that name the App's references and the SDK's testing module for their types", async () => {
     await expect(
       refusedSeal({
