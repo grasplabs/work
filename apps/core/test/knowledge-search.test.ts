@@ -10,7 +10,13 @@ import { describe, expect, it } from "vite-plus/test";
 import { dutchHandbook } from "./fixtures/dutch-knowledge.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 
 // Search as people use it: Dutch words find their sections with or without
 // diacritics, by prefix, inside compounds and with a typo; results rank
@@ -484,8 +490,110 @@ const filler = (seed: number, words: number) =>
       vocabulary[(seed * 31 + index * 17 + index * index) % vocabulary.length]
   ).join(" ");
 
+/** A statement as core prepared and bound it. */
+interface Bound {
+  query: string;
+  values: unknown[];
+}
+
+/**
+ * `person`'s Knowledge API on a connection that keeps every statement it
+ * makes of the knowledge database, with its values, and adds up the rows
+ * they read (D1's `meta.rows_read`), the search indexes' own included.
+ */
+const recordingReads = async (person: Person) => {
+  const real = env.KNOWLEDGE;
+  const made: { rows: number; statements: Bound[] } = {
+    rows: 0,
+    statements: [],
+  };
+  const recorded = (
+    statement: D1PreparedStatement,
+    query: string
+  ): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property) => {
+        if (property === "bind") {
+          return (...values: unknown[]) => {
+            made.statements.push({ query, values });
+            return recorded(target.bind(...values), query);
+          };
+        }
+        if (property === "all") {
+          return async () => {
+            const result = await target.all();
+            made.rows += result.meta.rows_read;
+            return result;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+  const knowledge: D1Database = {
+    prepare: (query) => recorded(real.prepare(query), query),
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      const results = await real.batch<T>(statements);
+      for (const { meta } of results) {
+        made.rows += meta.rows_read;
+      }
+      return results;
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+  const { core } = await openRpc(person.session, {
+    coreEnv: { ...env, KNOWLEDGE: knowledge },
+  });
+  const api: KnowledgeApi = core.authenticate().knowledge;
+  return { knowledge: api, made };
+};
+
+/** The tables that grow with what the knowledge base holds. */
+const corpusTables = new Set([
+  "collections",
+  "documents",
+  "sections",
+  "search_rows",
+  "search_words",
+  "search_trigrams",
+]);
+
+/** A step of a query plan that reads a table whole, or an index none of it. */
+const scanPattern =
+  /^SCAN (?<table>\S+)(?: VIRTUAL TABLE INDEX \d+:(?<constraints>\S*))?/u;
+
+/**
+ * The corpus tables `statement` reads whole, by SQLite's plan for it: a
+ * table scanned row by row, or a full-text index scanned without a MATCH
+ * or rowid constraint (FTS5's `M` and `=`).
+ */
+const tablesReadWhole = async ({ query, values }: Bound): Promise<string[]> => {
+  const { results } = await env.KNOWLEDGE.prepare(`EXPLAIN QUERY PLAN ${query}`)
+    .bind(...values)
+    .all<{ detail: string }>();
+  return results.flatMap(({ detail }) => {
+    const step = scanPattern.exec(detail)?.groups;
+    const table = step?.table ?? "";
+    if (!corpusTables.has(table)) {
+      return [];
+    }
+    const constrained = /[M=]/u.test(step?.constraints ?? "");
+    return constrained ? [] : [table];
+  });
+};
+
 describe("search speed", { timeout: 300_000 }, () => {
-  it("answers in about 100 ms over 5,000 sections", async () => {
+  // How long a search takes depends on how busy the machine is; how it
+  // finds what it finds doesn't. So this asks what keeps a search fast as
+  // the corpus grows (it answers in 3 to 25 ms on a laptop): it reaches
+  // sections only through its indexes, and a search for words few
+  // sections hold reads little, however much else there is.
+  it("finds sections through its indexes over 5,000 sections, reading a fraction of them", async () => {
     const person = await personOf("user");
     const sectionsOf = (document: number) =>
       Array.from(
@@ -498,7 +606,22 @@ describe("search speed", { timeout: 300_000 }, () => {
       text: [`# Document ${document}`, ...sectionsOf(document)].join("\n"),
     }));
     await collectionWith(person, [...documents, ...dutchHandbook]);
-    const queries = [
+    const held = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS sections FROM sections"
+    ).first<{ sections: number }>();
+    const sections = held?.sections ?? 0;
+    const recording = await recordingReads(person);
+    /** The corpus tables `query`'s search read whole, and the rows it read. */
+    const searched = async (query: string) => {
+      recording.made.rows = 0;
+      recording.made.statements = [];
+      await recording.knowledge.search(query);
+      const whole = await Promise.all(
+        recording.made.statements.map(tablesReadWhole)
+      );
+      return { readWhole: whole.flat(), rows: recording.made.rows };
+    };
+    const everyQuery = [
       "vakantiedagen",
       "financiele planning",
       "salaris",
@@ -508,18 +631,27 @@ describe("search speed", { timeout: 300_000 }, () => {
       "reiskostenvergoedng",
       "pensioenregeling",
     ];
-    // Warm up: the first query compiles and caches the statement.
-    await person.knowledge.search(queries[0] ?? "");
-    const timings: number[] = [];
-    for (const query of queries) {
-      const start = performance.now();
-      // oxlint-disable-next-line no-await-in-loop -- one at a time, to time each
-      await person.knowledge.search(query);
-      timings.push(performance.now() - start);
+    // Words only the handbook's few sections hold, one with a typo.
+    const rare = ["vakantiedagen", "pensioenregeling", "reiskostenvergoedng"];
+
+    const readWhole: Record<string, string[]> = {};
+    const rows: Record<string, boolean> = {};
+    for (const query of everyQuery) {
+      // oxlint-disable-next-line no-await-in-loop -- one search at a time
+      const found = await searched(query);
+      readWhole[query] = found.readWhole;
+      if (rare.includes(query)) {
+        rows[query] = found.rows < sections / 10;
+      }
     }
-    // The aim is about 100 ms; on a laptop each takes 3 to 25 ms. CI
-    // machines are slower and shared, so the bound leaves them room while
-    // still catching a search that got many times slower.
-    expect(Math.max(...timings)).toBeLessThan(500);
+
+    expect({ sections: sections >= 5000, readWhole, rows }).toStrictEqual({
+      sections: true,
+      // Through the indexes, however many sections match: a word in
+      // thousands of them costs what they match, never the whole corpus.
+      readWhole: Object.fromEntries(everyQuery.map((query) => [query, []])),
+      // A word in a handful of sections reads little of the rest.
+      rows: Object.fromEntries(rare.map((query) => [query, true])),
+    });
   });
 });
