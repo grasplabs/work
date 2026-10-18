@@ -612,6 +612,60 @@ describe("a JSON workflow's compute modules", () => {
     });
   });
 
+  it("runs a draft's modules in the sandbox again only when they change, checking each edit against their contracts", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
+    // The runtime's loader, which every sandboxed call starts an isolate
+    // with here, counting the isolates.
+    let runs = 0;
+    const loader = env.LOADER;
+    const counted = {
+      ...env,
+      LOADER: {
+        get: (...args: Parameters<typeof loader.get>) => {
+          runs += 1;
+          return loader.get(...args);
+        },
+        load: loader.load.bind(loader),
+      },
+    };
+    const edit = async (
+      expectedRevision: number,
+      source: string,
+      modules: Record<string, string>
+    ) => {
+      const before = runs;
+      const draft = await editWorkflowDraft(counted, by, workflow.id, {
+        expectedRevision,
+        source,
+        modules,
+      });
+      return {
+        ran: runs > before,
+        problems: draft.problems.map(({ code }) => code),
+      };
+    };
+    const first = await edit(0, definitionOf(workflow.name), totalModules);
+    // Only the definition changes: to an export the modules don't have,
+    // which their kept contracts still find.
+    const missing = await edit(
+      1,
+      definitionOf(workflow.name, { contract: "local:code/total.ts#missing" }),
+      totalModules
+    );
+    const back = await edit(2, definitionOf(workflow.name), totalModules);
+    const changed = await edit(3, definitionOf(workflow.name), {
+      ...totalModules,
+      "code/sum.ts": `${sumModule}// changed\n`,
+    });
+    expect({ first, missing, back, changed }).toStrictEqual({
+      first: { ran: true, problems: [] },
+      missing: { ran: false, problems: ["binding.unknown_contract"] },
+      back: { ran: false, problems: [] },
+      changed: { ran: true, problems: [] },
+    });
+  });
+
   it("keeps a draft's modules only with the revisions it keeps, and drops them with the workflow", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `c-${unique()}`);

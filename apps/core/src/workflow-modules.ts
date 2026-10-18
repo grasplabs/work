@@ -100,7 +100,12 @@ export interface CompiledModules {
   readonly modules: Readonly<Record<string, string>>;
   /** Each calculation's contract, by `code/<file>.ts#<export>`. */
   readonly contracts: ReadonlyMap<string, ComputeContract>;
+  /** What the inspection answered, which `contracts` were read from. */
+  readonly manifest: string;
 }
+
+/** What validation resolves `local:` keys against: modules' contracts. */
+export type ModuleContracts = Pick<CompiledModules, "contracts">;
 
 /** The hash a version's modules are published under: of their canonical JSON. */
 export const modulesHashOf = async (
@@ -403,15 +408,27 @@ export const compileModules = async (
     sources: Object.freeze({ ...sources }),
     modules: Object.freeze({ ...built.modules }),
     contracts: contractsOf(text, sources),
+    manifest: text,
   };
 };
+
+/**
+ * The contracts of `sources` from what an inspection of exactly them
+ * answered before (`CompiledModules.manifest`), checked again as they
+ * were then: for checking a definition against, never for sealing, which
+ * builds and inspects them afresh.
+ */
+export const contractsFromManifest = (
+  manifest: string,
+  sources: Readonly<Record<string, string>>
+): ModuleContracts => ({ contracts: contractsOf(manifest, sources) });
 
 /**
  * The module manifest validation resolves `local:` keys against: each
  * calculation `compiled` exports, as a compute contract.
  */
 export const moduleLookup =
-  (compiled: CompiledModules | undefined): ContractLookup =>
+  (compiled: ModuleContracts | undefined): ContractLookup =>
   (key) => {
     const groups = manifestKey.exec(key)?.groups;
     const contract =

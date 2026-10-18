@@ -20,13 +20,18 @@ import { z } from "zod";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  workflowResourceDraftInspections,
   workflowResourceDraftModules,
   workflowResourceDrafts,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
-import { compileModules } from "./workflow-modules.ts";
-import type { CompiledModules } from "./workflow-modules.ts";
+import {
+  compileModules,
+  contractsFromManifest,
+  modulesHashOf,
+} from "./workflow-modules.ts";
+import type { ModuleContracts } from "./workflow-modules.ts";
 import {
   definitionProblems,
   publishWorkflowVersion,
@@ -76,6 +81,12 @@ import {
 //   revision's definition is seen beside another's modules. Publishing
 //   sends the latest revision's modules, which publication builds and
 //   checks again before it seals them.
+// - Contracts kept between edits. What an inspection answered is kept
+//   with its revision, keyed by the modules' hash, and an edit that
+//   carries exactly those modules checks its definition against it instead
+//   of running them again; it is read back through the same checks as
+//   when it was answered (`contractsFromManifest`). It only ever decides
+//   what a draft reports: publishing builds and inspects the modules anew.
 // - Starting from code nobody sealed. Before anyone edits, the modules
 //   are the current version's, read back from its seal with every hash
 //   checked (`sealedModules`).
@@ -321,49 +332,84 @@ const diagnosticsSchema = z.object({
 });
 
 /**
- * `modules` built and inspected as a publication builds them, for checking
- * a draft against: none for none, and the build's diagnostics as problems
- * when they don't build. A build that couldn't finish (slow, or the
- * sandbox unavailable) is thrown, and nothing is saved.
+ * The most bytes an inspection's answer takes as a row: past it, it isn't
+ * kept, and the next edit with the same modules inspects them again.
+ */
+const maxManifestBytes = 1024 * 1024;
+
+/** The modules' problems, from the diagnostics of a build that refused them. */
+const moduleProblems = (error: unknown): WorkflowDefinitionProblem[] => {
+  const details = diagnosticsSchema.safeParse(
+    workflowResourceErrors.codeOf(error) === "workflow.modules_invalid" &&
+      error instanceof Error &&
+      "details" in error
+      ? error.details
+      : undefined
+  );
+  if (!details.success) {
+    throw error;
+  }
+  return details.data.diagnostics.map(({ file, line, message }) => ({
+    code: "modules.invalid",
+    message:
+      file === null
+        ? message
+        : `${file}${line === null ? "" : `:${line}`}: ${message}`,
+    pointer: file === null ? "/modules" : pointerJoin("/modules", file),
+    remedy: "Fix the module where the build says, then check again.",
+  }));
+};
+
+/**
+ * `modules` checked for a draft, as a publication builds and inspects
+ * them: none for none, and the build's diagnostics as problems when they
+ * don't build. A build that couldn't finish (slow, or the sandbox
+ * unavailable) is thrown, and nothing is saved. When the revision the
+ * edit builds on (`previous`) carries exactly these modules, what their
+ * inspection answered then is checked again instead: most edits change
+ * only the definition. Answers the inspection to keep with this revision.
  */
 const checkModules = async (
   env: Env,
   workflowId: string,
+  previous: number,
   modules: Record<string, string>
 ): Promise<{
-  compiled?: CompiledModules;
+  contracts?: ModuleContracts;
   problems: WorkflowDefinitionProblem[];
+  inspection?: { modulesHash: string; manifest: string };
 }> => {
   if (Object.keys(modules).length === 0) {
     return { problems: [] };
   }
+  const modulesHash = await modulesHashOf(modules);
+  const kept = await drizzle(env.DB)
+    .select({ manifest: workflowResourceDraftInspections.manifest })
+    .from(workflowResourceDraftInspections)
+    .where(
+      and(
+        eq(workflowResourceDraftInspections.workflowResourceId, workflowId),
+        eq(workflowResourceDraftInspections.revision, previous),
+        eq(workflowResourceDraftInspections.modulesHash, modulesHash)
+      )
+    )
+    .get();
   try {
+    if (kept !== undefined) {
+      return {
+        contracts: contractsFromManifest(kept.manifest, modules),
+        problems: [],
+        inspection: { modulesHash, manifest: kept.manifest },
+      };
+    }
+    const compiled = await compileModules(env, modules, workflowId);
     return {
-      compiled: await compileModules(env, modules, workflowId),
+      contracts: compiled,
       problems: [],
+      inspection: { modulesHash, manifest: compiled.manifest },
     };
   } catch (error) {
-    const details = diagnosticsSchema.safeParse(
-      workflowResourceErrors.codeOf(error) === "workflow.modules_invalid" &&
-        error instanceof Error &&
-        "details" in error
-        ? error.details
-        : undefined
-    );
-    if (!details.success) {
-      throw error;
-    }
-    return {
-      problems: details.data.diagnostics.map(({ file, line, message }) => ({
-        code: "modules.invalid",
-        message:
-          file === null
-            ? message
-            : `${file}${line === null ? "" : `:${line}`}: ${message}`,
-        pointer: file === null ? "/modules" : pointerJoin("/modules", file),
-        remedy: "Fix the module where the build says, then check again.",
-      })),
-    };
+    return { problems: moduleProblems(error) };
   }
 };
 
@@ -387,11 +433,16 @@ export const editWorkflowDraft = async (
     workflowDraftEditSchema,
     input
   );
-  const built = await checkModules(env, workflow.id, modules);
+  const built = await checkModules(env, workflow.id, expectedRevision, modules);
   const problems = boundedProblems([
     ...built.problems,
-    ...(await definitionProblems(env, by, workflow, source, built.compiled)),
+    ...(await definitionProblems(env, by, workflow, source, built.contracts)),
   ]);
+  const { inspection } = built;
+  const kept =
+    inspection !== undefined &&
+    new TextEncoder().encode(inspection.manifest).byteLength <=
+      maxManifestBytes;
   const checked = problems.length === 0;
   const revision = expectedRevision + 1;
   const editedAt = new Date();
@@ -437,6 +488,17 @@ export const editWorkflowDraft = async (
           source: text,
         })
       ),
+      // What their inspection answered, for the next edit that keeps them.
+      ...(kept
+        ? [
+            db.insert(workflowResourceDraftInspections).values({
+              workflowResourceId: workflow.id,
+              revision,
+              modulesHash: inspection.modulesHash,
+              manifest: inspection.manifest,
+            }),
+          ]
+        : []),
       // Only the latest revision and the latest checkpoint stay.
       db.delete(workflowResourceDrafts).where(
         and(
@@ -447,12 +509,21 @@ export const editWorkflowDraft = async (
               WHERE workflow_resource_id = ${workflow.id} AND checked = 1)`
         )
       ),
-      // And their modules, with them.
+      // And their modules and inspections, with them.
       db.delete(workflowResourceDraftModules).where(
         and(
           eq(workflowResourceDraftModules.workflowResourceId, workflow.id),
           sql`${workflowResourceDraftModules.revision} < ${revision}`,
           sql`${workflowResourceDraftModules.revision} IS NOT (SELECT MAX(revision)
+              FROM workflow_resource_drafts
+              WHERE workflow_resource_id = ${workflow.id} AND checked = 1)`
+        )
+      ),
+      db.delete(workflowResourceDraftInspections).where(
+        and(
+          eq(workflowResourceDraftInspections.workflowResourceId, workflow.id),
+          sql`${workflowResourceDraftInspections.revision} < ${revision}`,
+          sql`${workflowResourceDraftInspections.revision} IS NOT (SELECT MAX(revision)
               FROM workflow_resource_drafts
               WHERE workflow_resource_id = ${workflow.id} AND checked = 1)`
         )

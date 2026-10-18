@@ -63,6 +63,7 @@ import type { PinnedEventBinding } from "./bound-workflow-events.ts";
 import {
   sdkReleasePins,
   sdkResourceBindings,
+  workflowResourceDraftInspections,
   workflowResourceDraftModules,
   workflowResourceDrafts,
   workflowResourceMembers,
@@ -97,7 +98,7 @@ import {
   moduleLookup,
   modulesHashOf,
 } from "./workflow-modules.ts";
-import type { CompiledModules } from "./workflow-modules.ts";
+import type { CompiledModules, ModuleContracts } from "./workflow-modules.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
@@ -846,7 +847,7 @@ const inspectDefinition = async (
   by: Acting,
   workflow: Pick<Live, "name">,
   definition: string,
-  modules?: CompiledModules
+  modules?: ModuleContracts
 ): Promise<
   | { ok: true; checked: CheckedWorkflow; bindings: PinnedBinding[] }
   | { ok: false; problems: WorkflowDefinitionProblem[] }
@@ -1630,7 +1631,7 @@ export const definitionProblems = async (
   by: Acting,
   workflow: Pick<Live, "name">,
   definition: string,
-  modules?: CompiledModules
+  modules?: ModuleContracts
 ): Promise<WorkflowDefinitionProblem[]> => {
   const inspected = await inspectDefinition(
     env,
@@ -2123,6 +2124,10 @@ export const deleteWorkflowResource = async (
     ),
     db.delete(workflowResourceDraftModules).where(
       sql`${workflowResourceDraftModules.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+    ),
+    db.delete(workflowResourceDraftInspections).where(
+      sql`${workflowResourceDraftInspections.workflowResourceId} IN (SELECT id
         FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
     ),
     // The releases its approvals kept (workflow-bindings.ts) go back to

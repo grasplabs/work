@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "815db8ed-f4e6-46a1-9c7c-df78062dd6d8",
+  "id": "7358aff9-c68a-474b-ba55-c33a2b5ecc38",
   "prevId": "a052507f-3889-4b49-ab4a-919e1b8a7052",
   "tables": {
     "access_revocations": {
@@ -6290,6 +6290,66 @@
             "param"
           ],
           "name": "workflow_param_values_app_id_workflow_id_param_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_resource_draft_inspections": {
+      "name": "workflow_resource_draft_inspections",
+      "columns": {
+        "workflow_resource_id": {
+          "name": "workflow_resource_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "modules_hash": {
+          "name": "modules_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "manifest": {
+          "name": "manifest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "workflow_resource_draft_inspections_workflow_resource_id_workflow_resources_id_fk": {
+          "name": "workflow_resource_draft_inspections_workflow_resource_id_workflow_resources_id_fk",
+          "tableFrom": "workflow_resource_draft_inspections",
+          "tableTo": "workflow_resources",
+          "columnsFrom": [
+            "workflow_resource_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "workflow_resource_draft_inspections_workflow_resource_id_revision_pk": {
+          "columns": [
+            "workflow_resource_id",
+            "revision"
+          ],
+          "name": "workflow_resource_draft_inspections_workflow_resource_id_revision_pk"
         }
       },
       "uniqueConstraints": {},
