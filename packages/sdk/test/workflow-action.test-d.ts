@@ -7,7 +7,13 @@
 import { expectTypeOf } from "vite-plus/test";
 
 import { action, resource, v } from "../src/action.ts";
-import type { ActionCtx, ModelRequest } from "../src/action.ts";
+import type {
+  ActionCtx,
+  KnowledgeDocument,
+  KnowledgeHit,
+  ModelRequest,
+  TemplateContent,
+} from "../src/action.ts";
 import type { JsonValue } from "../src/value-descriptor.ts";
 
 const mail = resource.connector("mail", {
@@ -18,9 +24,40 @@ const writer = resource.model("writer", {
   output: v.object({ line: v.string(), score: v.number() }),
 });
 
+const docs = resource.knowledge("docs", { operations: ["search"] });
+const letter = resource.template("letter");
+
 declare const ctx: ActionCtx<
-  readonly [typeof mail, typeof lookup, typeof writer]
+  readonly [
+    typeof mail,
+    typeof lookup,
+    typeof writer,
+    typeof docs,
+    typeof letter,
+  ]
 >;
+
+expectTypeOf(ctx.resources.docs.search).returns.resolves.toEqualTypeOf<
+  KnowledgeHit[]
+>();
+expectTypeOf(
+  ctx.resources.letter.read
+).returns.resolves.toEqualTypeOf<TemplateContent>();
+
+// A knowledge operation the use didn't declare.
+// @ts-expect-error -- only "search"
+void ctx.resources.docs.read;
+
+// A knowledge use calls only search and read.
+// @ts-expect-error -- no such operation
+resource.knowledge("docs", { operations: ["delete"] });
+
+declare const reading: ActionCtx<
+  readonly [ReturnType<typeof resource.knowledge<"docs", "read">>]
+>;
+expectTypeOf(
+  reading.resources.docs.read
+).returns.resolves.toEqualTypeOf<KnowledgeDocument>();
 
 expectTypeOf(ctx.resources.mail.call)
   .parameter(0)

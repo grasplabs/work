@@ -10,8 +10,10 @@ import type { Infer, InferInput, ObjectSchema, ValueShape } from "./values.ts";
 // `local:code/<file>.ts#<export>`. It lives in the workflow's own `code/`
 // modules, beside its calculations, and reaches nothing but the bindings
 // it declares in `uses`: other bindings of the same workflow, by alias,
-// of a connector only the operations it names (GRA-704), and of a model
-// only the shape it declared its answers take (GRA-700).
+// of a connector only the operations it names (GRA-704), of a model only
+// the shape it declared its answers take, of a knowledge binding (one
+// collection) only the operations it names, and of a template binding its
+// one pinned version (GRA-700).
 //
 // ```ts
 // import { action, resource, v } from "@grasp-os/sdk/action";

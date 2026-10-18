@@ -431,15 +431,12 @@ describe("a workflow action's knowledge and template uses", () => {
     );
     await revokePermission(env, admin, revoked.permissionId);
     const revokedEnd = await ended(ada, revoked.workflow.id, revokedRun);
-    // Declares the letter alone, and reads it once its content changed.
+    // Reads the letter alone, once its content changed.
     const tampered = await readingWorkflow(
       ada,
       admin,
-      lookModule(
-        `const letter = await ctx.resources.letter.read();
-    return { status: JSON.stringify(letter.content) };`,
-        '[resource.template("letter")]'
-      ),
+      lookModule(`const letter = await ctx.resources.letter.read();
+    return { status: JSON.stringify(letter.content) };`),
       { before: [hold] }
     );
     const tamperedRun = await started(
@@ -447,10 +444,13 @@ describe("a workflow action's knowledge and template uses", () => {
       tampered.workflow.id,
       tampered.documents.leave
     );
+    // Its content and the hash stored with it changed together, behind
+    // the platform's back: only the approval's pin still tells.
+    const changed = canonicalJson({ greeting: "Changed" });
     await env.DB.prepare(
-      "UPDATE resource_templates SET content = ? WHERE id = ?"
+      "UPDATE resource_templates SET content = ?, content_hash = ? WHERE id = ?"
     )
-      .bind(canonicalJson({ greeting: "Changed" }), tampered.templateId)
+      .bind(changed, await sha256Hex(changed), tampered.templateId)
       .run();
     const tamperedEnd = await ended(ada, tampered.workflow.id, tamperedRun);
     const sensitive = await readingWorkflow(ada, admin, looksEverywhere, {
