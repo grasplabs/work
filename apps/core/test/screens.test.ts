@@ -420,8 +420,8 @@ export default function Desk() {
   it("keeps a cached build while it is used, and builds one the sweep took again, the same", async () => {
     const files = screen(`kept ${crypto.randomUUID()}`);
     const built = await buildScreens(env, files, "app-test");
-    const fromCache = async (at: number) => {
-      // R2, as core writes to it, counting what is written.
+    const fromCache = async (at: number, failWrites = false) => {
+      // R2, as core writes to it, counting what is written, or failing it.
       let writes = 0;
       const counted = {
         ...env,
@@ -430,6 +430,9 @@ export default function Desk() {
           get: env.FILES.get.bind(env.FILES),
           put: async (...args: Parameters<R2Bucket["put"]>) => {
             writes += 1;
+            if (failWrites) {
+              throw new Error("R2 is out");
+            }
             return await env.FILES.put(...args);
           },
         },
@@ -448,6 +451,8 @@ export default function Desk() {
     // Served a day on, it stays as it is; half its time on, it is
     // written again, so a build in use never reaches the sweep's limit.
     const soon = await fromCache(now + day);
+    // A refresh that fails still serves the build.
+    const unwritten = await fromCache(now + buildKeepMs / 2 + day, true);
     const later = await fromCache(now + buildKeepMs / 2 + day);
     // An object of another kind of cache, which this sweep leaves alone.
     await env.FILES.put("package-builds/kept.json", "{}");
@@ -469,6 +474,7 @@ export default function Desk() {
     const rebuilt = await buildScreens(env, files, "app-test");
     expect({
       soon,
+      unwritten,
       later,
       kept,
       swept,
@@ -476,6 +482,7 @@ export default function Desk() {
       other: (await env.FILES.head("package-builds/kept.json")) !== null,
     }).toStrictEqual({
       soon: { served: built, writes: 0 },
+      unwritten: { served: built, writes: 1 },
       later: { served: built, writes: 1 },
       kept: built,
       swept: "Built again",

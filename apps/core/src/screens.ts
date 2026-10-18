@@ -26,6 +26,7 @@ import type {
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   screenErrors,
   screenNameSchema,
@@ -318,7 +319,13 @@ const cachedBuild = async <Build>(
   if (cached) {
     const text = await cached.text();
     if (Date.now() - cached.uploaded.getTime() > buildRefreshMs) {
-      await env.FILES.put(cacheKey, text);
+      try {
+        await env.FILES.put(cacheKey, text);
+      } catch (error) {
+        // The build is served all the same: a refresh that failed is
+        // tried again at its next use, well before the sweep's limit.
+        log.warn("build.refresh_failed", errorFields(error));
+      }
     }
     return await new Response(text).json<Build>();
   }
