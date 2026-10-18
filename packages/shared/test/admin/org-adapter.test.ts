@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { healthOf } from "../../src/admin/admin-health.ts";
+import { talkedByDay } from "../../src/admin/admin-interviews.ts";
 import { logItemsOf } from "../../src/admin/admin-log.ts";
 import { organizationOf } from "../../src/admin/admin-organization.ts";
 import { todosAt } from "../../src/admin/admin-todo.ts";
 import { PRICES, valueOf } from "../../src/admin/admin-usage.ts";
 import { adminViewOf } from "../../src/admin/admin-view.ts";
 import type { InterviewFact } from "../../src/admin/interview-turn.ts";
-import { stephenOf } from "../../src/admin/onboarding-admin-record.ts";
+import {
+  logOf,
+  personLog,
+  stephenOf,
+} from "../../src/admin/onboarding-admin-record.ts";
 import { meteredOf, orgOfSnapshot } from "../../src/admin/org-adapter.ts";
 import { NEW_CLIENT, NOTHING_SAID } from "../../src/admin/org-record.ts";
 import type {
@@ -451,6 +457,154 @@ describe("a real organization as the admin reads it", () => {
     }).toStrictEqual({ said: 1, known: true });
   });
 
+  it("keeps the links of a six-week plan open past two weeks, and counts who finishes later", () => {
+    const long = orgOfSnapshot({
+      ...snapshot,
+      plan: { start: "2026-10-05", days: 42, told: "2026-10-02T10:00:00Z" },
+      links: [
+        link("daan", "completed"),
+        link("lisa", "completed"),
+        link("tim", "completed"),
+        link("mark", "invited"),
+      ],
+      interviews: [
+        held("daan", "lead", "2026-10-05T09:30:00Z"),
+        held("lisa", "employee", "2026-10-05T11:00:00Z", 4),
+        // Tim finishes on day 30 of the 42.
+        held("tim", "employee", "2026-11-04T10:00:00Z"),
+      ],
+      now: "2026-11-04T12:00:00Z",
+    });
+    const fortnight = adminViewOf(
+      long,
+      { ...long.seed, day: 14 },
+      "2026-10-19"
+    );
+    expect(fortnight.closed).toBeFalsy();
+    const seen = adminViewOf(long, long.seed, "2026-11-04");
+    const mark = seen.people.find((each) => each.person.id === "mark");
+    expect({
+      day: seen.day,
+      closed: seen.closed,
+      // Tim's interview, after the samples' fourteen days, is listed.
+      tim: seen.interviews.find((each) => each.id === "tim")?.day,
+      talked: seen.counts.completed,
+      mark: mark?.state,
+      // Mark can still be reminded: twelve days are left.
+      remind: mark?.mayRemind,
+      days: talkedByDay(seen).length,
+    }).toStrictEqual({
+      day: 30,
+      closed: false,
+      tim: 30,
+      talked: 3,
+      mark: "opened",
+      remind: true,
+      days: 43,
+    });
+  });
+
+  it("counts nobody who has not finished on a long plan's later days", () => {
+    // Tim never finishes; on day 20 of 42 only Lisa has told about handling tickets.
+    const long = orgOfSnapshot({
+      ...snapshot,
+      plan: { start: "2026-10-05", days: 42, told: "2026-10-02T10:00:00Z" },
+      now: "2026-10-25T12:00:00Z",
+    });
+    const seen = adminViewOf(long, long.seed, "2026-10-25");
+    const tickets = seen.works.find((each) => each.work.id === "w-tickets");
+    expect({
+      day: seen.day,
+      state: tickets?.state,
+      approved: tickets?.approved,
+      evidenced: tickets?.evidenced,
+      everyone: tickets?.everyone,
+    }).toStrictEqual({
+      day: 20,
+      state: "mapping",
+      approved: 1,
+      evidenced: 0,
+      everyone: false,
+    });
+  });
+
+  it("finds a long plan behind only from its own halfway", () => {
+    // Only Daan has talked, one of the four asked.
+    const long = orgOfSnapshot({
+      ...snapshot,
+      plan: { start: "2026-10-05", days: 42, told: "2026-10-02T10:00:00Z" },
+      links: [
+        link("daan", "completed"),
+        link("lisa", "invited"),
+        link("tim", "invited"),
+        link("mark", "invited"),
+      ],
+      interviews: [held("daan", "lead", "2026-10-05T09:30:00Z")],
+      now: "2026-10-26T12:00:00Z",
+    });
+    const levelOn = (day: number) =>
+      healthOf(adminViewOf(long, { ...long.seed, day }, "2026-10-26")).find(
+        (signal) => signal.area === "interviews"
+      )?.level;
+    expect({ fortnight: levelOn(10), halfway: levelOn(21) }).toStrictEqual({
+      fortnight: "good",
+      halfway: "watch",
+    });
+  });
+
+  it("closes the links of a short plan on its own last day", () => {
+    const short = orgOfSnapshot({
+      ...snapshot,
+      plan: { start: "2026-10-05", days: 7, told: "2026-10-02T10:00:00Z" },
+      now: "2026-10-12T12:00:00Z",
+    });
+    const before = adminViewOf(short, { ...short.seed, day: 6 }, "2026-10-11");
+    const seen = adminViewOf(short, short.seed, "2026-10-12");
+    expect({
+      before: before.closed,
+      day: seen.day,
+      closed: seen.closed,
+      mark: seen.people.find((each) => each.person.id === "mark")?.state,
+      expired: personLog(seen, "mark").find((each) => each.what === "expired")
+        ?.day,
+      on: logOf(seen).find((each) => each.kind === "closed")?.on,
+      // AI use is counted up to the day it closed, not a week past it.
+      asOf: seen.asOf,
+    }).toStrictEqual({
+      before: false,
+      day: 7,
+      closed: true,
+      mark: "expired",
+      expired: 7,
+      on: "2026-10-12",
+      asOf: "2026-10-12",
+    });
+  });
+
+  it("finds a team of a five-day plan quiet only near its end", () => {
+    // Every link went out on the first day, and nobody has talked.
+    const five = orgOfSnapshot({
+      ...snapshot,
+      plan: { start: "2026-10-05", days: 5, told: "2026-10-02T10:00:00Z" },
+      links: [
+        link("daan", "invited"),
+        link("lisa", "invited"),
+        link("tim", "invited"),
+        link("mark", "invited"),
+      ],
+      interviews: [],
+      now: "2026-10-09T12:00:00Z",
+    });
+    const quietOn = (day: number) =>
+      adminViewOf(five, { ...five.seed, day }, "2026-10-09").needs.flatMap(
+        (need) => (need.kind === "quiet" ? [[need.team.id, need.left]] : [])
+      );
+    expect({ first: quietOn(1), last: quietOn(4) }).toStrictEqual({
+      first: [],
+      last: [["t-service", 1]],
+    });
+  });
+
   it("carries what someone said of their interview", () => {
     expect(view.interviews.find((each) => each.id === "lisa")?.rating).toBe(4);
     expect(
@@ -475,7 +629,12 @@ describe("a real organization as the admin reads it", () => {
     const counted = meteredOf(snapshot.usage);
     expect(
       counted.map((each) => `${each.purpose}/${each.model}`).toSorted()
-    ).toStrictEqual(["drawing/opus", "interviews/sonnet", "interviews/voice"]);
+    ).toStrictEqual([
+      "drawing/opus",
+      "interviews/other",
+      "interviews/sonnet",
+      "interviews/voice",
+    ]);
     const sonnet = counted.find((each) => each.model === "sonnet");
     expect({
       tokensIn: sonnet?.use.tokensIn,
@@ -483,11 +642,14 @@ describe("a real organization as the admin reads it", () => {
       drawn: view.usage.matrix.drawing.opus.tokensOut,
       // A snapshot from before the Worker counted reads as nothing counted.
       before: orgOfSnapshot({ ...snapshot, usage: [] }).real?.metered,
+      other: counted.find((each) => each.model === "other")?.use,
     }).toStrictEqual({
       tokensIn: 500_000,
       counted: true,
       drawn: 1500,
       before: [],
+      // A model the admin has no price for is counted all the same, its spend unknown.
+      other: { tokensIn: 5, tokensOut: 5, spoken: 0, heard: 0, spend: 0 },
     });
     expect(sonnet?.use.spend).toBeCloseTo(
       0.1 * PRICES.sonnet.tokensIn +
