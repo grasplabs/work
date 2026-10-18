@@ -57,8 +57,10 @@ export interface Use<
   readonly "~use": {
     readonly alias: Alias;
     readonly kind: Kind;
-    readonly operations: readonly Operation[];
+    readonly operations: readonly string[];
   };
+  /** Types only: the operations a connector use declared, by name. */
+  readonly "~operation"?: Operation;
 }
 
 /** Any declared use. */
@@ -81,7 +83,7 @@ export interface OperationResource {
 
 /** What a use gives an action. */
 type ResourceOf<U extends AnyUse> = U["~use"]["kind"] extends "connector"
-  ? ConnectorResource<U["~use"]["operations"][number]>
+  ? ConnectorResource<Exclude<U["~operation"], undefined>>
   : OperationResource;
 
 /** What an action's handler gets besides its arguments. */
@@ -141,26 +143,25 @@ const maxOperationChars = 256;
 
 /**
  * `value`'s operations, copied: a non-empty list of distinct names, so
- * nothing the module keeps can change what was declared.
+ * nothing the module keeps can change what was declared. Read by index,
+ * each item once: no iterator module code could replace.
  */
-const operationsOf = <Operation extends string>(
-  value: readonly Operation[]
-): readonly Operation[] => {
-  // Typed, but whatever module code passed: checked as it is.
-  const passed: unknown = value;
-  if (
-    !Array.isArray(passed) ||
-    passed.length === 0 ||
-    passed.length > maxOperations
-  ) {
+const operationsOf = (value: unknown): readonly string[] => {
+  if (!Array.isArray(value)) {
     return refuse(
       `A connector's \`operations\` list the 1 to ${maxOperations} operations the action calls.`
     );
   }
-  const copy: Operation[] = [];
+  const { length } = value;
+  if (length === 0 || length > maxOperations) {
+    return refuse(
+      `A connector's \`operations\` list the 1 to ${maxOperations} operations the action calls.`
+    );
+  }
+  const copy: string[] = [];
   const seen = new Set<string>();
-  for (const operation of value) {
-    const name: unknown = operation;
+  for (let index = 0; index < length; index += 1) {
+    const name: unknown = value[index];
     if (
       typeof name !== "string" ||
       name.length === 0 ||
@@ -172,7 +173,7 @@ const operationsOf = <Operation extends string>(
       );
     }
     seen.add(name);
-    copy.push(operation);
+    copy.push(name);
   }
   return freeze(copy);
 };
@@ -188,22 +189,18 @@ const isDeclaredUse = (value: unknown): value is DeclaredUse =>
   "operations" in value &&
   Array.isArray(value.operations);
 
-const declareUse = <
-  Alias extends string,
-  Kind extends UseKind,
-  Operation extends string,
->(
+const declareUse = <Alias extends string, Kind extends UseKind>(
   kind: Kind,
   alias: Alias,
-  operations: readonly Operation[]
-): Use<Alias, Kind, Operation> => {
+  operations: readonly string[]
+): Use<Alias, Kind> => {
   if (typeof alias !== "string" || !aliasPattern.test(alias)) {
     return refuse(
       "A resource's alias is a binding alias: letters, digits and _."
     );
   }
   const declared = freeze({ alias, kind, operations });
-  const use: Use<Alias, Kind, Operation> = freeze({ "~use": declared });
+  const use: Use<Alias, Kind> = freeze({ "~use": declared });
   if (typeof weakSet === "function") {
     apply(weakSet, declaredUses, [use, declared]);
   }
@@ -232,11 +229,11 @@ export const resource = freeze({
         "Declare the operations a connector's action calls: `{ operations: [...] }`."
       );
     }
-    return declareUse("connector", alias, operationsOf(options.operations));
+    return declareUse("connector", alias, operationsOf(property.value));
   },
   // An App export is one operation: nothing more to declare.
   operation: <const Alias extends string>(alias: Alias) =>
-    declareUse<Alias, "operation", never>("operation", alias, []),
+    declareUse("operation", alias, []),
 });
 
 /** What `action` is declared with. */
