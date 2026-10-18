@@ -564,8 +564,8 @@ export const dependencyApprovalsDigest = async (
 /** Most approvals `DependencyImpact.approvals` lists: the newest. */
 export const dependencyImpactListed = 50;
 
-/** Most subjects the approvers' list of approvals in force shows. */
-export const dependencySubjectsListed = 200;
+/** How many subjects a page of the approvers' list of approvals in force shows. */
+export const dependencySubjectsListed = 100;
 
 /**
  * The Apps and workflows that hold approvals in force (approved or
@@ -575,12 +575,14 @@ export const dependencySubjectsListed = 200;
 export interface DependencySubjectsInForce {
   /** Whether the reader holds `dependencies.approve` now; none listed otherwise. */
   decides: boolean;
-  /** At most {@link dependencySubjectsListed}. */
+  /** At most {@link dependencySubjectsListed}: one page. */
   subjects: {
     subject: NamedDependencySubject;
     approvals: number;
     decidedAt: string;
   }[];
+  /** Where the next page starts (`inForce(next)`); null on the last. */
+  next: string | null;
 }
 
 /**
@@ -744,7 +746,7 @@ export interface DependenciesApi {
    * Every App and workflow holding approvals in force, for someone who
    * holds `dependencies.approve` now; none for anyone else.
    */
-  inForce: () => Promise<DependencySubjectsInForce>;
+  inForce: (cursor?: string) => Promise<DependencySubjectsInForce>;
   /**
    * What retiring or revoking the graph of approval `request` would touch,
    * for someone who holds `dependencies.approve` now.

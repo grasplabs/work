@@ -1340,23 +1340,54 @@ export const dependencyApprovals = async (
   };
 };
 
+/** Where a page of the approvers' list goes on from: the last subject it showed. */
+const inForceCursorSchema = z
+  .string()
+  .max(400)
+  .transform((text, context) => {
+    const match =
+      /^(?<at>\d{1,16}):(?<type>app|workflow):(?<id>.{1,200})$/u.exec(text);
+    if (match?.groups === undefined) {
+      context.addIssue({ code: "custom", message: "Not a page of this list" });
+      return z.NEVER;
+    }
+    const { at = "0", type, id = "" } = match.groups;
+    return {
+      decidedAt: Number(at),
+      subjectType: type === "workflow" ? "workflow" : "app",
+      subjectId: id,
+    } as const;
+  });
+
 /**
  * Every App and workflow holding approvals in force (approved or
  * retired), each by its name now, how many it holds and when the newest
- * was decided, newest first, at most {@link dependencySubjectsListed}: for
- * someone who holds `dependencies.approve` now, who may end them; nothing
- * for anyone else. Where an approver finds a workflow's approvals, which
- * have no page of their workflow's to be on.
+ * was decided: newest first, {@link dependencySubjectsListed} a page, the
+ * next page after `cursor` (the `next` a page answers with), however many
+ * there are. For someone who holds `dependencies.approve` now, who may end
+ * them; nothing for anyone else. Where an approver finds a workflow's
+ * approvals, which have no page of their workflow's to be on.
  */
 export const dependencySubjectsInForce = async (
   env: Env,
-  by: Identity
+  by: Identity,
+  cursor?: unknown
 ): Promise<DependencySubjectsInForce> => {
   if (!(await holdsApprove(env, by))) {
-    return { decides: false, subjects: [] };
+    return { decides: false, subjects: [], next: null };
   }
+  const after =
+    cursor === undefined || cursor === null
+      ? undefined
+      : dependencyErrors.parse(
+          "dependency.invalid",
+          inForceCursorSchema,
+          cursor
+        );
   const db = drizzle(env.DB);
   const decidedAt = sql<number>`MAX(${dependencyRequests.decidedAt})`;
+  // In one order every page agrees on: the newest decision first, then by
+  // subject, so no subject is shown twice or skipped as pages are read.
   const rows = await db
     .select({
       subjectType: dependencyRequests.subjectType,
@@ -1367,12 +1398,23 @@ export const dependencySubjectsInForce = async (
     .from(dependencyRequests)
     .where(inArray(dependencyRequests.status, ["approved", "retired"]))
     .groupBy(dependencyRequests.subjectType, dependencyRequests.subjectId)
-    .orderBy(desc(decidedAt), dependencyRequests.subjectId)
-    .limit(dependencySubjectsListed);
-  const names = await subjectNames(db, rows.map(subjectOfRow));
+    .having(
+      after === undefined
+        ? undefined
+        : sql`${decidedAt} < ${after.decidedAt} OR (${decidedAt} = ${after.decidedAt} AND (${dependencyRequests.subjectType} > ${after.subjectType} OR (${dependencyRequests.subjectType} = ${after.subjectType} AND ${dependencyRequests.subjectId} > ${after.subjectId})))`
+    )
+    .orderBy(
+      desc(decidedAt),
+      dependencyRequests.subjectType,
+      dependencyRequests.subjectId
+    )
+    .limit(dependencySubjectsListed + 1);
+  const page = rows.slice(0, dependencySubjectsListed);
+  const last = page.at(-1);
+  const names = await subjectNames(db, page.map(subjectOfRow));
   return {
     decides: true,
-    subjects: rows.map((row) => {
+    subjects: page.map((row) => {
       const subject = subjectOfRow(row);
       return {
         subject: { ...subject, name: names.get(subjectKey(subject)) ?? "" },
@@ -1380,6 +1422,10 @@ export const dependencySubjectsInForce = async (
         decidedAt: new Date(row.decidedAt).toISOString(),
       };
     }),
+    next:
+      rows.length > dependencySubjectsListed && last !== undefined
+        ? `${last.decidedAt}:${last.subjectType}:${last.subjectId}`
+        : null,
   };
 };
 

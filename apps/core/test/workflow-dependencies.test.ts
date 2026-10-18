@@ -1,5 +1,8 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { npmRegistryOrigin } from "@grasp-os/shared/dependencies";
+import {
+  dependencySubjectsListed,
+  npmRegistryOrigin,
+} from "@grasp-os/shared/dependencies";
 import type {
   DependencyProposal,
   DependencyRequest,
@@ -14,11 +17,21 @@ import {
   admitDependencies,
   proposeForTests,
 } from "../src/dependencies/requests.ts";
+import { buildDependencies } from "../src/packages/build.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { mockIdp } from "./idp.ts";
 import { named, plain, publish } from "./npm.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
-import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
 
 // Packages for an independent workflow's compute modules (GRA-665), from
 // the threat model on the issue: a workflow's packages need a person's
@@ -851,7 +864,183 @@ describe("the approvers' list of what holds approvals", () => {
         { subject: { type: "workflow", id: workflow, name }, approvals: 1 },
       ],
       readsWhole: false,
-      builder: { decides: false, subjects: [] },
+      builder: { decides: false, subjects: [], next: null },
+    });
+  });
+});
+
+describe("the approvers' list, page by page", () => {
+  it("shows every App and workflow holding approvals however many there are, each once", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const { builder, workflow } = await builderWithWorkflow();
+    const approved = await proposeAs(builder, proposalFor({ workflow }));
+    await decide(approver.api, approved);
+    // More workflows with an approval than a page shows: each a copy of
+    // that approval, for a workflow of its own.
+    const acting = await builder.api.whoami();
+    const { results: columns } = await env.DB.prepare(
+      "SELECT name FROM pragma_table_info('dependency_requests') WHERE name NOT IN ('id', 'subject_id')"
+    ).all<{ name: string }>();
+    const rest = columns.map(({ name }) => name).join(", ");
+    const ours = [workflow];
+    for (let index = 0; index < dependencySubjectsListed; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another, as a person would
+      const { id } = await createWorkflowResource(
+        env,
+        acting,
+        `stats-${unique()}`
+      );
+      ours.push(id);
+    }
+    await env.DB.batch(
+      ours
+        .slice(1)
+        .map((id) =>
+          env.DB.prepare(
+            `INSERT INTO dependency_requests (id, subject_id, ${rest}) SELECT ?, ?, ${rest} FROM dependency_requests WHERE id = ?`
+          ).bind(crypto.randomUUID(), id, approved.id)
+        )
+    );
+
+    const pages = [await approver.api.dependencies.inForce()];
+    for (let next = pages[0]?.next; typeof next === "string";) {
+      // oxlint-disable-next-line no-await-in-loop -- each page after the one before
+      const page = await approver.api.dependencies.inForce(next);
+      pages.push(page);
+      ({ next } = page);
+    }
+    const listed = pages.flatMap(({ subjects }) =>
+      subjects.map(({ subject }) => subject.id)
+    );
+
+    expect({
+      firstPage: pages[0]?.subjects.length,
+      pages: pages.length > 1,
+      once: listed.length === new Set(listed).size,
+      ours: listed.filter((id) => ours.includes(id)).toSorted(),
+      madeUp: await outcome(approver.api.dependencies.inForce("made-up")),
+    }).toStrictEqual({
+      firstPage: dependencySubjectsListed,
+      pages: true,
+      once: true,
+      ours: ours.toSorted(),
+      madeUp: "dependency.invalid",
+    });
+  });
+});
+
+describe("deleting a workflow that holds approved packages", () => {
+  it("revokes its approvals with it, drops their lock and lists it no more", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const { builder, workflow } = await builderWithWorkflow();
+    const stats = named("stats");
+    await publish(plain(stats, "1.0.0"));
+    const request = await resolvedFor(builder, { workflow }, stats);
+    await decide(approver.api, request);
+    const built = await buildFor(builder, { workflow }, request.graphHash);
+    const subject = { type: "workflow", id: workflow };
+    const pinnedBefore = await pinsOf(subject, request.graphHash);
+
+    const events = await auditedDuring(async () => {
+      await builder.api.workflowResources.delete(workflow);
+    });
+    const { results } = await env.DB.prepare(
+      "SELECT status, ended_reason AS reason FROM dependency_requests WHERE id = ?"
+    )
+      .bind(request.id)
+      .all();
+    const listed = await approver.api.dependencies.inForce();
+
+    expect({
+      pinnedBefore,
+      row: results,
+      pinnedAfter: await pinsOf(subject, request.graphHash),
+      listed: listed.subjects.some(({ subject: s }) => s.id === workflow),
+      revoked: dependencyEvents(events).map(({ action, target, detail }) => ({
+        action,
+        target,
+        workflow: detail.workflow,
+        reason: detail.reason,
+      })),
+    }).toStrictEqual({
+      pinnedBefore: [built.hash],
+      row: [{ status: "revoked", reason: "workflow.deleted" }],
+      pinnedAfter: [],
+      listed: false,
+      revoked: [
+        {
+          action: "dependency.revoked",
+          target: { type: "dependency_request", id: request.id },
+          workflow,
+          reason: "workflow.deleted",
+        },
+      ],
+    });
+  });
+
+  it("pins nothing for a build the deletion lands in the middle of", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const { builder, workflow } = await builderWithWorkflow();
+    const stats = named("stats");
+    await publish(plain(stats, "1.0.0"));
+    const request = await resolvedFor(builder, { workflow }, stats);
+    await decide(approver.api, request);
+    const { policyGeneration } = await builder.api.dependencies.status({
+      workflow,
+    });
+    let raced = false;
+    // The build's first batch is its pin: the workflow goes just before.
+    const db = racingDb(async () => {
+      if (!raced) {
+        raced = true;
+        await builder.api.workflowResources.delete(workflow);
+      }
+    });
+
+    const building = await outcome(
+      buildDependencies({ ...env, DB: db }, await builder.api.whoami(), {
+        workflow,
+        graphHash: request.graphHash,
+        target: "computation",
+        policyGeneration,
+      })
+    );
+
+    expect({
+      raced,
+      building,
+      pinned: await pinsOf(
+        { type: "workflow", id: workflow },
+        request.graphHash
+      ),
+    }).toStrictEqual({
+      raced: true,
+      building: "dependency.policy_changed",
+      pinned: [],
+    });
+  });
+});
+
+describe("Grasp staff and a workflow's packages", () => {
+  it("lets staff read nothing of a workflow's packages, whatever role their session carries", async () => {
+    const { builder, workflow } = await builderWithWorkflow();
+    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core: staffCore } = await openRpc(staffSession);
+    const staff = staffCore.authenticate();
+
+    expect({
+      builderReads: await outcome(
+        builder.api.dependencies.approvals({ workflow })
+      ),
+      approvals: await outcome(staff.dependencies.approvals({ workflow })),
+      status: await outcome(staff.dependencies.status({ workflow })),
+    }).toStrictEqual({
+      builderReads: "ok",
+      approvals: "role.forbidden",
+      status: "role.forbidden",
     });
   });
 });

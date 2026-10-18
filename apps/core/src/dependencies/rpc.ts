@@ -113,10 +113,10 @@ export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
     );
   }
 
-  async inForce(): Promise<DependencySubjectsInForce> {
+  async inForce(cursor?: string): Promise<DependencySubjectsInForce> {
     return await withPerson(
       this.#check,
-      async (by) => await dependencySubjectsInForce(this.#env, by)
+      async (by) => await dependencySubjectsInForce(this.#env, by, cursor)
     );
   }
 

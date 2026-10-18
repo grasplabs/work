@@ -1,5 +1,6 @@
 import type { DependencySubjectsInForce } from "@grasp-os/shared/dependencies";
 import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Table,
   TableBody,
@@ -10,7 +11,9 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 
+import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -19,16 +22,37 @@ import {
   SettingsLoading,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 
 // Settings → Packages: every App and workflow holding approved npm
 // packages, for someone who may approve packages, each leading to where
 // its approvals are retired or revoked: an App's own page, or the
 // workflow's approvals here, since a workflow has no page of its own.
 // Core lists nothing to anyone else; it checks the permission on every
-// call.
+// call. A page at a time, the newest decision first, each next page
+// asked for: older approvals are there however many there are.
 
 const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
   const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  // The pages read so far, from the first the route read.
+  const [shown, setShown] = useState(listed);
+  const [read, setRead] = useState(listed);
+  if (listed !== read) {
+    setRead(listed);
+    setShown(listed);
+  }
+  const more = async (next: string): Promise<void> => {
+    const page = await run(
+      async (session) => await session.dependencies.inForce(next)
+    );
+    if (page !== undefined) {
+      setShown((before) => ({
+        ...page,
+        subjects: [...before.subjects, ...page.subjects],
+      }));
+    }
+  };
   if (!listed.decides) {
     return (
       <p className="text-muted-foreground border-t px-5 py-4">
@@ -39,7 +63,7 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
       </p>
     );
   }
-  if (listed.subjects.length === 0) {
+  if (shown.subjects.length === 0) {
     return (
       <p className="text-muted-foreground border-t px-5 py-4">
         <Trans>No App or workflow has approved packages.</Trans>
@@ -66,7 +90,7 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {listed.subjects.map(({ subject, approvals, decidedAt }) => (
+          {shown.subjects.map(({ subject, approvals, decidedAt }) => (
             <TableRow key={`${subject.type}:${subject.id}`}>
               <TableCell>
                 {subject.type === "app" ? (
@@ -106,6 +130,23 @@ const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
           ))}
         </TableBody>
       </Table>
+      {shown.next === null ? null : (
+        <div className="flex flex-col items-start gap-1 border-t px-5 py-3">
+          <Button
+            disabled={busy}
+            onClick={() => {
+              if (shown.next !== null) {
+                void more(shown.next);
+              }
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <Trans>Show more</Trans>
+          </Button>
+          <ErrorText>{failure}</ErrorText>
+        </div>
+      )}
     </div>
   );
 };
