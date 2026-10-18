@@ -58,6 +58,7 @@ export interface Listening {
   baselines: number;
 }
 
+/** How many days the samples' interviews run. A real organization's run as long as its own plan (`listenDays`). */
 export const LISTEN_DAYS = 14;
 const LAST_DAY = 12;
 export const WORKFLOWS_FOUND = 12;
