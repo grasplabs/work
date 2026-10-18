@@ -1,5 +1,6 @@
 import type { Id } from "@grasp-os/sdk";
 import { useClient, usePaginatedQuery } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Select,
   SelectContent,
@@ -149,6 +150,17 @@ const Board = () => {
               </SelectContent>
             </Select>
           )}
+          {listed.hasMore ? (
+            <Button
+              variant="outline"
+              disabled={listed.isLoading}
+              onClick={() => {
+                listed.loadMore();
+              }}
+            >
+              Older snapshots
+            </Button>
+          ) : null}
           {writable ? (
             <TakeSnapshot
               onTaken={(id) => {
