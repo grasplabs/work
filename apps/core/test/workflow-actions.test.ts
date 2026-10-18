@@ -191,8 +191,32 @@ const listed = async (id: string, by: Identity) => {
   return version?.actions.map(({ modelSteeredWrites }) => modelSteeredWrites);
 };
 /**
+ * Runs `update` on a row the database's `trigger` keeps from changing, as
+ * only a write around the platform could: the trigger dropped and put back
+ * in the same transaction.
+ */
+const aroundTrigger = async (
+  trigger: string,
+  update: D1PreparedStatement
+): Promise<void> => {
+  const kept = await env.DB.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?"
+  )
+    .bind(trigger)
+    .first<{ sql: string }>();
+  if (kept === null) {
+    throw new Error(`No trigger ${trigger}`);
+  }
+  await env.DB.batch([
+    env.DB.prepare(`DROP TRIGGER ${trigger}`),
+    update,
+    env.DB.prepare(kept.sql),
+  ]);
+};
+/**
  * Rewrites the bindings workflow `id`'s version seals, its manifest
- * hash made to match, as only a write around the platform could.
+ * hash made to match, as only a write around the platform could. A
+ * replace of the row doesn't get around the database: it's refused.
  */
 const resealed = async (
   id: string,
@@ -212,13 +236,22 @@ const resealed = async (
     ...manifest,
     bindings: edit(manifest.bindings),
   });
-  await env.DB.prepare(
-    `INSERT OR REPLACE INTO workflow_resource_versions (workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at)
-      SELECT workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, ?, ?, author_id, created_at
-      FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1`
-  )
-    .bind(text, await sha256Hex(text), id)
-    .run();
+  const hash = await sha256Hex(text);
+  await expect(
+    env.DB.prepare(
+      `INSERT OR REPLACE INTO workflow_resource_versions (workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at)
+        SELECT workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, ?, ?, author_id, created_at
+        FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1`
+    )
+      .bind(text, hash, id)
+      .run()
+  ).rejects.toThrow("UNIQUE constraint failed: workflow_resource_versions.");
+  await aroundTrigger(
+    "workflow_resource_versions_immutable_update",
+    env.DB.prepare(
+      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
+    ).bind(text, hash, id)
+  );
 };
 /** Sends two mails and answers what the context holds. */
 const sendsTwice =
@@ -663,9 +696,10 @@ describe("a JSON workflow's own actions", () => {
       unbound: await listed(unbound.id, ada),
       uncatalogued: await listed(uncatalogued.id, ada),
     };
-    // A catalog row replaced around the platform (GRA-718's review: the
-    // database's immutability doesn't stop a replace), now stating every
-    // operation read-only, isn't the contract the version pinned.
+    // A catalog row rewritten around the platform, now stating every
+    // operation read-only, isn't the contract the version pinned. A
+    // replace of the row is refused (GRA-726): only dropping the
+    // database's trigger gets there.
     const replacedText = JSON.stringify({
       kind: "connector",
       operations: {
@@ -674,12 +708,21 @@ describe("a JSON workflow's own actions", () => {
         "mail.read": { ...operation, readOnly: true },
       },
     });
-    await env.DB.prepare(
-      `INSERT OR REPLACE INTO workflow_catalog_contracts (key, kind, contract, fingerprint, published_by, published_at)
-        SELECT key, kind, ?, ?, published_by, published_at FROM workflow_catalog_contracts WHERE key = ?`
-    )
-      .bind(replacedText, await sha256Hex(replacedText), mail)
-      .run();
+    const replacedFingerprint = await sha256Hex(replacedText);
+    const replace = await outcome(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO workflow_catalog_contracts (key, kind, contract, fingerprint, published_by, published_at)
+          SELECT key, kind, ?, ?, published_by, published_at FROM workflow_catalog_contracts WHERE key = ?`
+      )
+        .bind(replacedText, replacedFingerprint, mail)
+        .run()
+    );
+    await aroundTrigger(
+      "workflow_catalog_contracts_immutable_update",
+      env.DB.prepare(
+        "UPDATE workflow_catalog_contracts SET contract = ?, fingerprint = ? WHERE key = ?"
+      ).bind(replacedText, replacedFingerprint, mail)
+    );
     expect({
       published: {
         modelAndWrites: modelAndWrites.published,
@@ -688,6 +731,9 @@ describe("a JSON workflow's own actions", () => {
         modelAndExport: modelAndExport.published,
       },
       ...before,
+      replaceRefused: replace.includes(
+        "UNIQUE constraint failed: workflow_catalog_contracts."
+      ),
       replaced: await listed(modelAndWrites.id, ada),
     }).toStrictEqual({
       published: {
@@ -703,6 +749,7 @@ describe("a JSON workflow's own actions", () => {
       modelAndExport: [[{ alias: "contacts", kind: "operation" }]],
       unbound: [[reads]],
       uncatalogued: [[reads]],
+      replaceRefused: true,
       replaced: [
         [
           {
