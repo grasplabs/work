@@ -26,7 +26,10 @@ interface ImmutableTable {
    * A row under a new primary key that takes another unique index's key
    * of `row`, which REPLACE would delete just the same.
    */
-  sameUniqueKey?: (row: Row) => Row;
+  otherKey?: {
+    columns: readonly string[];
+    row: (row: Row) => Row;
+  };
 }
 
 const workflow = (id: string) => ({
@@ -69,7 +72,10 @@ const tables: readonly ImmutableTable[] = [
       created_at: 1,
     }),
     change: { manifest: '{"actions":[]}', manifest_hash: "tampered" },
-    sameUniqueKey: (row) => ({ ...row, version: 2 }),
+    otherKey: {
+      columns: ["workflow_resource_id", "definition_version"],
+      row: (row) => ({ ...row, version: 2 }),
+    },
   },
   {
     table: "workflow_start_receipts",
@@ -77,7 +83,15 @@ const tables: readonly ImmutableTable[] = [
     parents: (id) => [workflow(id)],
     row: receipt,
     change: { input_hash: "tampered", manifest_hash: "tampered" },
-    sameUniqueKey: (row) => ({ ...row, id: `${String(row.id)}-again` }),
+    otherKey: {
+      columns: [
+        "invoker_type",
+        "invoker_id",
+        "principal_id",
+        "idempotency_key",
+      ],
+      row: (row) => ({ ...row, id: `${String(row.id)}-again` }),
+    },
   },
   {
     table: "workflow_resource_params",
@@ -164,7 +178,18 @@ const insertSql = (verb: string, table: string, row: Row, tail = "") => {
 };
 
 /** The forms that resolve a conflict instead of failing on it. */
-const rewrites = (spec: ImmutableTable, row: Row) => {
+const forms = [
+  "INSERT OR REPLACE",
+  "REPLACE INTO",
+  "INSERT OR IGNORE",
+  "ON CONFLICT DO UPDATE",
+] as const;
+
+const rewrites = (
+  spec: ImmutableTable,
+  row: Row,
+  target: readonly string[] = spec.key
+): Record<(typeof forms)[number], D1PreparedStatement> => {
   const set = Object.keys(spec.change)
     .map((column) => `"${column}" = excluded."${column}"`)
     .join(", ");
@@ -176,7 +201,7 @@ const rewrites = (spec: ImmutableTable, row: Row) => {
       "INSERT",
       spec.table,
       row,
-      ` ON CONFLICT (${spec.key.join(", ")}) DO UPDATE SET ${set}`
+      ` ON CONFLICT (${target.join(", ")}) DO UPDATE SET ${set}`
     ),
   };
 };
@@ -214,35 +239,49 @@ describe("immutable records", () => {
   it.each(tables)(
     "$table refuses every insert over a key it holds",
     async (spec) => {
-      const row = await seeded(spec);
-      const before = await rowsOf(spec.table);
-      const overwrites = {
-        ...rewrites(spec, { ...row, ...spec.change }),
-        ...(spec.sameUniqueKey === undefined
-          ? {}
-          : Object.fromEntries(
-              Object.entries(
-                rewrites(spec, { ...spec.sameUniqueKey(row), ...spec.change })
-              ).map(([form, statement]) => [
-                `${form}, other unique key`,
-                statement,
-              ])
-            )),
-      };
-      const outcomes: Record<string, boolean> = {};
-      for (const [form, statement] of Object.entries(overwrites)) {
-        // One at a time, so each is tried against the row as seeded.
+      const overwrites: Record<string, (row: Row) => D1PreparedStatement> = {};
+      for (const form of forms) {
+        overwrites[form] = (row) =>
+          rewrites(spec, { ...row, ...spec.change })[form];
+        const { otherKey } = spec;
+        if (otherKey !== undefined) {
+          overwrites[`${form}, other unique key`] = (row) =>
+            rewrites(
+              spec,
+              { ...otherKey.row(row), ...spec.change },
+              otherKey.columns
+            )[form];
+        }
+      }
+      const outcomes: Record<string, { refused: boolean; unchanged: boolean }> =
+        {};
+      for (const [form, overwrite] of Object.entries(overwrites)) {
+        // Each against a row of its own, so none sees what another wrote.
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        const row = await seeded(spec);
         // oxlint-disable-next-line no-await-in-loop -- see above
-        const outcome = await refusal(statement);
-        // The table's own refusal, read as the unique violation it is.
-        outcomes[form] = outcome.includes(
-          `UNIQUE constraint failed: ${spec.table}.`
-        );
+        const before = await rowsOf(spec.table);
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const outcome = await refusal(overwrite(row));
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const after = await rowsOf(spec.table);
+        outcomes[form] = {
+          // The table's own refusal, read as the unique violation it is,
+          // and told from SQLite's by what it adds.
+          refused:
+            outcome.includes(`UNIQUE constraint failed: ${spec.table}.`) &&
+            outcome.includes(`(${spec.table} `),
+          unchanged: JSON.stringify(after) === JSON.stringify(before),
+        };
       }
       expect(outcomes).toStrictEqual(
-        Object.fromEntries(Object.keys(overwrites).map((form) => [form, true]))
+        Object.fromEntries(
+          Object.keys(overwrites).map((form) => [
+            form,
+            { refused: true, unchanged: true },
+          ])
+        )
       );
-      await expect(rowsOf(spec.table)).resolves.toStrictEqual(before);
     }
   );
 
