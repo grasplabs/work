@@ -12,7 +12,13 @@ export const workflowModulePattern =
   /^code\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.ts$/u;
 
 /** The kinds of the workflow's own bindings an action may use. */
-export const actionUseKinds = ["connector", "operation", "model"] as const;
+export const actionUseKinds = [
+  "connector",
+  "operation",
+  "model",
+  "knowledge",
+  "template",
+] as const;
 export type ActionUseKind = (typeof actionUseKinds)[number];
 
 /** An alias an action uses: a binding alias, as the profile names them. */
@@ -61,16 +67,42 @@ export const operationUseSchema = z.strictObject({
   kind: z.literal("operation"),
 });
 
+/** The operations of a Knowledge collection an action may use (GRA-700). */
+export const knowledgeUseOperations = ["search", "read"] as const;
+
+/**
+ * A knowledge binding's use: the operations of its one collection the
+ * action calls, each once (GRA-700). The host refuses any other.
+ */
+export const knowledgeUseSchema = z.strictObject({
+  alias: z.string().regex(actionUseAliasPattern),
+  kind: z.literal("knowledge"),
+  operations: z
+    .array(z.enum(knowledgeUseOperations))
+    .min(1)
+    .max(knowledgeUseOperations.length)
+    .refine((operations) => new Set(operations).size === operations.length),
+});
+
+/** A template binding's use: reading its one pinned version (GRA-700). */
+export const templateUseSchema = z.strictObject({
+  alias: z.string().regex(actionUseAliasPattern),
+  kind: z.literal("template"),
+});
+
 /**
  * A binding an action declares it uses, as its sealed contract holds it
  * (GRA-704): a connector's with the exact operations it calls, each once;
  * an operation binding's (an App export, one operation) with nothing more;
- * a model binding's with the shape its calls answer. The host refuses a
- * call of any other operation.
+ * a model binding's with the shape its calls answer; a knowledge binding's
+ * with the operations of its collection it calls; a template binding's
+ * with nothing more. The host refuses a call of any other operation.
  */
 export const actionUseSchema = z.discriminatedUnion("kind", [
   connectorUseSchema,
   operationUseSchema,
+  knowledgeUseSchema,
+  templateUseSchema,
   // A model binding's: the descriptor of what each of its calls answers,
   // as canonical JSON, sealed with the action's contract (GRA-700): the
   // host sends it, and checks every answer against it, never a shape the
@@ -93,7 +125,13 @@ export type SealedUse =
       readonly operations: readonly string[];
     }
   | { readonly alias: string; readonly kind: "operation" }
-  | { readonly alias: string; readonly kind: "model"; readonly output: string };
+  | { readonly alias: string; readonly kind: "model"; readonly output: string }
+  | {
+      readonly alias: string;
+      readonly kind: "knowledge";
+      readonly operations: readonly (typeof knowledgeUseOperations)[number][];
+    }
+  | { readonly alias: string; readonly kind: "template" };
 
 /** An action's uses: each alias once, at most `actionUses` of them. */
 export const actionUsesSchema = z

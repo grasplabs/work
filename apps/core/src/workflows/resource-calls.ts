@@ -42,6 +42,7 @@ import {
   runContext,
 } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
+import { callKnowledge, callTemplate } from "./resource-reads.ts";
 
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
@@ -143,6 +144,18 @@ export type BuiltCall =
       readonly outputSchema: Json;
       readonly model?: Json;
       readonly maxOutputTokens?: Json;
+    }
+  | {
+      /** A Knowledge collection's search or read, by an action (GRA-700). */
+      readonly name: "grasp.knowledge";
+      readonly binding: string;
+      readonly operation: "search" | "read";
+      readonly arguments: Json;
+    }
+  | {
+      /** A pinned template version's content, by an action (GRA-700). */
+      readonly name: "grasp.template";
+      readonly binding: string;
     };
 
 /** The binding kind each call goes through. */
@@ -150,6 +163,8 @@ const kindOf = {
   "grasp.operation": "operation",
   "grasp.connector": "connector",
   "grasp.model": "model",
+  "grasp.knowledge": "knowledge",
+  "grasp.template": "template",
 } as const;
 
 /** Keeps `entry` in the audit log, or fails before anything more. */
@@ -860,6 +875,14 @@ export const makeCall = async (
       }
       case "grasp.model": {
         output = await callModel(env, run, binding, call, effect);
+        break;
+      }
+      case "grasp.knowledge": {
+        output = await callKnowledge(env, run, binding, call);
+        break;
+      }
+      case "grasp.template": {
+        output = await callTemplate(env, binding);
         break;
       }
       default: {
