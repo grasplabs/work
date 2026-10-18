@@ -79,6 +79,9 @@ ${Array.from({ length: calls }, () => `    await ${hitCall(`"${name}"`)};`).join
  * admitted for, as its next one: an attempt of a generation the engine
  * has fenced is admitted no more (quotas.ts, `sharesReleased`).
  */
+/** How long an attempt meant to run out of time is given to start with. */
+const attemptMs = 2000;
+
 const attemptOf = (key: string, ms = 60_000) => ({
   key,
   step: key,
@@ -406,10 +409,13 @@ ${calling("over", 1)}
     const lineage = await lineageOf();
 
     const result = await withQuotas({ lineageHostCalls: 50 }, async () => {
-      // Its 200 ms pass, and the next admission settles it as used up.
-      const died = await admitAttempt(env, lineage, attemptOf("died", 200));
+      // Its deadline passes, and the next admission settles it as used up.
+      // Long enough to be admitted on a loaded runner: an attempt already
+      // past its deadline is refused at admission (quotas.ts).
+      const attempt = attemptOf("died", attemptMs);
+      const died = await admitAttempt(env, lineage, attempt);
       const before = await outcome(died.hostCall());
-      await scheduler.wait(300);
+      await scheduler.wait(Math.max(0, attempt.deadline - Date.now()) + 50);
       await admitAttempt(env, lineage, attemptOf("next"));
       const after = await outcome(died.hostCall());
       return { before, after };
