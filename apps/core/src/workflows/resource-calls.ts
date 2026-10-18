@@ -727,6 +727,62 @@ const callModel = async (
 };
 
 /**
+ * Why an action's call was refused at its host's own admission
+ * (resource-action.ts), before it was ever a named call: a binding its
+ * sealed `uses` doesn't list, a connector operation its use doesn't
+ * declare, a request of the wrong shape or past its bounds, or one past
+ * the attempt's calls.
+ */
+export type AdmissionReason =
+  | "use_undeclared"
+  | "operation_undeclared"
+  | "request_invalid"
+  | "call_limit";
+
+/**
+ * Keeps the evidence of an action's call refused at its host's own
+ * admission, as `workflow.call.refused`, the event App runs' refused calls
+ * leave (workflows/host.ts): what the host knows of the run, its build,
+ * task and attempt, never what the isolate sent. `call` is a declared
+ * alias, or null: an undeclared one is the isolate's text. An event that
+ * can't be kept is logged; the refusal stands either way.
+ */
+export const auditAdmissionRefusal = async (
+  env: Env,
+  run: CallingRun,
+  refusal: {
+    readonly build: string;
+    readonly task: string;
+    readonly attempt: number;
+    readonly generation: number;
+    readonly call: string | null;
+    readonly errorCode: string;
+    readonly reason: AdmissionReason;
+  }
+): Promise<void> => {
+  try {
+    await audited(env, {
+      actor: { type: "system" },
+      action: "workflow.call.refused",
+      target: { type: "workflow_run", id: run.runId },
+      detail: {
+        workflow: run.workflowId,
+        version: run.version,
+        person: run.principal,
+        ...refusal,
+      },
+    });
+  } catch (error) {
+    log.error("workflow.call.audit_failed", {
+      runId: run.runId,
+      task: refusal.task,
+      errorCode: refusal.errorCode,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
  * Makes `call`, a task's named call with its arguments built, as task
  * `task` of `run`, for `effect`: through the binding its start froze for
  * the call's alias, once the authority behind it was decided again

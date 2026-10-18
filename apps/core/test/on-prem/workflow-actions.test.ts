@@ -147,6 +147,9 @@ export const notify = action({
       Date.now() + 60_000,
       {
         owner: `workflow-resource:${workflow.id}`,
+        refused: async () => {
+          await Promise.resolve();
+        },
         make: async (built: BuiltCall, ordinal: number): Promise<Json> => {
           made.push(built);
           return await Promise.resolve({ messageId: `m${ordinal}` });
