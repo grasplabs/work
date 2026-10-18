@@ -136,7 +136,7 @@ const waits = workflowFiles(
  * A workflow that waits for one decision, keyed by a note it read, which
  * its description quotes too, and returns how it ended.
  */
-const keyedApproval = `import { workflow, z } from "@grasp-os/sdk/workflow";
+const keyedApproval = `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "approval",
@@ -148,7 +148,7 @@ export default workflow(
     await step.decision("review", {
       key: input.note ?? "none",
       description: "Approve: " + (input.note ?? "nothing"),
-      from: input.from,
+      from: input.from as Person,
       ask: async ({ recipients, reminder }) => {
 ${remember}
       },

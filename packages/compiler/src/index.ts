@@ -41,6 +41,7 @@ export {
   isUnderAppTests,
   strayTestFileMessage,
   strayTestFiles,
+  workflowBuildFiles,
 } from "./app-code.ts";
 export {
   appCodeLimitErrors,

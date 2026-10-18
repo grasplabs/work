@@ -82,7 +82,7 @@ const callsOf = ({ reference, input, more = [] }: CallingStep): string =>
   [{ reference, input }, ...more]
     .map(
       (call) =>
-        `    answered.push(await env.APP.callFunction(${JSON.stringify(call.reference)}, ${JSON.stringify(call.input)}));\n`
+        `    answered.push((await env.APP.callFunction(${JSON.stringify(call.reference)}, ${JSON.stringify(call.input)})) as Json);\n`
     )
     .join("");
 
@@ -97,7 +97,7 @@ const callingWorkflow = (
   steps: readonly CallingStep[],
   { between = "", options = "retries: { limit: 0 }" } = {}
 ): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { workflow, z } from "@grasp-os/sdk/workflow";
+  [`workflows/${id}.ts`]: `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) => {
   const answers = [];
@@ -105,7 +105,7 @@ ${steps
   .map(
     (calling, index) =>
       `${index === 0 ? "" : between}  answers.push(await step.do("${calling.name}", { description: "Call a function", sideEffect: true, input: null, ${options} }, async () => {
-    const answered = [];
+    const answered: Json[] = [];
 ${callsOf(calling)}    ${calling.after ?? ""}
     return answered.length === 1 ? answered[0] : answered;
   }));
@@ -1669,7 +1669,8 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
             reference: { contractId: "assist.flaky", kind: "action" },
             input: {},
             // As the SDK says to: the answer's error, thrown as it is.
-            after: "if (!answered[0].ok) throw answered[0].error;",
+            after:
+              "const [first] = answered as { ok: boolean; error?: unknown }[]; if (!first.ok) throw first.error;",
           },
         ],
         { options: `retries: { limit: 1, delay: "1 second" }` }

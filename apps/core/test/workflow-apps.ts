@@ -259,27 +259,32 @@ export const modelRegistration = (
 
 /**
  * Workflow code calling the sample App's function `path`, of `kind`, with
- * the input `input` (code), as a step calls it: its value, or the
- * function's refusal thrown, with its code.
+ * the input `input` (code), as a step calls it: its value, read as `type`,
+ * or the function's refusal thrown, with its code. What a binding answers
+ * is `unknown` to a workflow's type check: the call's answer is read as
+ * what `env.APP.callFunction` answers.
  */
 export const appCall = (
   path: string,
   kind: "query" | "mutation" | "action",
-  input: string
+  input: string,
+  /** The value's type, as the step code reads it (a type, as code). */
+  type = "Json"
 ): string =>
-  `((answer) => { if (!answer.ok) { throw Object.assign(new Error(answer.error.message), { code: answer.error.code }); } return answer.value; })(await env.APP.callFunction({ contractId: ${JSON.stringify(path)}, kind: ${JSON.stringify(kind)} }, ${input}))`;
+  `((answer) => { if (!answer.ok) { throw Object.assign(new Error(answer.error.message), { code: answer.error.code }); } return answer.value as ${type}; })((await env.APP.callFunction({ contractId: ${JSON.stringify(path)}, kind: ${JSON.stringify(kind)} }, ${input})) as { ok: true; value: unknown } | { ok: false; error: { message: string; code: string } })`;
 
 /** Workflow code counting a run of `name` (code), answering the count. */
 export const hitCall = (name: string): string =>
   appCall(
     "counter.hit",
     "action",
-    `{ name: ${name}, execution: crypto.randomUUID() }`
+    `{ name: ${name}, execution: crypto.randomUUID() }`,
+    "number"
   );
 
 /** Workflow code reading the counter `name` (code). */
 export const hitsCall = (name: string): string =>
-  appCall("counter.hits", "query", `{ name: ${name} }`);
+  appCall("counter.hits", "query", `{ name: ${name} }`, "number");
 
 /**
  * What `by` gets calling the sample App's function `path` of `app`'s
@@ -432,7 +437,7 @@ export const workflowFiles = (
   body: string,
   mocks: Record<string, unknown> = {}
 ): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { workflow, z } from "@grasp-os/sdk/workflow";
+  [`workflows/${id}.ts`]: `import { type Json, type Person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env, input }) => {
 ${body}
@@ -529,7 +534,7 @@ export const mailer = (options: string, after = "") =>
     "send",
     { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, ${options} },
     async ({ idempotencyKey, input: mail }) => {
-      const sent = JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
+      const sent = JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
 ${after}
       return sent;
     }

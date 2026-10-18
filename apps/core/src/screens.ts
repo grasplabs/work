@@ -5,6 +5,7 @@ import {
   appModuleName,
   buildFiles,
   compilerVersion,
+  isAppLayout,
   kitModuleName,
   kitModules,
   screenRuntime,
@@ -12,7 +13,7 @@ import {
   computeModuleErrors,
   openWorkflowErrors,
   serverFiles,
-  workflowFiles,
+  workflowBuildFiles,
 } from "@grasp-os/compiler";
 import type {
   AppCodeBuild,
@@ -23,6 +24,11 @@ import type {
   ServerBuild,
   WorkflowBuild,
 } from "@grasp-os/compiler";
+import {
+  generatedPaths,
+  serverModuleSource,
+  symbolicModules,
+} from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -99,7 +105,7 @@ export const buildKey = async (files: AppFiles): Promise<string> =>
 const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
   // An App's server code carries the host's generated modules, held to
   // their own allowance, so they never count against the App's limits.
-  if (kind === "app" || kind === "app-check") {
+  if (kind === "app" || kind === "app-check" || kind === "workflow") {
     return appCodeLimitErrors;
   }
   // A JSON workflow's generated module: one file, held to its own bound.
@@ -508,8 +514,27 @@ export const buildAppTests = async (
   );
 
 /**
+ * What a workflow build reads (`workflowBuildFiles`): the App's
+ * workflows, and the server code their types may name, with the host's
+ * generated modules as inspection has them (no App's version holds
+ * `.grasp/`): the constructors, the same for every App, and stand-ins for
+ * the references.
+ */
+const workflowInputs = (files: AppFiles): AppFiles => {
+  const selected = workflowBuildFiles(files);
+  return isAppLayout(selected)
+    ? {
+        ...selected,
+        ...symbolicModules(),
+        [generatedPaths.server]: serverModuleSource,
+      }
+    : selected;
+};
+
+/**
  * Builds an App's workflows (`workflows/**.ts`) into ES modules, in the
- * compiler's isolate. A build is cached in R2, like the server's.
+ * compiler's isolate, type-checked with the server code their types may
+ * name. A build is cached in R2, like the server's.
  */
 export const buildWorkflows = async (
   env: BuildEnv,
@@ -522,7 +547,7 @@ export const buildWorkflows = async (
     env,
     "workflow",
     appFiles,
-    workflowFiles,
+    workflowInputs,
     whose,
     signal
   );

@@ -63,28 +63,28 @@ const sharedMailbox = (local: string) => `shared-${local}@acme.test`;
 const sends = (local: string) =>
   ({
     // Through the run's own connection.
-    direct: `return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);`,
+    direct: `return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);`,
     // Twice under its key, as a retry would: connect answers the second
     // only when it is the same call.
     twice: `await env.MAIL.call("mail.send", mail, { idempotencyKey });
-      return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);`,
+      return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);`,
     // Through its App's server code, with its caller's key.
-    app: `return await env.APP.call("relay", mail);`,
+    app: `return (await env.APP.call("relay", mail)) as Json;`,
     // Sends from its account, and drafts the same from a shared mailbox.
     draft: `await env.MAIL.call("mail.send", mail, { idempotencyKey });
-      return JSON.parse((await env.MAIL.call("mail.createDraft", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })).output);`,
+      return JSON.parse(((await env.MAIL.call("mail.createDraft", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })) as { output: string }).output);`,
     // The same mail as the same shared mailbox, through two connections.
     both: `await env.MAIL.call("mail.send", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey });
-      return JSON.parse((await env.MAIL2.call("mail.send", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })).output);`,
+      return JSON.parse(((await env.MAIL2.call("mail.send", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })) as { output: string }).output);`,
     // Lists mail naming another address of the domain, then sends.
     list: `try {
         await env.MAIL.call("mail.list", { mailbox: mail.mailbox, to: ["other-${local}@grasp.test"] }, { idempotencyKey });
       } catch {
         // The connector refuses the field; the call was made.
       }
-      return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);`,
+      return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);`,
     // To 26 addresses of the domain at once.
-    many: `return JSON.parse((await env.MAIL.call("mail.send", { ...mail, to: Array.from({ length: 26 }, (_, index) => "${local}-" + index + "@grasp.test") }, { idempotencyKey })).output);`,
+    many: `return JSON.parse(((await env.MAIL.call("mail.send", { ...mail, to: Array.from({ length: 26 }, (_, index) => "${local}-" + index + "@grasp.test") }, { idempotencyKey })) as { output: string }).output);`,
   }) as const;
 
 type Sends = keyof ReturnType<typeof sends>;
@@ -134,7 +134,7 @@ const loop = (
   mailbox: string,
   send: Sends
 ): Record<string, string> => ({
-  "workflows/loop.ts": `import { emailMessage, workflow } from "@grasp-os/sdk/workflow";
+  "workflows/loop.ts": `import { emailMessage, type Json, workflow } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "loop",
@@ -472,14 +472,14 @@ export default app({
   uses: [mail],
 });
 `,
-  "workflows/loop.ts": `import { emailMessage, workflow } from "@grasp-os/sdk/workflow";
+  "workflows/loop.ts": `import { emailMessage, type Json, workflow } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "loop",
   { params: {}, input: emailMessage, triggers: [{ type: "email", address: "${local}" }] },
   async (step, { env, input }) =>
     await step.do("send", { description: "Mail the address again", sideEffect: true, retries: { limit: 0 }, input: null }, async () =>
-      await env.APP.callFunction({ contractId: "mail.relay", kind: "action" }, { to: input.to[0]?.address ?? "", subject: input.subject })
+      (await env.APP.callFunction({ contractId: "mail.relay", kind: "action" }, { to: input.to[0]?.address ?? "", subject: input.subject })) as Json
     )
 );
 `,
@@ -765,7 +765,7 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
 
 export default workflow("mailer", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("send", { description: "Send", sideEffect: true, input: { to: "${looping.address}", subject: "Hi" } }, async ({ idempotencyKey, input }) =>
-    JSON.parse((await env.MAIL.call("mail.send", input, { idempotencyKey })).output)
+    JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output)
   )
 );
 `,

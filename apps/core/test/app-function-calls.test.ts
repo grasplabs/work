@@ -437,11 +437,11 @@ export default app({
 
 /** A workflow `id` whose one step calls its App's `asker.go`. */
 const askingWorkflow = (id: string): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { workflow, z } from "@grasp-os/sdk/workflow";
+  [`workflows/${id}.ts`]: `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("ask", { description: "Ask", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    await env.APP.callFunction(${JSON.stringify({ contractId: "asker.go", kind: "action" })}, {})
+    (await env.APP.callFunction(${JSON.stringify({ contractId: "asker.go", kind: "action" })}, {})) as Json
   )
 );
 `,
@@ -1135,12 +1135,12 @@ describe("a run calling another App's functions", { timeout: 90_000 }, () => {
     const { id } = await builder.api.apps.create({ name: "Kicking desk" });
     await release(builder, id, {
       ...deskFiles(),
-      "workflows/kicker.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/kicker.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("kicker", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("kick", { description: "Kick", sideEffect: true, input: null, retries: { limit: 0 } }, async () => ({
-    now: await env.APP.callFunction(${kick}, {}),
-    later: await env.APP.callFunction(${later}, {}),
+    now: (await env.APP.callFunction(${kick}, {})) as Json,
+    later: (await env.APP.callFunction(${later}, {})) as Json,
   }))
 );
 `,
@@ -1470,11 +1470,11 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
     const { id } = await builder.api.apps.create({ name: "Run desk" });
     await release(builder, id, {
       ...deskFiles(),
-      "workflows/noter.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/noter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("noter", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("note", { description: "Note", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    await env.APP.callFunction(${reference}, { text: "from the run" })
+    (await env.APP.callFunction(${reference}, { text: "from the run" })) as Json
   )
 );
 `,

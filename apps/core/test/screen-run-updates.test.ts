@@ -206,7 +206,7 @@ describe("run status on screens", { timeout: 60_000 }, () => {
       builder,
       workflowFiles(
         "expiring",
-        `  await step.decision("review", { description: "Approve", from: "person:${builder.userId}", ask: async () => {}, timeout: 1500 });
+        `  await step.decision("review", { description: "Approve", from: "person:${builder.userId}" as Person, ask: async () => {}, timeout: 1500 });
   await step.sleep("go", { description: "Wait", duration: "1 day" });
   return 1;`
       )

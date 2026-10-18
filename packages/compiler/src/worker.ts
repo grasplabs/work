@@ -34,6 +34,7 @@ import {
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
+  workflowTypeContext,
 } from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
@@ -50,6 +51,7 @@ import {
   generatedWorkflowCode,
   rewriteImports,
   screenTypeImportError,
+  sdkImports,
   serverCode,
   workflowCode,
 } from "./imports.ts";
@@ -372,6 +374,19 @@ const appCodeTarget = serverTarget(
 );
 
 /**
+ * How an App's workflows are type-checked (type-check.ts): no DOM, which
+ * their isolate doesn't have, no JSX, each file a module of its own; by
+ * name only the SDK's workflow modules they may import, and those the
+ * App's server code their types may name imports (`appCodeTarget`'s),
+ * with its generated modules by their aliases. A workflow's values reach
+ * none of the server's: its build holds them to `sdkImports`.
+ */
+const workflowTarget = serverTarget(
+  generatedModules,
+  new Set([...sdkImports, ...serverSdkImports, "@grasp-os/sdk/database"])
+);
+
+/**
  * Type-checks the App against the kit's types and lints it against the
  * kit's design system.
  */
@@ -489,9 +504,13 @@ const compileCodeFile = (
   files: ReadonlySet<string>
 ): { code: string } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
+  const directives: DirectiveSite[] = [];
   let compiled: string;
   try {
-    compiled = stripTypes(source, path, [collectImports(imports)]);
+    compiled = stripTypes(source, path, [
+      collectImports(imports),
+      collectDirectives(directives),
+    ]);
   } catch (error) {
     const message = messageIn(path, error);
     return {
@@ -500,6 +519,21 @@ const compileCodeFile = (
       ],
     };
   }
+  // What would steer the type check of code whose types are checked
+  // (`buildWorkflows`) rather than be checked by it: a triple-slash
+  // directive reaches the whole program (a workflow's
+  // `/// <reference lib="dom" />` would give every workflow the DOM), and
+  // a suppression switches the check off.
+  const steering =
+    kind.typeChecked === true
+      ? directives.map(({ directive, line }) =>
+          problem(
+            "imports",
+            `${directive} is never in ${kind.name.toLowerCase()} code: its type check is the platform's, as it is, for all of them.`,
+            line === undefined ? { file: path } : { file: path, line }
+          )
+        )
+      : [];
   const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
     const message = codeImportError(
       kind,
@@ -517,8 +551,8 @@ const compileCodeFile = (
           ),
         ];
   });
-  if (errors.length > 0) {
-    return { errors };
+  if (steering.length > 0 || errors.length > 0) {
+    return { errors: [...steering, ...errors] };
   }
   try {
     return {
@@ -589,21 +623,6 @@ export const buildServer = (files: Record<string, string>): ServerBuild => {
   return built.ok
     ? { ...built, mainModule: appModuleName(serverEntry) }
     : built;
-};
-
-/**
- * Builds an App's workflows: the TypeScript files under `workflows/`.
- * Types are stripped, not checked; imports reach only those files and the
- * SDK.
- */
-export const buildWorkflows = (
-  files: Record<string, string>
-): WorkflowBuild => {
-  const workflows = workflowFiles(files);
-  const tooMuch = limitErrors(workflows);
-  return tooMuch.length > 0
-    ? { ok: false, diagnostics: tooMuch }
-    : compileCode(workflowCode, workflows);
 };
 
 /**
@@ -804,6 +823,62 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
   return errors.length > 0
     ? { ok: false, diagnostics: errors }
     : { ok: true, modules };
+};
+
+/**
+ * Builds an App's workflows: the TypeScript files under `workflows/`,
+ * their tests included, importing only those files and the SDK's
+ * workflow modules (`sdkImports`), then type-checked in one program
+ * against those modules' declarations (`workflowTarget`), with the App's
+ * server code their types may name (`workflowTypeContext`): what they
+ * build to, or why they fail, their type errors included. Every place a
+ * workflow runs builds it here first: as its version is made current,
+ * before its tests run; as a run loads it; and as a save is built.
+ */
+export const buildWorkflows = (
+  files: Record<string, string>
+): WorkflowBuild => {
+  const workflows = workflowFiles(files);
+  const context = workflowTypeContext(files);
+  const tooMuch = appCodeLimitErrors({ ...context, ...workflows });
+  if (tooMuch.length > 0) {
+    return { ok: false, diagnostics: tooMuch };
+  }
+  const built = compileCode(workflowCode, workflows);
+  if (!built.ok) {
+    return built;
+  }
+  // The App's server code joins the check only as it builds (what server
+  // code may import and name, no directive, suppression or ambient
+  // module), so none of it can steer the workflows' check; its own type
+  // errors are its seal's (`checkAppCode`), never a workflow's. Server
+  // code that doesn't build stays out, and a workflow that names it is
+  // told why its types are missing.
+  const layout = isAppLayout(context);
+  const serverBuilds = layout && buildAppCode(context).ok;
+  const diagnostics = typeCheck(
+    serverBuilds ? { ...context, ...workflows } : workflows,
+    kit.types,
+    workflowTarget
+  ).filter(({ file }) => file === undefined || Object.hasOwn(workflows, file));
+  if (!diagnostics.some((diagnostic) => isError(diagnostic))) {
+    return built;
+  }
+  return {
+    ok: false,
+    diagnostics:
+      layout && !serverBuilds
+        ? [
+            ...diagnostics,
+            {
+              rule: "server",
+              severity: "warning",
+              message:
+                "The App's server code doesn't build, so its types aren't in this check: a workflow that names them (appFunctions<Tree>(env), import type from operations/) can't find them until it builds.",
+            },
+          ]
+        : diagnostics,
+  };
 };
 
 /**

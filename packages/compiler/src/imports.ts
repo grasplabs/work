@@ -314,11 +314,18 @@ const fileSuppression = /@ts-nocheck\b/iu;
 // `// @ts-ignoreX` as `@ts-ignore`.
 const lineSuppression = /^[\s/*]*@ts-(?:ignore|expect-error)/iu;
 
+/**
+ * Where TypeScript ends a line: `\r\n`, `\r`, `\n`, U+2028 and U+2029.
+ * A block comment's suppression is read from its lines as TypeScript
+ * splits them (`/* x\r @ts-ignore *\/` suppresses), never only on `\n`.
+ */
+const lineTerminator = /\r\n?|\n|\u2028|\u2029/u;
+
 /** The suppression `comment` holds where TypeScript would obey it, if any. */
 const suppressionIn = (comment: string): string | undefined =>
   fileSuppression.exec(comment)?.[0] ??
   comment
-    .split("\n")
+    .split(lineTerminator)
     .map((line) =>
       lineSuppression
         .exec(line)?.[0]
@@ -680,6 +687,11 @@ export interface CodeKind {
   folder: string;
   /** The modules it may import besides its own files, and their flat names. */
   imports: ReadonlyMap<string, string>;
+  /**
+   * Whether its types are checked (`buildWorkflows`): then nothing in it
+   * may steer the check, no directive, suppression or ambient module.
+   */
+  typeChecked?: boolean;
 }
 
 /** Server code imports its own files and the Workers runtime. */
@@ -705,6 +717,7 @@ export const workflowCode: CodeKind = {
   imports: new Map(
     sdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
   ),
+  typeChecked: true,
 };
 
 /**
@@ -784,10 +797,19 @@ export const codeImportError = (
   file: string,
   files: ReadonlySet<string>
 ): string | undefined => {
-  // Its types are stripped, never checked (GRA-675 checks them): an
-  // ambient module there reaches nothing yet.
+  // An ambient module would declare, or shadow, a module by name in the
+  // type check, or `declare global` give every file globals its isolate
+  // doesn't have: code of a `typeChecked` kind declares none. The v1
+  // server's types are stripped, so there it reaches nothing. Compute
+  // modules are type-checked without this refusal yet (GRA-725), so there
+  // it still reaches their check.
   if (ambient) {
-    return undefined;
+    if (kind.typeChecked !== true) {
+      return undefined;
+    }
+    return specifier === undefined
+      ? `declare global is never in ${kind.name.toLowerCase()} code: it would declare globals its isolate doesn't have, for every file.`
+      : `declare module "${specifier}" is never in ${kind.name.toLowerCase()} code: it would declare, or shadow, a module the SDK doesn't give it.`;
   }
   if (typeOnly) {
     return typeImportError(file, specifier, false);

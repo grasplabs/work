@@ -143,7 +143,7 @@ const cutOff = (id: string, timeout: string, call: string, then: string) =>
   { description: "Count", timeout: "${timeout}", retries: { limit: 1, delay: 10 } },
   async () => {
     try {
-      const attempt = await env.APP.call(${call});
+      const attempt = (await env.APP.call(${call})) as number;
       if (attempt === 1) {
         await env.APP.call(${then});
       }
@@ -211,7 +211,7 @@ const mailStep = (
     { description: "Send", sideEffect: true, input: { to: "ben@acme.test", subject: "${subject}" }, timeout: "${attemptTimeout}", retries: { limit: 1, delay: 10 } },
     async ({ idempotencyKey, input: mail }) => {
       ${before}
-      const sent = JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
+      const sent = JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
       ${after}
       return sent;
     }
@@ -280,8 +280,8 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     { description: "Send the invoice", sideEffect: true, input: null, retries: { limit: 1, delay: 10 } },
     async () => {
       // A key of the method's own would send once per attempt.
-      const ownKey = await env.APP.call("mail", true);
-      const sent = await env.APP.call("mail", false);
+      const ownKey = (await env.APP.call("mail", true)) as Json;
+      const sent = (await env.APP.call("mail", false)) as Json;
       if ((await env.APP.call("hit", "app-send")) === 1) {
         // The mail went out, yet the attempt fails as if nothing was done,
         // with a failure the engine retries: the retry mustn't mail again.
@@ -329,8 +329,8 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     { description: "Send the invoice", sideEffect: true, input: null, retries: { limit: 1, delay: 10 } },
     async () => {
       // A key of the function's own would send once per attempt.
-      const ownKey = JSON.parse(await ${appCall("mail.mailOwnKey", "action", "{}")});
-      const sent = JSON.parse(await ${appCall("mail.mail", "action", "{}")});
+      const ownKey = JSON.parse(await ${appCall("mail.mailOwnKey", "action", "{}", "string")});
+      const sent = JSON.parse(await ${appCall("mail.mail", "action", "{}", "string")});
       if ((await ${hitCall(`"app-send"`)}) === 1) {
         // The mail went out, yet the attempt fails as if nothing was done,
         // with a failure the engine retries: the retry mustn't mail again.
@@ -377,7 +377,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)} },
     async ({ idempotencyKey, input: mail }) => {
       await ${hitCall(`"send"`)};
-      return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
+      return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
     }
   );
   await step.sleep("go", { description: "Wait", duration: "1 day" });
@@ -753,7 +753,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         `  return await step.do(
     "count",
     { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 0 } },
-    async () => await env.APP.call("hit", "queued")
+    async () => (await env.APP.call("hit", "queued")) as Json
   );`,
         { count: 1 }
       )
@@ -1209,7 +1209,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)} },
     async ({ idempotencyKey, input: mail }) => {
       await ${hitCall(`"send"`)};
-      return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
+      return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
     }
   );
   await step.sleep("go", { description: "Wait", duration: "1 day" });
@@ -1260,7 +1260,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, timeout: "${attemptTimeout}", retries: { limit: 4, delay: 250, backoff: "constant" } },
     async ({ idempotencyKey, input: mail }) => {
       await ${hitCall(`"send"`)};
-      return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
+      return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
     }
   );`,
         { send: { messageId: "mocked" } }
