@@ -1150,8 +1150,9 @@ export const admitWorkflowStart = async (
     const [[state]] = await auditedBatch(env, db, [
       db
         .select({
-          under: sql<number>`${underRunLimit(authorization)}`,
-          packaged: sql<number>`${authorization.packages}`,
+          under: sql<number>`${underRunLimit(authorization)}`.as("under"),
+          // Named, so no column of the statement shares its name.
+          packaged: sql<number>`(${authorization.packages})`.as("packaged"),
         })
         .from(sql`(SELECT 1)`),
       db
