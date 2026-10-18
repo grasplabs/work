@@ -628,6 +628,78 @@ const actionRunWith = async () => {
   return { admin, builder, workflow, request, runId };
 };
 
+/**
+ * A run of a workflow of a new builder's whose action, importing an
+ * approved package, sends two mails, the first held at the mail server
+ * until the graph is ended as `ending` (`retired` or `revoked`): how the
+ * run ended, what the server did, and what was audited meanwhile.
+ */
+const mailedThroughEnding = async (ending: "retired" | "revoked") => {
+  const admin = await approver();
+  const pkg = await doubling();
+  const { builder, workflow, request } = await workflowWith(pkg);
+  await approve(admin, request);
+  const mailKey = `mail-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key: mailKey,
+    kind: "connector",
+    operations: { "mail.send": { input: mailInput, output: mailOutput } },
+  });
+  await publishWorkflowVersion(
+    env,
+    builder,
+    workflow.id,
+    {
+      definition: mailingDefinitionOf(workflow.name, mailKey),
+      basedOn: null,
+      modules: { "code/notify.ts": mailingUsing(pkg) },
+      packages: { graphHash: request.graphHash },
+    },
+    sealPackages
+  );
+  // The first mail is held at the server until the graph is ended.
+  const mail = await mailConnection(["slow"]);
+  const permissionId = await granted(builder, admin, {
+    subject: { type: "workflow", workflowId: workflow.id },
+    object: { type: "connection", connectionId: mail.id },
+    actions: ["mail.send"],
+    binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
+  });
+  // Connect serves the contract as the approval and the start check it.
+  const serving = servingMail();
+  await approveWorkflowBinding(serving, admin, workflow.id, {
+    alias: "mail",
+    target: { kind: "connector", permissionId, contract: "composio.mail@1" },
+    reviewed: { version: 1 },
+  });
+  const { runId } = await startWorkflow(
+    serving,
+    { type: "person", person: builder },
+    workflow.id,
+    { version: 1, input: { who: "Ada" }, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  let run: Awaited<ReturnType<typeof ended>> | undefined;
+  const events = await auditedDuring(async () => {
+    try {
+      await vi.waitFor(
+        async () => {
+          await expect(mail.holding()).resolves.toBeTruthy();
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+      await end(admin, request, ending);
+    } finally {
+      // Released whatever the wait saw, so no call stays held.
+      await mail.release();
+    }
+    run = await ended(builder, workflow.id, runId);
+  });
+  return { run, server: await mail.did(), events };
+};
+
 describe("a workflow's modules importing approved packages", () => {
   // A run held asleep for an hour would go on in the engine after its
   // test, whatever the test made of it.
@@ -945,74 +1017,12 @@ describe("a workflow's modules importing approved packages", () => {
   });
 
   it("makes no call more of an action whose graph is revoked while it runs, audited", async () => {
-    const admin = await approver();
-    const pkg = await doubling();
-    const { builder, workflow, request } = await workflowWith(pkg);
-    await approve(admin, request);
-    const mailKey = `mail-${unique()}`;
-    await publishCatalogContract(env, admin, {
-      key: mailKey,
-      kind: "connector",
-      operations: { "mail.send": { input: mailInput, output: mailOutput } },
-    });
-    await publishWorkflowVersion(
-      env,
-      builder,
-      workflow.id,
-      {
-        definition: mailingDefinitionOf(workflow.name, mailKey),
-        basedOn: null,
-        modules: { "code/notify.ts": mailingUsing(pkg) },
-        packages: { graphHash: request.graphHash },
-      },
-      sealPackages
-    );
-    // The first mail is held at the server until the graph is revoked.
-    const mail = await mailConnection(["slow"]);
-    const permissionId = await granted(builder, admin, {
-      subject: { type: "workflow", workflowId: workflow.id },
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.send"],
-      binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
-    });
-    // Connect serves the contract as the approval and the start check it.
-    const serving = servingMail();
-    await approveWorkflowBinding(serving, admin, workflow.id, {
-      alias: "mail",
-      target: { kind: "connector", permissionId, contract: "composio.mail@1" },
-      reviewed: { version: 1 },
-    });
-    const { runId } = await startWorkflow(
-      serving,
-      { type: "person", person: builder },
-      workflow.id,
-      { version: 1, input: { who: "Ada" }, key: unique() }
-    );
-    if (runId === null) {
-      throw new Error("The start admitted no run");
-    }
-
-    let run: Awaited<ReturnType<typeof ended>> | undefined;
-    const events = await auditedDuring(async () => {
-      try {
-        await vi.waitFor(
-          async () => {
-            await expect(mail.holding()).resolves.toBeTruthy();
-          },
-          { timeout: 30_000, interval: 100 }
-        );
-        await end(admin, request, "revoked");
-      } finally {
-        // Released whatever the wait saw, so no call stays held.
-        await mail.release();
-      }
-      run = await ended(builder, workflow.id, runId);
-    });
+    const { run, server, events } = await mailedThroughEnding("revoked");
 
     expect({
       run,
       // The mail sent before the revocation, and none after.
-      server: await mail.did(),
+      server,
       audited: outcomesOf(events, [
         "dependency.admission_refused",
         "workflow.run.failed",
@@ -1032,6 +1042,27 @@ describe("a workflow's modules importing approved packages", () => {
           failureCode: "workflow.packages_revoked",
         },
       ],
+    });
+  });
+
+  it("keeps making the calls of an action whose graph is retired while it runs", async () => {
+    const { run, server, events } = await mailedThroughEnding("retired");
+
+    // What a retired graph sealed keeps running, as a compute call's does.
+    expect({
+      run,
+      server,
+      refused: outcomesOf(events, ["dependency.admission_refused"]),
+    }).toStrictEqual({
+      run: { status: "completed", output: { status: "sent" } },
+      server: {
+        calls: 2,
+        sent: [
+          { to: "Ada", subject: "2" },
+          { to: "Ada", subject: "4" },
+        ],
+      },
+      refused: [],
     });
   });
 
