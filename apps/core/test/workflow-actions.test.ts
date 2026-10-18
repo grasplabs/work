@@ -28,6 +28,8 @@ import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  shareWorkflowResource,
+  workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
@@ -252,7 +254,7 @@ const actingWorkflow = async (
 ) => {
   const key = await mailContract(admin);
   const workflow = await createWorkflowResource(env, by, `act-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
+  const published = await publishWorkflowVersion(env, by, workflow.id, {
     definition: definitionOf(workflow.name, {
       before,
       mail: { kind: "connector", contract: key },
@@ -273,7 +275,7 @@ const actingWorkflow = async (
     target: { kind: "connector", permissionId, contract: "composio.mail@1" },
     reviewed: { version: 1 },
   });
-  return { workflow, mail, serving, approval, key };
+  return { workflow, mail, serving, approval, key, published };
 };
 
 /** Starts version 1 of workflow `id` for `by`, on `startEnv`. */
@@ -388,6 +390,47 @@ describe("a JSON workflow's own actions", () => {
     });
     const sent = await mail.did();
     expect(sent.calls).toBe(0);
+  });
+
+  it("shows what each action may call in its version, as sealed, to every role alike", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const reader = await person("user");
+    const { workflow, published, key } = await actingWorkflow(
+      ada,
+      admin,
+      sendsTwice
+    );
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: reader.userId,
+      role: "user",
+    });
+    const [asBuilder] = await workflowVersions(env, ada, workflow.id);
+    const [asReader] = await workflowVersions(env, reader, workflow.id);
+    const actions = [
+      {
+        binding: "notify",
+        module: "code/notify.ts",
+        export: "notify",
+        uses: [{ alias: "mail", kind: "connector", operations: ["mail.send"] }],
+      },
+    ];
+    expect({
+      published: published.actions,
+      builder: asBuilder?.actions,
+      reader: asReader?.actions,
+      // Beside the catalog binding the action reaches, as every role sees it.
+      readerBindings: asReader?.bindings.map(({ alias, contractId }) => ({
+        alias,
+        contractId,
+      })),
+    }).toStrictEqual({
+      published: actions,
+      builder: actions,
+      reader: actions,
+      readerBindings: [{ alias: "mail", contractId: key }],
+    });
   });
 
   it("refuses a definition whose action uses a binding it doesn't declare, or of another kind", async () => {

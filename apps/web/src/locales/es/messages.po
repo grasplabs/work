@@ -1020,6 +1020,7 @@ msgstr "Acción"
 
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Actions"
 msgstr "Acciones"
 
@@ -4067,6 +4068,10 @@ msgstr "Nadie lo lee"
 #: src/routes/_shell.settings.models.tsx
 msgid "none"
 msgstr "ninguna"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "None"
+msgstr "Ninguna"
 
 #: src/activity/pending.tsx
 msgid "None current"
