@@ -294,6 +294,10 @@ describe("an organization's records", () => {
       ),
       // Each organization's log is its own: the other one was added too.
       added: text.split("Added this organization.").length - 1,
+      // The interviews as core counts them: the day the team was told, and who finished.
+      history: ["The company told its team.", "finished their interview."].map(
+        (line) => text.includes(line)
+      ),
     }).toStrictEqual({
       status: 200,
       toCome: false,
@@ -301,6 +305,7 @@ describe("an organization's records", () => {
       found: [true, true, true, true, true],
       newestFirst: true,
       added: 1,
+      history: [true, true],
     });
   });
 });
