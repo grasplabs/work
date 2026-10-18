@@ -33,8 +33,9 @@
  *   dependencies, from the catalog. What isn't: the catalog packages' own
  *   dependencies, which the package manager resolves at install, and
  *   integrity, which only a lockfile carries. A lock that names a package
- *   the project pins itself (Grasp's scope anywhere, React, the
- *   type-checker) is refused. Installing is the developer's step, after.
+ *   the project pins itself (Grasp's scope, React, the type-checker),
+ *   anywhere in its graph but its peers, is refused. Installing is the
+ *   developer's step, after.
  * - Code from the package runs: none does. The references are generated
  *   from the registration as data (`generateModules`).
  * - Licences: the vendored packages ship with their AGPL-3.0 text, and the
@@ -43,10 +44,12 @@
  *   "unknown" otherwise.
  */
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   renameSync,
+  rmdirSync,
   rmSync,
   readFileSync,
   readdirSync,
@@ -385,15 +388,15 @@ const appDependencies = (
     );
   }
   const locked = Object.values(lock.data.packages);
-  // Grasp's own scope is never fetched from a registry, anywhere in the
-  // graph; and nothing the project pins itself is the App's to replace.
-  const scoped = locked.flatMap((entry) => [
+  // Nothing the project pins itself is the App's to replace, anywhere in
+  // the graph but its peers, which the project's own versions meet.
+  const named = locked.flatMap((entry) => [
     entry.name,
     ...Object.keys(entry.dependencies),
   ]);
   if (
     Object.keys(lock.data.direct).some(ownedByProject) ||
-    scoped.some((name) => name.startsWith("@grasp-os/"))
+    named.some(ownedByProject)
   ) {
     refuse("The App's lock names a package the project pins itself.");
   }
@@ -689,9 +692,13 @@ export const packageProject = async (
       mkdirSync(path.dirname(target), { recursive: true });
       writeFileSync(target, text, { flag: "wx" });
     }
-    // Checked again just before: renaming onto a directory replaces it
-    // only while it is empty.
+    // Checked again just before, and an empty `--out` removed first: not
+    // every platform renames onto a directory, and removing one refuses
+    // unless it is empty.
     requireFreshOut(out);
+    if (existsSync(out)) {
+      rmdirSync(out);
+    }
     renameSync(building, out);
   } catch (error) {
     rmSync(building, { recursive: true, force: true });

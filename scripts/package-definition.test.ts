@@ -412,6 +412,10 @@ describe(
             locked("typescript", "5.0.0", "MIT"),
           ]),
           lockOf({ "date-kit": "1.2.0" }, [
+            locked("date-kit", "1.2.0", "MIT", { react: "18.0.0" }),
+            locked("react", "18.0.0", "MIT"),
+          ]),
+          lockOf({ "date-kit": "1.2.0" }, [
             locked("date-kit", "1.2.0", "MIT", { "@grasp-os/shared": "1.0.0" }),
             locked("@grasp-os/shared", "1.0.0", "MIT"),
           ]),
@@ -433,7 +437,7 @@ describe(
         dateKit: "1.2.0",
         overrides: { "date-kit@1.2.0": { "tz-data": "2.0.1" } },
         notices: ["| date-kit | 1.2.0 | unknown | the App's lock |"],
-        refused: ["refused", "refused", "refused", "refused"],
+        refused: ["refused", "refused", "refused", "refused", "refused"],
       });
     });
 
