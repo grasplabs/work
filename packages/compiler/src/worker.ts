@@ -852,17 +852,33 @@ export const buildWorkflows = (
   // code may import and name, no directive, suppression or ambient
   // module), so none of it can steer the workflows' check; its own type
   // errors are its seal's (`checkAppCode`), never a workflow's. Server
-  // code that doesn't build leaves a workflow that names it unresolved.
-  const server =
-    isAppLayout(context) && buildAppCode(context).ok ? context : {};
+  // code that doesn't build stays out, and a workflow that names it is
+  // told why its types are missing.
+  const layout = isAppLayout(context);
+  const serverBuilds = layout && buildAppCode(context).ok;
   const diagnostics = typeCheck(
-    { ...server, ...workflows },
+    serverBuilds ? { ...context, ...workflows } : workflows,
     kit.types,
     workflowTarget
   ).filter(({ file }) => file === undefined || Object.hasOwn(workflows, file));
-  return diagnostics.some((diagnostic) => isError(diagnostic))
-    ? { ok: false, diagnostics }
-    : built;
+  if (!diagnostics.some((diagnostic) => isError(diagnostic))) {
+    return built;
+  }
+  return {
+    ok: false,
+    diagnostics:
+      layout && !serverBuilds
+        ? [
+            ...diagnostics,
+            {
+              rule: "server",
+              severity: "warning",
+              message:
+                "The App's server code doesn't build, so its types aren't in this check: a workflow that names them (appFunctions<Tree>(env), import type from operations/) can't find them until it builds.",
+            },
+          ]
+        : diagnostics,
+  };
 };
 
 /**

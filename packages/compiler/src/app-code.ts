@@ -147,11 +147,11 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
 
 /**
  * The App's server code a workflow's types may name: its schema, values,
- * registration and operations, with the host's generated modules, never
- * its migrations or tests. A workflow's `appFunctions<Tree>(env)` is
- * typed by the App's operations (`import type * as notes from
- * "../operations/notes.ts"`), so they join its type check; they never
- * join its build.
+ * registration, operations and the migrations its registration imports,
+ * with the host's generated modules, never its tests. A workflow's
+ * `appFunctions<Tree>(env)` is typed by the App's operations (`import
+ * type * as notes from "../operations/notes.ts"`), so they join its type
+ * check; they never join its build.
  */
 export const workflowTypeContext = (
   files: Readonly<Record<string, string>>
@@ -159,7 +159,7 @@ export const workflowTypeContext = (
   Object.fromEntries(
     Object.entries(files).filter(([path]) => {
       const kind = appCodeKind(path);
-      return kind === "schema" || kind === "server" || kind === "generated";
+      return kind !== undefined && kind !== "test";
     })
   );
 

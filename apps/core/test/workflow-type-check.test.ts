@@ -65,18 +65,74 @@ export default workflow("typed", { params: {}, input: z.unknown() }, async (step
 `,
 });
 
-/** What building `files` as an App's workflows said: ok, and the files its errors name. */
+/**
+ * What building `files` as an App's workflows said: ok, the files its
+ * errors name, and the rules of its warnings.
+ */
 const built = async (
   files: Record<string, string>
-): Promise<{ ok: boolean; files: string[] }> => {
+): Promise<{ ok: boolean; files: string[]; warned: string[] }> => {
   const build = await buildWorkflows(env, files, "app-test");
+  const diagnostics = build.ok ? [] : build.diagnostics;
+  const of = (severity: string) =>
+    diagnostics.filter((diagnostic) => diagnostic.severity === severity);
   return {
     ok: build.ok,
     files: [
-      ...new Set(
-        (build.ok ? [] : build.diagnostics).map(({ file }) => file ?? "(App)")
-      ),
+      ...new Set(of("error").map(({ file }) => file ?? "(App)")),
     ].toSorted(),
+    warned: [...new Set(of("warning").map(({ rule }) => rule))].toSorted(),
+  };
+};
+
+/**
+ * The sample App with a migration its registration imports, as an App
+ * registers one (`migrations: [derive]`).
+ */
+const migratedApp = (): Record<string, string> => {
+  const app = sampleApp();
+  return {
+    ...app,
+    "app.ts": (app["app.ts"] ?? "")
+      .replace(
+        'import schema from "./schema.ts";',
+        'import derive from "./migrations/derive.ts";\nimport schema from "./schema.ts";'
+      )
+      .replace(
+        "  internalOperations: {},",
+        "  internalOperations: {},\n  migrations: [derive],"
+      ),
+    "migrations/derive.ts": `import { migration, v } from "@grasp-os/sdk";
+
+export default migration({
+  name: "derive",
+  table: "counters",
+  fromSchema: "before",
+  toSchema: "after",
+  input: v.object({ name: v.string(), count: v.number() }),
+  output: v.object({ name: v.string(), count: v.number() }),
+  fixtures: [],
+  handler: (_ctx, row) => row,
+});
+`,
+  };
+};
+
+/**
+ * The files and the rules of the errors building `files` as an App's
+ * workflows said: `rule: "imports"` is the build's own refusal (a
+ * directive, a suppression, an ambient module), before any type check.
+ */
+const steered = async (
+  files: Record<string, string>
+): Promise<{ files: string[]; rules: string[] }> => {
+  const build = await buildWorkflows(env, files, "app-test");
+  const errors = build.ok
+    ? []
+    : build.diagnostics.filter(({ severity }) => severity === "error");
+  return {
+    files: [...new Set(errors.map(({ file }) => file ?? "(App)"))].toSorted(),
+    rules: [...new Set(errors.map(({ rule }) => rule))].toSorted(),
   };
 };
 
@@ -159,6 +215,19 @@ describe(
         "a module the SDK doesn't give it, named with a trailing slash",
         'import type { GraspClient } from "@grasp-os/sdk/client/";\nexport type Reached = GraspClient;\n',
       ],
+    ])("refuse, in a helper they share, %s", async (_case, source) => {
+      await expect(
+        refusedActivation({
+          ...checked("    return 1;"),
+          "workflows/lib/extra.ts": source,
+        })
+      ).resolves.toStrictEqual({
+        code: "workflow.build_failed",
+        files: ["workflows/lib/extra.ts"],
+      });
+    });
+
+    it.each([
       [
         "a reference path into the kit",
         '/// <reference path="../../node_modules/@grasp-os/sdk/src/client.ts" />\nexport const extra = 1;\n',
@@ -180,6 +249,22 @@ describe(
         "// @ts-expect-error\nexport const title = (): string => document.title;\n",
       ],
       [
+        "an error the type check is told to expect, on a block comment's last line",
+        "/* Expected:\n @ts-expect-error */\nexport const title = (): string => document.title;\n",
+      ],
+      [
+        "a line the type check is told to ignore, after a carriage return in a block comment",
+        "/* x\r @ts-ignore */\nexport const title = (): string => document.title;\n",
+      ],
+      [
+        "an error the type check is told to expect, after a line separator in a block comment",
+        "/* x\u2028 @ts-expect-error */\nexport const title = (): string => document.title;\n",
+      ],
+      [
+        "an error the type check is told to expect, after a paragraph separator in a block comment",
+        "/* x\u2029 @ts-expect-error */\nexport const title = (): string => document.title;\n",
+      ],
+      [
         "a file the type check is told to skip",
         "// @ts-nocheck\nexport const title = (): string => document.title;\n",
       ],
@@ -188,24 +273,28 @@ describe(
         "// @ts-NoCheck\nexport const title = (): string => document.title;\n",
       ],
       [
-        "an ambient module that shadows the SDK's",
-        'declare module "@grasp-os/sdk/workflow" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
+        "an ambient module that adds to the SDK's, which a workflow then reads",
+        'import { leak } from "@grasp-os/sdk/workflow";\n\ndeclare module "@grasp-os/sdk/workflow" {\n  export const leak: number;\n}\nexport const extra: number = leak;\n',
       ],
       [
         "globals it declares for every workflow",
         "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
       ],
-    ])("refuse, in a helper they share, %s", async (_case, source) => {
-      await expect(
-        refusedActivation({
-          ...checked("    return 1;"),
-          "workflows/lib/extra.ts": source,
-        })
-      ).resolves.toStrictEqual({
-        code: "workflow.build_failed",
-        files: ["workflows/lib/extra.ts"],
-      });
-    });
+    ])(
+      "refuse, in a helper they share, %s, before the type check reads it",
+      async (_case, source) => {
+        await expect(
+          steered({
+            ...sampleApp(),
+            ...checked("    return 1;"),
+            "workflows/lib/extra.ts": source,
+          })
+        ).resolves.toStrictEqual({
+          files: ["workflows/lib/extra.ts"],
+          rules: ["imports"],
+        });
+      }
+    );
 
     it("make current a workflow that narrows what its bindings answer, and runs as its SDK types it", async () => {
       await expect(
@@ -228,14 +317,14 @@ describe(
           ].map(async (call) => await built({ ...sampleApp(), ...typed(call) }))
         )
       ).resolves.toStrictEqual([
-        { ok: true, files: [] },
-        { ok: false, files: ["workflows/typed.ts"] },
-        { ok: false, files: ["workflows/typed.ts"] },
-        { ok: false, files: ["workflows/typed.ts"] },
+        { ok: true, files: [], warned: [] },
+        { ok: false, files: ["workflows/typed.ts"], warned: [] },
+        { ok: false, files: ["workflows/typed.ts"], warned: [] },
+        { ok: false, files: ["workflows/typed.ts"], warned: [] },
       ]);
     });
 
-    it("leave out of a workflow's check server code that doesn't build, so it gives the workflows nothing", async () => {
+    it("leave out of a workflow's check server code that doesn't build, so it gives the workflows nothing, and say so", async () => {
       await expect(
         built({
           ...sampleApp(),
@@ -243,7 +332,20 @@ describe(
             "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
           ...checked("    return document.title;"),
         })
-      ).resolves.toStrictEqual({ ok: false, files: ["workflows/checked.ts"] });
+      ).resolves.toStrictEqual({
+        ok: false,
+        files: ["workflows/checked.ts"],
+        warned: ["server"],
+      });
+    });
+
+    it("type a workflow by the operations of an App that registers a migration", async () => {
+      await expect(
+        built({
+          ...migratedApp(),
+          ...typed('APP.query("counter.hits", { name: "x" })'),
+        })
+      ).resolves.toStrictEqual({ ok: true, files: [], warned: [] });
     });
 
     it("build a workflow beside server code with type errors of its own, which its seal refuses", async () => {
@@ -253,7 +355,7 @@ describe(
           "operations/extra.ts": 'export const total: number = "twelve";\n',
           ...typed('APP.query("counter.hits", { name: "x" })'),
         })
-      ).resolves.toStrictEqual({ ok: true, files: [] });
+      ).resolves.toStrictEqual({ ok: true, files: [], warned: [] });
     });
 
     it("fail a run whose version holds a workflow that doesn't type-check, however it became current", async () => {
