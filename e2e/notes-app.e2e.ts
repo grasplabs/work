@@ -749,12 +749,14 @@ test("a file the screen deletes while showing it is gone, never read again or a 
     .getByLabel("Upload a file")
     .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
   await expect(screen.getByText("Showing photo.png")).toBeVisible();
+  // Shown through photos, deleted through attachments: the same file, gone
+  // through every resource that reads it.
+  await screen.getByRole("button", { name: "Through photos" }).click();
+  await expect(screen.getByText("Showing photo.png")).toBeVisible();
   const reads: string[] = [];
   page.on("request", (request) => {
-    if (
-      request.method() === "GET" &&
-      request.url().includes("/attachments/files/")
-    ) {
+    // A read of the file through either resource.
+    if (request.method() === "GET" && request.url().includes("/files/")) {
       reads.push(request.url());
     }
   });

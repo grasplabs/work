@@ -830,11 +830,12 @@ export interface ClientInternals {
   /** Calls `onFence` at every fence, until the function it answers is called. */
   onFence: (onFence: () => void) => () => void;
   /**
-   * Calls `onDeleted` with `<alias>/<file>` of each file `files.delete`
-   * deleted, once core recorded it, until the function it answers is
-   * called: what a file's view reads again on.
+   * Calls `onDeleted` with the id of each file `files.delete` deleted,
+   * once core recorded it, until the function it answers is called: the
+   * file is gone through every resource that reads it, so each view of it
+   * shows it gone.
    */
-  onFileDeleted: (onDeleted: (key: string) => void) => () => void;
+  onFileDeleted: (onDeleted: (id: string) => void) => () => void;
 }
 
 /**
@@ -1445,7 +1446,7 @@ export class GraspClient {
   /** Told of every fence (`WorkflowLink.onFence`). */
   readonly #fenceListeners = new Set<(refusal: GraspError) => void>();
   /** Told of each file `files.delete` deleted (`onFileDeleted`). */
-  readonly #deletionListeners = new Set<(key: string) => void>();
+  readonly #deletionListeners = new Set<(id: string) => void>();
 
   /**
    * The App's files: downloading and deleting them through a files
@@ -1506,12 +1507,12 @@ export class GraspClient {
         }
       },
       () => this.#generation,
-      (key) => {
+      (id) => {
         for (const listener of this.#deletionListeners) {
           // One view failing never changes the deletion's outcome, nor
-          // keeps the others from reading the file again.
+          // keeps the others from showing the file gone.
           try {
-            listener(key);
+            listener(id);
           } catch {
             // The view's own failure, shown by the view.
           }

@@ -176,7 +176,7 @@ export interface DownloadOptions {
 export interface DeleteOptions {
   /**
    * Stops waiting; a deletion already sent still goes through, and the
-   * views of the file read it again once core recorded it.
+   * views of the file show it gone once core recorded it.
    */
   readonly signal?: AbortSignal;
   /**
@@ -248,20 +248,20 @@ export class ClientFiles {
   readonly #transport: FileTransport | undefined;
   readonly #refused: (error: GraspError, startedUnder: number) => void;
   readonly #generation: () => number;
-  readonly #deleted: (key: string) => void;
+  readonly #deleted: (id: string) => void;
 
   /**
    * For the session client only: `refused` hears each failure with the
    * client's fence count as its request started (`generation`), so a
    * refusal of one started before a fence never fences the client again;
-   * `deleted` hears `<alias>/<file>` of each file deleted, once core
-   * recorded it, so the views of it read it again.
+   * `deleted` hears the id of each file deleted, once core recorded it,
+   * so every view of it, through any resource, shows it gone.
    */
   constructor(
     transport: FileTransport | undefined,
     refused: (error: GraspError, startedUnder: number) => void,
     generation: () => number,
-    deleted: (key: string) => void
+    deleted: (id: string) => void
   ) {
     this.#transport = transport;
     this.#refused = refused;
@@ -355,8 +355,8 @@ export class ClientFiles {
     } catch (error) {
       return { failed: error };
     }
-    // Shown nowhere as it was: each view of it reads it again.
-    this.#deleted(`${alias}/${id}`);
+    // Gone through every resource: each view of it shows it gone.
+    this.#deleted(id);
     return {};
   }
 
