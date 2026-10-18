@@ -1,4 +1,5 @@
 import { generatedPath } from "@grasp-os/open-workflow/generate";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -14,7 +15,7 @@ import {
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
-import { auditedDuring, outcome, unique } from "./sign-in.ts";
+import { auditedDuring, outcome, refusal, unique } from "./sign-in.ts";
 
 // Exporting an App's definition (definition-export.ts): its current
 // sealed release and the exact workflow versions it binds, as portable
@@ -130,6 +131,9 @@ const paramsSchema = z.object({
   }),
 });
 
+/** A refusal's code and details, as these tests read them. */
+const refusedSchema = z.object({ code: z.string(), details: z.unknown() });
+
 /** The sorted keys of `value`. */
 const keys = (value: object): string[] => Object.keys(value).toSorted();
 
@@ -193,27 +197,19 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       root: keys(exported),
       app: keys(exported.app),
       provenance: keys(exported.app.provenance),
-      generated: keys(exported.app.generated),
-      generatedFile: Object.values(exported.app.generated).map(keys),
+      generated: keys(exported.app.provenance.generated),
       store: exported.app.store === null ? null : keys(exported.app.store),
       workflow: keys(entry),
       workflowProvenance: keys(entry.provenance),
       workflowFiles: keys(entry.files),
     }).toStrictEqual({
       root: ["app", "formatVersion", "unresolved", "workflows"],
-      app: [
-        "bindings",
-        "files",
-        "generated",
-        "provenance",
-        "store",
-        "version",
-        "workflows",
-      ],
+      app: ["bindings", "files", "provenance", "store", "version", "workflows"],
       provenance: [
         "compilerVersion",
         "contractHash",
         "dependencyLockHash",
+        "generated",
         "manifestHash",
         "schemaHash",
         "sdkProtocolVersion",
@@ -226,12 +222,6 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         ".grasp/references.ts",
         ".grasp/server-references.ts",
         ".grasp/server.ts",
-      ],
-      generatedFile: [
-        ["sha256", "text"],
-        ["sha256", "text"],
-        ["sha256", "text"],
-        ["sha256", "text"],
       ],
       store: ["alias", "operationManifestHash", "schemaHash", "schemaVersion"],
       workflow: [
@@ -278,21 +268,33 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       JSON.parse(entry.files["workflow.json"] ?? "{}")
     ).document.metadata.grasp;
     const text = JSON.stringify(exported);
-    // No row of this deployment in what the package says itself: only the
-    // sealed generated files, copied as they hash, name the App's own ID
-    // and its workflows' (the destination generates its own).
-    const ownFields = JSON.stringify({
-      ...exported,
-      app: { ...exported.app, generated: {} },
-    });
+    // Nor any hash over the definition as published, against which a
+    // holder could test guesses at what was withheld.
+    const asPublished = await env.DB.prepare(
+      "SELECT definition_json_hash, manifest_hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ definition_json_hash: string; manifest_hash: string }>();
     expect({
       withheld: entry.withheldDefaults.toSorted(),
       apiKey: params.apiKey,
       region: params.settings?.schema.properties?.region,
       pageSize: params.pageSize?.default,
-      secrets: [apiKey, region].filter((secret) => text.includes(secret)),
+      secrets: [
+        apiKey,
+        region,
+        asPublished?.definition_json_hash ?? "unpublished",
+        asPublished?.manifest_hash ?? "unpublished",
+      ].filter((secret) => text.includes(secret)),
+      hashes: {
+        manifest: entry.provenance.manifestHash,
+        definition:
+          entry.provenance.definitionHash ===
+          (await sha256Hex(entry.files["workflow.json"] ?? "")),
+      },
+      // No row of this deployment anywhere in the package.
       ids: [store, workflow.id, owner.userId, app].filter((id) =>
-        ownFields.includes(id)
+        text.includes(id)
       ),
     }).toStrictEqual({
       withheld: ["apiKey", "settings"],
@@ -305,6 +307,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       region: { type: "string" },
       pageSize: 25,
       secrets: [],
+      hashes: { manifest: null, definition: true },
       ids: [],
     });
 
@@ -321,7 +324,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     ]);
   });
 
-  it("lists a workflow its exporter doesn't build, and one whose sensitive parameter pins a value, without either's definition", async () => {
+  it("lists a workflow its exporter doesn't build, and those whose sensitive parameter pins or bounds its value, without their definitions", async () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     const bob = await person("builder");
@@ -340,9 +343,23 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         sensitive: true,
       },
     });
+    const bound = 4000 + Math.floor(Math.random() * 1000);
+    const bounding = await published(owner, {
+      port: {
+        schema: { type: "number", minimum: bound, maximum: bound },
+        label: "Port",
+        required: true,
+        sensitive: true,
+      },
+    });
     await bindWorkflowToApp(env, owner, theirs.id, {
       app,
       alias: "followUp",
+      version: 1,
+    });
+    await bindWorkflowToApp(env, owner, bounding.id, {
+      app,
+      alias: "later",
       version: 1,
     });
     await bindWorkflowToApp(env, owner, pinning.id, {
@@ -365,13 +382,57 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       packaged: {},
       unresolved: [
         { at: "app", alias: "followUp", reason: "forbidden" },
-        { at: "app", alias: "later", reason: "unbound" },
+        { at: "app", alias: "later", reason: "sensitive_constraint" },
         { at: "app", alias: "remind", reason: "sensitive_constraint" },
       ],
     });
     const text = JSON.stringify(exported);
-    expect(text).not.toContain(tier);
-    expect(text).not.toContain(theirs.name);
+    expect(
+      [tier, theirs.name, String(bound)].filter((value) => text.includes(value))
+    ).toStrictEqual([]);
+  });
+
+  it("refuses a package past its byte budget, or one whose files hold a known secret format, naming the file and never the match", async () => {
+    const budgeted = await appWith(files(), "Requests");
+    await seal(budgeted);
+    await setCurrentVersion(env, budgeted.owner, budgeted.app, 1);
+    // Built here, so no file of the repository holds one.
+    const token = ["ghp", "_", "Q".repeat(36)].join("");
+    const leaky = await appWith(
+      {
+        ...files(),
+        "app.ts": `// Deploy with ${token}\n${files()["app.ts"] ?? ""}`,
+      },
+      "Requests"
+    );
+    await seal(leaky);
+    await setCurrentVersion(env, leaky.owner, leaky.app, 1);
+
+    const refused = await refusal(
+      exportAppDefinition(env, leaky.owner, leaky.app)
+    );
+    expect({
+      tooLarge: await outcome(
+        exportAppDefinition(
+          { ...env, DEFINITION_EXPORT_MAX_BYTES: "1000" },
+          budgeted.owner,
+          budgeted.app
+        )
+      ),
+      withinBudget: await outcome(
+        exportAppDefinition(env, budgeted.owner, budgeted.app)
+      ),
+      secret: refusedSchema.parse(refused),
+      echoed: JSON.stringify(refused).includes(token),
+    }).toStrictEqual({
+      tooLarge: "version.export_too_large",
+      withinBudget: "ok",
+      secret: {
+        code: "version.export_secret_found",
+        details: { path: "app/app.ts" },
+      },
+      echoed: false,
+    });
   });
 
   it("is for the App's builders and its admins, never its users or Grasp staff, and records no refusal", async () => {

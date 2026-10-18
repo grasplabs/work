@@ -303,16 +303,6 @@ const artifactText = async (
   );
 };
 
-/**
- * The text of the stored artifact `entry` names, checked against its hash
- * and size as a load checks it (`version.artifact_corrupt` otherwise): for
- * reading one artifact of a release `loadRelease` verified.
- */
-export const releaseArtifactText = async (
-  env: Env,
-  entry: ReleaseArtifact
-): Promise<string> => await artifactText(storedArtifacts(env), entry);
-
 /** Where a release's sealed SDK modules are among its artifacts. */
 const sdkArtifactDir = "sdk/";
 

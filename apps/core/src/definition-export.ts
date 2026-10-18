@@ -5,6 +5,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   definitionPackageFormatVersion,
+  definitionPackageMaxBytes,
   definitionPackageMaxWorkflows,
   definitionPackageSchema,
 } from "@grasp-os/shared/definition-packages";
@@ -12,9 +13,11 @@ import type {
   DefinitionPackage,
   UnresolvedReason,
 } from "@grasp-os/shared/definition-packages";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { holdsKnownCredential } from "@grasp-os/shared/redact";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 
-import { loadRelease, releaseArtifactText } from "./app-releases.ts";
+import { loadRelease } from "./app-releases.ts";
 import { appFor, versionFiles, versionTree } from "./apps.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -27,14 +30,20 @@ import type { ExportedBinding } from "./workflow-resources.ts";
 // (`@grasp-os/shared/definition-packages`) another deployment builds and
 // activates again. Threat model, and how each is closed:
 //
-// - Secrets travel with it: the package is built field by field from what
-//   its schema allows, and parsed against that strict schema before it
-//   leaves, so nothing unlisted can. Nothing that holds a secret is read:
-//   no connection, permission or approval (a binding is its alias and
-//   kind), no parameter value, no record, member, guest, run, decision or
-//   audit row. A workflow's sensitive parameters' defaults, which its
-//   definition holds, are withheld (`withheldDefaults`); one whose schema
-//   pins a value (`const`, `enum`) isn't packaged at all.
+// - Secrets travel with it. No platform-held secret can: the package is
+//   built field by field from what its schema allows, and parsed against
+//   that strict schema before it leaves, so nothing unlisted can, and
+//   nothing that holds one is read: no connection, permission or approval
+//   (a binding is its alias and kind), no parameter value, no record,
+//   member, guest, run, decision or audit row. A workflow's sensitive
+//   parameters' defaults, which its definition holds, are withheld
+//   (`withheldDefaults`), and so is every hash over the definition as
+//   published, which would let a holder test guesses at them; one whose
+//   schema constrains its value (`const`, `enum`, a bound, a pattern)
+//   isn't packaged at all. The sealed generated files, which name this
+//   deployment's resources, are only their hashes. What builders wrote
+//   into source is scanned for known secret formats, and the export is
+//   refused, naming the file, if one turns up: a scan, not a guarantee.
 // - Someone exports what they can't read: only the App's builders (its
 //   admins among them), never Grasp staff; and only workflows they build,
 //   as for a workflow's source. A workflow they don't is listed as
@@ -45,10 +54,11 @@ import type { ExportedBinding } from "./workflow-resources.ts";
 //   the checks a run makes (the release's, its source tree's against the
 //   manifest, each generated file's, each workflow version's and build's),
 //   and refused otherwise.
-// - The graph of workflows never ends, or repeats: each version is
-//   packaged once under its key and named by it everywhere else, so a
-//   version reached again is only named; at most
-//   `definitionPackageMaxWorkflows` are read.
+// - The graph of workflows never ends, or repeats, or the package grows
+//   past what one answer holds: each version is packaged once under its
+//   key and named by it everywhere else, so a version reached again is
+//   only named; at most `definitionPackageMaxWorkflows` are read, and at
+//   most `definitionPackageMaxBytes` of text packaged.
 // - A package looks complete when it isn't: every binding it can't
 //   resolve is listed (`unresolved`), so activation blocks on it.
 
@@ -83,6 +93,28 @@ const schemaNodes = (node: unknown, into: JsonObject[] = []): JsonObject[] => {
   return into;
 };
 
+/** The keywords that bound or pin a value, whatever their arguments. */
+const valueKeywords = [
+  "const",
+  "enum",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "pattern",
+];
+
+/**
+ * Whether schema `node` constrains its value enough to give a sensitive
+ * one away: pins it (`const`, `enum`), bounds it or its pattern, or fixes
+ * its length exactly. Conservative: a bound alone counts, as a pair of
+ * bounds can pin a value.
+ */
+const constraining = (node: JsonObject): boolean =>
+  valueKeywords.some((keyword) => Object.hasOwn(node, keyword)) ||
+  (node.minLength !== undefined && node.minLength === node.maxLength) ||
+  (node.minItems !== undefined && node.minItems === node.maxItems);
+
 /** A definition with its sensitive defaults withheld, and whose they were. */
 interface Withheld {
   readonly text: string;
@@ -94,9 +126,9 @@ interface Withheld {
  * every one that doesn't say `sensitive: false`, as the profile treats
  * them: the parameter's own default and any in its schema go, and a
  * parameter that had its own is required instead. `sensitive_constraint`
- * for a sensitive parameter whose schema pins a value (`const`, `enum`),
- * which no package carries. Untouched, as published, when nothing is
- * withheld.
+ * for a sensitive parameter whose schema constrains its value
+ * (`constraining`), which could give it away. Untouched, as published,
+ * when nothing is withheld.
  */
 const withholdDefaults = (
   definition: string
@@ -116,11 +148,7 @@ const withholdDefaults = (
       continue;
     }
     const nodes = schemaNodes(param.schema);
-    if (
-      nodes.some(
-        (node) => Object.hasOwn(node, "const") || Object.hasOwn(node, "enum")
-      )
-    ) {
+    if (nodes.some(constraining)) {
       return "sensitive_constraint";
     }
     const ownDefault = Object.hasOwn(param, "default");
@@ -148,6 +176,47 @@ type Followed =
   | { readonly key: string }
   | { readonly reason: UnresolvedReason };
 
+/** How many bytes of text an export packages at most (`env` may lower it). */
+const maxBytesOf = (env: Env): number => {
+  const set = Number(env.DEFINITION_EXPORT_MAX_BYTES);
+  return Number.isInteger(set) && set > 0 && set < definitionPackageMaxBytes
+    ? set
+    : definitionPackageMaxBytes;
+};
+
+const encoder = new TextEncoder();
+
+/**
+ * Counts the text files an export packages against its byte budget, and
+ * scans each for known secret formats, as it is added: past `max` bytes,
+ * `version.export_too_large`; a file holding a known credential format,
+ * `version.export_secret_found` naming the file (under `prefix`), never
+ * what matched. Answers the files added.
+ */
+type TextBudget = (
+  prefix: string,
+  files: Readonly<Record<string, string>>
+) => Readonly<Record<string, string>>;
+
+const textBudget = (max: number): TextBudget => {
+  let bytes = 0;
+  return (prefix, files) => {
+    for (const [path, text] of Object.entries(files)) {
+      bytes +=
+        encoder.encode(path).byteLength + encoder.encode(text).byteLength;
+      if (bytes > max) {
+        throw versionErrors.create("version.export_too_large");
+      }
+      if (holdsKnownCredential(text)) {
+        throw versionErrors.create("version.export_secret_found", {
+          path: `${prefix}/${path}`,
+        });
+      }
+    }
+    return files;
+  };
+};
+
 /** A version found and keyed, its bindings still to follow. */
 interface Pending {
   readonly key: string;
@@ -164,13 +233,15 @@ class WorkflowGraph {
   readonly unresolved: DefinitionPackage["unresolved"] = [];
   readonly #env: Env;
   readonly #by: Acting;
+  readonly #budget: TextBudget;
   /** What each pin read came to, by `<workflow id>@<version>`. */
   readonly #followed = new Map<string, Followed>();
   readonly #pending: Pending[] = [];
 
-  constructor(env: Env, by: Acting) {
+  constructor(env: Env, by: Acting, budget: TextBudget) {
     this.#env = env;
     this.#by = by;
+    this.#budget = budget;
   }
 
   /**
@@ -243,17 +314,24 @@ class WorkflowGraph {
       return { reason: definition };
     }
     const key = `${workflowNamespace}/${found.name}/${found.definitionVersion}`;
+    const files = this.#budget(`workflows/${key}`, {
+      ...found.files,
+      "workflow.json": definition.text,
+    });
     this.#pending.push({
       key,
       entry: {
         provenance: {
-          manifestHash: found.manifestHash,
-          definitionHash: found.definitionHash,
+          // Both hash the definition as published: a holder could test
+          // guesses at a withheld default against either.
+          manifestHash:
+            definition.withheld.length === 0 ? found.manifestHash : null,
+          definitionHash: await sha256Hex(definition.text),
           evaluatorHash: found.evaluatorHash,
           buildHash: found.buildHash,
           profile: found.profile,
         },
-        files: { ...found.files, "workflow.json": definition.text },
+        files,
         withheldDefaults: definition.withheld,
       },
       bindings: found.bindings,
@@ -291,15 +369,15 @@ export const exportAppDefinition = async (
   if (tree !== manifest.sourceTreeHash) {
     throw versionErrors.create("version.artifact_corrupt", { path: "source" });
   }
-  const generated: DefinitionPackage["app"]["generated"] = {};
+  const budget = textBudget(maxBytesOf(env));
+  budget("app", files);
+  // Only their hashes: they name this deployment's resources, the
+  // workflows' it may not read among them, and the destination generates
+  // its own.
+  const generated: DefinitionPackage["app"]["provenance"]["generated"] = {};
   for (const entry of manifest.artifacts) {
     if (generatedNames.has(entry.path)) {
-      generated[entry.path] = {
-        sha256: entry.sha256,
-        // One after the other: a release generates a few.
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        text: await releaseArtifactText(env, entry),
-      };
+      generated[entry.path] = entry.sha256;
     }
   }
   const bindings: DefinitionPackage["app"]["bindings"] = {};
@@ -309,7 +387,7 @@ export const exportAppDefinition = async (
   ]) {
     bindings[resource.alias] = resource["~resource"];
   }
-  const graph = new WorkflowGraph(env, by);
+  const graph = new WorkflowGraph(env, by, budget);
   const workflows: DefinitionPackage["app"]["workflows"] = {};
   for (const alias of Object.keys(release.app.workflows).toSorted()) {
     const pinned = release.workflows.find(
@@ -339,9 +417,9 @@ export const exportAppDefinition = async (
         sdkProtocolVersion: manifest.sdkProtocolVersion,
         uiVersion: manifest.uiVersion,
         compilerVersion: manifest.compilerVersion,
+        generated,
       },
       files,
-      generated,
       store:
         store === null
           ? null

@@ -7,15 +7,20 @@ import { catalogBindingKinds } from "./workflow-resources.ts";
 // deployment can build and activate again. What it may carry is this
 // schema and nothing else: every object is strict, so a field core
 // didn't list here fails the export instead of travelling with it. No
-// connection, credential, approval, catalog target, parameter value,
-// store, member, record or audit data has a field here; bindings are
-// their aliases and kinds, which the destination binds anew.
+// platform-held secret has a field here: no connection, credential,
+// approval, catalog target, parameter value, store, member, record or
+// audit data; bindings are their aliases and kinds, which the destination
+// binds anew. What builders wrote into source is theirs, scanned for
+// known secret formats before it leaves (definition-export.ts).
 
 /** The format of a definition package. */
 export const definitionPackageFormatVersion = 1;
 
 /** The most workflow versions one package holds. */
 export const definitionPackageMaxWorkflows = 64;
+
+/** The most bytes of text one package holds (16 MiB). */
+export const definitionPackageMaxBytes = 16 * 1024 * 1024;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
@@ -51,8 +56,9 @@ export const appBindingKinds = [
  * - `missing`: the workflow, or the version pinned, is gone;
  * - `forbidden`: whoever exported doesn't build the workflow;
  * - `not_executable`: the version pinned has no build to run;
- * - `sensitive_constraint`: the version's sensitive parameter pins a value
- *   in its schema (`const`, `enum`), which a package never carries.
+ * - `sensitive_constraint`: the version's sensitive parameter constrains
+ *   its value in its schema (`const`, `enum`, a bound or a pattern), which
+ *   could give it away: a package never carries one.
  */
 export const unresolvedReasons = [
   "unbound",
@@ -79,14 +85,14 @@ export const definitionPackageSchema = z.strictObject({
       sdkProtocolVersion: z.int(),
       uiVersion: z.string().min(1).max(128),
       compilerVersion: z.string().min(1).max(128),
+      /**
+       * Each file the seal generated, by path: its SHA-256 only. The
+       * destination generates its own, for its own IDs and bindings.
+       */
+      generated: z.record(z.string().min(1).max(512), sha256Schema),
     }),
     /** The version's source tree, which hashes to `sourceTreeHash`. */
     files: filesSchema,
-    /** The code the seal generated, each as its manifest entry hashes it. */
-    generated: z.record(
-      z.string().min(1).max(512),
-      z.strictObject({ sha256: sha256Schema, text: z.string() })
-    ),
     /** The store contract the release was sealed against, without the store. */
     store: z
       .strictObject({
@@ -106,8 +112,13 @@ export const definitionPackageSchema = z.strictObject({
     workflowKeySchema,
     z.strictObject({
       provenance: z.strictObject({
-        manifestHash: sha256Schema,
-        /** The definition's hash as published, before any default was withheld. */
+        /**
+         * The version's manifest hash, null when a default was withheld:
+         * it is a hash over the definition as published, which would let
+         * a holder test guesses at what was withheld.
+         */
+        manifestHash: sha256Schema.nullable(),
+        /** The SHA-256 of `workflow.json` as exported. */
         definitionHash: sha256Schema,
         evaluatorHash: sha256Schema,
         buildHash: sha256Schema,
