@@ -12,7 +12,8 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import {
   actionUseAliasPattern,
-  actionUseSchema,
+  connectorUseSchema,
+  operationUseSchema,
   workflowModuleLimits,
 } from "@grasp-os/shared/workflow-modules";
 import type { ActionUse, SealedUse } from "@grasp-os/shared/workflow-modules";
@@ -322,11 +323,14 @@ export const versionActionsOf = (
 const descriptorObject = z.record(z.string(), z.json());
 
 /**
- * A use as the inspection answers it: as sealed (`actionUseSchema`), but a
- * model's output as the descriptor itself, sealed as canonical JSON.
+ * A use as the inspection answers it: a connector's and an operation's as
+ * sealed, a model's output only as the descriptor itself, which the
+ * version seals as canonical JSON (`sealedManifestUse`): never text it
+ * would keep as it came.
  */
-const manifestUseSchema = z.union([
-  actionUseSchema,
+const manifestUseSchema = z.discriminatedUnion("kind", [
+  connectorUseSchema,
+  operationUseSchema,
   z.strictObject({
     alias: z.string().regex(actionUseAliasPattern),
     kind: z.literal("model"),
@@ -368,8 +372,7 @@ const sealedManifestUse = (
   if (use.kind !== "model") {
     return sealedUse(use);
   }
-  const output =
-    typeof use.output === "string" ? use.output : canonicalJson(use.output);
+  const output = canonicalJson(use.output);
   let readable = output.length <= workflowModuleLimits.descriptorChars;
   if (readable) {
     try {
