@@ -12,7 +12,7 @@ import type { PurgePlan, PurgeResult } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, count, eq, gt, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lte, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -34,7 +34,16 @@ import { entryNow } from "./apps-collection.ts";
 import type { CollectionRow } from "./collections.ts";
 import { checkedText, personWriter, writeVersion } from "./documents.ts";
 import type { DocumentRow } from "./documents.ts";
+import { parseBaseFields } from "./frontmatter.ts";
 import { personalCollectionId } from "./memory-files.ts";
+import {
+  eraseFromSearchIndex,
+  errorNameOf,
+  owedWritesDone,
+  rebuildOwed,
+  rebuildSearchIndex,
+  secureDeleteReady,
+} from "./search-erasure.ts";
 import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 
 // Purging personal data from Knowledge, for good, when someone leaves or
@@ -64,11 +73,14 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // and deleted from R2 right after, or by the cron trigger when that fails
 // or an upload may still be storing its original.
 //
-// Then the search index is rebuilt from what it holds now: FTS5 keeps a
-// deleted row's terms in its index pages, where they can't be found by a
-// search but are still in the database, until a merge drops them, and
-// `optimize` doesn't merge an index that is one segment already, which can
-// still hold them. The rebuild runs after the data is committed, and on every purge, also one with nothing left to change, so
+// Then nothing of it is left in the search index (search-erasure.ts): a
+// content purge's deletes are secure ones, which take a row's terms out of
+// the index's pages, and the pages' directory is checked for a term left
+// behind; the index is rebuilt from what it holds now when one is, or
+// when that can't be told (a term that isn't plain ASCII, a platform that
+// refuses secure deletes), and always after a personal purge, whose
+// terms the purge doesn't know. The cleanup runs after the data is
+// committed, and on every purge, also one with nothing left to change, so
 // when it fails (`knowledge.purge_index_pending`) running the purge again
 // finishes it.
 //
@@ -94,8 +106,12 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // accent left out or encoded otherwise), a term joined to more of a word
 // ("Toms", "tomVisser": not removed, only counted when it starts the
 // word), memory already cached in a running isolate (never served again,
-// gone once evicted), D1's own point-in-time recovery, and anything
-// outside Knowledge. And it reaches too far where a name is an
+// gone once evicted), fragments of a word of at most three characters
+// left in the search index's page directory (search-erasure.ts: any text
+// with those letters leaves the same; a token with a digit, never three
+// of its characters), the pages SQLite freed, which keep their old bytes
+// until reused (D1 has no `PRAGMA secure_delete`), D1's own point-in-time
+// recovery, and anything outside Knowledge. And it reaches too far where a name is an
 // ordinary word too (Will, Mark, May): every "will" goes.
 
 /** How long an admin has to confirm a purge they prepared. */
@@ -208,23 +224,22 @@ const tokenFor = async (
 };
 
 /**
- * Drops deleted rows' terms from the search index's pages for good, by
- * rebuilding it from its content: after a delete, FTS5 only marks them
- * deleted. Refuses with `knowledge.purge_index_pending` when it fails: the
- * data is deleted already, and running the purge again rebuilds again.
+ * Runs `cleanup` of the search index, refusing with
+ * `knowledge.purge_index_pending` when it fails: the data is deleted
+ * already, and running the purge again cleans up again.
  */
-const rebuildSearchIndex = async (db: DrizzleD1Database): Promise<void> => {
+const cleanSearchIndex = async (
+  cleanup: () => Promise<void>
+): Promise<void> => {
   try {
-    await db.batch([
-      db.run(sql`INSERT INTO search_words (search_words) VALUES ('rebuild')`),
-      db.run(
-        sql`INSERT INTO search_trigrams (search_trigrams) VALUES ('rebuild')`
-      ),
-    ]);
+    await cleanup();
   } catch (error) {
     // The data is already deleted by now; running the purge again, which
-    // always rebuilds, finishes the cleanup.
-    log.error("knowledge.purge.rebuild_failed", errorFields(error));
+    // always cleans up, finishes it. The error's name only: a cleanup's
+    // query may carry the terms, which its error would repeat.
+    log.error("knowledge.purge.rebuild_failed", {
+      errorName: errorNameOf(error),
+    });
     throw knowledgeErrors.create("knowledge.purge_index_pending");
   }
 };
@@ -323,7 +338,10 @@ const purgePersonal = async (
     ),
   ]);
   await cleanUpOriginals(env);
-  await rebuildSearchIndex(db);
+  // Whole documents go, whose tokens the purge doesn't know: rebuilt.
+  await cleanSearchIndex(async () => {
+    await rebuildSearchIndex(db);
+  });
   return { purgeId, ...counts };
 };
 
@@ -454,7 +472,11 @@ const matcherOf = (
  * a term can't overlap the marker (`purgeTermSchema`), so each pass
  * replaces text outside the markers, or markers with fewer of them.
  */
-const without = (text: string, matcher: Matcher): string => {
+const without = (
+  text: string,
+  matcher: Matcher,
+  visit?: (current: string, index: number, length: number) => void
+): string => {
   if (!matcher.anywhere.test(text)) {
     return text;
   }
@@ -463,6 +485,7 @@ const without = (text: string, matcher: Matcher): string => {
     let next = "";
     let end = 0;
     for (const { index, 0: found } of current.matchAll(matcher.remove)) {
+      visit?.(current, index, found.length);
       next += `${current.slice(end, index)}${purgedMarker}`;
       end = index + found.length;
     }
@@ -490,6 +513,79 @@ const joinedIn = (texts: (string | null)[], matcher: Matcher): number => {
     }
   }
   return total;
+};
+
+/**
+ * What the search index's `unicode61` tokenizer takes as part of a token
+ * and isn't plain ASCII: a letter, a digit or a private-use character of
+ * another script.
+ */
+const otherTokenCharacter = /^(?!\p{ASCII})[\p{L}\p{N}\p{Co}]$/u;
+
+/** The character (code point) of `text` that ends just before `index`. */
+const characterBefore = (text: string, index: number): string => {
+  if (index === 0) {
+    return "";
+  }
+  // Where a character of two UTF-16 units ends, its second unit.
+  const unit = text.codePointAt(index - 1) ?? 0;
+  const lowSurrogate = unit >= 0xdc_00 && unit <= 0xdf_ff;
+  const start = lowSurrogate && index >= 2 ? index - 2 : index - 1;
+  return String.fromCodePoint(text.codePointAt(start) ?? 0x20);
+};
+
+/** The character (code point) of `text` that starts at `index`. */
+const characterAt = (text: string, index: number): string =>
+  index >= text.length
+    ? ""
+    : String.fromCodePoint(text.codePointAt(index) ?? 0x20);
+
+/**
+ * Whether a term in `text` sits beside a character that, to the search
+ * index, makes it part of a longer token: one of a script written without
+ * spaces ("東京Visser", "Visserさん"), which the purge removes the term from
+ * but whose token holds the term and isn't the term's own. The index's
+ * check of a term's tokens (search-erasure.ts) can't find that token, so
+ * the index is rebuilt then. It looks at every term `without` removes, in
+ * each of its passes: "Visser" in "Foo.Visserさん" is removed only once
+ * "Foo." is.
+ */
+const besideLongerToken = (text: string, matcher: Matcher): boolean => {
+  let beside = false;
+  without(text, matcher, (current, index, length) => {
+    beside ||=
+      otherTokenCharacter.test(characterBefore(current, index)) ||
+      otherTokenCharacter.test(characterAt(current, index + length));
+  });
+  return beside;
+};
+
+/**
+ * Whether a term in what the search index holds of a version's `text` is
+ * part of a longer token (`besideLongerToken`): its text, and its
+ * frontmatter's title, description and a skill's name as YAML decodes
+ * them ("Visser\u3055\u3093" is "Visserさん"). When the frontmatter doesn't
+ * read, a term anywhere in the text can't be told about, so it counts.
+ */
+const besideInIndexed = (
+  path: string,
+  text: string,
+  matcher: Matcher
+): boolean => {
+  let decoded: unknown[];
+  try {
+    const { frontmatter } = parseBaseFields(path, text);
+    decoded = [
+      frontmatter.title,
+      frontmatter.description,
+      "name" in frontmatter ? frontmatter.name : undefined,
+    ];
+  } catch {
+    return matcher.anywhere.test(text);
+  }
+  return [text, ...decoded].some(
+    (value) => typeof value === "string" && besideLongerToken(value, matcher)
+  );
 };
 
 /** A version's text and message, rewritten if they change. */
@@ -701,9 +797,10 @@ const rewriteVersions = async (
   upTo: number,
   matcher: Matcher,
   write: boolean
-): Promise<{ changed: number; joined: number }> => {
+): Promise<{ changed: number; joined: number; beside: boolean }> => {
   let changedVersions = 0;
   let joined = 0;
+  let beside = false;
   for (let after = 0; ;) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
     const page = await db
@@ -723,6 +820,9 @@ const rewriteVersions = async (
       .orderBy(asc(versions.number))
       .limit(versionsPerPage);
     const rows = page.map((row) => ({ row, changed: rewritten(row, matcher) }));
+    beside ||= rows.some(({ row }) =>
+      besideInIndexed(document.path, row.text, matcher)
+    );
     joined += joinedIn(
       rows.flatMap(({ row, changed }) => {
         const { text, message } = changed ?? row;
@@ -756,7 +856,7 @@ const rewriteVersions = async (
     }
     const last = page.at(-1);
     if (last === undefined || page.length < versionsPerPage) {
-      return { changed: changedVersions, joined };
+      return { changed: changedVersions, joined, beside };
     }
     after = last.number;
   }
@@ -772,7 +872,7 @@ const countDocument = async (
   db: DrizzleD1Database,
   named: Named,
   matcher: Matcher
-): Promise<{ counts: Counts; joined: number }> => {
+): Promise<{ counts: Counts; joined: number; beside: boolean }> => {
   const { document } = named;
   const saved = await requireSavable(env, db, named, matcher);
   const inVersions = await rewriteVersions(
@@ -793,6 +893,7 @@ const countDocument = async (
       versions: inVersions.changed,
     },
     joined: inVersions.joined + inSaved,
+    beside: inVersions.beside,
   };
 };
 
@@ -902,16 +1003,18 @@ const contentCounts = async (
   db: DrizzleD1Database,
   named: Named[],
   matcher: Matcher
-): Promise<{ counts: Counts; joined: number }> => {
+): Promise<{ counts: Counts; joined: number; tokensKnown: boolean }> => {
   const counts: Counts[] = [];
   let joined = 0;
+  let tokensKnown = true;
   for (const one of named) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
     const document = await countDocument(env, db, one, matcher);
     counts.push(document.counts);
     joined += document.joined;
+    tokensKnown &&= !document.beside;
   }
-  return { counts: sum(counts), joined };
+  return { counts: sum(counts), joined, tokensKnown };
 };
 
 /**
@@ -930,7 +1033,13 @@ const purgeContent = async (
   const db = drizzle(env.KNOWLEDGE);
   const named = await documentsNamed(db, input);
   const matcher = matcherOf(input.terms, { countJoined: false });
-  await contentCounts(env, db, named, matcher);
+  // Read before anything changes: whether a term is part of a longer
+  // token anywhere, so the index needs rebuilding, is recorded with the
+  // purge, and a run again after its text is rewritten still knows.
+  const { tokensKnown } = await contentCounts(env, db, named, matcher);
+  // Before anything is deleted: so the purge's deletes are secure ones,
+  // which leave nothing in the index's pages (search-erasure.ts).
+  const secure = await secureDeleteReady(db);
   const purgeId = crypto.randomUUID();
   // Recorded before anything changes, so no purge goes unrecorded however
   // far it gets.
@@ -946,14 +1055,21 @@ const purgeContent = async (
         purgeId
       )
     ),
+    ...(tokensKnown ? [] : [rebuildOwed(db, purgeId)]),
   ]);
   const done: Counts[] = [];
   for (const one of named) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
     done.push(await purgeDocument(env, db, person, one, matcher));
   }
+  if (!tokensKnown) {
+    // A rebuild from now on covers this purge's writes.
+    await owedWritesDone(db, purgeId);
+  }
   await cleanUpOriginals(env);
-  await rebuildSearchIndex(db);
+  await cleanSearchIndex(async () => {
+    await eraseFromSearchIndex(db, input.terms, { secure, tokensKnown });
+  });
   return { purgeId, ...sum(done) };
 };
 
