@@ -19,6 +19,10 @@
 -- has NEW.rowid -1 in a BEFORE trigger, so -1 is left out of the lookup,
 -- and an AFTER trigger keeps any row from being written with rowid -1:
 -- otherwise one such row would match, and refuse, every ordinary insert.
+-- SQLite's documentation leaves NEW.rowid undefined there; its insert
+-- code has always set it to -1, and workerd's does. Were that to change,
+-- the failure is closed and loud: every first insert in
+-- test/immutable-records.test.ts passes through these triggers.
 CREATE TRIGGER `workflow_resource_versions_immutable_insert` BEFORE INSERT ON `workflow_resource_versions`
 WHEN EXISTS (
 	SELECT 1 FROM `workflow_resource_versions`
