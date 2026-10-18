@@ -294,10 +294,6 @@ msgstr "{doc} en {where} lleva {late, plural, one {# día} other {# días}} pasa
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# documento} other {# documentos}}"
 
-#: src/activity/pending.tsx
-msgid "{domain} already keeps {type} records here: this domain's won't apply."
-msgstr "{domain} ya guarda aquí registros de tipo {type}: los de este dominio no se aplicarán."
-
 #: src/dashboard/dependency-requests.tsx
 msgid "{domain} doesn't get these packages."
 msgstr "{domain} no recibe estos paquetes."
@@ -1283,10 +1279,6 @@ msgstr "A una aplicación que nadie aprobó se le negaron los datos del dominio"
 #: src/engines/resource-bindings.tsx
 msgid "Another domain"
 msgstr "Otro dominio"
-
-#: src/activity/pending.tsx
-msgid "Another domain already keeps {type} records here: this domain's won't apply."
-msgstr "Otro dominio ya guarda aquí registros de tipo {type}: los de este dominio no se aplicarán."
 
 #: src/activity/pending.tsx
 msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
@@ -7575,10 +7567,6 @@ msgstr "Comité de empresa consultado, donde lo haya"
 msgctxt "settings group"
 msgid "Workspace"
 msgstr "Espacio de trabajo"
-
-#: src/activity/pending.tsx
-msgid "Would keep {claimed} records here"
-msgstr "Guardaría aquí registros de tipo {claimed}"
 
 #: src/chat/builds-state.ts
 msgid "Would run after approval"

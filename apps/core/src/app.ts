@@ -1687,8 +1687,8 @@ export class App extends DurableObject<Env> {
    * who it acts for (the caller of the running call `token` names), with
    * the version of the code the call runs, and, for a workflow run's step,
    * that step's idempotency key and its attempt, where the call is within
-   * calls between Apps (`path`), the method it calls, which a record's
-   * kept fields go by (knowledge/records.ts), and what it may do (`kind`).
+   * calls between Apps (`path`), the method it calls, and what it may do
+   * (`kind`).
    * For the App's stubs (app-bindings.ts, app-calls.ts) only, each of
    * which says whether its call changes anything (`use`): a call that may
    * only read is refused one that does, `app.read_only`, before any of it

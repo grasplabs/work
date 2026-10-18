@@ -17,7 +17,7 @@ import {
   workflowResourceIdSchema,
   workspaceIdSchema,
 } from "./ids.ts";
-import type { AppId, PermissionId } from "./ids.ts";
+import type { PermissionId } from "./ids.ts";
 import { storeOperationPathPattern } from "./operation-limits.ts";
 
 // Apps and agents start with nothing. Each thing they may use is one
@@ -437,17 +437,6 @@ export interface Permission {
    * agent works.
    */
   chat: string | null;
-  /**
-   * On an App's request to write a collection: the record types the
-   * version of it current now declares there (`@grasp-os/shared/apps`),
-   * those it would claim once granted, and those another App has there
-   * already, which it would not get: that App is named to admins only.
-   * None otherwise.
-   */
-  recordTypes?: {
-    claims: string[];
-    taken: { type: string; owner: AppId | null }[];
-  };
 }
 
 /**
