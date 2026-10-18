@@ -26,7 +26,7 @@ export default workflowTests(extract, [
   {
     name: "keeps what the model found in the notes as a draft for review",
     input,
-    mocks: { extract: found, propose: "draft-1" },
+    mocks: { "may-review": null, extract: found, propose: "draft-1" },
     expect: {
       output: { draft: "draft-1", statements: 1 },
       sideEffects: [
@@ -45,6 +45,7 @@ export default workflowTests(extract, [
     name: "reads a stakeholder's chat as notes, and keeps a guest's draft",
     input: { chat: "chat-1" },
     mocks: {
+      "may-review": null,
       "read-chat": {
         source: input.source,
         notes: input.notes,

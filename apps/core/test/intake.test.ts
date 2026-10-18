@@ -257,6 +257,14 @@ describe("the intake", { timeout: 60_000 }, () => {
         ...edited,
       })
     );
+    // Kept again unchanged: still that revision, which a save asserts.
+    const keptAgain = valueOf(
+      await call(admin, app, "drafts.keep", "mutation", {
+        id,
+        expectedRevision: 2,
+        ...edited,
+      })
+    );
     const before = await sourcesOf(admin, app);
     const saved = savedSchema.parse(
       valueOf(
@@ -282,6 +290,7 @@ describe("the intake", { timeout: 60_000 }, () => {
         statements: opened.statements,
       },
       kept,
+      keptAgain,
       before,
       saved: saved.statements,
       source: source && {
@@ -312,6 +321,7 @@ describe("the intake", { timeout: 60_000 }, () => {
         ],
       },
       kept: 2,
+      keptAgain: 2,
       // Nothing is saved before someone saves it.
       before: [],
       saved: 1,
@@ -897,6 +907,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
       ok: true,
       outline: {
         steps: [
+          { type: "step", name: "may-review", kind: "exact", locked: true },
           {
             type: "branch",
             condition: '"chat" in input',
@@ -909,6 +920,31 @@ describe("reading notes", { timeout: 60_000 }, () => {
           { type: "step", name: "propose", kind: "exact", sideEffect: true },
         ],
       },
+    });
+  });
+
+  it("reads nothing for someone who may not review drafts: their run stops before the model is asked", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await copyOf(admin);
+    const member = await memberOf(admin, app, "user", "user");
+    const { run, gateway } = await extracted(
+      member,
+      app,
+      { source: interviewSource(`Not theirs ${unique()}`), notes },
+      answering()
+    );
+    expect({
+      status: run.status,
+      code: run.failure?.error.code,
+      step: run.failure?.step,
+      modelCalls: gateway.requests.length,
+      drafts: await draftsOf(admin, app),
+    }).toStrictEqual({
+      status: "failed",
+      code: "data.access_denied",
+      step: "may-review",
+      modelCalls: 0,
+      drafts: [],
     });
   });
 

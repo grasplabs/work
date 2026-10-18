@@ -79,10 +79,13 @@ const listed = (found: Chat): Chat => ({
 });
 
 /** The code of a failure, when it has one. */
-const codeOf = (error: unknown): string | null => {
-  const code = Reflect.get(Object(error), "code");
-  return typeof code === "string" ? code : null;
-};
+const codeOf = (error: unknown): string | null =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  typeof error.code === "string"
+    ? error.code
+    : null;
 
 /**
  * What the intake shows the caller: whether they may review drafts, and

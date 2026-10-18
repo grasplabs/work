@@ -54,12 +54,14 @@ export default defineConfig({
       // (the seal strips types without checking them), and
       // builtin-blueprints.test.ts covers what they do at runtime.
       "apps/core/test/fixtures/blueprints/*/files/**",
-      // The built-ins of spec 8's layout, for the same reason: their server
-      // code imports `#grasp/server` and their screens `#grasp`. A seal
-      // type-checks the one and the screen build type-checks and lints the
-      // other against the kit, with the modules the host generated
-      // (builtin-blueprints.test.ts builds both).
-      "apps/core/blueprints/intake/files/**",
+      // The screens of a built-in of spec 8's layout, for the same reason:
+      // they import `#grasp`, generated from the App's manifest. The screen
+      // build type-checks them and lints them against the kit, with the
+      // references the host generated (builtin-blueprints.test.ts builds
+      // them). Its server code and workflows are linted here
+      // (blueprints/intake/tsconfig.json).
+      "apps/core/blueprints/intake/files/screens/**",
+      "apps/core/blueprints/intake/files/components/**",
     ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),

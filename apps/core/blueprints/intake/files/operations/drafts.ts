@@ -142,7 +142,10 @@ export const create = mutation({
  * out of a stakeholder's chat (`guest`), whose words are untrusted. Run
  * again under the step's key, it answers the draft it kept the first
  * time. Called by anyone else who may write drafts (a builder), it keeps
- * a draft as theirs to review, as `create` does.
+ * a draft as theirs to review, as `create` does. `guest` records where
+ * the draft came from, not who may be trusted: the App's builders are,
+ * and one may mark a draft either way. A chat's words are marked by the
+ * run that read them, which a builder started.
  */
 export const propose = mutation({
   args: { ...draftArgs, guest: v.boolean() },
@@ -187,7 +190,16 @@ export const keep = mutation({
       },
       { expectedRevision: args.expectedRevision }
     );
-    return args.expectedRevision + 1;
+    // The revision the commit gives it, as a staged read shows it: one
+    // more only when the edits change it, so not always one more.
+    const kept = await ctx.db.get("drafts", args.id);
+    if (kept === null) {
+      throw new AppError(
+        "intake.not_found",
+        "This draft is gone: someone saved or discarded it."
+      );
+    }
+    return kept._rev;
   },
 });
 
