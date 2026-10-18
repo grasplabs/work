@@ -738,6 +738,38 @@ test("a file hidden, then shown again, loads afresh instead of its last view", a
   await expect(screen.getByText("Showing photo.png")).toBeVisible();
 });
 
+test("a file the screen deletes while showing it is gone, never read again or a failure", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesApp");
+  const app = await notesApp(builder, undefined, fileViewFiles());
+  const page = await pageOf(builder);
+  const screen = await openFiles(page, app);
+  await screen
+    .getByLabel("Upload a file")
+    .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
+  await expect(screen.getByText("Showing photo.png")).toBeVisible();
+  const reads: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "GET" &&
+      request.url().includes("/attachments/files/")
+    ) {
+      reads.push(request.url());
+    }
+  });
+  // Still shown when its deletion lands, as a row is until the change
+  // that removes it reaches the screen's own data.
+  await screen.getByRole("button", { name: "Delete the file" }).click();
+  await expect(screen.getByRole("status", { name: "Deletion" })).toHaveText(
+    "deleted"
+  );
+  await expect(screen.getByText("The file is gone")).toBeVisible();
+  await expect(screen.getByRole("heading", { name: "Files" })).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(reads).toStrictEqual([]);
+});
+
 test("a file whose screen lost the App's data shows the refusal, and isn't read again", async ({
   pageOf,
 }) => {
