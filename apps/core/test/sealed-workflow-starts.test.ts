@@ -21,6 +21,10 @@ import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import {
+  readWorkflowWindow,
+  workflowQueryOf,
+} from "../src/workflow-reference-queries.ts";
+import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
@@ -1192,10 +1196,40 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     const windowed = z
       .object({ items: z.array(z.unknown()), hasMore: z.boolean() })
       .parse(await read({ runId }, 500));
+    // Access lost while the window reads: checked again before each page
+    // past the first, so nothing more is read.
+    let gates = 0;
+    const cutOff = await readWorkflowWindow(
+      env,
+      { app: fixture.app, userId: bob.userId },
+      await workflowQueryOf(release, history),
+      { runId },
+      {
+        extent: 500,
+        charge: async () => {
+          // A window's pages cost nothing here.
+        },
+        gate: async () => {
+          gates += 1;
+          await Promise.reject(roleErrors.create("role.forbidden"));
+        },
+      }
+    ).then(
+      () => "read",
+      (error: unknown) => roleErrors.codeOf(error)
+    );
     expect({
       morethanAPage: rows.length > 100,
       window: windowed.items,
       hasMore: windowed.hasMore,
-    }).toStrictEqual({ morethanAPage: true, window: rows, hasMore: false });
+      cutOff,
+      gates,
+    }).toStrictEqual({
+      morethanAPage: true,
+      window: rows,
+      hasMore: false,
+      cutOff: "role.forbidden",
+      gates: 1,
+    });
   });
 });

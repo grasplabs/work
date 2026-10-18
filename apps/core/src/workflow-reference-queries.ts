@@ -579,7 +579,9 @@ const historyWindowMaxPages = liveWindowMaxItems / 10;
  * Up to `size` rows of run `runId`'s history from its start, as a live
  * window reads it: page after page, each from the cursor the one before
  * ended at, until the window is full or the history ends. The caller paid
- * `windowPages(extent)` pages; `charge` is asked for each page past them.
+ * `windowPages(extent)` pages; `charge` is asked for each page past them,
+ * and `gate`, the call's access check, before each page after the first,
+ * so access lost while the window reads stops it.
  */
 const historyWindow = async (
   env: Env,
@@ -590,16 +592,22 @@ const historyWindow = async (
     size,
     extent,
     charge,
+    gate,
   }: {
     size: number;
     extent: number;
     charge: (pages: number, whole: number) => Promise<void>;
+    gate: () => Promise<void>;
   }
 ): Promise<{ items: Json[]; hasMore: boolean }> => {
   const paid = windowPages(extent);
   const items: Json[] = [];
   let cursor: string | null = null;
   for (let pages = 1; pages <= historyWindowMaxPages; pages += 1) {
+    if (pages > 1) {
+      // oxlint-disable-next-line no-await-in-loop -- access again before each further page
+      await gate();
+    }
     if (pages > paid) {
       // oxlint-disable-next-line no-await-in-loop -- a page's charge before its read
       await charge(1, pages);
@@ -754,6 +762,8 @@ export const readWorkflowWindow = async (
   window: {
     readonly extent: number;
     readonly charge: (pages: number, whole: number) => Promise<void>;
+    /** The call's access check, passed again before each further page. */
+    readonly gate: () => Promise<void>;
   }
 ): Promise<OperationResult> => {
   if (query.name === "decision") {
@@ -783,7 +793,12 @@ export const readWorkflowWindow = async (
       caller,
       { query, bound: workflowId },
       runIdOf(args),
-      { size, extent: window.extent, charge: window.charge }
+      {
+        size,
+        extent: window.extent,
+        charge: window.charge,
+        gate: window.gate,
+      }
     );
   } else {
     page = await runsPage(env, caller, workflowId, {
