@@ -24,11 +24,12 @@ import { searchRebuilds } from "../db/knowledge/schema.ts";
 // ASCII, a directory that can't be read) is rebuilt too: the rebuild is
 // the fallback, never skipped.
 //
-// What may stay: fragments of at most three characters of a word without
-// digits, in the trigram index and the words index's prefix indexes, which
-// hold the same for any text with those letters; never a whole token of a
-// term longer than that, and of a token with a digit (an ID, a PIN, a
-// group of a number) never as much as three characters.
+// What may stay, beyond what live text holds: fragments of at most three
+// characters of a word without digits, in the trigram index and the words
+// index's prefix indexes, which hold the same for any text with those
+// letters; never a whole token of a term longer than that, and of a token
+// with a digit (an ID, a PIN, a group of a number) never as much as three
+// characters.
 //
 // Nothing a lookup carries (the terms) is ever logged: a failed query's
 // error repeats its parameters, so only the error's name is.
@@ -426,23 +427,29 @@ export const errorNameOf = (error: unknown): string =>
  * (`secure`, from `secureDeleteReady` before the writes), the terms'
  * tokens are known (`tokensKnown`: no occurrence was part of a longer
  * token, as one beside a script written without spaces is, "東京Visser"),
- * no purge recorded a rebuild still owed (`rebuildOwed`), and no page
- * separator holds a token of them that no live row explains
- * (`leftUnexplained`), there is nothing left to do; otherwise the index is
- * rebuilt. Throws when the rebuild fails.
+ * no other purge recorded a rebuild still owed (`rebuildOwed`), and no
+ * page separator holds a token of them that no live row explains
+ * (`leftUnexplained`), there is nothing left to do, and this purge's own
+ * owed rebuild (`id`) is cleared; otherwise the index is rebuilt, which
+ * clears it. Throws when the rebuild fails.
  */
 export const eraseFromSearchIndex = async (
   db: DrizzleD1Database,
   terms: readonly string[],
-  { secure, tokensKnown }: { secure: boolean; tokensKnown: boolean }
+  {
+    secure,
+    tokensKnown,
+    id,
+  }: { secure: boolean; tokensKnown: boolean; id: string }
 ): Promise<void> => {
   const keys = secure && tokensKnown ? indexKeysOf(terms) : undefined;
   if (keys !== undefined) {
     try {
       if (
-        !(await anyRebuildOwed(db)) &&
+        !(await anyRebuildOwed(db, id)) &&
         (await leftUnexplained(db, keys)) === "clean"
       ) {
+        await db.delete(searchRebuilds).where(eq(searchRebuilds.id, id));
         return;
       }
     } catch (error) {

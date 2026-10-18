@@ -6,9 +6,11 @@ import {
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
+import { rebuildSearchIndex } from "../src/knowledge/search-erasure.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -168,6 +170,15 @@ const countingWrites = async (person: Person) => {
     coreEnv: { ...env, KNOWLEDGE: knowledge },
   });
   return { api: core.authenticate(), written };
+};
+
+/**
+ * Rebuilds the search index, paying the rebuilds earlier tests' purges
+ * left owed (one that failed after its writes leaves the next purge to
+ * rebuild): a test counting a purge's rebuilds counts only its own.
+ */
+const payOwedRebuilds = async (): Promise<void> => {
+  await rebuildSearchIndex(drizzle(env.KNOWLEDGE));
 };
 
 /** How many sections the search index holds. */
@@ -1073,6 +1084,7 @@ describe("a purge of content", setUpTime, () => {
       );
     }
     const added = (await indexedSections()) - before;
+    await payOwedRebuilds();
     const large = await purgeOne();
     // A rebuild of the whole index writes at least a row for each section
     // it holds: what the corpus grew by would show, many times over.
@@ -1081,6 +1093,155 @@ describe("a purge of content", setUpTime, () => {
       bound: large.rows - small.rows < added / 4,
       rebuilds: large.rebuilds,
     }).toMatchObject({ bound: true, rebuilds: 0 });
+  });
+
+  it("rebuilds for an ID's trigram that heads a page and only the purged document held", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    // IDs of letters and digits, enough to fill pages of the trigram
+    // index, shared with a document that stays: a page holds both, so it
+    // isn't emptied when the purged ID goes, and its separator stays.
+    const ids = Array.from(
+      { length: 3000 },
+      () => `k${Math.random().toString(36).slice(2, 7)}7`
+    );
+    const keptIds = Array.from(
+      { length: 3000 },
+      () => `m${Math.random().toString(36).slice(2, 7)}7`
+    );
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "ids.md",
+      `# IDs\n${ids.join(" ")}`
+    );
+    await saveOver(
+      admin,
+      handbook.id,
+      "kept.md",
+      `# Kept\n${keptIds.join(" ")}`
+    );
+    await env.KNOWLEDGE.prepare(
+      "INSERT INTO search_trigrams (search_trigrams) VALUES ('optimize')"
+    ).run();
+    // A trigram heading a page that one ID alone holds, in this document
+    // alone.
+    const { results: separators } = await env.KNOWLEDGE.prepare(
+      "SELECT CAST(term AS TEXT) AS term FROM search_trigrams_idx WHERE CAST(term AS TEXT) GLOB '0[a-z0-9][a-z0-9][a-z0-9]'"
+    ).all<{ term: string }>();
+    let target: { trigram: string; id: string } | undefined;
+    for (const { term } of separators) {
+      const trigram = term.slice(1);
+      const holders = ids.filter((id) => id.includes(trigram));
+      const [only] = holders;
+      const keptHolds = keptIds.some((id) => id.includes(trigram));
+      if (holders.length === 1 && only !== undefined && !keptHolds) {
+        // oxlint-disable-next-line no-await-in-loop -- one trigram at a time
+        const rows = await env.KNOWLEDGE.prepare(
+          "SELECT count(*) AS n FROM search_trigrams WHERE search_trigrams MATCH ?"
+        )
+          .bind(`"${trigram}"`)
+          .first<{ n: number }>();
+        if (rows?.n === 1) {
+          target = { trigram, id: only };
+          break;
+        }
+      }
+    }
+    await payOwedRebuilds();
+    const watching = await watchingPurge(admin);
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [target?.id ?? ""],
+      reason: "other",
+    };
+    const { token } = await watching.api.knowledge.preparePurge(input);
+    await watching.api.knowledge.purge(input, token);
+    const left = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS n FROM search_trigrams_idx WHERE CAST(term AS TEXT) = ?"
+    )
+      .bind(`0${target?.trigram ?? ""}`)
+      .first<{ n: number }>();
+    expect({
+      found: target !== undefined,
+      rebuilds: watching.written.rebuilds,
+      separatorLeft: left?.n,
+    }).toStrictEqual({ found: true, rebuilds: 1, separatorLeft: 0 });
+  });
+
+  it("leaves a rebuild owed when a purge fails after its writes, for the next purge to pay", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const name = `failing${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+    const failed = await saveOver(
+      admin,
+      handbook.id,
+      "failed.md",
+      `# Failed\nAsk ${name}.`
+    );
+    await payOwedRebuilds();
+    // Its writes commit; then its check and its rebuild fail, and it isn't
+    // run again.
+    let failRebuild = false;
+    const failing = await apiWith(admin, {
+      prepare: (query) => {
+        if (query.includes("_idx")) {
+          throw new Error("D1 is unavailable");
+        }
+        if (query.includes("VALUES ('rebuild')")) {
+          failRebuild = true;
+        }
+      },
+      beforeBatch: () => {
+        if (failRebuild) {
+          failRebuild = false;
+          throw new Error("D1 is unavailable");
+        }
+      },
+    });
+    const failedInput: PurgeInput = {
+      type: "content",
+      documentIds: [failed.id],
+      terms: [name],
+      reason: "other",
+    };
+    const plan = await failing.knowledge.preparePurge(failedInput);
+    const first = await outcome(
+      failing.knowledge.purge(failedInput, plan.token)
+    );
+    // The next purge, of something else, pays the rebuild it owes.
+    const other = `other${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+    const next = await saveOver(
+      admin,
+      handbook.id,
+      "next.md",
+      `# ${other}\n${other}.`
+    );
+    const watching = await watchingPurge(admin);
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [next.id],
+      terms: [other],
+      reason: "other",
+    };
+    const { token } = await watching.api.knowledge.preparePurge(input);
+    await watching.api.knowledge.purge(input, token);
+    expect({
+      first,
+      rebuilds: watching.written.rebuilds,
+      held: await holding(name),
+    }).toStrictEqual({
+      first: "knowledge.purge_index_pending",
+      rebuilds: 1,
+      held: [],
+    });
   });
 
   it("doesn't rebuild for an ID whose trigram heads a page that other text still holds", async () => {
@@ -1128,6 +1289,7 @@ describe("a purge of content", setUpTime, () => {
       `# Ticket\nCase ${id}.`
     );
     await saveOver(admin, handbook.id, "kept.md", `# Kept\nCase ${id}.`);
+    await payOwedRebuilds();
     const watching = await watchingPurge(admin);
     const input: PurgeInput = {
       type: "content",
@@ -2316,6 +2478,7 @@ describe("a personal purge's search index", setUpTime, () => {
       "INSERT INTO search_trigrams (search_trigrams) VALUES ('optimize')"
     ).run();
     const added = (await indexedSections()) - before;
+    await payOwedRebuilds();
     const large = await purgeOne();
     // A rebuild writes at least a row for each section the index holds.
     expect({
@@ -2368,8 +2531,10 @@ describe("a personal purge's search index", setUpTime, () => {
       );
     }
     const name = `Visser${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
-    // A plain person: checked, no rebuild.
-    const plain = await leaverWith({ "notes.md": `# Notes\nAsk ${name}.` });
+    // A plain person, in words of their own (common words may head pages
+    // earlier text left): checked, no rebuild.
+    const plain = await leaverWith({ "notes.md": `# ${name}\n${name}.` });
+    await payOwedRebuilds();
     const plainPurge = await purgeCounted(admin, plain.leaver);
     const { leaver } = await leaverWith({
       "notes.md": `# Notes\nAsk ${name}さん.`,
@@ -2429,6 +2594,7 @@ describe("a personal purge's search index", setUpTime, () => {
     const { leaver, personal } = await leaverWith({
       "notes.md": "# Notes\nAsk me.",
     });
+    await payOwedRebuilds();
     const { rebuilds } = await purgeCounted(admin, leaver, {
       beforeRead: async () => {
         await saveOver(leaver, personal, "notes.md", `# Notes\nAsk ${name}.`);
@@ -2452,6 +2618,7 @@ describe("a personal purge's search index", setUpTime, () => {
         logged.push(args);
       })
     );
+    await payOwedRebuilds();
     let rebuilds = 0;
     try {
       ({ rebuilds } = await purgeCounted(admin, leaver, { refuseRead: true }));
@@ -2494,6 +2661,7 @@ describe("a personal purge's search index", setUpTime, () => {
           logged.push(args);
         })
       );
+      await payOwedRebuilds();
       try {
         const { rebuilds } = await purgeCounted(admin, leaver);
         return { rebuilds, lines: logged.map((args) => JSON.stringify(args)) };
