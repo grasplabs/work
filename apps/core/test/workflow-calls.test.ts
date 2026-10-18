@@ -85,7 +85,7 @@ import {
   startDetailsPerSweep,
   sweepRunDetails,
 } from "../src/workflows/retention.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import { release, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -3790,6 +3790,44 @@ describe("model resources of a JSON workflow's own actions", () => {
       replayRequests: 2,
       within: { status: "failed", code: "workflow.model_call_limit" },
       withinRequests: 1,
+    });
+  });
+
+  it("takes the run's last model call against the count the run keeps, whichever activation made the others", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await writingWorkflow(ada, admin, {
+      tasks: [greetTask],
+      maxModelCalls: 2,
+    });
+    const runIdOf = Promise.withResolvers<string>();
+    // While the action's first request is out, another activation of the
+    // run keeps a model call of its own: the action's second finds none
+    // left.
+    const gateway = answeringGateway(async (requests) => {
+      if (requests.length === 1) {
+        await runInDurableObject(
+          runObject(await runIdOf.promise),
+          (_object, state) => {
+            state.storage.sql.exec(
+              "INSERT INTO grasp_action_model_calls (key) VALUES ('elsewhere')"
+            );
+          }
+        );
+      }
+      return answer('{"line":"Hello Ada"}');
+    });
+    const ai: AiBinding = env.AI;
+    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
+    const runId = await started(ada, workflow.id);
+    runIdOf.resolve(runId);
+    const end = await ended(ada, workflow.id, runId);
+    expect({
+      end: endOf(end),
+      requests: gateway.requests.length,
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.model_call_limit" },
+      requests: 1,
     });
   });
 

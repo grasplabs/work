@@ -217,13 +217,11 @@ export const modelCallsIn = (sql: SqlStorage): ActionModelCalls => ({
     if (!runIsThere(sql)) {
       return;
     }
+    // A row each time, never merged: a call kept twice was made twice.
     sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${modelCallsTable} (key TEXT PRIMARY KEY NOT NULL)`
+      `CREATE TABLE IF NOT EXISTS ${modelCallsTable} (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL)`
     );
-    sql.exec(
-      `INSERT INTO ${modelCallsTable} (key) VALUES (?) ON CONFLICT (key) DO NOTHING`,
-      key
-    );
+    sql.exec(`INSERT INTO ${modelCallsTable} (key) VALUES (?)`, key);
   },
 });
 

@@ -160,7 +160,8 @@ class ActionHost extends RpcTarget {
     {
       readonly kind: string;
       readonly operations: ReadonlySet<string>;
-      readonly output: string | undefined;
+      /** A model use's sealed output descriptor, parsed once. */
+      readonly output: Json | undefined;
     }
   >;
   readonly #effects: ActionEffects;
@@ -180,7 +181,10 @@ class ActionHost extends RpcTarget {
         {
           kind: use.kind,
           operations: new Set(use.kind === "connector" ? use.operations : []),
-          output: use.kind === "model" ? use.output : undefined,
+          output:
+            use.kind === "model"
+              ? jsonSchema.parse(JSON.parse(use.output))
+              : undefined,
         },
       ])
     );
@@ -301,7 +305,7 @@ class ActionHost extends RpcTarget {
           input: asked.data.input,
           // The sealed descriptor, as the version published it: the shape
           // the call asks for and its answer is checked against.
-          outputSchema: jsonSchema.parse(JSON.parse(use.output)),
+          outputSchema: use.output,
         },
         ordinal
       );
