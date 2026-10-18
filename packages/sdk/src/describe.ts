@@ -313,6 +313,17 @@ const isStubArgument = (
   ancestor.node.callee.type === "Identifier" &&
   bindings.stubs.get(ancestor.node.callee.name) === stub;
 
+/** Whether `args` is the context's `env` alone, as a stub takes it. */
+const isContextEnv = (bindings: Bindings, args: readonly Node[]): boolean => {
+  const [only, extra] = args;
+  return (
+    extra === undefined &&
+    only?.type === "Identifier" &&
+    bindings.env !== undefined &&
+    only.name === bindings.env
+  );
+};
+
 /** The methods of `appFunctions(env)`: one per kind of function. */
 const functionKinds: ReadonlySet<string> = new Set([
   "query",
@@ -478,13 +489,13 @@ const checkEnvUses = (body: Node, bindings: Bindings): void => {
         `Only call \`${node.name}\`; don't rename it or pass it on`
       );
     }
-    // Made only with the context's `env`, which the check of `env` below
-    // reads: never without it.
+    // Made only with the context's `env` itself, which the check of `env`
+    // below reads: never without it, nor with anything else.
     if (
       called &&
       bindings.stubs.get(node.name) === "appFunctions" &&
       parent.node.type === "CallExpression" &&
-      parent.node.arguments.length !== 1
+      !isContextEnv(bindings, parent.node.arguments)
     ) {
       throw fail(node, envHint(bindings.env ?? "env"));
     }

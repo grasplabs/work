@@ -595,6 +595,11 @@ describe(describeWorkflow, () => {
       [inStep(`await appFunctions(env).then("x", {});`), "don't keep `env`"],
       // Never made without the context's env.
       [inStep(`await appFunctions().query("x", {});`), "appFunctions(env)"],
+      [inStep(`await appFunctions({}).query("x", {});`), "appFunctions(env)"],
+      [
+        inStep(`await appFunctions(input).query("x", {});`),
+        "appFunctions(env)",
+      ],
       // A name only known when it runs.
       [inStep(`await env["APP"].call("sendAll");`), "don't keep `env`"],
       [inStep(`await env[input.name].call("sendAll");`), "don't keep `env`"],
