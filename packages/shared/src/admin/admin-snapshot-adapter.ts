@@ -286,6 +286,7 @@ export const staffSnapshotOf = (
     now: snapshot.now,
     members: membersOf(snapshot),
     known: snapshot.gate.known,
+    paused: snapshot.paused,
   };
 };
 

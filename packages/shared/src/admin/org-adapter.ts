@@ -416,6 +416,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     // A snapshot from before the Worker counted has none.
     metered: meteredOf(snapshot.usage ?? []),
     ...(snapshot.known === undefined ? {} : { known: snapshot.known }),
+    ...(snapshot.paused === undefined ? {} : { paused: snapshot.paused }),
   };
 
   const skipped: ("sources" | "documents" | "pulse")[] = [

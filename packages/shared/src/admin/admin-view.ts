@@ -56,10 +56,12 @@ export interface AdminView extends OrgView {
 }
 
 /**
- * What needs Grasp first: a go to give, then what holds people up, then the first conversation
+ * What needs Grasp first: interviews it paused, as nobody gets on until it resumes them, then a
+ * go to give, then what holds people up, then the first conversation
  * that Stephen prepares from, then what can wait a day.
  */
 const NEED_ORDER: Need["kind"][] = [
+  "paused",
   "go",
   "short",
   "ending",

@@ -724,6 +724,8 @@ export interface StaffSnapshot {
   members?: Member[];
   /** How much Grasp knows, in percent, where the organization counts it itself, as Grasp OS's core does for its gate. */
   known?: number;
+  /** Grasp's staff paused the interviews, where the organization holds that itself, as Grasp OS's core does. */
+  paused?: boolean;
 }
 
 /** What the company's own admin sees: their onboarding, their people with the links to send, and numbers per team. Never anyone's words. */

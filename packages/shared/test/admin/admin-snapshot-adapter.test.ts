@@ -251,6 +251,10 @@ const shown = () => {
   return { org, view: adminViewOf(org, state, "2026-10-14") };
 };
 
+/** What needs Grasp at an organization read from core, on core's day, by kind. */
+const kindsOf = (of: ReturnType<typeof adminOrgOf>) =>
+  adminViewOf(of.org, of.state, "2026-10-14").needs.map((need) => need.kind);
+
 /** A view as text, its maps and sets spelled out, to look for words in. */
 const text = (value: unknown): string =>
   JSON.stringify(value, (_key: string, each: unknown): unknown => {
@@ -498,6 +502,27 @@ describe("an organization from core's admin snapshot", () => {
     expect(
       adminViewOf(ready.org, ready.state, "2026-10-14").needs[0]
     ).toStrictEqual({ kind: "go", percent: 85, threshold: 80 });
+  });
+
+  it("shows interviews Grasp paused first, as nobody gets on until it resumes them", () => {
+    const paused = adminOrgOf(
+      {
+        ...snapshot,
+        paused: true,
+        gate: { ...snapshot.gate, known: 85, ready: true },
+      },
+      client
+    );
+    const unpaused = adminOrgOf(snapshot, client);
+    const untold = adminOrgOf(
+      { ...snapshot, paused: true, told: false },
+      client
+    );
+
+    expect(paused.org.real?.paused).toBeTruthy();
+    expect(kindsOf(paused).slice(0, 2)).toStrictEqual(["paused", "go"]);
+    expect(kindsOf(unpaused)).not.toContain("paused");
+    expect(kindsOf(untold)).not.toContain("paused");
   });
 
   it("runs the interviews as long as core's plan, past the samples' fourteen days", () => {
