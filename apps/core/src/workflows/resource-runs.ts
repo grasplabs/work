@@ -214,6 +214,16 @@ const runEntry = (row: RunRow, action: string): AuditEntry => ({
   },
 });
 
+/** `entry`, naming `failureCode` when it records a failed end that has one. */
+const withFailure = (
+  entry: AuditEntry,
+  status: WorkflowRunStatus,
+  failureCode: string | null
+): AuditEntry =>
+  status === "failed" && failureCode !== null
+    ? { ...entry, detail: { ...entry.detail, failureCode } }
+    : entry;
+
 const endActions: Partial<Record<WorkflowRunStatus, string>> = {
   completed: "workflow.run.completed",
   failed: "workflow.run.failed",
@@ -261,9 +271,16 @@ export const projectResourceRun = async (
             : lt(workflowResourceRuns.engineSequence, engine.sequence)
         )
       ),
+    // A failure names its code, as the run keeps it: a run that failed for
+    // packages revoked, say, says so in the audit log.
     ...(action === undefined
       ? []
-      : [outboxedIfChanged(db, runEntry(row, action))]),
+      : [
+          outboxedIfChanged(
+            db,
+            withFailure(runEntry(row, action), status, failureCode)
+          ),
+        ]),
     // Ended, it waits in the admission queue for nothing more: its places
     // go now, rather than keep others waiting until they lapse. After the
     // audit entry, which reads what the row's update changed.

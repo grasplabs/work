@@ -78,9 +78,22 @@ export const workflowPublishSchema = z.strictObject({
   definition: z.string(),
   basedOn: z.number().int().positive().nullable(),
   modules: workflowModulesSchema.optional(),
+  /**
+   * The approved npm packages its modules may import: the graph, by its
+   * hash, approved for this workflow's `computation`, whose built entries
+   * the version seals (GRA-665). Its modules import exactly those entries,
+   * by name, and nothing else of npm.
+   */
+  packages: z
+    .strictObject({ graphHash: z.string().regex(/^[0-9a-f]{64}$/u) })
+    .optional(),
 });
 
 export const workflowResourceErrors = defineErrorFamily({
+  "workflow.packages_invalid":
+    "These packages can't be sealed into a version of this workflow: they need what a calculation's sandbox doesn't have, or are more than a version holds.",
+  "workflow.packages_revoked":
+    "The packages this version of the workflow uses aren't approved any more. Someone with the permission to approve dependencies can approve them again, or publish a version without them.",
   "workflow.resource_invalid": "That isn't a valid request for a workflow.",
   "workflow.resource_unavailable":
     "This workflow doesn't exist or was deleted.",

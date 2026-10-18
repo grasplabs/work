@@ -1,5 +1,6 @@
 import {
   appModuleName,
+  computePackagesFile,
   kitModuleName,
   workflowSdkModules,
 } from "@grasp-os/compiler";
@@ -49,12 +50,11 @@ import { buildComputeModules, withinBuildWait } from "./screens.ts";
 //   the host makes the call from the sealed task table.
 // - Imports past the SDK. The compiler builds them as their own kind
 //   (`computeCode`): their own files and `@grasp-os/sdk/compute` only, so
-//   no Workers runtime, no other SDK entry and no package, type-checked
-//   against that SDK. A workflow's builders may have packages approved
-//   for its compute modules (`computation`, dependencies/subjects.ts),
-//   and build them (packages/build.ts), but none is imported yet: imports
-//   come with sealing them into a version and admitting them at every
-//   start and compute call (slice 3 of GRA-665).
+//   no Workers runtime and no other SDK entry, type-checked against that
+//   SDK; and the entries of the approved graph their version seals, if
+//   any, by name (`computeCodeWith`), whose modules the version's build
+//   holds and every start and call admits again
+//   (workflows/sealed-packages.ts). No other package.
 // - The clock, randomness, timers and generated code. The isolate takes
 //   them away before any module of the workflow's evaluates (the SDK's
 //   compute-lockdown.ts), on the global object and every prototype of it,
@@ -137,10 +137,28 @@ export interface CompiledModules {
 /** What validation resolves `local:` keys against: modules' contracts. */
 export type ModuleContracts = Pick<CompiledModules, "contracts">;
 
-/** The hash a version's modules are published under: of their canonical JSON. */
+/**
+ * The hash a version's modules are published under: of their canonical
+ * JSON, and of the approved graph they import, if any (GRA-665), so the
+ * same modules with other packages are another publication.
+ */
 export const modulesHashOf = async (
-  sources: Readonly<Record<string, string>>
-): Promise<string> => await sha256Hex(canonicalJson({ ...sources }));
+  sources: Readonly<Record<string, string>>,
+  graphHash?: string
+): Promise<string> =>
+  await sha256Hex(
+    graphHash === undefined
+      ? canonicalJson({ ...sources })
+      : canonicalJson({ sources: { ...sources }, packages: graphHash })
+  );
+
+/** The approved packages a build of modules may import: names and modules. */
+export interface ModulePackages {
+  /** Each importable entry, by name. */
+  readonly entries: readonly string[];
+  /** Each entry's module, by its flat name (`packageModuleName`). */
+  readonly modules: Readonly<Record<string, string>>;
+}
 
 /** The most diagnostics a refusal names. */
 const maxDiagnostics = 50;
@@ -491,13 +509,23 @@ export const compileModules = async (
   env: Env,
   sources: Readonly<Record<string, string>>,
   /** Whose build it is: the workflow resource's ID. */
-  whose: string
+  whose: string,
+  /** The approved packages the modules may import, if any (GRA-665). */
+  packages?: ModulePackages
 ): Promise<CompiledModules> => {
+  // Which entries they may import is part of what is built, and of what
+  // the build is cached by (`computePackagesFile`).
+  const files = {
+    ...sources,
+    // Always core's: a file of this name from anywhere else never stands.
+    [computePackagesFile]: JSON.stringify(packages?.entries.toSorted() ?? []),
+  };
+  const packageModules = packages?.modules ?? {};
   let built: Awaited<ReturnType<typeof buildComputeModules>> | "late";
   try {
     built = await withinBuildWait(
       env,
-      async () => await buildComputeModules(env, { ...sources }, whose)
+      async () => await buildComputeModules(env, files, whose)
     );
   } catch (error) {
     if (isExpectedError(error)) {
@@ -520,9 +548,11 @@ export const compileModules = async (
       env,
       {
         mainModule: computeMain,
-        // The platform's modules last: no module of the workflow's takes one's name.
+        // The platform's modules last: no module of the workflow's takes
+        // one's name. Its packages' modules load as they will run.
         modules: {
           ...built.modules,
+          ...packageModules,
           ...sdk.modules,
           [computeMain]: inspectMain(paths),
         },
@@ -547,7 +577,9 @@ export const compileModules = async (
   }
   return {
     sources: Object.freeze({ ...sources }),
-    modules: Object.freeze({ ...built.modules }),
+    // Its packages' modules with its own (`pkg~` beside `app~`): sealed in
+    // the build, under its identity, and loaded with them at every call.
+    modules: Object.freeze({ ...built.modules, ...packageModules }),
     contracts: contractsOf(text, sources),
     manifest: text,
   };

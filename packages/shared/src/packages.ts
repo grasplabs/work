@@ -198,6 +198,13 @@ export const packageLimits = {
   appLocks: 32,
   /** What one target's build makes, every file of it together. */
   artifactBytes: 16 * 1024 * 1024,
+  /**
+   * The most characters the approved packages' modules one workflow
+   * version seals have together (GRA-665): they are loaded with its build
+   * at every call, so they are bounded as its own modules are. A version
+   * sealed under a lower limit always loads under this one.
+   */
+  workflowPackageChars: 2 * 1024 * 1024,
 } as const;
 export type PackageLimits = Record<keyof typeof packageLimits, number>;
 

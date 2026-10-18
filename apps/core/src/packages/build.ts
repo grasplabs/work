@@ -69,9 +69,9 @@ import { verifiedTarball } from "./tarballs.ts";
 // byte before keeping it. An App's graph or a workflow's (its subject,
 // dependencies/subjects.ts): every lease, lock, pin and admission below
 // is the subject's own, and a workflow builds only `computation`, whose
-// artifact never leaves core (nothing imports it yet: publication still
-// refuses package imports in `code/`, until slice 3 of GRA-665 seals
-// them into a version). What could go wrong, and what stops it:
+// artifact never leaves core: a version that imports it copies its
+// entries' modules into its own build (workflows/sealed-packages.ts).
+// What could go wrong, and what stops it:
 //
 // - Building what nobody approved, or more of it: every build asks
 //   `admitDependencies` first, for this App, graph and target under the
