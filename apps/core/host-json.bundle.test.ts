@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import {
   mkdirSync,
   mkdtempSync,
@@ -45,13 +44,28 @@ const run = async (
     ...options,
     signal: stopping.signal,
   });
-  const closed = once(child, "close");
-  closing.add(closed);
+  // Settled once it closed, whatever it failed with first (stopped, an
+  // AbortError comes before its close), or once it never started.
+  const closed = Promise.withResolvers<null>();
+  let failure: Error | undefined;
+  child.once("close", () => {
+    closed.resolve(null);
+  });
+  child.once("error", (error) => {
+    failure = error;
+    if (child.pid === undefined) {
+      closed.resolve(null);
+    }
+  });
+  closing.add(closed.promise);
   const [stdout, stderr] = await Promise.all([
     text(child.stdout),
     text(child.stderr),
   ]);
-  await closed;
+  await closed.promise;
+  if (failure !== undefined) {
+    throw failure;
+  }
   if (child.exitCode !== 0) {
     throw new Error(`${stdout}${stderr}`);
   }
