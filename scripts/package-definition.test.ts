@@ -128,6 +128,40 @@ const definitionOf = (
   unresolved: [],
 });
 
+/** A locked package, as an App's lock records it. */
+const integrity = `sha512-${"A".repeat(86)}==`;
+const locked = (
+  name: string,
+  version: string,
+  license: string | null,
+  dependencies: Record<string, string> = {}
+) => ({
+  name,
+  version,
+  integrity,
+  license,
+  publishedAt: "2026-01-01T00:00:00.000Z",
+  dependencies,
+  peers: {},
+});
+const lockOf = (
+  direct: Record<string, string>,
+  packages: ReturnType<typeof locked>[]
+) =>
+  JSON.stringify({
+    lockfileVersion: 1,
+    registry: "https://registry.npmjs.org",
+    requested: Object.fromEntries(
+      Object.entries(direct).map(([name, version]) => [name, `^${version}`])
+    ),
+    direct,
+    platformPeers: {},
+    targets: {},
+    packages: Object.fromEntries(
+      packages.map((entry) => [`${entry.name}@${entry.version}`, entry])
+    ),
+  });
+
 const made: string[] = [];
 
 /** A new empty directory, and where a project would go inside it. */
@@ -295,7 +329,7 @@ describe(
       });
     });
 
-    it("refuses a path that leaves its directory, collides, or isn't relative, and writes nothing", async () => {
+    it("refuses a path that leaves its directory, collides once folded, a tool reads, or a file system can't hold, and writes nothing", async () => {
       const paths = [
         "../escape.ts",
         "operations/../../escape.ts",
@@ -306,7 +340,18 @@ describe(
         "./app.ts",
         "nul\0.ts",
         "APP.ts",
+        "operationſ/notes.ts",
         ".grasp/server.ts",
+        "CON.ts",
+        "operations/lpt1",
+        "notes.ts.",
+        "notes.ts ",
+        "tab\u0009.ts",
+        ".git/config",
+        "operations/.GIT/hooks/pre-commit",
+        ".npmrc",
+        ".vscode/settings.json",
+        `${"a".repeat(256)}.ts`,
       ];
       const outcomes: Record<string, string> = {};
       for (const file of paths) {
@@ -322,6 +367,96 @@ describe(
       expect(outcomes).toStrictEqual(
         Object.fromEntries(paths.map((file) => [file, "refused, 0 written"]))
       );
+    });
+
+    it("pins the App's locked packages and their dependencies exactly, and refuses a lock that would replace what the project pins", async () => {
+      const withLock = (lock: string) =>
+        definitionOf({
+          ...notesFiles(),
+          "package.json": JSON.stringify({
+            dependencies: { "date-kit": "^1.2.0" },
+          }),
+          "grasp.lock.json": lock,
+        });
+      const { out } = scratch();
+      await packaged(
+        withLock(
+          lockOf({ "date-kit": "1.2.0" }, [
+            locked("date-kit", "1.2.0", "MIT | injected\n| row |", {
+              "tz-data": "2.0.1",
+            }),
+            locked("tz-data", "2.0.1", "Apache-2.0"),
+          ])
+        ),
+        out
+      );
+      const project = z
+        .object({
+          dependencies: z.record(z.string(), z.string()),
+          overrides: z.record(z.string(), z.record(z.string(), z.string())),
+        })
+        .parse(
+          JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
+        );
+      const notices = readFileSync(
+        path.join(out, "THIRD-PARTY-NOTICES.md"),
+        "utf-8"
+      );
+      const refused = await Promise.all(
+        [
+          lockOf({ "@grasp-os/sdk": "9.9.9" }, [
+            locked("@grasp-os/sdk", "9.9.9", "MIT"),
+          ]),
+          lockOf({ react: "18.0.0" }, [locked("react", "18.0.0", "MIT")]),
+          lockOf({ typescript: "5.0.0" }, [
+            locked("typescript", "5.0.0", "MIT"),
+          ]),
+          lockOf({ "date-kit": "1.2.0" }, [
+            locked("date-kit", "1.2.0", "MIT", { "@grasp-os/shared": "1.0.0" }),
+            locked("@grasp-os/shared", "1.0.0", "MIT"),
+          ]),
+        ].map(
+          async (lock) =>
+            await refusalOf(packaged(withLock(lock), scratch().out))
+        )
+      );
+      expect({
+        dateKit: project.dependencies["date-kit"],
+        overrides: project.overrides,
+        notices: notices
+          .split("\n")
+          .filter(
+            (line) => line.startsWith("| date-kit") || line.includes("injected")
+          ),
+        refused,
+      }).toStrictEqual({
+        dateKit: "1.2.0",
+        overrides: { "date-kit@1.2.0": { "tz-data": "2.0.1" } },
+        notices: ["| date-kit | 1.2.0 | unknown | the App's lock |"],
+        refused: ["refused", "refused", "refused", "refused"],
+      });
+    });
+
+    it("renames the finished project onto an empty --out and leaves nothing beside it", async () => {
+      const { dir, out } = scratch();
+      mkdirSync(out);
+      await packaged(definitionOf(), out);
+      expect({
+        beside: readdirSync(dir),
+        written: readdirSync(out).toSorted(),
+      }).toStrictEqual({
+        beside: ["project"],
+        written: [
+          "LICENSES",
+          "THIRD-PARTY-NOTICES.md",
+          "app",
+          "grasp-project.json",
+          "package.json",
+          "tsconfig.json",
+          "vendor",
+          "workflows",
+        ],
+      });
     });
 
     it("refuses a directory that isn't empty, a package for another protocol, a key that isn't a workflow's, and dependencies with no lock", async () => {

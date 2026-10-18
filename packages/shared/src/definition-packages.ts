@@ -98,7 +98,9 @@ export const definitionPackageSchema = z.strictObject({
      * text, which the SDK reads back strictly (`readAppManifest`): what
      * a destination generates the App's references from, with its own
      * identity, without running the App's code. Derived from its source
-     * alone: no ID of this deployment.
+     * alone: no ID of this deployment. Never trusted: an import seals the
+     * App again from its source, and takes nothing from this but what a
+     * developer's project generates for its own build.
      */
     manifest: z.string().min(1),
     /** The store contract the release was sealed against, without the store. */

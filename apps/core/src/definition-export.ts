@@ -252,11 +252,11 @@ const encoder = new TextEncoder();
  * Counts the text files an export packages against its byte budget, and
  * scans each for known secret formats, as it is added: past `max` bytes,
  * `version.export_too_large`; a file holding a known credential format,
- * `version.export_secret_found` naming the file (under `prefix`), never
+ * `version.export_secret_found` naming the file (under `prefix`, if any), never
  * what matched. Answers the files added.
  */
 type TextBudget = (
-  prefix: string,
+  prefix: string | null,
   files: Readonly<Record<string, string>>
 ) => Readonly<Record<string, string>>;
 
@@ -271,7 +271,7 @@ const textBudget = (max: number): TextBudget => {
       }
       if (holdsKnownCredential(text)) {
         throw versionErrors.create("version.export_secret_found", {
-          path: `${prefix}/${path}`,
+          path: prefix === null ? path : `${prefix}/${path}`,
         });
       }
     }
@@ -437,7 +437,8 @@ export const exportAppDefinition = async (
   const budget = textBudget(maxBytesOf(env));
   budget("app", files);
   const registration = canonicalText(release.app);
-  budget("app", { ".grasp/manifest.json": registration });
+  // Named as the package names it: it is no file of the App's.
+  budget(null, { "app.manifest": registration });
   // Only their hashes: they name this deployment's resources, the
   // workflows' it may not read among them, and the destination generates
   // its own.

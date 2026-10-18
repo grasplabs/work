@@ -8,34 +8,46 @@
  *
  * Threat model (GRA-713), and how each is closed:
  *
- * - A package's file path writes outside where it belongs: every path is
- *   checked before anything is written (`safePath`): relative, `/`
- *   separated, no empty, `.` or `..` segment, no backslash, drive or NUL,
- *   and each lands inside its own subtree once resolved. Two paths that
- *   differ only by case are refused, as is an App file where the
- *   references are generated. The whole project is planned first, and
- *   nothing is written unless all of it checks.
- * - It writes through something already there: `--out` must not exist or
- *   be an empty directory, never a link, and every file is created anew
- *   (`wx`) in directories this made.
+ * - A package's file path writes outside where it belongs, or where a tool
+ *   reads it: every path is checked before anything is written
+ *   (`safePath`): relative, `/` separated, at most 255 bytes a segment, no
+ *   empty, `.` or `..` segment, no separator, drive, colon or control
+ *   character, no trailing dot or space, no name Windows reserves, and no
+ *   `.git`, `.npmrc` or `.vscode`; and each lands inside its subtree once
+ *   resolved. Two paths the same once folded (NFC, full case folding) are
+ *   refused, as is an App file where the references are generated.
+ * - It writes through something already there, or leaves half a project:
+ *   the whole project is planned and checked first, then built in a new
+ *   directory beside `--out`, each file created anew (`wx`), and renamed
+ *   onto `--out` only while that is missing or an empty directory, never
+ *   a link.
  * - The package isn't one the platform made, or for another SDK protocol:
  *   it is parsed with the strict package schema, its registration with
  *   the SDK's strict reader, and a protocol other than the checkout's is
  *   refused.
- * - Packages are fetched that nothing pinned, or the network is reached:
- *   nothing here makes a network call. The project names exact versions
- *   only: the App's direct dependencies from its own lock, and the
- *   catalog's for what the vendored packages need. Installing is the
- *   developer's step, after.
+ * - Packages are fetched that nothing pinned, or replace one the project
+ *   pins, or the network is reached: nothing here makes a network call.
+ *   What is pinned exactly: the App's direct dependencies and, as npm
+ *   `overrides`, each of its locked packages' dependencies, from its own
+ *   lock; the vendored packages' and the project's own direct
+ *   dependencies, from the catalog. What isn't: the catalog packages' own
+ *   dependencies, which the package manager resolves at install, and
+ *   integrity, which only a lockfile carries. A lock that names a package
+ *   the project pins itself (Grasp's scope anywhere, React, the
+ *   type-checker) is refused. Installing is the developer's step, after.
  * - Code from the package runs: none does. The references are generated
  *   from the registration as data (`generateModules`).
  * - Licences: the vendored packages ship with their AGPL-3.0 text, and the
  *   notices list each direct dependency with the licence its lock or
- *   installed package declares, "unknown" where neither does.
+ *   installed package declares when it reads as an SPDX expression,
+ *   "unknown" otherwise.
  */
 import {
   lstatSync,
   mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -72,15 +84,37 @@ const refuse = (message: string): never => {
   throw new PackagingError(message);
 };
 
-const segmentPattern = /^[^\\/:*?"<>|\0]+$/u;
 const drivePattern = /^[A-Za-z]:/u;
 const workflowKeyPattern =
   /^workspace\/(?<name>[a-z0-9-]+)\/(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/u;
 
+/** Characters no segment holds: separators, Windows' reserved, controls. */
+// oxlint-disable-next-line no-control-regex -- control characters are what it refuses
+const forbiddenCharacters = /[\\/:*?"<>|\u0000-\u001F\u007F]/u;
+/** Names Windows reserves for devices, with or without an extension. */
+const reservedName = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/u;
+/** Segments that configure a tool or repository when written anywhere. */
+const toolSegments: ReadonlySet<string> = new Set([
+  ".git",
+  ".npmrc",
+  ".vscode",
+]);
+const encoder = new TextEncoder();
+
+/**
+ * `text` folded as file systems that ignore case compare names: NFC, then
+ * full case folding (`ſ` as `s`, `ß` as `ss`) by way of upper case.
+ */
+export const folded = (text: string): string =>
+  text.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC");
+
 /**
  * `relative` as a path inside a project subtree: `/`-separated segments,
- * none empty, `.` or `..`, with no backslash, colon, drive or NUL, and at
- * most 512 characters. Refuses anything else, naming `where`.
+ * at most 512 characters, refusing anything else, naming `where`. No
+ * segment is empty, `.` or `..`; holds a separator, colon, character
+ * Windows reserves or control character; ends in a dot or space; is a
+ * name Windows reserves for a device; is `.git`, `.npmrc` or `.vscode`
+ * in any case; or takes more than 255 bytes.
  */
 export const safePath = (relative: string, where: string): string => {
   if (
@@ -92,7 +126,18 @@ export const safePath = (relative: string, where: string): string => {
     return refuse(`${where}: a file path must be relative.`);
   }
   for (const segment of relative.split("/")) {
-    if (segment === "." || segment === ".." || !segmentPattern.test(segment)) {
+    const name = folded(segment);
+    if (
+      segment === "" ||
+      segment === "." ||
+      segment === ".." ||
+      forbiddenCharacters.test(segment) ||
+      segment.endsWith(".") ||
+      segment.endsWith(" ") ||
+      reservedName.test(name) ||
+      toolSegments.has(name) ||
+      encoder.encode(segment).byteLength > 255
+    ) {
       return refuse(`${where}: a file path has a segment it may not have.`);
     }
   }
@@ -108,17 +153,17 @@ interface Plan {
 
 const newPlan = (): Plan => {
   const files = new Map<string, string>();
-  const folded = new Set<string>();
+  const seen = new Set<string>();
   return {
     files,
     add: (file, text) => {
-      const key = file.toLowerCase();
-      if (folded.has(key)) {
+      const key = folded(file);
+      if (seen.has(key)) {
         refuse(
           `${file}: another file has this path, or one that differs only by case.`
         );
       }
-      folded.add(key);
+      seen.add(key);
       files.set(file, text);
     },
   };
@@ -295,11 +340,32 @@ const declaredDependenciesSchema = z.object({
   dependencies: z.record(z.string(), z.string()).optional(),
 });
 
-/** The App's own dependencies, exactly as its lock resolved them. */
+/** What the App's lock pins: its direct dependencies, and theirs. */
+interface AppPins {
+  readonly direct: Record<string, string>;
+  /**
+   * npm `overrides`: for each locked package, by `<name>@<version>`, the
+   * exact version of each of its dependencies, as the lock resolved them.
+   */
+  readonly overrides: Record<string, Record<string, string>>;
+}
+
+/** Whether the project pins `name` itself, so no App lock may name it. */
+const ownedByProject = (name: string): boolean =>
+  name.startsWith("@grasp-os/") ||
+  projectDependencies.some((each) => each === name) ||
+  projectDevDependencies.some((each) => each === name);
+
+/**
+ * The App's own dependencies, exactly as its lock resolved them, and each
+ * locked package's dependencies as overrides. A lock that names one the
+ * project pins itself (the vendored packages, React, the type-checker) is
+ * refused: it would swap it for whatever the registry serves.
+ */
 const appDependencies = (
   files: Readonly<Record<string, string>>,
   notices: Notice[]
-): Record<string, string> => {
+): AppPins => {
   const lockText = files["grasp.lock.json"];
   if (lockText === undefined) {
     const declared =
@@ -310,7 +376,7 @@ const appDependencies = (
     if (Object.keys(declared ?? {}).length > 0) {
       refuse("The App declares dependencies but carries no lock for them.");
     }
-    return {};
+    return { direct: {}, overrides: {} };
   }
   const lock = graspLockSchema.safeParse(JSON.parse(lockText));
   if (!lock.success) {
@@ -319,6 +385,18 @@ const appDependencies = (
     );
   }
   const locked = Object.values(lock.data.packages);
+  // Grasp's own scope is never fetched from a registry, anywhere in the
+  // graph; and nothing the project pins itself is the App's to replace.
+  const scoped = locked.flatMap((entry) => [
+    entry.name,
+    ...Object.keys(entry.dependencies),
+  ]);
+  if (
+    Object.keys(lock.data.direct).some(ownedByProject) ||
+    scoped.some((name) => name.startsWith("@grasp-os/"))
+  ) {
+    refuse("The App's lock names a package the project pins itself.");
+  }
   for (const [name, version] of Object.entries(lock.data.direct)) {
     notices.push({
       name,
@@ -329,7 +407,13 @@ const appDependencies = (
       from: "the App's lock",
     });
   }
-  return lock.data.direct;
+  const overrides: Record<string, Record<string, string>> = {};
+  for (const entry of locked) {
+    if (Object.keys(entry.dependencies).length > 0) {
+      overrides[`${entry.name}@${entry.version}`] = { ...entry.dependencies };
+    }
+  }
+  return { direct: lock.data.direct, overrides };
 };
 
 /** What a vendored package needs from the checkout. */
@@ -439,6 +523,16 @@ const tsconfig = {
   include: ["app", "workflows"],
 };
 
+/** A licence as an SPDX expression may be written: anything else is unknown. */
+const spdxLike =
+  /^[A-Za-z0-9][A-Za-z0-9.+-]*(?: (?:AND|OR|WITH) \(?[A-Za-z0-9][A-Za-z0-9.+-]*\)?)*$/u;
+
+/** `licence` as the notices print it: SPDX-like, or "unknown". */
+const licenceText = (licence: string | null): string =>
+  licence !== null && licence.length <= 128 && spdxLike.test(licence)
+    ? licence
+    : "unknown";
+
 /** The notices of `notices`, each package and version once, by name. */
 const noticesText = (notices: readonly Notice[]): string => {
   const unique = new Map<string, Notice>();
@@ -452,7 +546,7 @@ const noticesText = (notices: readonly Notice[]): string => {
     .toSorted((a, b) => (a.name < b.name ? -1 : 1))
     .map(
       ({ name, version, licence, from }) =>
-        `| ${name} | ${version} | ${licence ?? "unknown"} | ${from} |`
+        `| ${name} | ${version} | ${licenceText(licence)} | ${from} |`
     );
   return [
     "# Third-party notices",
@@ -478,7 +572,7 @@ export const planProject = async (
   planWorkflows(project, definition.workflows);
 
   const notices: Notice[] = [];
-  const dependencies = appDependencies(definition.app.files, notices);
+  const pins = appDependencies(definition.app.files, notices);
   const catalog = readCatalog(
     readFileSync(path.join(input.repo, "pnpm-workspace.yaml"), "utf-8")
   );
@@ -516,10 +610,13 @@ export const planProject = async (
             `file:./vendor/@grasp-os/${name}`,
           ])
         ),
+        ...pins.direct,
         ...pinnedAll(projectDependencies),
-        ...dependencies,
       },
       devDependencies: pinnedAll(projectDevDependencies),
+      ...(Object.keys(pins.overrides).length === 0
+        ? {}
+        : { overrides: pins.overrides }),
     })
   );
   project.add("tsconfig.json", jsonText(tsconfig));
@@ -571,25 +668,34 @@ const requireFreshOut = (out: string): void => {
 
 /**
  * Writes the project for `input` into `input.out`, once all of it is
- * planned and checked: answers the paths written, sorted.
+ * planned and checked: built in a new directory beside it, then renamed
+ * onto it (missing, or empty), so `--out` holds all of it or none.
+ * Answers the paths written, sorted.
  */
 export const packageProject = async (
   input: PackagingInput
 ): Promise<string[]> => {
-  requireFreshOut(input.out);
+  const out = path.resolve(input.out);
+  requireFreshOut(out);
   const files = await planProject(input);
-  const root = path.resolve(input.out);
-  for (const file of files.keys()) {
-    const target = path.resolve(root, file);
-    if (!target.startsWith(`${root}${path.sep}`)) {
-      refuse(`${file}: lands outside the project.`);
+  mkdirSync(path.dirname(out), { recursive: true });
+  const building = mkdtempSync(path.join(path.dirname(out), ".grasp-project-"));
+  try {
+    for (const [file, text] of files) {
+      const target = path.resolve(building, file);
+      if (!target.startsWith(`${building}${path.sep}`)) {
+        refuse(`${file}: lands outside the project.`);
+      }
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, text, { flag: "wx" });
     }
-  }
-  mkdirSync(root, { recursive: true });
-  for (const [file, text] of files) {
-    const target = path.resolve(root, file);
-    mkdirSync(path.dirname(target), { recursive: true });
-    writeFileSync(target, text, { flag: "wx" });
+    // Checked again just before: renaming onto a directory replaces it
+    // only while it is empty.
+    requireFreshOut(out);
+    renameSync(building, out);
+  } catch (error) {
+    rmSync(building, { recursive: true, force: true });
+    throw error;
   }
   return [...files.keys()].toSorted();
 };
