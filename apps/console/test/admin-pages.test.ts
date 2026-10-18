@@ -75,6 +75,79 @@ const readySnapshot = (name: string): AdminSnapshot => {
   };
 };
 
+/**
+ * A company told `daysIn` days ago, on a plan of `days` days, with one
+ * team: its lead Lisa and Tom, both sent their link; Lisa has talked
+ * when `leadTalked`.
+ */
+const toldSnapshot = (
+  name: string,
+  {
+    days,
+    daysIn,
+    leadTalked,
+  }: { days: number; daysIn: number; leadTalked: boolean }
+): AdminSnapshot => {
+  const empty = emptyAdminSnapshot(name);
+  const at = (back: number, hour: number) =>
+    new Date(
+      Date.parse(empty.now) - back * 86_400_000 + hour * 3_600_000
+    ).toISOString();
+  const told = at(daysIn, 0);
+  return {
+    ...empty,
+    roster: {
+      teams: [
+        { id: "sales", name: "Sales", lead: "lisa", does: "", off: false },
+      ],
+      people: [
+        ["lisa", "Lisa"],
+        ["tom", "Tom"],
+      ].map(([id = "", person = ""]) => ({
+        id,
+        name: person,
+        email: "",
+        team: "sales",
+        title: "",
+        away: false,
+      })),
+    },
+    plan: { start: told.slice(0, 10), days, at: told },
+    agreements: { processing: true, assessment: true, council: "none" },
+    agreed: true,
+    told: true,
+    links: ["lisa", "tom"].map((person) => ({
+      person,
+      sentAt: told,
+      openedAt: null,
+      remindedAt: null,
+      deletedAt: null,
+      state: person === "lisa" && leadTalked ? "completed" : "waiting",
+    })),
+    interviews: leadTalked
+      ? [
+          {
+            person: "lisa",
+            kind: "lead",
+            startedAt: at(daysIn, 1),
+            completedAt: at(daysIn, 2),
+            updatedAt: at(daysIn, 2),
+            agreed: true,
+            phase: "readback",
+            stoppedAt: null,
+            minutes: 40,
+            facts: 4,
+            out: 0,
+            confirmed: 4,
+            rating: 5,
+            typed: false,
+            interviewer: "stephen",
+          },
+        ]
+      : [],
+  };
+};
+
 /** The overview's row for client `clientId`, in its table of organizations. */
 const rowOf = (html: string, clientId: string): string => {
   const table = html.indexOf("<table");
@@ -267,6 +340,52 @@ describe("the admin's frame", () => {
     expect(
       companies.map(({ name }) => listed(`Open at ${name}:`))
     ).toStrictEqual([true, true, true]);
+  });
+
+  it("counts only leads who talked, and the days of each company's own plan", async () => {
+    const waiting = await liveClient();
+    waiting.account.admin = toldSnapshot("Waiting", {
+      days: 21,
+      daysIn: 3,
+      leadTalked: false,
+    });
+    const talking = await liveClient();
+    talking.account.admin = toldSnapshot("Talking", {
+      days: 21,
+      daysIn: 3,
+      leadTalked: true,
+    });
+
+    const { html } = await page("/admin");
+    const main = html.slice(html.indexOf("<main"));
+
+    expect({
+      // Tom's link went out without Lisa: she still hasn't talked.
+      waiting: rowOf(main, waiting.clientId).includes("0 of 1 talked"),
+      // Three weeks, as its plan has it.
+      talking: rowOf(main, talking.clientId).includes(" of 21. "),
+    }).toStrictEqual({ waiting: true, talking: true });
+  });
+
+  it("counts an organization's days to its own plan beside its page", async () => {
+    const company = await liveClient();
+    company.account.admin = toldSnapshot("Company", {
+      days: 21,
+      daysIn: 3,
+      leadTalked: true,
+    });
+
+    const { status, html } = await page(
+      `/admin/organizations/${company.clientId}`
+    );
+
+    expect({
+      status,
+      days: /Day (?:<!-- -->)?\d+(?:<!-- -->)? of (?:<!-- -->)?21/u.test(html),
+    }).toStrictEqual({
+      status: 200,
+      days: true,
+    });
   });
 
   it("shows only the organizations in a phase when one is chosen", async () => {
