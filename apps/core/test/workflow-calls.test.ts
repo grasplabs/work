@@ -3853,6 +3853,68 @@ describe("model resources of a JSON workflow's own actions", () => {
     });
   });
 
+  it("refuses a version whose actions' model output shapes are past what it may hold, pointing at the action", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = `writer-${unique()}`;
+    await publishCatalogContract(env, admin, { key, kind: "model" });
+    const workflow = await createWorkflowResource(env, ada, `big-${unique()}`);
+    // One output shape of some 80 KB: within what a module's contract may
+    // take, past what the version's manifest holds.
+    const big = `import { action, resource, v } from "@grasp-os/sdk/action";
+
+const values = Array.from({ length: 400 }, (_, index) => \`\${"x".repeat(190)}\${index}\`);
+const writer = resource.model("writer", {
+  output: v.object({ pick: v.enum(values as [string, ...string[]]) }),
+});
+
+export const greet = action({
+  args: { who: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [writer],
+  handler: async () => ({ status: "never" }),
+});
+`;
+    const error = await refusal(
+      publishWorkflowVersion(env, ada, workflow.id, {
+        definition: definitionOf(workflow.name, {
+          bindings: {
+            greet: { kind: "operation", contract: "local:code/greet.ts#greet" },
+            writer: { kind: "model", contract: key },
+          },
+          tasks: [greetTask],
+        }),
+        basedOn: null,
+        modules: { "code/greet.ts": big },
+      })
+    );
+    const parsed = z
+      .object({
+        code: z.string(),
+        details: z.object({
+          problems: z.array(
+            z.looseObject({ code: z.string(), pointer: z.string() })
+          ),
+        }),
+      })
+      .parse(error);
+    expect({
+      code: parsed.code,
+      problems: parsed.details.problems.map(({ code, pointer }) => ({
+        code,
+        pointer,
+      })),
+    }).toStrictEqual({
+      code: "workflow.definition_invalid",
+      problems: [
+        {
+          code: "manifest.too_large",
+          pointer: "/document/metadata/grasp/bindings/greet",
+        },
+      ],
+    });
+  });
+
   it("fails on an answer outside the declared shape, and refuses the next call once its approval is revoked", async () => {
     const admin = await person("admin");
     const ada = await person("builder");

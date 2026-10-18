@@ -1012,6 +1012,47 @@ const sealedBuildOf = (
   }
 };
 
+/**
+ * Why a version's manifest is past `manifestMaxBytes`: the output shapes
+ * its actions declare for their model calls (GRA-700), sealed in it, when
+ * they hold most of it, pointing at the action with the largest; otherwise
+ * what it pins.
+ */
+const tooLargeProblem = (
+  actions: readonly WorkflowVersionAction[]
+): WorkflowDefinitionProblem => {
+  let total = 0;
+  let largest: { binding: string; bytes: number } | undefined;
+  for (const action of actions) {
+    for (const use of action.uses) {
+      if (use.kind === "model") {
+        const bytes = bytesOf(use.output);
+        total += bytes;
+        if (largest === undefined || bytes > largest.bytes) {
+          largest = { binding: action.binding, bytes };
+        }
+      }
+    }
+  }
+  if (largest === undefined || total * 2 < manifestMaxBytes) {
+    return {
+      code: "manifest.too_large",
+      message: "What the version pins is larger than a version may hold.",
+      pointer: "/document/metadata/grasp/bindings",
+      remedy: "Bind fewer workflows.",
+    };
+  }
+  return {
+    code: "manifest.too_large",
+    // Fixed text, as every problem's: the pointer names the action with
+    // the largest shape.
+    message:
+      "The output shapes the version's actions declare for their model calls are larger than a version may hold.",
+    pointer: `/document/metadata/grasp/bindings/${largest.binding}`,
+    remedy: "Declare smaller output shapes for the actions' model uses.",
+  };
+};
+
 /** Where a version's manifest says what its actions may do (GRA-709). */
 const manifestActionsSchema = z.object({
   actions: z.array(
@@ -1370,14 +1411,7 @@ const writeVersion = async (
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
-    throw definitionInvalid([
-      {
-        code: "manifest.too_large",
-        message: "What the version pins is larger than a version may hold.",
-        pointer: "/document/metadata/grasp/bindings",
-        remedy: "Bind fewer workflows.",
-      },
-    ]);
+    throw definitionInvalid([tooLargeProblem(actions)]);
   }
   const manifestHash = await sha256Hex(manifest);
   const createdAt = new Date();
