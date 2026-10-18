@@ -1,4 +1,5 @@
 import type {
+  ActionOperation,
   WorkflowDraft,
   WorkflowResource,
   WorkflowActionReview,
@@ -44,6 +45,18 @@ import { TestRun } from "../workflows/test-run.tsx";
 // and, for one that asks a model, the writes its answers may steer
 // (GRA-718), which no reviewer should have to piece together.
 
+/** The writes a model's answers may steer in one action (GRA-718). */
+const SteeredWrites = ({ writes }: { writes: ActionOperation[] }) => {
+  const operations = formatList(
+    writes.map(({ alias, operation }) => `${alias}.${operation}`)
+  );
+  return (
+    <Badge variant="destructive">
+      <Trans>Writes a model may steer: {operations}</Trans>
+    </Badge>
+  );
+};
+
 /** What a version's own actions may call: each action, then its uses. */
 const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
   if (actions.length === 0) {
@@ -66,16 +79,7 @@ const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
             </Badge>
           ))}
           {action.modelSteeredWrites.length > 0 && (
-            <Badge variant="destructive">
-              <Trans>
-                Writes a model may steer:{" "}
-                {formatList(
-                  action.modelSteeredWrites.map(
-                    ({ alias, operation }) => `${alias}.${operation}`
-                  )
-                )}
-              </Trans>
-            </Badge>
+            <SteeredWrites writes={action.modelSteeredWrites} />
           )}
         </li>
       ))}
