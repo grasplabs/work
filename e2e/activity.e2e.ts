@@ -48,9 +48,9 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     }));
     await api.permissions.request({
       subject: { type: "app", appId },
-      object: { type: "collection", collectionId },
-      actions: ["write"],
-      binding: "PLAYBOOK_WRITE",
+      object: { type: "platform" },
+      actions: ["guests"],
+      binding: "GUESTS",
     });
   } finally {
     core[Symbol.dispose]();
@@ -76,11 +76,11 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);
 
-  const writing = await toCard(
+  const inviting = await toCard(
     page,
-    `${appName}: write on Collection ${collectionId}`
+    new RegExp(`^${appName}: guests on Guest chats\\.`, "u")
   );
-  await writing.getByRole("button", { name: /^Reject /u }).click();
+  await inviting.getByRole("button", { name: /^Reject /u }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Reject", exact: true })
@@ -88,7 +88,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(
     page.getByRole("status").filter({ hasText: `Rejected: ${appName}` })
   ).toHaveCount(1);
-  await expect(writing).toHaveCount(0);
+  await expect(inviting).toHaveCount(0);
 
   // The approval is in the log, found by what it granted, once the log has
   // taken its events from core's outbox, which it does in the background.
@@ -172,21 +172,20 @@ test("an admin sees a grant asked for again after a new version, and approves on
 }) => {
   const { admin, builder } = peopleIn("activityAgain");
   const appName = `Minutes ${crypto.randomUUID()}`;
-  const collectionId = await collectionOf(admin);
   const builds = apiOf(builder);
   const decides = apiOf(admin);
   let appId: string;
   try {
     ({ id: appId } = await builds.api.apps.create({
       name: appName,
-      description: "Writes the minutes",
+      description: "Invites guests to the minutes",
     }));
     await release(builds.api, appId, { "README.md": "One" }, "First");
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId },
-      object: { type: "collection", collectionId },
-      actions: ["write"],
-      binding: "PLAYBOOK",
+      object: { type: "platform" },
+      actions: ["guests"],
+      binding: "GUESTS",
     });
     await decides.api.permissions.grant(id, { version: 1 });
     // The builder can't grant it, so a new version asks for it again.
@@ -202,7 +201,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
     await expect(page).toHaveURL(/\/dashboard$/u);
     const card = await toCard(
       page,
-      `${appName}: write on Collection ${collectionId}`
+      new RegExp(`^${appName}: guests on Guest chats\\.`, "u")
     );
     await expect(card).toContainText(
       /Asked again after version 2 was made current \(previously granted by .+ on .+\)/u
@@ -224,7 +223,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
     await card.getByRole("button", { name: /^Approve /u }).click();
     await expect(
       page.getByRole("status").filter({
-        hasText: `Approved: ${appName}: write on Collection ${collectionId}.`,
+        hasText: `Approved: ${appName}: guests on Guest chats.`,
       })
     ).toHaveCount(1);
     await expect(card).toHaveCount(0);

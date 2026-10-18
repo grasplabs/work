@@ -386,21 +386,17 @@ ${mailStep("after")}`,
       personApi("admin"),
       personApi("builder"),
     ]);
-    // Server code that reads a collection for its caller, under a
-    // permission that also lets it write there: one that changes things.
+    // Server code that lists the App's guest chats for its caller, under
+    // the permission to invite guests: one that changes things.
     const savingServer = `import { DurableObject } from "cloudflare:workers";
 
 export class App extends DurableObject {
   async save(caller: unknown): Promise<unknown> {
-    const page = await (this.env as any).NOTES.listDocuments(caller);
-    return page.documents.length;
+    const chats = await (this.env as any).GUESTS.list(caller);
+    return chats.length;
   }
 }
 `;
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Notes ${crypto.randomUUID().slice(0, 8)}`,
-      access: "everyone",
-    });
     const version = (mark: string) => ({
       "app/server.ts": savingServer,
       ...workflowFiles(
@@ -415,9 +411,9 @@ export class App extends DurableObject {
     await release(builder, app, version("First."));
     const permission = await requestGranted(idp, builder, {
       subject: { type: "app", appId: app },
-      object: { type: "collection", collectionId },
-      actions: ["read", "write"],
-      binding: "NOTES",
+      object: { type: "platform" },
+      actions: ["guests"],
+      binding: "GUESTS",
     });
     // The run on the builder's own version waits; then harmless code is
     // made current, and an admin grants again for it.
@@ -445,7 +441,7 @@ export class App extends DurableObject {
     }).toMatchObject({
       attacked: { version: 2, status: "failed" },
       failedStep: { step: "save", errorCode: "permission.denied" },
-      // The run on the version the admin granted for reads the collection.
+      // The run on the version the admin granted for lists the chats.
       approved: { version: 3, status: "completed", output: 0 },
     });
   });

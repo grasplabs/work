@@ -113,12 +113,22 @@ const helloActions = (
     .filter(({ target }) => target?.id === "hello")
     .map(({ action }) => action);
 
-/** A permission to read and write the collection `collectionId`. */
+/** A permission to read the collection `collectionId`. */
 const notesOf = (collectionId: CollectionId): DeclaredPermission => ({
   object: { type: "collection", collectionId },
-  actions: ["read", "write"],
+  actions: ["read"],
   binding: "NOTES",
 });
+
+/**
+ * A permission to invite guests: one that changes things, so a version no
+ * admin approved is asked for it again.
+ */
+const guests: DeclaredPermission = {
+  object: { type: "platform" },
+  actions: ["guests"],
+  binding: "GUESTS",
+};
 
 /** The trees stored for `hello`, by their hashes. */
 const helloTrees = async (): Promise<string[]> => {
@@ -547,11 +557,7 @@ describe("the built-in blueprints", () => {
     await reinstall();
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const { collectionId } = await collectionWithNote(admin.api, {
-      name: `Granted ${unique()}`,
-      access: "everyone",
-    });
-    const declaring = releaseWith({ permissions: [notesOf(collectionId)] });
+    const declaring = releaseWith({ permissions: [guests] });
     await expect(install(declaring)).resolves.toBeTruthy();
     const created = await builder.api.apps.blueprints.create("hello", {
       name: "Granted",
@@ -571,7 +577,7 @@ describe("the built-in blueprints", () => {
               ...hello().files,
               [greetings]: `${hello().files[greetings]}\n// Changed.\n`,
             },
-            permissions: [notesOf(collectionId)],
+            permissions: [guests],
           })
         )
       ).resolves.toBeTruthy();
@@ -641,7 +647,7 @@ describe("the built-in blueprints", () => {
     await storedGrant(
       { type: "app", id: previous },
       { type: "collection", id: collectionId },
-      ["read", "write"],
+      ["read"],
       "NOTES",
       "requested"
     );

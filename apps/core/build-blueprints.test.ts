@@ -65,8 +65,8 @@ const schema = {
 /** A collection a built-in declares. */
 const tasks = { id: "tasks", name: "Tasks", description: "Things to do." };
 
-/** A permission to read and write `tasks`, under `binding`. */
-const onTasks = (binding = "TASKS", actions = ["read", "write"]) => ({
+/** A permission on `tasks`, to read unless `actions` say otherwise. */
+const onTasks = (binding = "TASKS", actions = ["read"]) => ({
   object: { type: "collection", collectionId: "tasks" },
   actions,
   binding,
@@ -124,6 +124,10 @@ describe("the built-in blueprints' build", () => {
 
   it.each([
     ["an action a collection doesn't have", [onTasks("TASKS", ["delete"])]],
+    [
+      "write on a collection, which an App never does",
+      [onTasks("TASKS", ["read", "write"])],
+    ],
     ["a binding name twice", [onTasks(), onTasks("TASKS", ["read"])]],
     ["a platform binding name", [onTasks("KNOWLEDGE")]],
     [
