@@ -10,7 +10,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
@@ -34,7 +34,10 @@ import type { StepError } from "../src/workflows/code.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
-import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import {
+  resourceRunFor,
+  terminateResourceRun,
+} from "../src/workflows/resource-runs.ts";
 import {
   requirePackagesAdmitted,
   sealPackages,
@@ -471,6 +474,9 @@ const activationOf = async (
 /** What a step captures: Ada's input, and no context. */
 const adaData = { input: { input: { who: "Ada" }, context: {} } };
 
+/** The runs `actionRunWith` started, each ended after its test. */
+const heldRuns: { by: Acting; workflowId: string; runId: string }[] = [];
+
 /**
  * A workflow of a new builder's whose action `doubled` imports an approved
  * package, its version published and a run of it held asleep before the
@@ -494,10 +500,23 @@ const actionRunWith = async () => {
     sealPackages
   );
   const runId = await started(builder, workflow.id);
+  heldRuns.push({ by: builder, workflowId: workflow.id, runId });
   return { admin, builder, workflow, request, runId };
 };
 
 describe("a workflow's modules importing approved packages", () => {
+  // A run held asleep for an hour would go on in the engine after its
+  // test, whatever the test made of it.
+  afterEach(async () => {
+    const held = heldRuns.splice(0);
+    await Promise.all(
+      held.map(
+        async ({ by, workflowId, runId }) =>
+          await terminateResourceRun(env, by, workflowId, runId)
+      )
+    );
+  });
+
   it("seals the approved package into the version and runs it", async () => {
     const admin = await approver();
     const pkg = await doubling();
