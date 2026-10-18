@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { adminSnapshotSchema } from "../../src/admin-snapshot.ts";
 import type { AdminSnapshot } from "../../src/admin-snapshot.ts";
+import { logItemsOf } from "../../src/admin/admin-log.ts";
 import {
   adminOrgOf,
   staffSnapshotOf,
@@ -346,6 +347,27 @@ describe("an organization from core's admin snapshot", () => {
     });
   });
 
+  it("keeps an interview the kind it was held as, when the team's lead changed since", () => {
+    // Lisa talked as Sales's lead; the roster now names Tom.
+    const changed = adminOrgOf(
+      {
+        ...snapshot,
+        roster: snapshot.roster && {
+          ...snapshot.roster,
+          teams: snapshot.roster.teams.map((team) =>
+            team.id === "sales" ? { ...team, lead: "tom" } : team
+          ),
+        },
+      },
+      client
+    );
+    const view = adminViewOf(changed.org, changed.state, "2026-10-14");
+
+    expect(
+      Object.fromEntries(view.interviews.map((each) => [each.id, each.kind]))
+    ).toStrictEqual({ lisa: "lead", tom: "employee" });
+  });
+
   it("knows what core knows, against core's threshold, and stays closed without Grasp's go", () => {
     const { view } = shown();
 
@@ -377,10 +399,18 @@ describe("an organization from core's admin snapshot", () => {
           assessment: true,
           council: "waiting",
         },
+        // Core forgets a deleted interview at once, and keeps when it went.
         links: snapshot.links.map((link) =>
           link.person === "lisa"
-            ? { ...link, deletedAt: "2026-10-07T12:00:00.000Z" }
+            ? {
+                ...link,
+                deletedAt: "2026-10-07T12:00:00.000Z",
+                state: "opened" as const,
+              }
             : link
+        ),
+        interviews: snapshot.interviews.filter(
+          (interview) => interview.person !== "lisa"
         ),
       },
       client
@@ -399,6 +429,45 @@ describe("an organization from core's admin snapshot", () => {
       stage: "waits",
       need: true,
       deleted: true,
+    });
+  });
+
+  it("counts a fresh interview someone saved after deleting theirs", () => {
+    // Lisa deleted hers on day 2, opened her link again and agreed to a new one on day 3.
+    const again = adminOrgOf(
+      {
+        ...snapshot,
+        links: snapshot.links.map((link) =>
+          link.person === "lisa"
+            ? { ...link, deletedAt: "2026-10-07T12:00:00.000Z" }
+            : link
+        ),
+        interviews: snapshot.interviews.map((interview) =>
+          interview.person === "lisa"
+            ? {
+                ...interview,
+                startedAt: "2026-10-08T08:00:00.000Z",
+                completedAt: "2026-10-08T08:30:00.000Z",
+                updatedAt: "2026-10-08T08:30:00.000Z",
+              }
+            : interview
+        ),
+      },
+      client
+    );
+    const view = adminViewOf(again.org, again.state, "2026-10-14");
+    const lisa = view.people.find((each) => each.person.id === "lisa");
+
+    expect({
+      deleted: lisa?.deleted,
+      state: lisa?.state,
+      talked: view.interviews.some((each) => each.id === "lisa"),
+      completed: view.counts.completed,
+    }).toStrictEqual({
+      deleted: false,
+      state: "completed",
+      talked: true,
+      completed: 1,
     });
   });
 
@@ -431,6 +500,54 @@ describe("an organization from core's admin snapshot", () => {
     ).toStrictEqual({ kind: "go", percent: 85, threshold: 80 });
   });
 
+  it("runs the interviews as long as core's plan, past the samples' fourteen days", () => {
+    // Six weeks planned; day 27 now. Tom finished on day 23 and Grasp's go came on day 20.
+    const long = adminOrgOf(
+      {
+        ...snapshot,
+        now: "2026-11-01T10:00:00Z",
+        plan: { ...snapshot.plan, start: "2026-10-05", days: 42 },
+        gate: {
+          ...snapshot.gate,
+          open: true,
+          closedSince: null,
+          openedAt: "2026-10-25T15:00:00.000Z",
+        },
+        links: snapshot.links.map((link) =>
+          link.person === "tom" ? { ...link, state: "completed" } : link
+        ),
+        interviews: snapshot.interviews.map((interview) =>
+          interview.person === "tom"
+            ? {
+                ...interview,
+                completedAt: "2026-10-28T10:00:00.000Z",
+                updatedAt: "2026-10-28T10:00:00.000Z",
+                agreed: true,
+                phase: "readback" as const,
+                stoppedAt: null,
+              }
+            : interview
+        ),
+      },
+      client
+    );
+    const view = adminViewOf(long.org, long.state, "2026-11-01");
+
+    expect({
+      day: view.day,
+      closed: view.closed,
+      opened: view.knowledge.opened,
+      talked: view.interviews.map((each) => each.id).toSorted(),
+      tom: view.people.find((each) => each.person.id === "tom")?.state,
+    }).toStrictEqual({
+      day: 27,
+      closed: false,
+      opened: 20,
+      talked: ["lisa", "tom"],
+      tom: "completed",
+    });
+  });
+
   it("counts the AI core counted, by day and by what it was for", () => {
     const { view } = shown();
 
@@ -448,6 +565,83 @@ describe("an organization from core's admin snapshot", () => {
       drawing: 5000,
     });
     expect(total.spend).toBeGreaterThan(0);
+  });
+
+  it("counts no chat nobody had, once the company is in", () => {
+    const opened = adminOrgOf(
+      {
+        ...snapshot,
+        gate: {
+          ...snapshot.gate,
+          open: true,
+          closedSince: null,
+          openedAt: "2026-10-12T15:00:00.000Z",
+        },
+      },
+      client
+    );
+
+    const { members, usage } = adminViewOf(
+      opened.org,
+      opened.state,
+      "2026-10-14"
+    );
+    // Its members are in, and core counted none of their chat.
+    expect({
+      active: members.filter((member) => member.state === "active").length,
+      chat: [usage.purposes.chat.tokensIn, usage.purposes.runs.tokensIn],
+    }).toStrictEqual({ active: 2, chat: [0, 0] });
+  });
+
+  it("counts the AI of a model it has no price for, with its spend unknown", () => {
+    // Core's default deployment reads with Workers AI's models.
+    const llama = adminOrgOf(
+      {
+        ...snapshot,
+        usage: [
+          {
+            day: "2026-10-05",
+            use: {
+              reading: {
+                "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+                  ...metered,
+                  calls: 2,
+                  tokensIn: 9000,
+                  tokensOut: 1500,
+                },
+              },
+            },
+          },
+        ],
+      },
+      client
+    );
+    const { usage } = adminViewOf(llama.org, llama.state, "2026-10-14");
+
+    expect({
+      counted: usage.counted,
+      other: usage.models.other,
+      reading: usage.purposes.reading.tokensIn,
+    }).toStrictEqual({
+      counted: true,
+      other: { tokensIn: 9000, tokensOut: 1500, spoken: 0, heard: 0, spend: 0 },
+      reading: 9000,
+    });
+  });
+
+  it("keeps in its log who was told and who talked, by the day, with no Worker activity", () => {
+    const { view } = shown();
+    const kinds = new Set(
+      logItemsOf(view, []).flatMap((item) =>
+        item.source.from === "company" ? [item.source.event.kind] : []
+      )
+    );
+
+    expect([
+      kinds.has("told"),
+      kinds.has("lead"),
+      kinds.has("talked"),
+    ]).toStrictEqual([true, true, true]);
   });
 
   it("names its members as core does, ready for when it opens", () => {

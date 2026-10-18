@@ -75,6 +75,79 @@ const readySnapshot = (name: string): AdminSnapshot => {
   };
 };
 
+/**
+ * A company told `daysIn` days ago, on a plan of `days` days, with one
+ * team: its lead Lisa and Tom, both sent their link; Lisa has talked
+ * when `leadTalked`.
+ */
+const toldSnapshot = (
+  name: string,
+  {
+    days,
+    daysIn,
+    leadTalked,
+  }: { days: number; daysIn: number; leadTalked: boolean }
+): AdminSnapshot => {
+  const empty = emptyAdminSnapshot(name);
+  const at = (back: number, hour: number) =>
+    new Date(
+      Date.parse(empty.now) - back * 86_400_000 + hour * 3_600_000
+    ).toISOString();
+  const told = at(daysIn, 0);
+  return {
+    ...empty,
+    roster: {
+      teams: [
+        { id: "sales", name: "Sales", lead: "lisa", does: "", off: false },
+      ],
+      people: [
+        ["lisa", "Lisa"],
+        ["tom", "Tom"],
+      ].map(([id = "", person = ""]) => ({
+        id,
+        name: person,
+        email: "",
+        team: "sales",
+        title: "",
+        away: false,
+      })),
+    },
+    plan: { start: told.slice(0, 10), days, at: told },
+    agreements: { processing: true, assessment: true, council: "none" },
+    agreed: true,
+    told: true,
+    links: ["lisa", "tom"].map((person) => ({
+      person,
+      sentAt: told,
+      openedAt: null,
+      remindedAt: null,
+      deletedAt: null,
+      state: person === "lisa" && leadTalked ? "completed" : "waiting",
+    })),
+    interviews: leadTalked
+      ? [
+          {
+            person: "lisa",
+            kind: "lead",
+            startedAt: at(daysIn, 1),
+            completedAt: at(daysIn, 2),
+            updatedAt: at(daysIn, 2),
+            agreed: true,
+            phase: "readback",
+            stoppedAt: null,
+            minutes: 40,
+            facts: 4,
+            out: 0,
+            confirmed: 4,
+            rating: 5,
+            typed: false,
+            interviewer: "stephen",
+          },
+        ]
+      : [],
+  };
+};
+
 /** The overview's row for client `clientId`, in its table of organizations. */
 const rowOf = (html: string, clientId: string): string => {
   const table = html.indexOf("<table");
@@ -82,73 +155,6 @@ const rowOf = (html: string, clientId: string): string => {
   return at === -1 || table === -1
     ? ""
     : html.slice(html.lastIndexOf("<tr", at), html.indexOf("</tr>", at));
-};
-
-/** `person`'s link, sent and opened at `sentAt`. */
-const openedLink = (person: string, sentAt: string) => ({
-  person,
-  sentAt,
-  openedAt: sentAt,
-  remindedAt: null,
-  deletedAt: null,
-  state: "opened" as const,
-});
-
-/**
- * A company whose team was told and whose only team's lead, Lisa, opened
- * her link and hasn't talked yet, while Tom's link went out after the wait
- * for her: as the model has it, at the team leads, none of whom talked.
- */
-const leadWaitedSnapshot = (name: string): AdminSnapshot => {
-  const empty = emptyAdminSnapshot(name);
-  return {
-    ...empty,
-    now: "2026-10-10T10:00:00.000Z",
-    company: {
-      ...empty.company,
-      signInDomains: ["acme.test"],
-      signIn: ["microsoft"],
-      admins: ["eva@acme.test"],
-    },
-    roster: {
-      teams: [
-        { id: "sales", name: "Sales", lead: "lisa", does: "", off: false },
-      ],
-      people: [
-        {
-          id: "lisa",
-          name: "Lisa",
-          email: "lisa@acme.test",
-          team: "sales",
-          title: "",
-          away: false,
-        },
-        {
-          id: "tom",
-          name: "Tom",
-          email: "tom@acme.test",
-          team: "sales",
-          title: "",
-          away: false,
-        },
-      ],
-    },
-    plan: { start: "2026-10-05", days: 14, at: "2026-10-05T07:00:00.000Z" },
-    agreements: {
-      processing: true,
-      assessment: true,
-      council: "none",
-      processingOn: "2026-09-25",
-      assessmentOn: "2026-09-29",
-    },
-    agreed: true,
-    told: true,
-    links: [
-      openedLink("lisa", "2026-10-05T07:00:00.000Z"),
-      openedLink("tom", "2026-10-09T07:00:00.000Z"),
-    ],
-    kickoff: { at: "2026-09-24T10:00:00.000Z", known: 0.6 },
-  };
 };
 
 /** The text of `html` between the admin's sidebar and the page beside it. */
@@ -299,19 +305,6 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("counts a team lead as talked only once they talked, not once their team's links went out", async () => {
-    const acme = await liveClient();
-    acme.account.admin = leadWaitedSnapshot("Acme");
-
-    const { html } = await page("/admin");
-    const row = rowOf(html.slice(html.indexOf("<main")), acme.clientId);
-
-    expect({
-      none: row.includes("0 of 1 talked"),
-      one: row.includes("1 of 1 talked"),
-    }).toStrictEqual({ none: true, one: false });
-  });
-
   it("puts every organization's most pressing need in today's list before any one's next", async () => {
     // Four needs each: twelve, past the eight the list shows.
     const companies = await Promise.all(
@@ -333,6 +326,31 @@ describe("the admin's frame", () => {
     expect(
       companies.map(({ name }) => listed(`Open at ${name}:`))
     ).toStrictEqual([true, true, true]);
+  });
+
+  it("counts only leads who talked, and the days of each company's own plan", async () => {
+    const waiting = await liveClient();
+    waiting.account.admin = toldSnapshot("Waiting", {
+      days: 21,
+      daysIn: 3,
+      leadTalked: false,
+    });
+    const talking = await liveClient();
+    talking.account.admin = toldSnapshot("Talking", {
+      days: 21,
+      daysIn: 3,
+      leadTalked: true,
+    });
+
+    const { html } = await page("/admin");
+    const main = html.slice(html.indexOf("<main"));
+
+    expect({
+      // Tom's link went out without Lisa: she still hasn't talked.
+      waiting: rowOf(main, waiting.clientId).includes("0 of 1 talked"),
+      // Three weeks, as its plan has it.
+      talking: rowOf(main, talking.clientId).includes(" of 21. "),
+    }).toStrictEqual({ waiting: true, talking: true });
   });
 
   it("shows only the organizations in a phase when one is chosen", async () => {
