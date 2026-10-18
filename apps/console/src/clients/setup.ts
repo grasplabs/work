@@ -85,8 +85,10 @@ export interface ClientSetup {
   signInOverridden: boolean;
   /** Whether a change to what a deploy sets on its core waits for its next deploy. */
   configPending: boolean;
-  /** The newest first. */
+  /** The newest first: its latest `setupDeployLimit`. */
   deploys: SetupDeploy[];
+  /** Whether it has older deploys than those. */
+  moreDeploys: boolean;
   workers: SetupWorker[];
   /**
    * What the release it runs keeps in its account: its databases and
@@ -94,10 +96,12 @@ export interface ClientSetup {
    * Null before anything is live there.
    */
   resources: { databases: string[]; buckets: string[]; gateway: string } | null;
-  /** The newest imported releases, newest first. */
+  /** The newest imported releases, newest first: the latest `setupReleaseLimit`. */
   releases: { id: string; notes: string; builtAt: Date }[];
   /** The newest release of all, whether or not it is listed. */
   newestReleaseId: string | null;
+  /** Whether the console has older releases than those. */
+  moreReleases: boolean;
   /** How many releases came after the one its core runs; null when that can't be told. */
   behind: number | null;
   /** The latest rollout the client was in, and how far it got with it. */
@@ -147,7 +151,8 @@ const deploysOf = async (
     .where(eq(clientDeploys.clientId, clientId))
     // Two deploys of one millisecond in the order they started.
     .orderBy(desc(clientDeploys.createdAt), desc(sql`rowid`))
-    .limit(setupDeployLimit);
+    // One more than it lists, which says whether there are older ones.
+    .limit(setupDeployLimit + 1);
 
 const workersOf = async (
   db: ConsoleDatabase,
@@ -262,13 +267,16 @@ export const getClientSetup = async (
     signIn: settings?.signIn ?? null,
     signInOverridden: settings?.signInOverridden ?? false,
     configPending: settings?.configPending ?? false,
-    deploys,
+    deploys: deploys.slice(0, setupDeployLimit),
+    moreDeploys: deploys.length > setupDeployLimit,
     workers,
     resources: await resourcesOf(db, runs),
     releases: listed.releases
       .slice(0, setupReleaseLimit)
       .map(({ id, notes, builtAt }) => ({ id, notes, builtAt })),
     newestReleaseId: listed.releases[0]?.id ?? null,
+    moreReleases:
+      listed.releases.length > setupReleaseLimit || listed.older !== null,
     behind: await behindOf(db, runs),
     rollout,
     done: history.filter(

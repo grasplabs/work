@@ -133,7 +133,9 @@ describe("an organization's Setup", () => {
         last: textOf(sectionOf(deploys.html, "The last deploy")).includes(
           `Release · ${acme.release.id}`
         ),
-        every: textOf(sectionOf(deploys.html, "Every deploy")).includes("Done"),
+        every: textOf(sectionOf(deploys.html, "Recent deploys")).includes(
+          "Done"
+        ),
         settingUp: deploys.html.includes("Setting it up"),
       },
       resources: [
@@ -146,11 +148,15 @@ describe("an organization's Setup", () => {
       ].map((text) => resources.html.includes(text)),
       releases: {
         follows: releases.html.includes("Follows the rollouts"),
-        runs: textOf(sectionOf(releases.html, "Every release")).includes(
+        runs: textOf(sectionOf(releases.html, "Recent releases")).includes(
           acme.release.id
         ),
         runsThis: releases.html.includes("Runs this"),
         latestRollout: releases.html.includes("Not in one yet"),
+        // Only the newest are listed, and the whole list is a link away.
+        allReleases: sectionOf(releases.html, "Recent releases").includes(
+          'href="/releases"'
+        ),
       },
       settings: textOf(sectionOf(settings.html, "Its secrets")).includes(
         "Generation1Last rotatedNeverLiveYes"
@@ -171,6 +177,7 @@ describe("an organization's Setup", () => {
         runs: true,
         runsThis: true,
         latestRollout: true,
+        allReleases: true,
       },
       settings: true,
     });

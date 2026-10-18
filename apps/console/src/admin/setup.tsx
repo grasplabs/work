@@ -1076,8 +1076,8 @@ const Deploys = ({
       )}
       {deploys.length > 0 ? (
         <SetupSection
-          description="The newest first. A rollout deploys a release; someone at Grasp deploys new settings or secrets."
-          title="Every deploy"
+          description={`${setup.moreDeploys ? `The latest ${deploys.length}, newest first: older ones aren’t listed.` : "The newest first."} A rollout deploys a release; someone at Grasp deploys new settings or secrets.`}
+          title="Recent deploys"
         >
           <div className="@container border-t">
             <Table>
@@ -1450,8 +1450,22 @@ const Releases = ({
         />
       </SetupSection>
       <SetupSection
-        description="As CI made them, the newest first."
-        title="Every release"
+        action={
+          <Button
+            nativeButton={false}
+            render={<Link to="/releases" />}
+            size="sm"
+            variant="ghost"
+          >
+            All releases
+          </Button>
+        }
+        description={
+          setup.moreReleases
+            ? `The latest ${releases.length} CI made, newest first: older ones are under all releases.`
+            : "As CI made them, the newest first."
+        }
+        title="Recent releases"
       >
         {releases.length === 0 ? (
           <Quiet>None imported yet.</Quiet>
