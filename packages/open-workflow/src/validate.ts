@@ -126,13 +126,24 @@ const deepFreeze = (value: JsonValue): JsonValue => {
  * Counts what the workflow's own actions reach as used, as a task's call
  * would be: sealed and approved with the rest. A use of a binding the
  * definition doesn't declare, of another kind, or of its own modules is
- * refused.
+ * refused, and so is a declared operation its contract doesn't name.
+ * Worked to a fixed point: a binding first reached through a use is
+ * checked too, wherever the definition declares it.
  */
 const markActionUses = (checker: Checker): void => {
-  for (const binding of checker.bindings.values()) {
-    if (!binding.referenced) {
+  const pending = [...checker.bindings.values()].filter(
+    ({ referenced }) => referenced
+  );
+  const checked = new Set<object>();
+  for (
+    let binding = pending.pop();
+    binding !== undefined;
+    binding = pending.pop()
+  ) {
+    if (checked.has(binding)) {
       continue;
     }
+    checked.add(binding);
     for (const use of binding.contract?.uses ?? []) {
       const used = checker.bindings.get(use.alias);
       if (
@@ -149,6 +160,19 @@ const markActionUses = (checker: Checker): void => {
         continue;
       }
       used.referenced = true;
+      pending.push(used);
+      // Exactly the operations its catalog contract names (GRA-704): what
+      // the host lets the action call, and nothing it might add later.
+      for (const operation of use.operations ?? []) {
+        if (used.contract?.operations?.has(operation) !== true) {
+          checker.report.error(
+            "binding.unknown_operation",
+            { pointer: binding.pointer },
+            `Declare only operations \`${use.alias}\`'s contract names: it has no \`${operation}\`.`,
+            { expected: "an operation of the binding's contract" }
+          );
+        }
+      }
     }
   }
 };

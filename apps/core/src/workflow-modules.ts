@@ -11,11 +11,10 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import {
-  actionUseAliasPattern,
-  actionUseKinds,
+  actionUsesSchema,
   workflowModuleLimits,
 } from "@grasp-os/shared/workflow-modules";
-import type { ActionUseKind } from "@grasp-os/shared/workflow-modules";
+import type { ActionUse, SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
@@ -85,12 +84,22 @@ export interface ComputeContract {
   readonly kind: "compute" | "operation";
   readonly input: string;
   readonly output: string;
-  /** An action's: the workflow's own bindings it uses, by alias and kind. */
-  readonly uses?: readonly {
-    readonly alias: string;
-    readonly kind: ActionUseKind;
-  }[];
+  /**
+   * An action's: the workflow's own bindings it uses, by alias and kind,
+   * a connector's with the operations it calls.
+   */
+  readonly uses?: readonly SealedUse[];
 }
+
+/** `use` copied and frozen, its operations with it. */
+export const sealedUse = (use: ActionUse | SealedUse): SealedUse =>
+  use.kind === "connector"
+    ? Object.freeze({
+        alias: use.alias,
+        kind: use.kind,
+        operations: Object.freeze([...use.operations]),
+      })
+    : Object.freeze({ alias: use.alias, kind: use.kind });
 
 /** A version's compute modules, built and inspected for sealing. */
 export interface CompiledModules {
@@ -226,11 +235,6 @@ const manifestKey =
 
 const descriptorObject = z.record(z.string(), z.json());
 
-const useSchema = z.strictObject({
-  alias: z.string().regex(actionUseAliasPattern),
-  kind: z.enum(actionUseKinds),
-});
-
 const manifestSchema = z.record(
   z.string().max(512),
   z.discriminatedUnion("kind", [
@@ -243,12 +247,7 @@ const manifestSchema = z.record(
       kind: z.literal("operation"),
       input: descriptorObject,
       output: descriptorObject,
-      uses: z
-        .array(useSchema)
-        .max(workflowModuleLimits.actionUses)
-        .refine(
-          (uses) => new Set(uses.map(({ alias }) => alias)).size === uses.length
-        ),
+      uses: actionUsesSchema,
     }),
   ])
 );
@@ -302,7 +301,7 @@ const contractsOf = (
       input: canonicalJson(input),
       output: canonicalJson(output),
       ...(declared.kind === "operation"
-        ? { uses: declared.uses.map((use) => ({ ...use })) }
+        ? { uses: declared.uses.map(sealedUse) }
         : {}),
     };
     // As the version's load reads it back (workflow-builds.ts): a contract
@@ -426,7 +425,7 @@ export const moduleLookup =
           output: contract.output,
           ...(contract.uses === undefined
             ? {}
-            : { uses: contract.uses.map((use) => ({ ...use })) }),
+            : { uses: contract.uses.map(sealedUse) }),
         };
   };
 

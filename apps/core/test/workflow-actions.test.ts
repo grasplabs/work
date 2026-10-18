@@ -160,7 +160,7 @@ const servingMail = (): Env => {
 /** A module whose action `notify` runs `body` with `uses` declared. */
 const notifyModule = (
   body: string,
-  uses = '[resource.connector("mail")]'
+  uses = '[resource.connector("mail", { operations: ["mail.send"] })]'
 ): string => `import { action, resource, v } from "@grasp-os/sdk/action";
 
 export const notify = action({
@@ -396,7 +396,10 @@ describe("a JSON workflow's own actions", () => {
     const key = await mailContract(admin);
     for (const [uses, mail] of [
       // Declares a use the definition has no binding for.
-      ['[resource.connector("other")]', { kind: "connector", contract: key }],
+      [
+        '[resource.connector("other", { operations: ["mail.send"] })]',
+        { kind: "connector", contract: key },
+      ],
       // Uses `mail` as an operation, which the definition binds a connector.
       ['[resource.operation("mail")]', { kind: "connector", contract: key }],
       // Uses the workflow's own action: never one of its own modules.
@@ -424,6 +427,106 @@ describe("a JSON workflow's own actions", () => {
       expect(parsed.code).toBe("workflow.definition_invalid");
       expect(JSON.stringify(parsed.details)).toContain("binding.unknown_use");
     }
+  });
+
+  it("refuses an action that declares an operation its connector's contract doesn't name, or doesn't declare one", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await mailContract(admin);
+    const codes: string[] = [];
+    for (const uses of [
+      // An operation the contract doesn't name.
+      '[resource.connector("mail", { operations: ["mail.delete"] })]',
+      // A pattern is a name like any other: never a wildcard.
+      '[resource.connector("mail", { operations: ["*"] })]',
+      // No operations declared.
+      '[resource.connector("mail")]',
+      '[resource.connector("mail", { operations: [] })]',
+      // A use built by hand, widening what it calls.
+      '[{ "~use": { alias: "mail", kind: "connector", operations: ["mail.send", "mail.delete"] } }]',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `act-${unique()}`
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const error = await refusal(
+        publishWorkflowVersion(env, ada, workflow.id, {
+          definition: definitionOf(workflow.name, {
+            mail: { kind: "connector", contract: key },
+          }),
+          basedOn: null,
+          modules: {
+            "code/notify.ts": notifyModule('return { status: "x" };', uses),
+          },
+        })
+      );
+      const parsed = z
+        .object({ code: z.string(), details: z.unknown() })
+        .parse(error);
+      codes.push(
+        parsed.code === "workflow.definition_invalid" &&
+          JSON.stringify(parsed.details).includes("binding.unknown_operation")
+          ? "binding.unknown_operation"
+          : parsed.code
+      );
+    }
+    expect(codes).toStrictEqual([
+      "binding.unknown_operation",
+      "binding.unknown_operation",
+      "workflow.modules_invalid",
+      "workflow.modules_invalid",
+      "workflow.modules_invalid",
+    ]);
+  });
+
+  it("makes no call of an operation the action's use doesn't declare, though it computes the name and swallows the refusal", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await actingWorkflow(
+      ada,
+      admin,
+      notifyModule(
+        `try {
+      await ctx.resources.mail.call(["mail", "archive"].join("."), { to: args.to, subject: "x" });
+    } catch {
+      // Swallowed.
+    }
+    return { status: "swallowed" };`,
+        // The list it passed, changed once declared: the copy stands.
+        `(() => {
+    const operations = ["mail.send"];
+    const mail = resource.connector("mail", { operations });
+    operations.push("mail.archive");
+    return [mail];
+  })()`
+      )
+    );
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    let calls = 0;
+    const code = await outcome(
+      callAction(
+        env,
+        build.compute,
+        build.sdk,
+        notifyCall,
+        { to: "Ada" },
+        Date.now() + 5000,
+        {
+          owner: `workflow-action:${workflow.id}`,
+          make: async (): Promise<Json> => {
+            calls += 1;
+            return await Promise.resolve({ messageId: "m" });
+          },
+        }
+      )
+    );
+    expect({ code, calls }).toStrictEqual({
+      code: "workflow.call_denied",
+      calls: 0,
+    });
   });
 
   it("fails with a refusal the action swallowed, even when its deadline ends it", async () => {
@@ -577,7 +680,7 @@ describe("a JSON workflow's own actions", () => {
 export const notify = action({
   args: { to: v.string() },
   returns: v.object({ status: v.string() }),
-  uses: [resource.connector("mail")],
+  uses: [resource.connector("mail", { operations: ["mail.send"] })],
   handler: (ctx, args) => {
     const late = ctx.resources.mail.call("mail.send", { to: args.to, subject: "late" });
     const realThen = Promise.prototype.then;

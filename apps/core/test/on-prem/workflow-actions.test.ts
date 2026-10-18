@@ -120,7 +120,7 @@ describe("a JSON workflow's own action on-prem", () => {
 export const notify = action({
   args: { to: v.string() },
   returns: v.object({ status: v.string() }),
-  uses: [resource.connector("mail")],
+  uses: [resource.connector("mail", { operations: ["mail.send"] })],
   handler: async (ctx, args) => {
     const first = await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" });
     const second = await ctx.resources.mail.call("mail.send", { to: args.to, subject: "two" });
