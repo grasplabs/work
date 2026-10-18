@@ -345,6 +345,21 @@ describe("an organization's onboarding in the admin", () => {
     });
   });
 
+  it("counts the interviews' days to the length the company's plan has", async () => {
+    const snapshot = bakery();
+    const plan = snapshot.plan ?? { start: "2026-10-05", days: 14 };
+    const base = await liveClient({ ...snapshot, plan: { ...plan, days: 21 } });
+
+    const { html } = await page(`${base}/steps?stage=interviews`);
+
+    expect(
+      [
+        "Day 9 of 21. 1 of 3 talked",
+        "Day 9 of 21. The link closes on 26 Oct 2026.",
+      ].map((text) => html.includes(text))
+    ).toStrictEqual([true, true]);
+  });
+
   it("opens a company that has nothing yet on what is agreed, with its first conversation still to come", async () => {
     const base = await liveClient(emptyAdminSnapshot("Bakkerij Noord"));
 

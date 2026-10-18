@@ -16,9 +16,9 @@
  */
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import type { VisionField } from "@grasp-os/shared/admin/interviews";
-import { LISTEN_DAYS } from "@grasp-os/shared/admin/onboarding";
 import {
   dateOn,
+  listenDays,
   mayInvite,
   RESEARCH_SOURCES,
   STAGES,
@@ -643,13 +643,14 @@ const Interviews = ({
   clientId: string;
 }) => {
   const { counts } = view;
-  const closes = dayDate(view, LISTEN_DAYS);
+  const days = listenDays(view.org);
+  const closes = dayDate(view, days);
   let description =
     "Two weeks, from the day the company tells its team. Everyone gets one link, and one reminder.";
   if (view.closed) {
     description = `The link closed on ${closes}. What was said stays; a link that was not used has expired.`;
   } else if (view.told) {
-    description = `Day ${view.day} of ${LISTEN_DAYS}. The link closes on ${closes}. One reminder a person, then nobody is chased: not taking part stays safe.`;
+    description = `Day ${view.day} of ${days}. The link closes on ${closes}. One reminder a person, then nobody is chased: not taking part stays safe.`;
   }
   if (!view.told) {
     return (
