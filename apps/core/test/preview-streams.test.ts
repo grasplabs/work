@@ -8,6 +8,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { openTestRun } from "./agent-chat.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { chatsOf, chatWithDraft, outcome, requestFor } from "./previews.ts";
@@ -101,6 +102,13 @@ export const big = action({
   },
 });
 
+/** Answers once: never a stream's, so streaming it runs nothing. */
+export const once = action({
+  args: {},
+  returns: v.null(),
+  handler: async () => null,
+});
+
 /** Asks the App's model: an outside system. */
 export const consult = action({
   args: {},
@@ -114,14 +122,14 @@ export const consult = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { big, consult, create, draft, slow, titles, writer } from "./operations/notes.ts";
+import { big, consult, create, draft, once, slow, titles, writer } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, draft, slow, consult, big } },
+  operations: { notes: { create, titles, draft, slow, consult, big, once } },
   internalOperations: {},
   screens: [],
   uses: [writer],
@@ -713,6 +721,95 @@ describe(
         // Past the receipts the object keeps.
         oldest: "submission.expired",
         newest: "ok",
+      });
+    });
+
+    it("keeps no receipt of a run that ran nothing of the App's, so its key may run again", async () => {
+      const { builder, app, chatId, revision } = await setUp();
+      const seat = { chatId, app, revision };
+      // An action that answers once, streamed: refused before it runs.
+      const request = await streamRequest(
+        builder,
+        seat,
+        "notes.once",
+        {},
+        crypto.randomUUID()
+      );
+      const first = await follow(builder, seat, "stream", request);
+      const firstEnd = await first.ended;
+      await first.subscription.release();
+      expect({
+        firstEnd,
+        attached: await attachedInObject(builder, seat, request),
+      }).toStrictEqual({
+        firstEnd: "operation.mode_mismatch",
+        attached: "submission.expired",
+      });
+    });
+
+    it("refuses a stream whose draft is saved while it opens, never bringing back the preview it read", async () => {
+      const { builder, app, chatId, revision } = await setUp();
+      const seat = { chatId, app, revision };
+      const request = await streamRequest(
+        builder,
+        seat,
+        "notes.draft",
+        { topic: "stale" },
+        crypto.randomUUID()
+      );
+      const runId = await openTestRun(chatsOf(builder), chatId);
+      const changed =
+        notesFiles("saved meanwhile")["operations/notes.ts"] ?? "";
+      const opened = await runInDurableObject(
+        chatsOf(builder),
+        async (instance) => {
+          // Opened at the draft's revision, then, before it is decided,
+          // the draft is saved: the agent's write lands in between.
+          const opening = instance.previewStream(
+            chatId,
+            builder.userId,
+            app,
+            revision,
+            request,
+            false
+          );
+          instance.saveDraft(
+            chatId,
+            app,
+            1,
+            { "operations/notes.ts": changed },
+            [],
+            revision,
+            runId
+          );
+          try {
+            await opening;
+            return "opened";
+          } catch (error) {
+            return typeof error === "object" &&
+              error !== null &&
+              "code" in error
+              ? error.code
+              : "failed";
+          }
+        }
+      );
+      const next = { ...seat, revision: revision + 1 };
+      const fresh = await follow(
+        builder,
+        next,
+        "stream",
+        await streamRequest(
+          builder,
+          next,
+          "notes.draft",
+          { topic: "fresh" },
+          crypto.randomUUID()
+        )
+      );
+      expect({ opened, fresh: await fresh.ended }).toStrictEqual({
+        opened: "app.preview_outdated",
+        fresh: "ok",
       });
     });
 

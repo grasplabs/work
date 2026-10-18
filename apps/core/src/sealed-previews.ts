@@ -8,6 +8,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { streamMaxRunning } from "@grasp-os/shared/operation-limits";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -22,6 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import {
+  keepsReceipt,
   readerOf,
   refused as refusedResult,
   resultOf,
@@ -487,13 +489,22 @@ export class SealedPreviews {
     if (input === undefined && call.input !== undefined) {
       throw operationErrors.create("contract.invalid_request");
     }
-    const inputHash = await sha256Hex(canonicalJson(input ?? null));
-    const name = streamName(personId, call, key);
-    // An attach reads only what runs: a preview not running holds nothing,
-    // and none is sealed just to say so.
+    // Which preview it is for is decided now, with the draft the caller
+    // just read, before anything awaits: a draft saved meanwhile drops
+    // this preview, and the stream is then refused rather than recreate
+    // it over the newer one. An attach reads only what runs: a preview
+    // not running holds nothing, and none is sealed just to say so.
     const running = attach
       ? this.#runningAt(chatId, app, draft)
       : this.#runningFor(chatId, app, draft);
+    const inputHash = await sha256Hex(canonicalJson(input ?? null));
+    if (
+      running !== undefined &&
+      this.#running.get(nameOf(chatId, app)) !== running
+    ) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    const name = streamName(personId, call, key);
     const known = running?.streams.get(name);
     if (known !== undefined) {
       return known.inputHash === inputHash
@@ -532,7 +543,7 @@ export class SealedPreviews {
     };
     running.streams.set(name, { inputHash, live });
     const run = async (): Promise<void> => {
-      const result = await this.#runStream(
+      const outcome = await this.#runStream(
         chatId,
         personId,
         app,
@@ -542,14 +553,22 @@ export class SealedPreviews {
       );
       clearTimeout(live.idle);
       live.idle = undefined;
-      live.result = withReason(result, live.unfollowed);
+      live.result = withReason(outcome.result, live.unfollowed);
       // Settled, it keeps no snapshot: its readers get its result next.
       live.progress = null;
       wake(live);
       // A dropped preview keeps no receipt: nothing can attach to it, and
-      // it would take the place of a current preview's.
-      if (this.#running.get(nameOf(chatId, app)) === running) {
+      // it would take the place of a current preview's. Nor does a run
+      // that ran nothing of the App's, as a live one keeps none
+      // (`keepsReceipt`): the same key may run again once, say, the
+      // sandbox is back.
+      if (this.#running.get(nameOf(chatId, app)) !== running) {
+        return;
+      }
+      if (keepsReceipt(outcome)) {
         this.#kept(running, name, live);
+      } else {
+        forget(running, name, live);
       }
     };
     this.#ctx.waitUntil(run());
@@ -593,19 +612,25 @@ export class SealedPreviews {
     running: Running,
     call: FunctionRequest,
     live: Live
-  ) {
+  ): Promise<{ result: OperationResult; reached: boolean; effects: number }> {
     const requestId = crypto.randomUUID();
+    // As a live run reports them (`invokeAppAction`): whether the
+    // operation host was reached, and how many effects the run made.
+    let reached = false;
+    let effects = 0;
     try {
       const release = await this.#loaded(chatId, app, running);
       const path = publicOperationOf(release, call.reference);
       const store = await this.#storeOf(chatId, app, running, release);
-      return await callOperation(
+      const invocation = this.#invocationOf(chatId, personId, app, running, {
+        store,
+        requestId,
+        deadline: Date.now() + platformLimits.serverInvocationWallMs,
+      });
+      reached = true;
+      const result = await callOperation(
         this.#hostedOf(chatId, app, running, release),
-        this.#invocationOf(chatId, personId, app, running, {
-          store,
-          requestId,
-          deadline: Date.now() + platformLimits.serverInvocationWallMs,
-        }),
+        invocation,
         { path, kind: call.reference.kind },
         call.input,
         {
@@ -619,10 +644,14 @@ export class SealedPreviews {
             },
           },
           cancelled: live.stop.signal,
+          onEffect: () => {
+            effects += 1;
+          },
         }
       );
+      return { result, reached, effects };
     } catch (error) {
-      return refusedResult(error);
+      return { result: refusedResult(error), reached, effects };
     }
   }
 
