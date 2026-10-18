@@ -24,13 +24,13 @@ interface ImmutableTable {
    * be a new row rather than one over this one.
    */
   change: Row;
-  /**
-   * A row under a new primary key that takes another unique index's key
-   * of `row`, which REPLACE would delete just the same.
-   */
+  /** Another unique index's key, which REPLACE would delete by too. */
   otherKey?: {
     columns: readonly string[];
+    /** A row under a new primary key that takes `row`'s other key. */
     row: (row: Row) => Row;
+    /** `row` with a new other key, so only its primary key collides. */
+    freed: (row: Row) => Row;
   };
 }
 
@@ -77,6 +77,7 @@ const tables: readonly ImmutableTable[] = [
     otherKey: {
       columns: ["workflow_resource_id", "definition_version"],
       row: (row) => ({ ...row, version: 2 }),
+      freed: (row) => ({ ...row, definition_version: "2.0.0" }),
     },
   },
   {
@@ -93,6 +94,10 @@ const tables: readonly ImmutableTable[] = [
         "idempotency_key",
       ],
       row: (row) => ({ ...row, id: `${String(row.id)}-again` }),
+      freed: (row) => ({
+        ...row,
+        idempotency_key: `${String(row.idempotency_key)}-again`,
+      }),
     },
   },
   {
@@ -258,45 +263,67 @@ const rowidOf = async (spec: ImmutableTable, row: Row): Promise<number> => {
   return found.id;
 };
 
-/** Whether `outcome` is the table's own refusal of `key`, not SQLite's. */
-const refusedBy = (outcome: string, table: string, key = "") =>
-  outcome.includes(`UNIQUE constraint failed: ${table}.${key}`) &&
-  outcome.includes(`(${table} `);
+/**
+ * Whether `outcome` is the table's own refusal by the trigger of the key
+ * of `columns`: not SQLite's, nor another key's trigger.
+ */
+const refusedBy = (
+  outcome: string,
+  table: string,
+  columns: readonly string[]
+) =>
+  outcome.includes(
+    `UNIQUE constraint failed: ${columns.map((column) => `${table}.${column}`).join(", ")} (${table} `
+  );
 
 describe("immutable records", () => {
   it.each(tables)(
     "$table refuses every insert over a key it holds",
     async (spec) => {
-      const overwrites: Record<string, (row: Row) => D1PreparedStatement> = {};
+      // Each attempt collides on one key only, so it's that key's
+      // trigger that must refuse it.
+      const overwrites: Record<
+        string,
+        { key: readonly string[]; statement: (row: Row) => D1PreparedStatement }
+      > = {};
+      const { otherKey } = spec;
       for (const form of forms) {
-        overwrites[form] = (row) =>
-          rewrites(spec, { ...row, ...spec.change })[form];
-        const { otherKey } = spec;
+        overwrites[form] = {
+          key: spec.key,
+          statement: (row) =>
+            rewrites(spec, {
+              ...(otherKey === undefined ? row : otherKey.freed(row)),
+              ...spec.change,
+            })[form],
+        };
         if (otherKey !== undefined) {
-          overwrites[`${form}, other unique key`] = (row) =>
-            rewrites(
-              spec,
-              { ...otherKey.row(row), ...spec.change },
-              otherKey.columns
-            )[form];
+          overwrites[`${form}, other unique key`] = {
+            key: otherKey.columns,
+            statement: (row) =>
+              rewrites(
+                spec,
+                { ...otherKey.row(row), ...spec.change },
+                otherKey.columns
+              )[form],
+          };
         }
       }
       const outcomes: Record<string, { refused: boolean; unchanged: boolean }> =
         {};
-      for (const [form, overwrite] of Object.entries(overwrites)) {
+      for (const [form, { key, statement }] of Object.entries(overwrites)) {
         // Each against a row of its own, so none sees what another wrote.
         // oxlint-disable-next-line no-await-in-loop -- one at a time
         const row = await seeded(spec);
         // oxlint-disable-next-line no-await-in-loop -- see above
         const before = await rowsOf(spec.table);
         // oxlint-disable-next-line no-await-in-loop -- see above
-        const outcome = await refusal(overwrite(row));
+        const outcome = await refusal(statement(row));
         // oxlint-disable-next-line no-await-in-loop -- see above
         const after = await rowsOf(spec.table);
         outcomes[form] = {
           // The table's own refusal, read as the unique violation it is,
           // and told from SQLite's by what it adds.
-          refused: refusedBy(outcome, spec.table),
+          refused: refusedBy(outcome, spec.table, key),
           unchanged: JSON.stringify(after) === JSON.stringify(before),
         };
       }
@@ -346,8 +373,8 @@ describe("immutable records", () => {
         insertSql("INSERT", spec.table, { ...row, ...spec.change })
       );
       expect({
-        replace: refusedBy(replace, spec.table, "rowid"),
-        replaceInto: refusedBy(replaceInto, spec.table, "rowid"),
+        replace: refusedBy(replace, spec.table, ["rowid"]),
+        replaceInto: refusedBy(replaceInto, spec.table, ["rowid"]),
         reserved: reserved.includes(`${spec.table} keep rowid -1`),
         unchanged: JSON.stringify(after) === JSON.stringify(before),
         again: again.includes(`UNIQUE constraint failed: ${spec.table}.`),
@@ -468,9 +495,15 @@ describe("immutable records", () => {
       .bind(`doc-${id}`)
       .all<{ position: number }>();
     expect({
-      replace: refusedBy(outcomes.replace, "sections", "document_id"),
-      upsert: refusedBy(outcomes.upsert, "sections", "document_id"),
-      rowid: refusedBy(outcomes.rowid, "sections", "rowid"),
+      replace: refusedBy(outcomes.replace, "sections", [
+        "document_id",
+        "position",
+      ]),
+      upsert: refusedBy(outcomes.upsert, "sections", [
+        "document_id",
+        "position",
+      ]),
+      rowid: refusedBy(outcomes.rowid, "sections", ["rowid"]),
       reserved: outcomes.reserved.includes("sections keep rowid -1"),
       unchanged: after === before,
       indexed: indexed.map(({ position }) => position),
