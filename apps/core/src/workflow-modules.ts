@@ -292,15 +292,28 @@ export const versionActionsOf = (
       binding: alias,
       module: groups.module,
       export: groups.export,
-      uses: (contract.uses ?? []).map((use) =>
-        use.kind === "connector"
-          ? {
+      uses: (contract.uses ?? []).map((use) => {
+        switch (use.kind) {
+          case "connector": {
+            return {
               alias: use.alias,
               kind: use.kind,
               operations: [...use.operations],
-            }
-          : { alias: use.alias, kind: use.kind }
-      ),
+            };
+          }
+          case "model": {
+            // The shape each of its calls may answer, as sealed (GRA-700):
+            // what a reviewer approves the action's model calls for.
+            return { alias: use.alias, kind: use.kind, output: use.output };
+          }
+          case "operation": {
+            return { alias: use.alias, kind: use.kind };
+          }
+          default: {
+            return use satisfies never;
+          }
+        }
+      }),
     });
   }
   return actions.toSorted((a, b) => (a.binding < b.binding ? -1 : 1));

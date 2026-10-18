@@ -99,6 +99,7 @@ import {
   compileModules,
   moduleLookup,
   modulesHashOf,
+  sealedUse,
   versionActionsOf,
 } from "./workflow-modules.ts";
 import type { CompiledModules, ModuleContracts } from "./workflow-modules.ts";
@@ -1360,15 +1361,8 @@ const writeVersion = async (
       binding: action.binding,
       module: action.module,
       export: action.export,
-      uses: action.uses.map((use) =>
-        use.kind === "connector"
-          ? {
-              alias: use.alias,
-              kind: use.kind,
-              operations: [...use.operations],
-            }
-          : { alias: use.alias, kind: use.kind }
-      ),
+      // Each use exactly as sealed, a model's output included (GRA-700).
+      uses: action.uses.map((use) => sealedUse(use)),
     })),
     // What the version runs, sealed with it: its build's artifacts by
     // hash, and its executable identity (workflow-builds.ts).

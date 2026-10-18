@@ -3718,7 +3718,23 @@ describe("model resources of a JSON workflow's own actions", () => {
     const runId = await started(ada, workflow.id);
     const run = await ended(ada, workflow.id, runId);
     const receipts = await receiptsOf(runId);
+    const [version] = await workflowVersions(env, ada, workflow.id);
     expect({
+      // The version's review shows the action's model use with the shape
+      // its calls may answer, as sealed.
+      listed: version?.actions.map(({ binding, uses }) => ({
+        binding,
+        uses: uses.map((use) => ({
+          ...use,
+          ...("output" in use
+            ? {
+                output: z
+                  .record(z.string(), z.unknown())
+                  .parse(JSON.parse(use.output)).kind,
+              }
+            : {}),
+        })),
+      })),
       executable,
       end: endOf(run),
       // Two requests, though the run replayed after its pause.
@@ -3729,6 +3745,12 @@ describe("model resources of a JSON workflow's own actions", () => {
         outcome,
       })),
     }).toStrictEqual({
+      listed: [
+        {
+          binding: "greet",
+          uses: [{ alias: "writer", kind: "model", output: "object" }],
+        },
+      ],
       executable: true,
       end: { status: "completed", output: { status: "Hello Ada / Hi again" } },
       requests: 2,
