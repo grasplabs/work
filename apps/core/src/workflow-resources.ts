@@ -1479,6 +1479,8 @@ const writeVersion = async (
     throw definitionInvalid([tooLargeProblem(actions)]);
   }
   const manifestHash = await sha256Hex(manifest);
+  // Before anything is written: a publication that lands answers it.
+  const reviewed = await reviewedActions(env, actions, bindings);
   const createdAt = new Date();
   const db = drizzle(env.DB);
   // This publication's own reservations: another publishing the same
@@ -1583,7 +1585,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
-    actions: await reviewedActions(env, actions, bindings),
+    actions: reviewed,
     build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
