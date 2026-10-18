@@ -254,15 +254,21 @@ describe("a workflow's draft", () => {
       invalid: invalid.problems.map(
         ({ code, pointer, taskId }) => `${code} ${pointer} ${taskId}`
       ),
-      invalidCheckpoint: invalid.checkpoint,
+      invalidCheckpoint: invalid.checkpoint?.revision,
       incomplete: incomplete.problems.map(({ code }) => code),
-      incompleteCheckpoint: incomplete.checkpoint,
+      incompleteCheckpoint: incomplete.checkpoint?.revision,
+      // The diagram is the checkpoint's: the text that passed, never the
+      // latest edit's.
+      diagram: incomplete.checkpoint?.diagram.tasks.map(
+        ({ id, kind }) => `${id} ${kind}`
+      ),
       leaked: JSON.stringify(invalid.problems).includes(secret),
     }).toStrictEqual({
       invalid: ["profile.unknown_property /do/0/finish/unknown finish"],
-      invalidCheckpoint: { revision: 1, source: good },
+      invalidCheckpoint: 1,
       incomplete: ["json.invalid"],
-      incompleteCheckpoint: { revision: 1, source: good },
+      incompleteCheckpoint: 1,
+      diagram: ["finish set"],
       leaked: false,
     });
     // Only the latest revision, once it passed, publishes: an earlier one
@@ -333,10 +339,15 @@ describe("a workflow's draft", () => {
     );
     const latest = await workflowDraft(env, ada, workflow.id);
     expect({
-      saved: [saved.revision, saved.source, saved.checkpoint],
+      saved: [
+        saved.revision,
+        saved.source,
+        saved.checkpoint?.revision,
+        saved.checkpoint?.source,
+      ],
       latest: [latest.revision, latest.source],
     }).toStrictEqual({
-      saved: [2, "{ mine, not yet", { revision: 1, source: passing }],
+      saved: [2, "{ mine, not yet", 1, passing],
       latest: [3, theirs],
     });
   });

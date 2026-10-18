@@ -15,6 +15,7 @@ import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
+import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's definition as its builders edit it: the draft's JSON, each
 // save one revision-checked edit that core checks against the profile,
@@ -79,6 +80,26 @@ const DraftStatus = ({ draft }: { draft: WorkflowDraft }) => {
   );
 };
 
+/** The diagram of the draft's checkpoint, the latest text that passed. */
+const CheckpointDiagram = ({
+  checkpoint,
+}: {
+  checkpoint: NonNullable<WorkflowDraft["checkpoint"]>;
+}) => {
+  const { t } = useLingui();
+  const { revision: checkpointRevision } = checkpoint;
+  return (
+    <div className="flex flex-col gap-2">
+      <h2 className="font-medium">
+        {checkpointRevision === 0
+          ? t`Diagram of the current version`
+          : t`Diagram of revision ${checkpointRevision}`}
+      </h2>
+      <WorkflowDiagramView diagram={checkpoint.diagram} label={t`Diagram`} />
+    </div>
+  );
+};
+
 export const DefinitionEditor = ({
   workflow,
   loaded,
@@ -103,6 +124,7 @@ export const DefinitionEditor = ({
   const [replacing, setReplacing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
   const edited = text !== draft.source;
+  const { checkpoint } = draft;
   const publishable =
     !edited &&
     draft.revision > 0 &&
@@ -276,6 +298,9 @@ export const DefinitionEditor = ({
       <ErrorText>
         {outcome?.kind === "failed" ? outcome.reason : undefined}
       </ErrorText>
+      {checkpoint === null ? null : (
+        <CheckpointDiagram checkpoint={checkpoint} />
+      )}
       {draft.problems.length === 0 ? null : (
         <section aria-labelledby="definition-problems">
           <h2 className="font-medium" id="definition-problems">

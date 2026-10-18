@@ -1,3 +1,4 @@
+/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -183,4 +184,118 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
   await expect(page.getByLabel("workflow.json")).toHaveValue(next);
   await page.getByRole("button", { name: "Publish revision 2" }).click();
   await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
+});
+
+/** Spec 13.9's routing, by who, as workflow `name`: branches that join. */
+const routing = (name: string): string =>
+  JSON.stringify(
+    {
+      ...JSON.parse(definition(name, "unused")),
+      input: {
+        schema: {
+          format: "json",
+          document: {
+            type: "object",
+            properties: { who: { type: "string" } },
+            required: ["who"],
+            additionalProperties: false,
+          },
+        },
+      },
+      do: [
+        {
+          route: {
+            switch: [
+              {
+                ada: {
+                  when: '${ $workflow.input.who == "Ada" }',
+                  then: "greet-ada",
+                },
+              },
+              { anyone: { then: "greet-other" } },
+            ],
+          },
+        },
+        { "greet-ada": { set: { status: "ada" }, then: "finished" } },
+        { "greet-other": { set: { status: "other" }, then: "finished" } },
+        { finished: { set: "${ . }" } },
+      ],
+    },
+    null,
+    2
+  );
+
+test("a builder sees every declared branch of the checked definition, and a test run marks only the tasks it reached", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("workflowDiagram");
+  const page = await pageOf(builder);
+  const name = `routed-${crypto.randomUUID().slice(0, 8)}`;
+  await page.goto("/workflows");
+  await page.getByLabel("Name of a new workflow").fill(name);
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+
+  await save(page, routing(name));
+  await expect(
+    page.getByText("Revision 1 passes the profile and can be published.")
+  ).toBeVisible();
+  const diagram = page.getByRole("region", { name: "Diagram", exact: true });
+  const route = diagram.getByRole("listitem", { name: "route" });
+  await expect(route.getByText("Case ada, when it holds")).toBeVisible();
+  await expect(route.getByText("Then greet-ada")).toBeVisible();
+  await expect(route.getByText("Otherwise: anyone")).toBeVisible();
+  await expect(route.getByText("Then greet-other")).toBeVisible();
+  for (const task of ["greet-ada", "greet-other", "finished"]) {
+    // oxlint-disable-next-line no-await-in-loop -- one task at a time
+    await expect(diagram.getByRole("listitem", { name: task })).toBeVisible();
+  }
+
+  // Text that doesn't pass leaves the diagram on the revision that did.
+  await save(page, "{ not yet");
+  await expect(
+    page.getByRole("heading", { name: "Diagram of revision 1" })
+  ).toBeVisible();
+  await save(page, routing(name));
+  await page.getByRole("button", { name: "Publish revision 3" }).click();
+  await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Input").fill('{ "who": "Ada" }');
+  await page.getByRole("button", { name: "Start a test run" }).click();
+  await expect(page.getByText("The run completed.")).toBeVisible({
+    timeout: 30_000,
+  });
+  const ran = page.getByRole("region", {
+    name: "What the run of version 1 did",
+  });
+  for (const task of ["route", "greet-ada", "finished"]) {
+    // oxlint-disable-next-line no-await-in-loop -- one task at a time
+    await expect(
+      ran.getByRole("listitem", { name: task }).getByText("Reached")
+    ).toBeVisible();
+  }
+  await expect(
+    ran.getByRole("listitem", { name: "greet-other" })
+  ).toHaveAttribute("data-state", "none");
+
+  // A version with no build that runs is admitted and never runs: the
+  // panel says so instead of waiting on a run that doesn't exist.
+  await save(
+    page,
+    definition(
+      name,
+      "unused",
+      { set: { status: "done", ["k".repeat(2100)]: "${ . }" } },
+      "1.1.0"
+    )
+  );
+  await page.getByRole("button", { name: "Publish revision 4" }).click();
+  await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
+  await page.getByLabel("Input").fill("{}");
+  await page.getByRole("button", { name: "Start a test run" }).click();
+  await expect(
+    page.getByText("Version 2 has no build that runs, so nothing ran", {
+      exact: false,
+    })
+  ).toBeVisible();
 });

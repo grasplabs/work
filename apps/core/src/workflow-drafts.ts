@@ -1,3 +1,4 @@
+import { workflowDiagram } from "@grasp-os/open-workflow/diagram";
 import { profileName } from "@grasp-os/open-workflow/limits";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
@@ -138,6 +139,19 @@ const storedProblems = (text: string): WorkflowDefinitionProblem[] =>
 
 type DraftRow = typeof workflowResourceDrafts.$inferSelect;
 
+/**
+ * A checkpoint as the editor shows it: its revision and text, and its
+ * diagram, drawn from that very text, which passed the profile.
+ */
+const checkpointOf = (
+  revision: number,
+  source: string
+): NonNullable<WorkflowDraft["checkpoint"]> => ({
+  revision,
+  source,
+  diagram: workflowDiagram(z.json().parse(JSON.parse(source))),
+});
+
 /** The latest revision of workflow `id`'s draft, and its latest checkpoint. */
 const draftRows = async (
   env: Env,
@@ -191,7 +205,7 @@ const draftOf = async (
       ? undefined
       : await workflowDefinition(env, by, workflow.id, workflow.currentVersion);
   const publishedCheckpoint =
-    published === undefined ? null : { revision: 0, source: published };
+    published === undefined ? null : checkpointOf(0, published);
   if (latest === undefined) {
     return {
       revision: 0,
@@ -209,7 +223,7 @@ const draftOf = async (
     checkpoint:
       checkpoint === undefined
         ? publishedCheckpoint
-        : { revision: checkpoint.revision, source: checkpoint.source },
+        : checkpointOf(checkpoint.revision, checkpoint.source),
     editedBy: latest.editedBy,
     editedAt: latest.editedAt.toISOString(),
   };
