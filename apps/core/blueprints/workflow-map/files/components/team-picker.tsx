@@ -43,7 +43,11 @@ export const TeamPicker = ({
   };
   const items = [
     { value: null, label: "No team" },
-    ...[...teams, ...added].map(({ id, title }) => ({
+    // A team added here, until the live list has it too.
+    ...[
+      ...teams,
+      ...added.filter(({ id }) => !teams.some((known) => known.id === id)),
+    ].map(({ id, title }) => ({
       value: id,
       label: title,
     })),

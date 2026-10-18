@@ -126,7 +126,7 @@ export const refusal = (code: string): string => {
     }
     case "data.invalid":
     case "contract.invalid_args": {
-      return "That can't be saved: check the decision is under 1,000 characters.";
+      return "That can't be saved: the decision is at most 1,000 characters, and the narrative at most 30,000.";
     }
     case "board.not_found": {
       return "There's no such snapshot, or you can't open it.";

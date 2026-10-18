@@ -25,6 +25,12 @@ import { whilePending } from "./pending";
 import { settle } from "./snapshot";
 import type { Snapshot } from "./snapshot";
 
+/** Longest the decision a snapshot asks for is (schema.ts). */
+const decisionMax = 1000;
+
+/** Longest a snapshot's narrative is (schema.ts). */
+const narrativeMax = 30_000;
+
 const levels = Array.from({ length: maturityLevels + 1 }, (_, level) => ({
   value: String(level),
   label: `Maturity ${level} of ${maturityLevels}`,
@@ -138,6 +144,7 @@ export const NarrativeEditor = ({
         <div className="flex flex-col gap-2">
           <Input
             aria-label="Edit the decision needed"
+            maxLength={decisionMax}
             placeholder="The one decision the board needs to make"
             value={decision}
             onChange={(event) => {
@@ -146,6 +153,7 @@ export const NarrativeEditor = ({
           />
           <Textarea
             aria-label="Edit the narrative"
+            maxLength={narrativeMax}
             placeholder="Where we stand and what changed, in a few lines"
             value={body}
             onChange={(event) => {
