@@ -67,7 +67,20 @@ export const listedFrom = (
   body: "",
 });
 
-/** A workflow, or a version of it, as the store answers it. */
+/** The version of a workflow last drawn, without its notes. */
+export const drawnFrom = (
+  id: Id<"workflows">,
+  revision: number,
+  drawn: Stored
+): Workflow => ({
+  id,
+  revision,
+  version: drawn.version,
+  record: recordFrom(drawn),
+  body: "",
+});
+
+/** A workflow, as the store answers it. */
 export const workflowFrom = (
   id: Id<"workflows">,
   stored: Stored & { _rev: number; notes: string }
@@ -124,6 +137,9 @@ export const refusal = (code: string): string => {
     }
     case "map.too_many_teams": {
       return "The map holds at most 100 teams: use one it has.";
+    }
+    case "map.invalid": {
+      return "That can't be saved: names take no control characters, and an App's or a workflow's ID only letters, digits, `.`, `_`, `:` and `-`.";
     }
     case "map.not_found": {
       return "This workflow is gone.";

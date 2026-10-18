@@ -9,6 +9,7 @@ import { doc, mutation, query } from "#grasp/server";
 import type { Doc, Id, MutationCtx } from "#grasp/server";
 
 import { appLink, editedFields, workflowStates } from "../schema.ts";
+import { requireIdentifier, requireWorkflowText } from "./text.ts";
 
 // The map's workflows: listed, opened beside the version of them last
 // drawn, saved and linked to the App workflow built from them. Each save
@@ -100,16 +101,32 @@ export const list = query({
   },
 });
 
+/** The version of a workflow last drawn, as it is set beside it: no notes. */
+const drawnSummary = v.object({
+  version: v.number().integer().min(1),
+  title: editedFields.title,
+  state: v.enum(workflowStates),
+  team: editedFields.team,
+  steps: editedFields.steps,
+  parameters: editedFields.parameters,
+  gain: editedFields.gain,
+  app: appLink.nullable(),
+});
+
 /**
  * A workflow with its notes, and for a designed one, the version of it
- * last drawn, to set beside it; null for a workflow that isn't there.
+ * last drawn, without its notes, to set beside it; null for a workflow
+ * that isn't there. One answer holds at most one workflow's notes, so it
+ * stays within what a query answers: the workflow itself, within the
+ * store's 128 KiB, and the drawn version within the 24 KiB a workflow
+ * holds without its notes (`requireListable`).
  */
 export const open = query({
   args: { id: v.id("workflows") },
   returns: v
     .object({
       current: doc("workflows"),
-      drawn: doc("workflowVersions").nullable(),
+      drawn: drawnSummary.nullable(),
     })
     .nullable(),
   handler: async (ctx, args) => {
@@ -126,7 +143,22 @@ export const open = query({
         range.eq("workflow", args.id).eq("version", current.drawnVersion ?? 0)
       )
       .take(1);
-    return { current, drawn: drawn ?? null };
+    return {
+      current,
+      drawn:
+        drawn === undefined
+          ? null
+          : {
+              version: drawn.version,
+              title: drawn.title,
+              state: drawn.state,
+              team: drawn.team,
+              steps: drawn.steps,
+              parameters: drawn.parameters,
+              gain: drawn.gain,
+              app: drawn.app,
+            },
+    };
   },
 });
 
@@ -164,6 +196,7 @@ export const save = mutation({
   }),
   handler: async (ctx, args) => {
     const { id, expectedRevision, ...edited } = args;
+    requireWorkflowText(edited);
     if (id === null) {
       if (edited.state === "designed") {
         throw new AppError(
@@ -214,6 +247,8 @@ export const link = mutation({
   },
   returns: v.object({ version: v.number().integer().min(1) }),
   handler: async (ctx, args) => {
+    requireIdentifier("App's ID", args.app.appId);
+    requireIdentifier("workflow's ID", args.app.workflowId);
     const stored = await ctx.db.get("workflows", args.id);
     if (stored === null) {
       throw new AppError("map.not_found", "This workflow is gone.");

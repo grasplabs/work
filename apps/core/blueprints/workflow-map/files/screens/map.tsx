@@ -7,7 +7,13 @@ import { api } from "#grasp";
 
 import { WorkflowEditor } from "../components/editor";
 import { WorkflowList } from "../components/overview";
-import { listedFrom, refusal, settle, workflowFrom } from "../components/store";
+import {
+  drawnFrom,
+  listedFrom,
+  refusal,
+  settle,
+  workflowFrom,
+} from "../components/store";
 import type { Opened, Team } from "../components/store";
 
 /** How many workflows the list loads at a time. */
@@ -177,7 +183,8 @@ const WorkflowMap = () => {
       kind: "open",
       opened: {
         current: workflowFrom(current._id, current),
-        drawn: drawn === null ? null : workflowFrom(current._id, drawn),
+        drawn:
+          drawn === null ? null : drawnFrom(current._id, current._rev, drawn),
       },
     });
   };

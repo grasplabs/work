@@ -52,7 +52,9 @@ const call = async (
 /** What a call answered; a refusal fails the test, saying why. */
 const valueOf = (result: OperationResult): unknown => {
   if (!result.ok) {
-    throw new Error(`Refused: ${result.error.code} ${result.error.message}`);
+    throw new Error(
+      `Refused: ${result.error.code} ${result.error.message} ${JSON.stringify(result.error.details ?? null)}`
+    );
   }
   return result.value;
 };
@@ -314,6 +316,9 @@ const seedMap = async (admin: Person, map: AppId) => {
 
 /** A snapshot's maturity, unless a test says another. */
 const defaultTake = { maturity: 1 };
+
+/** An ID as long as an App's or a workflow's may be. */
+const longId = (prefix: string): string => prefix.padEnd(256, "x");
 
 /** Takes a snapshot as `person`. */
 const take = async (
@@ -680,6 +685,70 @@ describe("the board page", { timeout: 90_000 }, () => {
       opened: "",
       level: "contract.invalid_args",
     });
+  });
+
+  it("freezes and shows workflows at their longest, a page at a time within what a query answers", async () => {
+    const { admin, app, map } = await setUp({ bindStatistics: false });
+    const team = idSchema.parse(
+      valueOf(
+        await call(admin, map, "teams.add", "mutation", {
+          title: "€".repeat(200),
+        })
+      )
+    );
+    // Each written as the map's screen would: drawn, designed, linked.
+    const worst = async (index: number): Promise<void> => {
+      const fields = {
+        title: `${index}`.padEnd(200, "€"),
+        team,
+        steps: [
+          {
+            name: "Do it",
+            numbers: { frequency: estimated(10), minutes: estimated(6) },
+          },
+        ],
+      };
+      const id = await saveWorkflow(admin, map, {
+        ...fields,
+        state: "drawn",
+      });
+      await saveWorkflow(
+        admin,
+        map,
+        { ...fields, state: "designed" },
+        { id, revision: await revisionOf(admin, map, id) }
+      );
+      valueOf(
+        await call(admin, map, "map.link", "mutation", {
+          id,
+          expectedRevision: await revisionOf(admin, map, id),
+          app: { appId: longId(`app${index}-`), workflowId: longId("w-") },
+        })
+      );
+    };
+    for (let index = 0; index < 60; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one workflow at a time
+      await worst(index);
+    }
+    const mapPage = await call(admin, map, "figures.list", "query", {
+      pagination: { pageSize: 100 },
+    });
+    const taken = idSchema.parse(valueOf(await take(admin, app)));
+    const snapshot = snapshotSchema.parse(
+      valueOf(await call(admin, app, "snapshots.get", "query", { id: taken }))
+    );
+    const figuresPage = await call(admin, app, "snapshots.figures", "query", {
+      take: snapshot.take,
+      pagination: { pageSize: 100 },
+    });
+    const items = (result: OperationResult) =>
+      z.object({ items: z.array(z.unknown()) }).parse(valueOf(result)).items
+        .length;
+    expect({
+      mapPage: items(mapPage),
+      figures: snapshot.figures,
+      figuresPage: items(figuresPage),
+    }).toStrictEqual({ mapPage: 50, figures: 60, figuresPage: 50 });
   });
 
   it("takes no snapshot of a map nobody bound it to", async () => {

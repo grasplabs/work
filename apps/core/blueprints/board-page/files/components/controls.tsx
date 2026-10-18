@@ -92,6 +92,10 @@ export const TakeSnapshot = ({
       >
         Take a snapshot
       </Button>
+      <p className="text-muted-foreground w-full text-sm">
+        A snapshot freezes the workflow map&apos;s numbers and what runs, as you
+        may see them, for everyone who can open this page.
+      </p>
     </div>
   );
 };

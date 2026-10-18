@@ -8,6 +8,7 @@ import { query } from "#grasp/server";
 import type { Doc, QueryCtx } from "#grasp/server";
 
 import { appLink, shortTextMax, workflowStates } from "../schema.ts";
+import { teamsMax } from "./teams.ts";
 
 // The map's numbers, for another App to read (the board page, through an
 // `app` resource an admin binds to this App): each workflow's hours a
@@ -18,7 +19,13 @@ import { appLink, shortTextMax, workflowStates } from "../schema.ts";
 // and a page of them stays small. It reads as whoever calls, under the
 // map's own roles: everyone the map is shared with.
 
-/** Most workflows one page holds, whatever the page asks for. */
+/**
+ * Most workflows one page holds, whatever the page asks for. A figure at
+ * its longest is about 2.2 KB of JSON: a title and a team's of 200
+ * characters, 3 bytes each at most (text.ts refuses what JSON writes
+ * longer), two IDs of 256 ASCII characters, and its numbers. 50 of them
+ * are about 110 KB, well within the 256 KiB a query answers.
+ */
 const pageMax = 50;
 
 const minutesPerHour = 60;
@@ -96,19 +103,19 @@ const drawnOf = async (ctx: QueryCtx, workflow: Doc<"workflows">) => {
 };
 
 /** What a page holds of `workflow`: its team's title, and its hours. */
-const figureOf = async (ctx: QueryCtx, workflow: Doc<"workflows">) => {
-  const team =
-    workflow.team === null ? null : await ctx.db.get("teams", workflow.team);
-  return {
-    id: workflow._id,
-    title: workflow.title,
-    team: team?.title ?? null,
-    state: workflow.state,
-    current: hoursOf(workflow.version, workflow.steps),
-    drawn: await drawnOf(ctx, workflow),
-    app: workflow.app,
-  };
-};
+const figureOf = async (
+  ctx: QueryCtx,
+  teams: ReadonlyMap<string, string>,
+  workflow: Doc<"workflows">
+) => ({
+  id: workflow._id,
+  title: workflow.title,
+  team: workflow.team === null ? null : (teams.get(workflow.team) ?? null),
+  state: workflow.state,
+  current: hoursOf(workflow.version, workflow.steps),
+  drawn: await drawnOf(ctx, workflow),
+  app: workflow.app,
+});
 
 /** Every workflow's figures, a page at a time, by title. */
 export const list = query({
@@ -122,10 +129,16 @@ export const list = query({
         cursor: args.pagination.cursor,
         pageSize: Math.min(args.pagination.pageSize, pageMax),
       });
+    // Every team in one read, and a page's drawn versions one read each:
+    // within the reads one call may make (a page, the teams, and 50).
+    const listedTeams = await ctx.db.query("teams").take(teamsMax);
+    const teams = new Map<string, string>(
+      listedTeams.map(({ _id, title }) => [_id, title])
+    );
     const items = [];
     for (const workflow of page.items) {
       // oxlint-disable-next-line no-await-in-loop -- a page's reads, one after another
-      items.push(await figureOf(ctx, workflow));
+      items.push(await figureOf(ctx, teams, workflow));
     }
     return { ...page, items };
   },

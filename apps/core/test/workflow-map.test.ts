@@ -107,7 +107,16 @@ const workflowSchema = z
   .loose();
 
 const openedSchema = z
-  .object({ current: workflowSchema, drawn: workflowSchema.nullable() })
+  .object({
+    current: workflowSchema,
+    drawn: z
+      .looseObject({
+        version: z.number(),
+        state: z.string(),
+        steps: z.array(z.unknown()),
+      })
+      .nullable(),
+  })
   .nullable();
 
 const pageSchema = z.object({
@@ -616,6 +625,96 @@ describe("the workflow map", { timeout: 60_000 }, () => {
       // Held to what the figures hold.
       absurd: 100_000,
     });
+  });
+
+  it("takes no control characters in a name, none but tabs and line breaks in notes, no half surrogate, and only identifiers as a link's IDs", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const saved = async (fields: Record<string, unknown>) =>
+      codeOf(await save(admin, app, null, null, { ...drawn, ...fields }));
+    const designed = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, drawn))
+    );
+    const v1 = await opened(admin, app, designed.id);
+    valueOf(
+      await save(admin, app, designed.id, v1?.current._rev ?? 0, {
+        ...drawn,
+        state: "designed",
+      })
+    );
+    const v2 = await opened(admin, app, designed.id);
+    const linked = async (appId: string, workflowId: string) =>
+      codeOf(
+        await call(admin, app, "map.link", "mutation", {
+          id: designed.id,
+          expectedRevision: v2?.current._rev,
+          app: { appId, workflowId },
+        })
+      );
+    expect({
+      title: await saved({ title: "Pay\u0007 invoices" }),
+      tab: await saved({ title: "Pay\tinvoices" }),
+      who: await saved({
+        steps: [{ name: "Match", who: "Con\u001Btroller", handover: false }],
+      }),
+      parameter: await saved({
+        parameters: [{ name: "Limit", value: "5\u0000000" }],
+      }),
+      halfSurrogate: await saved({ title: "Pay \uD800 invoices" }),
+      notesBreaks: await saved({ notes: "Line one\n\tLine two\r\n" }),
+      notesControl: await saved({ notes: "Line\u0001 one" }),
+      team: codeOf(
+        await call(admin, app, "teams.add", "mutation", {
+          title: "Fin\u0008ance",
+        })
+      ),
+      linkSpace: await linked("app 1", "pay"),
+      linkQuote: await linked("app-1", 'pay"'),
+      linkFine: await linked("app-1.v2", "pay_now:1"),
+    }).toStrictEqual({
+      title: "map.invalid",
+      tab: "map.invalid",
+      who: "map.invalid",
+      parameter: "map.invalid",
+      halfSurrogate: "map.invalid",
+      notesBreaks: "ok",
+      notesControl: "map.invalid",
+      team: "map.invalid",
+      linkSpace: "map.invalid",
+      linkQuote: "map.invalid",
+      linkFine: "ok",
+    });
+  });
+
+  it("opens a workflow with its notes and the version last drawn without them, within what a query answers", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    // As much as a workflow holds: steps near the listed bound, and notes
+    // at their longest, of characters 3 bytes each.
+    const big = {
+      ...drawn,
+      steps: Array.from({ length: 12 }, (_, index) => longStep(index)),
+      notes: "€".repeat(30_000),
+    };
+    const first = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, big))
+    );
+    const v1 = await opened(admin, app, first.id);
+    valueOf(
+      await save(admin, app, first.id, v1?.current._rev ?? 0, {
+        ...big,
+        state: "designed",
+      })
+    );
+    const answer = await call(admin, app, "map.open", "query", {
+      id: first.id,
+    });
+    const read = openedSchema.parse(valueOf(answer));
+    expect({
+      notes: read?.current.notes.length,
+      drawnVersion: read?.drawn?.version,
+      drawnNotes: read?.drawn !== null && "notes" in (read?.drawn ?? {}),
+    }).toStrictEqual({ notes: 30_000, drawnVersion: 1, drawnNotes: false });
   });
 
   it("keeps a page of the list within what a query answers, however much its workflows hold", async () => {

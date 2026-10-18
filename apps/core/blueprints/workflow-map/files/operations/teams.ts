@@ -3,11 +3,12 @@ import { AppError, v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "#grasp/server";
 
 import { shortTextMax } from "../schema.ts";
+import { requireText } from "./text.ts";
 
 // The teams the map groups workflows by.
 
 /** Most teams the map lists. */
-const teamsMax = 100;
+export const teamsMax = 100;
 
 /** The teams, by title. */
 export const list = query({
@@ -25,6 +26,7 @@ export const add = mutation({
   args: { title: v.string().trim().min(1).max(shortTextMax) },
   returns: v.id("teams"),
   handler: async (ctx, args) => {
+    requireText("team's name", args.title);
     const teams = await ctx.db.query("teams").take(teamsMax);
     if (teams.length >= teamsMax) {
       throw new AppError(

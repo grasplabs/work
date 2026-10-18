@@ -46,8 +46,15 @@ const mapPage = 50;
 /** Figures one write holds: within a commit's 100 writes. */
 const figuresPerWrite = 50;
 
-/** Figures one page of a snapshot holds. */
-const figuresPage = 100;
+/**
+ * Figures one page of a snapshot holds. A figure at its longest is about
+ * 2.7 KB of JSON: a title and a team's of 200 characters, 3 bytes each at
+ * most (the map refuses what JSON writes longer), the running App
+ * workflow's two IDs of 256 ASCII characters, its numbers, and the
+ * record's own fields. 50 of them are about 135 KB, well within the
+ * 256 KiB a query answers.
+ */
+const figuresPage = 50;
 
 /** Snapshots one page of the list holds. */
 const listPage = 20;
@@ -124,9 +131,13 @@ export const addFigures = internalMutation({
   },
 });
 
-/** Writes a snapshot, once each of its figures is. */
+/**
+ * Writes a snapshot, with the last of its figures, once each other is: one
+ * commit for a snapshot of up to `figuresPerWrite` workflows.
+ */
 export const finish = internalMutation({
   args: {
+    last: v.array(v.object(figureFields)).max(figuresPerWrite),
     take: v.string().min(1).max(64),
     title: v.string(),
     date: v.string().min(10).max(10),
@@ -137,8 +148,14 @@ export const finish = internalMutation({
     decisionNeeded: v.string().trim().max(decisionMax),
   },
   returns: v.id("snapshots"),
-  handler: async (ctx, args) =>
-    await ctx.db.insert("snapshots", { ...args, narrative: "" }),
+  handler: async (ctx, args) => {
+    const { last, ...snapshot } = args;
+    for (const figure of last) {
+      // oxlint-disable-next-line no-await-in-loop -- staged in order, committed together
+      await ctx.db.insert("figures", figure);
+    }
+    return await ctx.db.insert("snapshots", { ...snapshot, narrative: "" });
+  },
 });
 
 /**
@@ -180,7 +197,13 @@ export const take = action({
       take: takeId,
       at,
     }));
-    for (let from = 0; from < rows.length; from += figuresPerWrite) {
+    // Each chunk of figures but the last in a commit of its own, and the
+    // last with the snapshot.
+    const lastFrom =
+      rows.length === 0
+        ? 0
+        : Math.floor((rows.length - 1) / figuresPerWrite) * figuresPerWrite;
+    for (let from = 0; from < lastFrom; from += figuresPerWrite) {
       // oxlint-disable-next-line no-await-in-loop -- one commit after another
       await ctx.runMutation(addFigures, {
         figures: rows.slice(from, from + figuresPerWrite),
@@ -188,6 +211,7 @@ export const take = action({
     }
     const date = now.toISOString().slice(0, 10);
     return await ctx.runMutation(finish, {
+      last: rows.slice(lastFrom),
       take: takeId,
       title: `Snapshot ${date}`,
       date,

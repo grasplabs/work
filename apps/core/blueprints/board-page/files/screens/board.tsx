@@ -22,8 +22,8 @@ import type { Shown } from "../components/viewer";
 /** Snapshots the list loads at a time. */
 const listPage = 20;
 
-/** Figures one read of a snapshot loads. */
-const figuresPage = 100;
+/** Figures one read of a snapshot loads: as many as one answers. */
+const figuresPage = 50;
 
 /**
  * The board page: a snapshot of the workflow map on one page, the newest
