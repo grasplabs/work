@@ -1,51 +1,113 @@
-// What the board page's server answers (app/server.ts), as its screen
-// reads it.
+// The board page's snapshots as its screen reads them from the App's
+// store (operations/snapshots.ts), and what each refusal means to the
+// person using it.
 
-import { callServer } from "@grasp-os/sdk/screen";
+import type { Id } from "@grasp-os/sdk";
 
-/** A snapshot as the page lists it. */
-export interface Listed {
-  id: string;
-  path: string;
-  title: string;
-}
+import type { SignalFigure, SnapshotRecord, WorkflowFigures } from "./board";
 
-/** The Playbook's snapshots, and whether the page may read them. */
-export interface Snapshots {
-  access: "none" | "ok";
-  snapshots: Listed[];
-}
-
-/** A snapshot at its current version. */
+/** A snapshot, with its figures. */
 export interface Snapshot {
-  id: string;
-  path: string;
-  version: number;
-  record: Record<string, unknown>;
+  id: Id<"snapshots">;
+  /** The revision it was read at, which a save of its narrative asserts. */
+  revision: number;
+  record: SnapshotRecord;
+  /** Its narrative. */
   body: string;
 }
 
-/** A server call's answer, or the code of why it was refused. */
+/** A call's answer, or the code of why it was refused. */
 export type Outcome<T> = { ok: T } | { error: string };
 
+type Basis = "estimated" | "observed";
+
+/** A snapshot as the store keeps it. */
+interface StoredSnapshot {
+  _id: Id<"snapshots">;
+  _rev: number;
+  title: string;
+  date: string;
+  maturity: number;
+  windowDays: number;
+  signals: { workflow: string; kind: string; value: number }[];
+  decisionNeeded: string;
+  narrative: string;
+}
+
+/** A workflow's figures as the store keeps them. */
+interface StoredFigure {
+  workflow: string;
+  title: string;
+  team: string | null;
+  state: "drawn" | "designed";
+  drawn: { version: number; hoursPerWeek: number; basis: Basis } | null;
+  designed: { version: number; hoursPerWeek: number; basis: Basis } | null;
+  unavailable: boolean;
+  running: {
+    appId: string;
+    workflowId: string;
+    runs: number;
+    hoursPerWeek: number;
+  } | null;
+}
+
+/** A workflow's figures as the page reads them. */
+const figuresFrom = (stored: StoredFigure): WorkflowFigures => ({
+  path: stored.workflow,
+  title: stored.title,
+  ...(stored.team === null ? {} : { team: stored.team }),
+  state: stored.state,
+  ...(stored.drawn === null ? {} : { drawn: stored.drawn }),
+  ...(stored.designed === null ? {} : { designed: stored.designed }),
+  ...(stored.unavailable ? { unavailable: true } : {}),
+  ...(stored.running === null ? {} : { running: stored.running }),
+});
+
+/** A snapshot and its figures as the page reads them. */
+export const snapshotFrom = (
+  stored: StoredSnapshot,
+  figures: readonly StoredFigure[]
+): Snapshot => ({
+  id: stored._id,
+  revision: stored._rev,
+  record: {
+    title: stored.title,
+    date: stored.date,
+    maturity: stored.maturity,
+    ...(stored.decisionNeeded === ""
+      ? {}
+      : { decisionNeeded: stored.decisionNeeded }),
+    figures: {
+      windowDays: stored.windowDays,
+      workflows: figures.map(figuresFrom),
+      signals: stored.signals.map(
+        ({ workflow, kind, value }): SignalFigure => ({
+          path: workflow,
+          kind,
+          value,
+        })
+      ),
+    },
+  },
+  body: stored.narrative,
+});
+
+/** The code of why a call failed, or that it couldn't be made. */
 const codeOf = (error: unknown): string =>
   typeof error === "object" &&
   error !== null &&
   "code" in error &&
   typeof error.code === "string"
     ? error.code
-    : "app.failed";
+    : "app.unreachable";
 
 /**
- * Calls the server's `method`: its answer, or, when the call itself fails
- * (the connection, the platform), why, as a refusal the page shows.
+ * What `run` resolves with, or the code of why it rejected, so no call
+ * ends in an unhandled rejection.
  */
-export const ask = async <T>(
-  method: string,
-  ...args: unknown[]
-): Promise<Outcome<T>> => {
+export const settle = async <T>(run: () => Promise<T>): Promise<Outcome<T>> => {
   try {
-    return await callServer<Outcome<T>>(method, ...args);
+    return { ok: await run() };
   } catch (error) {
     return { error: codeOf(error) };
   }
@@ -54,32 +116,32 @@ export const ask = async <T>(
 /** What a refusal means to the person using the page. */
 export const refusal = (code: string): string => {
   switch (code) {
-    case "knowledge.conflict": {
+    case "data.conflict":
+    case "data.reads_changed": {
       return "Someone saved this snapshot since you opened it. Open it again to see their changes.";
     }
-    case "knowledge.forbidden": {
-      return "Only admins change the Playbook.";
+    case "data.access_denied":
+    case "data.write_denied": {
+      return "Only the App's builders take snapshots and write them.";
     }
-    case "knowledge.invalid": {
+    case "data.invalid":
+    case "contract.invalid_args": {
       return "That can't be saved: check the decision is under 1,000 characters.";
     }
-    case "knowledge.not_found": {
+    case "board.not_found": {
       return "There's no such snapshot, or you can't open it.";
-    }
-    case "board.not_snapshot": {
-      return "That document isn't a snapshot.";
     }
     case "board.figures_incomplete": {
       return "The Apps linked here ran more workflows than one snapshot reads, so it wasn't taken: its figures would be incomplete.";
     }
     case "board.too_many_workflows": {
-      return "The Playbook has more workflows than one snapshot holds (250).";
+      return "The workflow map has more workflows than one snapshot holds (250).";
     }
-    case "permission.denied": {
-      return "The page can't use the Playbook: an admin approves its permission first.";
+    case "resource.unavailable": {
+      return "The page can't read the workflow map yet: an admin binds it to the map first.";
     }
-    case "permission.restricted": {
-      return "The page read restricted data, so it can't write to the Playbook, which everyone reads.";
+    case "app.unreachable": {
+      return "Grasp can't be reached right now. Try again in a moment.";
     }
     default: {
       return `That didn't work (${code}).`;

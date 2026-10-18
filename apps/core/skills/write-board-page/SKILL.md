@@ -1,19 +1,19 @@
 ---
 name: write-board-page
-description: Writes the one-page board update from the Playbook, with where the company stands, what changed since the last snapshot, what the plan does next and what the board needs to decide. Use before a board or management meeting.
+description: Writes the one-page board update from the board page's latest snapshot, with where the company stands, what changed since the last snapshot, what the plan does next and what the board needs to decide. Use before a board or management meeting.
 ---
 
 # Write the board page
 
-One page a board member reads in two minutes. Every claim comes from the Playbook and links to the record it comes from.
+One page a board member reads in two minutes. Every claim comes from what Grasp holds (the board page's snapshots, the workflow map, the intake's statements, the notes in Knowledge) and names where it comes from.
 
 ## Sections
 
-1. **Where we stand.** The latest `snapshot`: its date and `maturity`, and the maturity of the one before it.
-2. **What changed.** Workflows designed or built since the last snapshot, with the hours a week they save. A snapshot the board page took has `figures`: each workflow's hours `drawn`, `designed`, and `running` (its designed steps at the runs a week observed). Use those numbers as they are, frozen when it was taken. Elsewhere use their `gain.hoursPerWeek`, and their steps' `observed` numbers where there are any. Say plainly which are estimates.
-3. **The plan.** What the plan's notes (under `plan/`) say is under way, and what comes next, each with its due date. Name any that slipped.
-4. **Decisions needed.** The snapshot's `decisionNeeded`, and `decision` records that are `proposed`, each in one sentence with the choice it asks for.
-5. **Risks.** `statement` records tagged `blocker` that the plan doesn't address yet, and the snapshot's improvement signals (`figures.signals`) that are high.
+1. **Where we stand.** The board page's latest snapshot: its date and `maturity`, and the maturity of the one before it.
+2. **What changed.** Workflows designed or built since the last snapshot, with the hours a week they save. The latest snapshot's figures hold each workflow's hours `drawn`, `designed`, and `running` (its designed steps at the runs a week observed). Use those numbers as they are, frozen when it was taken. Elsewhere use the workflow map's `gain.hoursPerWeek`, and their steps' `observed` numbers where there are any. Say plainly which are estimates.
+3. **The plan.** What the plan's notes in Knowledge (under `plan/`) say is under way, and what comes next, each with its due date. Name any that slipped.
+4. **Decisions needed.** The snapshot's `decisionNeeded`, and decisions the notes in Knowledge propose, each in one sentence with the choice it asks for.
+5. **Risks.** The intake's statements tagged `blocker` that the plan doesn't address yet, and the snapshot's improvement signals that are high.
 
 ## Where it goes
 

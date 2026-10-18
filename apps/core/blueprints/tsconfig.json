@@ -11,5 +11,5 @@
   "include": ["*/files/screens", "*/files/components"],
   // Spec 8's layout: its screens import the `#grasp` the host generates,
   // which nothing here maps; the screen build checks them with it.
-  "exclude": ["intake/files"]
+  "exclude": ["intake/files", "workflow-map/files", "board-page/files"]
 }
