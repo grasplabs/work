@@ -389,13 +389,14 @@ export const useUpload = <Reference extends FilesReference>(
 
 /**
  * What `useFile` last settled: for which client, resource and file, the
- * view or the failure.
+ * view, the failure, or that this client deleted it.
  */
 interface ShownFile {
   readonly client: GraspClient;
   readonly key: string;
   readonly view?: FileView;
   readonly error?: GraspError;
+  readonly gone?: true;
 }
 
 /**
@@ -403,6 +404,12 @@ interface ShownFile {
  * resource the App declares with `read` (spec 10.7.5): `undefined` while
  * it loads or is skipped, then `{ file, name, mimeType, size, previewUrl }`.
  * A failure is thrown to the screen's error boundary, as a query's is.
+ *
+ * `null` once the file was deleted through this client while shown, as a
+ * query answers `null` for a document that is gone: its preview revoked,
+ * nothing read again, and nothing thrown. A screen that removes a file
+ * still shows it until its own data catches up (the row a live query
+ * lists until the change reaches it), so its deletion is no failure.
  *
  * `previewUrl` is a local URL of a bounded raster image's preview, for an
  * `<img>`, or null; it is revoked when another file is shown, the screen
@@ -413,7 +420,7 @@ interface ShownFile {
 export const useFile = <Reference extends FilesReference>(
   resource: Declaring<Reference, "read">,
   file: FileRef | "skip"
-): FileView | undefined => {
+): FileView | null | undefined => {
   const client = useClient();
   const internals = clientInternals(client);
   // What the view is of: the resource and the file, read by this client.
@@ -426,11 +433,7 @@ export const useFile = <Reference extends FilesReference>(
   // A reference core could have minted, checked as download and delete
   // check theirs: anything else is refused here, never read as "skip".
   const id = file === "skip" ? undefined : readFileRef(file).id;
-  const shownFile = id === undefined ? undefined : `${resource.alias}/${id}`;
-  // How often the file was deleted through this client while shown: each
-  // deletion is a read of its own, which shows core's answer.
-  const [deletions, setDeletions] = useState(0);
-  const key = shownFile === undefined ? undefined : `${shownFile}#${deletions}`;
+  const key = id === undefined ? undefined : `${resource.alias}/${id}`;
   // The fences as the hook's first render saw them: one between it and
   // the effect is caught by the effect, which never reads past it. After
   // a fence the screen shows the refusal until it is mounted again.
@@ -449,11 +452,6 @@ export const useFile = <Reference extends FilesReference>(
     if (id === undefined || key === undefined) {
       return noSubscription();
     }
-    const unwatch = internals.onFileDeleted((deleted) => {
-      if (deleted === shownFile) {
-        setDeletions((count) => count + 1);
-      }
-    });
     const stop = new AbortController();
     let previewUrl: string | null = null;
     const revoke = (): void => {
@@ -462,6 +460,15 @@ export const useFile = <Reference extends FilesReference>(
         previewUrl = null;
       }
     };
+    // Deleted through this client, once core recorded it: gone, never read
+    // again (core's answer would be that it isn't there).
+    const unwatch = internals.onFileDeleted((deleted) => {
+      if (deleted === key) {
+        stop.abort();
+        revoke();
+        setShown({ client, key, gone: true });
+      }
+    });
     const fenced = (): void => {
       stop.abort();
       revoke();
@@ -517,7 +524,7 @@ export const useFile = <Reference extends FilesReference>(
       // later read of the same file (after a skip, say) starts loading.
       setShown(undefined);
     };
-  }, [client, internals, reading, id, key, shownFile, fencesSeen]);
+  }, [client, internals, reading, id, key, fencesSeen]);
   // Shown only for what is asked now: another resource, file or client is
   // loading until its own read settles.
   if (shown === undefined || shown.key !== key || shown.client !== client) {
@@ -525,6 +532,9 @@ export const useFile = <Reference extends FilesReference>(
   }
   if (shown.error !== undefined) {
     throw shown.error;
+  }
+  if (shown.gone === true) {
+    return null;
   }
   return shown.view;
 };
