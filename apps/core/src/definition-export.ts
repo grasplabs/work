@@ -14,6 +14,7 @@ import type {
   UnresolvedReason,
 } from "@grasp-os/shared/definition-packages";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalText } from "@grasp-os/shared/json";
 import { holdsKnownCredential } from "@grasp-os/shared/redact";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 
@@ -435,6 +436,8 @@ export const exportAppDefinition = async (
   }
   const budget = textBudget(maxBytesOf(env));
   budget("app", files);
+  const registration = canonicalText(release.app);
+  budget("app", { ".grasp/manifest.json": registration });
   // Only their hashes: they name this deployment's resources, the
   // workflows' it may not read among them, and the destination generates
   // its own.
@@ -484,6 +487,7 @@ export const exportAppDefinition = async (
         generated,
       },
       files,
+      manifest: registration,
       store:
         store === null
           ? null

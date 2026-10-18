@@ -93,6 +93,14 @@ export const definitionPackageSchema = z.strictObject({
     }),
     /** The version's source tree, which hashes to `sourceTreeHash`. */
     files: filesSchema,
+    /**
+     * The App's registration as the host read and sealed it, canonical
+     * text, which the SDK reads back strictly (`readAppManifest`): what
+     * a destination generates the App's references from, with its own
+     * identity, without running the App's code. Derived from its source
+     * alone: no ID of this deployment.
+     */
+    manifest: z.string().min(1),
     /** The store contract the release was sealed against, without the store. */
     store: z
       .strictObject({
