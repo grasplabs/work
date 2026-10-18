@@ -17,6 +17,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 import { holdsKnownCredential } from "@grasp-os/shared/redact";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
 import { appFor, versionFiles, versionTree } from "./apps.ts";
@@ -470,6 +471,36 @@ export const exportAppDefinition = async (
     }
   }
   await graph.finish();
+  // What the App's references type of each packaged workflow, as sealed;
+  // never its pin, nor anything of one the package doesn't carry.
+  const workflowContracts: DefinitionPackage["app"]["workflowContracts"] = {};
+  for (const sealed of release.workflows) {
+    if (typeof workflows[sealed.alias] === "string") {
+      workflowContracts[sealed.alias] = {
+        events: Object.fromEntries(
+          Object.entries(sealed.events).map(([name, event]) => [
+            name,
+            { type: event.type, data: z.json().parse(event.data) },
+          ])
+        ),
+        listens: Object.fromEntries(
+          Object.entries(sealed.listens).map(([task, events]) => [
+            task,
+            [...events],
+          ])
+        ),
+        decisions: Object.fromEntries(
+          Object.entries(sealed.decisions).map(([name, decision]) => [
+            name,
+            {
+              value: z.json().parse(decision.value),
+              context: z.json().parse(decision.context),
+            },
+          ])
+        ),
+      };
+    }
+  }
   const { store } = release;
   const definitionPackage = definitionPackageSchema.parse({
     formatVersion: definitionPackageFormatVersion,
@@ -500,6 +531,7 @@ export const exportAppDefinition = async (
             },
       bindings,
       workflows,
+      workflowContracts,
     },
     workflows: graph.packaged,
     unresolved: graph.unresolved,

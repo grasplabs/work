@@ -16,11 +16,13 @@ import path from "node:path";
 
 import { inspectApp } from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
+import { definitionPackageSchema } from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { canonicalText } from "@grasp-os/shared/json";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
 import notes from "../packages/sdk/test/notes/app.ts";
 import { packageProject, PackagingError } from "./package-definition-lib.ts";
 
@@ -34,14 +36,25 @@ const ROOT = path.join(import.meta.dirname, "..");
 const notesDir = path.join(ROOT, "packages/sdk/test/notes");
 const hash = (digit: string): string => digit.repeat(64);
 
+/**
+ * A module of the App's own that reads a workflow's event reference, which
+ * types only when the references carry what the seal resolved.
+ */
+const confirmations = `import { workflows } from "#grasp";
+
+export const confirmed = workflows.archiveNotes.events.confirmed;
+`;
+
 /** The Notes fixture's source, as an App version's tree holds it. */
-const notesFiles = (): Record<string, string> =>
-  Object.fromEntries(
+const notesFiles = (): Record<string, string> => ({
+  ...Object.fromEntries(
     ["app.ts", "schema.ts", "operations/notes.ts"].map((file) => [
       file,
       readFileSync(path.join(notesDir, file), "utf-8"),
     ])
-  );
+  ),
+  "operations/confirmations.ts": confirmations,
+});
 
 const objectSchema = (properties: Record<string, unknown>) => ({
   format: "json",
@@ -107,7 +120,22 @@ const definitionOf = (
     manifest: canonicalText(inspectApp(notes).manifest),
     store: null,
     bindings: {},
-    workflows: {},
+    workflows: {
+      archiveNotes: "workspace/greet/1.0.0",
+      summarizeNote: "workspace/greet/1.0.0",
+    },
+    // As core packages them: plain JSON, read back by the package schema.
+    workflowContracts:
+      definitionPackageSchema.shape.app.shape.workflowContracts.parse(
+        structuredClone(
+          Object.fromEntries(
+            notesWorkflows.map(({ alias, events, listens, decisions }) => [
+              alias,
+              { events, listens, decisions },
+            ])
+          )
+        )
+      ),
   },
   workflows: {
     "workspace/greet/1.0.0": {
@@ -231,6 +259,9 @@ describe(
           (file) => file.startsWith("vendor/") && /\.test|\/test\//u.test(file)
         ),
         sameSource: read("app/app.ts") === notesFiles()["app.ts"],
+        sealedContracts: read("app/.grasp/references.ts").includes(
+          "notes.archive.confirmed"
+        ),
         localIdentity:
           read("app/.grasp/references.ts").includes('"local"') &&
           !read("app/.grasp/references.ts").includes("app_0000"),
@@ -252,6 +283,7 @@ describe(
           "app/.grasp/server-references.ts",
           "app/.grasp/server.ts",
           "app/app.ts",
+          "app/operations/confirmations.ts",
           "app/operations/notes.ts",
           "app/schema.ts",
         ],
@@ -261,6 +293,7 @@ describe(
         ],
         vendorTests: [],
         sameSource: true,
+        sealedContracts: true,
         localIdentity: true,
         grasp: ["@grasp-os/shared", "@grasp-os/sdk", "@grasp-os/ui"],
         notExact: [],
@@ -382,9 +415,18 @@ describe(
       await packaged(
         withLock(
           lockOf({ "date-kit": "1.2.0" }, [
-            locked("date-kit", "1.2.0", "MIT | injected\n| row |", {
-              "tz-data": "2.0.1",
-            }),
+            {
+              ...locked("date-kit", "1.2.0", "MIT | injected\n| row |", {
+                "tz-data": "2.0.1",
+              }),
+              // A peer the graph meets is pinned like a dependency; one the
+              // platform meets is the project's own.
+              peers: {
+                "tz-rules": { range: "^3.0.0", resolved: "3.1.0", by: "graph" },
+                react: { range: "^19.0.0", resolved: "19.3.0", by: "platform" },
+              },
+            },
+            locked("tz-rules", "3.1.0", "MIT"),
             locked("tz-data", "2.0.1", "Apache-2.0"),
           ])
         ),
@@ -435,7 +477,9 @@ describe(
         refused,
       }).toStrictEqual({
         dateKit: "1.2.0",
-        overrides: { "date-kit@1.2.0": { "tz-data": "2.0.1" } },
+        overrides: {
+          "date-kit@1.2.0": { "tz-data": "2.0.1", "tz-rules": "3.1.0" },
+        },
         notices: ["| date-kit | 1.2.0 | unknown | the App's lock |"],
         refused: ["refused", "refused", "refused", "refused", "refused"],
       });

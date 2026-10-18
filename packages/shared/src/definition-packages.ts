@@ -116,6 +116,27 @@ export const definitionPackageSchema = z.strictObject({
     bindings: z.record(aliasSchema, z.enum(appBindingKinds)),
     /** Each workflow the App declares, by alias: its version's key, if packaged. */
     workflows: z.record(aliasSchema, workflowKeySchema.nullable()),
+    /**
+     * For each workflow alias whose version is packaged, what the seal
+     * resolved of it beyond its declaration (the events its binding
+     * admits, its listen tasks and its decisions, by their descriptors),
+     * which the App's generated references type: never the version it
+     * pinned, and nothing of a workflow the package doesn't carry.
+     */
+    workflowContracts: z.record(
+      aliasSchema,
+      z.strictObject({
+        events: z.record(
+          z.string(),
+          z.strictObject({ type: z.string(), data: z.json() })
+        ),
+        listens: z.record(z.string(), z.array(z.string())),
+        decisions: z.record(
+          z.string(),
+          z.strictObject({ value: z.json(), context: z.json() })
+        ),
+      })
+    ),
   }),
   /** Each workflow version reached from the App, once, by key. */
   workflows: z.record(

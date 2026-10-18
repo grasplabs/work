@@ -57,11 +57,16 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import { generateModules, readAppManifest } from "@grasp-os/sdk/host";
+import {
+  generateModules,
+  readAppManifest,
+  readSealedWorkflows,
+} from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import { definitionPackageSchema } from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { graspLockSchema } from "@grasp-os/shared/packages";
+import type { LockedPackage } from "@grasp-os/shared/packages";
 import { z } from "zod";
 
 /** The workspace packages a project vendors, each with what it depends on. */
@@ -309,10 +314,22 @@ const planApp = async (
   project: Plan,
   app: DefinitionPackage["app"]
 ): Promise<void> => {
-  const generated = await generateModules(readAppManifest(app.manifest), {
-    resourceId: localIdentity,
-    resourceVersion: app.version,
-  });
+  // What the seal resolved of each packaged workflow, read back as
+  // strictly as a release's own contracts are: no pin, so the references
+  // name no deployment's workflow.
+  const bound = readSealedWorkflows(
+    Object.fromEntries(
+      Object.entries(app.workflowContracts).map(([alias, contract]) => [
+        alias,
+        { alias, ...contract },
+      ])
+    )
+  );
+  const generated = await generateModules(
+    readAppManifest(app.manifest),
+    { resourceId: localIdentity, resourceVersion: app.version },
+    bound
+  );
   for (const [file, text] of Object.entries(generated)) {
     project.add(`app/${safePath(file, "generated")}`, text);
   }
@@ -348,10 +365,25 @@ interface AppPins {
   readonly direct: Record<string, string>;
   /**
    * npm `overrides`: for each locked package, by `<name>@<version>`, the
-   * exact version of each of its dependencies, as the lock resolved them.
+   * exact version of each of its dependencies and of each peer met within
+   * its graph, as the lock resolved them.
    */
   readonly overrides: Record<string, Record<string, string>>;
 }
+
+/**
+ * The peers of `entry` the lock resolved within its own graph, by exact
+ * version: pinned like its dependencies. Peers the platform meets are the
+ * project's own (React), which it pins itself.
+ */
+const graphPeersOf = (entry: LockedPackage): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(entry.peers).flatMap(([name, peer]) =>
+      peer.by === "graph" && peer.resolved !== null
+        ? [[name, peer.resolved]]
+        : []
+    )
+  );
 
 /** Whether the project pins `name` itself, so no App lock may name it. */
 const ownedByProject = (name: string): boolean =>
@@ -393,6 +425,7 @@ const appDependencies = (
   const named = locked.flatMap((entry) => [
     entry.name,
     ...Object.keys(entry.dependencies),
+    ...Object.keys(graphPeersOf(entry)),
   ]);
   if (
     Object.keys(lock.data.direct).some(ownedByProject) ||
@@ -412,8 +445,9 @@ const appDependencies = (
   }
   const overrides: Record<string, Record<string, string>> = {};
   for (const entry of locked) {
-    if (Object.keys(entry.dependencies).length > 0) {
-      overrides[`${entry.name}@${entry.version}`] = { ...entry.dependencies };
+    const pinnedEdges = { ...graphPeersOf(entry), ...entry.dependencies };
+    if (Object.keys(pinnedEdges).length > 0) {
+      overrides[`${entry.name}@${entry.version}`] = pinnedEdges;
     }
   }
   return { direct: lock.data.direct, overrides };

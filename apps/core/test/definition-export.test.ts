@@ -222,6 +222,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         "provenance",
         "store",
         "version",
+        "workflowContracts",
         "workflows",
       ],
       provenance: [
@@ -277,6 +278,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       manifestHash: exported.app.provenance.manifestHash,
       bindings: exported.app.bindings,
       workflows: exported.app.workflows,
+      contracts: exported.app.workflowContracts,
       packaged: keys(exported.workflows),
       unresolved: exported.unresolved,
       nested: { workflows: entry.workflows, bindings: entry.bindings },
@@ -285,6 +287,12 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       manifestHash: release.manifestHash,
       bindings: { writer: "model" },
       workflows: { followUp: key, later: null, remind: key },
+      // What the references type of each packaged one, never of the
+      // unbound alias.
+      contracts: {
+        followUp: { events: {}, listens: {}, decisions: {} },
+        remind: { events: {}, listens: {}, decisions: {} },
+      },
       packaged: [key],
       unresolved: [{ at: "app", alias: "later", reason: "unbound" }],
       nested: { workflows: {}, bindings: {} },
@@ -409,12 +417,14 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const exported = await exportAppDefinition(env, owner, app);
     expect({
       workflows: exported.app.workflows,
+      contracts: exported.app.workflowContracts,
       packaged: exported.workflows,
       unresolved: exported.unresolved.toSorted((a, b) =>
         a.alias < b.alias ? -1 : 1
       ),
     }).toStrictEqual({
       workflows: { followUp: null, later: null, remind: null },
+      contracts: {},
       packaged: {},
       unresolved: [
         { at: "app", alias: "followUp", reason: "forbidden" },
