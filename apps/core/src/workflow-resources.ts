@@ -1011,25 +1011,23 @@ const sealedBuildOf = (
 
 /** Where a version's manifest says what its actions may do (GRA-709). */
 const manifestActionsSchema = z.object({
-  actions: z
-    .array(
-      z.strictObject({
-        binding: z.string(),
-        module: z.string(),
-        export: z.string(),
-        uses: actionUsesSchema,
-      })
-    )
-    .optional(),
+  actions: z.array(
+    z.strictObject({
+      binding: z.string(),
+      module: z.string(),
+      export: z.string(),
+      uses: actionUsesSchema,
+    })
+  ),
 });
 
 /**
- * What version `row`'s actions may do, as its manifest seals it; null for
- * a version sealed before it was recorded, which says nothing either way.
+ * What version `row`'s actions may do, as its manifest seals it: a
+ * manifest without them is malformed, as one without its build is.
  */
 const sealedActionsOf = (
   row: typeof workflowResourceVersions.$inferSelect
-): WorkflowVersionAction[] | null => {
+): WorkflowVersionAction[] => {
   let manifest: unknown;
   try {
     manifest = JSON.parse(row.manifest);
@@ -1040,7 +1038,7 @@ const sealedActionsOf = (
   if (!parsed.success) {
     throw corrupt(row.workflowResourceId, row.version);
   }
-  return parsed.data.actions ?? null;
+  return parsed.data.actions;
 };
 
 /** A version's row, as the registry answers it. */

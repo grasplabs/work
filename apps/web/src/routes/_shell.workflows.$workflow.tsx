@@ -43,18 +43,7 @@ import { TestRun } from "../workflows/test-run.tsx";
 // (GRA-709): each binding they use, and a connector's exact operations.
 
 /** What a version's own actions may call: each action, then its uses. */
-const ActionEffects = ({
-  actions,
-}: {
-  actions: WorkflowVersionAction[] | null;
-}) => {
-  if (actions === null) {
-    return (
-      <span className="text-muted-foreground">
-        <Trans>Not recorded</Trans>
-      </span>
-    );
-  }
+const ActionEffects = ({ actions }: { actions: WorkflowVersionAction[] }) => {
   if (actions.length === 0) {
     return (
       <span className="text-muted-foreground">

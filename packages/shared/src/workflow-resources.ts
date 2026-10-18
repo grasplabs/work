@@ -653,11 +653,8 @@ export interface WorkflowResourceVersion {
   contractHash: string;
   manifestHash: string;
   bindings: WorkflowVersionBinding[];
-  /**
-   * What its own actions may do, as sealed with it, by binding; null for
-   * a version sealed before it was recorded.
-   */
-  actions: WorkflowVersionAction[] | null;
+  /** What its own actions may do, as sealed with it, by binding. */
+  actions: WorkflowVersionAction[];
   build: WorkflowVersionBuild;
   author: string;
   createdAt: string;

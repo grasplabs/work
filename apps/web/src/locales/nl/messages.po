@@ -4175,10 +4175,6 @@ msgstr "Niet aangeboden"
 msgid "Not published"
 msgstr "Niet gepubliceerd"
 
-#: src/routes/_shell.workflows.$workflow.tsx
-msgid "Not recorded"
-msgstr "Niet vastgelegd"
-
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "Not released"

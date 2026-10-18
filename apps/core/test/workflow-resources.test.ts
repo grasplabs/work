@@ -1092,15 +1092,26 @@ describe("stored versions", () => {
     )
       .bind(definitionOf({ name: child.name, status: "tampered" }), child.id)
       .run();
+    // A manifest that lost what its actions may do is malformed too: no
+    // version is listed as doing nothing for want of the record.
+    const bare = await workflowOf(ada, "bare");
+    await publish(ada, bare.id, definitionOf({ name: bare.name }));
+    await env.DB.prepare(
+      "UPDATE workflow_resource_versions SET manifest = json_remove(manifest, '$.actions') WHERE workflow_resource_id = ?"
+    )
+      .bind(bare.id)
+      .run();
     const parent = await workflowOf(ada, "parent");
     expect({
       definition: await outcome(workflowDefinition(env, ada, child.id, 1)),
       binding: await outcome(
         publish(ada, parent.id, bindingDefinition(parent.name, child.name))
       ),
+      actions: await outcome(workflowVersions(env, ada, bare.id)),
     }).toStrictEqual({
       definition: "workflow.version_corrupt",
       binding: "workflow.version_corrupt",
+      actions: "workflow.version_corrupt",
     });
   });
 

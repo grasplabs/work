@@ -4175,10 +4175,6 @@ msgstr "No ofrecida"
 msgid "Not published"
 msgstr "No publicado"
 
-#: src/routes/_shell.workflows.$workflow.tsx
-msgid "Not recorded"
-msgstr "Sin registrar"
-
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "Not released"
