@@ -1,3 +1,4 @@
+import { dayOf } from "@grasp-os/shared/admin/org-record";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   onboardingErrors,
@@ -30,7 +31,7 @@ import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { shareDocument } from "./documents.ts";
 import { gateView } from "./gate.ts";
-import { dayOf, mondayOf } from "./rules.ts";
+import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 import { summaryOf } from "./summary.ts";
 

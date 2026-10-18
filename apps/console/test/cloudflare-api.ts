@@ -10,6 +10,12 @@
  * for each database the fake holds at once (`CLIENT_D1_<n>`,
  * vite.test.config.ts).
  */
+import {
+  adminSnapshotPath,
+  adminSnapshotPurpose,
+  adminSnapshotRequestSchema,
+} from "@grasp-os/shared/admin-snapshot";
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
@@ -134,6 +140,92 @@ const answerSummary = async (
     return new Response("Forbidden", { status: 403 });
   }
   return Response.json(account.onboarding ?? noOnboarding);
+};
+
+/** Two hex characters at a time. */
+const hexPair = /../gu;
+
+/** A company with nothing begun: what a core answers that has no onboarding. */
+export const emptyAdminSnapshot = (name: string): AdminSnapshot => ({
+  now: new Date().toISOString(),
+  company: {
+    name,
+    timeZone: "Europe/Amsterdam",
+    signInDomains: [],
+    signIn: [],
+    admins: [],
+  },
+  contacts: null,
+  roster: null,
+  plan: null,
+  agreements: null,
+  agreed: false,
+  paused: false,
+  told: false,
+  mapped: [],
+  links: [],
+  interviews: [],
+  works: null,
+  kickoff: null,
+  gate: {
+    open: false,
+    closedSince: null,
+    threshold: 80,
+    known: 0,
+    ready: false,
+    over: false,
+    openedAt: null,
+  },
+  contract: null,
+  members: [],
+  integrations: null,
+  usage: [],
+});
+
+/**
+ * What a client's core answers the console's admin snapshot request with,
+ * as core does (core's src/admin-snapshot.ts): the account's snapshot
+ * once the signature checks out, with the key its live version's auth
+ * secret gives for the admin's purpose, and the request parses, keeping
+ * whom it names as the reader; 401 for a request signed otherwise, 403
+ * for one that doesn't parse; 404 from a core from before the snapshot.
+ */
+const answerAdmin = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  if (account.admin === "absent") {
+    return new Response("Not found", { status: 404 });
+  }
+  await account.adminHeld?.();
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminSnapshotPurpose,
+    ["verify"]
+  );
+  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
+  const signed = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
+      Number.parseInt(pair, 16)
+    ),
+    new TextEncoder().encode(body)
+  );
+  if (!signed) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const asked = adminSnapshotRequestSchema.safeParse(JSON.parse(body));
+  if (!asked.success || account.admin === "ended") {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.adminReaders.push(asked.data.staff.email);
+  if (account.admin === "garbled") {
+    return Response.json({ company: account.name });
+  }
+  return Response.json(account.admin ?? emptyAdminSnapshot(account.name));
 };
 
 /**
@@ -497,6 +589,7 @@ export const mockCloudflareApi = (
       completions: new Set(),
       scriptUploads: [],
       notices: [],
+      adminReaders: [],
     };
     accounts.set(account.id, account);
     return account;
@@ -511,6 +604,8 @@ export const mockCloudflareApi = (
   const busyAccounts = new Map<string, number>();
   /** Calls whose caller aborted them before they were answered. */
   const aborted = { count: 0 };
+  /** Admin snapshot requests to cores under way, and the most at once in this test. */
+  const adminReads = { now: 0, peak: 0 };
 
   /** Whose token a call carries: the deployer's or the tenant admin's. */
   const callers = new Map([
@@ -749,6 +844,20 @@ export const mockCloudflareApi = (
     if (url.pathname === onboardingSummaryPath && request.method === "POST") {
       return await answerSummary(account, live, request);
     }
+    if (url.pathname === adminSnapshotPath && request.method === "POST") {
+      adminReads.now += 1;
+      adminReads.peak = Math.max(adminReads.peak, adminReads.now);
+      try {
+        // As fetch does: an aborted request ends at once, whatever its
+        // core was still doing.
+        return await Promise.race([
+          answerAdmin(account, live, request),
+          whenAborted(request.signal),
+        ]);
+      } finally {
+        adminReads.now -= 1;
+      }
+    }
     return url.pathname === "/health"
       ? Response.json({
           ok: true,
@@ -823,6 +932,8 @@ export const mockCloudflareApi = (
     load.peakAccounts = 0;
     busyAccounts.clear();
     aborted.count = 0;
+    adminReads.now = 0;
+    adminReads.peak = 0;
   });
 
   return {
@@ -832,6 +943,8 @@ export const mockCloudflareApi = (
     peakConcurrency: () => load.peak,
     /** The most accounts it was answering calls for at once in this test. */
     peakAccounts: () => load.peakAccounts,
+    /** The most admin snapshot requests cores were answering at once in this test. */
+    peakAdminReads: () => adminReads.peak,
     /** How many calls their caller aborted before they were answered, in this test. */
     abortedCalls: () => aborted.count,
     /** Adds an account the token is a member of, and returns what it holds. */

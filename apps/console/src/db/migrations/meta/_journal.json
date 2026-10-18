@@ -92,6 +92,13 @@
       "when": 1790801581082,
       "tag": "0012_drop_features_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792266422022,
+      "tag": "0013_client_admin_reads",
+      "breakpoints": true
     }
   ]
 }
