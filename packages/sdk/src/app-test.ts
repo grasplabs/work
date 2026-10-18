@@ -99,9 +99,12 @@ export interface TestPrincipal {
   action: <Reference extends PublicReference<"action">>(
     // A streaming action runs only for a screen following it (spec
     // 10.7.6), never through a call that answers once: its type is
-    // refused here, as the host refuses it (`operation.mode_mismatch`).
+    // refused here, as the host refuses it (`operation.mode_mismatch`),
+    // and so is a union any member of which streams (not distributed).
     reference: Reference &
-      (Reference extends StreamingFunction ? never : unknown),
+      ([Extract<Reference, StreamingFunction>] extends [never]
+        ? unknown
+        : never),
     args: ArgsOf<Reference>
   ) => Promise<ReturnOf<Reference>>;
   /**

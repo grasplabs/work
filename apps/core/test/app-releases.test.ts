@@ -938,22 +938,27 @@ export const progress = action({
           "operations: { notes: { get, create, tally }, streams: { once, progress } },"
         ),
     };
-    const running = (name: string): Record<string, string> => ({
+    const running = (reference: string): Record<string, string> => ({
       ...streamed,
       "tests/helper.ts": `import type { api } from "#grasp";
 import type { TestPrincipal } from "@grasp-os/sdk/testing";
 
-export const run = async (principal: TestPrincipal, refs: typeof api): Promise<number> =>
-  await principal.action(refs.streams.${name}, {});
+export const run = async (principal: TestPrincipal, refs: typeof api, flag: boolean): Promise<number> =>
+  await principal.action(${reference}, {});
 `,
     });
     await expect(
-      Promise.all([
-        refusedSeal(running("once")),
-        refusedSeal(running("progress")),
-      ])
+      Promise.all(
+        [
+          "refs.streams.once",
+          "refs.streams.progress",
+          // Either one: it may stream, so it is refused as well.
+          "flag ? refs.streams.once : refs.streams.progress",
+        ].map(async (reference) => await refusedSeal(running(reference)))
+      )
     ).resolves.toStrictEqual([
       { code: "ok", files: [] },
+      { code: "version.build_failed", files: ["tests/helper.ts"] },
       { code: "version.build_failed", files: ["tests/helper.ts"] },
     ]);
   });
