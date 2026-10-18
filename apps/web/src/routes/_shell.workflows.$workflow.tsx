@@ -23,7 +23,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
 
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, formatList } from "../format.ts";
 import {
   NotLoadedState,
   PageLoading,
@@ -70,7 +70,7 @@ const ActionEffects = ({
           {action.uses.map((use) => (
             <Badge key={use.alias} variant="outline">
               {use.kind === "connector"
-                ? `${use.alias}: ${use.operations.join(", ")}`
+                ? `${use.alias}: ${formatList(use.operations)}`
                 : use.alias}
             </Badge>
           ))}
