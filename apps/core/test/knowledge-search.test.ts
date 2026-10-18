@@ -606,8 +606,9 @@ const namedPattern = new RegExp(
 const corpusNamesOf = (query: string): Map<string, string> => {
   const names = new Map([...corpusTables].map((table) => [table, table]));
   for (const { groups } of query.matchAll(namedPattern)) {
-    const table = groups?.table ?? "";
-    const alias = groups?.alias ?? "";
+    // Names are compared as SQLite does: whatever their case.
+    const table = (groups?.table ?? "").toLowerCase();
+    const alias = (groups?.alias ?? "").toLowerCase();
     if (corpusTables.has(table) && alias !== "") {
       names.set(alias, table);
     }
@@ -632,7 +633,7 @@ const tablesReadWhole = async ({ query, values }: Bound): Promise<string[]> => {
   const names = corpusNamesOf(query);
   return results.flatMap(({ detail }) => {
     const step = scanPattern.exec(detail)?.groups;
-    const table = names.get(step?.table ?? "");
+    const table = names.get((step?.table ?? "").toLowerCase());
     if (table === undefined) {
       return [];
     }
