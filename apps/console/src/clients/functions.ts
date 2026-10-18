@@ -10,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { consoleDatabase } from "../db/act.ts";
+import { adminReader } from "./admin.ts";
 import { applySettings } from "./apply.ts";
 import { clientGrid, gridLive } from "./grid.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
@@ -55,6 +56,17 @@ export const fetchClientGrid = createServerFn({ method: "GET" }).handler(
  */
 export const fetchGridLive = createServerFn({ method: "GET" }).handler(
   async () => await gridLive(env, new Date())
+);
+
+/**
+ * Every client's admin snapshot, as its core answers the verified staff
+ * member asking (whom its audit log records), or as not reachable since it
+ * last answered (`clientAdmins`). A POST, though it reads: it keeps when
+ * each core answered, and every core's audit log records the read, so it
+ * takes the same-origin check every change does (src/access.ts).
+ */
+export const fetchClientAdmins = createServerFn({ method: "POST" }).handler(
+  async ({ context }) => await adminReader(env, context.staff)()
 );
 
 /** A client's settings and its latest console actions; null settings for no such client. */
