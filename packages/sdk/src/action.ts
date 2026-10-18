@@ -51,7 +51,15 @@ export { v } from "./values.ts";
 export type { Infer, InferInput } from "./values.ts";
 
 /** The kinds of binding an action may use in this release. */
-export type UseKind = "connector" | "operation" | "model";
+export type UseKind =
+  | "connector"
+  | "operation"
+  | "model"
+  | "knowledge"
+  | "template";
+
+/** The operations of a Knowledge collection an action may declare. */
+export type KnowledgeOperation = "search" | "read";
 
 /**
  * A binding an action declares it uses: its alias and kind, and of a
@@ -111,12 +119,67 @@ export interface ModelResource<Output extends AnySchema = AnySchema> {
   readonly generate: (request: ModelRequest) => Promise<Infer<Output>>;
 }
 
+/** One search hit of a Knowledge collection: a title and an excerpt. */
+export interface KnowledgeHit {
+  readonly title: string;
+  readonly excerpt: string;
+}
+
+/** A document of a Knowledge collection: its title and text. */
+export interface KnowledgeDocument {
+  readonly title: string;
+  readonly text: string;
+}
+
+/**
+ * A knowledge binding (one collection), as an action calls it: only the
+ * operations its use declared, each reading what the run's person may
+ * read of the collection, checked by the host.
+ */
+export type KnowledgeResource<Operation extends KnowledgeOperation> =
+  ("search" extends Operation
+    ? {
+        /** The best matches for `text`: 1 to 500 characters, up to `limit` (1 to 20). */
+        readonly search: (request: {
+          readonly text: string;
+          readonly limit?: number;
+        }) => Promise<KnowledgeHit[]>;
+      }
+    : unknown) &
+    ("read" extends Operation
+      ? {
+          /** One document of the collection, by its ID. */
+          readonly read: (request: {
+            readonly id: string;
+          }) => Promise<KnowledgeDocument>;
+        }
+      : unknown);
+
+/** A template version, as its binding pins it: data, never code. */
+export interface TemplateContent {
+  readonly contract: string;
+  readonly version: number;
+  readonly content: JsonValue;
+}
+
+/** A template binding, as an action calls it: its pinned version. */
+export interface TemplateResource {
+  /** The pinned version's content, as approved. */
+  readonly read: () => Promise<TemplateContent>;
+}
+
 /** What a use gives an action. */
 type ResourceOf<U extends AnyUse> = U["~use"]["kind"] extends "connector"
   ? ConnectorResource<Exclude<U["~operation"], undefined>>
   : U["~use"]["kind"] extends "model"
     ? ModelResource<Exclude<U["~output"], undefined>>
-    : OperationResource;
+    : U["~use"]["kind"] extends "knowledge"
+      ? KnowledgeResource<
+          Extract<Exclude<U["~operation"], undefined>, KnowledgeOperation>
+        >
+      : U["~use"]["kind"] extends "template"
+        ? TemplateResource
+        : OperationResource;
 
 /** What an action's handler gets besides its arguments. */
 export interface ActionCtx<Uses extends readonly AnyUse[]> {
@@ -220,7 +283,9 @@ const isDeclaredUse = (value: unknown): value is DeclaredUse =>
   "kind" in value &&
   (value.kind === "connector" ||
     value.kind === "operation" ||
-    value.kind === "model") &&
+    value.kind === "model" ||
+    value.kind === "knowledge" ||
+    value.kind === "template") &&
   "operations" in value &&
   Array.isArray(value.operations);
 
@@ -228,12 +293,13 @@ const declareUse = <
   Alias extends string,
   Kind extends UseKind,
   Output extends AnySchema = AnySchema,
+  Operation extends string = never,
 >(
   kind: Kind,
   alias: Alias,
   operations: readonly string[],
   output?: ValueDescriptor
-): Use<Alias, Kind, never, Output> => {
+): Use<Alias, Kind, Operation, Output> => {
   if (typeof alias !== "string" || !aliasPattern.test(alias)) {
     return refuse(
       "A resource's alias is a binding alias: letters, digits and _."
@@ -244,7 +310,9 @@ const declareUse = <
       ? { alias, kind, operations }
       : { alias, kind, operations, output }
   );
-  const use: Use<Alias, Kind, never, Output> = freeze({ "~use": declared });
+  const use: Use<Alias, Kind, Operation, Output> = freeze({
+    "~use": declared,
+  });
   if (typeof weakSet === "function") {
     apply(weakSet, declaredUses, [use, declared]);
   }
@@ -256,6 +324,15 @@ export interface ConnectorUseOptions<Operation extends string> {
   /** The exact operations of the connector the action calls. */
   readonly operations: readonly Operation[];
 }
+
+/** What a knowledge use declares besides its alias. */
+export interface KnowledgeUseOptions<Operation extends KnowledgeOperation> {
+  /** The operations of the binding's collection the action calls. */
+  readonly operations: readonly Operation[];
+}
+
+/** The knowledge operations, as `resource.knowledge` takes them. */
+const knowledgeOperations: ReadonlySet<string> = new Set(["search", "read"]);
 
 /** What a model use declares besides its alias. */
 export interface ModelUseOptions<Output extends AnySchema> {
@@ -306,6 +383,38 @@ export const resource = freeze({
       descriptorOf(property.value)
     );
   },
+  knowledge: <
+    const Alias extends string,
+    const Operation extends KnowledgeOperation,
+  >(
+    alias: Alias,
+    options: KnowledgeUseOptions<Operation>
+  ): Use<Alias, "knowledge", Operation> => {
+    const property =
+      typeof options === "object" && options !== null
+        ? getOwnPropertyDescriptor(options, "operations")
+        : undefined;
+    if (property === undefined || !("value" in property)) {
+      return refuse(
+        'Declare the operations a knowledge use calls: `{ operations: ["search", "read"] }`.'
+      );
+    }
+    const operations = operationsOf(property.value);
+    if (
+      operations.length > knowledgeOperations.size ||
+      operations.some((operation) => !knowledgeOperations.has(operation))
+    ) {
+      return refuse('A knowledge use calls "search", "read" or both.');
+    }
+    return declareUse<Alias, "knowledge", AnySchema, Operation>(
+      "knowledge",
+      alias,
+      operations
+    );
+  },
+  // One pinned version: nothing more to declare.
+  template: <const Alias extends string>(alias: Alias) =>
+    declareUse("template", alias, []),
 });
 
 /** What `action` is declared with. */
@@ -338,7 +447,13 @@ export type ContractUse =
       readonly alias: string;
       readonly kind: "model";
       readonly output: ValueDescriptor;
-    };
+    }
+  | {
+      readonly alias: string;
+      readonly kind: "knowledge";
+      readonly operations: readonly string[];
+    }
+  | { readonly alias: string; readonly kind: "template" };
 
 /** An action's contract, as the host's manifest records it. */
 export interface ActionContract {
@@ -410,6 +525,13 @@ const usesOf = (value: unknown): ActionContract["uses"] => {
           alias: use.alias,
           kind: use.kind,
           // Frozen as `resource` copied it.
+          operations: use.operations,
+        });
+      }
+      if (use.kind === "knowledge") {
+        return freeze({
+          alias: use.alias,
+          kind: use.kind,
           operations: use.operations,
         });
       }

@@ -18,6 +18,8 @@ export const bindingKinds = [
   "compute",
   "decision",
   "event",
+  "knowledge",
+  "template",
 ] as const;
 export type BindingKind = (typeof bindingKinds)[number];
 
@@ -376,6 +378,10 @@ const requiredFields: Readonly<
   workflow: ["workflow", "input", "output"],
   decision: ["input", "response"],
   event: ["events"],
+  // Served by the host's own contract (search and read; a pinned version's
+  // content): an action's use is all that reaches one.
+  knowledge: [],
+  template: [],
 };
 
 const checkComplete = (contract: ResolvedContract): void => {

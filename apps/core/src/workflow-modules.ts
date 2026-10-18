@@ -14,7 +14,9 @@ import { valueDepth } from "@grasp-os/shared/value-depth";
 import {
   actionUseAliasPattern,
   connectorUseSchema,
+  knowledgeUseSchema,
   operationUseSchema,
+  templateUseSchema,
   workflowModuleLimits,
 } from "@grasp-os/shared/workflow-modules";
 import type { ActionUse, SealedUse } from "@grasp-os/shared/workflow-modules";
@@ -113,7 +115,15 @@ export const sealedUse = (use: ActionUse | SealedUse): SealedUse => {
         output: use.output,
       });
     }
-    case "operation": {
+    case "knowledge": {
+      return Object.freeze({
+        alias: use.alias,
+        kind: use.kind,
+        operations: Object.freeze([...use.operations]),
+      });
+    }
+    case "operation":
+    case "template": {
       return Object.freeze({ alias: use.alias, kind: use.kind });
     }
     default: {
@@ -325,7 +335,15 @@ export const versionActionsOf = (
             // what a reviewer approves the action's model calls for.
             return { alias: use.alias, kind: use.kind, output: use.output };
           }
-          case "operation": {
+          case "knowledge": {
+            return {
+              alias: use.alias,
+              kind: use.kind,
+              operations: [...use.operations],
+            };
+          }
+          case "operation":
+          case "template": {
             return { alias: use.alias, kind: use.kind };
           }
           default: {
@@ -349,6 +367,8 @@ const descriptorObject = z.record(z.string(), z.json());
 const manifestUseSchema = z.discriminatedUnion("kind", [
   connectorUseSchema,
   operationUseSchema,
+  knowledgeUseSchema,
+  templateUseSchema,
   z.strictObject({
     alias: z.string().regex(actionUseAliasPattern),
     kind: z.literal("model"),
@@ -616,7 +636,17 @@ export const moduleLookup =
           output: contract.output,
           ...(contract.uses === undefined
             ? {}
-            : { uses: contract.uses.map(sealedUse) }),
+            : {
+                // As validation checks them against the catalog: a
+                // connector's with its operations, which its contract must
+                // name; any other by its alias and kind. A knowledge use's
+                // operations are the host's own to hold it to (GRA-700).
+                uses: contract.uses.map((use) =>
+                  use.kind === "connector"
+                    ? sealedUse(use)
+                    : { alias: use.alias, kind: use.kind }
+                ),
+              }),
         };
   };
 

@@ -185,13 +185,19 @@ export const workflowResourceErrors = defineErrorFamily({
     "A task's action made as many calls as one attempt of it may, so the run failed.",
 });
 
-/** The binding kinds the host catalog serves, beside other workflows. */
+/**
+ * The binding kinds the host catalog serves, beside other workflows. A
+ * `knowledge` or `template` binding is reached only by the workflow's own
+ * actions (GRA-700): no JSON task calls one.
+ */
 export const catalogBindingKinds = [
   "operation",
   "connector",
   "model",
   "decision",
   "event",
+  "knowledge",
+  "template",
 ] as const;
 export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
 
@@ -353,6 +359,22 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     deciders: z.array(deciderSchema).min(1).max(16),
   }),
   z.strictObject({ kind: z.literal("event") }),
+  // One Knowledge collection, through a permission the workflow itself
+  // holds to read it (GRA-700): its runs' actions read only that, and
+  // only what the person a run acts for may read too.
+  z.strictObject({
+    kind: z.literal("knowledge"),
+    permissionId: identifierSchema,
+  }),
+  // One published template version, pinned by its content's hash as the
+  // admin approves it (GRA-700): content that no longer hashes to it
+  // serves nothing.
+  z.strictObject({
+    kind: z.literal("template"),
+    templateId: identifierSchema,
+    version: z.int().min(1),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  }),
 ]);
 export type WorkflowBindingTarget = z.infer<typeof workflowBindingTargetSchema>;
 
