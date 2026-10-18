@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  collectionKeysOf,
+  addCollectionKeys,
   holdsAny,
   indexKeysOf,
   owedRebuildStaleMs,
@@ -11,6 +11,7 @@ import {
   rebuildOwed,
   rebuildSearchIndex,
 } from "../src/knowledge/search-erasure.ts";
+import type { IndexKey } from "../src/knowledge/search-erasure.ts";
 
 // What a purge leaves of a term in the search index's page directory
 // (search-erasure.ts, threat model in GRA-693): the rule that decides
@@ -138,11 +139,20 @@ describe("a purged term's page separators", () => {
   });
 });
 
-/** The keys of `value` in `table`, or undefined when not checked. */
-const keysIn = (value: string, table: "search_words" | "search_trigrams") =>
-  collectionKeysOf(value)
-    ?.filter((key) => key.table === table)
-    .map(({ key }) => key);
+/** What a personal purge reads of `value`: its keys, or why it stopped. */
+const collectionKeysOf = (value: string, maxKeys = 20_000) => {
+  const into = new Map<string, IndexKey>();
+  const outcome = addCollectionKeys(value, into, maxKeys);
+  return { outcome, keys: [...into.values()] };
+};
+
+/** The keys of `value` in `table`, or why there are none. */
+const keysIn = (value: string, table: IndexKey["table"]) => {
+  const { outcome, keys } = collectionKeysOf(value);
+  return outcome === "ok"
+    ? keys.filter((key) => key.table === table).map(({ key }) => key)
+    : outcome;
+};
 
 describe("a deleted collection's page separators", () => {
   it("are checked for the trigrams that hold a short word whole with its neighbours", () => {
@@ -157,15 +167,39 @@ describe("a deleted collection's page separators", () => {
     });
   });
 
-  it("are checked through punctuation of any script, never a token they can't fold", () => {
+  it("are checked through punctuation of any script apart from tokens, never a token they can't read exactly", () => {
     expect({
-      dash: keysIn("plan — team’s", "search_words"),
-      accented: collectionKeysOf("café"),
-      otherScript: collectionKeysOf("Visserさん"),
+      dash: keysIn("plan — team", "search_words"),
+      beside: keysIn("team’s", "search_words"),
+      inATrigram: keysIn("—Jo", "search_words"),
+      accented: keysIn("café", "search_words"),
+      otherScript: keysIn("Visserさん", "search_words"),
     }).toStrictEqual({
-      dash: ["0plan", "0team", "0s", "1s", "2s"],
-      accented: undefined,
-      otherScript: undefined,
+      dash: ["0plan", "0team"],
+      beside: "unknown",
+      inATrigram: "unknown",
+      accented: "unknown",
+      otherScript: "unknown",
+    });
+  });
+
+  it("are collected once each, and stop at the cap", () => {
+    const repeated = collectionKeysOf("1 ".repeat(500_000));
+    const many = collectionKeysOf(
+      // Words of letters, of a key each.
+      Array.from(
+        { length: 50 },
+        (_, at) =>
+          `zz${String.fromCodePoint(97 + (at % 26))}${String.fromCodePoint(97 + Math.floor(at / 26))}q`
+      ).join(" "),
+      10
+    );
+    expect({
+      repeated: { outcome: repeated.outcome, few: repeated.keys.length < 20 },
+      many: { outcome: many.outcome, keys: many.keys.length },
+    }).toStrictEqual({
+      repeated: { outcome: "ok", few: true },
+      many: { outcome: "capped", keys: 11 },
     });
   });
 });

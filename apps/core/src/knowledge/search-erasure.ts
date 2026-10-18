@@ -32,8 +32,9 @@ import { searchRebuilds } from "../db/knowledge/schema.ts";
 // error repeats its parameters, so only the error's name is.
 //
 // A personal purge deletes a whole collection, whose terms it doesn't
-// name: it reads what the index holds of the collection before deleting
-// it, and checks the tokens of that text (threat model in GRA-696). Its
+// name: before deleting it, it reads every version of its documents, each
+// of which the index held once, and checks the tokens they gave the index
+// (threat model in GRA-696). Its
 // common words ("the", single letters) head pages all the time, so a
 // separator that holds one of its tokens counts only when no live row
 // still holds the token: then it reveals nothing the index doesn't. That
@@ -380,18 +381,18 @@ export const eraseFromSearchIndex = async (
 
 /** How far a personal purge checks a collection's tokens before it rebuilds instead. */
 export const collectionCheckCaps = {
-  /** Characters of indexed text read. */
-  characters: 2 * 1024 * 1024,
+  /** The collection's versions, every one of which the index may have held. */
+  versions: 2000,
+  /** Characters of those versions' text, read and tokenised. */
+  characters: 1024 * 1024,
   /** Distinct page-directory keys looked up. */
   keys: 20_000,
   /** Lookups of whether a live row still holds a token. */
   liveLookups: 1000,
-  /** The collection's (document, version) pairs, compared at the delete. */
-  versions: 2000,
 } as const;
 
-/** Rows of the index read at once. */
-const rowsPerRead = 50;
+/** Versions' text read at once: no more than the character cap in all. */
+const versionsPerRead = 20;
 
 /** Keys looked up in one query. */
 const keysPerLookup = 500;
@@ -409,18 +410,31 @@ const tokenCharacter = /[\p{L}\p{N}\p{Co}\p{M}]/u;
 /** A token whose characters are all plain ASCII letters and digits. */
 const asciiToken = /^[A-Za-z0-9]+$/u;
 
+/** A character that isn't plain ASCII. */
+const notAscii = /\P{ASCII}/u;
+
 /**
- * The page-directory keys of the tokens in one value of an indexed column,
- * as `indexKeysOf` gives for a term's, and, for a token shorter than three
- * characters, the trigrams that span it whole with its neighbours (" jo",
- * "jo."), which the text says here. Undefined when a token holds a
- * character that isn't plain ASCII, whose folding is SQLite's own: rebuilt.
+ * Adds to `into` the page-directory keys of the tokens in one value of an
+ * indexed column, as `indexKeysOf` gives for a term's, and, for a token
+ * shorter than three characters, the trigrams that span it whole with its
+ * neighbours (" jo", "jo."), which the text says here. "unknown" when the
+ * tokenizers' reading of a token can't be worked out exactly: a character
+ * that isn't plain ASCII in it, right beside it (JavaScript's Unicode
+ * tables aren't SQLite's, which might join the two), or in a trigram of
+ * its neighbours (JavaScript's case folding isn't SQLite's). "capped" as
+ * soon as `into` holds more than `maxKeys`.
  */
-export const collectionKeysOf = (value: string): IndexKey[] | undefined => {
+export const addCollectionKeys = (
+  value: string,
+  into: Map<string, IndexKey>,
+  maxKeys: number
+): "ok" | "unknown" | "capped" => {
   // Code points, as the tokenizers count characters.
   // oxlint-disable-next-line typescript/no-misused-spread -- code points are meant
   const characters = [...value];
-  const keys: IndexKey[] = [];
+  const add = (key: IndexKey) => {
+    into.set(`${key.table}:${key.key}`, key);
+  };
   let start = 0;
   while (start < characters.length) {
     if (tokenCharacter.test(characters[start] ?? "")) {
@@ -432,44 +446,52 @@ export const collectionKeysOf = (value: string): IndexKey[] | undefined => {
         end += 1;
       }
       const token = characters.slice(start, end).join("");
-      if (!asciiToken.test(token)) {
-        return undefined;
+      const beside = `${characters[start - 1] ?? ""}${characters[end] ?? ""}`;
+      if (!asciiToken.test(token) || notAscii.test(beside)) {
+        return "unknown";
       }
-      keys.push(...keysOfToken(token.toLowerCase()));
+      for (const key of keysOfToken(token.toLowerCase())) {
+        add(key);
+      }
       if (token.length < 3) {
         const first = Math.max(0, end - 3);
         const last = Math.min(start, characters.length - 3);
         for (let at = first; at <= last; at += 1) {
-          keys.push({
+          const trigram = characters.slice(at, at + 3).join("");
+          if (notAscii.test(trigram)) {
+            return "unknown";
+          }
+          add({
             table: "search_trigrams",
-            key: `0${characters
-              .slice(at, at + 3)
-              .join("")
-              .toLowerCase()}`,
+            key: `0${trigram.toLowerCase()}`,
             least: 3,
           });
         }
+      }
+      if (into.size > maxKeys) {
+        return "capped";
       }
       start = end;
     } else {
       start += 1;
     }
   }
-  return keys;
+  return "ok";
 };
 
 /** What a personal purge's check counted, logged when it stops at a cap. */
 interface CheckCounts {
+  versions?: number;
   characters?: number;
   keys?: number;
   liveLookups?: number;
-  versions?: number;
 }
 
 /**
  * What a personal purge read of its collection before deleting it: the
  * page-directory keys of its tokens, or why they aren't checked (a token
- * that isn't plain ASCII; a cap reached, with the counts).
+ * that can't be read exactly, frontmatter that doesn't read, a cap
+ * reached, with the counts).
  */
 export type CollectionPlan =
   | {
@@ -487,91 +509,108 @@ const loggedCapped = (counts: CheckCounts): CollectionPlan => {
   return { kind: "capped", counts };
 };
 
-/** A section's (document, version) pair: a save to its document changes it. */
-const collectionPair = sql`document_id || ':' || version`;
+/** A version's (document, number) pair: a save to its document adds one. */
+const versionPair = sql`v.document_id || ':' || v.number`;
 
-/** Whether a section is of a document of `collectionId`. */
-const inCollection = (collectionId: string) => sql`document_id IN (
+/** Whether version `v` is of a document of `collectionId`. */
+const versionInCollection = (collectionId: string) => sql`v.document_id IN (
   SELECT id FROM documents WHERE collection_id = ${collectionId}
 )`;
+
+/**
+ * The values a version of a document at `path` gave the search index, or
+ * undefined when that can't be told (`indexedValuesOf`, documents.ts).
+ */
+export type IndexedValues = (
+  path: string,
+  text: string
+) => readonly string[] | undefined;
 
 /** `collectionPlan`, which throws when a read fails. */
 const readCollection = async (
   db: DrizzleD1Database,
-  collectionId: string
+  collectionId: string,
+  valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
-  const pairs = await db.all<{ pair: string }>(sql`
-      SELECT DISTINCT ${collectionPair} AS pair FROM sections
-      WHERE ${inCollection(collectionId)}
-      LIMIT ${collectionCheckCaps.versions + 1}
-    `);
-  const versions = pairs.map(({ pair }) => pair);
+  // How much there is, before any text is read.
+  const [size] = await db.all<{ versions: number; characters: number }>(sql`
+    SELECT count(*) AS versions, coalesce(sum(length(v.text)), 0) AS characters
+    FROM versions AS v WHERE ${versionInCollection(collectionId)}
+  `);
+  const counts = {
+    versions: size?.versions ?? 0,
+    characters: size?.characters ?? 0,
+  };
+  if (
+    counts.versions > collectionCheckCaps.versions ||
+    counts.characters > collectionCheckCaps.characters
+  ) {
+    return loggedCapped(counts);
+  }
+  const listed = await db.all<{ pair: string }>(sql`
+    SELECT ${versionPair} AS pair FROM versions AS v
+    WHERE ${versionInCollection(collectionId)}
+    ORDER BY v.document_id, v.number
+    LIMIT ${collectionCheckCaps.versions + 1}
+  `);
+  const versions = listed.map(({ pair }) => pair);
   if (versions.length > collectionCheckCaps.versions) {
     return loggedCapped({ versions: versions.length });
   }
   const keys = new Map<string, IndexKey>();
   let characters = 0;
-  let after = 0;
-  for (;;) {
+  for (let at = 0; at < versions.length; at += versionsPerRead) {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const rows = await db.all<{
-      id: number;
-      title: string | null;
-      description: string | null;
-      headings: string | null;
-      text: string | null;
-    }>(sql`
-      SELECT r.id AS id, w.title AS title, w.description AS description,
-        w.headings AS headings, w.text AS text
-      FROM search_rows AS r JOIN search_words AS w ON w.rowid = r.id
-      WHERE r.document_id IN (
-        SELECT id FROM documents WHERE collection_id = ${collectionId}
-      ) AND r.id > ${after}
-      ORDER BY r.id LIMIT ${rowsPerRead}
+    const rows = await db.all<{ path: string; text: string }>(sql`
+      SELECT d.path AS path, v.text AS text
+      FROM versions AS v JOIN documents AS d ON d.id = v.document_id
+      WHERE ${versionPair} IN (
+        SELECT value FROM json_each(${JSON.stringify(
+          versions.slice(at, at + versionsPerRead)
+        )})
+      )
     `);
     for (const row of rows) {
-      for (const value of [
-        row.title,
-        row.description,
-        row.headings,
-        row.text,
-      ]) {
-        if (value !== null) {
-          characters += value.length;
-          const ofValue = collectionKeysOf(value);
-          if (ofValue === undefined) {
-            return { kind: "unknown" };
-          }
-          for (const key of ofValue) {
-            keys.set(`${key.table}:${key.key}`, key);
-          }
+      const values = valuesOf(row.path, row.text);
+      if (values === undefined) {
+        return { kind: "unknown" };
+      }
+      // A title or description repeats on every section's row.
+      for (const value of new Set(values)) {
+        characters += value.length;
+        if (characters > collectionCheckCaps.characters) {
+          return loggedCapped({ characters, keys: keys.size });
+        }
+        const added = addCollectionKeys(value, keys, collectionCheckCaps.keys);
+        if (added === "unknown") {
+          return { kind: "unknown" };
+        }
+        if (added === "capped") {
+          return loggedCapped({ characters, keys: keys.size });
         }
       }
-      after = row.id;
-    }
-    if (
-      characters > collectionCheckCaps.characters ||
-      keys.size > collectionCheckCaps.keys
-    ) {
-      return loggedCapped({ characters, keys: keys.size });
-    }
-    if (rows.length < rowsPerRead) {
-      return { kind: "keys", keys: [...keys.values()], versions };
     }
   }
+  return { kind: "keys", keys: [...keys.values()], versions };
 };
 
 /**
- * Reads what the search index holds of `collectionId`'s documents, a page
- * of rows at a time, and gives the keys of its tokens (`CollectionPlan`).
- * Stops at `collectionCheckCaps`.
+ * Reads every version of `collectionId`'s documents, each of which the
+ * search index held once (a later save's secure deletes can leave a page
+ * separator of it), a page of versions at a time, and gives the keys of
+ * the tokens their values (`valuesOf`) gave the index (`CollectionPlan`).
+ * A version a content purge rewrote is read as it is now: its terms were
+ * erased then. How much text there is is read first, and reading stops at
+ * `collectionCheckCaps`; when a read fails, the plan is unknown, logged
+ * by the error's name, and the index is rebuilt.
  */
 export const collectionPlan = async (
   db: DrizzleD1Database,
-  collectionId: string
+  collectionId: string,
+  valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
   try {
-    return await readCollection(db, collectionId);
+    return await readCollection(db, collectionId, valuesOf);
   } catch (error) {
     // Not readable here (a platform that refuses it): rebuilt instead.
     log.warn("knowledge.purge.index_check_failed", {
@@ -583,11 +622,11 @@ export const collectionPlan = async (
 
 /**
  * The statement, for the batch that deletes `collectionId`, that records a
- * rebuild as owed (`id`) when the collection's (document, version) pairs
- * aren't `versions`, those `collectionPlan` read: a save meanwhile, whose
- * text the plan didn't read. The same pairs, in any order, are as many,
- * and none of them is missing from `versions`. Its writes are the
- * batch's, done when it commits.
+ * rebuild as owed (`id`) when the collection's versions aren't `versions`,
+ * those `collectionPlan` read: a save meanwhile, whose text the plan
+ * didn't read. The same pairs, in any order, are as many, and none of them
+ * is missing from `versions`. Its writes are the batch's, done when it
+ * commits.
  */
 export const rebuildOwedIfChanged = (
   db: DrizzleD1Database,
@@ -607,11 +646,11 @@ export const rebuildOwedIfChanged = (
         writesDoneAt: sql<number>`${now}`.as("writes_done_at"),
       })
       .from(sql`(SELECT 1)`).where(sql`(
-        SELECT count(DISTINCT ${collectionPair}) FROM sections
-        WHERE ${inCollection(collectionId)}
+        SELECT count(*) FROM versions AS v
+        WHERE ${versionInCollection(collectionId)}
       ) != ${versions.length} OR EXISTS (
-        SELECT 1 FROM sections WHERE ${inCollection(collectionId)}
-          AND ${collectionPair} NOT IN (SELECT value FROM json_each(${read}))
+        SELECT 1 FROM versions AS v WHERE ${versionInCollection(collectionId)}
+          AND ${versionPair} NOT IN (SELECT value FROM json_each(${read}))
       )`)
   );
 };

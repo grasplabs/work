@@ -132,6 +132,53 @@ const fileTitle = (path: string): string => {
 };
 
 /**
+ * A document's title: the frontmatter's, else a skill's name, else its
+ * first heading (of `found`, its sections), else its file name.
+ */
+const titleOf = (
+  path: string,
+  { type, frontmatter }: ParsedRecord,
+  found: readonly Section[]
+): string => {
+  const name =
+    type === "skill" && typeof frontmatter.name === "string"
+      ? frontmatter.name
+      : undefined;
+  const firstHeading = found
+    .map(({ headings }) => headings[0] ?? "")
+    .find((heading) => heading !== "");
+  return frontmatter.title ?? name ?? firstHeading ?? fileTitle(path);
+};
+
+/**
+ * The values a save of `text` at `path` gives the search index
+ * (0001_search.sql), as `prepare` reads them: its title and description,
+ * and each section's headings, joined by a space, and text. Undefined when
+ * its frontmatter doesn't read. A personal purge works out from these the
+ * tokens of every version it deletes (search-erasure.ts).
+ */
+export const indexedValuesOf = (
+  path: string,
+  text: string
+): string[] | undefined => {
+  let parsed: ParsedRecord;
+  try {
+    parsed = parseBaseFields(path, text);
+  } catch {
+    return undefined;
+  }
+  const found = splitSections(parsed.body);
+  return [
+    titleOf(path, parsed, found),
+    parsed.frontmatter.description,
+    ...found.flatMap(({ headings, text: sectionText }) => [
+      headings.join(" "),
+      sectionText,
+    ]),
+  ];
+};
+
+/**
  * Reads the text of the document at `path`, within the limits a save
  * keeps. Its title is the frontmatter's, else a skill's name, else its
  * first heading, else its file name.
@@ -175,16 +222,9 @@ const prepare = (
       maxLinks: documentMaxLinks,
     });
   }
-  const name =
-    type === "skill" && typeof frontmatter.name === "string"
-      ? frontmatter.name
-      : undefined;
-  const firstHeading = found
-    .map(({ headings }) => headings[0] ?? "")
-    .find((heading) => heading !== "");
   return {
     type,
-    title: frontmatter.title ?? name ?? firstHeading ?? fileTitle(path),
+    title: titleOf(path, parsed, found),
     description: frontmatter.description,
     owner: frontmatter.owner,
     tags: frontmatter.tags,

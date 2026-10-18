@@ -270,8 +270,10 @@ const member = (value: object, key: string | symbol): unknown => {
  * `person`'s API on a connection that adds up the rows each batch writes
  * (as `countingWrites`), and runs `beforeRead` once, as a personal purge
  * first reads what the search index holds of the collection: a change
- * made after the purge began reading. With `refuseRead`, that read fails,
- * repeating its query and parameters, as a platform's refusal would.
+ * made after the purge listed the collection's versions, as it reads
+ * their text. With `refuseRead`, its first read fails, repeating its query
+ * and parameters, as a platform's refusal would. `rebuilds` counts the
+ * rebuilds of the whole index it ran.
  */
 const watchingPurge = async (
   person: Person,
@@ -281,14 +283,21 @@ const watchingPurge = async (
   }: { beforeRead?: () => Promise<void>; refuseRead?: boolean } = {}
 ) => {
   const real = env.KNOWLEDGE;
-  const written = { rows: 0 };
+  const written = { rows: 0, rebuilds: 0 };
   let pending = beforeRead;
   const knowledge: D1Database = {
     prepare: (query) => {
-      const reading = query.includes("JOIN search_words AS w");
+      if (
+        query.includes(
+          "INSERT INTO search_words (search_words) VALUES ('rebuild')"
+        )
+      ) {
+        written.rebuilds += 1;
+      }
+      const reading = query.includes("v.text AS text");
       const statement = real.prepare(
-        refuseRead && reading
-          ? query.replace("ORDER BY r.id", "AND refused_here ORDER BY r.id")
+        refuseRead && query.includes("AS characters")
+          ? query.replace("AS characters", "AS characters, refused_here")
           : query
       );
       const run = pending;
@@ -343,7 +352,10 @@ const leaverWith = async (files: Record<string, string>) => {
   return { leaver, personal };
 };
 
-/** Purges `leaver`'s Personal collection as `admin`, saying what it wrote. */
+/**
+ * Purges `leaver`'s Personal collection as `admin`, saying what it wrote
+ * and how often it rebuilt the whole index.
+ */
 const purgeCounted = async (
   admin: Person,
   leaver: Person,
@@ -357,7 +369,47 @@ const purgeCounted = async (
   };
   const { token } = await counting.api.knowledge.preparePurge(input);
   await counting.api.knowledge.purge(input, token);
-  return counting.written.rows;
+  return counting.written;
+};
+
+/**
+ * A word of a new person's notes that heads a page of the words index, in
+ * one segment with a document of the handbook: words in order, alternating
+ * between the two, so a page holds both and isn't emptied when the
+ * person's go, and its directory entry, made from its first word, stays.
+ */
+const personsWordHeadingAPage = async (admin: Person) => {
+  const handbook = await admin.api.knowledge.createCollection({
+    name: "Handbook",
+    access: "everyone",
+  });
+  const stem = `zq${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+  const words = Array.from(
+    { length: 3000 },
+    (_, at) => `${stem}${lettersOf(at, 3)}`
+  );
+  const { leaver, personal } = await leaverWith({
+    "even.md": `# Words\n${words.filter((_, at) => at % 2 === 0).join(" ")}`,
+  });
+  await saveOver(
+    admin,
+    handbook.id,
+    "odd.md",
+    `# Words\n${words.filter((_, at) => at % 2 === 1).join(" ")}`
+  );
+  await env.KNOWLEDGE.prepare(
+    "INSERT INTO search_words (search_words) VALUES ('optimize')"
+  ).run();
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT CAST(term AS TEXT) AS term FROM search_words_idx WHERE CAST(term AS TEXT) LIKE ?"
+  )
+    .bind(`0${stem}%`)
+    .all<{ term: string }>();
+  const leading = words.find(
+    (word, at) =>
+      at % 2 === 0 && results.some(({ term }) => term === `0${word}`)
+  );
+  return { leaver, personal, leading };
 };
 
 describe("a personal purge", setUpTime, () => {
@@ -2144,47 +2196,30 @@ describe("a personal purge's search index", setUpTime, () => {
     const large = await purgeOne();
     // A rebuild writes at least a row for each section the index holds.
     expect({
-      grewBy: large - small,
-      bound: large - small < added / 4,
-    }).toMatchObject({ bound: true });
+      grewBy: large.rows - small.rows,
+      bound: large.rows - small.rows < added / 4,
+      rebuilds: large.rebuilds,
+    }).toMatchObject({ bound: true, rebuilds: 0 });
   });
 
   it("drops a word of the person's from the page directory, where it was the first term of a page", async () => {
     const admin = await personOf("admin");
-    const handbook = await admin.api.knowledge.createCollection({
-      name: "Handbook",
-      access: "everyone",
-    });
-    // Words in order, alternating between the person's notes and a
-    // document of the handbook: a page holds both, so it isn't emptied
-    // when the person's go, and its directory entry, made from its first
-    // word, stays.
-    const stem = `zq${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
-    const words = Array.from(
-      { length: 3000 },
-      (_, at) => `${stem}${lettersOf(at, 3)}`
-    );
-    const { leaver } = await leaverWith({
-      "even.md": `# Words\n${words.filter((_, at) => at % 2 === 0).join(" ")}`,
-    });
-    await saveOver(
-      admin,
-      handbook.id,
-      "odd.md",
-      `# Words\n${words.filter((_, at) => at % 2 === 1).join(" ")}`
-    );
-    await env.KNOWLEDGE.prepare(
-      "INSERT INTO search_words (search_words) VALUES ('optimize')"
-    ).run();
-    const { results } = await env.KNOWLEDGE.prepare(
-      "SELECT CAST(term AS TEXT) AS term FROM search_words_idx WHERE CAST(term AS TEXT) LIKE ?"
-    )
-      .bind(`0${stem}%`)
-      .all<{ term: string }>();
-    const leading = words.find(
-      (word, at) =>
-        at % 2 === 0 && results.some(({ term }) => term === `0${word}`)
-    );
+    const { leaver, leading } = await personsWordHeadingAPage(admin);
+    const heldBefore = leading === undefined ? [] : await holding(leading);
+    await purgeCounted(admin, leaver);
+    expect({
+      found: leading !== undefined,
+      heldBefore: heldBefore.includes("search_words_idx.term"),
+      heldAfter: await holding(leading ?? ""),
+    }).toStrictEqual({ found: true, heldBefore: true, heldAfter: [] });
+  });
+
+  it("drops a word the person had only in an earlier version from the page directory", async () => {
+    const admin = await personOf("admin");
+    const { leaver, personal, leading } = await personsWordHeadingAPage(admin);
+    // Saved over: the earlier version's sections go, with secure deletes
+    // that leave the page's directory entry, made from the word.
+    await saveOver(leaver, personal, "even.md", "# Words\nNothing left here.");
     const heldBefore = leading === undefined ? [] : await holding(leading);
     await purgeCounted(admin, leaver);
     expect({
@@ -2212,7 +2247,7 @@ describe("a personal purge's search index", setUpTime, () => {
     const name = `Visser${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
     // A plain person: checked, no rebuild.
     const plain = await leaverWith({ "notes.md": `# Notes\nAsk ${name}.` });
-    const plainWritten = await purgeCounted(admin, plain.leaver);
+    const plainPurge = await purgeCounted(admin, plain.leaver);
     const { leaver } = await leaverWith({
       "notes.md": `# Notes\nAsk ${name}さん.`,
     });
@@ -2241,15 +2276,14 @@ describe("a personal purge's search index", setUpTime, () => {
     const { token } = await failing.knowledge.preparePurge(input);
     const first = await outcome(failing.knowledge.purge(input, token));
     const again = await purgeCounted(admin, leaver);
-    const sections = await indexedSections();
     expect({
-      plainChecked: plainWritten < sections,
+      plainRebuilds: plainPurge.rebuilds,
       first,
-      againRebuilt: again >= sections,
+      againRebuilds: again.rebuilds,
     }).toStrictEqual({
-      plainChecked: true,
+      plainRebuilds: 0,
       first: "knowledge.purge_index_pending",
-      againRebuilt: true,
+      againRebuilds: 1,
     });
   });
 
@@ -2272,15 +2306,15 @@ describe("a personal purge's search index", setUpTime, () => {
     const { leaver, personal } = await leaverWith({
       "notes.md": "# Notes\nAsk me.",
     });
-    const written = await purgeCounted(admin, leaver, {
+    const { rebuilds } = await purgeCounted(admin, leaver, {
       beforeRead: async () => {
         await saveOver(leaver, personal, "notes.md", `# Notes\nAsk ${name}.`);
       },
     });
-    expect({
-      rebuilt: written >= (await indexedSections()),
-      held: await holding(name),
-    }).toStrictEqual({ rebuilt: true, held: [] });
+    expect({ rebuilds, held: await holding(name) }).toStrictEqual({
+      rebuilds: 1,
+      held: [],
+    });
   });
 
   it("rebuilds when it can't read what the index holds, and never logs a word", async () => {
@@ -2295,9 +2329,9 @@ describe("a personal purge's search index", setUpTime, () => {
         logged.push(args);
       })
     );
-    let written = 0;
+    let rebuilds = 0;
     try {
-      written = await purgeCounted(admin, leaver, { refuseRead: true });
+      ({ rebuilds } = await purgeCounted(admin, leaver, { refuseRead: true }));
     } finally {
       for (const spy of spies) {
         spy.mockRestore();
@@ -2309,47 +2343,68 @@ describe("a personal purge's search index", setUpTime, () => {
         line.includes("knowledge.purge.index_check_failed")
       ),
       leaked: lines.filter((line) => line.includes(name)),
-      rebuilt: written >= (await indexedSections()),
+      rebuilds,
       held: await holding(name),
     }).toStrictEqual({
       checkFailed: true,
       leaked: [],
-      rebuilt: true,
+      rebuilds: 1,
       held: [],
     });
   });
 
   it("rebuilds past its caps, logging counts and never a word", async () => {
     const admin = await personOf("admin");
-    const stem = `capped${lettersOf(Math.floor(Math.random() * 26 ** 4), 4)}`;
-    const words = Array.from(
-      { length: 21_000 },
-      (_, at) => `${stem}${lettersOf(at, 4)}`
-    );
-    const { leaver } = await leaverWith({
-      "many.md": `# Many\n${words.join(" ")}`,
-    });
-    const logged: unknown[] = [];
-    const spies = (["log", "info", "warn", "error"] as const).map((level) =>
-      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
-        logged.push(args);
-      })
-    );
-    let written = 0;
-    try {
-      written = await purgeCounted(admin, leaver);
-    } finally {
-      for (const spy of spies) {
-        spy.mockRestore();
+    /** Purges a person with `files`, saying what it logged and rebuilt. */
+    const purgeLogged = async (files: Record<string, string>[]) => {
+      const leaver = await personOf("user");
+      const { personal } = await leaver.api.memory.collections();
+      for (const version of files) {
+        for (const [path, text] of Object.entries(version)) {
+          // oxlint-disable-next-line no-await-in-loop -- one save at a time
+          await saveOver(leaver, personal, path, text);
+        }
       }
-    }
-    const lines = logged.map((args) => JSON.stringify(args));
-    expect({
+      const logged: unknown[] = [];
+      const spies = (["log", "info", "warn", "error"] as const).map((level) =>
+        vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+          logged.push(args);
+        })
+      );
+      try {
+        const { rebuilds } = await purgeCounted(admin, leaver);
+        return { rebuilds, lines: logged.map((args) => JSON.stringify(args)) };
+      } finally {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      }
+    };
+    // More distinct words than keys it looks up.
+    const stem = `capped${lettersOf(Math.floor(Math.random() * 26 ** 4), 4)}`;
+    const many = await purgeLogged([
+      {
+        "many.md": `# Many\n${Array.from(
+          { length: 21_000 },
+          (_, at) => `${stem}${lettersOf(at, 4)}`
+        ).join(" ")}`,
+      },
+    ]);
+    // More text than it reads, in short words, over two versions.
+    const short = await purgeLogged([
+      { "short.md": `# Short\n${"1 ".repeat(300_000)}` },
+      { "short.md": `# Short\n${"2 ".repeat(300_000)}` },
+    ]);
+    const outcomeOf = ({ rebuilds, lines }: typeof many) => ({
       capped: lines.some((line) =>
         line.includes("knowledge.purge.collection_check_capped")
       ),
       leaked: lines.filter((line) => line.includes(stem)),
-      rebuilt: written >= (await indexedSections()),
-    }).toStrictEqual({ capped: true, leaked: [], rebuilt: true });
+      rebuilds,
+    });
+    expect({ many: outcomeOf(many), short: outcomeOf(short) }).toStrictEqual({
+      many: { capped: true, leaked: [], rebuilds: 1 },
+      short: { capped: true, leaked: [], rebuilds: 1 },
+    });
   });
 });
