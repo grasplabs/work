@@ -877,6 +877,46 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuses a test's type error with the server code's", async () => {
+    await expect(
+      refusedSeal({
+        ...notesFiles(),
+        "tests/helper.ts": 'export const count: number = "none";\n',
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["tests/helper.ts"],
+    });
+  });
+
+  it("checks no test that steers the check, so it gives the server code nothing", async () => {
+    // A test that doesn't build (here, globals it declares) never joins
+    // the check: the operation's `document` stays an error. It is refused
+    // where tests run, as a version is made current.
+    await expect(
+      refusedSeal({
+        ...withOperation(
+          "export const title = (): string => document.title;\n"
+        ),
+        "tests/helper.ts":
+          "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["operations/extra.ts"],
+    });
+  });
+
+  it("seals tests that name the App's references and the SDK's testing module for their types", async () => {
+    await expect(
+      refusedSeal({
+        ...notesFiles(),
+        "tests/helper.ts":
+          'import type { api } from "#grasp";\nimport type * as testing from "@grasp-os/sdk/testing";\nexport type Checked = [typeof api, typeof testing];\n',
+      })
+    ).resolves.toStrictEqual({ code: "ok", files: [] });
+  });
+
   it("refuses a migration's global declarations, which the rest of the server code would see", async () => {
     await expect(
       refusedSeal({
