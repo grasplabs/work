@@ -193,6 +193,7 @@ export const sectionWords: Record<
  * prototype's need lines go there (`need-lines.ts`): the column marks it.
  */
 const needSections: Record<Need["kind"], OrgSection> = {
+  paused: "steps",
   transcript: "steps",
   ask: "steps",
   research: "steps",
