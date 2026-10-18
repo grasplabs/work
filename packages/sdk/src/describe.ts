@@ -313,6 +313,13 @@ const isStubArgument = (
   ancestor.node.callee.type === "Identifier" &&
   bindings.stubs.get(ancestor.node.callee.name) === stub;
 
+/** The methods of `appFunctions(env)`: one per kind of function. */
+const functionKinds: ReadonlySet<string> = new Set([
+  "query",
+  "mutation",
+  "action",
+]);
+
 /** Whether the node `ancestors` end above is called as `node.method(…)`. */
 const isMethodCalled = (ancestors: Ancestor[]): boolean => {
   const caller = ancestors.at(-2);
@@ -337,11 +344,18 @@ const envCallOf = (
   ancestors: Ancestor[]
 ): string | undefined => {
   const parent = ancestors.at(-1);
-  if (
-    isStubArgument(bindings, parent, "appServer") ||
-    isStubArgument(bindings, parent, "appFunctions")
-  ) {
+  if (isStubArgument(bindings, parent, "appServer")) {
     return isMethodCalled(ancestors.slice(0, -1)) ? "APP" : undefined;
+  }
+  if (isStubArgument(bindings, parent, "appFunctions")) {
+    // Only its methods, one per kind of function: any other name is no
+    // call the stub has.
+    const member = ancestors.at(-2)?.node;
+    return isMethodCalled(ancestors.slice(0, -1)) &&
+      member?.type === "MemberExpression" &&
+      functionKinds.has(nameOf(member.property) ?? "")
+      ? "APP"
+      : undefined;
   }
   if (parent?.node.type !== "MemberExpression" || !isObjectOfMember(parent)) {
     return undefined;
@@ -463,6 +477,16 @@ const checkEnvUses = (body: Node, bindings: Bindings): void => {
         node,
         `Only call \`${node.name}\`; don't rename it or pass it on`
       );
+    }
+    // Made only with the context's `env`, which the check of `env` below
+    // reads: never without it.
+    if (
+      called &&
+      bindings.stubs.get(node.name) === "appFunctions" &&
+      parent.node.type === "CallExpression" &&
+      parent.node.arguments.length !== 1
+    ) {
+      throw fail(node, envHint(bindings.env ?? "env"));
     }
     if (node.name !== bindings.env) {
       return;
@@ -785,15 +809,27 @@ const checkParamReads = (body: Node, bindings: Bindings): void => {
   });
 };
 
-/** What the file imports from the SDK, by the name it imports each as. */
+/**
+ * What the file imports from the SDK, by the name it imports each as: its
+ * values only. A type-only import (`import type { workflow }`, or an
+ * inline `type appFunctions`) is erased, so the name in the file's code is
+ * something else of the file's own, never the SDK's `workflow` or a stub.
+ */
 const sdkImportsOf = (file: Node): Map<string, string | undefined> => {
   const imports = new Map<string, string | undefined>();
   visit(file, (node) => {
-    if (node.type !== "ImportDeclaration" || node.source.value !== sdkModule) {
+    if (
+      node.type !== "ImportDeclaration" ||
+      node.source.value !== sdkModule ||
+      node.importKind === "type"
+    ) {
       return;
     }
     for (const specifier of node.specifiers) {
-      if (specifier.type === "ImportSpecifier") {
+      if (
+        specifier.type === "ImportSpecifier" &&
+        specifier.importKind !== "type"
+      ) {
         imports.set(specifier.local.name, nameOf(specifier.imported));
       }
     }

@@ -5,6 +5,7 @@ import {
   checkWorkflowBindings,
   checkWorkflowModule,
   describeWorkflow,
+  reviewedCalls,
 } from "../src/describe.ts";
 import { createTestEngine } from "../src/testing.ts";
 import { asDefaultExport, outlineOf } from "./outline.ts";
@@ -41,6 +42,27 @@ export default workflow("sample", { params: {} }, async (step, { env }) => {
   await step.do("notes", { description: "Read notes" }, async () => ${call});
 });
 `;
+
+/** A file of `imports`, then `body`: the SDK's names as it imports them. */
+const lookalike = (imports: string, body: string): string => `
+${imports}
+
+${body}
+`;
+
+/** The file's own `appFunctions`, which calls another binding than `APP`. */
+const callsGmail = `const appFunctions = (e) => ({ query: async () => await e.GMAIL.send() });
+
+export default workflow("sample", { params: {} }, async (step, { env }) => {
+  await step.do("x", { description: "X" }, async () => await appFunctions(env).query("drafts.list", {}));
+});`;
+
+/** The file's own `workflow`, in the SDK's place. */
+const fakeWorkflow = `const workflow = (id, config, run) => run;
+
+export default workflow("sample", { params: {} }, async (step, { env }) => {
+  await step.do("x", { description: "X" }, async () => await env.GMAIL.send());
+});`;
 
 describe(describeWorkflow, () => {
   it("shows a step in a loop once, nested under the loop", () => {
@@ -327,6 +349,48 @@ describe(describeWorkflow, () => {
     ).toThrow("don't keep `env`");
   });
 
+  it("takes nothing imported as a type only for the SDK's, whatever the file's own code of that name does", () => {
+    const cases: [string, string][] = [
+      // A type-only import, then the file's own function of that name,
+      // which calls another binding: never read as the App's.
+      [
+        lookalike(
+          `import type { appFunctions } from "@grasp-os/sdk/workflow";\nimport { workflow } from "@grasp-os/sdk/workflow";`,
+          callsGmail
+        ),
+        "don't keep `env`",
+      ],
+      [
+        lookalike(
+          `import { type appFunctions, workflow } from "@grasp-os/sdk/workflow";`,
+          callsGmail
+        ),
+        "don't keep `env`",
+      ],
+      // The SDK's `workflow` as a type only, and a function of the
+      // file's own in its place: no workflow of the SDK's to read.
+      [
+        lookalike(
+          `import type { workflow } from "@grasp-os/sdk/workflow";`,
+          fakeWorkflow
+        ),
+        "Expected one call to `workflow`",
+      ],
+      [
+        lookalike(
+          `import { type workflow } from "@grasp-os/sdk/workflow";`,
+          fakeWorkflow
+        ),
+        "Expected one call to `workflow`",
+      ],
+    ];
+
+    for (const [source, message] of cases) {
+      expect(() => describeWorkflow(source)).toThrow(message);
+      expect(reviewedCalls(source)).toStrictEqual({ steps: null, all: [] });
+    }
+  });
+
   it("names a binding a step's option calls, such as a decision's ask", () => {
     const source = workflowSource(
       `await step.decision("approve", { description: "Approve", from: params.reviewer, timeout: "1 day", ask: async (request) => await env.MAIL.call("mail.send", request) });`,
@@ -526,6 +590,11 @@ describe(describeWorkflow, () => {
         inStep(`await appFunctions(env.APP).query("x", {});`),
         "don't keep `env`",
       ],
+      // Only its methods, one per kind.
+      [inStep(`await appFunctions(env).call("x", {});`), "don't keep `env`"],
+      [inStep(`await appFunctions(env).then("x", {});`), "don't keep `env`"],
+      // Never made without the context's env.
+      [inStep(`await appFunctions().query("x", {});`), "appFunctions(env)"],
       // A name only known when it runs.
       [inStep(`await env["APP"].call("sendAll");`), "don't keep `env`"],
       [inStep(`await env[input.name].call("sendAll");`), "don't keep `env`"],
