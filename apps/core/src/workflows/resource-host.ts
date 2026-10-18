@@ -2309,9 +2309,26 @@ export class ResourceRunHost
           // nothing awaited between it and the call going out: one refused
           // at admission takes none.
           if (built.name === "grasp.model") {
-            this.#reserveModelCall(
-              `${stepKey}:${attempt.number}:${attempt.generation}:${ordinal}`
-            );
+            try {
+              this.#reserveModelCall(
+                `${stepKey}:${attempt.number}:${attempt.generation}:${ordinal}`
+              );
+            } catch (error) {
+              // Refused before it is a named call, so no receipt of
+              // `makeCall`'s: kept as the evidence an action's call
+              // refused at admission leaves, naming its declared binding.
+              await auditAdmissionRefusal(this.#env, this.#run.calling, {
+                build: this.#run.build.hash,
+                task: task.id,
+                attempt: attempt.number,
+                generation: attempt.generation,
+                call: built.binding,
+                errorCode:
+                  workflowResourceErrors.codeOf(error) ?? "internal.unexpected",
+                reason: "model_call_limit",
+              });
+              throw error;
+            }
           }
           return await makeCall(this.#env, this.#run.calling, task.id, built, {
             key: `${stepKey}:${ordinal}`,

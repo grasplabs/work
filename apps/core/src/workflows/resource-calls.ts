@@ -730,14 +730,16 @@ const callModel = async (
  * Why an action's call was refused at its host's own admission
  * (resource-action.ts), before it was ever a named call: a binding its
  * sealed `uses` doesn't list, a connector operation its use doesn't
- * declare, a request of the wrong shape or past its bounds, or one past
- * the attempt's calls.
+ * declare, a request of the wrong shape or past its bounds, one past the
+ * attempt's calls, or a model call past the run's `maxModelCalls`
+ * (resource-host.ts, GRA-700).
  */
 export type AdmissionReason =
   | "use_undeclared"
   | "operation_undeclared"
   | "request_invalid"
-  | "call_limit";
+  | "call_limit"
+  | "model_call_limit";
 
 /**
  * Keeps the evidence of an action's call refused at its host's own

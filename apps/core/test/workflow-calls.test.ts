@@ -3797,21 +3797,39 @@ describe("model resources of a JSON workflow's own actions", () => {
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Never sent"}')
     );
-    const withinEnd = await ended(
-      ada,
-      within.workflow.id,
-      await started(ada, within.workflow.id)
-    );
+    const withinRun = await started(ada, within.workflow.id);
+    const withinEnd = await ended(ada, within.workflow.id, withinRun);
+    // The call refused at the limit leaves its evidence, naming its binding.
+    const events = await allEvents();
+    const refusedAtLimit = events
+      .filter(
+        (event) =>
+          event.action === "workflow.call.refused" &&
+          event.target?.id === withinRun
+      )
+      .map(({ detail }) => ({
+        call: detail?.call,
+        reason: detail?.reason,
+        errorCode: detail?.errorCode,
+      }));
     expect({
       replayed: endOf(replayedEnd),
       replayRequests,
       within: endOf(withinEnd),
       withinRequests: withinGateway.requests.length,
+      refusedAtLimit,
     }).toStrictEqual({
       replayed: { status: "failed", code: "workflow.model_call_limit" },
       replayRequests: 2,
       within: { status: "failed", code: "workflow.model_call_limit" },
       withinRequests: 1,
+      refusedAtLimit: [
+        {
+          call: "writer",
+          reason: "model_call_limit",
+          errorCode: "workflow.model_call_limit",
+        },
+      ],
     });
   });
 
