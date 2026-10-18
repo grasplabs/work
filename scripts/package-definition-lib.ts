@@ -780,6 +780,9 @@ export const planProject = async (
       version: `${definition.app.version}.0.0`,
       private: true,
       type: "module",
+      // Its check runs as TypeScript, which Node strips without a flag
+      // from 22.18.
+      engines: { node: ">=22.18" },
       scripts: {
         typecheck: "node grasp/check.ts",
         build: "node grasp/check.ts",
