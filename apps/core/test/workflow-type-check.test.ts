@@ -65,6 +65,41 @@ export default workflow("typed", { params: {}, input: z.unknown() }, async (step
 `,
 });
 
+/** Server code with an action that answers once and one that streams. */
+const streams = {
+  "operations/streams.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const once = action({ args: {}, returns: v.number(), handler: async () => 1 });
+
+export const progress = action({
+  args: {},
+  returns: v.number(),
+  stream: v.object({ done: v.number() }),
+  handler: async (ctx) => {
+    await ctx.emit({ done: 1 });
+    return 1;
+  },
+});
+`,
+};
+/** A workflow `streaming` calling the action at `path` of `streams`. */
+const calling = (path: string): Record<string, string> => ({
+  "workflows/streaming.ts": `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
+
+import type * as streams from "../operations/streams.ts";
+
+type Invoices = { streams: typeof streams };
+
+export default workflow("streaming", { params: {}, input: z.unknown() }, async (step, { env }) =>
+  await step.do("call", { description: "Call" }, async () => {
+    const answered = await appFunctions<Invoices>(env).action("${path}", {});
+    return answered.ok ? answered.value : 0;
+  })
+);
+`,
+});
+
 /**
  * What building `files` as an App's workflows said: ok, the files its
  * errors name, and the rules of its warnings.
@@ -321,6 +356,20 @@ describe(
         { ok: false, files: ["workflows/typed.ts"], warned: [] },
         { ok: false, files: ["workflows/typed.ts"], warned: [] },
         { ok: false, files: ["workflows/typed.ts"], warned: [] },
+      ]);
+    });
+
+    it("offer a workflow's call no streaming action, which runs only for a screen following it", async () => {
+      await expect(
+        Promise.all(
+          ["streams.once", "streams.progress"].map(
+            async (path) =>
+              await built({ ...sampleApp(), ...streams, ...calling(path) })
+          )
+        )
+      ).resolves.toStrictEqual([
+        { ok: true, files: [], warned: [] },
+        { ok: false, files: ["workflows/streaming.ts"], warned: [] },
       ]);
     });
 

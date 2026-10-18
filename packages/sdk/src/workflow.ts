@@ -32,6 +32,7 @@ import type {
   Callable,
   ReferenceKind,
   ReturnOf,
+  StreamingFunction,
 } from "./references.ts";
 import { namePattern, nameRule, stepOptionSchemas } from "./steps.ts";
 
@@ -747,6 +748,9 @@ type GroupDepth = [never, 0, 1, 2, 3];
  * The registered paths (`drafts.propose`) of the public functions of kind
  * `Kind` in `Tree`, the App's functions grouped as its `operations`
  * registers them: a definition by its path, a group by the paths in it.
+ * Never a streaming action's: it runs only for a screen following it
+ * (spec 10.7.6), and a workflow's call answers once, so the host refuses
+ * it (`operation.mode_mismatch`).
  */
 export type FunctionPaths<
   Tree,
@@ -758,7 +762,9 @@ export type FunctionPaths<
   : {
       [Key in keyof Tree & string]: Tree[Key] extends Callable
         ? Tree[Key] extends Callable<Kind, "public">
-          ? `${Prefix}${Key}`
+          ? Tree[Key] extends StreamingFunction
+            ? never
+            : `${Prefix}${Key}`
           : never
         : Tree[Key] extends object
           ? FunctionPaths<
