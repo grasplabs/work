@@ -564,6 +564,19 @@ export interface RealHappened {
    * the admin counts it from its own sources.
    */
   known?: number;
+  /**
+   * Grasp's staff paused the interviews: until they resume them nobody can open their link or
+   * save what they said, as Grasp OS's core holds them. None where nothing pauses them.
+   */
+  paused?: boolean;
+  /** What isn't known of the organization yet (`StaffSnapshot.unknown`): read as unknown, not as a draft or as nothing. */
+  unknown?: Unknown;
+}
+
+/** Parts of an organization nothing is known of yet. */
+export interface Unknown {
+  contract: boolean;
+  works: boolean;
 }
 
 const clamp = (value: number, min = 0, max = 1) =>
@@ -1879,6 +1892,8 @@ export type StageStatus = "done" | "now" | "waits" | "later";
 
 /** Something that needs a person at Grasp. */
 export type Need =
+  /** Grasp's staff paused the interviews: nobody can open or finish theirs until Grasp resumes them. */
+  | { kind: "paused" }
   | { kind: "transcript" }
   | { kind: "ask"; fields: VisionField[] }
   | { kind: "research" }
@@ -2370,6 +2385,9 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     STAGES.find((each) => stages[each] !== "done" && !optional(each)) ?? "open";
 
   const needs: Need[] = [];
+  if (told && org.real?.paused === true) {
+    needs.push({ kind: "paused" });
+  }
   if (!read) {
     needs.push({ kind: "transcript" });
   }
