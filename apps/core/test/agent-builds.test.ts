@@ -27,6 +27,7 @@ import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 import { v1Server } from "./v1-app-server.ts";
+import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
 // person in a draft of its own, and repairing what its checks report.
@@ -1403,8 +1404,46 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
   });
 
-  // The review of the v1 App server's code (`server`, `serverFiles`):
-  // it goes with the server (GRA-645).
+  it("reviews the grants a version uses, asking again for those its reviewer can't grant", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const admin = await signedInApi(idp, "admin");
+    const notify = workflowFiles(
+      "notify",
+      `  return await step.do("save", { description: "Save it" }, async () => await ${hitCall(`"notify"`)});`,
+      { save: 1 }
+    );
+    const app = await appWith(builder, notify);
+    await requestGranted(idp, builder, outlook(app));
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      {
+        "workflows/notify.ts": `// Saves it.\n${notify["workflows/notify.ts"] ?? ""}`,
+      },
+      "Noted"
+    );
+
+    const grant = {
+      subject: { type: "app", appId: app },
+      binding: "OUTLOOK",
+      status: "active",
+    };
+    // A builder can't grant it: making the version current asks again.
+    await expect(
+      builder.api.apps.versions.review(app, version)
+    ).resolves.toMatchObject({
+      grants: [{ permission: grant, askedAgain: true }],
+    });
+    // An admin can: nothing is asked for again.
+    await expect(
+      admin.api.apps.versions.review(app, version)
+    ).resolves.toMatchObject({
+      grants: [{ permission: grant, askedAgain: false }],
+    });
+  });
+
+  // The review of the v1 App server's code (`server`, `serverFiles`): it
+  // goes with the server (GRA-645). The test before it holds a sealed App
+  // to the same grants.
   it("reviews code a workflow may use, the steps that call the App, and the grants the version uses", async () => {
     const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");

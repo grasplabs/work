@@ -118,8 +118,9 @@ const outcomeOf = async (
 };
 
 /**
- * A host for a run of a new App held to `calls`, whose App method calls
- * are counted in `appCalls`, with a permission on another App's exports
+ * A host for a run of a new App held to `calls`, whose v1 App method calls
+ * (`callApp`, which goes with the v1 server, GRA-645) are counted in
+ * `appCalls`, with a permission on another App's exports
  * as `CRM`; what it says fails the run as tampering is in `tampered`.
  */
 const hostHeldTo = async (
@@ -447,6 +448,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse a call made through a step attempt's host once that attempt is over, while another step runs, and a step whose name the review doesn't show", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: [], send: ["APP"] },
@@ -577,6 +581,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse a call unless the step running now and the step whose host it came through both call it, failing both", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: ["APP"], send: [] },
@@ -611,6 +618,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse, as stale, an attempt's calls of every kind once the engine gave up on it, and audit the first", async () => {
     const { host, runId, appCalls, leases, userId } = await hostHeldTo({
       steps: { tidy: ["APP", "CRM", "HANDBOOK"] },
@@ -665,6 +675,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse, as stale, a call whose attempt the engine gave up on while the host read what the call needs", async () => {
     let giveUp: (() => void) | undefined;
     // Core's database, giving the attempt up as the host reads it, after
@@ -704,6 +717,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse, as stale, every call of an attempt the engine gave up on while its code ran on, and audit the first", async () => {
     const { host, runId, appCalls, leases } = await hostHeldTo({
       steps: { tidy: ["APP"] },
@@ -729,6 +745,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("audit only an attempt's first refused call, and refuse every later one of it at once, one its review shows too", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { tidy: ["APP"] },
@@ -943,6 +962,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse an attempt's model, attachment and decision calls once it had a call refused", async () => {
     const { host, userId } = await hostHeldTo({ steps: { tidy: [] }, all: [] });
     const codes: string[] = [];
