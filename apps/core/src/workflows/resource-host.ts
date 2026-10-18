@@ -2317,6 +2317,8 @@ export class ResourceRunHost
               // Refused before it is a named call, so no receipt of
               // `makeCall`'s: kept as the evidence an action's call
               // refused at admission leaves, naming its declared binding.
+              // That write never rejects (it logs one it can't keep), so
+              // the refusal below always stands.
               await auditAdmissionRefusal(this.#env, this.#run.calling, {
                 build: this.#run.build.hash,
                 task: task.id,
