@@ -49,7 +49,8 @@ import {
 // are real, on the engine (Workerflow). Their side effects go
 // through the real connect to a fake mail server (test/mail-server.ts)
 // that counts every call that reached it, so a mail sent twice shows
-// there; the App's counters (`v1HitsOf`) show how often a step really ran.
+// there; the App's counters (`hitsOf`) show how often a step really ran
+// (`v1HitsOf` for the v1 server's own tests).
 //
 // How each failure is brought about, only from outside core:
 // - a crash or a deploy stops a run's execution: the engine's own pause,
@@ -566,8 +567,10 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
     const outlived = await builder.api.workflows.start(app, "outlived");
     await finished(outlived.id, runEnds);
-    // The run has ended; the search its first attempt's code left waiting
-    // goes, but that code was stopped.
+    // The run has ended; the search its first attempt's call left waiting
+    // goes. Read at once, as nothing later could show more: whatever that
+    // call does once let go is refused, its run ended and its attempt
+    // holding no more (the `ended` run below waits for that refusal's audit).
     await mail.release();
     const { status: outlivedStatus } = await builder.api.workflows.status(
       outlived.id

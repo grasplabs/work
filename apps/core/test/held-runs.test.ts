@@ -340,8 +340,9 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
   it("wait on, and complete once confirmed, when connect can't say for a moment whether a side effect still waits", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection([], mailForApps);
-    // Through the App (asked in the attempt) and directly (asked while the
-    // run waits): connect fails the first question each time.
+    // Through the App's function and directly, each asked while the run
+    // waits (the function's held keys, or the step's own): connect fails
+    // the first question each time.
     const app = await appWith(admin, {
       ...workflowFiles(
         "via-app",
