@@ -17,7 +17,7 @@ const workflowSource = (
   body: string,
   signature = "step, { params, input }"
 ) => `
-import { appExports, appServer, workflow } from "@grasp-os/sdk/workflow";
+import { appExports, appFunctions, appServer, workflow } from "@grasp-os/sdk/workflow";
 
 export default workflow("sample", { params: {} }, async (${signature}) => {
 ${body}
@@ -32,6 +32,15 @@ const mail = (to: string): string =>
 /** A step, `tidy-up` unless named, whose function runs `code`. */
 const inStep = (code: string, name = "tidy-up"): string =>
   `await step.do("${name}", { description: "Tidy" }, async () => { ${code} });`;
+
+/** A workflow importing the App's functions stub as `functions`, its one step calling `call`. */
+const renamed = (call: string) => `
+import { appFunctions as functions, workflow } from "@grasp-os/sdk/workflow";
+
+export default workflow("sample", { params: {} }, async (step, { env }) => {
+  await step.do("notes", { description: "Read notes" }, async () => ${call});
+});
+`;
 
 describe(describeWorkflow, () => {
   it("shows a step in a loop once, nested under the loop", () => {
@@ -277,6 +286,7 @@ describe(describeWorkflow, () => {
         `await step.do("book", { description: "Book", input: total }, async () => await bindings.APP.call("book", total));`,
         `await step.do("mail", { description: "Mail" }, async () => [await bindings.MAIL.call("mail.send", {}), await appExports<Crm>(bindings.CRM).find({})]);`,
         `await step.do("keep", { description: "Keep" }, async () => await appServer<App>(bindings).keep(total));`,
+        `await step.do("propose", { description: "Propose" }, async () => await appFunctions<Intake>(bindings).mutation("drafts.propose", { total }));`,
       ].join("\n"),
       "step, { input, env: bindings }"
     );
@@ -290,6 +300,7 @@ describe(describeWorkflow, () => {
       { name: "book", env: ["APP"] },
       { name: "mail", env: ["MAIL", "CRM"] },
       { name: "keep", env: ["APP"] },
+      { name: "propose", env: ["APP"] },
     ]);
     expect(() =>
       describeWorkflow(
@@ -299,6 +310,21 @@ describe(describeWorkflow, () => {
         )
       )
     ).toThrow("Call the App's bindings as `env.NAME`");
+  });
+
+  it("reads the App's functions stub by the name the file imports it as, and nothing else of that name", () => {
+    expect(
+      describeWorkflow(
+        renamed(`await functions(env).action("chats.notes", {})`)
+      ).steps
+    ).toMatchObject([{ name: "notes", env: ["APP"] }]);
+    // Not imported under its own name here: a function of the file's
+    // that `env` is passed to, whatever it is called.
+    expect(() =>
+      describeWorkflow(
+        renamed(`await appFunctions(env).action("chats.notes", {})`)
+      )
+    ).toThrow("don't keep `env`");
   });
 
   it("names a binding a step's option calls, such as a decision's ask", () => {
@@ -329,6 +355,17 @@ describe(describeWorkflow, () => {
       // A stub kept within one step.
       [inStep(`const app = appServer(env); await app.hit();`), "don't keep"],
       [inStep(`const crm = appExports(env.CRM); await crm.find({});`), "keep"],
+      [
+        inStep(
+          `const functions = appFunctions(env); await functions.query("drafts.list", {});`
+        ),
+        "don't keep",
+      ],
+      [
+        `let made;\n${inStep(`made = appFunctions(env);`, "prepare")}\n${inStep(`await made.mutation("drafts.propose", {});`)}`,
+        "don't keep `env`",
+      ],
+      [`await appFunctions(env).query("drafts.list", {});`, own],
       // A function inside the step's own, which could outlive it.
       [
         inStep(
@@ -473,6 +510,22 @@ describe(describeWorkflow, () => {
       [inStep(`await helper({ ...env });`), "don't keep `env`"],
       [inStep(`await helper([env][0]);`), "don't keep `env`"],
       [inStep(`await appServer(env, 1).sendAll();`), "don't keep `env`"],
+      [
+        inStep(`await appFunctions(env, 1).query("drafts.list", {});`),
+        "don't keep `env`",
+      ],
+      [
+        inStep(`await appFunctions(env)["mutation"]("drafts.propose", {});`),
+        "don't keep `env`",
+      ],
+      [
+        inStep(`await appFunctions(env)[input.kind]("drafts.propose", {});`),
+        "don't keep `env`",
+      ],
+      [
+        inStep(`await appFunctions(env.APP).query("x", {});`),
+        "don't keep `env`",
+      ],
       // A name only known when it runs.
       [inStep(`await env["APP"].call("sendAll");`), "don't keep `env`"],
       [inStep(`await env[input.name].call("sendAll");`), "don't keep `env`"],
@@ -485,6 +538,11 @@ describe(describeWorkflow, () => {
         "Only call `appServer`",
       ],
       [inStep(`await helper(appExports);`), "Only call `appExports`"],
+      [inStep(`await helper(appFunctions);`), "Only call `appFunctions`"],
+      [
+        `const appFunctions = (bindings) => bindings; const all = appFunctions(env);`,
+        "Only call `appFunctions`",
+      ],
       // The context by another way than its parameter.
       [inStep(`await this.env.APP.call("sendAll");`), "Don't use `this`"],
       [
