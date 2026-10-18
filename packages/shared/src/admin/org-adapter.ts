@@ -21,8 +21,7 @@ import type {
   Timeline,
   Work,
 } from "./onboarding-admin.ts";
-import { LISTEN_DAYS } from "./onboarding.ts";
-import { daysBetween, METER_PURPOSES } from "./org-record.ts";
+import { daysBetween, METER_PURPOSES, PLAN_DAYS } from "./org-record.ts";
 import type {
   DrawnWork,
   HeldInterview,
@@ -122,31 +121,28 @@ export const workOf = (record: WorkRecord): Work => {
   };
 };
 
-/** The model a call was made to, by the name its maker gives it; none for one the admin does not count. */
-const modelOf = (name: string): Model | null => {
+/** The model a call was made to, by the name its maker gives it: one the admin has no price for is another. */
+const modelOf = (name: string): Model => {
   if (name === "voice") {
     return "voice";
   }
   return (
     (["opus", "sonnet", "haiku"] as const).find((model) =>
       name.includes(model)
-    ) ?? null
+    ) ?? "other"
   );
 };
 
 /**
  * What the Worker counted, as the admin counts use: tokens read (new and kept together) and
  * written, minutes spoken, and what that cost at the admin's prices, with what the model had kept
- * of an earlier call at a tenth.
+ * of an earlier call at a tenth. A model with no price is counted as another, its spend unknown.
  */
 export const meteredOf = (usage: MeterDay[]): RealHappened["metered"] =>
   usage.flatMap((day) =>
     METER_PURPOSES.flatMap((purpose) =>
       Object.entries(day.use[purpose] ?? {}).flatMap(([name, took]) => {
         const model = modelOf(name);
-        if (!model) {
-          return [];
-        }
         const price = PRICES[model];
         const spoken = took.seconds / 60;
         const spend =
@@ -206,10 +202,10 @@ const dayAt = (start: string, time: string | null | undefined) =>
 export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
   const { profile, roster, plan, client } = snapshot;
   const start = plan?.start ?? profile.created.slice(0, 10);
-  const today = Math.min(
-    Math.max(daysBetween(start, snapshot.now), 0),
-    LISTEN_DAYS
-  );
+  // Its interviews run as long as its plan says, from five days to six weeks; one not planned yet
+  // has the usual length a plan starts from.
+  const days = plan?.days ?? PLAN_DAYS;
+  const today = Math.min(Math.max(daysBetween(start, snapshot.now), 0), days);
   const people = roster?.people ?? [];
   const teams: OrgTeam[] = (roster?.teams ?? []).map((team) => {
     const lead = people.find((person) => person.id === team.lead);
@@ -344,7 +340,8 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
       {
         id: person.id,
         person,
-        kind: person.lead ? "lead" : "employee",
+        // As it was held: a lead changed since leaves an interview as it was.
+        kind: interview.kind,
         work,
         day: dayAt(start, ended) ?? today,
         approved,
@@ -452,6 +449,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     place: profile.place,
     sponsor: profile.sponsor.title || profile.sponsor.name,
     start,
+    days,
     teams,
     works,
     dropped: [],
