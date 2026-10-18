@@ -549,11 +549,12 @@ const readCollection = async (
   valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
   // How much there is, before any text is read: no more of the history
-  // than one version past the cap.
+  // than one version past the cap. Bytes, never fewer than characters: a
+  // text's `length` stops at its first NUL, which a save allows.
   const [size] = await db.all<{ versions: number; characters: number }>(sql`
     SELECT count(*) AS versions, coalesce(sum(size), 0) AS characters
     FROM (
-      SELECT length(v.text) AS size FROM versions AS v
+      SELECT length(CAST(v.text AS BLOB)) AS size FROM versions AS v
       WHERE ${versionInCollection(collectionId)}
       LIMIT ${collectionCheckCaps.versions + 1}
     )

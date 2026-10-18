@@ -2395,6 +2395,12 @@ describe("a personal purge's search index", setUpTime, () => {
       { "short.md": `# Short\n${"1 ".repeat(300_000)}` },
       { "short.md": `# Short\n${"2 ".repeat(300_000)}` },
     ]);
+    // As much text after a NUL, where SQLite's `length` of a text stops:
+    // found too much before any of it is read.
+    const afterNul = await purgeLogged([
+      { "nul.md": `# Nul\n\u0000${"3 ".repeat(300_000)}` },
+      { "nul.md": `# Nul\n\u0000${"4 ".repeat(300_000)}` },
+    ]);
     // One token of a mebibyte with a digit: as many trigrams as characters.
     const long = await purgeLogged([
       { "long.md": `# Long\n${stem}1${"x".repeat(1_000_000)}` },
@@ -2410,12 +2416,20 @@ describe("a personal purge's search index", setUpTime, () => {
       leaked: lines.filter((line) => line.includes(stem)),
       rebuilds,
     });
+    const capLines = afterNul.lines.filter((line) =>
+      line.includes("knowledge.purge.collection_check_capped")
+    );
     expect({
+      afterNul: {
+        ...outcomeOf(afterNul),
+        beforeReading: capLines.every((line) => !line.includes('"keys"')),
+      },
       many: outcomeOf(many),
       short: outcomeOf(short),
       long: outcomeOf(long),
       longWord: outcomeOf(longWord),
     }).toStrictEqual({
+      afterNul: { capped: true, leaked: [], rebuilds: 1, beforeReading: true },
       many: { capped: true, leaked: [], rebuilds: 1 },
       short: { capped: true, leaked: [], rebuilds: 1 },
       long: { capped: true, leaked: [], rebuilds: 1 },
