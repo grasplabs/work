@@ -10,6 +10,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 
 import { withDraftReferences } from "./draft-references.ts";
+import { workflowBindingKinds } from "./permissions.ts";
 import {
   buildScreens,
   buildServer,
@@ -150,7 +151,14 @@ export const buildOnSave = async (
       "workflows",
       source,
       workflowFiles,
-      async () => await buildWorkflows(env, files, source.app, signal),
+      async () =>
+        await buildWorkflows(
+          env,
+          files,
+          source.app,
+          await workflowBindingKinds(env, source.app),
+          signal
+        ),
       env,
       signal
     ),

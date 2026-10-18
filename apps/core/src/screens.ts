@@ -14,6 +14,7 @@ import {
   computePackagesFile,
   openWorkflowErrors,
   serverFiles,
+  workflowBindingsPath,
   workflowBuildFiles,
 } from "@grasp-os/compiler";
 import type {
@@ -556,20 +557,34 @@ const workflowInputs = (files: AppFiles): AppFiles => {
 /**
  * Builds an App's workflows (`workflows/**.ts`) into ES modules, in the
  * compiler's isolate, type-checked with the server code their types may
- * name. A build is cached in R2, like the server's.
+ * name, and their `env` typed by `bindings`: each binding name the App's
+ * permissions hold, as the kind of binding it is (`workflowBindingKinds`,
+ * permissions.ts); any other name answers `unknown`. A
+ * build is cached in R2, like the server's, by its inputs, the bindings
+ * among them.
  */
 export const buildWorkflows = async (
   env: BuildEnv,
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
   whose: string,
+  bindings: Readonly<Record<string, string>>,
   signal?: AbortSignal
 ): Promise<WorkflowBuild> =>
   await cachedBuild<WorkflowBuild>(
     env,
     "workflow",
     appFiles,
-    workflowInputs,
+    (files) => ({
+      ...workflowInputs(files),
+      [workflowBindingsPath]: JSON.stringify(
+        Object.fromEntries(
+          Object.entries(bindings).toSorted(([one], [other]) =>
+            one.localeCompare(other)
+          )
+        )
+      ),
+    }),
     whose,
     signal
   );

@@ -105,7 +105,7 @@ describe("building on save", { timeout: 60_000 }, () => {
       ok: true,
     });
     await expect(
-      buildWorkflows(unbuilt, files, "app-test")
+      buildWorkflows(unbuilt, files, "app-test", {})
     ).resolves.toMatchObject({
       ok: true,
     });

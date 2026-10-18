@@ -15,6 +15,7 @@ import {
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
+  bindingNameSchema,
   declaredPermissionSchema,
   grantReviewSchema,
   permissionErrors,
@@ -1678,6 +1679,43 @@ export const activeOrRequestedPermissions = async (
     "active",
     "requested",
   ]);
+
+/**
+ * Every binding name App `app`'s permissions hold, with the kind of
+ * binding a run gets from it (bindings.ts, `runBindingsFor`): a
+ * connection's, a collection's or another App's exports'. Whatever the
+ * permission's status, revoked included: what its workflows are
+ * type-checked against (GRA-720) is what their code may name, which a
+ * revocation doesn't change, so their build doesn't break on it; a call
+ * is checked against the permissions as they are when it is made. A name
+ * held twice is the kind the run's stub of it would be, an export's over a
+ * connection's over a collection's (`bindings`, workflows/code.ts).
+ */
+export const workflowBindingKinds = async (
+  env: Env,
+  app: AppId
+): Promise<Record<string, "connection" | "collection" | "app">> => {
+  const held = await permissionsIn(env, { type: "app", appId: app }, [
+    "active",
+    "requested",
+    "revoked",
+  ]);
+  const rank = { collection: 0, connection: 1, app: 2 } as const;
+  const kinds: Record<string, "connection" | "collection" | "app"> = {};
+  for (const { binding, object } of held) {
+    const kind = object.type;
+    if (
+      (kind === "connection" || kind === "collection" || kind === "app") &&
+      bindingNameSchema.safeParse(binding).success
+    ) {
+      const before = kinds[binding];
+      if (before === undefined || rank[kind] > rank[before]) {
+        kinds[binding] = kind;
+      }
+    }
+  }
+  return kinds;
+};
 
 /**
  * The active permissions of the App or agent `authority` names that hold

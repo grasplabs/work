@@ -28,6 +28,7 @@ import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
+import { workflowBindingKinds } from "../permissions.ts";
 import {
   capability,
   noPlaceOf,
@@ -641,7 +642,13 @@ const modulesOf = async (
   /** Given up on: no compile starts, and it throws its reason. */
   signal?: AbortSignal
 ): Promise<Record<string, string>> => {
-  const build = await buildWorkflows(env, files, app, signal);
+  const build = await buildWorkflows(
+    env,
+    files,
+    app,
+    await workflowBindingKinds(env, app),
+    signal
+  );
   signal?.throwIfAborted();
   if (!build.ok) {
     throw workflowErrors.create("workflow.build_failed", {
