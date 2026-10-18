@@ -3,6 +3,7 @@ import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, StoreId, WorkflowId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   categoryOf,
@@ -36,6 +37,7 @@ import type {
   Invocation,
   ProgressSink,
   ResourceBindings,
+  UseRefusal,
 } from "./operations.ts";
 import { requireApprovedVersion } from "./permissions.ts";
 import { readWindow } from "./query-windows.ts";
@@ -126,6 +128,52 @@ const fencedStore = (
 });
 
 /**
+ * How a real call of App `app`'s version `version` keeps the evidence of a
+ * use its code asked for that its sealed manifest doesn't allow
+ * (operations.ts, `Invocation.refusedUse`; GRA-279): `app.use.refused`, as
+ * the App's server code acting for `principal`, every field core's own.
+ * One that can't be kept is logged; the refusal stands either way.
+ */
+const keptUseRefusals =
+  (
+    env: Env,
+    context: {
+      readonly app: AppId;
+      readonly version: number;
+      readonly principal: string;
+      readonly requestId: string;
+      readonly runId: string | null;
+    }
+  ) =>
+  async (refusal: UseRefusal): Promise<void> => {
+    const { app, version, principal, requestId, runId } = context;
+    try {
+      await keepAuditEvent(env, drizzle(env.DB), {
+        actor: { type: "app", appId: app, part: "server" },
+        action: "app.use.refused",
+        target: { type: "app", id: app },
+        requestId,
+        detail: {
+          version,
+          person: principal,
+          runId,
+          function: refusal.function,
+          useKind: refusal.use.kind,
+          useName: refusal.use.name,
+          reason: refusal.reason,
+          errorCode: refusal.errorCode,
+        },
+      });
+    } catch (error) {
+      log.error("app.use.audit_failed", {
+        requestId,
+        errorCode: refusal.errorCode,
+        ...errorFields(error),
+      });
+    }
+  };
+
+/**
  * The invocation of `release` for `caller`: the store from the release
  * alone, the principal and roles from core's identity of the caller,
  * never from a request.
@@ -201,6 +249,13 @@ export const invocationFor = async (
     deadline,
     runId: null,
     authorize,
+    refusedUse: keptUseRefusals(env, {
+      app,
+      version: release.manifest.resourceVersion,
+      principal: by.userId,
+      requestId,
+      runId: null,
+    }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
     // operation host admits each request through `authorize` first, as it
@@ -394,6 +449,13 @@ export const runInvocationFor = async (
     deadline,
     runId,
     authorize,
+    refusedUse: keptUseRefusals(env, {
+      app,
+      version,
+      principal: authority.onBehalfOf,
+      requestId,
+      runId,
+    }),
     // No `workflows`: a run's call starts no workflow (operations.ts,
     // `Invocation.workflows`), so its step can't open a lineage of its own.
     resources: keyedUnderRun(bindings, runId, requireHolds),

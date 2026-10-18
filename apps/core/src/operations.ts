@@ -271,7 +271,64 @@ export interface Invocation {
    * counted on that root (quotas.ts).
    */
   readonly workflows?: WorkflowStarts;
+  /**
+   * Keeps the evidence of a use refused at the host's admission
+   * (`UseRefusal`): the first of a caller's call, nested calls included,
+   * before App code hears of it. Never throws: the refusal stands, whatever
+   * came of keeping it. None where nothing is kept (a draft's preview, an
+   * App's tests).
+   */
+  readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
 }
+
+/**
+ * A use App code asked the operation host for that the running function's
+ * sealed manifest doesn't allow (GRA-279), as core keeps it for the audit
+ * log (`Invocation.refusedUse`): every field from the sealed manifest or
+ * the host, never App code's text. `use.name` is a function path, resource
+ * alias or workflow alias the App's manifest has, or null when what was
+ * asked isn't one.
+ */
+export interface UseRefusal {
+  /** The function whose code asked: its sealed path. */
+  readonly function: string;
+  readonly use: {
+    readonly kind: "function" | "resource" | "workflow";
+    readonly name: string | null;
+  };
+  /**
+   * Not in the function's `uses` (`use_undeclared`), or a declared
+   * resource or workflow asked for what its declaration doesn't allow
+   * (`request_not_allowed`).
+   */
+  readonly reason: "use_undeclared" | "request_not_allowed";
+  readonly errorCode: string;
+}
+
+/** What a refusal of a use carries for its evidence (`refusedUseOf`). */
+type RefusedUse = Pick<UseRefusal, "use" | "reason">;
+
+/**
+ * The uses refused at the host's admission, by the error each was refused
+ * with: what `runHandler` keeps as evidence when that error reaches the
+ * channel, whatever wrapped the call.
+ */
+const refusedUses = new WeakMap<object, RefusedUse>();
+
+/** `error`, noted as the refusal of `refused` (`refusedUses`). */
+const refusingUse = <E extends Error>(error: E, refused: RefusedUse): E => {
+  refusedUses.set(error, refused);
+  return error;
+};
+
+/** `name` when the App's manifest has it in `table`, else null. */
+const sealedName = (
+  table: Readonly<Record<string, unknown>> | undefined,
+  name: unknown
+): string | null =>
+  typeof name === "string" && table !== undefined && Object.hasOwn(table, name)
+    ? name
+    : null;
 
 /**
  * Runs a registered function's handler over a channel: the SDK's
@@ -1732,19 +1789,39 @@ const resourceCall = async (
     Object.hasOwn(run.app.manifest.resources, alias)
       ? run.app.manifest.resources[alias]
       : undefined;
-  if (declaration === undefined || typeof method !== "string") {
-    throw operationErrors.create("resource.not_allowed");
+  const resourceName = sealedName(run.app.manifest.resources, alias);
+  if (declaration === undefined) {
+    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+      use: { kind: "resource", name: resourceName },
+      reason: "use_undeclared",
+    });
+  }
+  const notAllowedRequest = () =>
+    refusingUse(operationErrors.create("resource.not_allowed"), {
+      use: { kind: "resource", name: resourceName },
+      reason: "request_not_allowed",
+    });
+  if (typeof method !== "string") {
+    throw notAllowedRequest();
   }
   const args = jsonOf(request.args);
   if (args === undefined || !isJsonArray(args)) {
-    throw operationErrors.create("resource.not_allowed");
+    throw notAllowedRequest();
   }
   if (bytesOf(args) > operationInputMaxBytes) {
     throw operationErrors.create("contract.input_too_large", {
       maxBytes: operationInputMaxBytes,
     });
   }
-  allowedRequest(declaration, method, args);
+  try {
+    allowedRequest(declaration, method, args);
+  } catch (error) {
+    // What its declaration doesn't allow; a declared operation's request
+    // outside its contract is the arguments' fault, as it was.
+    throw operationErrors.codeOf(error) === "resource.not_allowed"
+      ? notAllowedRequest()
+      : error;
+  }
   // The one gate (`admit`): the same admission a mutation's commit runs,
   // so a request is made only while the caller may still act.
   await admit(run.invocation);
@@ -1807,14 +1884,23 @@ const workflowStart = (
       ? workflows[alias]
       : undefined;
   const args = jsonOf(request.args);
+  const workflowName = sealedName(workflows, alias);
+  if (declaration === undefined) {
+    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "use_undeclared",
+    });
+  }
   if (
-    declaration === undefined ||
     method !== "start" ||
     args === undefined ||
     !isJsonArray(args) ||
     args.length > 1
   ) {
-    throw operationErrors.create("resource.not_allowed");
+    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "request_not_allowed",
+    });
   }
   // No argument is no input, which JSON can't carry: the declared schema
   // decides it, its default included.
@@ -1997,6 +2083,12 @@ interface Run {
   readonly depth: number;
   /** What the whole call may still do, shared by every function in it. */
   readonly budget: CallBudget;
+  /**
+   * Whether the call kept its evidence of a refused use already
+   * (`Invocation.refusedUse`): shared by every function in it, so only
+   * its first refusal is kept.
+   */
+  readonly evidence: { kept: boolean };
   /** The caller's call, as its runner knows it: the same at any depth. */
   readonly call: CallTree;
   /**
@@ -2340,6 +2432,68 @@ const letGo = async (
 };
 
 /**
+ * Keeps the evidence of a use refused at the host's admission
+ * (`refusedUses`) as `operation`'s code asked it: the call's first, through
+ * `Invocation.refusedUse`, before the refusal reaches App code. A failure
+ * to keep it is logged; the refusal stands either way.
+ */
+const keepEvidence = async (
+  run: Run,
+  operation: OperationManifest,
+  error: unknown
+): Promise<void> => {
+  const refused =
+    typeof error === "object" && error !== null
+      ? refusedUses.get(error)
+      : undefined;
+  const keep = run.invocation.refusedUse;
+  if (refused === undefined || keep === undefined || run.evidence.kept) {
+    return;
+  }
+  run.evidence.kept = true;
+  const errorCode = operationErrors.codeOf(error) ?? "resource.not_allowed";
+  try {
+    await keep({ function: operation.path, ...refused, errorCode });
+  } catch (keepError) {
+    log.error("app.use.audit_failed", {
+      requestId: run.invocation.requestId,
+      errorCode,
+      ...errorFields(keepError),
+    });
+  }
+};
+
+/**
+ * `capabilities`, its calls and resource requests keeping the evidence of
+ * a use refused at the host's admission (`keepEvidence`).
+ */
+const keepingEvidence = (
+  run: Run,
+  operation: OperationManifest,
+  capabilities: Capabilities
+): Capabilities => {
+  const keeping =
+    <Args extends unknown[]>(capability: (...args: Args) => Promise<unknown>) =>
+    async (...args: Args): Promise<unknown> => {
+      try {
+        return await capability(...args);
+      } catch (error) {
+        await keepEvidence(run, operation, error);
+        throw error;
+      }
+    };
+  return {
+    ...capabilities,
+    ...(capabilities.call === undefined
+      ? {}
+      : { call: keeping(capabilities.call) }),
+    ...(capabilities.resource === undefined
+      ? {}
+      : { resource: keeping(capabilities.resource) }),
+  };
+};
+
+/**
  * Runs `operation`'s handler with `args` over a channel of `capabilities`,
  * ended once it settles, and answers its checked return; a failure as the
  * host decides it (`failureOf`). `stale` says, for a failure, whether the
@@ -2353,7 +2507,10 @@ const runHandler = async (
   capabilities: Capabilities,
   stale?: () => Promise<boolean>
 ): Promise<Json> => {
-  const calls = trackedCalls(capabilities, run.invocation.deadline);
+  const calls = trackedCalls(
+    keepingEvidence(run, operation, capabilities),
+    run.invocation.deadline
+  );
   const open = openChannel({
     requestId: run.invocation.requestId,
     path: operation.path,
@@ -2552,7 +2709,13 @@ const startNested = async (
       ? run.app.manifest.operations[path]
       : undefined;
   if (callee === undefined) {
-    throw operationErrors.create("operation.not_found");
+    throw refusingUse(operationErrors.create("operation.not_found"), {
+      use: {
+        kind: "function",
+        name: sealedName(run.app.manifest.operations, path),
+      },
+      reason: "use_undeclared",
+    });
   }
   if (callee.kind !== kind) {
     throw operationErrors.create("operation.kind_mismatch");
@@ -2739,7 +2902,17 @@ const runMutation = async (
           // Any other resource is refused as a mutation's always is.
           resource: async (alias, method, callArgs) => {
             if (!startsWorkflow(operation, alias)) {
-              throw operationErrors.create("operation.no_resources");
+              // Any resource but a workflow it lists: not one of its uses.
+              throw refusingUse(
+                operationErrors.create("operation.no_resources"),
+                {
+                  use: {
+                    kind: "resource",
+                    name: sealedName(run.app.manifest.resources, alias),
+                  },
+                  reason: "use_undeclared",
+                }
+              );
             }
             const start = workflowStart(run, operation, {
               alias,
@@ -3137,6 +3310,7 @@ export const callOperation = async (
         invocation,
         depth: 0,
         budget: options.budget ?? callBudget(),
+        evidence: { kept: false },
         call: new CallTree(options.parentSession),
         ...(progress === undefined ? {} : { progress }),
         ...(cancelled === undefined ? {} : { cancelled }),
