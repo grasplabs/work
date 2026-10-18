@@ -63,7 +63,7 @@ const testStepLimit = 60;
 const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
 
 /**
- * The tests that run the compiler on whole Apps: the screen compiler's,
+ * The tests that run the compiler on whole Apps: the App compiler's,
  * and the App sandbox's, which builds each App's server code. They run as
  * their own project (vite.screens.config.ts), after the others, so their
  * long compiles don't starve the light tests of CPU.
@@ -263,7 +263,7 @@ export const coreProject = (
                   },
                 }),
           },
-          // A stand-in frontend and the screen compiler, written by the
+          // A stand-in frontend and the App compiler, written by the
           // global setup.
           assets: { directory: "./dist/test-assets" },
           // The real connect Worker behind the CONNECT service binding,

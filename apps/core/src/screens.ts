@@ -18,7 +18,9 @@ import {
 } from "@grasp-os/compiler";
 import type {
   AppCodeBuild,
+  CompileTarget,
   Diagnostic,
+  InspectTarget,
   ComputeModulesBuild,
   OpenWorkflowBuild,
   ScreenBuild,
@@ -134,20 +136,28 @@ export type BuildEnv = PlatformEnv & {
   FILES: Pick<R2Bucket, "get" | "put">;
 };
 
-/** The compiler's methods, by what they build. */
-const compilerMethods = {
-  screen: "build",
-  server: "buildServer",
-  workflow: "buildWorkflows",
-  app: "buildAppCode",
-  "app-check": "checkAppCode",
-  "app-tests": "buildAppTests",
-  "open-workflow": "buildOpenWorkflow",
-  compute: "buildComputeModules",
-} as const;
+/**
+ * What the compiler (`AppCompiler`) runs for each kind of build: its
+ * method and the target. Only inspection (`app`, the server code with
+ * stand-in generated modules) is `inspect`; a seal's checked server code
+ * (`app-check`) is `build("app")`, with every gate.
+ */
+const compilerCalls = {
+  screen: ["build", "screens"],
+  server: ["build", "server"],
+  workflow: ["build", "workflows"],
+  app: ["inspect", "app"],
+  "app-check": ["build", "app"],
+  "app-tests": ["build", "app-tests"],
+  "open-workflow": ["build", "open-workflow"],
+  compute: ["build", "compute"],
+} as const satisfies Record<
+  string,
+  readonly ["build", CompileTarget] | readonly ["inspect", InspectTarget]
+>;
 
-/** The kinds of build, by the compiler's method each runs. */
-type BuildKind = keyof typeof compilerMethods;
+/** The kinds of build, by the compiler call each runs. */
+type BuildKind = keyof typeof compilerCalls;
 
 /**
  * Whether the compiler's answer is shaped as a build: its code is core's
@@ -185,7 +195,8 @@ const compiled = async (
   files: AppFiles
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
-    const built = await runner.run("compiler", compilerMethods[kind], [files]);
+    const [method, target] = compilerCalls[kind];
+    const built = await runner.run("compiler", method, [target, files]);
     return { built, cache: true };
   } catch (error) {
     // A JSON workflow's generated module is never its author's to fix,
@@ -239,7 +250,7 @@ const buildSweepKey = "builds-sweep.json";
 const buildSweepBatch = 500;
 
 /** The prefix each kind of build is cached under. */
-const buildPrefixes = Object.keys(compilerMethods).map(
+const buildPrefixes = Object.keys(compilerCalls).map(
   (kind) => `${kind}-builds/`
 );
 

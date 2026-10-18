@@ -52,7 +52,7 @@ import { sealedPackagesSchema } from "./workflows/package-seal.ts";
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
 // its definition, validated at publication, lowered into SDK TypeScript
 // (@grasp-os/open-workflow's generate.ts), type-checked and compiled into
-// JavaScript by the screen compiler, as App code is, and sealed with the
+// JavaScript by the App compiler, as App code is, and sealed with the
 // version: the original JSON, the generated code, the compiled module, the
 // expression table it names its expressions from, a source map and the SDK
 // modules it was compiled against, each a content-addressed artifact

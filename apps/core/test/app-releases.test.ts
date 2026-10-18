@@ -1563,10 +1563,11 @@ describe("screens", { timeout: 120_000 }, () => {
     });
   });
 
-  it("type-check a screen's files against only the modules the kit gives it, however a file names one", async () => {
-    // A declaration's type naming a module by `import()` in a namespace:
-    // the compiler's check runs no import check (GRA-683), so only the
-    // type check's resolution holds it.
+  it("check a screen's declaration naming a module by import() in a namespace as its build does", async () => {
+    // The compiler's check is its build's diagnostics (GRA-676, GRA-683),
+    // so the declaration's import check refuses it before any type check;
+    // the type check's resolution, which holds it as well, is tested on its
+    // own (packages/compiler, type-check.test.ts).
     const files = {
       ...notesFiles(),
       "screens/notes.tsx":
@@ -1577,13 +1578,16 @@ describe("screens", { timeout: 120_000 }, () => {
     const checked = z
       .array(z.object({ file: z.string().optional(), rule: z.string() }))
       .parse(
-        await platformRunner(env, "app-test").run("compiler", "check", [files])
+        await platformRunner(env, "app-test").run("compiler", "check", [
+          "screens",
+          files,
+        ])
       );
     expect(
       checked
         .filter(({ file }) => file === "probe.d.ts")
         .map(({ rule }) => rule)
-    ).toStrictEqual(["TS2307"]);
+    ).toStrictEqual(["imports"]);
   });
 
   it.each([
