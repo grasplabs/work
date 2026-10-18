@@ -288,6 +288,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       ].filter((secret) => text.includes(secret)),
       hashes: {
         manifest: entry.provenance.manifestHash,
+        build: entry.provenance.buildHash,
         definition:
           entry.provenance.definitionHash ===
           (await sha256Hex(entry.files["workflow.json"] ?? "")),
@@ -307,7 +308,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       region: { type: "string" },
       pageSize: 25,
       secrets: [],
-      hashes: { manifest: null, definition: true },
+      hashes: { manifest: null, build: null, definition: true },
       ids: [],
     });
 
@@ -343,7 +344,9 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         sensitive: true,
       },
     });
-    const bound = 4000 + Math.floor(Math.random() * 1000);
+    // Long enough that no hash in the package holds it by chance.
+    const bound =
+      1_000_000_000_000 + Math.floor(Math.random() * 1_000_000_000_000);
     const bounding = await published(owner, {
       port: {
         schema: { type: "number", minimum: bound, maximum: bound },

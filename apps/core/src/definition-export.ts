@@ -322,13 +322,14 @@ class WorkflowGraph {
       key,
       entry: {
         provenance: {
-          // Both hash the definition as published: a holder could test
-          // guesses at a withheld default against either.
+          // Each hashes what was published, the definition or code
+          // generated from it: a holder could test guesses at a withheld
+          // default against it.
           manifestHash:
             definition.withheld.length === 0 ? found.manifestHash : null,
           definitionHash: await sha256Hex(definition.text),
           evaluatorHash: found.evaluatorHash,
-          buildHash: found.buildHash,
+          buildHash: definition.withheld.length === 0 ? found.buildHash : null,
           profile: found.profile,
         },
         files,

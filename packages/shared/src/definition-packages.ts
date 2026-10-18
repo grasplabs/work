@@ -114,14 +114,15 @@ export const definitionPackageSchema = z.strictObject({
       provenance: z.strictObject({
         /**
          * The version's manifest hash, null when a default was withheld:
-         * it is a hash over the definition as published, which would let
-         * a holder test guesses at what was withheld.
+         * it hashes what was published, which would let a holder test
+         * guesses at what was withheld.
          */
         manifestHash: sha256Schema.nullable(),
         /** The SHA-256 of `workflow.json` as exported. */
         definitionHash: sha256Schema,
         evaluatorHash: sha256Schema,
-        buildHash: sha256Schema,
+        /** The build's identity, null when a default was withheld, as above. */
+        buildHash: sha256Schema.nullable(),
         profile: z.string().min(1).max(128),
       }),
       /**
