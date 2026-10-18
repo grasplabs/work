@@ -35,6 +35,7 @@ import {
   typeImportError,
   workflowTypeContext,
 } from "./app-code.ts";
+import { assertNoBindings } from "./authority.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
 import { isError } from "./diagnostic.ts";
@@ -1102,11 +1103,11 @@ export default class AppCompiler extends WorkerEntrypoint {
    * check, lint, import boundaries, limits): its output, or why it fails.
    */
   // RPC exposes prototype methods only, so these can't be static.
-  // oxlint-disable-next-line class-methods-use-this
   async build<Target extends CompileTarget>(
     target: Target,
     files: Record<string, string>
   ): Promise<TargetBuilds[Target]> {
+    assertNoBindings(this.env, "The App compiler");
     const known = knownTarget(targetBuilds, target, "build");
     // SAFETY: `known` is `target`, which picks its own builder.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -1132,11 +1133,11 @@ export default class AppCompiler extends WorkerEntrypoint {
    * Builds `target` as contract inspection loads it (`targetInspections`):
    * only `app` has one.
    */
-  // oxlint-disable-next-line class-methods-use-this
   inspect<Target extends InspectTarget>(
     target: Target,
     files: Record<string, string>
   ): TargetInspections[Target] {
+    assertNoBindings(this.env, "The App compiler");
     const known = knownTarget(targetInspections, target, "inspect");
     return targetInspections[known](files);
   }

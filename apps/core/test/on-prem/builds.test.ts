@@ -2,11 +2,12 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { builderOwner } from "../../src/platform-sandbox.ts";
+import { builderOwner, platformRunner } from "../../src/platform-sandbox.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { buildOnSave } from "../../src/save-builds.ts";
 import { buildScreens, buildServer } from "../../src/screens.ts";
+import { probeModule } from "../isolate-probe.ts";
 import { v1Server } from "../v1-app-server.ts";
 import { workflowFiles } from "../workflow-apps.ts";
 
@@ -345,4 +346,45 @@ describe("the App compiler on-prem", () => {
     // Built again, to its deadline: not a failure read from the cache.
     expect(Date.now() - started).toBeGreaterThan(1000);
   });
+});
+
+/**
+ * Core's env as on-prem, its assets answering `probeModule` in place of
+ * the program at `program` (`/compiler.js`, `/package-builder.js`): what
+ * runs there is the probe, on the sandbox host, as that program runs.
+ */
+const probing = (program: string) => ({
+  ...onPrem,
+  ASSETS: {
+    fetch: async (...args: Parameters<Fetcher["fetch"]>) =>
+      new Request(...args).url.endsWith(program)
+        ? new Response(probeModule, {
+            headers: { "content-type": "text/javascript" },
+          })
+        : await env.ASSETS.fetch(...args),
+    connect: env.ASSETS.connect.bind(env.ASSETS),
+  },
+});
+
+describe("the platform's programs on the sandbox host", () => {
+  it.each([
+    ["App compiler", "compiler", "/compiler.js"],
+    ["package builder", "package-builder", "/package-builder.js"],
+  ] as const)(
+    "run the %s with no bindings and no network",
+    async (_case, program, path) => {
+      const report = await platformRunner(probing(path), "app-test").run(
+        program,
+        "report",
+        []
+      );
+      expect(report).toStrictEqual({
+        env: [],
+        imported: [],
+        fetch: "refused",
+        connect: "refused",
+      });
+    },
+    60_000
+  );
 });

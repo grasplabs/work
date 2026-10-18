@@ -1,9 +1,16 @@
-import { isolateSettings } from "@grasp-os/compiler";
-import type { Diagnostic } from "@grasp-os/compiler";
+import {
+  appCompilerCode,
+  isolateSettings,
+  packageBuilderCode,
+  packageBuilderSettings,
+} from "@grasp-os/compiler";
+import type { PlatformCode, Diagnostic } from "@grasp-os/compiler";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { callStub } from "../src/sandboxed.ts";
 import { buildScreens } from "../src/screens.ts";
+import { probeModule } from "./isolate-probe.ts";
 
 /** A screen with this code before its component. */
 const screen = (code: string): Record<string, string> => ({
@@ -125,26 +132,101 @@ export const classes = ["mt-7","${"(".repeat(400)}"];`
       ),
     ]);
   });
-
-  it("gives the compiler's isolate no network", async () => {
-    const probe = env.LOADER.load({
-      ...isolateSettings,
-      mainModule: "probe.js",
-      modules: {
-        "probe.js": `export default {
-  async fetch() {
-    try {
-      await fetch("https://example.com/");
-      return new Response("reached the network");
-    } catch (error) {
-      return new Response(String(error));
-    }
-  },
-};`,
-      },
-    });
-    const response = await probe.getEntrypoint().fetch("https://probe/");
-
-    await expect(response.text()).resolves.not.toBe("reached the network");
-  });
 });
+
+/** How an isolate runs, apart from its code. */
+type IsolateSettings = Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
+
+/** What the probe reports in an isolate with `settings`. */
+const probed = async (settings: IsolateSettings): Promise<unknown> =>
+  await callStub(
+    env.LOADER.load({
+      ...settings,
+      mainModule: "probe.js",
+      modules: { "probe.js": probeModule },
+    }).getEntrypoint(),
+    "report"
+  );
+
+/** `code` as a Loader takes it, with `bindings` in its env. */
+const loaderCode = (
+  code: PlatformCode,
+  settings: IsolateSettings,
+  bindings: Record<string, string>
+): WorkerLoaderWorkerCode => {
+  const modules: WorkerLoaderWorkerCode["modules"] = {};
+  for (const [name, { type, bytes }] of Object.entries(code.modules)) {
+    const text = new TextDecoder().decode(bytes);
+    if (type === "json") {
+      const json: unknown = JSON.parse(text);
+      modules[name] = { json };
+    } else if (type === "wasm") {
+      modules[name] = { wasm: new Uint8Array(bytes).buffer };
+    } else {
+      modules[name] = text;
+    }
+  }
+  return { ...settings, env: bindings, mainModule: code.mainModule, modules };
+};
+
+describe(
+  "the platform's isolates that read App code and packages",
+  { timeout: 60_000 },
+  () => {
+    it.each([
+      ["the App compiler's", isolateSettings],
+      ["the package builder's", packageBuilderSettings],
+    ])("give %s code no bindings and no network", async (_case, settings) => {
+      await expect(probed(settings)).resolves.toStrictEqual({
+        env: [],
+        imported: [],
+        fetch: "refused",
+        connect: "refused",
+      });
+    });
+
+    it("would report what an isolate with a binding and an outbound can reach", async () => {
+      // The probe's control: given what the settings above withhold, it
+      // sees it, so their refusals are theirs, not the probe's.
+      await expect(
+        probed({
+          ...isolateSettings,
+          env: { SECRET: "not for the compiler" },
+          globalOutbound: env.ASSETS,
+          limits: { cpuMs: 20_000 },
+        })
+      ).resolves.toMatchObject({ env: ["SECRET"], fetch: "reached" });
+    });
+
+    it.each([
+      [
+        "the App compiler",
+        appCompilerCode,
+        isolateSettings,
+        ["build", ["screens", {}]],
+      ],
+      [
+        "the package builder",
+        packageBuilderCode,
+        packageBuilderSettings,
+        ["inspect", [{ limits: {}, packages: [] }]],
+      ],
+    ] as const)(
+      "has %s refuse to work in an isolate handed a binding",
+      async (_case, code, settings, [method, args]) => {
+        const bound = env.LOADER.load(
+          loaderCode(await code(env.ASSETS), settings, { DB: "a credential" })
+        ).getEntrypoint();
+        await expect(
+          callStub(bound, method, args).then(
+            () => "worked",
+            (error: unknown) =>
+              error instanceof Error && error.message.includes("handed DB")
+                ? "refused"
+                : String(error)
+          )
+        ).resolves.toBe("refused");
+      }
+    );
+  }
+);
