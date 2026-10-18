@@ -2,7 +2,10 @@
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowNamespace,
+  workflowResourceErrors,
+} from "@grasp-os/shared/workflow-resources";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -1218,18 +1221,45 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       () => "read",
       (error: unknown) => roleErrors.codeOf(error)
     );
+    // The alias bound to another workflow while the window reads: the
+    // binding is read again before each further page, as `runs` reads it.
+    const other = await greetingOf(owner);
+    const rebound = await readWorkflowWindow(
+      env,
+      { app: fixture.app, userId: bob.userId },
+      await workflowQueryOf(release, history),
+      { runId },
+      {
+        extent: 500,
+        charge: async () => {
+          // A window's pages cost nothing here.
+        },
+        gate: async () => {
+          await bindWorkflowToApp(env, owner, other.id, {
+            app: fixture.app,
+            alias: "followUp",
+            version: 1,
+          });
+        },
+      }
+    ).then(
+      () => "read",
+      (error: unknown) => workflowResourceErrors.codeOf(error)
+    );
     expect({
       morethanAPage: rows.length > 100,
       window: windowed.items,
       hasMore: windowed.hasMore,
       cutOff,
       gates,
+      rebound,
     }).toStrictEqual({
       morethanAPage: true,
       window: rows,
       hasMore: false,
       cutOff: "role.forbidden",
       gates: 1,
+      rebound: "workflow.run_unavailable",
     });
   });
 });

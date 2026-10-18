@@ -581,7 +581,8 @@ const historyWindowMaxPages = liveWindowMaxItems / 10;
  * ended at, until the window is full or the history ends. The caller paid
  * `windowPages(extent)` pages; `charge` is asked for each page past them,
  * and `gate`, the call's access check, before each page after the first,
- * so access lost while the window reads stops it.
+ * with the App's binding of the alias read again, so access lost or the
+ * alias rebound while the window reads stops it.
  */
 const historyWindow = async (
   env: Env,
@@ -612,8 +613,15 @@ const historyWindow = async (
       // oxlint-disable-next-line no-await-in-loop -- a page's charge before its read
       await charge(1, pages);
     }
+    // The binding in force before each further page too: rebound while
+    // the window reads, the rest of it is refused as `runs` would list it.
+    const bound =
+      pages === 1
+        ? from.bound
+        : // oxlint-disable-next-line no-await-in-loop -- read again for each further page
+          await boundWorkflowId(env, caller.app, from.query.alias);
     // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
-    const page = await historyPage(env, caller, from, runId, {
+    const page = await historyPage(env, caller, { ...from, bound }, runId, {
       size: Math.min(size - items.length, queryMaxResults),
       cursor,
     });
