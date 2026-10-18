@@ -1359,7 +1359,9 @@ const buildDeclaration = `/**
  * \`export default workflow(id, config, async (step, { input, params, env }) => …)\`,
  * calling the App's bindings only in a step's own function (not between
  * steps, nor in a function inside it: loop with \`for...of\`), each call
- * written out as \`env.NAME.method(…)\`, \`appServer(env).method(…)\` or
+ * written out as \`env.NAME.method(…)\`, \`appServer(env).method(…)\`,
+ * \`appFunctions(env).query(…)\` (or \`mutation\`, \`action\`: the App's
+ * public functions, typed by its definitions) or
  * \`appExports(env.NAME).method(…)\`, so its review names what each step
  * calls. A check refuses any other use of \`env\`, and \`globalThis\`,
  * \`self\`, \`Proxy\`, \`Reflect\`, \`Function\`, \`eval\` or a change to a
