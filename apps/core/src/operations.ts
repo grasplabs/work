@@ -331,6 +331,18 @@ const sealedName = (
     : null;
 
 /**
+ * The use App code asked for under `alias`, refused as one the function
+ * doesn't list: a workflow when the App declares one under it, otherwise a
+ * resource, named only when the App's manifest has it.
+ */
+const undeclaredUse = (run: Run, alias: unknown): RefusedUse["use"] => {
+  const workflow = sealedName(run.app.manifest.workflows, alias);
+  return workflow === null
+    ? { kind: "resource", name: sealedName(run.app.manifest.resources, alias) }
+    : { kind: "workflow", name: workflow };
+};
+
+/**
  * Runs a registered function's handler over a channel: the SDK's
  * `runFunction` with the App's registration, wherever its code runs.
  */
@@ -1792,7 +1804,7 @@ const resourceCall = async (
   const resourceName = sealedName(run.app.manifest.resources, alias);
   if (declaration === undefined) {
     throw refusingUse(operationErrors.create("resource.not_allowed"), {
-      use: { kind: "resource", name: resourceName },
+      use: undeclaredUse(run, alias),
       reason: "use_undeclared",
     });
   }
@@ -2905,13 +2917,7 @@ const runMutation = async (
               // Any resource but a workflow it lists: not one of its uses.
               throw refusingUse(
                 operationErrors.create("operation.no_resources"),
-                {
-                  use: {
-                    kind: "resource",
-                    name: sealedName(run.app.manifest.resources, alias),
-                  },
-                  reason: "use_undeclared",
-                }
+                { use: undeclaredUse(run, alias), reason: "use_undeclared" }
               );
             }
             const start = workflowStart(run, operation, {

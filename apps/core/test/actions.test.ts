@@ -214,6 +214,12 @@ const guestbook = resource.guests("guestbook", {
   operations: ["list", "read"],
 });
 
+/** A workflow the App declares, which no function here lists. */
+const followUp = resource.workflow("followUp", {
+  input: v.object({ who: v.string() }),
+  output: v.object({ status: v.string() }),
+});
+
 const sendMail = action({
   args: { to: v.string().email() },
   returns: v.object({ mailbox: v.string() }),
@@ -622,7 +628,7 @@ const notesApp = app({
     "notes.blindCount": { tables: { notes: { insert: true } } },
   },
   screens: [],
-  uses: [mail, summarizer, help, letter, guestbook],
+  uses: [mail, summarizer, help, letter, guestbook, followUp],
 });
 
 const { manifest } = inspectApp(notesApp);
@@ -2245,6 +2251,11 @@ describe("evidence of a refused use", () => {
     const noFunction = await kept(
       async (channel) => await channel.call("query", "notes.nothing", {})
     );
+    // A workflow the App declares that sendMail doesn't list.
+    const workflow = await kept(
+      async (channel) =>
+        await channel.resource("followUp", "start", [{ who: "Ada" }])
+    );
     // A declared resource asked for an action it doesn't declare.
     const request = await kept(
       async (channel) => await channel.resource("mail", "call", ["delete", {}])
@@ -2254,6 +2265,7 @@ describe("evidence of a refused use", () => {
       appResource: appResource.heard,
       function: fn.heard,
       noFunction: noFunction.heard,
+      workflow: workflow.heard,
       request: request.heard,
     }).toStrictEqual({
       loop: {
@@ -2293,6 +2305,14 @@ describe("evidence of a refused use", () => {
           errorCode: "operation.not_found",
         },
       ],
+      workflow: [
+        {
+          function: "actions.sendMail",
+          use: { kind: "workflow", name: "followUp" },
+          reason: "use_undeclared",
+          errorCode: "resource.not_allowed",
+        },
+      ],
       request: [
         {
           function: "actions.sendMail",
@@ -2324,6 +2344,25 @@ describe("evidence of a refused use", () => {
         ),
       }
     );
+    // A workflow the App declares that the mutation doesn't list.
+    const workflowHeard: UseRefusal[] = [];
+    const startsUnlisted = await call(
+      fixture,
+      "mutation",
+      "notes.create",
+      { title: "z" },
+      {
+        refusedUse: async (refusal) => {
+          workflowHeard.push(refusal);
+          await Promise.resolve();
+        },
+        run: misusing(
+          "notes.create",
+          async (channel) =>
+            await channel.resource("followUp", "start", [{ who: "Ada" }])
+        ),
+      }
+    );
     // A hook that fails leaves the refusal as it was.
     const failing = await call(
       fixture,
@@ -2345,6 +2384,8 @@ describe("evidence of a refused use", () => {
     expect({
       asked: codeOf(asked),
       heard,
+      startsUnlisted: codeOf(startsUnlisted),
+      workflowHeard,
       failing: codeOf(failing),
     }).toStrictEqual({
       asked: "operation.no_resources",
@@ -2352,6 +2393,15 @@ describe("evidence of a refused use", () => {
         {
           function: "notes.create",
           use: { kind: "resource", name: "mail" },
+          reason: "use_undeclared",
+          errorCode: "operation.no_resources",
+        },
+      ],
+      startsUnlisted: "operation.no_resources",
+      workflowHeard: [
+        {
+          function: "notes.create",
+          use: { kind: "workflow", name: "followUp" },
           reason: "use_undeclared",
           errorCode: "operation.no_resources",
         },
