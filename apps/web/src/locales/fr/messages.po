@@ -7587,6 +7587,11 @@ msgstr "S’exécuterait après approbation"
 msgid "Write your answer"
 msgstr "Écrivez votre réponse"
 
+#. placeholder {0}: formatList( action.modelSteeredWrites.map( ({ alias, operation }) => `${alias}.${operation}` ) )
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Writes a model may steer: {0}"
+msgstr "Écritures qu’un modèle peut orienter : {0}"
+
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Rédaction"

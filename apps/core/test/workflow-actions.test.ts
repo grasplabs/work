@@ -180,6 +180,10 @@ export const notify = action({
 });
 `;
 
+/** The `mail` connector use of `operations`, as an action declares it. */
+const connector = (operations: string[]): string =>
+  `resource.connector("mail", { operations: ${JSON.stringify(operations)} })`;
+
 /** Sends two mails and answers what the context holds. */
 const sendsTwice =
   notifyModule(`await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" });
@@ -470,6 +474,8 @@ describe("a JSON workflow's own actions", () => {
         module: "code/notify.ts",
         export: "notify",
         uses: [{ alias: "mail", kind: "connector", operations: ["mail.send"] }],
+        // No model asked, so no write a model may steer (GRA-718).
+        modelSteeredWrites: [],
       },
     ];
     expect({
@@ -486,6 +492,99 @@ describe("a JSON workflow's own actions", () => {
       builder: actions,
       reader: actions,
       readerBindings: [{ alias: "mail", contractId: key }],
+    });
+  });
+
+  it("flags the writes an action's model may steer in its version's review: each operation its contract doesn't state is read-only, and only beside a model use", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // `mail.read` stated read-only; `mail.send` and `mail.draft` not, so
+    // taken for writes.
+    const mail = `mail-${unique()}`;
+    const operation = {
+      input: descriptorOf(v.object({ to: v.string(), subject: v.string() })),
+      output: descriptorOf(v.object({ messageId: v.string() })),
+    };
+    await publishCatalogContract(env, admin, {
+      key: mail,
+      kind: "connector",
+      operations: {
+        "mail.send": operation,
+        "mail.draft": { ...operation, readOnly: false },
+        "mail.read": { ...operation, readOnly: true },
+      },
+    });
+    const model = `writer-${unique()}`;
+    await publishCatalogContract(env, admin, { key: model, kind: "model" });
+    const writer =
+      'resource.model("writer", { output: v.object({ line: v.string() }) })';
+    const reviewed = async (uses: string) => {
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `act-${unique()}`
+      );
+      const definition = z
+        .looseObject({
+          document: z.looseObject({
+            metadata: z.object({
+              grasp: z.looseObject({
+                bindings: z.record(z.string(), z.unknown()),
+              }),
+            }),
+          }),
+        })
+        .parse(
+          JSON.parse(
+            definitionOf(workflow.name, {
+              mail: { kind: "connector", contract: mail },
+            })
+          )
+        );
+      if (uses.includes("writer")) {
+        definition.document.metadata.grasp.bindings.writer = {
+          kind: "model",
+          contract: model,
+        };
+      }
+      const published = await publishWorkflowVersion(env, ada, workflow.id, {
+        definition: JSON.stringify(definition),
+        basedOn: null,
+        modules: {
+          "code/notify.ts": notifyModule('return { status: "x" };', uses),
+        },
+      });
+      const [listed] = await workflowVersions(env, ada, workflow.id);
+      return {
+        published: published.actions.map(
+          ({ modelSteeredWrites }) => modelSteeredWrites
+        ),
+        listed: listed?.actions.map(
+          ({ modelSteeredWrites }) => modelSteeredWrites
+        ),
+      };
+    };
+    const steered = [
+      { alias: "mail", operation: "mail.send" },
+      { alias: "mail", operation: "mail.draft" },
+    ];
+    const modelAndWrites = await reviewed(
+      `[${writer}, ${connector(["mail.send", "mail.draft", "mail.read"])}]`
+    );
+    const modelAndReads = await reviewed(
+      `[${writer}, ${connector(["mail.read"])}]`
+    );
+    const writesAlone = await reviewed(
+      `[${connector(["mail.send", "mail.draft"])}]`
+    );
+    expect({
+      modelAndWrites,
+      modelAndReads,
+      writesAlone,
+    }).toStrictEqual({
+      modelAndWrites: { published: [steered], listed: [steered] },
+      modelAndReads: { published: [[]], listed: [[]] },
+      writesAlone: { published: [[]], listed: [[]] },
     });
   });
 

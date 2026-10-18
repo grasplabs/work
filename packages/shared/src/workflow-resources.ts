@@ -228,6 +228,13 @@ export const catalogContractSchema = z
         z.strictObject({
           input: z.string().max(256 * 1024),
           output: z.string().max(256 * 1024),
+          /**
+           * That the operation only reads, as the admin who publishes the
+           * contract states it (GRA-718): what a version's review relies
+           * on to leave it out of the writes a model may steer. Missing,
+           * it is taken for a write.
+           */
+          readOnly: z.boolean().optional(),
         })
       )
       .optional(),
@@ -586,6 +593,22 @@ export interface WorkflowVersionAction {
   uses: ActionUse[];
 }
 
+/** A connector operation one of a version's actions may call. */
+export interface ActionOperation {
+  alias: string;
+  operation: string;
+}
+
+/**
+ * One of a version's own actions as its review shows it (GRA-718): as
+ * sealed, and, when it asks a model, each connector operation it may call
+ * that its pinned contract doesn't state is read-only, which the model's
+ * answers may steer. Empty when it asks no model, or only reads.
+ */
+export interface WorkflowActionReview extends WorkflowVersionAction {
+  modelSteeredWrites: ActionOperation[];
+}
+
 /**
  * Why a deletion was refused with `workflow.resource_bound`, in its
  * details: the workflows whose current version binds it that the caller
@@ -656,7 +679,7 @@ export interface WorkflowResourceVersion {
   manifestHash: string;
   bindings: WorkflowVersionBinding[];
   /** What its own actions may do, as sealed with it, by binding. */
-  actions: WorkflowVersionAction[];
+  actions: WorkflowActionReview[];
   build: WorkflowVersionBuild;
   author: string;
   createdAt: string;

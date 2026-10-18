@@ -38,6 +38,7 @@ import type {
   WorkflowResourceVersion,
   WorkflowRole,
   WorkflowBinders,
+  WorkflowActionReview,
   WorkflowVersionAction,
   WorkflowVersionBinding,
   WorkflowVersionSource,
@@ -1085,12 +1086,76 @@ const sealedActionsOf = (
   return parsed.data.actions;
 };
 
+/** Whether `action` asks a model (GRA-700). */
+const asksModel = (action: WorkflowVersionAction): boolean =>
+  action.uses.some(({ kind }) => kind === "model");
+
+/** What a review reads of a version's binding: which contract it pinned. */
+type PinnedContract = Pick<
+  WorkflowVersionBinding,
+  "alias" | "kind" | "contractId" | "fingerprint"
+>;
+
+/**
+ * `actions` as a version's review shows them (GRA-718): each with the
+ * connector operations it may call that a model's answers may steer, when
+ * it asks a model. An operation counts as a write unless the catalog
+ * contract its binding pinned states it is read-only: the one the version
+ * pinned, as a catalog key is published once and its row never changes
+ * (the database refuses it). A binding, contract or operation that isn't
+ * there counts as a write too, so the flag shows whenever it can't be
+ * ruled out. Read from the actions as sealed and the catalog, never
+ * inspected again.
+ */
+const reviewedActions = async (
+  env: Env,
+  actions: readonly WorkflowVersionAction[],
+  bindings: readonly PinnedContract[]
+): Promise<WorkflowActionReview[]> => {
+  const connectorOf = (alias: string): PinnedContract | undefined =>
+    bindings.find(
+      (binding) => binding.alias === alias && binding.kind === "connector"
+    );
+  const keys = actions.filter(asksModel).flatMap((action) =>
+    action.uses.flatMap((use) => {
+      const contractId =
+        use.kind === "connector" ? connectorOf(use.alias)?.contractId : null;
+      return typeof contractId === "string" ? [contractId] : [];
+    })
+  );
+  const catalog = await resolveCatalogKeys(env, [...new Set(keys)]);
+  const readOnly = (alias: string, operation: string): boolean => {
+    const binding = connectorOf(alias);
+    const contract =
+      binding?.contractId === null || binding?.contractId === undefined
+        ? undefined
+        : catalog.get(binding.contractId);
+    return (
+      contract !== undefined &&
+      contract.contract.operations?.[operation]?.readOnly === true
+    );
+  };
+  return actions.map((action) => ({
+    ...action,
+    modelSteeredWrites: asksModel(action)
+      ? action.uses.flatMap((use) =>
+          use.kind === "connector"
+            ? use.operations
+                .filter((operation) => !readOnly(use.alias, operation))
+                .map((operation) => ({ alias: use.alias, operation }))
+            : []
+        )
+      : [],
+  }));
+};
+
 /**
  * A version's row, as the registry answers it: only once its manifest
  * still hashes to what was sealed, since what its actions may do and its
  * build are read from it (`workflow.version_corrupt` otherwise).
  */
 const versionOf = async (
+  env: Env,
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: WorkflowVersionBinding[]
 ): Promise<WorkflowResourceVersion> => {
@@ -1106,7 +1171,7 @@ const versionOf = async (
     contractHash: row.contractHash,
     manifestHash: row.manifestHash,
     bindings,
-    actions: sealedActionsOf(row),
+    actions: await reviewedActions(env, sealedActionsOf(row), bindings),
     build: buildSummary(
       sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
     ),
@@ -1276,7 +1341,7 @@ const publishedAs = async (
   }
   const bindings = await bindingsOf(env, id);
   return {
-    version: await versionOf(row, bindings.get(row.version) ?? []),
+    version: await versionOf(env, row, bindings.get(row.version) ?? []),
     modulesHash: sealedModulesHash(row),
   };
 };
@@ -1518,7 +1583,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
-    actions,
+    actions: await reviewedActions(env, actions, bindings),
     build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
@@ -1763,6 +1828,7 @@ export const workflowVersions = async (
     rows.map(
       async (row) =>
         await versionOf(
+          env,
           row,
           (bindings.get(row.version) ?? []).map(
             (binding) => visible.get(binding) ?? binding

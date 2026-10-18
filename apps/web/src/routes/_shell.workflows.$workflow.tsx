@@ -1,8 +1,8 @@
 import type {
   WorkflowDraft,
   WorkflowResource,
+  WorkflowActionReview,
   WorkflowResourceVersion,
-  WorkflowVersionAction,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
 import {
@@ -40,10 +40,12 @@ import { TestRun } from "../workflows/test-run.tsx";
 // with a role, its published versions. Core decides who sees what: the
 // draft is read only for builders, as it can hold a sensitive default.
 // Each version shows what its own actions may call, as sealed with it
-// (GRA-709): each binding they use, and a connector's exact operations.
+// (GRA-709): each binding they use, and a connector's exact operations;
+// and, for one that asks a model, the writes its answers may steer
+// (GRA-718), which no reviewer should have to piece together.
 
 /** What a version's own actions may call: each action, then its uses. */
-const ActionEffects = ({ actions }: { actions: WorkflowVersionAction[] }) => {
+const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
   if (actions.length === 0) {
     return (
       <span className="text-muted-foreground">
@@ -63,6 +65,18 @@ const ActionEffects = ({ actions }: { actions: WorkflowVersionAction[] }) => {
                 : use.alias}
             </Badge>
           ))}
+          {action.modelSteeredWrites.length > 0 && (
+            <Badge variant="destructive">
+              <Trans>
+                Writes a model may steer:{" "}
+                {formatList(
+                  action.modelSteeredWrites.map(
+                    ({ alias, operation }) => `${alias}.${operation}`
+                  )
+                )}
+              </Trans>
+            </Badge>
+          )}
         </li>
       ))}
     </ul>
