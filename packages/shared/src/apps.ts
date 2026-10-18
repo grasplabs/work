@@ -393,7 +393,7 @@ export interface AppVersionsApi {
    * Makes a version the one that runs, after review or to roll back. By
    * anyone but one of the organization's admins (Grasp staff too, and a
    * rollback too), it asks again for the App's permissions on a
-   * connection, to write a collection, to start a workflow or to call
+   * connection, to start a workflow or to call
    * another App's exports other than all those marked `read`: they allow
    * nothing until an admin grants them again, which approves the version
    * they reviewed (`PermissionsApi.grant`). Code of a version no admin approved changes

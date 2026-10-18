@@ -625,7 +625,10 @@ const workflowGenerationMoved = (
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
  * workflow and nothing else; a store's own code reaches connections and
- * collections alone.
+ * collections alone. Only an agent writes a collection: an App, a workflow
+ * and a store only read one (their collection stubs have no write), and
+ * keep what they write in a business store, so `write` would give them
+ * nothing an admin could see being granted.
  */
 const requireObjectFits = (
   subject: PermissionSubject,
@@ -634,6 +637,15 @@ const requireObjectFits = (
 ): void => {
   if (object.type === "platform" && subject.type !== "app") {
     refuseRequest("subject: Only an App uses what the platform offers.");
+  }
+  if (
+    object.type === "collection" &&
+    subject.type !== "agent" &&
+    actions.includes("write")
+  ) {
+    refuseRequest(
+      "actions: Only an agent writes a collection. An App, a workflow or a store reads it, and keeps what it writes in a store."
+    );
   }
   if (
     subject.type === "trigger" &&
@@ -1161,7 +1173,7 @@ const canGrantSql = (by: Identity): SQL =>
  * That a permission lets an App change things for the person using it,
  * as SQL on its row: any on a connection (core can't tell a connector's
  * writes from its reads; connect knows), or with an action other than
- * `read`, such as writing a collection, starting a workflow, or calling
+ * `read`, such as starting a workflow, inviting guests, or calling
  * another App's exports marked `write` (or one by name, whichever it is
  * marked: its App's next version may mark it `write`). Any on a store too:
  * its actions are operation paths, and a mutation may be named `read`.

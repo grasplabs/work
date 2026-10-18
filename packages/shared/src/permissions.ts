@@ -366,6 +366,8 @@ export type PermissionRequest = z.input<typeof permissionRequestSchema>;
  * statistics, guest chats): the things that name the same thing for
  * whoever creates from it, where a connection is someone's or set up for
  * one App, and a workflow or exports name an App its creator may not see.
+ * A collection only to read: an App never writes one (it keeps what it
+ * writes in a business store), so `write` would give it nothing.
  */
 export const declaredPermissionSchema = z
   .strictObject({
@@ -375,14 +377,23 @@ export const declaredPermissionSchema = z
       platformObjectSchema,
     ]),
   })
-  .superRefine(checkGrant);
+  .superRefine(checkGrant)
+  .superRefine(({ object, actions }, context) => {
+    if (object.type === "collection" && actions.includes("write")) {
+      context.addIssue({
+        code: "custom",
+        path: ["actions"],
+        message: "An App only reads a collection",
+      });
+    }
+  });
 export type DeclaredPermission = z.infer<typeof declaredPermissionSchema>;
 
 /**
  * Requested: asked for, allows nothing yet. Active: granted, allows its
  * actions. Revoked: allows nothing, for good (ask again for a new one).
- * An App's active permission on a connection, to write a collection, to
- * start a workflow, or to call another App's exports other than all those
+ * An App's active permission on a connection, to start a workflow, or to
+ * call another App's exports other than all those
  * marked `read`, goes back to requested when someone who couldn't grant
  * it (Grasp staff included) makes another version of the App current
  * (`AppVersionsApi.setCurrent`), until an admin grants it again.
