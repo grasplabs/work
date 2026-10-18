@@ -1,5 +1,5 @@
 /**
- * The screen compiler, as it runs in its own isolate (a Dynamic Worker, one
+ * The App compiler, as it runs in its own isolate (a Dynamic Worker, one
  * per build). It has no bindings and no network: it reads the files it is
  * given and what it knows of the kit, nothing else.
  *
@@ -400,10 +400,11 @@ const workflowTarget = serverTarget(
 const computeTarget = serverTarget({}, new Set(computeSdkImports));
 
 /**
- * Type-checks the App against the kit's types and lints it against the
- * kit's design system.
+ * Type-checks the App's screens against the kit's types and lints them
+ * against the kit's design system: `buildScreens`' last gate, once its
+ * import checks pass.
  */
-export const checkScreens = (files: Record<string, string>): Diagnostic[] => {
+const checkScreens = (files: Record<string, string>): Diagnostic[] => {
   const app = buildFiles(files);
   const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
@@ -1049,58 +1050,138 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
     : built;
 };
 
-export default class ScreenCompiler extends WorkerEntrypoint {
+/**
+ * What the compiler builds: an App's screens, its v1 server (`app/`), its
+ * server code of spec 8's layout (`app`), its tests, its workflows, a
+ * JSON workflow's generated module and its compute modules.
+ */
+export type CompileTarget =
+  | "screens"
+  | "server"
+  | "app"
+  | "app-tests"
+  | "workflows"
+  | "open-workflow"
+  | "compute";
+
+/** What a build of each target answers. */
+export interface TargetBuilds {
+  screens: ScreenBuild;
+  server: ServerBuild;
+  app: AppCodeBuild;
+  "app-tests": AppCodeBuild;
+  workflows: WorkflowBuild;
+  "open-workflow": OpenWorkflowBuild;
+  compute: ComputeModulesBuild;
+}
+
+/**
+ * Each target's build, with every gate it has: for `app`, the server code
+ * type-checked against the host's real generated modules, as a seal holds
+ * a release to it (`checkAppCode`).
+ */
+const targetBuilds: {
+  readonly [Target in CompileTarget]: (
+    files: Record<string, string>
+  ) => TargetBuilds[Target] | Promise<TargetBuilds[Target]>;
+} = {
+  screens: buildScreens,
+  server: buildServer,
+  app: checkAppCode,
+  "app-tests": buildAppTests,
+  workflows: buildWorkflows,
+  "open-workflow": buildOpenWorkflow,
+  compute: buildComputeModules,
+};
+
+/** The targets contract inspection loads, and what it builds of each. */
+export interface TargetInspections {
+  app: AppCodeBuild;
+}
+
+/** What `inspect` builds a target to. */
+export type InspectTarget = keyof TargetInspections;
+
+/**
+ * What contract inspection (spec 19.1) loads to read what the App
+ * registers, before anything is generated for it: its server code built
+ * with stand-in generated modules, whose types are stripped, not checked
+ * (`buildAppCode`). Never what a release is sealed from.
+ */
+const targetInspections: {
+  readonly [Target in InspectTarget]: (
+    files: Record<string, string>
+  ) => TargetInspections[Target];
+} = {
+  app: buildAppCode,
+};
+
+/**
+ * The target `target` names, or an error: a call names it as a string over
+ * RPC, and one the compiler doesn't know never falls through to another.
+ */
+const knownTarget = <Target extends string>(
+  table: Readonly<Record<Target, unknown>>,
+  target: unknown,
+  what: string
+): Target => {
+  if (typeof target !== "string" || !Object.hasOwn(table, target)) {
+    throw new TypeError(
+      `${what} has no target ${JSON.stringify(target)}: it takes ${Object.keys(table).join(", ")}.`
+    );
+  }
+  // SAFETY: `target` is one of `table`'s own keys, checked just above.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return target as Target;
+};
+
+/**
+ * The App compiler, in an isolate of its own: it parses, checks and
+ * transforms App code, and never runs it. Each method takes the target it
+ * acts on, and nothing else is exposed.
+ */
+export default class AppCompiler extends WorkerEntrypoint {
+  /**
+   * Builds `target` from `files`, with every gate the target has (type
+   * check, lint, import boundaries, limits): its output, or why it fails.
+   */
   // RPC exposes prototype methods only, so these can't be static.
   // oxlint-disable-next-line class-methods-use-this
-  async build(files: Record<string, string>): Promise<ScreenBuild> {
-    return await buildScreens(files);
+  async build<Target extends CompileTarget>(
+    target: Target,
+    files: Record<string, string>
+  ): Promise<TargetBuilds[Target]> {
+    const known = knownTarget(targetBuilds, target, "build");
+    // SAFETY: `known` is `target`, which picks its own builder.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return (await targetBuilds[known](files)) as TargetBuilds[Target];
   }
 
-  /** Builds the App's server code (`buildServer`). */
-  // oxlint-disable-next-line class-methods-use-this
-  buildServer(files: Record<string, string>): ServerBuild {
-    return buildServer(files);
+  /**
+   * What `build(target, files)` says, without its output: every diagnostic
+   * the build gives (a passing screens build carries its lint warnings;
+   * other passing builds carry none). Derived from the build itself, so it
+   * is never clean where the build refuses.
+   */
+  async check(
+    target: CompileTarget,
+    files: Record<string, string>
+  ): Promise<Diagnostic[]> {
+    knownTarget(targetBuilds, target, "check");
+    const built = await this.build(target, files);
+    return "diagnostics" in built ? built.diagnostics : [];
   }
 
-  /** Builds an App's server code of spec 8's layout (`buildAppCode`). */
+  /**
+   * Builds `target` as contract inspection loads it (`targetInspections`):
+   * only `app` has one.
+   */
   // oxlint-disable-next-line class-methods-use-this
-  buildAppCode(files: Record<string, string>): AppCodeBuild {
-    return buildAppCode(files);
-  }
-
-  /** Builds and type-checks an App's server code (`checkAppCode`). */
-  // oxlint-disable-next-line class-methods-use-this
-  checkAppCode(files: Record<string, string>): AppCodeBuild {
-    return checkAppCode(files);
-  }
-
-  /** Builds an App's tests (`buildAppTests`). */
-  // oxlint-disable-next-line class-methods-use-this
-  buildAppTests(files: Record<string, string>): AppCodeBuild {
-    return buildAppTests(files);
-  }
-
-  /** Builds the App's workflows (`buildWorkflows`). */
-  // oxlint-disable-next-line class-methods-use-this
-  buildWorkflows(files: Record<string, string>): WorkflowBuild {
-    return buildWorkflows(files);
-  }
-
-  /** Builds a JSON workflow's generated module (`buildOpenWorkflow`). */
-  // oxlint-disable-next-line class-methods-use-this
-  buildOpenWorkflow(files: Record<string, string>): OpenWorkflowBuild {
-    return buildOpenWorkflow(files);
-  }
-
-  /** Builds a JSON workflow's compute modules (`buildComputeModules`). */
-  // oxlint-disable-next-line class-methods-use-this
-  buildComputeModules(files: Record<string, string>): ComputeModulesBuild {
-    return buildComputeModules(files);
-  }
-
-  /** Only the type check and the lint, without building. */
-  // oxlint-disable-next-line class-methods-use-this
-  check(files: Record<string, string>): Diagnostic[] {
-    return checkScreens(files);
+  inspect<Target extends InspectTarget>(
+    target: Target,
+    files: Record<string, string>
+  ): TargetInspections[Target] {
+    const known = knownTarget(targetInspections, target, "inspect");
+    return targetInspections[known](files);
   }
 }

@@ -2,7 +2,7 @@ import { platformLimits } from "./platform-limits.ts";
 
 /**
  * The most an App's files take, checked on every write and commit. The
- * screen compiler takes as much in one build (its files are some of the
+ * App compiler takes as much in one build (its files are some of the
  * App's), so an App within these limits always fits a build, and the build
  * stays well inside its isolate's CPU and memory. The authoring source
  * limits are the platform's (spec 18.1). No dependencies but those, which
