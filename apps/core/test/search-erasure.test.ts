@@ -170,8 +170,8 @@ describe("a deleted collection's page separators", () => {
   it("are checked through punctuation of any script apart from tokens, never a token they can't read exactly", () => {
     expect({
       dash: keysIn("plan — team", "search_words"),
-      beside: keysIn("team’s", "search_words"),
-      inATrigram: keysIn("—Jo", "search_words"),
+      beside: keysIn("plans’", "search_words"),
+      inATrigram: keysIn("— a", "search_words"),
       accented: keysIn("café", "search_words"),
       otherScript: keysIn("Visserさん", "search_words"),
     }).toStrictEqual({
