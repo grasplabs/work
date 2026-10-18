@@ -668,26 +668,29 @@ const answeredWorkflowQuery = async (
   try {
     // The gate every call's invocation passes before it reads, as late as
     // it can be: the caller's own check (an agent's permission, say), the
-    // release not revoked, and the person's role in the App, read again
-    // now, so a revocation or a role lost since the call began reads
-    // nothing.
-    await stillAllowed?.();
-    await requireNotRevoked(
-      env,
-      appIdSchema.parse(caller.app),
-      release.manifest.resourceVersion
-    );
-    await operationRoles(env, by, appIdSchema.parse(caller.app));
-    // The call's deadline, as its invocation would hold it: past it,
-    // nothing is read.
-    if (Date.now() >= deadline) {
-      throw operationErrors.create("operation.deadline_exceeded");
-    }
+    // release not revoked, the person's role in the App, read again now,
+    // so a revocation or a role lost since the call began reads nothing;
+    // and the call's deadline, as its invocation would hold it. A window
+    // passes it again before each page it reads.
+    const gate = async (): Promise<void> => {
+      await stillAllowed?.();
+      await requireNotRevoked(
+        env,
+        appIdSchema.parse(caller.app),
+        release.manifest.resourceVersion
+      );
+      await operationRoles(env, by, appIdSchema.parse(caller.app));
+      if (Date.now() >= deadline) {
+        throw operationErrors.create("operation.deadline_exceeded");
+      }
+    };
+    await gate();
     const result =
       call.window === undefined
         ? await callWorkflowQuery(env, caller, query, call.input)
         : await readWorkflowWindow(env, caller, query, call.input, {
             extent: call.window.extent,
+            gate,
             charge:
               chargeWindow ??
               (async () => {
