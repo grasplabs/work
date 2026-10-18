@@ -4582,6 +4582,7 @@ msgstr "Pakket"
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Packages"
 msgstr "Pakketten"
 
