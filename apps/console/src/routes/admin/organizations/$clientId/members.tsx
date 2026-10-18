@@ -118,13 +118,13 @@ const MemberRow = ({ member }: { member: MemberView }) => {
  * those in a company's Grasp.
  */
 const Members = () => {
-  const { admin, view } = useOrganization();
+  const { view } = useOrganization();
   const { members, seats } = view;
   const here = members.filter(
     (member) => member.state === "ready" || member.state === "active"
   ).length;
-  // Core holds no contract yet, so no number of seats it gives either.
-  const seatsKnown = admin.snapshot.contract !== null;
+  // A contract not known yet gives no number of seats either.
+  const seatsKnown = !view.unknown.contract;
   const be = here === 1 ? "is" : "are";
   const hereLabel = view.open ? `${be} in` : `${be} ready for when Grasp opens`;
   return (
