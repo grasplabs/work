@@ -35,25 +35,36 @@ import { useCoreAction } from "../use-core-action.ts";
 const Subjects = ({ listed }: { listed: DependencySubjectsInForce }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  // The pages read so far, from the first the route read.
-  const [shown, setShown] = useState(listed);
-  const [read, setRead] = useState(listed);
-  if (listed !== read) {
-    setRead(listed);
-    setShown(listed);
+  // The pages read so far, from the first page the route read (`from`).
+  const [view, setView] = useState({ from: listed, shown: listed });
+  if (view.from !== listed) {
+    setView({ from: listed, shown: listed });
   }
+  const { shown } = view;
   const more = async (next: string): Promise<void> => {
+    // The first page this one follows: once the route read again (the
+    // permission may have changed), what it answers is dropped.
+    const { from } = view;
     const page = await run(
       async (session) => await session.dependencies.inForce(next)
     );
     if (page !== undefined) {
       // A page refused (the permission was taken away since) replaces the
       // list, which then says why; any other adds to it.
-      setShown((before) =>
-        page.decides
-          ? { ...page, subjects: [...before.subjects, ...page.subjects] }
-          : page
-      );
+      setView((before) => {
+        if (before.from !== from) {
+          return before;
+        }
+        return {
+          from,
+          shown: page.decides
+            ? {
+                ...page,
+                subjects: [...before.shown.subjects, ...page.subjects],
+              }
+            : page,
+        };
+      });
     }
   };
   if (!shown.decides) {
