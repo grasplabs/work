@@ -746,6 +746,26 @@ const pinnedApp = async (
   return { fixture, release };
 };
 
+/** A workflow of `name` running `tasks` steps, one after another. */
+const longDefinitionOf = (name: string, tasks: number): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: Array.from({ length: tasks }, (_, index) => ({
+      [`step-${index}`]: { set: { status: `${index}` } },
+    })),
+  });
+
 /** A workflow whose task fails on an expression that reads the input. */
 const failingDefinitionOf = (name: string): string =>
   JSON.stringify({
@@ -884,6 +904,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ({ nextCursor: cursor } = page);
     } while (cursor !== null);
     const window = await ask(bob, { runId: bobs }, 50);
+    const partWindow = await ask(bob, { runId: bobs }, 3);
     expect({
       told: whole.items.map((item) =>
         Object.fromEntries(
@@ -898,6 +919,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ),
       paged,
       window: window.ok ? window.value : window.error.code,
+      partWindow: partWindow.ok ? partWindow.value : partWindow.error.code,
     }).toStrictEqual({
       // Metadata only: no input, output or engine step ID; the task named
       // by the ID its sealed build declares.
@@ -911,6 +933,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ascending: true,
       paged: whole.items,
       window: { items: whole.items, hasMore: false },
+      partWindow: { items: whole.items.slice(0, 3), hasMore: true },
     });
 
     // Anyone else's run, a run started outside the App, and an ID no run
@@ -1082,5 +1105,97 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       leaks: false,
       removed: { items: [], nextCursor: null, hasMore: false },
     });
+  });
+
+  it("fills a window of more than a page from successive pages of the history", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `long-${unique()}`
+    );
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: longDefinitionOf(workflow.name, 60),
+      basedOn: null,
+    });
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob],
+      workflow.id,
+      owner
+    );
+    const started = await callAppFunction(
+      env,
+      bob,
+      fixture.app,
+      JSON.stringify({
+        reference: {
+          resourceId: release.manifest.resourceId,
+          resourceVersion: release.manifest.resourceVersion,
+          contractId: "requests.kickOff",
+          fingerprint: release.fingerprints["requests.kickOff"] ?? "",
+          kind: "action",
+        },
+        input: { who: "Bob" },
+      })
+    );
+    const runId = started.result.ok
+      ? z.object({ runId: z.string() }).parse(started.result.value).runId
+      : "";
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, admin, workflow.id, runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 60_000, interval: 200 }
+    );
+    const history = await queryReference(release, "followUp", "history");
+    const read = async (input: unknown, window?: number) => {
+      const request = JSON.stringify({
+        reference: history,
+        input,
+        ...(window === undefined ? {} : { window: { extent: window } }),
+      });
+      const { result } =
+        window === undefined
+          ? await callAppFunction(env, bob, fixture.app, request)
+          : await callScreenFunction(
+              env,
+              bob,
+              fixture.app,
+              request,
+              Date.now() + 30_000,
+              async () => {
+                // A window's pages cost nothing here.
+              }
+            );
+      if (!result.ok) {
+        throw new Error(`${result.error.code}: ${result.error.message}`);
+      }
+      return result.value;
+    };
+    // Every row, page by page as a caller pages it.
+    const rows: unknown[] = [];
+    let cursor: string | null = null;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
+      const answer = await read({
+        runId,
+        pagination: { pageSize: 100, cursor },
+      });
+      const page = historySchema.parse(answer);
+      rows.push(...page.items);
+      ({ nextCursor: cursor } = page);
+    } while (cursor !== null);
+    const windowed = z
+      .object({ items: z.array(z.unknown()), hasMore: z.boolean() })
+      .parse(await read({ runId }, 500));
+    expect({
+      morethanAPage: rows.length > 100,
+      window: windowed.items,
+      hasMore: windowed.hasMore,
+    }).toStrictEqual({ morethanAPage: true, window: rows, hasMore: false });
   });
 });

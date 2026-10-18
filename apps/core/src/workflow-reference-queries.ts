@@ -566,6 +566,61 @@ const historyPage = async (
   };
 };
 
+/**
+ * The most pages one window of a run's history reads: enough for the
+ * largest window in pages of ten rows, as an App's own windows
+ * (query-windows.ts). A journal sparser than that, mostly bookkeeping no
+ * row tells, has its window refused (`operation.read_limit`) rather than
+ * cut short, so Load More never stalls on the same records.
+ */
+const historyWindowMaxPages = liveWindowMaxItems / 10;
+
+/**
+ * Up to `size` rows of run `runId`'s history from its start, as a live
+ * window reads it: page after page, each from the cursor the one before
+ * ended at, until the window is full or the history ends. The caller paid
+ * `windowPages(extent)` pages; `charge` is asked for each page past them.
+ */
+const historyWindow = async (
+  env: Env,
+  caller: WorkflowQueryCaller,
+  from: { query: ResolvedWorkflowQuery; bound: string },
+  runId: string,
+  {
+    size,
+    extent,
+    charge,
+  }: {
+    size: number;
+    extent: number;
+    charge: (pages: number, whole: number) => Promise<void>;
+  }
+): Promise<{ items: Json[]; hasMore: boolean }> => {
+  const paid = windowPages(extent);
+  const items: Json[] = [];
+  let cursor: string | null = null;
+  for (let pages = 1; pages <= historyWindowMaxPages; pages += 1) {
+    if (pages > paid) {
+      // oxlint-disable-next-line no-await-in-loop -- a page's charge before its read
+      await charge(1, pages);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
+    const page = await historyPage(env, caller, from, runId, {
+      size: Math.min(size - items.length, queryMaxResults),
+      cursor,
+    });
+    items.push(...page.items);
+    if (!page.hasMore || page.nextCursor === null) {
+      return { items, hasMore: false };
+    }
+    if (items.length >= size) {
+      return { items, hasMore: true };
+    }
+    cursor = page.nextCursor;
+  }
+  throw operationErrors.create("operation.read_limit");
+};
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -721,23 +776,26 @@ export const readWorkflowWindow = async (
     return { ok: true, value: { items: [], hasMore: false } };
   }
   const size = Math.min(Math.max(window.extent, 1), liveWindowMaxItems);
-  const page =
-    query.name === "history"
-      ? await historyPage(
-          env,
-          caller,
-          { query, bound: workflowId },
-          runIdOf(args),
-          { size, cursor: null }
-        )
-      : await runsPage(env, caller, workflowId, {
-          ...(typeof args.status === "string" ? { status: args.status } : {}),
-          size,
-        });
-  const owed =
-    Math.ceil(page.items.length / queryMaxResults) - windowPages(window.extent);
-  if (owed > 0) {
-    await window.charge(owed, windowPages(window.extent) + owed);
+  let page: { items: Json[]; hasMore: boolean };
+  if (query.name === "history") {
+    page = await historyWindow(
+      env,
+      caller,
+      { query, bound: workflowId },
+      runIdOf(args),
+      { size, extent: window.extent, charge: window.charge }
+    );
+  } else {
+    page = await runsPage(env, caller, workflowId, {
+      ...(typeof args.status === "string" ? { status: args.status } : {}),
+      size,
+    });
+    const owed =
+      Math.ceil(page.items.length / queryMaxResults) -
+      windowPages(window.extent);
+    if (owed > 0) {
+      await window.charge(owed, windowPages(window.extent) + owed);
+    }
   }
   // Each record as the query's own pages carry it: checked in pages of
   // the most a page holds, since a window holds more than one page.
