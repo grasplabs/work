@@ -501,6 +501,9 @@ export const exportAppDefinition = async (
       };
     }
   }
+  // Counted and scanned like every file: their descriptors come from
+  // catalog contracts, which the files above don't hold.
+  budget(null, { "app.workflowContracts": canonicalText(workflowContracts) });
   const { store } = release;
   const definitionPackage = definitionPackageSchema.parse({
     formatVersion: definitionPackageFormatVersion,
