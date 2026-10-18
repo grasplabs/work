@@ -160,7 +160,8 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   bounded so its row stays within D1's limit.
 // - A version changing after publication. A version is a row written once
 //   (`(workflow_resource_id, version)` and its semantic version are unique,
-//   and nothing updates them); publishing a semantic version again with
+//   and the database refuses any update, deletion or insert over either,
+//   REPLACE included: migrations 0080 and 0101); publishing a semantic version again with
 //   other content is refused (`workflow.version_exists`), and with the
 //   same content answers the version already published, so a retried
 //   publication is the same publication.

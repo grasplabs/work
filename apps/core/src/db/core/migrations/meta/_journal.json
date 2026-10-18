@@ -708,6 +708,13 @@
       "when": 1792332912349,
       "tag": "0100_drop_record_types",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1792338548131,
+      "tag": "0101_immutable_insert_triggers",
+      "breakpoints": true
     }
   ]
 }

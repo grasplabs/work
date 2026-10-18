@@ -34,8 +34,9 @@ import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 // what serves each. Threat model, and how each is closed:
 //
 // - A contract changing under the versions that pinned it: a key is
-//   published once and never changed (the database refuses updates and
-//   deletions); a new shape is a new key. A version pins a key and its
+//   published once and never changed (the database refuses updates,
+//   deletions and any insert over a key it holds, REPLACE included); a new
+//   shape is a new key. A version pins a key and its
 //   fingerprint, the SHA-256 of the canonical contract.
 // - A contract the validator can't hold: published contracts are read by
 //   the profile's own catalog reader (`resolveContract`), with its limits,

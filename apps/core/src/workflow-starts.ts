@@ -144,8 +144,8 @@ import { tellQueryFollowers } from "./workflows/run-changes.ts";
 //   (restricted.ts), so no later step, retry or replay runs without it.
 // - A frozen snapshot changed later: a receipt, with its frozen params and
 //   bindings and their hashes, is a row written once; the database refuses
-//   any change of it but retention removing its input and values, and any
-//   deletion. Its audit event names the bindings' hash, never a
+//   any change of it but retention removing its input and values, any
+//   deletion, and any insert over its ID or key (REPLACE included). Its audit event names the bindings' hash, never a
 //   parameter's value nor a hash of the values, which a guess at a short
 //   sensitive one could be checked against.
 
