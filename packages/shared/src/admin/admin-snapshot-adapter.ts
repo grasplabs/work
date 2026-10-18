@@ -287,6 +287,10 @@ export const staffSnapshotOf = (
     members: membersOf(snapshot),
     known: snapshot.gate.known,
     paused: snapshot.paused,
+    unknown: {
+      contract: snapshot.contract === null,
+      works: snapshot.works === null,
+    },
   };
 };
 

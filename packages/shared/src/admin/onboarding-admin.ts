@@ -569,6 +569,14 @@ export interface RealHappened {
    * save what they said, as Grasp OS's core holds them. None where nothing pauses them.
    */
   paused?: boolean;
+  /** What isn't known of the organization yet (`StaffSnapshot.unknown`): read as unknown, not as a draft or as nothing. */
+  unknown?: Unknown;
+}
+
+/** Parts of an organization nothing is known of yet. */
+export interface Unknown {
+  contract: boolean;
+  works: boolean;
 }
 
 const clamp = (value: number, min = 0, max = 1) =>

@@ -6,7 +6,7 @@ import { isInterviewer } from "./interviewer.ts";
 import type { Interviewer } from "./interviewer.ts";
 import { PHASES, TAGS } from "./interviews.ts";
 import type { PersonState, Phase } from "./interviews.ts";
-import type { Member } from "./onboarding-admin.ts";
+import type { Member, Unknown } from "./onboarding-admin.ts";
 import { present } from "./present.ts";
 
 /**
@@ -726,6 +726,8 @@ export interface StaffSnapshot {
   known?: number;
   /** Grasp's staff paused the interviews, where the organization holds that itself, as Grasp OS's core does. */
   paused?: boolean;
+  /** What the organization's own record doesn't hold yet, as Grasp OS's core holds no contract or drawn work: not a draft, not nothing, but not known. */
+  unknown?: Unknown;
 }
 
 /** What the company's own admin sees: their onboarding, their people with the links to send, and numbers per team. Never anyone's words. */

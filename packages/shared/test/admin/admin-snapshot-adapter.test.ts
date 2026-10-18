@@ -7,7 +7,7 @@ import {
   adminOrgOf,
   staffSnapshotOf,
 } from "../../src/admin/admin-snapshot-adapter.ts";
-import { adminViewOf } from "../../src/admin/admin-view.ts";
+import { adminViewOf, portfolioOf } from "../../src/admin/admin-view.ts";
 import { orgOfSnapshot } from "../../src/admin/org-adapter.ts";
 
 const client = {
@@ -696,6 +696,34 @@ describe("an organization from core's admin snapshot", () => {
         joined: "2026-09-23",
       },
     ]);
+  });
+
+  it("reads a contract and work core doesn't hold as unknown, not as a draft or as none", () => {
+    const { view } = shown();
+    const { org, state } = adminOrgOf(snapshot, client);
+    const real = org.real && {
+      ...org.real,
+      unknown: { contract: false, works: false },
+    };
+    const knownView = adminViewOf({ ...org, real }, state, "2026-10-14");
+
+    expect({
+      unknown: view.unknown,
+      contractNeed: view.needs.some((need) => need.kind === "contract"),
+      counted: portfolioOf([view]).counted,
+    }).toStrictEqual({
+      unknown: { contract: true, works: true },
+      contractNeed: false,
+      counted: { fees: 0, value: 0 },
+    });
+    // Once core holds them, the draft contract waits for Grasp as before.
+    expect({
+      unknown: knownView.unknown,
+      contractNeed: knownView.needs.some((need) => need.kind === "contract"),
+    }).toStrictEqual({
+      unknown: { contract: false, works: false },
+      contractNeed: true,
+    });
   });
 
   it("leaves unknown what core doesn't hold", () => {

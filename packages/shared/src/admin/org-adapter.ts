@@ -417,6 +417,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     metered: meteredOf(snapshot.usage ?? []),
     ...(snapshot.known === undefined ? {} : { known: snapshot.known }),
     ...(snapshot.paused === undefined ? {} : { paused: snapshot.paused }),
+    ...(snapshot.unknown === undefined ? {} : { unknown: snapshot.unknown }),
   };
 
   const skipped: ("sources" | "documents" | "pulse")[] = [
