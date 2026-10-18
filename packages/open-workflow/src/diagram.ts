@@ -69,6 +69,34 @@ const kindOf = (task: JsonObject): string | undefined => {
 const bindingOf = (task: JsonObject): string | null =>
   literal(objectOf(objectOf(task.metadata)?.grasp)?.binding);
 
+/** A positive amount of one unit, as `<n><letter>` in an ISO 8601 duration. */
+const part = (value: JsonValue | undefined, letter: string): string =>
+  typeof value === "number" && value > 0 ? `${value}${letter}` : "";
+
+/**
+ * A wait's literal duration: its text, or its fixed units (`{ minutes: 5 }`)
+ * as the ISO 8601 duration they add up to. An expression shows nothing.
+ */
+const durationOf = (value: JsonValue | undefined): string | null => {
+  const text = literal(value);
+  const units = objectOf(value);
+  if (text !== null || units === undefined) {
+    return text;
+  }
+  const { days, hours, minutes, seconds = 0, milliseconds = 0 } = units;
+  if (typeof seconds !== "number" || typeof milliseconds !== "number") {
+    return null;
+  }
+  // Seconds carry the milliseconds as their fraction (`PT1.5S`).
+  const allSeconds = (seconds * 1000 + milliseconds) / 1000;
+  const time = `${part(hours, "H")}${part(minutes, "M")}${part(allSeconds, "S")}`;
+  const date = part(days, "D");
+  if (date === "" && time === "") {
+    return "PT0S";
+  }
+  return `P${date}${time === "" ? "" : `T${time}`}`;
+};
+
 /** What a task does, as its literal source says it. */
 const detailOf = (kind: string, task: JsonObject): string | null => {
   switch (kind) {
@@ -96,7 +124,7 @@ const detailOf = (kind: string, task: JsonObject): string | null => {
       return literal(raised) ?? literal(error?.title) ?? literal(error?.type);
     }
     case "wait": {
-      return literal(task.wait);
+      return durationOf(task.wait);
     }
     case "emit":
     case "listen": {

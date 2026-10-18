@@ -190,6 +190,24 @@ describe("a workflow's diagram", () => {
     ).resolves.toStrictEqual(["refuse (raise) overBudget"]);
   });
 
+  it("shows a literal wait's duration, written as text or as fixed units", async () => {
+    await expect(
+      diagramOf(
+        documentAround({ name: "waiting", input: {}, required: [] }, [
+          { short: { wait: "PT5M" } },
+          { long: { wait: { days: 1, hours: 2, minutes: 30 } } },
+          { brief: { wait: { seconds: 1, milliseconds: 500 } } },
+          { done: { set: { status: "done" } } },
+        ])
+      )
+    ).resolves.toStrictEqual([
+      "short (wait) PT5M",
+      "long (wait) P1DT2H30M",
+      "brief (wait) PT1.5S",
+      "done (set)",
+    ]);
+  });
+
   it("keeps each task's ID and place when only its label changes, and never shows an expression's value", async () => {
     const [first, second] = await Promise.all([
       labelled("Pause"),
