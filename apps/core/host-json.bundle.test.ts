@@ -28,13 +28,25 @@ import { hostJsonSource } from "./src/host-json.ts";
 // values with nothing in scope but the language's built-ins.
 
 const here = import.meta.dirname;
-/** Runs `args` in Node to its end; failing with its output if it fails. */
+/** Stops every process `run` started that is still running. */
+const stopping = new AbortController();
+/** Each process `run` started, settled once it closed. */
+const closing = new Set<Promise<unknown>>();
+
+/**
+ * Runs `args` in Node to its end; failing with its output if it fails,
+ * or once `stopping` stops it.
+ */
 const run = async (
   args: string[],
   options: { cwd: string; env: NodeJS.ProcessEnv }
 ): Promise<void> => {
-  const child = spawn(process.execPath, args, options);
+  const child = spawn(process.execPath, args, {
+    ...options,
+    signal: stopping.signal,
+  });
   const closed = once(child, "close");
+  closing.add(closed);
   const [stdout, stderr] = await Promise.all([
     text(child.stdout),
     text(child.stderr),
@@ -158,10 +170,19 @@ describe("the host's JSON module, bundled as Wrangler bundles core", () => {
   };
 
   beforeAll(async () => {
-    await Promise.all([bundled(false), bundled(true)]);
+    // Both settled before either's failure is told: none still writes.
+    const results = await Promise.allSettled([bundled(false), bundled(true)]);
+    const failed = results.find(({ status }) => status === "rejected");
+    if (failed?.status === "rejected") {
+      throw failed.reason;
+    }
   }, bundlingTimeout);
 
-  afterAll(() => {
+  afterAll(async () => {
+    // One the setup's bound cut short is stopped, and closed, before its
+    // directory goes.
+    stopping.abort();
+    await Promise.allSettled(closing);
     rmSync(dir, { recursive: true, force: true });
   });
 
