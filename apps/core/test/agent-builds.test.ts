@@ -26,7 +26,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
-import { v1Server } from "./workflow-apps.ts";
+import { v1Server } from "./v1-app-server.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
 // person in a draft of its own, and repairing what its checks report.

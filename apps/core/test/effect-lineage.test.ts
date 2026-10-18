@@ -14,7 +14,7 @@ import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
-import { v1AppWith, v1Server } from "./workflow-apps.ts";
+import { v1AppWith, v1Server } from "./v1-app-server.ts";
 
 // The runs a run's own mail starts, as its descendants: mail it sends
 // through a native mail connector to its App's own address starts its

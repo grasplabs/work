@@ -7,7 +7,8 @@ import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { buildOnSave } from "../../src/save-builds.ts";
 import { buildScreens, buildServer } from "../../src/screens.ts";
-import { v1Server, workflowFiles } from "../workflow-apps.ts";
+import { v1Server } from "../v1-app-server.ts";
+import { workflowFiles } from "../workflow-apps.ts";
 
 // The screen compiler on-prem: it runs on the sandbox host this project
 // starts (src/platform-sandbox.ts), never in core's own process, whose
