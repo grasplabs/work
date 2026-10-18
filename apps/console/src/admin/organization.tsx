@@ -17,8 +17,7 @@
  * the column folded the way the reader last left it.
  */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { LISTEN_DAYS } from "@grasp-os/shared/admin/onboarding";
-import { dateOn } from "@grasp-os/shared/admin/onboarding-admin";
+import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Select,
@@ -326,7 +325,7 @@ const OrgColumn = ({
               : `The interviews, on ${date}`}
           </span>
           <span className="text-foreground tabular-nums">
-            Day {view.day} of {LISTEN_DAYS}
+            Day {view.day} of {listenDays(view.org)}
           </span>
         </div>
       ) : null}
