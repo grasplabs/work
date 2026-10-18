@@ -3,20 +3,27 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { requestGranted, serverBuilt } from "./apps.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
-import { mailConnection, mailWithSearch } from "./mail-connection.ts";
+import {
+  mailConnection,
+  mailForApps,
+  mailWithSearch,
+} from "./mail-connection.ts";
 import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { openRpc, outcome as codeOf, signedInWithRole } from "./sign-in.ts";
 import {
-  v1AppWith,
+  appCall,
+  appWith,
+  bindMail,
+  bindStats,
   grantMail,
   invoiceMail,
   mailer,
+  pointsOf,
   runEvents,
   workflowFiles,
 } from "./workflow-apps.ts";
@@ -79,7 +86,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     const admin = await personApi("admin");
     const mail = await mailConnection([], mailWithSearch);
     // No retries: waiting for the person uses none.
-    const app = await v1AppWith(admin, {
+    const app = await appWith(admin, {
       ...mailer(`retries: { limit: 0 }`),
       // A read, but on a Composio connection from a restricted App its
       // input leaves for a third party: a side effect's step, with its key.
@@ -170,7 +177,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
   it("wake the waiting step as soon as its person decides, not at its next check", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await v1AppWith(admin, mailer(`retries: { limit: 0 }`));
+    const app = await appWith(admin, mailer(`retries: { limit: 0 }`));
     await grantMail(idp, admin, app, mail.id);
     await appHost(env, appIdSchema.parse(app)).restrict();
     const run = await admin.api.workflows.start(app, "mailer");
@@ -214,18 +221,18 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
 
   it("wait for a side effect held in their App's method, or caught by their code, and complete once confirmed, with the method's statistics points added up once, as the step completes", async () => {
     const admin = await personApi("admin");
-    const mail = await mailConnection();
-    const app = await v1AppWith(admin, {
+    const mail = await mailConnection([], mailForApps);
+    const app = await appWith(admin, {
       ...workflowFiles(
         "via-app",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => await env.APP.call("mail", false));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mail", "action", "{}")}));`,
         { send: null }
       ),
-      // Its App method records statistics points before the mail is held:
-      // the step records them again once it is confirmed.
+      // Its App function records statistics points before the mail is
+      // held: the step records them again once it is confirmed.
       ...workflowFiles(
         "counted",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => await env.APP.call("mailCounted"));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mailCounted", "action", "{}")}));`,
         { send: null }
       ),
       ...workflowFiles(
@@ -240,13 +247,10 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
         { send: null }
       ),
     });
-    // The App's first call mustn't have to build its code in the call's
-    // deadline.
-    await serverBuilt(app, 1);
     await grantMail(idp, admin, app, mail.id);
-    const appId = appIdSchema.parse(app);
-    const viewer = { userId: admin.userId, mode: "interactive" } as const;
-    await appHost(env, appId).restrict();
+    await bindMail(idp, admin, app, mail.id, "send");
+    await bindStats(app);
+    await appHost(env, appIdSchema.parse(app)).restrict();
     const runs = [
       await admin.api.workflows.start(app, "via-app"),
       await admin.api.workflows.start(app, "counted"),
@@ -259,8 +263,8 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     const held = await admin.api.pendingActions.list();
     const before = await mail.did();
     const points = async () => ({
-      mails: await callApp(env, appId, viewer, "points", ["mails"]),
-      sent: await callApp(env, appId, viewer, "points", ["sent"]),
+      mails: await pointsOf(admin, app, "mails"),
+      sent: await pointsOf(admin, app, "sent"),
     });
     const pointsBefore = await points();
     for (const action of held) {
@@ -312,7 +316,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
 
   it("refuse a step that returns the value core keeps for a held step", async () => {
     const admin = await personApi("admin");
-    const app = await v1AppWith(
+    const app = await appWith(
       admin,
       workflowFiles(
         "forger",
@@ -335,21 +339,20 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
 
   it("wait on, and complete once confirmed, when connect can't say for a moment whether a side effect still waits", async () => {
     const admin = await personApi("admin");
-    const mail = await mailConnection();
-    // Through the App (asked in the attempt) and directly (asked while the
-    // run waits): connect fails the first question each time.
-    const app = await v1AppWith(admin, {
+    const mail = await mailConnection([], mailForApps);
+    // Through the App's function and directly, each asked while the run
+    // waits (the function's held keys, or the step's own): connect fails
+    // the first question each time.
+    const app = await appWith(admin, {
       ...workflowFiles(
         "via-app",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => await env.APP.call("mail", false));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mail", "action", "{}")}));`,
         { send: null }
       ),
       ...mailer(`retries: { limit: 0 }`),
     });
-    // The App's first call mustn't have to build its code in the call's
-    // deadline.
-    await serverBuilt(app, 1);
     await grantMail(idp, admin, app, mail.id);
+    await bindMail(idp, admin, app, mail.id, "send");
     await appHost(env, appIdSchema.parse(app)).restrict();
     const { CONNECT: connect } = env;
     const statuses: string[] = [];
@@ -399,7 +402,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
   it("drop a held side effect whose run has ended when its person comes to confirm it", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await v1AppWith(admin, mailer(`retries: { limit: 0 }`));
+    const app = await appWith(admin, mailer(`retries: { limit: 0 }`));
     await grantMail(idp, admin, app, mail.id);
     await appHost(env, appIdSchema.parse(app)).restrict();
     const run = await admin.api.workflows.start(app, "mailer");
@@ -426,7 +429,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
   it("drop a held side effect, input and all, once its run has ended for its retention, without its person coming back", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await v1AppWith(admin, mailer(`retries: { limit: 0 }`));
+    const app = await appWith(admin, mailer(`retries: { limit: 0 }`));
     await grantMail(idp, admin, app, mail.id);
     await appHost(env, appIdSchema.parse(app)).restrict();
     const run = await admin.api.workflows.start(app, "mailer");
@@ -468,7 +471,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
   it("fail the step, for good, when the person declines a side effect it waits for", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await v1AppWith(
+    const app = await appWith(
       admin,
       mailer(`retries: { limit: 3, delay: 10, backoff: "constant" }`)
     );

@@ -93,8 +93,123 @@ export const book = mutation({
   },
 });
 `,
+  "operations/effects.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+import { bump } from "./sample.ts";
+
+export const stats = resource.statistics("stats", { operations: ["record", "read"] });
+
+export const send = resource.connector("send", { contract: "composio.mail@1", actions: ["MAIL_SEND"] });
+
+export const search = resource.connector("search", { contract: "composio.mail@1", actions: ["MAIL_SEARCH"] });
+
+const invoice = { to: "ben@acme.test", subject: "Invoice INV-7" };
+
+// What a connector answered, or the code it refused with.
+const outcome = async (work: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    return await work();
+  } catch (error) {
+    return { refused: String(Reflect.get(Object(error), "code")) };
+  }
+};
+
+export const point = action({
+  args: { measures: v.array(v.string()) },
+  returns: v.null(),
+  uses: [stats],
+  handler: async (ctx, args) => {
+    for (const measure of args.measures) {
+      await ctx.resources.stats.record({ measure, value: 1 });
+    }
+    return null;
+  },
+});
+
+// How many points of measure the App's statistics hold of today and
+// yesterday: a run that crosses midnight counts the same.
+export const points = action({
+  args: { measure: v.string() },
+  returns: v.number(),
+  uses: [stats],
+  handler: async (ctx, args) => {
+    const { groups } = await ctx.resources.stats.read({ measure: args.measure, days: 2 });
+    return groups[0]?.count ?? 0;
+  },
+});
+
+// Waits at the mail server, which holds the search until the test lets it
+// go, then records a point of measure, and counts whether it was
+// taken (measure:recorded) or refused, the search or the point.
+export const pointAfter = action({
+  args: { measure: v.string(), execution: v.string() },
+  returns: v.null(),
+  uses: [search, stats, bump],
+  handler: async (ctx, args) => {
+    try {
+      await ctx.resources.search.call("MAIL_SEARCH", { query: "hold " + args.measure });
+    } catch {
+      await ctx.runMutation(bump, { name: args.measure + ":refused" });
+      return null;
+    }
+    try {
+      await ctx.resources.stats.record({ measure: args.measure, value: 1 });
+      await ctx.runMutation(bump, { name: args.measure + ":recorded" });
+    } catch {
+      await ctx.runMutation(bump, { name: args.measure + ":refused" });
+    }
+    return null;
+  },
+});
+
+// Mails the invoice, under the call's own key: what the connector
+// answered, or its refusal, as JSON.
+export const mail = action({
+  args: {},
+  returns: v.string(),
+  uses: [send],
+  handler: async (ctx) => JSON.stringify(await outcome(async () => await ctx.resources.send.call("MAIL_SEND", invoice))),
+});
+
+// As mail, naming a key of its own past the client's types: refused, as
+// the host derives every request's key.
+export const mailOwnKey = action({
+  args: {},
+  returns: v.string(),
+  uses: [send],
+  handler: async (ctx) =>
+    JSON.stringify(
+      await outcome(async () => {
+        const call: unknown = Reflect.get(ctx.resources.send, "call");
+        if (typeof call !== "function") {
+          throw new TypeError("The client has no call");
+        }
+        return await Reflect.apply(call, ctx.resources.send, ["MAIL_SEND", invoice, { idempotencyKey: crypto.randomUUID() }]);
+      })
+    ),
+});
+
+// Records two points alike, mails the invoice, and records a third once
+// the mail was sent.
+export const mailCounted = action({
+  args: {},
+  returns: v.string(),
+  uses: [send, stats],
+  handler: async (ctx) => {
+    await ctx.resources.stats.record({ measure: "mails", value: 1 });
+    await ctx.resources.stats.record({ measure: "mails", value: 1 });
+    const sent = await outcome(async () => await ctx.resources.send.call("MAIL_SEND", invoice));
+    if (!("refused" in Object(sent))) {
+      await ctx.resources.stats.record({ measure: "sent", value: 1 });
+    }
+    return JSON.stringify(sent);
+  },
+});
+`,
   "app.ts": `import { app, resource } from "@grasp-os/sdk";
 
+import { mail, mailCounted, mailOwnKey, point, pointAfter, points, search, send, stats } from "./operations/effects.ts";
 import { book, bump, hit, hits } from "./operations/sample.ts";
 import schema from "./schema.ts";
 
@@ -113,10 +228,17 @@ export default app({
       ledger: { read: "owner", write: "owner" },
     },
   },
-  operations: { counter: { hit, hits, bump }, ledger: { book } },
+  operations: {
+    counter: { hit, hits, bump },
+    ledger: { book },
+    stats: { point, points, pointAfter },
+    mail: { mail, mailOwnKey, mailCounted },
+  },
   internalOperations: {},
   screens: [],
-  uses: [${Object.keys(models).join(", ")}],
+  uses: [stats, send, search${Object.keys(models)
+    .map((alias) => `, ${alias}`)
+    .join("")}],
 });
 `,
 });
@@ -201,6 +323,21 @@ export const hitsOf = async (
   return hits;
 };
 
+/** How many points of `measure` the sample App's statistics hold, as `by` reads them. */
+export const pointsOf = async (
+  by: Builder,
+  app: string,
+  measure: string
+): Promise<number> => {
+  const points = await sampleCall(by, app, "stats.points", "action", {
+    measure,
+  });
+  if (typeof points !== "number") {
+    throw new TypeError(`The statistics didn't read: ${String(points)}`);
+  }
+  return points;
+};
+
 /** Opens the gate `name` of the sample App (`counter.bump`), as `by`. */
 export const openGate = async (
   by: Builder,
@@ -213,6 +350,50 @@ export const openGate = async (
   if (typeof opened !== "number") {
     throw new TypeError(`The gate didn't open: ${String(opened)}`);
   }
+};
+
+/**
+ * An admin's binding of the sample App's resource `alias` to `target`, for
+ * the version current now.
+ */
+const bindSample = async (
+  app: string,
+  alias: string,
+  target: { kind: "statistics" } | { kind: "connector"; permissionId: string }
+) => {
+  const { currentVersion } = await findApp(env, appIdSchema.parse(app));
+  return await approveResourceBinding(env, await person("admin"), {
+    app,
+    alias,
+    target,
+    reviewed: { version: currentVersion ?? 0 },
+  });
+};
+
+/** Binds the sample App's statistics (`stats`) to its own measures. */
+export const bindStats = async (app: string) =>
+  await bindSample(app, "stats", { kind: "statistics" });
+
+/**
+ * Gives the sample App's mail connector `alias` (`send`, or `search`) the
+ * connection `connectionId` (allowing `mailForApps`): a permission on its
+ * tool (`MAIL_SEND`, or `MAIL_SEARCH`) `requester` asks for and an admin
+ * grants, and the admin's binding to it.
+ */
+export const bindMail = async (
+  idp: Idp,
+  requester: Builder,
+  app: string,
+  connectionId: string,
+  alias: "send" | "search"
+) => {
+  const permissionId = await requestGranted(idp, requester, {
+    subject: { type: "app", appId: app },
+    object: { type: "connection", connectionId },
+    actions: [alias === "send" ? "MAIL_SEND" : "MAIL_SEARCH"],
+    binding: alias.toUpperCase(),
+  });
+  return await bindSample(app, alias, { kind: "connector", permissionId });
 };
 
 /**
@@ -235,115 +416,6 @@ export const bindModel = async (
     ...(budget === undefined ? {} : { budget }),
   });
 };
-
-/**
- * The v1 sample server, for the run tests not moved onto the sample App
- * yet (GRA-656's later slices): purchase orders, a ledger that books each
- * entry once per idempotency key, counters that show how often a step
- * really ran, and statistics points, recorded around a mail, by name, or
- * once a held search is let go.
- */
-export const v1Server = `import { DurableObject } from "cloudflare:workers";
-
-type Caller = { userId: string; idempotencyKey?: string };
-
-export class App extends DurableObject {
-  hit(_caller: Caller, name: string): number {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS hits (name TEXT PRIMARY KEY, count INTEGER NOT NULL)");
-    this.ctx.storage.sql.exec("INSERT INTO hits VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET count = count + 1", name);
-    return this.hits(_caller, name);
-  }
-
-  hits(_caller: Caller, name: string): number {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS hits (name TEXT PRIMARY KEY, count INTEGER NOT NULL)");
-    const [row] = this.ctx.storage.sql.exec("SELECT count FROM hits WHERE name = ?", name).toArray();
-    return Number(row?.count ?? 0);
-  }
-
-  // Takes \`ms\` milliseconds, holding the App's turn meanwhile.
-  async pause(_caller: Caller, ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  purchaseOrder(_caller: Caller, number: string): { amount: number } | null {
-    return number === "PO-1" ? { amount: 800_000 } : null;
-  }
-
-  book(caller: Caller, entry: { invoice: string; total: number }, key: string): string {
-    this.hit(caller, "book:" + key);
-    return "ledger-" + entry.invoice + "-for-" + caller.userId;
-  }
-
-  // Mails the invoice with the caller's key, or with a key of its own.
-  async mail(caller: Caller, ownKey: boolean): Promise<unknown> {
-    const idempotencyKey = ownKey ? crypto.randomUUID() : caller.idempotencyKey;
-    try {
-      const { output } = await (this.env as any).MAIL.call(
-        caller,
-        "mail.send",
-        { to: "ben@acme.test", subject: "Invoice INV-7" },
-        { idempotencyKey }
-      );
-      return JSON.parse(output);
-    } catch (error) {
-      return { refused: (error as { code?: string }).code };
-    }
-  }
-
-  // Records two points alike of the App's statistics, mails the invoice,
-  // and records a third once the mail was sent.
-  async mailCounted(caller: Caller): Promise<unknown> {
-    const stats = (this.env as any).STATISTICS;
-    await stats.record(caller, { measure: "mails", value: 1 });
-    await stats.record(caller, { measure: "mails", value: 1 });
-    const sent = await this.mail(caller, false);
-    if (!("refused" in (sent as object))) {
-      await stats.record(caller, { measure: "sent", value: 1 });
-    }
-    return sent;
-  }
-
-  // How many points of \`measure\` the App's statistics hold of today
-  // and yesterday: a run that crosses midnight counts the same.
-  async points(caller: Caller, measure: string): Promise<number> {
-    const { groups } = await (this.env as any).STATISTICS.read(caller, { measure, days: 2 });
-    return groups[0]?.count ?? 0;
-  }
-
-  // Records a point of each of \`measures\`, in that order.
-  async point(caller: Caller, ...measures: string[]): Promise<void> {
-    for (const measure of measures) {
-      await (this.env as any).STATISTICS.record(caller, { measure, value: 1 });
-    }
-  }
-
-  // Waits at the mail server, its search naming its caller's token, until
-  // the test lets it go, then counts \`parked:done\`.
-  async parkAtMail(caller: Caller): Promise<void> {
-    await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + ((caller as { token?: string }).token ?? "") });
-    this.hit(caller, "parked:done");
-  }
-
-  // Waits at the mail server, which holds its search until the test lets
-  // it go (MAIL, granted \`mail.search\`), then records a point of
-  // \`measure\`, and counts whether the call was taken
-  // (\`measure\`:recorded) or refused, the search's answer or the point.
-  async pointAfter(caller: Caller, measure: string): Promise<void> {
-    try {
-      await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + measure });
-    } catch {
-      this.hit(caller, measure + ":refused");
-      return;
-    }
-    try {
-      await this.point(caller, measure);
-      this.hit(caller, measure + ":recorded");
-    } catch {
-      this.hit(caller, measure + ":refused");
-    }
-  }
-}
-`;
 
 /**
  * A workflow of the given steps' code, run as `id`, with a test that
@@ -399,19 +471,6 @@ export const workflowsApp = async (
 };
 
 /**
- * A new App with the v1 sample server and `files`, for the run tests not
- * moved onto the sample App yet; GRA-656's last slice removes it.
- */
-export const v1AppWith = async (
-  builder: Builder,
-  files: Record<string, string>
-): Promise<string> => {
-  const { id } = await builder.api.apps.create({ name: "Invoices" });
-  await release(builder, id, { "app/server.ts": v1Server, ...files });
-  return id;
-};
-
-/**
  * A run's audit events, once the log has `last` of them, each as its
  * action and what it says of the step, the reason and the error, sorted.
  */
@@ -432,20 +491,22 @@ export const runEvents = async (run: string, last: string): Promise<string[]> =>
     { timeout: 10_000, interval: 100 }
   );
 
-/** Gives the App `MAIL`, for sending on the connection; an admin grants it. */
+/**
+ * Gives the App `MAIL`, for sending on the connection; an admin grants it.
+ * Answers the permission's ID.
+ */
 export const grantMail = async (
   idp: Idp,
   requester: Builder,
   app: string,
   connectionId: string
-): Promise<void> => {
+): Promise<string> =>
   await requestGranted(idp, requester, {
     subject: { type: "app", appId: app },
     object: { type: "connection", connectionId },
     actions: ["mail.send"],
     binding: "MAIL",
   });
-};
 
 /** The mail each test's workflow sends. */
 export const invoiceMail = { to: "ben@acme.test", subject: "Invoice INV-7" };
