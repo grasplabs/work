@@ -6,9 +6,9 @@
  * brought. Read-only: the console keeps nothing of its own on a company,
  * so the prototype's fields and switches are what they say.
  *
- * Core holds no contract yet, so the model has every contract as a draft:
- * nothing of its terms is agreed, and the page says so instead of the
- * model's placeholder dates and fees. The agreements are core's own.
+ * Core holds no contract yet, so the model reads it as unknown: the page
+ * says nothing is known about it, instead of a draft, dates or fees. The
+ * agreements are core's own.
  */
 import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
@@ -195,21 +195,36 @@ const runsFigure = ({
 /** The contract in short: where it stands, how long it runs, what it costs, and the seats taken. */
 const Summary = ({ view }: { view: AdminView }) => {
   const { contract, seats } = view;
+  const known = !view.unknown.contract;
   const draft = contract.status === "draft";
   const runs = runsFigure(view);
+  let seatsSub = "are taken";
+  if (!known) {
+    seatsSub = "taken; the contract isn’t known yet";
+  } else if (seats.of === 0) {
+    seatsSub = "taken; the contract gives none yet";
+  }
   return (
     <section
       aria-label="The contract in short"
       className="overflow-hidden rounded-xl border"
     >
       <div className="bg-border grid grid-cols-2 gap-px lg:grid-cols-4">
-        <Figure
-          attention={contract.status !== "signed"}
-          label="Contract"
-          sub={statusLine(view)}
-          value={contractWords[contract.status]}
-        />
-        {draft ? null : (
+        {known ? (
+          <Figure
+            attention={contract.status !== "signed"}
+            label="Contract"
+            sub={statusLine(view)}
+            value={contractWords[contract.status]}
+          />
+        ) : (
+          <Figure
+            label="Contract"
+            sub="the company’s Grasp doesn’t hold it yet"
+            value="Not known yet"
+          />
+        )}
+        {draft || !known ? null : (
           <>
             <Figure
               attention={runs.attention}
@@ -227,13 +242,13 @@ const Summary = ({ view }: { view: AdminView }) => {
           </>
         )}
         <Figure
-          attention={seats.of > 0 && seats.used > seats.of}
+          attention={known && seats.of > 0 && seats.used > seats.of}
           label="Seats"
-          sub={
-            seats.of > 0 ? "are taken" : "taken; the contract gives none yet"
-          }
+          sub={seatsSub}
           value={
-            seats.of > 0 ? `${seats.used} of ${seats.of}` : String(seats.used)
+            known && seats.of > 0
+              ? `${seats.used} of ${seats.of}`
+              : String(seats.used)
           }
         />
       </div>
@@ -244,6 +259,19 @@ const Summary = ({ view }: { view: AdminView }) => {
 /** The terms as they were signed; for a draft, that nothing is agreed yet. */
 const Terms = ({ view }: { view: AdminView }) => {
   const { contract } = view;
+  if (view.unknown.contract) {
+    return (
+      <Part
+        description="Nothing is known about the contract yet."
+        id="contract-contract"
+        title="The terms"
+      >
+        <dl>
+          <Line label="The proposal">{notConnected("Rooms")}</Line>
+        </dl>
+      </Part>
+    );
+  }
   if (contract.status === "draft") {
     return (
       <Part
@@ -302,7 +330,12 @@ const Terms = ({ view }: { view: AdminView }) => {
  */
 const Gives = ({ view }: { view: AdminView }) => {
   const { contract, seats } = view;
-  const draft = contract.status === "draft";
+  let open = "";
+  if (view.unknown.contract) {
+    open = "Not known yet";
+  } else if (contract.status === "draft") {
+    open = "None agreed yet";
+  }
   return (
     <Part
       description="How many people may come in, and how much AI use the fee covers."
@@ -310,10 +343,10 @@ const Gives = ({ view }: { view: AdminView }) => {
     >
       <dl>
         <Line label="Seats">
-          {`${draft ? "None agreed yet" : contract.seats}; ${seats.used} ${plural(seats.used, "is", "are")} taken.`}
+          {`${open === "" ? contract.seats : open}; ${seats.used} ${plural(seats.used, "is", "are")} taken.`}
         </Line>
         <Line label="AI use a month">
-          {draft ? "None agreed yet" : euros(contract.aiIncluded)}
+          {open === "" ? euros(contract.aiIncluded) : open}
         </Line>
       </dl>
     </Part>
@@ -434,7 +467,10 @@ const Agreements = ({
 };
 
 /** What the invoices come to so far, in a line. */
-const invoicesLine = ({ contract, invoices }: AdminView): string => {
+const invoicesLine = ({ contract, invoices, unknown }: AdminView): string => {
+  if (unknown.contract) {
+    return "None known yet: nothing is known about the contract.";
+  }
   if (invoices.length === 0) {
     return contract.status === "signed"
       ? `None yet. The first one comes on ${formatDate(contract.from)}.`

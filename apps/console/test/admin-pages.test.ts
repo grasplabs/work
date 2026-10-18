@@ -616,7 +616,7 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("shows an organization's contract as still being written, its agreements as core has them, and no invoices", async () => {
+  it("says nothing is known of a contract core doesn't hold, with no draft or fee, beside the agreements as core has them", async () => {
     const acme = await liveClient();
     const empty = emptyAdminSnapshot("Acme");
     acme.account.admin = {
@@ -664,16 +664,18 @@ describe("the admin's frame", () => {
       status,
       toCome: html.includes("This section isn’t in the console yet."),
       summary: {
-        contract: html.includes("Being written"),
-        notSent: html.includes("not sent yet"),
-        seats: html.includes("taken; the contract gives none yet"),
-        // A draft has no agreed term or fee: the model's placeholders aren't shown.
+        contract: html.includes("Not known yet"),
+        // Core holds no contract: it is neither a draft nor a fee of nothing.
+        draft: ["Being written", "not sent yet", "€0"].some((text) =>
+          html.includes(text)
+        ),
+        seats: html.includes("taken; the contract isn’t known yet"),
         runs: html.includes("Still runs"),
         fee: html.includes("Fee a month"),
       },
       terms: [
         partOf("The terms").includes(
-          "Nothing is agreed yet: the contract is still being written."
+          "Nothing is known about the contract yet."
         ),
         partOf("The terms").includes(
           "Once Rooms is connected, this fills in by itself."
@@ -681,7 +683,7 @@ describe("the admin's frame", () => {
       ],
       gives: [
         partOf("What it gives the company").includes(
-          "None agreed yet; 2 are taken."
+          "Not known yet; 2 are taken."
         ),
         // What the model works out of AI use isn't what was used: the AI use section says what it is.
         partOf("What it gives the company").includes("was used this month"),
@@ -702,14 +704,14 @@ describe("the admin's frame", () => {
         ),
       },
       invoices: partOf("Invoices").includes(
-        "None yet. There is no signed contract."
+        "None known yet: nothing is known about the contract."
       ),
     }).toStrictEqual({
       status: 200,
       toCome: false,
       summary: {
         contract: true,
-        notSent: true,
+        draft: false,
         seats: true,
         runs: false,
         fee: false,
