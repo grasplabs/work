@@ -270,20 +270,29 @@ const member = (value: object, key: string | symbol): unknown => {
  * `person`'s API on a connection that adds up the rows each batch writes
  * (as `countingWrites`), and runs `beforeRead` once, as a personal purge
  * first reads what the search index holds of the collection: a change
- * made after the purge began reading.
+ * made after the purge began reading. With `refuseRead`, that read fails,
+ * repeating its query and parameters, as a platform's refusal would.
  */
 const watchingPurge = async (
   person: Person,
-  { beforeRead }: { beforeRead?: () => Promise<void> } = {}
+  {
+    beforeRead,
+    refuseRead = false,
+  }: { beforeRead?: () => Promise<void>; refuseRead?: boolean } = {}
 ) => {
   const real = env.KNOWLEDGE;
   const written = { rows: 0 };
   let pending = beforeRead;
   const knowledge: D1Database = {
     prepare: (query) => {
-      const statement = real.prepare(query);
+      const reading = query.includes("JOIN search_words AS w");
+      const statement = real.prepare(
+        refuseRead && reading
+          ? query.replace("ORDER BY r.id", "AND refused_here ORDER BY r.id")
+          : query
+      );
       const run = pending;
-      if (run === undefined || !query.includes("JOIN search_words AS w")) {
+      if (run === undefined || !reading) {
         return statement;
       }
       pending = undefined;
@@ -2272,6 +2281,42 @@ describe("a personal purge's search index", setUpTime, () => {
       rebuilt: written >= (await indexedSections()),
       held: await holding(name),
     }).toStrictEqual({ rebuilt: true, held: [] });
+  });
+
+  it("rebuilds when it can't read what the index holds, and never logs a word", async () => {
+    const admin = await personOf("admin");
+    const name = `refused${unique()}`;
+    const { leaver } = await leaverWith({
+      "notes.md": `# Notes\nAsk ${name}.`,
+    });
+    const logged: unknown[] = [];
+    const spies = (["log", "info", "warn", "error"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+        logged.push(args);
+      })
+    );
+    let written = 0;
+    try {
+      written = await purgeCounted(admin, leaver, { refuseRead: true });
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+    const lines = logged.map((args) => JSON.stringify(args));
+    expect({
+      checkFailed: lines.some((line) =>
+        line.includes("knowledge.purge.index_check_failed")
+      ),
+      leaked: lines.filter((line) => line.includes(name)),
+      rebuilt: written >= (await indexedSections()),
+      held: await holding(name),
+    }).toStrictEqual({
+      checkFailed: true,
+      leaked: [],
+      rebuilt: true,
+      held: [],
+    });
   });
 
   it("rebuilds past its caps, logging counts and never a word", async () => {

@@ -386,6 +386,8 @@ export const collectionCheckCaps = {
   keys: 20_000,
   /** Lookups of whether a live row still holds a token. */
   liveLookups: 1000,
+  /** The collection's (document, version) pairs, compared at the delete. */
+  versions: 2000,
 } as const;
 
 /** Rows of the index read at once. */
@@ -459,8 +461,9 @@ export const collectionKeysOf = (value: string): IndexKey[] | undefined => {
 /** What a personal purge's check counted, logged when it stops at a cap. */
 interface CheckCounts {
   characters?: number;
-  keys: number;
+  keys?: number;
   liveLookups?: number;
+  versions?: number;
 }
 
 /**
@@ -469,7 +472,12 @@ interface CheckCounts {
  * that isn't plain ASCII; a cap reached, with the counts).
  */
 export type CollectionPlan =
-  | { readonly kind: "keys"; readonly keys: readonly IndexKey[] }
+  | {
+      readonly kind: "keys";
+      readonly keys: readonly IndexKey[];
+      /** The (document, version) pairs read (`rebuildOwedIfChanged`). */
+      readonly versions: readonly string[];
+    }
   | { readonly kind: "unknown" }
   | { readonly kind: "capped"; readonly counts: CheckCounts };
 
@@ -479,15 +487,28 @@ const loggedCapped = (counts: CheckCounts): CollectionPlan => {
   return { kind: "capped", counts };
 };
 
-/**
- * Reads what the search index holds of `collectionId`'s documents, a page
- * of rows at a time, and gives the keys of its tokens (`CollectionPlan`).
- * Stops at `collectionCheckCaps`.
- */
-export const collectionPlan = async (
+/** A section's (document, version) pair: a save to its document changes it. */
+const collectionPair = sql`document_id || ':' || version`;
+
+/** Whether a section is of a document of `collectionId`. */
+const inCollection = (collectionId: string) => sql`document_id IN (
+  SELECT id FROM documents WHERE collection_id = ${collectionId}
+)`;
+
+/** `collectionPlan`, which throws when a read fails. */
+const readCollection = async (
   db: DrizzleD1Database,
   collectionId: string
 ): Promise<CollectionPlan> => {
+  const pairs = await db.all<{ pair: string }>(sql`
+      SELECT DISTINCT ${collectionPair} AS pair FROM sections
+      WHERE ${inCollection(collectionId)}
+      LIMIT ${collectionCheckCaps.versions + 1}
+    `);
+  const versions = pairs.map(({ pair }) => pair);
+  if (versions.length > collectionCheckCaps.versions) {
+    return loggedCapped({ versions: versions.length });
+  }
   const keys = new Map<string, IndexKey>();
   let characters = 0;
   let after = 0;
@@ -535,48 +556,47 @@ export const collectionPlan = async (
       return loggedCapped({ characters, keys: keys.size });
     }
     if (rows.length < rowsPerRead) {
-      return { kind: "keys", keys: [...keys.values()] };
+      return { kind: "keys", keys: [...keys.values()], versions };
     }
   }
 };
 
 /**
- * The (document, version) pairs of `collectionId`'s sections, as one
- * string: a save to the collection changes it.
+ * Reads what the search index holds of `collectionId`'s documents, a page
+ * of rows at a time, and gives the keys of its tokens (`CollectionPlan`).
+ * Stops at `collectionCheckCaps`.
  */
-const collectionVersions = (collectionId: string) => sql`(
-  SELECT coalesce(group_concat(pair, ',' ORDER BY pair), '') FROM (
-    SELECT DISTINCT document_id || ':' || version AS pair FROM sections
-    WHERE document_id IN (
-      SELECT id FROM documents WHERE collection_id = ${collectionId}
-    )
-  )
-)`;
-
-/** `collectionId`'s versions now (`collectionVersions`), read before `collectionPlan`. */
-export const collectionFingerprint = async (
+export const collectionPlan = async (
   db: DrizzleD1Database,
   collectionId: string
-): Promise<string> => {
-  const [row] = await db.all<{ versions: string }>(
-    sql`SELECT ${collectionVersions(collectionId)} AS versions`
-  );
-  return row?.versions ?? "";
+): Promise<CollectionPlan> => {
+  try {
+    return await readCollection(db, collectionId);
+  } catch (error) {
+    // Not readable here (a platform that refuses it): rebuilt instead.
+    log.warn("knowledge.purge.index_check_failed", {
+      errorName: errorNameOf(error),
+    });
+    return { kind: "unknown" };
+  }
 };
 
 /**
  * The statement, for the batch that deletes `collectionId`, that records a
- * rebuild as owed (`id`) when the collection changed since `fingerprint`
- * was read: what `collectionPlan` read then isn't all the batch deletes.
- * Its writes are the batch's, done when it commits.
+ * rebuild as owed (`id`) when the collection's (document, version) pairs
+ * aren't `versions`, those `collectionPlan` read: a save meanwhile, whose
+ * text the plan didn't read. The same pairs, in any order, are as many,
+ * and none of them is missing from `versions`. Its writes are the
+ * batch's, done when it commits.
  */
 export const rebuildOwedIfChanged = (
   db: DrizzleD1Database,
   id: string,
   collectionId: string,
-  fingerprint: string
+  versions: readonly string[]
 ) => {
   const now = Date.now();
+  const read = JSON.stringify(versions);
   // Builders, not `db.run`: drizzle's D1 batch can't bind a raw
   // statement's parameters.
   return db.insert(searchRebuilds).select(
@@ -586,8 +606,13 @@ export const rebuildOwedIfChanged = (
         owedAt: sql<number>`${now}`.as("owed_at"),
         writesDoneAt: sql<number>`${now}`.as("writes_done_at"),
       })
-      .from(sql`(SELECT 1)`)
-      .where(sql`${collectionVersions(collectionId)} IS NOT ${fingerprint}`)
+      .from(sql`(SELECT 1)`).where(sql`(
+        SELECT count(DISTINCT ${collectionPair}) FROM sections
+        WHERE ${inCollection(collectionId)}
+      ) != ${versions.length} OR EXISTS (
+        SELECT 1 FROM sections WHERE ${inCollection(collectionId)}
+          AND ${collectionPair} NOT IN (SELECT value FROM json_each(${read}))
+      )`)
   );
 };
 

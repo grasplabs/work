@@ -37,7 +37,6 @@ import type { DocumentRow } from "./documents.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
-  collectionFingerprint,
   collectionPlan,
   eraseCollectionFromSearchIndex,
   eraseFromSearchIndex,
@@ -329,13 +328,21 @@ const purgePersonal = async (
   const purgeId = crypto.randomUUID();
   const inCollection = documentsIn(db, collectionId);
   const secure = await secureDeleteReady(db);
-  const fingerprint = await collectionFingerprint(db, collectionId);
   const plan = secure
     ? await collectionPlan(db, collectionId)
     : ({ kind: "unknown" } as const);
   await auditedBatch(env, db, [
     rebuildOwed(db, purgeId, { writesDone: true }),
-    rebuildOwedIfChanged(db, `${purgeId}:changed`, collectionId, fingerprint),
+    ...(plan.kind === "keys"
+      ? [
+          rebuildOwedIfChanged(
+            db,
+            `${purgeId}:changed`,
+            collectionId,
+            plan.versions
+          ),
+        ]
+      : []),
     db.delete(sections).where(inArray(sections.documentId, inCollection)),
     db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
     db.delete(versions).where(inArray(versions.documentId, inCollection)),
