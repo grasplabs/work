@@ -642,6 +642,18 @@ export const appVersions = sqliteTable(
      * previous release writes gets none.
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
+    /**
+     * The binding names the App's permissions held when the version was
+     * committed, whatever their status, each with the kind of binding it
+     * is (JSON, `WorkflowBindingKinds`, permissions.ts): what its
+     * workflows' `env` is typed by at every build, so a version is typed
+     * the same however its App's permissions change after. A row the
+     * previous release writes gets none (the default).
+     */
+    workflowBindings: text("workflow_bindings", { mode: "json" })
+      .$type<Record<string, "connection" | "collection" | "app">>()
+      .notNull()
+      .default(sql`'{}'`),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );

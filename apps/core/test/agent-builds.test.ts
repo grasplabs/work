@@ -1163,6 +1163,48 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
   });
 
+  it("checks a draft's workflows against the permissions its App asked for meanwhile, as the version committed from it would be", async () => {
+    // Reads the connection's answer as what it is: typed only while the
+    // App holds a permission for INVOICES.
+    const reading = {
+      "workflows/reading.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("reading", { params: {}, input: z.unknown() }, async (step, { env }) => {
+  return await step.do("read", { description: "Read the invoices" }, async () =>
+    (await env.INVOICES.call("mail.list", {})).output.length
+  );
+});
+`,
+    };
+    const { chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        await env.build.write(app.id, ${JSON.stringify(reading)});
+        const before = await env.build.check(app.id);
+        await env.build.requestPermission(app.id, {
+          object: { type: "connection", connectionId: "connection-outlook" },
+          actions: ["mail.list"],
+          binding: "INVOICES",
+        });
+        const after = await env.build.check(app.id);
+        return {
+          before: before.workflows.status,
+          after: after.workflows.status,
+        };
+      };`),
+      says("Checked."),
+    ]);
+    await grant();
+
+    await chat.ask("Build an invoice reader");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect(returned(result?.text)).toStrictEqual({
+      before: "failed",
+      after: "ok",
+    });
+  });
+
   it("stands by a proposal once committed, when what follows it fails", async () => {
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {

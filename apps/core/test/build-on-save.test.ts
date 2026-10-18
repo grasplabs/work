@@ -229,7 +229,12 @@ export class App {}
 
     const builds = await buildOnSave(
       { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
-      { app: appIdSchema.parse(crypto.randomUUID()), version: 1, files }
+      {
+        app: appIdSchema.parse(crypto.randomUUID()),
+        version: 1,
+        files,
+        bindings: {},
+      }
     );
     // Still held: the build that didn't finish has cached nothing, so its
     // first use builds it anew.

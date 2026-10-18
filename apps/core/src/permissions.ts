@@ -48,7 +48,6 @@ import {
   inArray,
   getTableColumns,
   isNull,
-  lte,
   ne,
   or,
   sql,
@@ -1681,52 +1680,21 @@ export const activeOrRequestedPermissions = async (
     "requested",
   ]);
 
+/** A binding name's kind: the run's stub of it (bindings.ts, `runBindingsFor`). */
+export type WorkflowBindingKind = "connection" | "collection" | "app";
+
 /**
- * Every binding name App `app`'s permissions held when its `version` was
- * committed, with the kind of binding a run gets from it (bindings.ts,
- * `runBindingsFor`): a connection's, a collection's or another App's
- * exports'. What its workflows are type-checked against (GRA-720): a
- * permission asked for at or before the version, whatever its status
- * since, revoked included, as when it was asked for never changes. So the
- * version is typed the same at every build, as it is made current and at
- * each run's load: a permission asked for later types only later
- * versions, never breaking one already current, and a revocation changes
- * nothing; a call is checked against the permissions as they are when it
- * is made. A name held twice is the kind the run's stub of it would be, an
+ * The binding names `held` gives, each with the kind of binding a run
+ * gets from it: a connection's, a collection's or another App's exports'.
+ * A name held twice is the kind the run's stub of it would be, an
  * export's over a connection's over a collection's (`bindings`,
- * workflows/code.ts). None for a version that doesn't exist.
+ * workflows/code.ts).
  */
-export const workflowBindingKinds = async (
-  env: Env,
-  app: AppId,
-  version: number
-): Promise<Record<string, "connection" | "collection" | "app">> => {
-  const db = drizzle(env.DB);
-  const [committed] = await db
-    .select({ createdAt: appVersions.createdAt })
-    .from(appVersions)
-    .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
-    .all();
-  if (committed === undefined) {
-    return {};
-  }
-  const held = await db
-    .select({
-      binding: permissions.binding,
-      objectType: permissions.objectType,
-    })
-    .from(permissions)
-    .where(
-      and(
-        eq(permissions.subjectType, "app"),
-        eq(permissions.subjectId, app),
-        lte(permissions.requestedAt, committed.createdAt)
-      )
-    )
-    .orderBy(asc(permissions.requestedAt), asc(permissions.id))
-    .all();
+export const bindingKindsOf = (
+  held: readonly { binding: string; objectType: string }[]
+): Record<string, WorkflowBindingKind> => {
   const rank = { collection: 0, connection: 1, app: 2 } as const;
-  const kinds: Record<string, "connection" | "collection" | "app"> = {};
+  const kinds: Record<string, WorkflowBindingKind> = {};
   for (const { binding, objectType: kind } of held) {
     if (
       (kind === "connection" || kind === "collection" || kind === "app") &&
@@ -1739,6 +1707,51 @@ export const workflowBindingKinds = async (
     }
   }
   return kinds;
+};
+
+/**
+ * Every binding name App `app`'s permissions hold now, whatever their
+ * status, revoked included (`bindingKindsOf`): what a version committed
+ * now keeps (`app_versions.workflow_bindings`), and what a draft, to be
+ * committed, is type-checked against.
+ */
+export const appBindingKinds = async (
+  env: Env,
+  app: AppId
+): Promise<Record<string, WorkflowBindingKind>> =>
+  bindingKindsOf(
+    await drizzle(env.DB)
+      .select({
+        binding: permissions.binding,
+        objectType: permissions.objectType,
+      })
+      .from(permissions)
+      .where(
+        and(eq(permissions.subjectType, "app"), eq(permissions.subjectId, app))
+      )
+      .all()
+  );
+
+/**
+ * The binding names App `app`'s `version` keeps (`appBindingKinds` when it
+ * was committed): what its workflows are type-checked against (GRA-720).
+ * A version is typed the same at every build, as it is made current and
+ * at each run's load: a permission asked for later types only later
+ * versions, never breaking one already current, and nothing done to a
+ * permission after changes it; a call is checked against the permissions
+ * as they are when it is made. None for a version that doesn't exist.
+ */
+export const workflowBindingKinds = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<Record<string, WorkflowBindingKind>> => {
+  const [committed] = await drizzle(env.DB)
+    .select({ bindings: appVersions.workflowBindings })
+    .from(appVersions)
+    .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
+    .all();
+  return committed?.bindings ?? {};
 };
 
 /**

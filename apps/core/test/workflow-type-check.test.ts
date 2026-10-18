@@ -429,6 +429,51 @@ describe(
       });
     });
 
+    it("keep a version typed as committed when making it current asks for its permissions again", async () => {
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Checked" });
+      const connection = await mailConnection();
+      await requestGranted(idp, builder, {
+        subject: { type: "app", appId: app },
+        object: { type: "connection", connectionId: connection.id },
+        actions: ["mail.send"],
+        binding: "MAIL",
+      });
+      // Reads MAIL's answer as a connection's: typed only while MAIL is.
+      const { version } = await builder.api.apps.files.commit(
+        app,
+        {
+          ...sampleApp(),
+          ...checked(`    if (input === "never") {
+      return (await env.MAIL.call("mail.send", {})).output.length;
+    }
+    return 1;`),
+        },
+        "Typed"
+      );
+      // Made current by a builder who can't grant: MAIL, which changes
+      // things, is asked for again, now.
+      await builder.api.apps.versions.setCurrent(app, version);
+      const [mail] = await builder.api.permissions.list({
+        type: "app",
+        appId: app,
+      });
+      // Its run builds it again, as it was committed: MAIL still typed.
+      const run = await startRun(env, {
+        app: appIdSchema.parse(app),
+        workflow: workflowIdSchema.parse("checked"),
+        input: undefined,
+        startedBy: builder.userId,
+        actor: { type: "system" },
+      });
+      await finished(run.id);
+      const { status } = await builder.api.workflows.status(run.id);
+      expect({ mail: mail?.status, status }).toStrictEqual({
+        mail: "requested",
+        status: "completed",
+      });
+    });
+
     it("type a build again once the App asks for another permission: the bindings are part of its cache key", async () => {
       const files = {
         ...sampleApp(),

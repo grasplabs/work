@@ -42,7 +42,12 @@ import {
 } from "./db/core/schema.ts";
 import { ensureCollection } from "./knowledge/collections.ts";
 import { appMemoryPath } from "./knowledge/memory-files.ts";
-import { declarableOf, declaredRequests, toPermission } from "./permissions.ts";
+import {
+  bindingKindsOf,
+  declarableOf,
+  declaredRequests,
+  toPermission,
+} from "./permissions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -328,6 +333,12 @@ export const createFromBlueprint = async (
     pendingVersion: null,
     createdAt: now,
   };
+  const requests = declaredRequests(
+    by,
+    app,
+    blueprint.permissions,
+    blueprint.id
+  );
   const versionRow: VersionRow = {
     appId: app,
     version: 1,
@@ -345,6 +356,8 @@ export const createFromBlueprint = async (
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,
+    // The App's permissions are the ones it is created with.
+    workflowBindings: bindingKindsOf(requests.rows),
   };
   const db = drizzle(env.DB);
   // The App, only while the blueprint is still there and, for a marked
