@@ -19,6 +19,7 @@ import {
   requireBuilder,
   roleErrors,
 } from "@grasp-os/shared/roles";
+import { actionUsesSchema } from "@grasp-os/shared/workflow-modules";
 import {
   catalogBindingKinds,
   catalogKeySchema,
@@ -37,6 +38,7 @@ import type {
   WorkflowResourceVersion,
   WorkflowRole,
   WorkflowBinders,
+  WorkflowVersionAction,
   WorkflowVersionBinding,
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
@@ -95,6 +97,7 @@ import {
   compileModules,
   moduleLookup,
   modulesHashOf,
+  versionActionsOf,
 } from "./workflow-modules.ts";
 import type { CompiledModules } from "./workflow-modules.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
@@ -1006,6 +1009,40 @@ const sealedBuildOf = (
   }
 };
 
+/** Where a version's manifest says what its actions may do (GRA-709). */
+const manifestActionsSchema = z.object({
+  actions: z
+    .array(
+      z.strictObject({
+        binding: z.string(),
+        module: z.string(),
+        export: z.string(),
+        uses: actionUsesSchema,
+      })
+    )
+    .optional(),
+});
+
+/**
+ * What version `row`'s actions may do, as its manifest seals it; null for
+ * a version sealed before it was recorded, which says nothing either way.
+ */
+const sealedActionsOf = (
+  row: typeof workflowResourceVersions.$inferSelect
+): WorkflowVersionAction[] | null => {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(row.manifest);
+  } catch {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  const parsed = manifestActionsSchema.safeParse(manifest);
+  if (!parsed.success) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return parsed.data.actions ?? null;
+};
+
 /** A version's row, as the registry answers it. */
 const versionOf = (
   row: typeof workflowResourceVersions.$inferSelect,
@@ -1019,6 +1056,7 @@ const versionOf = (
   contractHash: row.contractHash,
   manifestHash: row.manifestHash,
   bindings,
+  actions: sealedActionsOf(row),
   build: buildSummary(
     sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
   ),
@@ -1263,6 +1301,8 @@ interface Publication {
   compiled: CompiledBuild;
   /** The hash of the modules published with it, null for none. */
   modulesHash: string | null;
+  /** What its own actions may do, from the contracts its build seals. */
+  actions: WorkflowVersionAction[];
 }
 
 /**
@@ -1284,6 +1324,7 @@ const writeVersion = async (
     bindings,
     compiled,
     modulesHash,
+    actions,
   } = publication;
   // Bounded when the definition was checked (`inspectDefinition`).
   const contractText = canonicalJson(contractOf(checked));
@@ -1304,6 +1345,22 @@ const writeVersion = async (
     evaluatorHash: jqProvenance.sha256,
     contractHash,
     bindings: bindings.map((binding) => ({ ...binding })),
+    // What its own actions may do, as its build seals them (GRA-709): read
+    // back for review, never derived again.
+    actions: actions.map((action) => ({
+      binding: action.binding,
+      module: action.module,
+      export: action.export,
+      uses: action.uses.map((use) =>
+        use.kind === "connector"
+          ? {
+              alias: use.alias,
+              kind: use.kind,
+              operations: [...use.operations],
+            }
+          : { alias: use.alias, kind: use.kind }
+      ),
+    })),
     // What the version runs, sealed with it: its build's artifacts by
     // hash, and its executable identity (workflow-builds.ts).
     build: compiled.build,
@@ -1424,6 +1481,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
+    actions,
     build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
@@ -1562,6 +1620,7 @@ const publish = async (
       bindings,
       compiled,
       modulesHash,
+      actions: versionActionsOf(checked.bindings, modules),
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {

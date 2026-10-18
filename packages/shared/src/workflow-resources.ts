@@ -9,6 +9,7 @@ import {
 } from "./operation-limits.ts";
 import type { WorkflowDiagram, WorkflowRunTrace } from "./workflow-diagrams.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
+import type { ActionUse } from "./workflow-modules.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
 // workflow is a resource of its own, with its own owner, members and
@@ -570,6 +571,20 @@ export interface WorkflowVersionBinding {
 }
 
 /**
+ * One of a version's own actions a task can call (GRA-709): its binding,
+ * the module and export it is, and what its sealed contract lets it
+ * reach, each use the workflow's own binding by alias, a connector's with
+ * the exact operations it calls. The host refuses anything else (GRA-704).
+ * It names nothing outside the workflow, so every role sees it alike.
+ */
+export interface WorkflowVersionAction {
+  binding: string;
+  module: string;
+  export: string;
+  uses: ActionUse[];
+}
+
+/**
  * Why a deletion was refused with `workflow.resource_bound`, in its
  * details: the workflows whose current version binds it that the caller
  * may see, and how many more there are that they may not.
@@ -638,6 +653,11 @@ export interface WorkflowResourceVersion {
   contractHash: string;
   manifestHash: string;
   bindings: WorkflowVersionBinding[];
+  /**
+   * What its own actions may do, as sealed with it, by binding; null for
+   * a version sealed before it was recorded.
+   */
+  actions: WorkflowVersionAction[] | null;
   build: WorkflowVersionBuild;
   author: string;
   createdAt: string;

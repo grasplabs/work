@@ -1020,6 +1020,7 @@ msgstr "Actie"
 
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Actions"
 msgstr "Acties"
 
@@ -4068,6 +4069,10 @@ msgstr "Niemand leest het"
 msgid "none"
 msgstr "geen"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "None"
+msgstr "Geen"
+
 #: src/activity/pending.tsx
 msgid "None current"
 msgstr "Geen actuele"
@@ -4169,6 +4174,10 @@ msgstr "Niet aangeboden"
 #: src/workflows/independent-workflows.tsx
 msgid "Not published"
 msgstr "Niet gepubliceerd"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Not recorded"
+msgstr "Niet vastgelegd"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx

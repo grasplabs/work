@@ -223,6 +223,8 @@ describe("publishing a version", () => {
       definitionVersion: "1.0.0",
       profile: "grasp-open-workflow/1",
       bindings: [],
+      // No actions of its own: an empty list, recorded as such.
+      actions: [],
       author: ada.userId,
       definitionHash: await canonicalHash(
         definitionOf({ name: workflow.name })
