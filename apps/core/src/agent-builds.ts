@@ -1359,8 +1359,9 @@ const buildDeclaration = `/**
  * operations files, \`operations/<group>.ts\`. A workflow is
  * \`workflows/<id>.ts\` with its tests in \`workflows/<id>.workflow-tests.ts\`:
  * \`export default workflow(id, config, async (step, { input, params, env }) => …)\`,
- * calling the App's bindings only in a step's own function (not between
- * steps, nor in a function inside it: loop with \`for...of\`), each call
+ * calling the App's bindings only in a step's own function (\`step.do\`'s,
+ * or an option such as a decision's \`ask\`; not between steps, nor in a
+ * function inside it: loop with \`for...of\`), each call
  * written out as \`env.NAME.method(…)\`, \`appServer(env).method(…)\`,
  * \`appFunctions<Tree>(env).query("notes.list", …)\` (or \`mutation\`,
  * \`action\`: the App's public functions, by \`group.name\`) or
@@ -1552,7 +1553,8 @@ build: {
    * Asks for a permission the App needs, as its builders do: an admin
    * grants it or not, and it allows nothing until then. \`binding\` is the
    * name the App's code reaches it by, such as \`MAIL\`. On a collection,
-   * an App asks only to \`read\`: it keeps what it writes in its own store.
+   * an App asks only to \`read\`: it never writes one (what it writes goes
+   * to a business store).
    */
   requestPermission(app: string, request: {
     object:
