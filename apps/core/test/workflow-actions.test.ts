@@ -325,6 +325,38 @@ const receiptsOf = async (runId: string) => {
     }));
 };
 
+/**
+ * The evidence run `runId` kept of calls refused at an action's admission
+ * (`workflow.call.refused`): what each names, its generation as a number.
+ */
+const refusalsOf = async (runId: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      (event) =>
+        event.action === "workflow.call.refused" && event.target?.id === runId
+    )
+    .map(({ detail }) => ({
+      ...detail,
+      generation: typeof detail?.generation,
+    }));
+};
+
+/** An action's admission refusal, as `ActionEffects.refused` hears it. */
+interface HeardRefusal {
+  readonly reason: string;
+  readonly call: string | null;
+  readonly errorCode: string;
+}
+
+/** Effects' `refused` that keeps what it hears in `heard`. */
+const hearing =
+  (heard: HeardRefusal[]) =>
+  async (said: HeardRefusal): Promise<void> => {
+    heard.push(said);
+    await Promise.resolve();
+  };
+
 describe("a JSON workflow's own actions", () => {
   it("calls the bindings it declares, each an effect of its own, once even across a replay", async () => {
     const admin = await person("admin");
@@ -387,7 +419,18 @@ describe("a JSON workflow's own actions", () => {
       code: "workflow.call_denied",
     });
     const sent = await mail.did();
-    expect(sent.calls).toBe(0);
+    const receipts = await receiptsOf(runId);
+    // Refused by the call's authority, it has its receipt there, and no
+    // admission evidence besides.
+    expect({
+      sent: sent.calls,
+      receipts: receipts.map(({ result }) => result),
+      evidence: await refusalsOf(runId),
+    }).toStrictEqual({
+      sent: 0,
+      receipts: ["workflow.call_denied"],
+      evidence: [],
+    });
   });
 
   it("refuses a definition whose action uses a binding it doesn't declare, or of another kind", async () => {
@@ -482,10 +525,10 @@ describe("a JSON workflow's own actions", () => {
     ]);
   });
 
-  it("makes no call of an operation the action's use doesn't declare, though it computes the name and swallows the refusal", async () => {
+  it("makes no call of an operation the action's use doesn't declare, though it computes the name and swallows the refusal, and keeps the evidence once", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const { workflow } = await actingWorkflow(
+    const { workflow, serving } = await actingWorkflow(
       ada,
       admin,
       notifyModule(
@@ -506,6 +549,7 @@ describe("a JSON workflow's own actions", () => {
     );
     const build = await loadWorkflowBuild(env, workflow.id, 1);
     let calls = 0;
+    const heard: HeardRefusal[] = [];
     const code = await outcome(
       callAction(
         env,
@@ -516,6 +560,7 @@ describe("a JSON workflow's own actions", () => {
         Date.now() + 5000,
         {
           owner: `workflow-action:${workflow.id}`,
+          refused: hearing(heard),
           make: async (): Promise<Json> => {
             calls += 1;
             return await Promise.resolve({ messageId: "m" });
@@ -523,9 +568,42 @@ describe("a JSON workflow's own actions", () => {
         }
       )
     );
-    expect({ code, calls }).toStrictEqual({
+    // Through a run, the refusal is kept as evidence once, naming the
+    // use and the host's record of the attempt, never the computed name.
+    const runId = await started(ada, workflow.id, serving);
+    expect({
+      code,
+      calls,
+      heard,
+      run: await ended(ada, workflow.id, runId),
+      evidence: await refusalsOf(runId),
+      receipts: await receiptsOf(runId),
+    }).toStrictEqual({
       code: "workflow.call_denied",
       calls: 0,
+      heard: [
+        {
+          reason: "operation_undeclared",
+          call: "mail",
+          errorCode: "workflow.call_denied",
+        },
+      ],
+      run: { status: "failed", code: "workflow.call_denied" },
+      evidence: [
+        {
+          workflow: workflow.id,
+          version: 1,
+          person: ada.userId,
+          build: build.hash,
+          task: "notify",
+          attempt: 1,
+          generation: "number",
+          call: "mail",
+          errorCode: "workflow.call_denied",
+          reason: "operation_undeclared",
+        },
+      ],
+      receipts: [],
     });
   });
 
@@ -561,6 +639,7 @@ describe("a JSON workflow's own actions", () => {
         Date.now() + 2000,
         {
           owner: `workflow-resource:${workflow.id}`,
+          refused: hearing([]),
           make: async (): Promise<Json> => {
             calls += 1;
             if (calls === 1) {
@@ -599,7 +678,7 @@ describe("a JSON workflow's own actions", () => {
         notifyCall,
         { to: "Ada" },
         Date.now() + 30_000,
-        { owner: `workflow-action:${workflow.id}`, make }
+        { owner: `workflow-action:${workflow.id}`, make, refused: hearing([]) }
       );
     // Its effect lands before the task does.
     let done = false;
@@ -645,6 +724,7 @@ describe("a JSON workflow's own actions", () => {
       Date.now() + 30_000,
       {
         owner: `workflow-action:${workflow.id}`,
+        refused: hearing([]),
         make: async (built: BuiltCall): Promise<Json> => {
           await scheduler.wait(100);
           done.push(
@@ -716,7 +796,7 @@ export const notify = action({
         notifyCall,
         { to: "Ada" },
         Date.now() + 30_000,
-        { owner: `workflow-action:${workflow.id}`, make }
+        { owner: `workflow-action:${workflow.id}`, make, refused: hearing([]) }
       );
     let begun = 0;
     let done = 0;
@@ -771,6 +851,7 @@ export const notify = action({
         Date.now() + 30_000,
         {
           owner: `workflow-action:${workflow.id}`,
+          refused: hearing([]),
           make: async (built: BuiltCall): Promise<Json> => {
             subjects.push(
               built.name === "grasp.connector"
@@ -882,8 +963,10 @@ export const notify = action({
       arguments: { literal: null },
     } as const;
     const made: BuiltCall[] = [];
+    const heard: HeardRefusal[] = [];
     const effects = {
       owner: `workflow-resource:${workflow.id}`,
+      refused: hearing(heard),
       make: async (built: BuiltCall): Promise<Json> => {
         made.push(built);
         return await Promise.resolve({ messageId: "m" });
@@ -903,6 +986,14 @@ export const notify = action({
     );
     expect(capped).toBe("workflow.action_call_limit");
     expect(made).toHaveLength(maxActionCalls);
+    // The cap's refusal is evidence once, not once a call past it.
+    expect(heard.splice(0)).toStrictEqual([
+      {
+        reason: "call_limit",
+        call: "mail",
+        errorCode: "workflow.action_call_limit",
+      },
+    ]);
     // A seal that lists no uses refuses the call its module still makes.
     const contract = build.compute.contracts.get("code/notify.ts#notify");
     if (contract === undefined) {
@@ -926,9 +1017,18 @@ export const notify = action({
         effects
       )
     );
-    expect({ denied, made: made.length }).toStrictEqual({
+    expect({ denied, made: made.length, heard }).toStrictEqual({
       denied: "workflow.call_denied",
       made: 0,
+      // An alias its seal doesn't list is named by no one: it is the
+      // module's text.
+      heard: [
+        {
+          reason: "use_undeclared",
+          call: null,
+          errorCode: "workflow.call_denied",
+        },
+      ],
     });
   });
 });

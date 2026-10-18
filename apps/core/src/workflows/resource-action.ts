@@ -22,7 +22,7 @@ import {
   readAnswer,
   requestModule,
 } from "../workflow-modules.ts";
-import type { BuiltCall } from "./resource-calls.ts";
+import type { AdmissionReason, BuiltCall } from "./resource-calls.ts";
 import { requireShape } from "./resource-calls.ts";
 
 // A run's call of one of its workflow's own actions (platform
@@ -52,6 +52,12 @@ import { requireShape } from "./resource-calls.ts";
 //   deadline, the run's lease): the capability dies with the call.
 // - A refusal the action swallows. The first refusal of one of its calls
 //   fails the task with that refusal, whatever the action did with it.
+// - A hidden call leaving no trace (GRA-279). When that first refusal is
+//   the host's own admission's (an undeclared use or operation, a bad
+//   request, the call cap), the host keeps it as audit evidence
+//   (`ActionEffects.refused`) before the task fails: once per attempt,
+//   from what the host knows, a binding named only when it is declared.
+//   A refusal `make` gave has its own receipt there already.
 
 /** The most resource calls one attempt of an action makes. */
 export const maxActionCalls = 32;
@@ -87,6 +93,16 @@ export interface ActionEffects {
   readonly owner: string;
   /** The run's own sandbox session, on-prem: the action's parent there. */
   readonly parent?: string | undefined;
+  /**
+   * Keeps the evidence of the attempt's first refusal, when it was the
+   * host's own admission's: why, and the alias, only when declared.
+   * Never throws: the refusal stands whatever came of keeping it.
+   */
+  readonly refused: (refusal: {
+    readonly reason: AdmissionReason;
+    readonly call: string | null;
+    readonly errorCode: string;
+  }) => Promise<void>;
 }
 
 /**
@@ -97,6 +113,10 @@ export interface ActionEffects {
 interface ActionHostState {
   live: boolean;
   refusal: Error | undefined;
+  /** Why the first refusal was refused, when it was the host's own admission's. */
+  admission:
+    | { readonly reason: AdmissionReason; readonly call: string | null }
+    | undefined;
   readonly made: Promise<unknown>[];
 }
 
@@ -165,34 +185,67 @@ class ActionHost extends RpcTarget {
     return await made;
   }
 
+  /**
+   * Refuses a call at the host's own admission with `error`, noting why
+   * (`call` a declared alias, or null) when it is the attempt's first
+   * refusal: `callAction` keeps that one as evidence.
+   */
+  #refuse(reason: AdmissionReason, call: string | null, error: Error): never {
+    if (this.#state.refusal === undefined) {
+      this.#state.admission ??= { reason, call };
+    }
+    throw error;
+  }
+
   async #call(alias: unknown, request: unknown): Promise<Json> {
     if (!this.#state.live) {
       throw workflowResourceErrors.create("workflow.call_denied");
     }
     if (passedBound([alias, request], callBounds) !== undefined) {
-      throw workflowResourceErrors.create("workflow.call_invalid");
+      return this.#refuse(
+        "request_invalid",
+        null,
+        workflowResourceErrors.create("workflow.call_invalid")
+      );
     }
     const use = typeof alias === "string" ? this.#uses.get(alias) : undefined;
     if (typeof alias !== "string" || use === undefined) {
-      throw workflowResourceErrors.create("workflow.call_denied");
+      return this.#refuse(
+        "use_undeclared",
+        null,
+        workflowResourceErrors.create("workflow.call_denied")
+      );
     }
     const { kind } = use;
     if (this.#count >= maxActionCalls) {
-      throw workflowResourceErrors.create("workflow.action_call_limit", {
-        limit: maxActionCalls,
-      });
+      return this.#refuse(
+        "call_limit",
+        alias,
+        workflowResourceErrors.create("workflow.action_call_limit", {
+          limit: maxActionCalls,
+        })
+      );
     }
     this.#count += 1;
     const ordinal = this.#count;
     if (kind === "connector") {
       const parsed = connectorRequestSchema.safeParse(request);
       if (!parsed.success) {
-        throw workflowResourceErrors.create("workflow.call_invalid");
+        return this.#refuse(
+          "request_invalid",
+          alias,
+          workflowResourceErrors.create("workflow.call_invalid")
+        );
       }
       // Only an operation its sealed contract declares (GRA-704): what
-      // review and approval saw, whatever name the action computes.
+      // review and approval saw, whatever name the action computes. The
+      // evidence names the use, never the computed operation.
       if (!use.operations.has(parsed.data.operation)) {
-        throw workflowResourceErrors.create("workflow.call_denied");
+        return this.#refuse(
+          "operation_undeclared",
+          alias,
+          workflowResourceErrors.create("workflow.call_denied")
+        );
       }
       return await this.#effects.make(
         {
@@ -208,7 +261,11 @@ class ActionHost extends RpcTarget {
     }
     const parsed = operationRequestSchema.safeParse(request);
     if (kind !== "operation" || !parsed.success) {
-      throw workflowResourceErrors.create("workflow.call_invalid");
+      return this.#refuse(
+        "request_invalid",
+        alias,
+        workflowResourceErrors.create("workflow.call_invalid")
+      );
     }
     return await this.#effects.make(
       {
@@ -246,7 +303,12 @@ export const callAction = async (
   if (remaining <= 0) {
     throw actionFailed();
   }
-  const state: ActionHostState = { live: true, refusal: undefined, made: [] };
+  const state: ActionHostState = {
+    live: true,
+    refusal: undefined,
+    admission: undefined,
+    made: [],
+  };
   const host = new ActionHost(contract.uses ?? [], effects, state);
   const modules = {
     ...compute.modules,
@@ -322,8 +384,17 @@ export const callAction = async (
     state.live = false;
   }
   // A refusal of one of its calls stands, whatever the action made of it,
-  // and even when the deadline ended it.
+  // and even when the deadline ended it; the host's own admission's is
+  // kept as evidence first.
   if (state.refusal !== undefined) {
+    if (state.admission !== undefined) {
+      await effects.refused({
+        ...state.admission,
+        errorCode:
+          workflowResourceErrors.codeOf(state.refusal) ??
+          "workflow.call_denied",
+      });
+    }
     throw state.refusal;
   }
   if (settled === undefined || !callsDone) {
