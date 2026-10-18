@@ -20,6 +20,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { packageLimits } from "@grasp-os/shared/packages";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
@@ -694,6 +695,35 @@ export interface LoadedBuild {
   readonly packages: { readonly graphHash: string } | undefined;
 }
 
+/** The prefix of an approved package's module (`packageModuleName`). */
+const packageModulePrefix = "pkg~";
+
+/**
+ * Whether a build's compute modules hold exactly the package modules its
+ * manifest seals (`entries`, by name): each one, no other (none for a
+ * version that seals none), within a version's allowance together.
+ */
+const packagesAgree = (
+  modules: Readonly<Record<string, string>>,
+  entries: Readonly<Record<string, string>>
+): boolean => {
+  const sealed = new Set(Object.values(entries));
+  const held = Object.keys(modules).filter((name) =>
+    name.startsWith(packageModulePrefix)
+  );
+  const chars = held.reduce(
+    (total, name) => total + (modules[name]?.length ?? 0),
+    0
+  );
+  return (
+    held.length === sealed.size &&
+    held.every((name) => sealed.has(name)) &&
+    // The platform's ceiling, not a deployment's: a version sealed under
+    // any limit loads.
+    chars <= packageLimits.workflowPackageChars
+  );
+};
+
 /** Where a version's manifest seals the approved packages its modules import. */
 const manifestPackagesSchema = z.object({
   packages: sealedPackagesSchema.optional(),
@@ -1024,14 +1054,7 @@ export const loadWorkflowBuild = async (
   }
   return await sharedRun(verifying, hash, buildReadMs(env, build), async () => {
     const built = await verifiedBuild(env, id, version, build);
-    // Every entry it seals loads as a module of its build, under its
-    // identity: none named that the build doesn't hold.
-    if (
-      packages !== undefined &&
-      !Object.values(packages.entries).every((name) =>
-        Object.hasOwn(built.compute.modules, name)
-      )
-    ) {
+    if (!packagesAgree(built.compute.modules, packages?.entries ?? {})) {
       throw corrupt(id, version, "packages");
     }
     const loaded: LoadedBuild = Object.freeze({

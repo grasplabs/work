@@ -6,6 +6,7 @@ import {
   dependencyErrors,
   workflowDependencyTarget,
 } from "@grasp-os/shared/dependencies";
+import { packageLimitsOf } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { workflowModuleLimits } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -47,6 +48,22 @@ const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
 
 const invalid = (reason: string) =>
   workflowResourceErrors.create("workflow.packages_invalid", { reason });
+
+const tooLarge = (limit: number) =>
+  invalid(
+    `Their modules are larger than a version holds: at most ${limit} characters together.`
+  );
+
+/**
+ * What a run's admission refusing the graph means: it isn't approved for
+ * this workflow any more. Anything else (a policy that kept changing as it
+ * was read, say) isn't a refusal, and the call is tried again.
+ */
+const refusedCodes: ReadonlySet<string> = new Set([
+  "dependency.revoked",
+  "dependency.retired",
+  "dependency.approval_required",
+]);
 
 /**
  * The approved graph `graphHash` of workflow `workflow`, sealed for a
@@ -101,8 +118,19 @@ export const sealPackages = async (
       `They have ${entries.length} entries; a version holds at most ${workflowModuleLimits.files}.`
     );
   }
+  // Bounded before anything is read: what the artifact says of its sizes,
+  // then the text itself, each a version's whole allowance at most.
+  const limit = packageLimitsOf(env.PACKAGE_LIMITS).workflowPackageChars;
+  const described = entries.reduce(
+    (total, [, { module }]) => total + (artifact.files[module]?.bytes ?? 0),
+    0
+  );
+  if (described > limit) {
+    throw tooLarge(limit);
+  }
   const modules: Record<string, string> = {};
   const named: Record<string, string> = {};
+  let chars = 0;
   for (const [entry, { module }] of entries) {
     const file = artifact.files[module];
     const bytes =
@@ -119,7 +147,15 @@ export const sealPackages = async (
     } catch {
       throw invalid(`The module of ${entry} isn't text.`);
     }
+    chars += text.length;
+    if (chars > limit) {
+      throw tooLarge(limit);
+    }
     const name = packageModuleName(entry);
+    // Never two entries under one module name.
+    if (Object.hasOwn(modules, name)) {
+      throw invalid(`Two of their entries would load as ${name}.`);
+    }
     modules[name] = text;
     named[entry] = name;
   }
@@ -176,10 +212,13 @@ export const requirePackagesAdmitted = async (
       if (code === "dependency.policy_changed" && tries < generationTries) {
         continue;
       }
-      if (code !== undefined) {
+      if (code !== undefined && refusedCodes.has(code)) {
         throw workflowResourceErrors.create("workflow.packages_revoked");
       }
-      throw error;
+      // Not a refusal: a step tries it again (an unexpected error is).
+      throw new Error("The dependency policy couldn't be read for this call.", {
+        cause: error,
+      });
     }
   }
 };

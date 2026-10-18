@@ -146,7 +146,9 @@ const typescriptExtension = /\.tsx?$/u;
  * module (GRA-665).
  */
 export const packageModuleName = (entry: string): string =>
-  `pkg~${entry.replaceAll("/", "~")}.js`;
+  // `%` and `~` escaped first, so `~` stands only for `/`: no two entries
+  // (`a~b` and `a/b`, say) share a name.
+  `pkg~${entry.replaceAll("%", "%25").replaceAll("~", "%7E").replaceAll("/", "~")}.js`;
 
 /**
  * Where core names, among a compute build's files, the approved package

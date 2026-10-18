@@ -2,6 +2,9 @@
 import { packageModuleName } from "@grasp-os/compiler";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -27,8 +30,11 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
-import { sealPackages } from "../src/workflows/sealed-packages.ts";
-import { publish } from "./npm.ts";
+import {
+  requirePackagesAdmitted,
+  sealPackages,
+} from "../src/workflows/sealed-packages.ts";
+import { noise, publish } from "./npm.ts";
 import { racingDb } from "./racing-db.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { auditedDuring, outcome, unique } from "./sign-in.ts";
@@ -64,6 +70,12 @@ const person = async (role: Role): Promise<Identity> => {
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
   };
 };
+
+/**
+ * The most characters a version's packages may have in tests: the
+ * deployment's lowered `workflowPackageChars` (vite.config.ts).
+ */
+const testPackageChars = 64 * 1024;
 
 /** An admin who may approve packages. */
 const approver = async (): Promise<Identity> => {
@@ -118,6 +130,59 @@ const definitionOf = (name: string, linger?: string): string =>
     ],
   });
 
+/**
+ * A definition of `name` whose action `doubled` answers `pkg`'s `double`
+ * of 6, after `linger`.
+ */
+const actionDefinitionOf = (name: string, linger: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {},
+          bindings: {
+            doubled: {
+              kind: "operation",
+              contract: "local:code/doubled.ts#doubled",
+            },
+          },
+        },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      { linger: { wait: linger } },
+      {
+        doubled: {
+          call: "grasp.operation",
+          with: { binding: "doubled", arguments: { value: 6 } },
+        },
+      },
+      { answer: { set: { status: "${ .status }" } } },
+    ],
+  });
+
+/** An action answering `pkg`'s `double` of its value, using nothing. */
+const actionUsing = (
+  pkg: string
+): string => `import { action, v } from "@grasp-os/sdk/action";
+import { double } from ${JSON.stringify(pkg)};
+
+export const doubled = action({
+  args: { value: v.number() },
+  returns: v.object({ status: v.string() }),
+  uses: [],
+  handler: async (_ctx, args) => ({ status: String(double(args.value)) }),
+});
+`;
+
 /** A calculation doubling the sum with `pkg`'s `double`. */
 const moduleUsing = (
   pkg: string
@@ -132,13 +197,18 @@ export const total = compute({
 `;
 
 /** Publishes `name`@`version`, exporting `double`, to the test registry. */
-const publishDoubling = async (name: string, version: string) => {
+const publishDoubling = async (
+  name: string,
+  version: string,
+  /** Code its module runs as it loads, before `double`. */
+  prelude = ""
+) => {
   await publish({
     name,
     version,
     manifest: { type: "module", main: "index.js", license: "MIT" },
     files: {
-      "index.js": "export const double = (value) => value * 2;",
+      "index.js": `${prelude}export const double = (value) => value * 2;`,
     },
   });
 };
@@ -529,5 +599,179 @@ describe("a workflow's modules importing approved packages", () => {
       otherGraph: true,
       republished: "workflow.version_exists",
     });
+  });
+
+  it("fails a run in flight at its next action once the graph is revoked", async () => {
+    const admin = await approver();
+    const pkg = await doubling();
+    const { builder, workflow, request } = await workflowWith(pkg);
+    await approve(admin, request);
+    await publishWorkflowVersion(
+      env,
+      builder,
+      workflow.id,
+      {
+        definition: actionDefinitionOf(workflow.name, "PT3S"),
+        basedOn: null,
+        modules: { "code/doubled.ts": actionUsing(pkg) },
+        packages: { graphHash: request.graphHash },
+      },
+      sealPackages
+    );
+    const runId = await started(builder, workflow.id);
+    await end(admin, request, "revoked");
+
+    await expect(ended(builder, workflow.id, runId)).resolves.toStrictEqual({
+      status: "failed",
+      code: "workflow.packages_revoked",
+    });
+  });
+
+  it("refuses package code that reads the clock or randomness as it loads", async () => {
+    const admin = await approver();
+    const refusals: string[] = [];
+    for (const prelude of [
+      "export const at = Date.now();\n",
+      "export const roll = Math.random();\n",
+    ]) {
+      const pkg = `double-${unique()}`;
+      // oxlint-disable-next-line no-await-in-loop -- one package at a time
+      await publishDoubling(pkg, "1.0.0", prelude);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const { builder, workflow, request } = await workflowWith(pkg);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await approve(admin, request);
+      refusals.push(
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await outcome(publishedWith(builder, workflow, pkg, request.graphHash))
+      );
+    }
+
+    expect(refusals).toStrictEqual([
+      "workflow.modules_invalid",
+      "workflow.modules_invalid",
+    ]);
+  });
+
+  it("seals nothing for Grasp staff, nor another workflow's approved graph", async () => {
+    const admin = await approver();
+    const pkg = await doubling();
+    const theirs = await workflowWith(pkg);
+    await approve(admin, theirs.request);
+    const { builder, workflow, request } = await workflowWith(pkg);
+    // Staff with an admin's role in the workflow, as staff sessions carry.
+    const staff: Acting = { ...builder, role: "admin", staff: true };
+    await approve(admin, request);
+
+    expect({
+      // The same graph by its hash, approved only for the other workflow.
+      sameGraph: theirs.request.graphHash === request.graphHash,
+      staff: await outcome(
+        publishedWith(staff, workflow, pkg, request.graphHash)
+      ),
+    }).toStrictEqual({ sameGraph: true, staff: "role.forbidden" });
+    // Their approval admits nothing for a workflow that never had one.
+    const other = await person("builder");
+    const unrelated = await createWorkflowResource(env, other, `u-${unique()}`);
+    await expect(
+      outcome(publishedWith(other, unrelated, pkg, theirs.request.graphHash))
+    ).resolves.toBe("dependency.approval_required");
+  });
+
+  it("refuses packages larger than a version holds", async () => {
+    const admin = await approver();
+    const pkg = `double-${unique()}`;
+    await publishDoubling(
+      pkg,
+      "1.0.0",
+      `export const blob = ${JSON.stringify(noise(testPackageChars + 1024))};\n`
+    );
+    const { builder, workflow, request } = await workflowWith(pkg);
+    await approve(admin, request);
+
+    await expect(
+      outcome(publishedWith(builder, workflow, pkg, request.graphHash))
+    ).resolves.toBe("workflow.packages_invalid");
+  });
+
+  it("names two entries that differ in ~ and / apart", () => {
+    expect(packageModuleName("a~b")).not.toBe(packageModuleName("a/b"));
+  });
+
+  it("loads no package module its manifest doesn't seal", async () => {
+    const admin = await approver();
+    const pkg = await doubling();
+    const { builder, workflow, request } = await workflowWith(pkg);
+    await approve(admin, request);
+    await publishedWith(builder, workflow, pkg, request.graphHash);
+    const row = await env.DB.prepare(
+      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ manifest: string }>();
+    const manifest = z
+      .object({
+        packages: z
+          .object({ entries: z.record(z.string(), z.string()) })
+          .catchall(z.json()),
+      })
+      .catchall(z.json())
+      .parse(JSON.parse(row?.manifest ?? "{}"));
+    // A version beside it whose manifest no longer seals what the same
+    // build holds (versions never change, so a new row): the build's own
+    // modules unchanged, a package module among them it doesn't seal.
+    let next = 1;
+    const rewritten = async (changed: Record<string, Json>) => {
+      next += 1;
+      const text = canonicalJson(changed);
+      const { results: columns } = await env.DB.prepare(
+        "SELECT name FROM pragma_table_info('workflow_resource_versions') WHERE name NOT IN ('version', 'definition_version', 'manifest', 'manifest_hash')"
+      ).all<{ name: string }>();
+      const rest = columns.map(({ name }) => name).join(", ");
+      await env.DB.prepare(
+        `INSERT INTO workflow_resource_versions (version, definition_version, manifest, manifest_hash, ${rest}) SELECT ?, ?, ?, ?, ${rest} FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1`
+      )
+        .bind(next, `1.0.${next}`, text, await sha256Hex(text), workflow.id)
+        .run();
+      return await outcome(loadWorkflowBuild(env, workflow.id, next));
+    };
+    const { packages, ...unsealed } = manifest;
+
+    expect({
+      noEntries: await rewritten({
+        ...manifest,
+        packages: { ...packages, entries: {} },
+      }),
+      noPackages: await rewritten(unsealed),
+    }).toStrictEqual({
+      noEntries: "workflow.version_corrupt",
+      noPackages: "workflow.version_corrupt",
+    });
+  });
+
+  it("tries a call again, not fails it, while the policy keeps changing as it is read", async () => {
+    const admin = await approver();
+    const pkg = await doubling();
+    const { workflow, request } = await workflowWith(pkg);
+    await approve(admin, request);
+    // Every read of the policy finds it moved on since the last.
+    const db = racingDb(async (real) => {
+      await real
+        .prepare(
+          "INSERT INTO dependency_policy (id, generation) VALUES ('policy', 1) ON CONFLICT(id) DO UPDATE SET generation = generation + 1"
+        )
+        .run();
+    });
+
+    const answered = await outcome(
+      requirePackagesAdmitted(
+        { ...env, DB: db },
+        workflow.id,
+        request.graphHash
+      )
+    );
+
+    expect(answered).not.toBe("workflow.packages_revoked");
+    expect(answered).toContain("couldn't be read");
   });
 });
