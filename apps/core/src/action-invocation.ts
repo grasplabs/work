@@ -351,12 +351,20 @@ export class ActionInvocation extends DurableObject<Env> {
    * the last its result. A refusal is that result.
    */
   async open(spec: InvocationOpen): Promise<ReadableStream<Uint8Array>> {
+    // Input past what reads as a value (`jsonOf`) is refused here, recording
+    // nothing: hashed as none, two such inputs would share a key's run, the
+    // second joining the first or reading its receipt instead of being
+    // refused (`submission.key_conflict`).
+    const input = jsonOf(spec.call.input);
+    if (input === undefined && spec.call.input !== undefined) {
+      return resultOf(
+        refused(operationErrors.create("contract.invalid_request"))
+      );
+    }
     // In line from the first await on: a cancel sent after this open is
     // decided after it.
     return await this.#serially(async () => {
-      const inputHash = await sha256Hex(
-        canonicalJson(jsonOf(spec.call.input) ?? null)
-      );
+      const inputHash = await sha256Hex(canonicalJson(input ?? null));
       return await this.#decide(spec, inputHash);
     });
   }
