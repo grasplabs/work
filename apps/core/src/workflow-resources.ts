@@ -65,6 +65,8 @@ import type { PinnedEventBinding } from "./bound-workflow-events.ts";
 import {
   sdkReleasePins,
   sdkResourceBindings,
+  workflowResourceDraftInspections,
+  workflowResourceDraftModules,
   workflowResourceDrafts,
   workflowResourceMembers,
   workflowResources,
@@ -99,7 +101,7 @@ import {
   modulesHashOf,
   versionActionsOf,
 } from "./workflow-modules.ts";
-import type { CompiledModules } from "./workflow-modules.ts";
+import type { CompiledModules, ModuleContracts } from "./workflow-modules.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
@@ -848,7 +850,7 @@ const inspectDefinition = async (
   by: Acting,
   workflow: Pick<Live, "name">,
   definition: string,
-  modules?: CompiledModules
+  modules?: ModuleContracts
 ): Promise<
   | { ok: true; checked: CheckedWorkflow; bindings: PinnedBinding[] }
   | { ok: false; problems: WorkflowDefinitionProblem[] }
@@ -1687,17 +1689,23 @@ const publish = async (
  * `checkDefinition` checks it: empty when nothing does. Its refusals of
  * the definition are answered as problems, at their pointers; anything
  * else (the catalog unreachable) is thrown. What drafts are checked with
- * (workflow-drafts.ts), so a checkpoint is exactly what would publish.
- * A draft is its definition alone and publishes without modules, so it is
- * checked without them: a `local:` binding is a problem in a draft.
+ * (workflow-drafts.ts), so a checkpoint is exactly what would publish:
+ * against `modules`, the draft's own, built as a publication builds them.
  */
 export const definitionProblems = async (
   env: Env,
   by: Acting,
   workflow: Pick<Live, "name">,
-  definition: string
+  definition: string,
+  modules?: ModuleContracts
 ): Promise<WorkflowDefinitionProblem[]> => {
-  const inspected = await inspectDefinition(env, by, workflow, definition);
+  const inspected = await inspectDefinition(
+    env,
+    by,
+    workflow,
+    definition,
+    modules
+  );
   return inspected.ok ? [] : inspected.problems;
 };
 
@@ -1822,6 +1830,37 @@ export const workflowSource = async (
     }
   }
   return { files };
+};
+
+/**
+ * The modules version `version` of workflow `id` sealed, by path, read
+ * back from its build with every hash checked: none for a version without
+ * modules, or one whose build doesn't run, which seals none. For the
+ * workflow's builders, whose role the caller has checked.
+ */
+export const sealedModules = async (
+  env: Env,
+  workflowId: string,
+  version: number
+): Promise<Record<string, string>> => {
+  const row = await drizzle(env.DB)
+    .select({ manifest: workflowResourceVersions.manifest })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflowId),
+        eq(workflowResourceVersions.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  if (!sealedBuildOf(workflowId, version, row.manifest).executable) {
+    return {};
+  }
+  const build = await loadWorkflowBuild(env, workflowId, version);
+  return { ...build.compute.sources };
 };
 
 /**
@@ -2151,6 +2190,14 @@ export const deleteWorkflowResource = async (
     // sensitive parameter's default: it goes once it is deleted.
     db.delete(workflowResourceDrafts).where(
       sql`${workflowResourceDrafts.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+    ),
+    db.delete(workflowResourceDraftModules).where(
+      sql`${workflowResourceDraftModules.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+    ),
+    db.delete(workflowResourceDraftInspections).where(
+      sql`${workflowResourceDraftInspections.workflowResourceId} IN (SELECT id
         FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
     ),
     // The releases its approvals kept (workflow-bindings.ts) go back to

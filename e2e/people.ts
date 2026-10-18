@@ -178,6 +178,7 @@ const cast = {
   signOutFailure: { member: "user" },
   workflowEditor: { builder: "builder" },
   workflowDiagram: { builder: "builder" },
+  workflowModules: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },

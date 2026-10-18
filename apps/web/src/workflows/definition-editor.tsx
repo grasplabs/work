@@ -15,10 +15,11 @@ import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
+import { ModuleFiles, sameModules } from "./module-files.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
-// A workflow's definition as its builders edit it: the draft's JSON, each
-// save one revision-checked edit that core checks against the profile,
+// A workflow's definition as its builders edit it: the draft's JSON and its
+// own modules, each save one revision-checked edit that core checks against the profile,
 // what it found at its JSON Pointer and task, and publishing the latest
 // edit once it passes. The page never decides what passes: core's answer
 // does, and the editor keeps the person's text whatever it answers.
@@ -100,6 +101,28 @@ const CheckpointDiagram = ({
   );
 };
 
+/** What core found in the latest revision, when it found anything. */
+const Problems = ({
+  problems,
+}: {
+  problems: readonly WorkflowDefinitionProblem[];
+}) =>
+  problems.length === 0 ? null : (
+    <section aria-labelledby="definition-problems">
+      <h2 className="font-medium" id="definition-problems">
+        <Trans>What to fix</Trans>
+      </h2>
+      <ul>
+        {problems.map((problem) => (
+          <Problem
+            key={`${problem.pointer} ${problem.code} ${problem.message}`}
+            problem={problem}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+
 export const DefinitionEditor = ({
   workflow,
   loaded,
@@ -118,12 +141,13 @@ export const DefinitionEditor = ({
   const { t } = useLingui();
   const [draft, setDraft] = useState(loaded);
   const [text, setText] = useState(loaded.source);
+  const [modules, setModules] = useState(loaded.modules);
   const [busy, setBusy] = useState(false);
   // Taking theirs replaces the text when it arrives: the editor holds still
   // until then, so nothing typed meanwhile is overwritten.
   const [replacing, setReplacing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
-  const edited = text !== draft.source;
+  const edited = text !== draft.source || !sameModules(modules, draft.modules);
   const { checkpoint } = draft;
   const publishable =
     !edited &&
@@ -140,6 +164,7 @@ export const DefinitionEditor = ({
           await session.workflowResources.editDraft(workflow, {
             expectedRevision: draft.revision,
             source: text,
+            modules,
           })
       );
       setDraft(saved);
@@ -166,6 +191,7 @@ export const DefinitionEditor = ({
       setDraft(latest);
       if (replace) {
         setText(latest.source);
+        setModules(latest.modules);
       }
       setOutcome(undefined);
     } catch (error) {
@@ -226,6 +252,11 @@ export const DefinitionEditor = ({
         />
         <DraftStatus draft={draft} />
       </div>
+      <ModuleFiles
+        modules={modules}
+        onChange={setModules}
+        readOnly={replacing}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           // The definition it starts from is saved as it is, too, as the
@@ -301,21 +332,7 @@ export const DefinitionEditor = ({
       {checkpoint === null ? null : (
         <CheckpointDiagram checkpoint={checkpoint} />
       )}
-      {draft.problems.length === 0 ? null : (
-        <section aria-labelledby="definition-problems">
-          <h2 className="font-medium" id="definition-problems">
-            <Trans>What to fix</Trans>
-          </h2>
-          <ul>
-            {draft.problems.map((problem) => (
-              <Problem
-                key={`${problem.pointer} ${problem.code} ${problem.message}`}
-                problem={problem}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
+      <Problems problems={draft.problems} />
     </div>
   );
 };

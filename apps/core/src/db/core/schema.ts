@@ -3003,6 +3003,51 @@ export const workflowResourceDrafts = sqliteTable(
 );
 
 /**
+ * The modules each draft revision carries (src/workflow-drafts.ts), one
+ * row per module: inserted with their revision, never changed, and kept
+ * and removed with it. A row each keeps every row within what D1 holds,
+ * however a revision's definition and modules add up.
+ */
+export const workflowResourceDraftModules = sqliteTable(
+  "workflow_resource_draft_modules",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    path: text().notNull(),
+    source: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.workflowResourceId, table.revision, table.path],
+    }),
+  ]
+);
+
+/**
+ * What the sandbox's inspection of a draft revision's modules answered
+ * (src/workflow-drafts.ts): kept with the revision, so a later edit that
+ * carries exactly the same modules (`modules_hash`) checks its definition
+ * against these contracts instead of running the modules again. Only an
+ * inspection that succeeded is kept; a publication always inspects anew.
+ */
+export const workflowResourceDraftInspections = sqliteTable(
+  "workflow_resource_draft_inspections",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    modulesHash: text("modules_hash").notNull(),
+    manifest: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
  * Which exact version of an independent workflow each App binds, by an
  * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
  * version and grants nothing: starting it still takes the App's own

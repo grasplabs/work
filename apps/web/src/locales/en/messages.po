@@ -1055,6 +1055,10 @@ msgstr "Add a widget"
 msgid "Add a word"
 msgstr "Add a word"
 
+#: src/workflows/module-files.tsx
+msgid "Add module"
+msgstr "Add module"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "Add note"
 msgstr "Add note"
@@ -3724,6 +3728,10 @@ msgctxt "severity of a finding"
 msgid "Moderate"
 msgstr "Moderate"
 
+#: src/workflows/module-files.tsx
+msgid "Modules"
+msgstr "Modules"
+
 #: src/brain/brain.ts
 msgid "Monthly budget for AI"
 msgstr "Monthly budget for AI"
@@ -3934,6 +3942,10 @@ msgstr "No memory files are written yet."
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "No model is set up for this deployment yet."
+
+#: src/workflows/module-files.tsx
+msgid "No modules yet. A module holds calculations a task calls through a local binding."
+msgstr "No modules yet. A module holds calculations a task calls through a local binding."
 
 #: src/workflows/triggers.tsx
 msgid "No next run"
@@ -4610,6 +4622,10 @@ msgstr "Pasted on {when}. Bring it in again to read it again."
 msgid "Path"
 msgstr "Path"
 
+#: src/workflows/module-files.tsx
+msgid "Path of a new module"
+msgstr "Path of a new module"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Pause the interviews"
 msgstr "Pause the interviews"
@@ -5000,6 +5016,10 @@ msgstr "Reload"
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove"
 msgstr "Remove"
+
+#: src/workflows/module-files.tsx
+msgid "Remove {file}"
+msgstr "Remove {file}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
