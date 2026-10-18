@@ -64,6 +64,24 @@ const readySnapshot = (name: string): AdminSnapshot => {
   };
 };
 
+/** A company whose people came in through its sign-in, its lead not named yet. */
+const peopleInSnapshot = (name: string): AdminSnapshot => ({
+  ...readySnapshot(name),
+  roster: {
+    teams: [{ id: "t-sales", name: "Sales", lead: null, does: "", off: false }],
+    people: [
+      {
+        id: "p-anna",
+        name: "Anna",
+        email: "anna@acme.test",
+        team: "t-sales",
+        title: "",
+        away: false,
+      },
+    ],
+  },
+});
+
 /** A company Grasp gave its go to a week ago, its platform open. */
 const openSnapshot = (name: string): AdminSnapshot => {
   const ready = readySnapshot(name);
@@ -181,5 +199,16 @@ describe("an organization's overview", () => {
       ),
       toHours: signalOf(html, "Workflows").includes(`href="${base}/hours"`),
     }).toStrictEqual({ open: true, workflows: true, toHours: true });
+  });
+
+  it("says the sign-in is connected once the company's people are in, before its team leads are named", async () => {
+    const acme = await liveClient();
+    acme.account.admin = peopleInSnapshot("Acme");
+
+    const { html } = await page(`/admin/organizations/${acme.clientId}`);
+
+    expect(html).toContain(
+      'aria-label="Connections: Not yet. Sign-in connected, team leads not named yet"'
+    );
   });
 });

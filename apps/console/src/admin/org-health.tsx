@@ -116,8 +116,11 @@ const lineOf = (signal: HealthSignal, view: AdminView, held: Held): string => {
       if (signal.stopped > 0) {
         return `${signal.stopped} stopped: someone must sign in again`;
       }
+      // The model's sign-in signal is the whole Connected step, leads named too: people in through the sign-in already say it is connected.
       if (!signal.signIn) {
-        return "Sign-in not connected yet";
+        return view.state.client === "directory"
+          ? "Sign-in connected, team leads not named yet"
+          : "Sign-in not connected yet";
       }
       return held.integrations
         ? `${signal.connected} connected`
