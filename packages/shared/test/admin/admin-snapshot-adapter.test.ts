@@ -7,7 +7,7 @@ import {
   adminOrgOf,
   staffSnapshotOf,
 } from "../../src/admin/admin-snapshot-adapter.ts";
-import { adminViewOf } from "../../src/admin/admin-view.ts";
+import { adminViewOf, portfolioOf } from "../../src/admin/admin-view.ts";
 import { orgOfSnapshot } from "../../src/admin/org-adapter.ts";
 
 const client = {
@@ -251,6 +251,10 @@ const shown = () => {
   return { org, view: adminViewOf(org, state, "2026-10-14") };
 };
 
+/** What needs Grasp at an organization read from core, on core's day, by kind. */
+const kindsOf = (of: ReturnType<typeof adminOrgOf>) =>
+  adminViewOf(of.org, of.state, "2026-10-14").needs.map((need) => need.kind);
+
 /** A view as text, its maps and sets spelled out, to look for words in. */
 const text = (value: unknown): string =>
   JSON.stringify(value, (_key: string, each: unknown): unknown => {
@@ -300,7 +304,8 @@ describe("an organization from core's admin snapshot", () => {
     expect(tom?.reminded).toBe(4);
     const sales = view.teams.find((team) => team.team.id === "sales");
     const ops = view.teams.find((team) => team.team.id === "ops");
-    expect([sales?.sent, sales?.heard]).toStrictEqual([0, 0]);
+    // Tom's link, the team's first, went out the day after Lisa was heard.
+    expect([sales?.sent, sales?.heard]).toStrictEqual([1, 0]);
     expect([ops?.sent, ops?.heard]).toStrictEqual([null, null]);
   });
 
@@ -500,6 +505,27 @@ describe("an organization from core's admin snapshot", () => {
     ).toStrictEqual({ kind: "go", percent: 85, threshold: 80 });
   });
 
+  it("shows interviews Grasp paused first, as nobody gets on until it resumes them", () => {
+    const paused = adminOrgOf(
+      {
+        ...snapshot,
+        paused: true,
+        gate: { ...snapshot.gate, known: 85, ready: true },
+      },
+      client
+    );
+    const unpaused = adminOrgOf(snapshot, client);
+    const untold = adminOrgOf(
+      { ...snapshot, paused: true, told: false },
+      client
+    );
+
+    expect(paused.org.real?.paused).toBeTruthy();
+    expect(kindsOf(paused).slice(0, 2)).toStrictEqual(["paused", "go"]);
+    expect(kindsOf(unpaused)).not.toContain("paused");
+    expect(kindsOf(untold)).not.toContain("paused");
+  });
+
   it("runs the interviews as long as core's plan, past the samples' fourteen days", () => {
     // Six weeks planned; day 27 now. Tom finished on day 23 and Grasp's go came on day 20.
     const long = adminOrgOf(
@@ -671,6 +697,45 @@ describe("an organization from core's admin snapshot", () => {
         joined: "2026-09-23",
       },
     ]);
+  });
+
+  it("reads a contract and work core doesn't hold as unknown, not as a draft or as none", () => {
+    const { view } = shown();
+    const { org, state } = adminOrgOf(snapshot, client);
+    const real = org.real && {
+      ...org.real,
+      unknown: { contract: false, works: false },
+    };
+    const knownView = adminViewOf({ ...org, real }, state, "2026-10-14");
+
+    expect({
+      unknown: view.unknown,
+      contractNeed: view.needs.some((need) => need.kind === "contract"),
+      counted: portfolioOf([view]).counted,
+    }).toStrictEqual({
+      unknown: { contract: true, works: true },
+      contractNeed: false,
+      counted: { fees: 0, value: 0 },
+    });
+    // Once core holds them, the draft contract waits for Grasp as before.
+    expect({
+      unknown: knownView.unknown,
+      contractNeed: knownView.needs.some((need) => need.kind === "contract"),
+    }).toStrictEqual({
+      unknown: { contract: false, works: false },
+      contractNeed: true,
+    });
+  });
+
+  it("counts a team's links from when its colleagues' went out, and asks no one to read words core never sends", () => {
+    const { view } = shown();
+    const sales = view.teams.find((team) => team.team.id === "sales");
+
+    expect({
+      // Lisa finished on the first day; Tom's link went out the day after.
+      salesSent: sales?.sent,
+      read: view.needs.some((need) => need.kind === "read"),
+    }).toStrictEqual({ salesSent: 1, read: false });
   });
 
   it("leaves unknown what core doesn't hold", () => {

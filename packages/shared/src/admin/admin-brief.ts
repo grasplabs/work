@@ -35,6 +35,7 @@ export const BRIEF_ITEMS = 3;
 
 /** What is worth saying to the company itself; the rest (reading, research) is Grasp's own to do. */
 export const WITH_COMPANY: readonly Need["kind"][] = [
+  "paused",
   "go",
   "short",
   "ending",
