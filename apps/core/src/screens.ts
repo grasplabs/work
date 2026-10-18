@@ -38,7 +38,6 @@ import { z } from "zod";
 
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
-import { deleteExpired } from "./screen-frame.ts";
 import type { FrameCode } from "./screen-frame.ts";
 
 /**
@@ -240,13 +239,32 @@ const buildSweepSchema = z.object({
   cursor: z.string().optional(),
 });
 
+/** What a cached build is written with: when it was last used. */
+const usedNow = (): R2PutOptions => ({
+  customMetadata: { usedAt: String(Date.now()) },
+});
+
+/**
+ * When a cached build was last used: as it was last written, or, for one
+ * written before builds said so, when it was uploaded.
+ */
+const lastUsedOf = (object: R2Object): number => {
+  const usedAt = Number(object.customMetadata?.usedAt);
+  return Number.isFinite(usedAt) && usedAt > 0
+    ? usedAt
+    : object.uploaded.getTime();
+};
+
 /**
  * Deletes cached builds last used more than `buildKeepMs` before `now`,
  * from the cron: in code, not a bucket rule, so it runs wherever core
  * does. One page of one kind's prefix a run, at most `buildSweepBatch`
  * objects, from where the last run stopped; once a kind is done, the next
- * run starts the next. Each is read again just before it goes, so one
- * used since the listing is kept (`deleteExpired`).
+ * run starts the next. A build is never last used after it was uploaded,
+ * so only those uploaded that long ago are read again, just before they
+ * go: one used since the listing is kept. R2 deletes take no condition,
+ * so one used between that read and the delete is still lost, and built
+ * again the next time it is asked for.
  */
 export const sweepBuilds = async (env: Env, now: Date): Promise<void> => {
   const stored = await env.FILES.get(buildSweepKey);
@@ -260,7 +278,21 @@ export const sweepBuilds = async (env: Env, now: Date): Promise<void> => {
     limit: buildSweepBatch,
     ...(state.cursor === undefined ? {} : { cursor: state.cursor }),
   });
-  await deleteExpired(env, listed.objects, now, buildKeepMs);
+  const unused = (object: R2Object): boolean =>
+    now.getTime() - lastUsedOf(object) > buildKeepMs;
+  const candidates = listed.objects.filter(
+    ({ uploaded }) => now.getTime() - uploaded.getTime() > buildKeepMs
+  );
+  const stillUnused = await Promise.all(
+    candidates.map(async ({ key }) => {
+      const head = await env.FILES.head(key);
+      return head !== null && unused(head) ? [key] : [];
+    })
+  );
+  const keys = stillUnused.flat();
+  if (keys.length > 0) {
+    await env.FILES.delete(keys);
+  }
   const next = listed.truncated
     ? { prefix: state.prefix, cursor: listed.cursor }
     : { prefix: (state.prefix + 1) % buildPrefixes.length };
@@ -318,9 +350,9 @@ const cachedBuild = async <Build>(
   const cached = await env.FILES.get(cacheKey);
   if (cached) {
     const text = await cached.text();
-    if (Date.now() - cached.uploaded.getTime() > buildRefreshMs) {
+    if (Date.now() - lastUsedOf(cached) > buildRefreshMs) {
       try {
-        await env.FILES.put(cacheKey, text);
+        await env.FILES.put(cacheKey, text, usedNow());
       } catch (error) {
         // The build is served all the same: a refresh that failed is
         // tried again at its next use, well before the sweep's limit.
@@ -349,7 +381,7 @@ const cachedBuild = async <Build>(
         );
       }
       if (answer.cache) {
-        await env.FILES.put(cacheKey, JSON.stringify(answer.built));
+        await env.FILES.put(cacheKey, JSON.stringify(answer.built), usedNow());
       }
       return answer.built;
     },

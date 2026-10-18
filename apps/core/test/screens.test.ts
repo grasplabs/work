@@ -448,21 +448,25 @@ export default function Desk() {
     };
     const day = 24 * 60 * 60 * 1000;
     const now = Date.now();
-    // Served a day on, it stays as it is; half its time on, it is
-    // written again, so a build in use never reaches the sweep's limit.
+    // Served a day on, it stays as it is; past half its time, it is
+    // written again as used then, so a build in use never reaches the
+    // sweep's limit.
+    const refreshed = now + buildKeepMs / 2 + day;
     const soon = await fromCache(now + day);
     // A refresh that fails still serves the build.
-    const unwritten = await fromCache(now + buildKeepMs / 2 + day, true);
-    const later = await fromCache(now + buildKeepMs / 2 + day);
+    const unwritten = await fromCache(refreshed, true);
+    const later = await fromCache(refreshed);
     // An object of another kind of cache, which this sweep leaves alone.
     await env.FILES.put("package-builds/kept.json", "{}");
-    await sweptAt(now + buildKeepMs - day);
+    // Past its first use's time, but not its last's: kept.
+    await sweptAt(now + buildKeepMs + day);
     const kept = await buildScreens(
       { ...env, LOADER: noBuilds },
       files,
       "app-test"
     );
-    await sweptAt(now + buildKeepMs + day);
+    // Past its last use's time: gone.
+    await sweptAt(refreshed + buildKeepMs + day);
     const swept = await buildScreens(
       { ...env, LOADER: noBuilds },
       files,
