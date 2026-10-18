@@ -9,7 +9,6 @@ import {
   deadlinePassed,
   outputOf,
   reminding,
-  server,
 } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
@@ -43,7 +42,6 @@ describe("decisions past their deadline", { timeout: 60_000 }, () => {
     // go on, then asks who may answer, as a reminder late in a run does.
     const { id: app } = await builder.api.apps.create({ name: "Late" });
     await release(builder, app, {
-      "app/server.ts": server,
       "workflows/late.ts": `export default {
   metadata: { id: "late", params: [] },
   run: async (engine) => {

@@ -23,11 +23,15 @@ import { mailConnection } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { v1AppWith, v1Server } from "./v1-app-server.ts";
+import { v1AppWith } from "./v1-app-server.ts";
 import {
+  appWith,
   grantMail,
+  hitCall,
+  hitsOf,
   invoiceMail,
   mailer,
+  sampleApp,
   workflowFiles,
 } from "./workflow-apps.ts";
 
@@ -46,8 +50,8 @@ const idp = mockIdp();
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
-/** How often the App counted `name` (its server's `hit`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
+/** How often the v1 App counted `name` (its server's `hit`). */
+const v1HitsOf = async (app: string, userId: string, name: string) =>
   await callApp(
     env,
     appIdSchema.parse(app),
@@ -214,8 +218,8 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
   it("run a call a step's review shows, and refuse and audit it from a step whose review doesn't", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const shown = await v1AppWith(admin, mailer(""));
-    const hidden = await v1AppWith(admin, mailer(""));
+    const shown = await appWith(admin, mailer(""));
+    const hidden = await appWith(admin, mailer(""));
     for (const app of [shown, hidden]) {
       // oxlint-disable-next-line no-await-in-loop -- one grant at a time
       await grantMail(idp, admin, app, mail.id);
@@ -257,7 +261,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": v1Server, ...mailer("") },
+      { ...sampleApp(), ...mailer("") },
       "Mailer"
     );
     const reviewedKept = await admin.api.apps.versions.review(app, version);
@@ -317,7 +321,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": v1Server, ...files },
+      { ...sampleApp(), ...files },
       "Guarded"
     );
     const { workflows } = await admin.api.apps.versions.review(app, version);
@@ -345,22 +349,18 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
       "tidy",
       `  let app;
   await step.do("prepare", { description: "Prepare" }, async () => {
-    app = appServer(env);
+    app = env.APP;
   });
   return await step.do("tidy-up", { description: "Tidy" }, async () => {
-    await app.hit("tidied");
+    await app.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "tidied", execution: crypto.randomUUID() });
     return "tidied";
   });`,
       { prepare: null, "tidy-up": null }
     );
-    const source = (files["workflows/tidy.ts"] ?? "").replace(
-      "import { workflow, z }",
-      "import { appServer, workflow, z }"
-    );
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": v1Server, ...files, "workflows/tidy.ts": source },
+      { ...sampleApp(), ...files },
       "Tidy"
     );
     const { workflows } = await admin.api.apps.versions.review(app, version);
@@ -373,7 +373,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
       kept: await storedCalls(app),
       run: await outcomeOf(admin, run.id, 'Step "tidy-up" called APP'),
       audited: await refusals(run.id),
-      hits: await hitsOf(app, admin.userId, "tidied"),
+      hits: await hitsOf(admin, app, "tidied"),
     }).toMatchObject({
       // The reader refuses a stub kept in a variable: the review shows the
       // workflow's steps as unreadable, calling none of the App's bindings.
@@ -401,7 +401,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const files = workflowFiles(
       "tidy",
       `  return await step.do("tidy", { description: "Tidy" }, async () => {
-    await appServer(env).hit("tidied");
+    await ${hitCall(`"tidied"`)};
     return "tidied";
   });`,
       { tidy: null }
@@ -415,7 +415,7 @@ queueMicrotask(() => {
   try {
     Object.assign(me, {
       run: async (engine) => {
-        await engine.do("tidy:x1", {}, async () => await engine.env.APP.call("hit", "swapped"));
+        await engine.do("tidy:x1", {}, async () => await engine.env.APP.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "swapped", execution: "swapped" }));
         return "swapped";
       },
     });
@@ -424,9 +424,9 @@ queueMicrotask(() => {
 `;
     const source = (files["workflows/tidy.ts"] ?? "").replace(
       'import { workflow, z } from "@grasp-os/sdk/workflow";\n',
-      `import { appServer, workflow, z } from "@grasp-os/sdk/workflow";\n${swaps}`
+      `import { workflow, z } from "@grasp-os/sdk/workflow";\n${swaps}`
     );
-    const app = await v1AppWith(admin, {
+    const app = await appWith(admin, {
       ...files,
       "workflows/tidy.ts": source,
     });
@@ -437,8 +437,8 @@ queueMicrotask(() => {
     expect({
       kept: await storedCalls(app),
       run: await outcomeOf(admin, run.id),
-      tidied: await hitsOf(app, admin.userId, "tidied"),
-      swapped: await hitsOf(app, admin.userId, "swapped"),
+      tidied: await hitsOf(admin, app, "tidied"),
+      swapped: await hitsOf(admin, app, "swapped"),
     }).toMatchObject({
       kept: { tidy: { steps: { tidy: ["APP"] }, all: ["APP"] } },
       run: { status: "completed", output: "tidied" },
@@ -491,6 +491,9 @@ queueMicrotask(() => {
     });
   });
 
+  // The v1 App server's own fence on its methods: it goes with the server
+  // (GRA-645); a sealed function's calls hold to the step's lease
+  // (run-functions.test.ts).
   it("start no App method, nor an export, for a step attempt that no longer holds by the time the App would start it", async () => {
     const admin = await personApi("admin");
     const app = await v1AppWith(admin, {});
@@ -514,14 +517,14 @@ queueMicrotask(() => {
 
     expect({
       refused,
-      ran: await hitsOf(app, admin.userId, "late"),
+      ran: await v1HitsOf(app, admin.userId, "late"),
     }).toStrictEqual({ refused: "execution.stale_attempt", ran: 0 });
   });
 
   it("send no connection call whose attempt the engine gave up on while it was authorized and signed", async () => {
     const admin = await personApi("admin");
     const mail = await mailConnection();
-    const app = await v1AppWith(admin, {});
+    const app = await appWith(admin, {});
     await grantMail(idp, admin, app, mail.id);
     let giveUp: (() => void) | undefined;
     // Core's database, giving the attempt up once the call is checked
@@ -767,7 +770,7 @@ queueMicrotask(() => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": v1Server, ...mailer("") },
+      { ...sampleApp(), ...mailer("") },
       "Mailer"
     );
     // Its source reads as one step, `send`, calling MAIL.
@@ -829,7 +832,7 @@ queueMicrotask(() => {
     const admin = await personApi("admin");
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const files: Record<string, string> = {
-      "app/server.ts": v1Server,
+      ...sampleApp(),
       ...mailer(""),
     };
     const { version: first } = await admin.api.apps.files.commit(
@@ -908,7 +911,7 @@ queueMicrotask(() => {
   let later = "carried on";
   try {
     later = await step.do("tidy", { description: "Tidy" }, async () => {
-      await appServer(env).hit("tidied");
+      await ${hitCall(`"tidied"`)};
       return "tidied";
     });
   } catch (error) {
@@ -917,14 +920,7 @@ queueMicrotask(() => {
   return later;`,
       { evil: "evil", tidy: "tidied" }
     );
-    const source = (files["workflows/tidy.ts"] ?? "").replace(
-      "import { workflow, z }",
-      "import { appServer, workflow, z }"
-    );
-    const app = await v1AppWith(admin, {
-      ...files,
-      "workflows/tidy.ts": source,
-    });
+    const app = await appWith(admin, files);
     // Its review shows `tidy` alone, as a describer that missed `evil`
     // would have kept it.
     await describedAs(app, {
@@ -937,7 +933,7 @@ queueMicrotask(() => {
     expect({
       run: await outcomeOf(admin, run.id),
       audited: await refusals(run.id),
-      tidied: await hitsOf(app, admin.userId, "tidied"),
+      tidied: await hitsOf(admin, app, "tidied"),
     }).toMatchObject({
       run: { status: "failed", code: "workflow.step_not_reviewed" },
       audited: [

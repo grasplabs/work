@@ -1403,6 +1403,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
   });
 
+  // The review of the v1 App server's code (`server`, `serverFiles`):
+  // it goes with the server (GRA-645).
   it("reviews code a workflow may use, the steps that call the App, and the grants the version uses", async () => {
     const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");
