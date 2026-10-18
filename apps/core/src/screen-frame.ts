@@ -283,7 +283,7 @@ const sweepStateSchema = z.object({
 
 /**
  * Deletes those of `objects` (a listing) last staged more than
- * `frameKeepMs` before `now`, each read again just before: one staged
+ * `keepMs` before `now`, each read again just before: one staged
  * again since the listing is kept. R2 deletes take no condition, so one
  * staged again between that read and the delete is still lost; the frame's
  * document and the next open notice and stage it again (`stageFrame`).
@@ -291,10 +291,12 @@ const sweepStateSchema = z.object({
 export const deleteExpired = async (
   env: Env,
   objects: readonly R2Object[],
-  now: Date
+  now: Date,
+  /** How long past its last write an object is kept; a staged build's by default. */
+  keepMs = frameKeepMs
 ): Promise<void> => {
   const isOld = (uploaded: Date): boolean =>
-    now.getTime() - uploaded.getTime() > frameKeepMs;
+    now.getTime() - uploaded.getTime() > keepMs;
   const listedOld = objects.filter(({ uploaded }) => isOld(uploaded));
   const stillOld = await Promise.all(
     listedOld.map(async ({ key }) => {

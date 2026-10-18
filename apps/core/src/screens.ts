@@ -33,9 +33,11 @@ import {
 } from "@grasp-os/shared/screens";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
+import { z } from "zod";
 
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
+import { deleteExpired } from "./screen-frame.ts";
 import type { FrameCode } from "./screen-frame.ts";
 
 /**
@@ -199,6 +201,71 @@ const compiled = async (
   }
 };
 
+const day = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a cached build is kept after it was last used: the cron's
+ * sweep deletes what is older (`sweepBuilds`). A build is the compiler's
+ * output for files core keeps, under its version, so one swept is built
+ * again, the same, the next time it is asked for: what runs never rests
+ * on the cache. Builds of an older compiler are never asked for again,
+ * and go once their time is up.
+ */
+export const buildKeepMs = 30 * day;
+
+/**
+ * How old a cached build may be and still be served as it is: past this,
+ * serving it writes it again (`cachedBuild`), so one in use never reaches
+ * `buildKeepMs`.
+ */
+const buildRefreshMs = buildKeepMs / 2;
+
+/** Where the builds' sweep left off: which kind, and R2's cursor in it. */
+const buildSweepKey = "builds-sweep.json";
+
+/** The most objects one run of the builds' sweep reads. */
+const buildSweepBatch = 500;
+
+/** The prefix each kind of build is cached under. */
+const buildPrefixes = Object.keys(compilerMethods).map(
+  (kind) => `${kind}-builds/`
+);
+
+const buildSweepSchema = z.object({
+  prefix: z
+    .int()
+    .min(0)
+    .max(buildPrefixes.length - 1),
+  cursor: z.string().optional(),
+});
+
+/**
+ * Deletes cached builds last used more than `buildKeepMs` before `now`,
+ * from the cron: in code, not a bucket rule, so it runs wherever core
+ * does. One page of one kind's prefix a run, at most `buildSweepBatch`
+ * objects, from where the last run stopped; once a kind is done, the next
+ * run starts the next. Each is read again just before it goes, so one
+ * used since the listing is kept (`deleteExpired`).
+ */
+export const sweepBuilds = async (env: Env, now: Date): Promise<void> => {
+  const stored = await env.FILES.get(buildSweepKey);
+  const parsed = buildSweepSchema.safeParse(
+    stored === null ? undefined : await stored.json()
+  );
+  const state = parsed.success ? parsed.data : { prefix: 0 };
+  const prefix = buildPrefixes[state.prefix] ?? "screen-builds/";
+  const listed = await env.FILES.list({
+    prefix,
+    limit: buildSweepBatch,
+    ...(state.cursor === undefined ? {} : { cursor: state.cursor }),
+  });
+  await deleteExpired(env, listed.objects, now, buildKeepMs);
+  const next = listed.truncated
+    ? { prefix: state.prefix, cursor: listed.cursor }
+    : { prefix: (state.prefix + 1) % buildPrefixes.length };
+  await env.FILES.put(buildSweepKey, JSON.stringify(next));
+};
+
 /**
  * The builds running now in this isolate, by whose build and its cache
  * key: a build
@@ -219,7 +286,9 @@ const buildsRunning = new Map<string, SharedRun<unknown>>();
  * build can't start the compiler on every request. A build that throws
  * isn't cached. Two requests in one isolate for a build that isn't cached
  * yet share one (`buildsRunning`); in two isolates they may both build
- * it, and build the same thing.
+ * it, and build the same thing. A cached build is kept `buildKeepMs` past
+ * its last use (`sweepBuilds`): one read older than `buildRefreshMs` is
+ * written again, so a build in use is never as old as the sweep's limit.
  */
 const cachedBuild = async <Build>(
   env: BuildEnv,
@@ -247,7 +316,11 @@ const cachedBuild = async <Build>(
     isBuildShaped(value);
   const cached = await env.FILES.get(cacheKey);
   if (cached) {
-    return await cached.json<Build>();
+    const text = await cached.text();
+    if (Date.now() - cached.uploaded.getTime() > buildRefreshMs) {
+      await env.FILES.put(cacheKey, text);
+    }
+    return await new Response(text).json<Build>();
   }
   // Given up on (a build job's lease lost): it starts no compile, nor
   // after waiting on another's (`sharedRun`). One already running goes

@@ -1,9 +1,9 @@
 import { kitModules } from "@grasp-os/compiler";
 import { compatibilityDate } from "@grasp-os/shared/runtime";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
-import { buildScreens } from "../src/screens.ts";
+import { buildKeepMs, buildScreens, sweepBuilds } from "../src/screens.ts";
 
 /** A sample App: two screens on the kit, sharing one of its own components. */
 const sampleApp: Record<string, string> = {
@@ -117,6 +117,14 @@ const noBuilds: WorkerLoader = {
   load: () => {
     throw new Error("Built again");
   },
+};
+
+/** Runs the cron's builds sweep at `at` until it has read every kind. */
+const sweptAt = async (at: number): Promise<void> => {
+  for (let run = 0; run < 24; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another, as the cron runs
+    await sweepBuilds(env, new Date(at));
+  }
 };
 
 // Every build starts an isolate with the compiler in it.
@@ -407,6 +415,73 @@ export default function Desk() {
         "app-test"
       )
     ).rejects.toThrow("Built again");
+  });
+
+  it("keeps a cached build while it is used, and builds one the sweep took again, the same", async () => {
+    const files = screen(`kept ${crypto.randomUUID()}`);
+    const built = await buildScreens(env, files, "app-test");
+    const fromCache = async (at: number) => {
+      // R2, as core writes to it, counting what is written.
+      let writes = 0;
+      const counted = {
+        ...env,
+        LOADER: noBuilds,
+        FILES: {
+          get: env.FILES.get.bind(env.FILES),
+          put: async (...args: Parameters<R2Bucket["put"]>) => {
+            writes += 1;
+            return await env.FILES.put(...args);
+          },
+        },
+      };
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(at);
+      try {
+        const served = await buildScreens(counted, files, "app-test");
+        return { served, writes };
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    // Served a day on, it stays as it is; half its time on, it is
+    // written again, so a build in use never reaches the sweep's limit.
+    const soon = await fromCache(now + day);
+    const later = await fromCache(now + buildKeepMs / 2 + day);
+    // An object of another kind of cache, which this sweep leaves alone.
+    await env.FILES.put("package-builds/kept.json", "{}");
+    await sweptAt(now + buildKeepMs - day);
+    const kept = await buildScreens(
+      { ...env, LOADER: noBuilds },
+      files,
+      "app-test"
+    );
+    await sweptAt(now + buildKeepMs + day);
+    const swept = await buildScreens(
+      { ...env, LOADER: noBuilds },
+      files,
+      "app-test"
+    ).then(
+      () => "served",
+      (error: unknown) => (error instanceof Error ? error.message : "")
+    );
+    const rebuilt = await buildScreens(env, files, "app-test");
+    expect({
+      soon,
+      later,
+      kept,
+      swept,
+      rebuilt,
+      other: (await env.FILES.head("package-builds/kept.json")) !== null,
+    }).toStrictEqual({
+      soon: { served: built, writes: 0 },
+      later: { served: built, writes: 1 },
+      kept: built,
+      swept: "Built again",
+      rebuilt: built,
+      other: true,
+    });
   });
 
   it("serves no build, not even a cached one, where nothing bounds the compiler", async () => {
