@@ -62,9 +62,9 @@ const liveClient = async () => {
 const { 0: noordkade, 3: hartog } = SAMPLE_ORGS;
 const day = "2026-10-02";
 
-/** The section as it renders for `view`, its core drawing the work. */
+/** The section as it renders for `view`. */
 const sectionOf = (view: AdminView): string =>
-  renderToString(createElement(OrgWorkflows, { view, held: true }));
+  renderToString(createElement(OrgWorkflows, { view }));
 
 /** The table's row of the work named `name`. */
 const rowOf = (html: string, name: string): string => {
@@ -91,7 +91,7 @@ describe("an organization's workflows", () => {
       .where(ne(clients.status, "offboarded"));
   });
 
-  it("says no work is listed while the company's own Grasp doesn't draw it", async () => {
+  it("says the work isn't known yet while the company's own Grasp doesn't draw it", async () => {
     const acme = await liveClient();
     acme.account.admin = { ...emptyAdminSnapshot("Acme"), told: true };
 
@@ -103,7 +103,7 @@ describe("an organization's workflows", () => {
       status,
       title: html.includes("Workflows</h1>"),
       none: html.includes(
-        "None yet: the company’s own Grasp doesn’t draw the work from its interviews yet."
+        "Not known yet: the company’s own Grasp doesn’t draw the work from its interviews yet."
       ),
       toCome: html.includes("This section isn’t in the console yet."),
       table: html.includes("<table"),

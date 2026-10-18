@@ -5,8 +5,8 @@ import { OrgWorkflows } from "../../../../admin/workflows.tsx";
 
 /** An organization's Workflows: how far each piece of work is known, and what it still lacks. */
 const Workflows = () => {
-  const { admin, view } = useOrganization();
-  return <OrgWorkflows held={admin.snapshot.works !== null} view={view} />;
+  const { view } = useOrganization();
+  return <OrgWorkflows view={view} />;
 };
 
 export const Route = createFileRoute(

@@ -308,17 +308,11 @@ const WorkRow = ({ row, team }: { row: WorkflowRow; team: string }) => {
 };
 
 /**
- * The section for `view`. `held` says whether the company's core draws
- * the work from its interviews at all: until it does, there is no work to
- * list, and the section says so rather than that none was found.
+ * The section for `view`. Until the company's core draws the work from
+ * its interviews at all (`view.unknown.works`), there is no work to list,
+ * and the section says it isn't known yet rather than that none was found.
  */
-export const OrgWorkflows = ({
-  view,
-  held,
-}: {
-  view: AdminView;
-  held: boolean;
-}) => {
+export const OrgWorkflows = ({ view }: { view: AdminView }) => {
   const [team, setTeam] = useState<string>(all);
   const [standing, setStanding] = useState<Standing | typeof all>(all);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -326,9 +320,9 @@ export const OrgWorkflows = ({
   if (view.works.length === 0) {
     let none =
       "None yet. A team’s work shows up here once its lead has named it.";
-    if (!held) {
+    if (view.unknown.works) {
       none =
-        "None yet: the company’s own Grasp doesn’t draw the work from its interviews yet.";
+        "Not known yet: the company’s own Grasp doesn’t draw the work from its interviews yet.";
     } else if (view.told) {
       none = "None found yet. They show up here as the interviews come in.";
     }
