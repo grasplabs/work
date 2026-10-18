@@ -258,37 +258,36 @@ test("an answer to an earlier open, arriving late, never replaces the workflow o
   const run = crypto.randomUUID().slice(0, 8);
   const [first, second] = [`Slow ${run}`, `Quick ${run}`];
   const page = await pageOf(admin);
-  // Core's answers that name `slow` wait until the test lets them through:
-  // the listing has come by then, so only the first workflow's opening.
-  let slow: string | undefined;
+  // While `holding`, an opening's call to core waits until the test lets
+  // it through: only the first workflow's, as the test opens it.
+  let holding = false;
   const held: (() => void)[] = [];
-  await page.routeWebSocket("**/rpc", (socket) => {
-    const toCore = socket.connectToServer();
-    toCore.onMessage((message) => {
-      if (slow !== undefined && String(message).includes(slow)) {
-        held.push(() => {
-          socket.send(message);
-        });
-        return;
-      }
-      socket.send(message);
-    });
+  await page.route("**/api/app-functions/**", async (route) => {
+    const body = route.request().postData() ?? "";
+    if (holding && body.includes('"map.open"')) {
+      const { promise, resolve } = Promise.withResolvers<null>();
+      held.push(() => {
+        resolve(null);
+      });
+      await promise;
+    }
+    await route.continue();
   });
   const screen = await openMap(page, app);
   await draw(screen, first);
   await draw(screen, second);
 
-  slow = first;
+  holding = true;
   await screen.getByRole("button", { name: first, exact: true }).click();
   await expect.poll(() => held.length).toBeGreaterThan(0);
+  holding = false;
   await screen.getByRole("button", { name: second, exact: true }).click();
   await expect(screen.getByLabel("Title", { exact: true })).toHaveValue(second);
 
   // The first answer lands, then one to a call after it: by then the map
   // has had the first, and still shows the second workflow.
-  slow = undefined;
-  for (const answer of held.splice(0)) {
-    answer();
+  for (const release of held.splice(0)) {
+    release();
   }
   const team = `Team ${run}`;
   await screen.getByLabel("New team").fill(team);
