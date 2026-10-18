@@ -169,7 +169,7 @@ const RailItem = ({
             aria-label={label}
             className={cn(
               buttonVariants({ size: "icon", variant: "ghost" }),
-              "data-[status=active]:bg-secondary data-[status=active]:text-secondary-foreground"
+              "data-[status=active]:bg-secondary data-[status=active]:text-secondary-foreground relative"
             )}
             clientId={clientId}
             section={section}
@@ -177,6 +177,14 @@ const RailItem = ({
         }
       >
         <Icon />
+        {/* Folded, the column still marks where something waits, as it does open. */}
+        {waits ? (
+          <span
+            aria-hidden
+            className="bg-status-attention absolute top-1.5 right-1.5 size-1.5 rounded-full"
+            data-waits
+          />
+        ) : null}
       </TooltipTrigger>
       <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
