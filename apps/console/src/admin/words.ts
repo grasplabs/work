@@ -282,6 +282,9 @@ const endingLine = (until: string, days: number): string => {
 // oxlint-disable-next-line complexity -- one line for each kind of need, as the prototype has them.
 export const needLine = (need: Need, view: OrgView): string => {
   switch (need.kind) {
+    case "paused": {
+      return "The interviews are paused: nobody can open or finish theirs until Grasp resumes them.";
+    }
     case "transcript": {
       return view.state.conversation === "in"
         ? "The first conversation is in. Have Stephen read it."

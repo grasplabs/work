@@ -169,7 +169,7 @@ const RailItem = ({
             aria-label={label}
             className={cn(
               buttonVariants({ size: "icon", variant: "ghost" }),
-              "data-[status=active]:bg-secondary data-[status=active]:text-secondary-foreground"
+              "data-[status=active]:bg-secondary data-[status=active]:text-secondary-foreground relative"
             )}
             clientId={clientId}
             section={section}
@@ -177,6 +177,14 @@ const RailItem = ({
         }
       >
         <Icon />
+        {/* Folded, the column still marks where something waits, as it does open. */}
+        {waits ? (
+          <span
+            aria-hidden
+            className="bg-status-attention absolute top-1.5 right-1.5 size-1.5 rounded-full"
+            data-waits
+          />
+        ) : null}
       </TooltipTrigger>
       <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
@@ -232,6 +240,8 @@ const OrgColumn = ({
   const opens = stageLines(view).open;
   const waits = view.knowledge.ready && view.knowledge.opened === null;
   const date = formatDate(dateOn(view.org, view.day));
+  // The last day the links worked: the plan's days count from day 0.
+  const lastDay = formatDate(dateOn(view.org, listenDays(view.org) - 1));
 
   if (folded) {
     return (
@@ -321,7 +331,7 @@ const OrgColumn = ({
         <div className="text-muted-foreground flex flex-none flex-col gap-1 border-t px-5 py-3 text-xs">
           <span>
             {view.closed
-              ? `The interviews closed on ${date}`
+              ? `The interviews closed on ${lastDay}`
               : `The interviews, on ${date}`}
           </span>
           <span className="text-foreground tabular-nums">
