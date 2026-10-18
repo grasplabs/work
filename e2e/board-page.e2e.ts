@@ -1,15 +1,14 @@
 import { expect } from "@playwright/test";
+import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
-import { revokeOtherCopies } from "./playbook.ts";
 
 // The board page, the built-in App, end to end: an admin creates an App
-// from it, approves the Playbook permission it asks for, takes a snapshot
-// of a Playbook full of workflows, writes its narrative and decision, and
-// prints it: the page alone, on one sheet of A4. The workflows are the
-// workflow map's records, whose type it declares: the admin creates one
-// from it too.
+// from it and one from the workflow map, binds the page's `map` to that
+// map, draws workflows in the map, takes a snapshot of them on the page,
+// writes its narrative and decision, and prints it: the page alone, on
+// one sheet of A4.
 
 const boardPage = "board-page";
 const workflowMap = "workflow-map";
@@ -20,8 +19,8 @@ const workflowMap = "workflow-map";
  */
 const installedMs = 30_000;
 
-/** Workflows seeded: more than each list on the page shows. */
-const seeded = 8;
+/** Workflows drawn: more than each list on the page shows. */
+const seeded = 6;
 
 /** A decision long enough to be cut short in print. */
 const decision =
@@ -33,6 +32,39 @@ const a4 = { width: 794, height: 1123 };
 /** The pages in a PDF: its page objects, not the page tree (`/Pages`). */
 const pageObject = /\/Type\s*\/Page(?![a-z])/gu;
 
+/** The screen of `app`'s route `screen`, once it shows `heading`. */
+const openScreen = async (
+  page: Page,
+  app: string,
+  screen: string,
+  heading: string
+): Promise<FrameLocator> => {
+  await page.goto(`/domains/${app}/apps/${screen}/full`);
+  const frame = page.frameLocator(`iframe[title="${screen} app"]`);
+  // The first open builds the screen, which takes a while on a loaded machine.
+  await expect(frame.getByRole("heading", { name: heading })).toBeVisible({
+    timeout: 20_000,
+  });
+  return frame;
+};
+
+/** Draws a workflow of one step, `times` a week for 30 minutes, in the map. */
+const draw = async (
+  map: FrameLocator,
+  title: string,
+  times: number
+): Promise<void> => {
+  await map.getByRole("button", { name: "Draw a workflow" }).click();
+  await map.getByLabel("Title", { exact: true }).fill(title);
+  await map.getByRole("button", { name: "Add a step" }).click();
+  await map.getByLabel("Name, step 1").fill("Do it");
+  await map.getByLabel("Times a week, step 1").fill(String(times));
+  await map.getByLabel("Minutes, step 1").fill("30");
+  await map.getByRole("button", { name: "Save" }).click();
+  await expect(map.getByText("Version 1")).toBeVisible();
+  await map.getByRole("button", { name: "All workflows" }).click();
+};
+
 test("an admin takes a snapshot on the board page, writes its narrative and prints it on one page", async ({
   pageOf,
 }) => {
@@ -40,6 +72,7 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
   const run = crypto.randomUUID().slice(0, 8);
   const { core, api } = apiOf(admin);
   let app: string;
+  let map: string;
   try {
     await expect
       .poll(
@@ -52,56 +85,39 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
         { timeout: installedMs }
       )
       .toBeTruthy();
-    /** An App of the admin's from the built-in `builtin`, approved and current. */
+    /** An App of the admin's from the built-in `builtin`, current. */
     const copy = async (builtin: string, name: string): Promise<string> => {
       const created = await api.apps.blueprints.create(builtin, { name });
-      await revokeOtherCopies(api, builtin, created.app.id);
-      for (const { id } of created.permissions) {
-        // Reviewed before a version of the copy is current.
-        // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-        await api.permissions.grant(id, { version: null });
-      }
       await api.apps.versions.setCurrent(created.app.id, 1);
       const { generation } = await api.screenTrust.review(created.app.id);
       await api.screenTrust.classify(created.app.id, "ordinary", generation);
       return created.app.id;
     };
     app = await copy(boardPage, `Board page ${run}`);
-    await copy(workflowMap, `Workflow map ${run}`);
-    // The Playbook is the deployment's: other runs' workflows are in it
-    // too, and the page shows the top ones of all of them.
-    for (let index = 1; index <= seeded; index += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one save at a time
-      await api.knowledge.saveDocument({
-        collectionId: "playbook",
-        path: `workflows/board-${run}-${index}.md`,
-        ifVersion: 0,
-        text: [
-          "---",
-          "type: workflow",
-          `title: A workflow with a long name to wrap, number ${index} of run ${run}`,
-          "state: drawn",
-          "steps:",
-          "  - name: Do it",
-          "    numbers:",
-          `      frequency: { value: ${index * 10}, basis: estimated }`,
-          "      minutes: { value: 30, basis: estimated }",
-          "---",
-          "",
-        ].join("\n"),
-      });
-    }
+    map = await copy(workflowMap, `Workflow map ${run}`);
+    // The map it reads, bound as an admin binds it on the engine's
+    // Resources tab. Its statistics stay unbound: nothing here runs.
+    await api.resourceBindings.approve({
+      app,
+      alias: "map",
+      target: { kind: "app", appId: map },
+      reviewed: { version: 1 },
+    });
   } finally {
     core[Symbol.dispose]();
   }
 
   const page = await pageOf(admin);
-  await page.goto(`/domains/${app}/apps/board/full`);
-  const screen = page.frameLocator('iframe[title="board app"]');
-  // The first open builds the screen, which takes a while on a loaded machine.
-  await expect(screen.getByRole("heading", { name: "Board page" })).toBeVisible(
-    { timeout: 20_000 }
-  );
+  const mapScreen = await openScreen(page, map, "map", "Workflow map");
+  for (let index = 1; index <= seeded; index += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one drawing at a time
+    await draw(
+      mapScreen,
+      `A workflow with a long name to wrap, number ${index} of run ${run}`,
+      index * 10
+    );
+  }
+  const screen = await openScreen(page, app, "board", "Board page");
 
   await screen.getByRole("combobox", { name: "Maturity" }).click();
   await screen.getByRole("option", { name: "Maturity 2 of 5" }).click();

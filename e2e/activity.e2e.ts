@@ -11,27 +11,44 @@ import { toCard } from "./pile.ts";
 // and exports what the log's filters match. Search, export and the grant
 // themselves are core's tests.
 
+/** A collection everyone reads, made by `admin`, for an App to ask for. */
+const collectionOf = async (
+  admin: Parameters<typeof apiOf>[0]
+): Promise<string> => {
+  const { core, api } = apiOf(admin);
+  try {
+    const { id } = await api.knowledge.createCollection({
+      name: `Board pack ${crypto.randomUUID()}`,
+      access: "everyone",
+    });
+    return id;
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
 test("an admin approves a permission request, finds it in the audit log, and exports it", async ({
   pageOf,
 }) => {
   const { admin, builder } = peopleIn("activity");
   const appName = `Board pack ${crypto.randomUUID()}`;
+  const collectionId = await collectionOf(admin);
   const { core, api } = apiOf(builder);
   let approved: string;
   try {
     const { id: appId } = await api.apps.create({
       name: appName,
-      description: "Reads the Playbook",
+      description: "Reads the board pack",
     });
     ({ id: approved } = await api.permissions.request({
       subject: { type: "app", appId },
-      object: { type: "collection", collectionId: "playbook" },
+      object: { type: "collection", collectionId },
       actions: ["read"],
       binding: "PLAYBOOK",
     }));
     await api.permissions.request({
       subject: { type: "app", appId },
-      object: { type: "collection", collectionId: "playbook" },
+      object: { type: "collection", collectionId },
       actions: ["write"],
       binding: "PLAYBOOK_WRITE",
     });
@@ -45,20 +62,23 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(page).toHaveURL(/\/dashboard$/u);
   // Other tests' requests wait in the pile too: it is gone through to this
   // App's cards.
-  const reading = await toCard(page, `${appName}: read on Collection playbook`);
+  const reading = await toCard(
+    page,
+    `${appName}: read on Collection ${collectionId}`
+  );
   await expect(reading).toContainText("as PLAYBOOK");
   await expect(reading).toContainText("Version to review: None current");
   await reading.getByRole("button", { name: /^Approve /u }).click();
   await expect(
-    page
-      .getByRole("status")
-      .filter({ hasText: `Approved: ${appName}: read on Collection playbook.` })
+    page.getByRole("status").filter({
+      hasText: `Approved: ${appName}: read on Collection ${collectionId}.`,
+    })
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);
 
   const writing = await toCard(
     page,
-    `${appName}: write on Collection playbook`
+    `${appName}: write on Collection ${collectionId}`
   );
   await writing.getByRole("button", { name: /^Reject /u }).click();
   await page
@@ -152,18 +172,19 @@ test("an admin sees a grant asked for again after a new version, and approves on
 }) => {
   const { admin, builder } = peopleIn("activityAgain");
   const appName = `Minutes ${crypto.randomUUID()}`;
+  const collectionId = await collectionOf(admin);
   const builds = apiOf(builder);
   const decides = apiOf(admin);
   let appId: string;
   try {
     ({ id: appId } = await builds.api.apps.create({
       name: appName,
-      description: "Writes the Playbook",
+      description: "Writes the minutes",
     }));
     await release(builds.api, appId, { "README.md": "One" }, "First");
     const { id } = await builds.api.permissions.request({
       subject: { type: "app", appId },
-      object: { type: "collection", collectionId: "playbook" },
+      object: { type: "collection", collectionId },
       actions: ["write"],
       binding: "PLAYBOOK",
     });
@@ -179,7 +200,10 @@ test("an admin sees a grant asked for again after a new version, and approves on
     // An old link to them leads there too.
     await page.goto("/activity?tab=pending");
     await expect(page).toHaveURL(/\/dashboard$/u);
-    const card = await toCard(page, `${appName}: write on Collection playbook`);
+    const card = await toCard(
+      page,
+      `${appName}: write on Collection ${collectionId}`
+    );
     await expect(card).toContainText(
       /Asked again after version 2 was made current \(previously granted by .+ on .+\)/u
     );
@@ -200,7 +224,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
     await card.getByRole("button", { name: /^Approve /u }).click();
     await expect(
       page.getByRole("status").filter({
-        hasText: `Approved: ${appName}: write on Collection playbook.`,
+        hasText: `Approved: ${appName}: write on Collection ${collectionId}.`,
       })
     ).toHaveCount(1);
     await expect(card).toHaveCount(0);

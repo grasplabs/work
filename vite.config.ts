@@ -59,9 +59,13 @@ export default defineConfig({
       // build type-checks them and lints them against the kit, with the
       // references the host generated (builtin-blueprints.test.ts builds
       // them). Its server code and workflows are linted here
-      // (blueprints/intake/tsconfig.json).
+      // (each built-in's own tsconfig.json).
       "apps/core/blueprints/intake/files/screens/**",
       "apps/core/blueprints/intake/files/components/**",
+      "apps/core/blueprints/workflow-map/files/screens/**",
+      "apps/core/blueprints/workflow-map/files/components/**",
+      "apps/core/blueprints/board-page/files/screens/**",
+      "apps/core/blueprints/board-page/files/components/**",
     ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
