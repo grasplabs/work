@@ -2,7 +2,6 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { toHex } from "@grasp-os/shared/encoding";
 import {
   appIdSchema,
-  collectionIdSchema,
   permissionIdSchema,
   runIdSchema,
   workflowIdSchema,
@@ -22,7 +21,6 @@ import {
 import { callApp } from "../src/app.ts";
 import { runBindingsFor } from "../src/bindings.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { AppCollectionBinding } from "../src/knowledge/app-binding.ts";
 import type { CollectionBinding } from "../src/knowledge/binding.ts";
 import {
   AttemptHost,
@@ -39,7 +37,7 @@ import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
 import { aroundEngine, endLiveRuns, runObject, sleeping } from "./runs.ts";
-import { outcome as codeOfCall, signedInApi, unique } from "./sign-in.ts";
+import { outcome as codeOfCall, signedInApi } from "./sign-in.ts";
 import { v1AppWith } from "./v1-app-server.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
 
@@ -578,20 +576,6 @@ const parking = (options = "") =>
     { park: null }
   );
 
-/** The tasks a records collection keeps (`app/records.json`). */
-const taskType = (collection: string) =>
-  JSON.stringify({
-    task: {
-      collection,
-      description: "Something to do",
-      schema: {
-        type: "object",
-        properties: { status: { enum: ["open", "done"] } },
-        required: ["status"],
-      },
-    },
-  });
-
 /**
  * A run of a new App of a builder's (`person`, or a new one), granted `mail.search` on a mail
  * connection of its own (MAIL) and `files` beside the App's, whose step
@@ -781,61 +765,6 @@ describe(
       await server.release();
 
       expect(pointed).toBe("app.caller_invalid");
-    });
-
-    it("writes no record once its run was cancelled after its last attempt check", async () => {
-      // The run acts for an admin, who may write to the collection.
-      const admin = await personApi("admin");
-      const { id: collectionId } = await admin.api.knowledge.createCollection({
-        name: `Tasks ${unique()}`,
-        access: "everyone",
-      });
-      let tasks = "";
-      const { identity, app, run, token, server } = await parkedRun(
-        { ...parking(), "app/records.json": taskType(collectionId) },
-        async (builder, appId) => {
-          tasks = await requestGranted(idp, builder, {
-            subject: { type: "app", appId },
-            object: { type: "collection", collectionId },
-            actions: ["read", "write"],
-            binding: "TASKS",
-          });
-        },
-        admin
-      );
-      const path = `tasks/${unique()}.md`;
-      const records = stubOn(AppCollectionBinding, {
-        app,
-        context: { type: "app", appId: app },
-        permissionId: permissionIdSchema.parse(tasks),
-        collectionId: collectionIdSchema.parse(collectionId),
-      });
-      const saved = await cancelledAfterCheck(
-        run,
-        identity,
-        2,
-        async () =>
-          await records.saveRecord(
-            { token },
-            {
-              path,
-              ifVersion: 0,
-              record: { type: "task", status: "open" },
-              body: "",
-            }
-          )
-      );
-      await server.release();
-      const written = await env.KNOWLEDGE.prepare(
-        "SELECT count(*) AS written FROM documents WHERE collection_id = ? AND path = ?"
-      )
-        .bind(collectionId, path)
-        .first<number>("written");
-
-      expect({ saved, written }).toStrictEqual({
-        saved: "app.caller_invalid",
-        written: 0,
-      });
     });
 
     it("is refused by its App once its run's cancel was finished by the run's object, the revoke repeated there", async () => {

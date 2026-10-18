@@ -739,15 +739,7 @@ const requireSavable = async (
   }
   const text = rewritten(current, matcher)?.text ?? current.text;
   try {
-    await checkedText(
-      env,
-      collection,
-      document.path,
-      text,
-      false,
-      undefined,
-      true
-    );
+    await checkedText(env, collection, document.path, text, false, true);
   } catch (error) {
     const code = knowledgeErrors.codeOf(error);
     if (code === undefined) {

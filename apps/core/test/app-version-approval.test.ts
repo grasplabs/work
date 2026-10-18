@@ -4,7 +4,6 @@ import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
 import type { AppCallerInput } from "../src/app.ts";
@@ -27,12 +26,12 @@ import {
   unique,
 } from "./sign-in.ts";
 
-// An App's next version and its permission to write a collection it
-// writes records to for the person whose call it runs in (through its
-// collection stub, knowledge/records.ts). These tests start from the way
-// that can fail: a builder who can't grant the permission ships other code
-// under it, and the next version they make current writes as the admin who
-// uses it, under a grant that admin gave the code before.
+// An App's next version and a permission of its that changes things (here,
+// to write a collection), for the person whose call it runs in. These
+// tests start from the way that can fail: a builder who can't grant the
+// permission ships other code under it, and the next version they make
+// current acts as the admin who uses it, under a grant that admin gave the
+// code before.
 
 const idp = mockIdp();
 
@@ -60,20 +59,15 @@ export class App extends DurableObject {
     return (this.env as Record<string, Stub>)[binding] ?? {};
   }
 
-  async save(caller: Caller, binding: string, input: unknown): Promise<unknown> {
-    return await outcome(async () => await this.stub(binding).saveRecord(caller, input));
+  async list(caller: Caller, binding: string): Promise<unknown> {
+    return await outcome(async () => {
+      const page = (await this.stub(binding).listDocuments(caller)) as { documents: unknown[] };
+      return page.documents.length;
+    });
   }
 
-  async link(caller: Caller, binding: string, input: unknown): Promise<unknown> {
-    return await outcome(async () => await this.stub(binding).linkWorkflow(caller, input));
-  }
-
-  async canWrite(caller: Caller, binding: string): Promise<unknown> {
-    return await outcome(async () => await this.stub(binding).canWrite(caller));
-  }
-
-  async record(caller: Caller, binding: string, id: string, version?: number): Promise<unknown> {
-    return await outcome(async () => await this.stub(binding).getRecord(caller, id, version));
+  async write(caller: Caller, binding: string, method: string, input: unknown): Promise<unknown> {
+    return await outcome(async () => await this.stub(binding)[method]?.(caller, input));
   }
 
   async read(caller: Caller, binding: string, id: string): Promise<unknown> {
@@ -109,31 +103,8 @@ const as = (userId: string): AppCallerInput => ({
   mode: "interactive",
 });
 
-/** A note, as the App saves it. */
-const drawn = { type: "doc", title: "Pay supplier invoices" };
-
-/** The App's `save` of `record` at `path`, from `ifVersion`. */
-const saveArgs = (
-  path: string,
-  record: Record<string, unknown>,
-  ifVersion = 0,
-  binding = "NOTES"
-) => [binding, { path, ifVersion, record, body: "Paid weekly." }];
-
-/**
- * A stub call's outcome: `{ error }` with its code, or `{ ok }` with only
- * the fields of what it answered that `shape` names.
- */
-const answered = (called: unknown, shape: z.ZodRawShape) =>
-  z
-    .union([
-      z.strictObject({ error: z.string() }),
-      z.strictObject({ ok: z.object(shape) }),
-    ])
-    .parse(called);
-
-/** What a test reads of a save. */
-const savedShape = { path: z.string(), currentVersion: z.number() };
+/** The App's `list` of the collection under `binding`. */
+const listArgs = (binding = "NOTES") => [binding];
 
 /**
  * An App `builder` built and released, which `admin` granted the collection
@@ -210,13 +181,12 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     ]);
     const app = await builtBy(builder, admin);
     const [write, read] = await permissionsOf(admin, app);
-    const path = `notes/pay-${unique()}.md`;
     const before = await callApp(
       env,
       app,
       as(admin.userId),
-      "save",
-      saveArgs(path, drawn)
+      "list",
+      listArgs()
     );
 
     // The attack: the builder ships other code, which the admin's next
@@ -224,16 +194,10 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const events = await auditedDuring(async () => {
       await changedBy(builder, app, "Rewrites every rule.");
     });
-    const after = await callApp(
-      env,
-      app,
-      as(admin.userId),
-      "save",
-      saveArgs(path, drawn, 1)
-    );
+    const after = await callApp(env, app, as(admin.userId), "list", listArgs());
 
     expect({
-      before: answered(before, savedShape),
+      before,
       after,
       bindings: await callApp(env, app, as(admin.userId), "bindings", []),
       permissions: await permissionsOf(admin, app),
@@ -246,8 +210,8 @@ describe("An App's next version", { timeout: 60_000 }, () => {
           detail,
         })),
     }).toStrictEqual({
-      before: { ok: { path, currentVersion: 1 } },
-      // The new version has no stub to write the collection with.
+      before: { ok: 0 },
+      // The new version has no stub of the collection it may write.
       after: { error: "failed" },
       bindings: ["NOTES_READ", "STATISTICS"],
       // Asked for again, it is the newest request, and still says who
@@ -282,18 +246,11 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       ],
     });
 
-    // Granted again, by an admin who saw the new code, it writes again (a
-    // change: a save that changes nothing makes no version).
+    // Granted again, by an admin who saw the new code, its stub is back.
     await grantReviewed(admin.api, write?.id ?? "");
     await expect(
-      callApp(
-        env,
-        app,
-        as(admin.userId),
-        "save",
-        saveArgs(path, { ...drawn, title: "Pay supplier invoices weekly" }, 1)
-      )
-    ).resolves.toMatchObject({ ok: { path, currentVersion: 2 } });
+      callApp(env, app, as(admin.userId), "list", listArgs())
+    ).resolves.toStrictEqual({ ok: 0 });
   });
 
   it("records each permission it asks for again by the IDs its grant was recorded with", async () => {
@@ -600,25 +557,15 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const events = await auditedDuring(async () => {
       await changedBy(admin, app, "Reviewed by an admin.");
     });
-    const path = `notes/pay-${unique()}.md`;
 
     expect({
       permissions: await permissionsOf(admin, app),
       audited: events.filter(({ action }) => action.startsWith("permission.")),
-      saved: answered(
-        await callApp(
-          env,
-          app,
-          as(admin.userId),
-          "save",
-          saveArgs(path, drawn)
-        ),
-        savedShape
-      ),
+      listed: await callApp(env, app, as(admin.userId), "list", listArgs()),
     }).toStrictEqual({
       permissions: granted,
       audited: [],
-      saved: { ok: { path, currentVersion: 1 } },
+      listed: { ok: 0 },
     });
 
     // Grasp staff are admins, but never decide a client's permissions.
@@ -633,5 +580,61 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       { binding: "NOTES_READ", status: "active" },
       { binding: "NOTES", status: "requested" },
     ]);
+  });
+});
+
+describe("An App's collection stub", { timeout: 60_000 }, () => {
+  beforeEach(async () => {
+    const admin = await personApi("admin");
+    ({ id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Notes ${unique()}`,
+      access: "everyone",
+    }));
+  });
+
+  // An App keeps what it writes in its own store: its stub of a
+  // collection only reads, even under a permission that lets it write
+  // there, for an admin who may write there.
+  it("writes nothing to the collection, whatever method its code calls", async () => {
+    const [admin, builder] = await Promise.all([
+      personApi("admin"),
+      personApi("builder"),
+    ]);
+    const app = await builtBy(builder, admin);
+    const note = {
+      path: `notes/${unique()}.md`,
+      ifVersion: 0,
+      text: "# Pay supplier invoices",
+      record: { type: "doc", title: "Pay supplier invoices" },
+      body: "Paid weekly.",
+    };
+    const methods = [
+      "saveRecord",
+      "saveDocument",
+      "deleteDocument",
+      "moveDocument",
+      "linkWorkflow",
+    ];
+    const tried: Record<string, unknown> = {};
+    for (const method of methods) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      tried[method] = await callApp(env, app, as(admin.userId), "write", [
+        "NOTES",
+        method,
+        note,
+      ]);
+    }
+    const written = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS written FROM documents WHERE collection_id = ?"
+    )
+      .bind(collectionId)
+      .first<number>("written");
+
+    expect({ tried, written }).toStrictEqual({
+      tried: Object.fromEntries(
+        methods.map((method) => [method, { error: "failed" }])
+      ),
+      written: 0,
+    });
   });
 });
