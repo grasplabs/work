@@ -36,7 +36,8 @@ import {
   woken,
 } from "./runs.ts";
 import { openRpc, signedInApi } from "./sign-in.ts";
-import { v1AppWith, runEvents, workflowFiles } from "./workflow-apps.ts";
+import { v1AppWith } from "./v1-app-server.ts";
+import { runEvents, workflowFiles } from "./workflow-apps.ts";
 
 // Retention of workflow runs, from its threat model (src/workflows/
 // retention.ts): once a run has ended for the deployment's retention, the
