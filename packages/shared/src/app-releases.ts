@@ -164,6 +164,8 @@ export const versionErrors = defineErrorFamily({
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",
+  "version.export_too_large":
+    "This App binds more workflow versions, with theirs, than one export holds.",
   "version.protocol_unsupported":
     "This version was sealed for a protocol between the platform and App code that this platform doesn't run. Seal it again.",
   "version.manifest_corrupt":
