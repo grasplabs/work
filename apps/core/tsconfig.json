@@ -23,10 +23,13 @@
   // module its seal generates (`#grasp/server`), which nothing here maps:
   // its files are untyped, like any inline test App's (the seal strips
   // types without checking them), and builtin-blueprints.test.ts covers
-  // what they do at runtime. A built-in of spec 8's layout (intake) is
-  // checked by its own tsconfig.json, which resolves `#grasp/server`.
+  // what they do at runtime. A built-in of spec 8's layout (each of them
+  // now) is checked by its own tsconfig.json, which resolves
+  // `#grasp/server`.
   "exclude": [
     "blueprints/intake",
+    "blueprints/workflow-map",
+    "blueprints/board-page",
     "blueprints/*/files/screens",
     "blueprints/*/files/components",
     "test/fixtures/blueprints/*/files"
