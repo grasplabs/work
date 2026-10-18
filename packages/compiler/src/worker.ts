@@ -34,6 +34,7 @@ import {
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
+  workflowTypeContext,
 } from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
@@ -81,12 +82,7 @@ import {
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
-import {
-  codeTarget,
-  screenTarget,
-  serverTarget,
-  typeCheck,
-} from "./type-check.ts";
+import { screenTarget, serverTarget, typeCheck } from "./type-check.ts";
 
 /**
  * What a page loads to run one screen, by flat name: of the App's modules,
@@ -379,10 +375,16 @@ const appCodeTarget = serverTarget(
 
 /**
  * How an App's workflows are type-checked (type-check.ts): no DOM, which
- * their isolate doesn't have, no JSX, each file a module of its own, and
- * by name only the SDK's workflow modules they may import.
+ * their isolate doesn't have, no JSX, each file a module of its own; by
+ * name only the SDK's workflow modules they may import, and those the
+ * App's server code their types may name imports (`appCodeTarget`'s),
+ * with its generated modules by their aliases. A workflow's values reach
+ * none of the server's: its build holds them to `sdkImports`.
  */
-const workflowTarget = codeTarget(new Set(sdkImports));
+const workflowTarget = serverTarget(
+  generatedModules,
+  new Set([...sdkImports, ...serverSdkImports, "@grasp-os/sdk/database"])
+);
 
 /**
  * Type-checks the App against the kit's types and lints it against the
@@ -624,33 +626,6 @@ export const buildServer = (files: Record<string, string>): ServerBuild => {
 };
 
 /**
- * Builds an App's workflows: the TypeScript files under `workflows/`,
- * their tests included, importing only those files and the SDK's
- * workflow modules (`sdkImports`), then type-checked in one program
- * against those modules' declarations (`workflowTarget`): what they build
- * to, or why they fail, their type errors included. Every place a
- * workflow runs builds it here first: as its version is made current,
- * before its tests run; as a run loads it; and as a save is built.
- */
-export const buildWorkflows = (
-  files: Record<string, string>
-): WorkflowBuild => {
-  const workflows = workflowFiles(files);
-  const tooMuch = limitErrors(workflows);
-  if (tooMuch.length > 0) {
-    return { ok: false, diagnostics: tooMuch };
-  }
-  const built = compileCode(workflowCode, workflows);
-  if (!built.ok) {
-    return built;
-  }
-  const diagnostics = typeCheck(workflows, kit.types, workflowTarget);
-  return diagnostics.some((diagnostic) => isError(diagnostic))
-    ? { ok: false, diagnostics }
-    : built;
-};
-
-/**
  * The module the host generated from a JSON workflow, built: as one module
  * by flat name; or why it failed.
  */
@@ -848,6 +823,46 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
   return errors.length > 0
     ? { ok: false, diagnostics: errors }
     : { ok: true, modules };
+};
+
+/**
+ * Builds an App's workflows: the TypeScript files under `workflows/`,
+ * their tests included, importing only those files and the SDK's
+ * workflow modules (`sdkImports`), then type-checked in one program
+ * against those modules' declarations (`workflowTarget`), with the App's
+ * server code their types may name (`workflowTypeContext`): what they
+ * build to, or why they fail, their type errors included. Every place a
+ * workflow runs builds it here first: as its version is made current,
+ * before its tests run; as a run loads it; and as a save is built.
+ */
+export const buildWorkflows = (
+  files: Record<string, string>
+): WorkflowBuild => {
+  const workflows = workflowFiles(files);
+  const context = workflowTypeContext(files);
+  const tooMuch = appCodeLimitErrors({ ...context, ...workflows });
+  if (tooMuch.length > 0) {
+    return { ok: false, diagnostics: tooMuch };
+  }
+  const built = compileCode(workflowCode, workflows);
+  if (!built.ok) {
+    return built;
+  }
+  // The App's server code joins the check only as it builds (what server
+  // code may import and name, no directive, suppression or ambient
+  // module), so none of it can steer the workflows' check; its own type
+  // errors are its seal's (`checkAppCode`), never a workflow's. Server
+  // code that doesn't build leaves a workflow that names it unresolved.
+  const server =
+    isAppLayout(context) && buildAppCode(context).ok ? context : {};
+  const diagnostics = typeCheck(
+    { ...server, ...workflows },
+    kit.types,
+    workflowTarget
+  ).filter(({ file }) => file === undefined || Object.hasOwn(workflows, file));
+  return diagnostics.some((diagnostic) => isError(diagnostic))
+    ? { ok: false, diagnostics }
+    : built;
 };
 
 /**

@@ -30,6 +30,7 @@
  */
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
 
+import { workflowFiles } from "./inputs.ts";
 import { kitModuleName, appModuleName } from "./kit.ts";
 
 /**
@@ -143,6 +144,35 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   }
   return isTestFile(path) ? "test" : undefined;
 };
+
+/**
+ * The App's server code a workflow's types may name: its schema, values,
+ * registration and operations, with the host's generated modules, never
+ * its migrations or tests. A workflow's `appFunctions<Tree>(env)` is
+ * typed by the App's operations (`import type * as notes from
+ * "../operations/notes.ts"`), so they join its type check; they never
+ * join its build.
+ */
+export const workflowTypeContext = (
+  files: Readonly<Record<string, string>>
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(files).filter(([path]) => {
+      const kind = appCodeKind(path);
+      return kind === "schema" || kind === "server" || kind === "generated";
+    })
+  );
+
+/**
+ * The files a workflow build reads: the App's workflows and their tests,
+ * and the server code their types may name (`workflowTypeContext`).
+ */
+export const workflowBuildFiles = (
+  files: Readonly<Record<string, string>>
+): Record<string, string> => ({
+  ...workflowTypeContext(files),
+  ...workflowFiles(files),
+});
 
 /** Whether `files` are an App of spec 8's layout: a registration and a schema. */
 export const isAppLayout = (files: Readonly<Record<string, string>>): boolean =>

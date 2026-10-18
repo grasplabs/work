@@ -94,14 +94,6 @@ export const serverTarget = (
   allowed,
 });
 
-/**
- * Code that runs in a worker's isolate and imports only App files by
- * relative path and, by name, the modules `allowed` lists: an App's
- * workflows. No DOM, no JSX, every file a module of its own.
- */
-export const codeTarget = (allowed: ReadonlySet<string>): TypeTarget =>
-  serverTarget({}, allowed);
-
 /** Where TypeScript's own declarations (`lib.dom.d.ts`, …) are. */
 export const libLocation = "/node_modules/typescript/lib";
 

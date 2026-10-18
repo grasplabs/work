@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { buildWorkflows } from "../src/screens.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished } from "./runs.ts";
@@ -17,7 +18,9 @@ import { sampleApp, workflowFiles } from "./workflow-apps.ts";
 // a workflow reaching, for its types, what its isolate doesn't have (the
 // DOM) or modules it may not import; one file steering the whole check
 // with a directive, a suppression or an ambient declaration; and a
-// version that got past the gate some other way still running.
+// version that got past the gate some other way still running. The App's
+// server code joins the check as types a workflow may name (its
+// `appFunctions<Tree>(env)`), only as it builds, so it steers nothing.
 
 const idp = mockIdp();
 
@@ -41,6 +44,41 @@ const failedBuild = z.object({
     })
     .optional(),
 });
+
+/**
+ * A workflow `typed` whose step calls `call`, typed by the sample App's
+ * own operations, as the App registers them under `counter`.
+ */
+const typed = (call: string): Record<string, string> => ({
+  "workflows/typed.ts": `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
+
+import type * as sample from "../operations/sample.ts";
+
+type Invoices = { counter: typeof sample };
+
+export default workflow("typed", { params: {}, input: z.unknown() }, async (step, { env }) =>
+  await step.do("count", { description: "Count" }, async () => {
+    const answered = await ${call.replace("APP", "appFunctions<Invoices>(env)")};
+    return answered.ok ? answered.value : 0;
+  })
+);
+`,
+});
+
+/** What building `files` as an App's workflows said: ok, and the files its errors name. */
+const built = async (
+  files: Record<string, string>
+): Promise<{ ok: boolean; files: string[] }> => {
+  const build = await buildWorkflows(env, files, "app-test");
+  return {
+    ok: build.ok,
+    files: [
+      ...new Set(
+        (build.ok ? [] : build.diagnostics).map(({ file }) => file ?? "(App)")
+      ),
+    ].toSorted(),
+  };
+};
 
 /**
  * What making `files` current was refused with: its code, and the files
@@ -177,6 +215,45 @@ describe(
     return ok ? crypto.randomUUID().length : 0;`)
         )
       ).resolves.toStrictEqual({ code: "ok", files: [] });
+    });
+
+    it("type a workflow's calls of its App's functions by the App's own operations", async () => {
+      await expect(
+        Promise.all(
+          [
+            'APP.query("counter.hits", { name: "x" })',
+            'APP.query("counter.missing", { name: "x" })',
+            'APP.query("counter.hits", { name: 1 })',
+            'APP.query("counter.hit", { name: "x", execution: "e" })',
+          ].map(async (call) => await built({ ...sampleApp(), ...typed(call) }))
+        )
+      ).resolves.toStrictEqual([
+        { ok: true, files: [] },
+        { ok: false, files: ["workflows/typed.ts"] },
+        { ok: false, files: ["workflows/typed.ts"] },
+        { ok: false, files: ["workflows/typed.ts"] },
+      ]);
+    });
+
+    it("leave out of a workflow's check server code that doesn't build, so it gives the workflows nothing", async () => {
+      await expect(
+        built({
+          ...sampleApp(),
+          "operations/extra.ts":
+            "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
+          ...checked("    return document.title;"),
+        })
+      ).resolves.toStrictEqual({ ok: false, files: ["workflows/checked.ts"] });
+    });
+
+    it("build a workflow beside server code with type errors of its own, which its seal refuses", async () => {
+      await expect(
+        built({
+          ...sampleApp(),
+          "operations/extra.ts": 'export const total: number = "twelve";\n',
+          ...typed('APP.query("counter.hits", { name: "x" })'),
+        })
+      ).resolves.toStrictEqual({ ok: true, files: [] });
     });
 
     it("fail a run whose version holds a workflow that doesn't type-check, however it became current", async () => {
