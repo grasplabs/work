@@ -14,6 +14,7 @@ import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
+import { buildComputeModules } from "../src/screens.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import {
   editWorkflowDraft,
@@ -33,6 +34,7 @@ import { callCompute } from "../src/workflows/resource-compute.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
+import { steeringCases } from "./steering-cases.ts";
 
 // A JSON workflow's own compute modules (workflow-modules.ts,
 // resource-compute.ts), from the threat model on GRA-271: a calculation
@@ -1045,5 +1047,72 @@ export const total = compute({ input: v.array(v.string()), output: v.number(), h
       const refused = await publicationRefusal(by, modules);
       expect(refused.code).toBe("workflow.resource_invalid");
     }
+  });
+});
+
+/**
+ * The files and rules of the errors building `files` as a JSON workflow's
+ * compute modules said: `rule: "imports"` is the build's own refusal (a
+ * directive, a suppression, an ambient module), before any type check.
+ */
+const computeErrors = async (
+  files: Record<string, string>
+): Promise<{ files: string[]; rules: string[] }> => {
+  const build = await buildComputeModules(env, files, `c-${unique()}`);
+  const errors = build.ok
+    ? []
+    : build.diagnostics.filter(({ severity }) => severity === "error");
+  return {
+    files: [...new Set(errors.map(({ file }) => file ?? "(none)"))].toSorted(),
+    rules: [...new Set(errors.map(({ rule }) => rule))].toSorted(),
+  };
+};
+
+describe("a JSON workflow's compute modules, type-checked as they are built", () => {
+  it.each(steeringCases("@grasp-os/sdk/compute"))(
+    "refuse, in a module they share, %s, before the type check reads it",
+    async (_case, source) => {
+      await expect(
+        computeErrors({ ...totalModules, "code/extra.ts": source })
+      ).resolves.toStrictEqual({
+        files: ["code/extra.ts"],
+        rules: ["imports"],
+      });
+    }
+  );
+
+  it.each([
+    [
+      "a DOM global, which their isolate doesn't have",
+      "export const title = (): string => document.title;\n",
+    ],
+    [
+      "browser storage",
+      'export const kept = (): string | null => localStorage.getItem("x");\n',
+    ],
+    [
+      "a module of the kit's screens, for its types",
+      'import type { ReactNode } from "react";\nexport type Reached = ReactNode;\n',
+    ],
+    [
+      "another SDK module, for its types",
+      'import type { GraspClient } from "@grasp-os/sdk/client";\nexport type Reached = GraspClient;\n',
+    ],
+  ])("refuse %s", async (_case, source) => {
+    const { files } = await computeErrors({
+      ...totalModules,
+      "code/extra.ts": source,
+    });
+    expect(files).toStrictEqual(["code/extra.ts"]);
+  });
+
+  it("build modules that use only the compute SDK and a worker's globals", async () => {
+    await expect(
+      computeErrors({
+        ...totalModules,
+        "code/extra.ts":
+          "export const encoded = (text: string): number => new TextEncoder().encode(text).length;\n",
+      })
+    ).resolves.toStrictEqual({ files: [], rules: [] });
   });
 });

@@ -9,6 +9,7 @@ import { startRun } from "../src/workflows/runs.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { refusal, signedInApi } from "./sign-in.ts";
+import { steeringCases } from "./steering-cases.ts";
 import { sampleApp, workflowFiles } from "./workflow-apps.ts";
 
 // An App's TypeScript workflows are type-checked wherever they are built
@@ -262,60 +263,7 @@ describe(
       });
     });
 
-    it.each([
-      [
-        "a reference path into the kit",
-        '/// <reference path="../../node_modules/@grasp-os/sdk/src/client.ts" />\nexport const extra = 1;\n',
-      ],
-      [
-        "a lib it references, the DOM's",
-        '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
-      ],
-      [
-        "a types reference",
-        '/// <reference types="node" />\nexport const extra = 1;\n',
-      ],
-      [
-        "a line the type check is told to ignore",
-        "// @ts-ignore\nexport const title = (): string => document.title;\n",
-      ],
-      [
-        "an error the type check is told to expect",
-        "// @ts-expect-error\nexport const title = (): string => document.title;\n",
-      ],
-      [
-        "an error the type check is told to expect, on a block comment's last line",
-        "/* Expected:\n @ts-expect-error */\nexport const title = (): string => document.title;\n",
-      ],
-      [
-        "a line the type check is told to ignore, after a carriage return in a block comment",
-        "/* x\r @ts-ignore */\nexport const title = (): string => document.title;\n",
-      ],
-      [
-        "an error the type check is told to expect, after a line separator in a block comment",
-        "/* x\u2028 @ts-expect-error */\nexport const title = (): string => document.title;\n",
-      ],
-      [
-        "an error the type check is told to expect, after a paragraph separator in a block comment",
-        "/* x\u2029 @ts-expect-error */\nexport const title = (): string => document.title;\n",
-      ],
-      [
-        "a file the type check is told to skip",
-        "// @ts-nocheck\nexport const title = (): string => document.title;\n",
-      ],
-      [
-        "a file the type check is told to skip, in another case",
-        "// @ts-NoCheck\nexport const title = (): string => document.title;\n",
-      ],
-      [
-        "an ambient module that adds to the SDK's, which a workflow then reads",
-        'import { leak } from "@grasp-os/sdk/workflow";\n\ndeclare module "@grasp-os/sdk/workflow" {\n  export const leak: number;\n}\nexport const extra: number = leak;\n',
-      ],
-      [
-        "globals it declares for every workflow",
-        "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
-      ],
-    ])(
+    it.each(steeringCases("@grasp-os/sdk/workflow"))(
       "refuse, in a helper they share, %s, before the type check reads it",
       async (_case, source) => {
         await expect(
