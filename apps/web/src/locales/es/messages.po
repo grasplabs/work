@@ -3925,7 +3925,7 @@ msgstr "Aún no hay ningún modelo configurado en este despliegue."
 
 #: src/workflows/module-files.tsx
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
-msgstr "Aún no hay módulos. Un módulo contiene cálculos que una tarea llama mediante un enlace local."
+msgstr "Aún no hay módulos. Un módulo contiene cálculos que una tarea llama mediante una vinculación local."
 
 #: src/workflows/triggers.tsx
 msgid "No next run"
