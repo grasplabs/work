@@ -472,9 +472,7 @@ const lockPins = (
     Object.keys(lock.direct).some(ownedByProject) ||
     named.some(ownedByProject)
   ) {
-    refuse(
-      `${owner.charAt(0).toUpperCase()}${owner.slice(1)}'s lock names a package the project pins itself.`
-    );
+    refuse(`A package the project pins itself is named in ${owner}'s lock.`);
   }
   for (const [name, version] of Object.entries(lock.direct)) {
     notices.push({
