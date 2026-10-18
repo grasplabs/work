@@ -24,6 +24,12 @@ const appFiles = {
   export type Reached = [Hidden, Given];
 }
 `,
+  // A type naming a module by `import()` in a namespace, which a
+  // declaration file's import check refuses first in a build.
+  "in-namespace.d.ts": `declare namespace Probe {
+  type Hidden = typeof import("hidden");
+}
+`,
   // A path into the kit's packages, which an ambient module can't name.
   "by-path.ts": `import type { Hidden } from "./node_modules/hidden/index";
 export type ByPath = Hidden;
@@ -39,7 +45,10 @@ const unresolved = (allowed?: ReadonlySet<string>): string[] =>
   )
     .filter(
       ({ rule, file }) =>
-        rule === "TS2307" && (file === "probe.d.ts" || file === "by-path.ts")
+        rule === "TS2307" &&
+        (file === "probe.d.ts" ||
+          file === "by-path.ts" ||
+          file === "in-namespace.d.ts")
     )
     .map(
       ({ message }) =>
@@ -54,7 +63,7 @@ describe("what an App file's types resolve to", () => {
       // Without the bound, TypeScript resolves all of it.
       unbounded: unresolved(),
     }).toStrictEqual({
-      given: ["./node_modules/hidden/index", "hidden"],
+      given: ["./node_modules/hidden/index", "hidden", "hidden"],
       unbounded: [],
     });
   });

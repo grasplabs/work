@@ -1,5 +1,5 @@
 /**
- * Builds the screen compiler into dist/, once per release at core's build
+ * Builds the App compiler into dist/, once per release at core's build
  * time: the kit's modules, what the compiler needs to know of the kit, and
  * the compiler that runs in its own isolate. Core imports the result
  * through `#isolate`.
@@ -880,7 +880,7 @@ const pruneReleases = (assets: string): void => {
  * Everything it reads, it reads here, after the caller took the build's
  * lock (build-lock.ts).
  */
-const buildScreenCompiler = async (
+const buildAppCompiler = async (
   assets: string,
   versionModule: string
 ): Promise<void> => {
@@ -990,7 +990,7 @@ const buildScreenCompiler = async (
   pruneReleases(assets);
   const kitSize = Object.values(kitCode).join("").length;
   console.info(
-    `Screen compiler ${version}: ${(compiler.length / 1e6).toFixed(1)} MB and ${(kitJson.length / 1e6).toFixed(1)} MB of what it knows of the kit; kit ${kitModules.version}: ${Object.keys(kitCode).length} modules, ${(kitSize / 1e6).toFixed(1)} MB`
+    `App compiler ${version}: ${(compiler.length / 1e6).toFixed(1)} MB and ${(kitJson.length / 1e6).toFixed(1)} MB of what it knows of the kit; kit ${kitModules.version}: ${Object.keys(kitCode).length} modules, ${(kitSize / 1e6).toFixed(1)} MB`
   );
 };
 
@@ -1002,5 +1002,5 @@ const buildScreenCompiler = async (
 const assets = process.argv[2] ?? path.join(dist, "assets");
 const versionModule = process.argv[3] ?? releaseVersionModule;
 await withBuildLock(assets, async () => {
-  await buildScreenCompiler(assets, versionModule);
+  await buildAppCompiler(assets, versionModule);
 });
