@@ -234,6 +234,34 @@ const resourceOf = (
         callHost(alias, { operation, arguments: args }),
     };
   }
+  if (kind === "knowledge") {
+    // Both methods; the host refuses one the use didn't declare.
+    return {
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      search: (request: unknown) =>
+        callHost(alias, {
+          operation: "search",
+          arguments: {
+            text: exportOf(request, "text"),
+            ...(exportOf(request, "limit") === undefined
+              ? {}
+              : { limit: exportOf(request, "limit") }),
+          },
+        }),
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      read: (request: unknown) =>
+        callHost(alias, {
+          operation: "read",
+          arguments: { id: exportOf(request, "id") },
+        }),
+    };
+  }
+  if (kind === "template") {
+    return {
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      read: () => callHost(alias, {}),
+    };
+  }
   if (kind === "model") {
     return {
       // Its two fields read once each, as data: what reaches the host is

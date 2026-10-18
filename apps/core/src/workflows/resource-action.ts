@@ -59,6 +59,10 @@ import { requireShape } from "./resource-calls.ts";
 //   (`ActionEffects.refused`) before the task fails: once per attempt,
 //   from what the host knows, a binding named only when it is declared.
 //   A refusal `make` gave has its own receipt there already.
+// - Reading more than its knowledge or template uses name (GRA-700). A
+//   knowledge use reaches its binding's one collection, with only the
+//   operations it declares; a template use, its binding's pinned version.
+//   What each reads, as the run's person may, is resource-reads.ts's.
 // - Model calls past the run's cap, or uncounted once its step replays
 //   (GRA-700). A model use's calls send the binding's own model the
 //   sealed output shape, never one the action makes up, and the host
@@ -93,6 +97,18 @@ const modelRequestSchema = z.strictObject({
   instructions: z.string().min(1),
   input: jsonSchema,
 });
+
+/**
+ * What an action asks of a knowledge binding: one of the operations of its
+ * collection, and its request (GRA-700). The collection is the binding's.
+ */
+const knowledgeRequestSchema = z.strictObject({
+  operation: z.enum(["search", "read"]),
+  arguments: jsonSchema,
+});
+
+/** What an action asks of a template binding: nothing; the version is pinned. */
+const templateRequestSchema = z.strictObject({});
 
 /** What the host does for an action's resource calls (resource-host.ts). */
 export interface ActionEffects {
@@ -180,7 +196,11 @@ class ActionHost extends RpcTarget {
         use.alias,
         {
           kind: use.kind,
-          operations: new Set(use.kind === "connector" ? use.operations : []),
+          operations: new Set(
+            use.kind === "connector" || use.kind === "knowledge"
+              ? use.operations
+              : []
+          ),
           output:
             use.kind === "model"
               ? jsonSchema.parse(JSON.parse(use.output))
@@ -285,6 +305,46 @@ class ActionHost extends RpcTarget {
           // An action passes its own values only: no parameter of the run.
           sensitive: [],
         },
+        ordinal
+      );
+    }
+    if (kind === "knowledge") {
+      const parsed = knowledgeRequestSchema.safeParse(request);
+      if (!parsed.success) {
+        return this.#refuse(
+          "request_invalid",
+          alias,
+          workflowResourceErrors.create("workflow.call_invalid")
+        );
+      }
+      // Only an operation its sealed use declares (GRA-700).
+      if (!use.operations.has(parsed.data.operation)) {
+        return this.#refuse(
+          "operation_undeclared",
+          alias,
+          workflowResourceErrors.create("workflow.call_denied")
+        );
+      }
+      return await this.#effects.make(
+        {
+          name: "grasp.knowledge",
+          binding: alias,
+          operation: parsed.data.operation,
+          arguments: parsed.data.arguments,
+        },
+        ordinal
+      );
+    }
+    if (kind === "template") {
+      if (!templateRequestSchema.safeParse(request).success) {
+        return this.#refuse(
+          "request_invalid",
+          alias,
+          workflowResourceErrors.create("workflow.call_invalid")
+        );
+      }
+      return await this.#effects.make(
+        { name: "grasp.template", binding: alias },
         ordinal
       );
     }

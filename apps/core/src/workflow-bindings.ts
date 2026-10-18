@@ -36,8 +36,10 @@ import {
   teams,
   workflowBindingApprovals,
 } from "./db/core/schema.ts";
+import { collections } from "./db/knowledge/schema.ts";
 import { gatewaySettings } from "./models.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
+import { pinnedTemplate } from "./resource-templates.ts";
 import { isRestricted, restrict } from "./restricted.ts";
 import {
   auditStoreRefusal,
@@ -152,6 +154,45 @@ const actionsOf = (row: { actions: string }): string[] => {
   return Array.isArray(parsed)
     ? parsed.filter((action): action is string => typeof action === "string")
     : [];
+};
+
+/**
+ * Refuses a knowledge target unless it names a permission workflow `id`
+ * itself holds, active, on a Knowledge collection, allowing `read`
+ * (GRA-700). Each call reads through it again, as the person its run acts
+ * for may read too (workflows/resource-calls.ts). A collection no delegate
+ * may ever read is refused too, as Knowledge's own `collectionsAllowed`
+ * leaves it out: one deleted, one only its owner reads (`me`), or one
+ * only admins read.
+ */
+const requireKnowledgeServes = async (
+  env: Env,
+  id: string,
+  target: Extract<WorkflowBindingTarget, { kind: "knowledge" }>
+): Promise<void> => {
+  const row = await workflowPermission(env, id, target.permissionId);
+  if (
+    row?.objectType !== "collection" ||
+    row.chatId !== null ||
+    !actionsOf(row).includes("read")
+  ) {
+    throw invalid(
+      "target.permissionId: The workflow holds no permission to read a collection."
+    );
+  }
+  const collection = await drizzle(env.KNOWLEDGE)
+    .select({ access: collections.access })
+    .from(collections)
+    .where(eq(collections.id, row.objectId))
+    .get();
+  if (collection === undefined) {
+    throw invalid("target.permissionId: That collection no longer exists.");
+  }
+  if (collection.access === "me" || collection.access === "admins") {
+    throw invalid(
+      "target.permissionId: A workflow can't read a personal or admins-only collection."
+    );
+  }
 };
 
 /**
@@ -622,6 +663,25 @@ export const requireTargetServes = async (
       // what data, and every send is checked on its own.
       break;
     }
+    case "knowledge": {
+      await requireKnowledgeServes(env, id, target);
+      return;
+    }
+    case "template": {
+      if (
+        (await pinnedTemplate(
+          env,
+          target.templateId,
+          target.version,
+          target.contentHash
+        )) === undefined
+      ) {
+        throw invalid(
+          "target.contentHash: No published template version has that content now."
+        );
+      }
+      return;
+    }
     default: {
       target satisfies never;
     }
@@ -667,6 +727,17 @@ const targetDetail = (
     }
     case "event": {
       return { targetKind: target.kind };
+    }
+    case "knowledge": {
+      return { targetKind: target.kind, permissionId: target.permissionId };
+    }
+    case "template": {
+      return {
+        targetKind: target.kind,
+        templateId: target.templateId,
+        version: target.version,
+        contentHash: target.contentHash,
+      };
     }
     default: {
       return target satisfies never;
