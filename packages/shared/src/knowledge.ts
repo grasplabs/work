@@ -106,6 +106,23 @@ export const collectionInputSchema = z
   });
 export type CollectionInput = z.input<typeof collectionInputSchema>;
 
+/**
+ * A collection a built-in blueprint asks for (its `blueprint.json`), by an
+ * ID of its own, the same in every deployment, which no collection a
+ * person creates has (theirs are UUIDs): the install creates it, open to
+ * everyone and changed by admins, if it isn't there yet, and every App
+ * created from a blueprint that names it shares it, such as the Playbook.
+ */
+export const declaredCollectionSchema = z.strictObject({
+  id: collectionIdSchema.refine(
+    (id) => /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(id) && id.length <= 64,
+    "Lowercase letters, digits and single hyphens, starting with a letter"
+  ),
+  name: z.string().trim().min(1).max(100),
+  description: z.string().trim().max(1024).default(""),
+});
+export type DeclaredCollection = z.infer<typeof declaredCollectionSchema>;
+
 /** A collection, as the API returns it. */
 export interface Collection {
   id: CollectionId;
