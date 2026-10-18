@@ -175,7 +175,8 @@ const keysOfToken = (token: string): IndexKey[] => {
  * characters: every token in the words index; one of three characters or
  * fewer, or with a digit, also in the words index's prefix indexes; one
  * of three, or each three characters of one with a digit, in the trigram
- * index. Undefined unless every term is plain
+ * index. Undefined for a number shorter than three characters, which the
+ * trigrams spanning its neighbours hold whole, and unless every term is plain
  * ASCII, whose tokens are exactly its runs of letters and digits, folded
  * to lower case (as `unicode61` and `trigram` fold them); anything else
  * is left to the rebuild.
@@ -194,6 +195,12 @@ export const indexKeysOf = (
         .filter((token) => token !== "")
     )
   );
+  // A number shorter than a trigram is held whole by the trigrams that
+  // span it and its neighbours (" 12", "-12"), whose neighbours the
+  // purge's terms don't say: rebuilt.
+  if ([...tokens].some((token) => digit.test(token) && token.length < 3)) {
+    return undefined;
+  }
   return [...tokens].flatMap(keysOfToken);
 };
 

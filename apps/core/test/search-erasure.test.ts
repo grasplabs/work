@@ -61,7 +61,7 @@ describe("a purged term's page separators", () => {
       pinPrefix: holds("4821", "search_words", "0482"),
       pinInPrefixIndex: holds("4821", "search_words", "2482"),
       pinTrigram: holds("4821", "search_trigrams", "0821"),
-      idPrefix: holds("AB12-9", "search_words", "0ab1"),
+      idPrefix: holds("AB12-901", "search_words", "0ab1"),
       pinTwo: holds("4821", "search_words", "048"),
     }).toStrictEqual({
       pinPrefix: true,
@@ -72,15 +72,21 @@ describe("a purged term's page separators", () => {
     });
   });
 
-  it("are checked only for terms whose tokens are known exactly: plain ASCII", () => {
+  it("are checked only for terms whose tokens are known exactly: plain ASCII, and no number shorter than a trigram", () => {
     expect({
       ascii: indexKeysOf(["Visser", "tom.visser@acme.test"]) === undefined,
+      pin: indexKeysOf(["4821"]) === undefined,
       accented: indexKeysOf(["Renée"]),
       otherScript: indexKeysOf(["東京"]),
+      // Held whole by the trigrams spanning its neighbours (" 12"), which
+      // a purge's terms don't say.
+      shortNumber: indexKeysOf(["Room 12"]),
     }).toStrictEqual({
       ascii: false,
+      pin: false,
       accented: undefined,
       otherScript: undefined,
+      shortNumber: undefined,
     });
   });
 });
