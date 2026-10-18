@@ -380,6 +380,55 @@ describe(
       ]);
     });
 
+    it("type a version by the permissions asked for when it was committed: a later request types later versions, never one already current", async () => {
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Checked" });
+      // A cast that holds only while MAIL's answer is unknown.
+      const files = {
+        ...sampleApp(),
+        ...checked(`    if (input === "never") {
+      const sent = (await env.MAIL.call("mail.send", {})) as { other: number };
+      return sent.other;
+    }
+    return 1;`),
+      };
+      const first = await builder.api.apps.files.commit(app, files, "First");
+      await builder.api.apps.versions.setCurrent(app, first.version);
+      const connection = await mailConnection();
+      await builder.api.permissions.request({
+        subject: { type: "app", appId: app },
+        object: { type: "connection", connectionId: connection.id },
+        actions: ["mail.send"],
+        binding: "MAIL",
+      });
+      // Its run builds it again, as it was committed: still untyped.
+      const run = await startRun(env, {
+        app: appIdSchema.parse(app),
+        workflow: workflowIdSchema.parse("checked"),
+        input: undefined,
+        startedBy: builder.userId,
+        actor: { type: "system" },
+      });
+      await finished(run.id);
+      const { status } = await builder.api.workflows.status(run.id);
+      // The same code committed after the request is typed, and refused.
+      const second = await builder.api.apps.files.commit(
+        app,
+        { ...files, "notes.md": "Again" },
+        "Second"
+      );
+      const outcome = await refusal(
+        builder.api.apps.versions.setCurrent(app, second.version)
+      );
+      expect({
+        status,
+        second: failedBuild.safeParse(outcome).data?.code,
+      }).toStrictEqual({
+        status: "completed",
+        second: "workflow.build_failed",
+      });
+    });
+
     it("type a build again once the App asks for another permission: the bindings are part of its cache key", async () => {
       const files = {
         ...sampleApp(),

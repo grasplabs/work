@@ -156,7 +156,7 @@ export const buildOnSave = async (
           env,
           files,
           source.app,
-          await workflowBindingKinds(env, source.app),
+          await workflowBindingKinds(env, source.app, source.version),
           signal
         ),
       env,

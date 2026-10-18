@@ -310,7 +310,7 @@ export interface DoOptions<Input extends StepInput = StepInput>
  * no output:
  *
  *   try {
- *     return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
+ *     return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
  *   } catch (error) {
  *     if (error.code === resolvedDone) return { sent: true };
  *     throw error;
@@ -503,6 +503,19 @@ export interface AppExportsBinding {
 }
 
 /**
+ * Which of the App's functions `callFunction` calls: its generated
+ * reference, or just its `contractId` and `kind`. The host checks the
+ * rest against the release the run is pinned to.
+ */
+export interface FunctionReferenceName {
+  readonly contractId: string;
+  readonly kind: ReferenceKind;
+  readonly resourceId?: string;
+  readonly resourceVersion?: number;
+  readonly fingerprint?: string;
+}
+
+/**
  * The run's own App (`env.APP`): its server methods (`call`, typed with
  * `appServer<App>(env)`) and its public functions (`callFunction`, typed
  * with `appFunctions<Tree>(env)`).
@@ -510,7 +523,7 @@ export interface AppExportsBinding {
 export interface OwnAppBinding {
   readonly call: (method: string, ...args: Json[]) => Promise<unknown>;
   readonly callFunction: (
-    reference: { readonly contractId: string; readonly kind: ReferenceKind },
+    reference: FunctionReferenceName,
     input: Json
   ) => Promise<FunctionResult<Json>>;
 }

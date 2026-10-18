@@ -646,7 +646,7 @@ const modulesOf = async (
     env,
     files,
     app,
-    await workflowBindingKinds(env, app),
+    await workflowBindingKinds(env, app, version),
     signal
   );
   signal?.throwIfAborted();
