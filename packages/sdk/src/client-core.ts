@@ -836,6 +836,11 @@ export interface ClientInternals {
    * shows it gone.
    */
   onFileDeleted: (onDeleted: (id: string) => void) => () => void;
+  /**
+   * Whether `files.delete` deleted file `id` through this client: a view
+   * asked for it later shows it gone, never reading it again.
+   */
+  fileDeleted: (id: string) => boolean;
 }
 
 /**
@@ -1447,6 +1452,11 @@ export class GraspClient {
   readonly #fenceListeners = new Set<(refusal: GraspError) => void>();
   /** Told of each file `files.delete` deleted (`onFileDeleted`). */
   readonly #deletionListeners = new Set<(id: string) => void>();
+  /**
+   * The files `files.delete` deleted (`fileDeleted`): ids are never
+   * reused, and one session deletes few.
+   */
+  readonly #deletedFiles = new Set<string>();
 
   /**
    * The App's files: downloading and deleting them through a files
@@ -1508,6 +1518,7 @@ export class GraspClient {
       },
       () => this.#generation,
       (id) => {
+        this.#deletedFiles.add(id);
         for (const listener of this.#deletionListeners) {
           // One view failing never changes the deletion's outcome, nor
           // keeps the others from showing the file gone.
@@ -1570,6 +1581,7 @@ export class GraspClient {
           client.#deletionListeners.delete(onDeleted);
         };
       },
+      fileDeleted: (id) => client.#deletedFiles.has(id),
     });
   }
 

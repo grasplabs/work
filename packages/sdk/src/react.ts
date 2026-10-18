@@ -460,17 +460,21 @@ export const useFile = <Reference extends FilesReference>(
         previewUrl = null;
       }
     };
+    // A refusal stays until the screen is mounted again: a deletion that
+    // finishes after it never turns it into the file gone.
+    let refused = false;
     // Deleted through this client, once core recorded it, through this
     // resource or another that reads the same file: gone, never read again
     // (core's answer would be that it isn't there).
     const unwatch = internals.onFileDeleted((deleted) => {
-      if (deleted === id) {
+      if (deleted === id && !refused) {
         stop.abort();
         revoke();
         setShown({ client, key, gone: true });
       }
     });
     const fenced = (): void => {
+      refused = true;
       stop.abort();
       revoke();
       setShown({
@@ -482,6 +486,14 @@ export const useFile = <Reference extends FilesReference>(
     const unfence = internals.onFence(fenced);
     if (internals.fences() !== fencesSeen) {
       fenced();
+      return () => {
+        unwatch();
+        unfence();
+      };
+    }
+    // Deleted before this view asked for it (shown again after a skip,
+    // say): gone (below), not read.
+    if (internals.fileDeleted(id)) {
       return () => {
         unwatch();
         unfence();
@@ -527,9 +539,9 @@ export const useFile = <Reference extends FilesReference>(
     };
   }, [client, internals, reading, id, key, fencesSeen]);
   // Shown only for what is asked now: another resource, file or client is
-  // loading until its own read settles.
+  // loading until its own read settles, or gone if this client deleted it.
   if (shown === undefined || shown.key !== key || shown.client !== client) {
-    return undefined;
+    return id !== undefined && internals.fileDeleted(id) ? null : undefined;
   }
   if (shown.error !== undefined) {
     throw shown.error;

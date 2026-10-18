@@ -768,6 +768,11 @@ test("a file the screen deletes while showing it is gone, never read again or a 
   );
   await expect(screen.getByText("The file is gone")).toBeVisible();
   await expect(screen.getByRole("heading", { name: "Files" })).toBeVisible();
+  // Hidden, then shown again: still gone, not read again.
+  await screen.getByRole("button", { name: "Hide the file" }).click();
+  await expect(screen.getByText("The file is hidden")).toBeVisible();
+  await screen.getByRole("button", { name: "Show the file" }).click();
+  await expect(screen.getByText("The file is gone")).toBeVisible();
   await page.waitForTimeout(1000);
   expect(reads).toStrictEqual([]);
 });
