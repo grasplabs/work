@@ -2,6 +2,7 @@ import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { formatDate } from "../src/admin/words.ts";
 import { act, consoleDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
@@ -69,7 +70,8 @@ const missingIn = (html: string, texts: string[]) =>
 /**
  * A company three days into its interviews, with one team of three: its
  * lead Ana talked to Claire for 12 minutes and gave it a 5; Ben typed to
- * Stephen for 7 minutes and stopped at the steps; Cleo has her link.
+ * Stephen for 7 minutes and stopped at the steps; Cleo has her link; and
+ * Dan has been talking to Stephen for 4 minutes, still at his story.
  * Its core also answers with what a core must never send (what was said,
  * the facts' words and a link's code), as an older or broken one might:
  * the console's read drops it.
@@ -129,6 +131,19 @@ const interviewingSnapshot = (): AdminSnapshot => {
     interviewer: "stephen" as const,
     transcript: said,
   };
+  // Core sends the part a live interview is in as where it stands, the
+  // same as for one that stopped: only the link says he is talking now.
+  const dan = {
+    ...ben,
+    person: "p-dan",
+    startedAt: at(now - 4 * minute),
+    updatedAt: at(now),
+    phase: "story" as const,
+    stoppedAt: "story" as const,
+    minutes: 4,
+    facts: 1,
+    typed: false,
+  };
   return {
     ...empty,
     roster: {
@@ -166,6 +181,14 @@ const interviewingSnapshot = (): AdminSnapshot => {
           title: "",
           away: false,
         },
+        {
+          id: "p-dan",
+          name: "Dan Mol",
+          email: "",
+          team: "t-finance",
+          title: "",
+          away: false,
+        },
       ],
     },
     plan: { start: start.slice(0, 10), days: 14, at: start },
@@ -175,8 +198,9 @@ const interviewingSnapshot = (): AdminSnapshot => {
       link("p-ana", "completed"),
       link("p-ben", "incomplete"),
       link("p-cleo", "invited"),
+      link("p-dan", "progress"),
     ],
-    interviews: [ana, ben],
+    interviews: [ana, ben, dan],
   };
 };
 
@@ -185,8 +209,12 @@ describe("an organization's interviews", () => {
 
   it("shows every team, everyone by name, every interview, and how Stephen and Claire did, in numbers only", async () => {
     const acme = await liveClient();
-    acme.account.admin = interviewingSnapshot();
+    const snapshot = interviewingSnapshot();
+    acme.account.admin = snapshot;
     const base = `/admin/organizations/${acme.clientId}/interviews`;
+    // The last day a link works: the plan's 14th, counting its first.
+    const lastDay = new Date(`${snapshot.plan?.start ?? ""}T12:00:00Z`);
+    lastDay.setUTCDate(lastDay.getUTCDate() + 13);
 
     const teams = await page(base);
     const people = await page(`${base}?tab=people`);
@@ -202,8 +230,9 @@ describe("an organization's interviews", () => {
         teams: missingIn(teams.html, [
           "Where everyone stands",
           "Finance",
-          "1 of 3 talked",
+          "1 of 4 talked",
           "Talked, day by day",
+          `The links work until ${formatDate(lastDay.toISOString())}.`,
         ]),
         people: missingIn(people.html, [
           "Ana Smit",
@@ -213,19 +242,23 @@ describe("an organization's interviews", () => {
           "Step by step",
           "Cleo Bakker",
           "Invited",
+          "Dan Mol",
+          "Talking now",
         ]),
         transcripts: missingIn(transcripts.html, [
           "Ana Smit",
           "Ben Vos",
           "Stopped at: Step by step",
+          "Dan Mol",
+          "Talking now",
           "the console is sent none of it, so no transcript is read here",
         ]),
         interviewers: missingIn(interviewers.html, [
           "What people thought of it",
           "1 of 1 said how it was",
           "5.0 of 5",
-          "1 of 2",
-          "19 minutes in all",
+          "1 of 3",
+          "23 minutes in all",
           "Who people chose",
           "Stephen",
           "Claire",
@@ -240,6 +273,8 @@ describe("an organization's interviews", () => {
         ]),
       },
       // Nothing anyone said, and no link's code, on any tab.
+      // Dan is talking now: he stopped nowhere.
+      danStopped: transcripts.html.includes("Stopped at: Your story"),
       leaked: pages.flatMap((each) =>
         [said, fact, linkCode].filter((text) => each.html.includes(text))
       ),
@@ -255,6 +290,7 @@ describe("an organization's interviews", () => {
         interviewers: [],
         setup: [],
       },
+      danStopped: false,
       leaked: [],
       toCome: false,
     });
@@ -285,7 +321,7 @@ describe("an organization's interviews", () => {
   it("gives no share of voice or of what was left in while no interview is finished", async () => {
     const acme = await liveClient();
     const snapshot = interviewingSnapshot();
-    // Only Ben, who stopped halfway, has started.
+    // Only Ben, who stopped halfway, and Dan, who is talking now, have started.
     acme.account.admin = {
       ...snapshot,
       interviews: snapshot.interviews.filter((interview) => !interview.agreed),
@@ -305,13 +341,13 @@ describe("an organization's interviews", () => {
     expect(
       ["Finished", "Left in", "By voice"].map((label) => ({
         label,
-        shown: [">0 of 1<", ">–<", ">0%<"].filter((text) =>
+        shown: [">0 of 2<", ">–<", ">0%<"].filter((text) =>
           figureOf(label).includes(text)
         ),
       }))
     ).toStrictEqual([
-      // Its ring says the share too: none of the one who started.
-      { label: "Finished", shown: [">0 of 1<", ">0%<"] },
+      // Its ring says the share too: none of the two who started.
+      { label: "Finished", shown: [">0 of 2<", ">0%<"] },
       { label: "Left in", shown: [">–<"] },
       { label: "By voice", shown: [">–<"] },
     ]);

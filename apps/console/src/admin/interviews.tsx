@@ -1,3 +1,5 @@
+import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
+import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
 /**
  * The interviews of one organization, by team, by name and one by one,
  * ported from the prototype (grasplabs/prototype
@@ -11,8 +13,7 @@
  * asked in, the invitation and the list of links to send (a link is a
  * credential, which core never sends) aren't here.
  */
-import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
-import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
+import type { Phase } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
   listenDays,
@@ -248,12 +249,13 @@ export const InterviewTeams = ({ view }: { view: OrgView }) => {
     );
   }
   const funnel = funnelOf(view);
-  const closes = dayDate(view, listenDays(view.org));
+  // The links close at the end of the plan's last day, counting its first as day 0.
+  const lastDay = dayDate(view, listenDays(view.org) - 1);
   let links = "The links go out once the company has told its team.";
   if (view.closed) {
-    links = `The links closed on ${closes}.`;
+    links = `The links closed after ${lastDay}.`;
   } else if (view.told) {
-    links = `The links close on ${closes}.`;
+    links = `The links work until ${lastDay}.`;
   }
   return (
     <>
@@ -431,6 +433,24 @@ export const InterviewPeople = ({ view }: { view: OrgView }) => {
   );
 };
 
+/** Where an unfinished interview stands: someone talking now, or the part it stopped in. */
+const InterviewWhere = ({
+  stoppedAt,
+  talking,
+}: {
+  stoppedAt: Phase | null;
+  talking: boolean;
+}) => {
+  if (talking) {
+    return <span className="text-muted-foreground text-xs">Talking now</span>;
+  }
+  return stoppedAt === null ? null : (
+    <span className="text-muted-foreground text-xs">
+      {`Stopped at: ${interviewPhaseWords[stoppedAt]}`}
+    </span>
+  );
+};
+
 /** Before any interview: whom they wait on. */
 export const noInterviewsYet = (view: OrgView): string =>
   view.told
@@ -444,6 +464,11 @@ export const noInterviewsYet = (view: OrgView): string =>
  */
 export const InterviewList = ({ view }: { view: OrgView }) => {
   const teams = new Map(view.teams.map((team) => [team.team.id, team]));
+  const talking = new Set(
+    view.people
+      .filter((each) => each.state === "progress")
+      .map((each) => each.person.id)
+  );
   return (
     <Panel
       description="Every interview, finished or stopped halfway. What anyone said stays in the company’s own Grasp: the console is sent none of it, so no transcript is read here."
@@ -487,11 +512,10 @@ export const InterviewList = ({ view }: { view: OrgView }) => {
                     <TableCell className="whitespace-normal" variant="card">
                       <span className="flex flex-col">
                         {dayDate(view, interview.day)}
-                        {interview.stoppedAt === null ? null : (
-                          <span className="text-muted-foreground text-xs">
-                            {`Stopped at: ${interviewPhaseWords[interview.stoppedAt]}`}
-                          </span>
-                        )}
+                        <InterviewWhere
+                          stoppedAt={interview.stoppedAt}
+                          talking={talking.has(interview.id)}
+                        />
                       </span>
                     </TableCell>
                     <TableCell className="text-right" variant="card">
