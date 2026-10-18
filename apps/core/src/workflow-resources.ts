@@ -1131,6 +1131,44 @@ const sealedBindingsOf = (
   );
 };
 
+/** Reads catalog contracts by key: those the catalog holds intact. */
+type CatalogLookup = (
+  keys: readonly string[]
+) => Promise<Map<string, ResolvedCatalogContract>>;
+
+/**
+ * A lookup that reads each catalog key once, however many reviews of one
+ * answer ask for it, concurrently or not: a listing of many versions
+ * pinning the same contract reads and hashes it once.
+ */
+const catalogOnce = (env: Env): CatalogLookup => {
+  // Each key, by the read that loads it: set before anything is awaited,
+  // so a review asking at the same time shares that read.
+  const reads = new Map<
+    string,
+    Promise<Map<string, ResolvedCatalogContract>>
+  >();
+  return async (keys) => {
+    const missing = [...new Set(keys)].filter((key) => !reads.has(key));
+    if (missing.length > 0) {
+      const read = resolveCatalogKeys(env, missing);
+      for (const key of missing) {
+        reads.set(key, read);
+      }
+    }
+    const found = new Map<string, ResolvedCatalogContract>();
+    for (const key of keys) {
+      // oxlint-disable-next-line no-await-in-loop -- each read shared, once
+      const read = await reads.get(key);
+      const contract = read?.get(key);
+      if (contract !== undefined) {
+        found.set(key, contract);
+      }
+    }
+    return found;
+  };
+};
+
 /**
  * `actions` as a version's review shows them (GRA-718): for each that asks
  * a model, its uses that may write, which the model's answers may steer.
@@ -1144,7 +1182,7 @@ const sealedBindingsOf = (
  * version as sealed and the catalog, never inspected again.
  */
 const reviewedActions = async (
-  env: Env,
+  lookup: CatalogLookup,
   actions: readonly WorkflowVersionAction[],
   bindings: readonly PinnedContract[]
 ): Promise<WorkflowActionReview[]> => {
@@ -1159,7 +1197,7 @@ const reviewedActions = async (
       return typeof contractId === "string" ? [contractId] : [];
     })
   );
-  const catalog = await resolveCatalogKeys(env, [...new Set(keys)]);
+  const catalog = await lookup(keys);
   const readOnly = (alias: string, operation: string): boolean => {
     const binding = connectorOf(alias);
     if (binding === undefined || binding.contractId === null) {
@@ -1200,7 +1238,7 @@ const reviewedActions = async (
  * build are read from it (`workflow.version_corrupt` otherwise).
  */
 const versionOf = async (
-  env: Env,
+  lookup: CatalogLookup,
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: WorkflowVersionBinding[]
 ): Promise<WorkflowResourceVersion> => {
@@ -1217,7 +1255,7 @@ const versionOf = async (
     manifestHash: row.manifestHash,
     bindings,
     actions: await reviewedActions(
-      env,
+      lookup,
       sealedActionsOf(row),
       sealedBindingsOf(row)
     ),
@@ -1390,7 +1428,11 @@ const publishedAs = async (
   }
   const bindings = await bindingsOf(env, id);
   return {
-    version: await versionOf(env, row, bindings.get(row.version) ?? []),
+    version: await versionOf(
+      catalogOnce(env),
+      row,
+      bindings.get(row.version) ?? []
+    ),
     modulesHash: sealedModulesHash(row),
   };
 };
@@ -1529,7 +1571,7 @@ const writeVersion = async (
   }
   const manifestHash = await sha256Hex(manifest);
   // Before anything is written: a publication that lands answers it.
-  const reviewed = await reviewedActions(env, actions, bindings);
+  const reviewed = await reviewedActions(catalogOnce(env), actions, bindings);
   const createdAt = new Date();
   const db = drizzle(env.DB);
   // This publication's own reservations: another publishing the same
@@ -1875,11 +1917,13 @@ export const workflowVersions = async (
     .orderBy(desc(workflowResourceVersions.version));
   const bindings = await bindingsOf(env, workflow.id);
   const visible = await visibleTo(env, by, [...bindings.values()].flat());
+  // One lookup for the whole listing: each contract read once.
+  const lookup = catalogOnce(env);
   return await Promise.all(
     rows.map(
       async (row) =>
         await versionOf(
-          env,
+          lookup,
           row,
           (bindings.get(row.version) ?? []).map(
             (binding) => visible.get(binding) ?? binding
