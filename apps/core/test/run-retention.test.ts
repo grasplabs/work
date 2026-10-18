@@ -5,7 +5,6 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import {
   batchesPerSweep,
@@ -13,14 +12,14 @@ import {
   sweptPerBatch,
 } from "../src/workflows/retention.ts";
 import { startRun } from "../src/workflows/runs.ts";
-import { release, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import {
   approvalTests,
   asksOf,
   confirmedAnswer,
-  server as approvalServer,
+  approvalAppWith,
+  remember,
 } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
@@ -36,8 +35,13 @@ import {
   woken,
 } from "./runs.ts";
 import { openRpc, signedInApi } from "./sign-in.ts";
-import { v1AppWith } from "./v1-app-server.ts";
-import { runEvents, workflowFiles } from "./workflow-apps.ts";
+import {
+  appWith,
+  hitCall,
+  hitsOf,
+  runEvents,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // Retention of workflow runs, from its threat model (src/workflows/
 // retention.ts): once a run has ended for the deployment's retention, the
@@ -80,7 +84,7 @@ const keeps = workflowFiles(
   "keeps",
   `  const { notes = "" } = (input ?? {}) as { notes?: string };
   const read = await step.do("read", { description: "Read", input: { notes } }, async ({ input: given }) => given.notes);
-  await step.do("done", { description: "Count", sideEffect: true, input: { counter: "done" } }, async ({ input: given }) => await env.APP.call("hit", given.counter));
+  await step.do("done", { description: "Count", sideEffect: true, input: { counter: "done" } }, async ({ input: given }) => await ${hitCall(`given.counter`)});
   return { read };`,
   { read: "notes", done: 1 }
 );
@@ -120,7 +124,7 @@ const waits = workflowFiles(
   "waits",
   `  const { notes = "" } = (input ?? {}) as { notes?: string };
   const read = await step.do("work", { description: "Work" }, async () => {
-    await env.APP.call("hit", "work");
+    await ${hitCall(`"work"`)};
     return notes;
   });
   await step.sleep("go", { description: "Wait", duration: "1 day" });
@@ -146,22 +150,12 @@ export default workflow(
       description: "Approve: " + (input.note ?? "nothing"),
       from: input.from,
       ask: async ({ recipients, reminder }) => {
-        await env.APP.call("remember", recipients, reminder);
+${remember}
       },
       timeout: input.timeout,
     })
 );
 `;
-
-/** How often the App counted `name` (its server's `hit`). */
-const hitsOf = async (app: string, person: Person, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId: person.userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
 
 /** A run's row, as the database has it. */
 const rowOf = async (run: string) =>
@@ -250,7 +244,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("removes what an ended run read and returned once its retention is over, not a day before, and keeps the run", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, { ...keeps, ...fails });
+    const app = await appWith(builder, { ...keeps, ...fails });
     const done = await endedRun(builder, app, "keeps");
     const failed = await endedRun(builder, app, "fails");
     const before = {
@@ -376,7 +370,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("settles the receipt of a last attempt that never returned as its run ends, charging its lineage, and removes it once the run's retention is over", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, hangs);
+    const app = await appWith(builder, hangs);
     const run = await builder.api.workflows.start(app, "hangs");
     await finished(run.id);
     const lineage = async () =>
@@ -421,7 +415,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("removes a run's attempt receipts before it marks the run, so a sweep stopped in between leaves the run due, and the next finishes it", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, hangs);
+    const app = await appWith(builder, hangs);
     const run = await builder.api.workflows.start(app, "hangs");
     await finished(run.id);
     // The database fails at the sweep's second batch, once: the one after
@@ -464,7 +458,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("says how long details are kept as the deployment has it when the run is read, and keeps no number in the row", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, fails);
+    const app = await appWith(builder, fails);
     const failed = await endedRun(builder, app, "fails");
     const shorter = { ...env, RUN_RETENTION_DAYS: "7" };
 
@@ -496,7 +490,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("removes nothing while the deployment's retention is no number of days it may be", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, keeps);
+    const app = await appWith(builder, keeps);
     const old = await oldRuns(builder, app, 1, 4000);
 
     const invalid = [];
@@ -518,7 +512,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("has the engine keep each run's record for the deployment's retention, and no longer", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, keeps);
+    const app = await appWith(builder, keeps);
     const start = {
       app: appIdSchema.parse(app),
       workflow: workflowIdSchema.parse("keeps"),
@@ -557,7 +551,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("reads the same everywhere once its retention is over, swept or not: details removed, and nothing it returned or said", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, { ...keeps, ...fails });
+    const app = await appWith(builder, { ...keeps, ...fails });
     const done = await endedRun(builder, app, "keeps");
     const failed = await endedRun(builder, app, "fails");
     const before = await builder.api.workflows.status(done.id);
@@ -610,7 +604,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("never touches a run that hasn't ended, however long ago it started, stopped or not, and it goes on with all it did", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, waits);
+    const app = await appWith(builder, waits);
     const run = await builder.api.workflows.start(app, "waits", {
       notes: transcript,
     });
@@ -647,7 +641,7 @@ describe("run retention", { timeout: 60_000 }, () => {
         output: ended.output,
         removed: ended.detailsRemoved,
       },
-      worked: await hitsOf(app, builder, "work"),
+      worked: await hitsOf(builder, app, "work"),
     }).toStrictEqual({
       waiting: null,
       whileStopped: { removed: null, status: "paused", engine: true },
@@ -663,13 +657,10 @@ describe("run retention", { timeout: 60_000 }, () => {
   it("leaves a decision a run still waits for as it was asked, and removes it with the run once that has ended, its key too", async () => {
     const builder = await personApi("builder");
     const decider = await personApi("user");
-    const { id: app } = await builder.api.apps.create({ name: "Approvals" });
-    const version = await release(builder, app, {
-      "app/server.ts": approvalServer,
+    const app = await approvalAppWith(builder, {
       "workflows/approval.ts": keyedApproval,
       "workflows/approval.workflow-tests.ts": approvalTests,
     });
-    await serverBuilt(app, version);
     const run = await builder.api.workflows.start(app, "approval", {
       from: `person:${decider.userId}`,
       timeout: 7 * day,
@@ -741,7 +732,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("marks a run once when two sweeps run at once, and changes nothing when one runs again", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, fails);
+    const app = await appWith(builder, fails);
     const failed = await endedRun(builder, app, "fails");
     const [early, late] = [daysOn(31), daysOn(32)];
 
@@ -763,7 +754,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("takes no step when a swept run is started again: its trigger finds the run, and an instance under its ID is refused", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, keeps);
+    const app = await appWith(builder, keeps);
     const key = `schedule:${crypto.randomUUID()}`;
     const delivery = {
       app: appIdSchema.parse(app),
@@ -801,7 +792,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       instance: await runEngine(env).status(run.id),
       status: await builder.api.workflows.status(run.id),
       cancelled: await builder.api.workflows.cancel(run.id),
-      done: await hitsOf(app, builder, "done"),
+      done: await hitsOf(builder, app, "done"),
       completed: events.filter(
         ({ action, target }) =>
           action === "workflow.run.completed" && target?.id === run.id
@@ -820,7 +811,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("finishes a sweep that stopped before its rows were marked", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, fails);
+    const app = await appWith(builder, fails);
     const failed = await endedRun(builder, app, "fails");
 
     // The database fails as the rows are marked, as D1 can.
@@ -858,7 +849,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("removes the instance of a cancelled run the engine never ended, and leaves one it can't remove for the next sweep, sweeping the rest", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, { ...waits, ...keeps });
+    const app = await appWith(builder, { ...waits, ...keeps });
     const done = await endedRun(builder, app, "keeps");
     const run = await builder.api.workflows.start(app, "waits", {
       notes: transcript,
@@ -907,7 +898,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("sweeps a bounded number of runs at a time, and the rest the next time", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, keeps);
+    const app = await appWith(builder, keeps);
     const perSweep = batchesPerSweep * sweptPerBatch;
     const runs = await oldRuns(builder, app, perSweep + 1, 40);
 
@@ -923,7 +914,7 @@ describe("run retention", { timeout: 60_000 }, () => {
 
   it("finds the runs to sweep by an index, reading no table whole and sorting nothing", async () => {
     const builder = await personApi("builder");
-    const app = await v1AppWith(builder, keeps);
+    const app = await appWith(builder, keeps);
     // More than a batch, so the sweep pages on from its first.
     const runs = await oldRuns(builder, app, sweptPerBatch + 3, 40);
     // A fresh D1 has no statistics: SQLite goes by the queries alone.
