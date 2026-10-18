@@ -160,9 +160,10 @@ describe("the tab's one connection to core", () => {
   });
 
   it("lets a frame wait out a reconnect as long as it takes, while the shell's call gives up in its seconds", async () => {
-    // Each pause its whole ceiling (2, 4, 8 and 16 s after the first
-    // attempt): core is out longer than the shell waits. Drawn at random,
-    // the four could add up to less than its five seconds.
+    // Each pause its whole ceiling. The shell's call cuts the first (1 s)
+    // short; the four after it (2, 4, 8 and 16 s) keep core out for 30 s,
+    // longer than the shell waits. Drawn at random, they could add up to
+    // less than its five seconds.
     vi.spyOn(Math, "random").mockReturnValue(1);
     const { core, opened } = tab([one, "down", "down", "down", "down", one]);
     const before = await core.session();
