@@ -32,6 +32,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
+import { TestRun } from "../workflows/test-run.tsx";
 
 // One independent workflow (platform specification 13): for its builders,
 // its definition as a draft they edit, check and publish; for everyone
@@ -111,7 +112,7 @@ const WorkflowResourceView = ({
       {draft === undefined ? null : (
         // Kept while another tab shows: what was typed stays.
         <TabsContent keepMounted value="definition">
-          <div className="mx-auto w-full max-w-5xl p-6">
+          <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6">
             {draft.state === "ready" ? (
               <DefinitionEditor
                 currentVersion={currentVersion}
@@ -128,6 +129,9 @@ const WorkflowResourceView = ({
               />
             ) : (
               <NotLoadedState page={draft} />
+            )}
+            {currentVersion === null ? null : (
+              <TestRun version={currentVersion} workflow={resource.id} />
             )}
           </div>
         </TabsContent>

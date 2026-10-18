@@ -1582,6 +1582,10 @@ msgstr "Bound"
 msgid "Bound to"
 msgstr "Bound to"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Branch {name}"
+msgstr "Branch {name}"
+
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Breadcrumb"
@@ -1682,6 +1686,10 @@ msgstr "Caps"
 #: src/routes/_shell.settings.models.tsx
 msgid "Caps an admin set on a domain's model, on the domain's Resources tab, on top of the deployment's budgets, and what the domain's actions spent through it. A workflow's own AI steps don't count here."
 msgstr "Caps an admin set on a domain's model, on the domain's Resources tab, on top of the deployment's budgets, and what the domain's actions spent through it. A workflow's own AI steps don't count here."
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Case {name}, when it holds"
+msgstr "Case {name}, when it holds"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -2336,6 +2344,18 @@ msgctxt "kind of app"
 msgid "Developer tools"
 msgstr "Developer tools"
 
+#: src/workflows/definition-editor.tsx
+msgid "Diagram"
+msgstr "Diagram"
+
+#: src/workflows/definition-editor.tsx
+msgid "Diagram of revision {checkpointRevision}"
+msgstr "Diagram of revision {checkpointRevision}"
+
+#: src/workflows/definition-editor.tsx
+msgid "Diagram of the current version"
+msgstr "Diagram of the current version"
+
 #: src/dashboard/outcome-card.tsx
 msgid "Did this happen? {who}"
 msgstr "Did this happen? {who}"
@@ -2548,6 +2568,10 @@ msgstr "Email and calendar"
 msgid "Employee interviews"
 msgstr "Employee interviews"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Ends the workflow"
+msgstr "Ends the workflow"
+
 #: src/onboarding/staff-words.ts
 msgid "Enough is known ({known}% of {threshold}%): the company waits for Grasp's go"
 msgstr "Enough is known ({known}% of {threshold}%): the company waits for Grasp's go"
@@ -2707,6 +2731,7 @@ msgstr "Extracting"
 #: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
+#: src/workflows/workflow-diagram.tsx
 msgid "Failed"
 msgstr "Failed"
 
@@ -2807,6 +2832,14 @@ msgstr "Fold the navigation"
 #: src/routes/_shell.onboarding.tsx
 msgid "Fold the sections"
 msgstr "Fold the sections"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "For each {name}"
+msgstr "For each {name}"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "For each {name}, while it holds"
+msgstr "For each {name}, while it holds"
 
 #: src/connections/connect-dialog.tsx
 msgid "For everyone"
@@ -3105,6 +3138,10 @@ msgstr "HR"
 msgid "If {condition}:"
 msgstr "If {condition}:"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "If it fails"
+msgstr "If it fails"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "If the rest of the month goes like the days so far"
 msgstr "If the rest of the month goes like the days so far"
@@ -3133,6 +3170,10 @@ msgstr "In Workflows"
 #: src/workflows/independent-workflows.tsx
 msgid "Independent workflows"
 msgstr "Independent workflows"
+
+#: src/workflows/test-run.tsx
+msgid "Input"
+msgstr "Input"
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -3197,6 +3238,10 @@ msgstr "It can be sent once more, exactly as before. Nothing is undone."
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
 msgstr "It counts against the budgets as spent: the most it could have cost. This can't be undone."
+
+#: src/workflows/workflow-diagram.tsx
+msgid "It declares no tasks."
+msgstr "It declares no tasks."
 
 #: src/dashboard/outcome-card.tsx
 msgid "It didn't happen"
@@ -3453,6 +3498,10 @@ msgstr "Leads"
 #: src/onboarding/staff-words.ts
 msgid "Leads talked: {count} of {of}"
 msgstr "Leads talked: {count} of {of}"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Leaves this list"
+msgstr "Leaves this list"
 
 #: src/knowledge/uploads.tsx
 msgid "Let go to add them"
@@ -4295,6 +4344,10 @@ msgstr "Onboarding"
 msgid "Onboarding sections"
 msgstr "Onboarding sections"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Only if its condition holds"
+msgstr "Only if its condition holds"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
 msgstr "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
@@ -4445,6 +4498,10 @@ msgstr "Other domains may now call {name}, which {does}"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Otherwise:"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Otherwise: {name}"
+msgstr "Otherwise: {name}"
 
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
@@ -4738,6 +4795,10 @@ msgstr "Ran a workflow"
 #: src/dashboard/report.ts
 msgid "Ran without a person: {share}"
 msgstr "Ran without a person: {share}"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Reached"
+msgstr "Reached"
 
 #: src/activity/audit-log.tsx
 msgid "Read"
@@ -5183,6 +5244,7 @@ msgid "Running"
 msgstr "Running"
 
 #: src/workflows/history-view.tsx
+#: src/workflows/workflow-diagram.tsx
 msgctxt "an attempt of a step"
 msgid "Running"
 msgstr "Running"
@@ -5655,6 +5717,10 @@ msgstr "Stakeholder invited into Grasp"
 msgid "Stakeholder named: the {role}"
 msgstr "Stakeholder named: the {role}"
 
+#: src/workflows/test-run.tsx
+msgid "Start a test run"
+msgstr "Start a test run"
+
 #: src/knowledge/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Start again from version {newerVersion}"
@@ -5678,6 +5744,10 @@ msgstr "Started following a connection late: changes before then weren't read"
 #: src/activity/audit-words.ts
 msgid "Started following what changes at a connection"
 msgstr "Started following what changes at a connection"
+
+#: src/workflows/test-run.tsx
+msgid "Starting…"
+msgstr "Starting…"
 
 #: src/brain/brain.ts
 msgid "Statement"
@@ -5720,6 +5790,10 @@ msgstr "Stephen"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Stephen is reading it. This takes a minute."
 msgstr "Stephen is reading it. This takes a minute."
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Steps"
+msgstr "Steps"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -5886,6 +5960,10 @@ msgstr "Test"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Test of {workflow}"
 msgstr "Test of {workflow}"
+
+#: src/workflows/test-run.tsx
+msgid "Test run of version {version}"
+msgstr "Test run of version {version}"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -6079,6 +6157,10 @@ msgstr "The data processing agreement isn't signed"
 msgid "The default, {each}"
 msgstr "The default, {each}"
 
+#: src/workflows/test-run.tsx
+msgid "The details of this run were removed when its retention ended."
+msgstr "The details of this run were removed when its retention ended."
+
 #: src/brain/brain.ts
 msgid "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
 msgstr "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
@@ -6156,6 +6238,10 @@ msgstr "The full audit trail"
 msgctxt "onboarding area section"
 msgid "The go"
 msgstr "The go"
+
+#: src/workflows/test-run.tsx
+msgid "The input isn't JSON."
+msgstr "The input isn't JSON."
 
 #: src/onboarding/staff-words.ts
 msgid "The interview days are set"
@@ -6302,6 +6388,26 @@ msgstr "The risk assessment isn't done"
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 msgstr "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 
+#: src/workflows/test-run.tsx
+msgid "The run completed."
+msgstr "The run completed."
+
+#: src/workflows/test-run.tsx
+msgid "The run failed."
+msgstr "The run failed."
+
+#: src/workflows/test-run.tsx
+msgid "The run is going."
+msgstr "The run is going."
+
+#: src/workflows/test-run.tsx
+msgid "The run is starting."
+msgstr "The run is starting."
+
+#: src/workflows/test-run.tsx
+msgid "The run was stopped."
+msgstr "The run was stopped."
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "The sponsor's answer"
 msgstr "The sponsor's answer"
@@ -6360,6 +6466,10 @@ msgstr "Their tools"
 #: src/frame/person-menu.tsx
 msgid "Theme"
 msgstr "Theme"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Then {task}"
+msgstr "Then {task}"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
@@ -6657,6 +6767,10 @@ msgctxt "tab of a workflow"
 msgid "Triggers"
 msgstr "Triggers"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Try"
+msgstr "Try"
+
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
@@ -6815,6 +6929,10 @@ msgstr "Version {number}, current"
 msgid "Version {version}"
 msgstr "Version {version}"
 
+#: src/workflows/test-run.tsx
+msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
+msgstr "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
+
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
 msgstr "Version to review: {version}"
@@ -6848,6 +6966,10 @@ msgstr "Vision page"
 #: src/brain/brain.ts
 msgid "Vision page confirmed"
 msgstr "Vision page confirmed"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Waiting"
+msgstr "Waiting"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
@@ -7105,6 +7227,10 @@ msgstr "What the domain's actions may spend through this binding, on top of the 
 #: src/routes/_shell.settings.spend.tsx
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
+
+#: src/workflows/test-run.tsx
+msgid "What the run of version {traceVersion} did"
+msgstr "What the run of version {traceVersion} did"
 
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
