@@ -493,15 +493,16 @@ export default appTest({
       ),
       "tests/b.test.ts": suiteOf("t.equal(1, 1);"),
     });
-    // The suites may take 500 ms in all: the first starts with that much
-    // left and runs out of it, the second can't start.
+    // The suites may take 500 ms in all: the first runs out of it, and is
+    // told the run's limit (not the time it happened to have left), the
+    // second can't start.
     const { code, failures } = await refusal(
       built,
       envWith({ APP_TEST_LIMITS_MS: "//500" })
     );
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
-      "tests/a.test.ts: it stopped: didn't finish within 0.5 seconds",
+      "tests/a.test.ts: it stopped: the version's tests ran past their 0.5 seconds",
       "tests/b.test.ts: didn't run: the version's tests ran past their 0.5 seconds",
     ]);
   });
