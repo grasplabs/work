@@ -11,6 +11,11 @@ import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import { connectErrors } from "@grasp-os/shared/connect";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { streamMaxEmits } from "@grasp-os/shared/operation-limits";
@@ -23,6 +28,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { keepsReceipt } from "../src/action-invocation.ts";
 import { operationRoles } from "../src/app-access.ts";
+import { invocationFor, runInvocationFor } from "../src/app-functions.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
@@ -32,6 +38,7 @@ import {
   callMaxDepth,
   callMaxResourceRequests,
   callOperation,
+  useEvidenceWaitMs,
 } from "../src/operations.ts";
 import type {
   BoundResource,
@@ -39,7 +46,11 @@ import type {
   ResourceBindings,
   ResourceContext,
   Runner,
+  UseRefusal,
 } from "../src/operations.ts";
+import { hostedRelease } from "../src/release-runner.ts";
+import { allEvents } from "./audit-events.ts";
+import { appWith, seal } from "./sealed-apps.ts";
 
 // Actions (spec 7.4, 12): server functions with no database, which
 // compose the App's queries and mutations, each its own invocation, and
@@ -202,6 +213,12 @@ const letter = resource.template("letter", { contract: "grasp.letter@1" });
 // Guest chats it lists and reads, and never invites.
 const guestbook = resource.guests("guestbook", {
   operations: ["list", "read"],
+});
+
+/** A workflow the App declares, which no function here lists. */
+const followUp = resource.workflow("followUp", {
+  input: v.object({ who: v.string() }),
+  output: v.object({ status: v.string() }),
 });
 
 const sendMail = action({
@@ -612,7 +629,7 @@ const notesApp = app({
     "notes.blindCount": { tables: { notes: { insert: true } } },
   },
   screens: [],
-  uses: [mail, summarizer, help, letter, guestbook],
+  uses: [mail, summarizer, help, letter, guestbook, followUp],
 });
 
 const { manifest } = inspectApp(notesApp);
@@ -665,6 +682,8 @@ interface CallOptions {
   readonly cancelled?: AbortSignal;
   /** Told of each effect the call makes. */
   readonly onEffect?: () => void;
+  /** Keeps the evidence of a use the host refused. */
+  readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
 }
 
 const call = async (
@@ -681,6 +700,7 @@ const call = async (
     progress,
     cancelled,
     onEffect,
+    refusedUse,
   }: CallOptions = {}
 ): Promise<OperationResult> =>
   await callOperation(
@@ -695,6 +715,7 @@ const call = async (
       authorize:
         authorize ?? (async () => await operationRoles(env, owner, appId)),
       ...(resources === undefined ? {} : { resources }),
+      ...(refusedUse === undefined ? {} : { refusedUse }),
     },
     { path, kind },
     args,
@@ -2167,5 +2188,385 @@ describe("an action's nested calls", () => {
       ),
       runs,
     }).toStrictEqual({ answer: "done", runs: 2 });
+  });
+});
+
+describe("evidence of a refused use", () => {
+  it("is kept once per call, for the first use refused, before App code hears of it, naming only what the manifest has", async () => {
+    const fixture = await notes();
+    const resources = bindingsOf({
+      mail: bound("connector", "microsoft-365.mail@1", messageSent),
+    });
+    /** What a call of sendMail kept, its code asking `asks` and swallowing each refusal. */
+    const kept = async (
+      ...asks: ((channel: OperationChannel) => Promise<unknown>)[]
+    ) => {
+      const order: string[] = [];
+      const heard: UseRefusal[] = [];
+      const result = await call(
+        fixture,
+        "action",
+        "actions.sendMail",
+        { to: "ada@acme.test" },
+        {
+          resources,
+          // Kept only once a write's time has passed: a refusal App code
+          // heard first would come before it.
+          refusedUse: async (refusal) => {
+            await scheduler.wait(20);
+            heard.push(refusal);
+            order.push("kept");
+          },
+          run: misusing("actions.sendMail", async (channel) => {
+            for (const ask of asks) {
+              try {
+                // oxlint-disable-next-line no-await-in-loop -- one ask after another
+                await ask(channel);
+              } catch {
+                order.push("refused");
+              }
+            }
+            return { mailbox: "m" };
+          }),
+        }
+      );
+      return { result: codeOf(result), heard, order };
+    };
+    // An alias the App doesn't have, then one it has that sendMail doesn't
+    // list: only the first is kept, as App code's text it is named by no
+    // one.
+    const loop = await kept(
+      async (channel) => await channel.resource("nope", "search", [{}]),
+      async (channel) =>
+        await channel.resource("help", "search", [{ text: "a" }])
+    );
+    const appResource = await kept(
+      async (channel) =>
+        await channel.resource("help", "search", [{ text: "a" }])
+    );
+    // A function sendMail doesn't list, and one the App doesn't have.
+    const fn = await kept(
+      async (channel) =>
+        await channel.call("mutation", "notes.create", { title: "x" })
+    );
+    const noFunction = await kept(
+      async (channel) => await channel.call("query", "notes.nothing", {})
+    );
+    // A workflow the App declares that sendMail doesn't list.
+    const workflow = await kept(
+      async (channel) =>
+        await channel.resource("followUp", "start", [{ who: "Ada" }])
+    );
+    // A declared resource asked for an action it doesn't declare.
+    const request = await kept(
+      async (channel) => await channel.resource("mail", "call", ["delete", {}])
+    );
+    expect({
+      loop,
+      appResource: appResource.heard,
+      function: fn.heard,
+      noFunction: noFunction.heard,
+      workflow: workflow.heard,
+      request: request.heard,
+    }).toStrictEqual({
+      loop: {
+        result: "ok",
+        heard: [
+          {
+            function: "actions.sendMail",
+            use: { kind: "resource", name: null },
+            reason: "use_undeclared",
+            errorCode: "resource.not_allowed",
+          },
+        ],
+        // Kept before App code heard of the refusal.
+        order: ["kept", "refused", "refused"],
+      },
+      appResource: [
+        {
+          function: "actions.sendMail",
+          use: { kind: "resource", name: "help" },
+          reason: "use_undeclared",
+          errorCode: "resource.not_allowed",
+        },
+      ],
+      function: [
+        {
+          function: "actions.sendMail",
+          use: { kind: "function", name: "notes.create" },
+          reason: "use_undeclared",
+          errorCode: "operation.not_found",
+        },
+      ],
+      noFunction: [
+        {
+          function: "actions.sendMail",
+          use: { kind: "function", name: null },
+          reason: "use_undeclared",
+          errorCode: "operation.not_found",
+        },
+      ],
+      workflow: [
+        {
+          function: "actions.sendMail",
+          use: { kind: "workflow", name: "followUp" },
+          reason: "use_undeclared",
+          errorCode: "resource.not_allowed",
+        },
+      ],
+      request: [
+        {
+          function: "actions.sendMail",
+          use: { kind: "resource", name: "mail" },
+          reason: "request_not_allowed",
+          errorCode: "resource.not_allowed",
+        },
+      ],
+    });
+  });
+
+  it("is kept for a mutation asking a resource it can't use, and is no part of a refusal the hook couldn't keep, nor held by one that hangs", async () => {
+    const fixture = await notes();
+    const heard: UseRefusal[] = [];
+    const asked = await call(
+      fixture,
+      "mutation",
+      "notes.create",
+      { title: "x" },
+      {
+        refusedUse: async (refusal) => {
+          heard.push(refusal);
+          await Promise.resolve();
+        },
+        run: misusing(
+          "notes.create",
+          async (channel) =>
+            await channel.resource("mail", "call", ["send", {}])
+        ),
+      }
+    );
+    // A workflow the App declares that the mutation doesn't list.
+    const workflowHeard: UseRefusal[] = [];
+    const startsUnlisted = await call(
+      fixture,
+      "mutation",
+      "notes.create",
+      { title: "z" },
+      {
+        refusedUse: async (refusal) => {
+          workflowHeard.push(refusal);
+          await Promise.resolve();
+        },
+        run: misusing(
+          "notes.create",
+          async (channel) =>
+            await channel.resource("followUp", "start", [{ who: "Ada" }])
+        ),
+      }
+    );
+    // A hook that never settles holds App code no longer than the wait
+    // for evidence: the action hears of its refusal and answers.
+    const started = Date.now();
+    const hung = await call(
+      fixture,
+      "action",
+      "actions.sendMail",
+      { to: "ada@acme.test" },
+      {
+        within: 20_000,
+        resources: bindingsOf({
+          mail: bound("connector", "microsoft-365.mail@1", messageSent),
+        }),
+        refusedUse: async () => {
+          await Promise.withResolvers<null>().promise;
+        },
+        run: misusing("actions.sendMail", async (channel) => {
+          try {
+            await channel.resource("nope", "search", [{}]);
+          } catch {
+            // Swallowed.
+          }
+          return { mailbox: "m" };
+        }),
+      }
+    );
+    const tookMs = Date.now() - started;
+    // A hook that fails leaves the refusal as it was.
+    const failing = await call(
+      fixture,
+      "mutation",
+      "notes.create",
+      { title: "y" },
+      {
+        refusedUse: async () => {
+          await Promise.resolve();
+          throw new Error("Unavailable");
+        },
+        run: misusing(
+          "notes.create",
+          async (channel) =>
+            await channel.resource("mail", "call", ["send", {}])
+        ),
+      }
+    );
+    expect({
+      asked: codeOf(asked),
+      heard,
+      startsUnlisted: codeOf(startsUnlisted),
+      workflowHeard,
+      hung: codeOf(hung),
+      heldNoLonger: tookMs < useEvidenceWaitMs + 5000,
+      failing: codeOf(failing),
+    }).toStrictEqual({
+      asked: "operation.no_resources",
+      heard: [
+        {
+          function: "notes.create",
+          use: { kind: "resource", name: "mail" },
+          reason: "use_undeclared",
+          errorCode: "operation.no_resources",
+        },
+      ],
+      startsUnlisted: "operation.no_resources",
+      workflowHeard: [
+        {
+          function: "notes.create",
+          use: { kind: "workflow", name: "followUp" },
+          reason: "use_undeclared",
+          errorCode: "operation.no_resources",
+        },
+      ],
+      hung: "ok",
+      heldNoLonger: true,
+      failing: "operation.no_resources",
+    });
+  });
+
+  it("is kept by core as app.use.refused, from a person's call and a run's", async () => {
+    const fixture = await appWith({
+      "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+      "operations/notes.ts": `import { v } from "@grasp-os/sdk";
+import { action, query } from "#grasp/server";
+export const label = query({ args: {}, returns: v.string(), handler: () => "label" });
+export const probe = action({ args: {}, returns: v.null(), handler: async () => null });
+`,
+      "app.ts": `import { app } from "@grasp-os/sdk";
+import { label, probe } from "./operations/notes.ts";
+import schema from "./schema.ts";
+export default app({
+  name: "Notes",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { notes: { label, probe } },
+  screens: [],
+  uses: [],
+});
+`,
+    });
+    const release = await seal(fixture);
+    const hosted = hostedRelease(env, release);
+    // Code that goes around its SDK: it asks the host for a function its
+    // uses don't list, swallowing the refusal, and answers all the same.
+    const run: Runner = async (path, args, channel) => {
+      if (path !== "notes.probe") {
+        return await hosted.run(path, args, channel);
+      }
+      try {
+        await channel.call("query", "notes.label", {});
+      } catch {
+        // Swallowed.
+      }
+      return null;
+    };
+    const appId = appIdSchema.parse(fixture.app);
+    const personRequest = crypto.randomUUID();
+    const byPerson = await callOperation(
+      { manifest: release.app, run },
+      await invocationFor(env, release, {
+        by: fixture.owner,
+        requestId: personRequest,
+        deadline: Date.now() + 30_000,
+      }),
+      { path: "notes.probe", kind: "action" },
+      {}
+    );
+    const runId = runIdSchema.parse(crypto.randomUUID());
+    const runRequest = crypto.randomUUID();
+    const byRun = await callOperation(
+      { manifest: release.app, run },
+      await runInvocationFor(
+        env,
+        release,
+        {
+          run: {
+            app: appId,
+            workflow: workflowIdSchema.parse("probing"),
+            runId,
+            version: 1,
+            shareSubject: fixture.owner.userId,
+            authority: {
+              subject: { type: "app", appId },
+              onBehalfOf: fixture.owner.userId,
+              mode: "workflow",
+              appVersion: 1,
+            },
+          },
+          requestId: runRequest,
+          deadline: Date.now() + 30_000,
+          stillCurrent: async () => {
+            await Promise.resolve();
+          },
+          requireHolds: () => {
+            // The step holds its lease throughout.
+          },
+          held: () => {
+            throw new Error("Nothing is held here");
+          },
+        },
+        "notes.probe"
+      ),
+      { path: "notes.probe", kind: "action" },
+      {}
+    );
+    const events = await allEvents();
+    const kept = events
+      .filter(
+        (event) =>
+          event.action === "app.use.refused" && event.target?.id === appId
+      )
+      .map(({ actor, requestId, detail }) => ({ actor, requestId, detail }))
+      .toSorted((one, other) =>
+        String(one.detail?.runId).localeCompare(String(other.detail?.runId))
+      );
+    const evidence = (requestId: string, from: string | null) => ({
+      actor: { type: "app", appId, part: "server" },
+      requestId,
+      detail: {
+        version: 1,
+        person: fixture.owner.userId,
+        runId: from,
+        function: "notes.probe",
+        useKind: "function",
+        useName: "notes.label",
+        reason: "use_undeclared",
+        errorCode: "operation.not_found",
+      },
+    });
+    expect({
+      byPerson: codeOf(byPerson),
+      byRun: codeOf(byRun),
+      kept,
+    }).toStrictEqual({
+      byPerson: "ok",
+      byRun: "ok",
+      kept: [
+        evidence(runRequest, runId),
+        evidence(personRequest, null),
+      ].toSorted((one, other) =>
+        String(one.detail.runId).localeCompare(String(other.detail.runId))
+      ),
+    });
   });
 });
