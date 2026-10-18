@@ -3,10 +3,12 @@
  * (grasplabs/prototype `components/admin/org-health.tsx`): five signals
  * that each open their section, as the model works them out (`healthOf`).
  *
- * What core doesn't hold yet isn't counted as nothing: the work drawn from
- * the interviews and what the company connected come as null in its
- * snapshot, so the workflows say none is found yet and the connections say
- * only whether the sign-in is in, never a count of zero standing for "not
+ * What core doesn't hold yet isn't counted as nothing: the contract and
+ * the work drawn from the interviews are unknown to the model
+ * (`view.unknown`), and what the company connected comes as null in its
+ * snapshot, so the account says its contract isn't known yet, the
+ * workflows say none is found yet and the connections say only whether
+ * the sign-in is in, never a draft or a count of zero standing for "not
  * read".
  */
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
@@ -46,8 +48,9 @@ const levelWords: Record<HealthLevel, string> = {
   attention: "Needs Grasp",
 };
 
-/** What core holds of what the signals count: the drawn work and the connections are null until it does. */
+/** What core holds of what the signals count: the contract, the drawn work and the connections are unknown until it does. */
 interface Held {
+  contract: boolean;
   works: boolean;
   integrations: boolean;
 }
@@ -94,8 +97,12 @@ const interviewsLine = (
 
 const accountLine = (
   signal: Extract<HealthSignal, { area: "account" }>,
-  view: AdminView
+  view: AdminView,
+  held: Held
 ): string => {
+  if (!held.contract) {
+    return "Contract not known yet";
+  }
   if (signal.needs.includes("contract")) {
     return "Contract not signed";
   }
@@ -145,7 +152,7 @@ const lineOf = (signal: HealthSignal, view: AdminView, held: Held): string => {
         : `${signal.known} of ${signal.of} known`;
     }
     case "account": {
-      return accountLine(signal, view);
+      return accountLine(signal, view, held);
     }
     default: {
       return signal satisfies never;
@@ -154,12 +161,19 @@ const lineOf = (signal: HealthSignal, view: AdminView, held: Held): string => {
 };
 
 /**
- * A signal's level as the model has it; the workflows say nothing yet
- * while core holds no drawn work, for the model would count its absence
- * as none live once the company is open.
+ * A signal's level as the model has it; the workflows and the account say
+ * nothing yet while core holds no drawn work or contract, for the model
+ * would count the work's absence as none live once the company is open.
  */
-const levelOf = (signal: HealthSignal, held: Held): HealthLevel =>
-  signal.area === "workflows" && !held.works ? "none" : signal.level;
+const levelOf = (signal: HealthSignal, held: Held): HealthLevel => {
+  if (
+    (signal.area === "workflows" && !held.works) ||
+    (signal.area === "account" && !held.contract)
+  ) {
+    return "none";
+  }
+  return signal.level;
+};
 
 /**
  * How the company is doing, in five signals that each open their section:
@@ -177,7 +191,8 @@ export const OrgHealth = ({
   clientId: string;
 }) => {
   const held: Held = {
-    works: snapshot.works !== null,
+    contract: !view.unknown.contract,
+    works: !view.unknown.works,
     integrations: snapshot.integrations !== null,
   };
   return (

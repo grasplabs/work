@@ -193,7 +193,7 @@ describe("an organization's overview", () => {
         "Interviews: Not yet. Not started",
         "Brain: Good. 85% known, opens at 80%",
         "Workflows: Not yet. No workflows found yet",
-        "Account: Needs Grasp. Contract not signed",
+        "Account: Not yet. Contract not known yet",
       ].map((label) => html.includes(`aria-label="${label}"`)),
       opens: [
         ["Connections", `${base}/integrations`],
@@ -228,7 +228,7 @@ describe("an organization's overview", () => {
       stands: brief.includes(
         "Agreed<!-- -->. <!-- -->85<!-- -->% of what Grasp needs is known."
       ),
-      // The go and both agreements; the contract is fourth, past the three a brief holds.
+      // The go and both agreements; a contract core doesn't hold is nothing to bring up.
       bringUp: [
         "The company comes in once Grasp gives its go.",
         "The agreement on handling data is not signed yet.",
