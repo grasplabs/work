@@ -234,6 +234,9 @@ interface DeclaredUse {
 /** The uses `resource` declared: what makes a value one. */
 const declaredUses = new WeakMap<object, DeclaredUse>();
 
+/** The knowledge operations, as `resource.knowledge` takes them. */
+const knowledgeOperations: ReadonlySet<string> = new Set(["search", "read"]);
+
 /** The most operations one connector use declares. */
 const maxOperations = 64;
 /** The longest operation name. */
@@ -244,17 +247,19 @@ const maxOperationChars = 256;
  * nothing the module keeps can change what was declared. Read by index,
  * each item once: no iterator module code could replace.
  */
-const operationsOf = (value: unknown): readonly string[] => {
+const operationsOf = (
+  value: unknown,
+  /** Whose operations, as an error names the use: "connector" or "knowledge". */
+  kind: "connector" | "knowledge"
+): readonly string[] => {
+  const most = kind === "knowledge" ? knowledgeOperations.size : maxOperations;
+  const listed = `A ${kind} use's \`operations\` list the 1 to ${most} operations the action calls.`;
   if (!Array.isArray(value)) {
-    return refuse(
-      `A connector's \`operations\` list the 1 to ${maxOperations} operations the action calls.`
-    );
+    return refuse(listed);
   }
   const { length } = value;
-  if (length === 0 || length > maxOperations) {
-    return refuse(
-      `A connector's \`operations\` list the 1 to ${maxOperations} operations the action calls.`
-    );
+  if (length === 0 || length > most) {
+    return refuse(listed);
   }
   const copy: string[] = [];
   const seen = new Set<string>();
@@ -267,7 +272,7 @@ const operationsOf = (value: unknown): readonly string[] => {
       seen.has(name)
     ) {
       return refuse(
-        "Name each operation of a connector's `operations` once, exactly."
+        `Name each operation of a ${kind} use's \`operations\` once, exactly.`
       );
     }
     seen.add(name);
@@ -333,9 +338,6 @@ export interface KnowledgeUseOptions<Operation extends KnowledgeOperation> {
   readonly operations: readonly Operation[];
 }
 
-/** The knowledge operations, as `resource.knowledge` takes them. */
-const knowledgeOperations: ReadonlySet<string> = new Set(["search", "read"]);
-
 /** What a model use declares besides its alias. */
 export interface ModelUseOptions<Output extends AnySchema> {
   /** The shape every answer of the binding's model takes for this action. */
@@ -358,7 +360,11 @@ export const resource = freeze({
         "Declare the operations a connector's action calls: `{ operations: [...] }`."
       );
     }
-    return declareUse("connector", alias, operationsOf(property.value));
+    return declareUse(
+      "connector",
+      alias,
+      operationsOf(property.value, "connector")
+    );
   },
   // An App export is one operation: nothing more to declare.
   operation: <const Alias extends string>(alias: Alias) =>
@@ -401,11 +407,8 @@ export const resource = freeze({
         'Declare the operations a knowledge use calls: `{ operations: ["search", "read"] }`.'
       );
     }
-    const operations = operationsOf(property.value);
-    if (
-      operations.length > knowledgeOperations.size ||
-      operations.some((operation) => !knowledgeOperations.has(operation))
-    ) {
+    const operations = operationsOf(property.value, "knowledge");
+    if (operations.some((operation) => !knowledgeOperations.has(operation))) {
       return refuse('A knowledge use calls "search", "read" or both.');
     }
     return declareUse<Alias, "knowledge", AnySchema, Operation>(
