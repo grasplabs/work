@@ -56,6 +56,12 @@ const dist = path.join(root, "dist");
 const modules = path.join(root, "node_modules");
 const ui = realpathSync(path.join(modules, "@grasp-os/ui"));
 const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
+/**
+ * The SDK's own dependency: its types name `@grasp-os/shared`'s (a
+ * workflow's `emailMessage`, a run's errors), so the kit's types hold
+ * them, or a check would read each as `any`.
+ */
+const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
 const require = createRequire(path.join(root, "package.json"));
 
 /** React as the kit's modules, App modules and packages import it. */
@@ -568,6 +574,8 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
       name = `/node_modules/@grasp-os/ui${real.slice(ui.length)}`;
     } else if (real.startsWith(`${sdk}/`)) {
       name = `/node_modules/@grasp-os/sdk${real.slice(sdk.length)}`;
+    } else if (real.startsWith(`${shared}/`)) {
+      name = `/node_modules/@grasp-os/shared${real.slice(shared.length)}`;
     } else if (inPackage === real) {
       // The compiler's own package.json, read for the entry.
       continue;
@@ -920,6 +928,8 @@ const buildScreenCompiler = async (
       "@grasp-os/sdk/database",
       // And its tests, against the SDK's testing module (app-code.ts).
       "@grasp-os/sdk/testing",
+      // And its workflows, against the SDK's workflow modules.
+      ...sdkImports,
     ]),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.

@@ -62,10 +62,10 @@ const fixed = restyled.replace(
 
 /** A workflow of the draft, with its tests. */
 const intake = {
-  "workflows/intake.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+  "workflows/intake.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("intake", { params: {}, input: z.unknown() }, async (step, { input }) => {
-  return await step.do("read", { description: "Read the invoice" }, async () => input);
+  return await step.do("read", { description: "Read the invoice" }, async () => input as Json);
 });
 `,
   "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
@@ -248,13 +248,13 @@ export default workflowTests(definition, [{ name: "runs", mocks: { limit: 1, boo
 /** A workflow whose first step calls a helper, the second a connection. */
 const digest = (to: string) => ({
   "workflows/lib/total.ts": "export const total = (n: number) => n + 1;\n",
-  "workflows/digest.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+  "workflows/digest.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 import { total } from "./lib/total.ts";
 
 export default workflow("digest", { params: {}, input: z.unknown() }, async (step, { env }) => {
   const sum = await step.do("sum", { description: "Sum" }, async () => total(1));
-  await step.do("mail", { description: "Mail" }, async () => await env.MAIL.call("mail.send", ${JSON.stringify(to)}));
+  await step.do("mail", { description: "Mail" }, async () => (await env.MAIL.call("mail.send", ${JSON.stringify(to)})) as Json);
   return sum;
 });
 `,
@@ -306,9 +306,9 @@ export const bindings = (): unknown => taken;
 import { bindings } from "./lib/take.ts";
 
 export default workflow("sweep", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  let app;
+  let app!: { sendAll: () => Promise<number> };
   await step.do("prepare", { description: "Prepare" }, async () => {
-    app = appServer(env);
+    app = appServer(env) as unknown as typeof app;
     return bindings() === undefined;
   });
   return await step.do("tidy-up", { description: "Tidy" }, async () => await app.sendAll());
@@ -1448,10 +1448,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");
     const notify = {
-      "workflows/notify.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/notify.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("notify", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  return await step.do("save", { description: "Save it" }, async () => await env.APP.call("hits", "notify"));
+  return await step.do("save", { description: "Save it" }, async () => (await env.APP.call("hits", "notify")) as Json);
 });
 `,
       "workflows/notify.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";

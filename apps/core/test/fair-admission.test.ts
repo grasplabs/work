@@ -200,7 +200,7 @@ const shown = (answer: Awaited<ReturnType<typeof admit>>): string =>
 /** A step that takes about `ms`, then returns 1. */
 const working = (name: string, ms: number) =>
   `  await step.do("${name}", { description: "Work" }, async () => {
-    await scheduler.wait(${ms});
+    await new Promise((resolve) => setTimeout(resolve, ${ms}));
     return 1;
   });`;
 
@@ -1324,7 +1324,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       ...workflowFiles(
         "mailer",
         `  await step.sleep("pause", { description: "Wait", duration: "3 seconds" });
-  return await step.do("send", { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input: mail }) => JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output));`,
+  return await step.do("send", { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input: mail }) => JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output));`,
         { send: { messageId: "mocked" } }
       ),
     });
@@ -1656,7 +1656,7 @@ const slow = (ms: number) =>
   workflowFiles(
     "slow",
     `  await step.do("slow", { description: "Work", timeout: "1 minute" }, async () => {
-    await scheduler.wait(${ms});
+    await new Promise((resolve) => setTimeout(resolve, ${ms}));
     return 1;
   });
   return 1;`,

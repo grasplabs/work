@@ -58,6 +58,9 @@ import { namePattern, nameRule, stepOptionSchemas } from "./steps.ts";
 // Workflow code imports only this module, so it gets Zod from here too.
 export { z } from "zod";
 export type { ParamKind, ParamValue } from "./params.ts";
+// What a step records and a binding is handed: a workflow's code names it
+// to narrow what a binding answers (`unknown`) into a step's result.
+export type { Json } from "@grasp-os/shared/json";
 // The input schemas of runs an email trigger (`input: emailMessage`) and an
 // event trigger (`input: connectorEvent`) start, and what they parse to.
 export {
@@ -305,7 +308,7 @@ export interface DoOptions<Input extends StepInput = StepInput>
  * no output:
  *
  *   try {
- *     return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
+ *     return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
  *   } catch (error) {
  *     if (error.code === resolvedDone) return { sent: true };
  *     throw error;

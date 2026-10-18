@@ -83,7 +83,7 @@ export default workflow(
     const order = await step.do(
       "match-po",
       { description: "Find the purchase order the invoice refers to", locked: true, input: input.purchaseOrder },
-      async ({ input: number }) => await ${appCall("ledger.purchaseOrder", "query", "{ number }")}
+      async ({ input: number }) => await ${appCall("ledger.purchaseOrder", "query", "{ number }", "{ amount: number } | null")}
     );
     if (!order) {
       return { status: "unmatched" };
@@ -115,7 +115,7 @@ export default workflow(
         locked: true,
         input: { invoice: input.number, total: extracted.total },
       },
-      async ({ input: booking }) => await ${appCall("ledger.book", "mutation", "booking")}
+      async ({ input: booking }) => await ${appCall("ledger.book", "mutation", "booking", "string")}
     );
     return { status: "booked", entry };
   }
@@ -156,7 +156,7 @@ const mailStep = (
       await env.OUTLOOK.call("mail.list", {});
       return "sent";
     } catch (error) {
-      if (error.code === "connect.connection_not_found") {
+      if ((error as { code?: string }).code === "connect.connection_not_found") {
         return "reached";
       }
       throw error;
@@ -409,7 +409,7 @@ export class App extends DurableObject {
         "saver",
         `  // ${mark}
   await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("save", { description: "Save", retries: { limit: 0 } }, async () => await env.APP.call("save", ${JSON.stringify(path)}));`,
+  return await step.do("save", { description: "Save", retries: { limit: 0 } }, async () => (await env.APP.call("save", ${JSON.stringify(path)})) as Json);`,
         { save: 1 }
       ),
     });
@@ -646,14 +646,14 @@ ${mailStep("after")}`,
       await env.OUTLOOK.call("mail.list", {});
       read = "ok";
     } catch (error) {
-      read = error.code;
+      read = (error as { code?: string }).code;
     }
     let other;
     try {
       await env.DRIVE.call("files.list", {});
       other = "ok";
     } catch (error) {
-      other = error.code;
+      other = (error as { code?: string }).code;
     }
     return { fetched, read, other };
   });`,
@@ -691,7 +691,7 @@ ${mailStep("after")}`,
       `  return await step.do("take", { description: "Take" }, async () => {
     const bindings = taken.find((one) => typeof one?.APP?.callFunction === "function");
     if (bindings !== undefined) {
-      await bindings.APP.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "taken", execution: crypto.randomUUID() });
+      await bindings.APP?.callFunction?.({ contractId: "counter.hit", kind: "action" }, { name: "taken", execution: crypto.randomUUID() });
     }
     return bindings === undefined ? "nothing" : "bindings";
   });`,
@@ -700,20 +700,21 @@ ${mailStep("after")}`,
     // As the module loads, it puts its own in place of what a run's
     // bindings could be built with, each keeping what it is handed: no
     // `env` anywhere in its code.
-    const takes = `const taken = [];
+    const takes = `const taken: { APP?: { callFunction?: (...args: object[]) => Promise<unknown> } }[] = [];
 const RealProxy = globalThis.Proxy;
-globalThis.Proxy = function (target, handler) {
+// Past the types, as a module that takes what it is handed would be.
+globalThis.Proxy = function (target: object, handler: ProxyHandler<object>) {
   taken.push(target);
   return new RealProxy(target, handler);
-};
+} as unknown as ProxyConstructor;
 const realFromEntries = Object.fromEntries;
-Object.fromEntries = (entries) => {
+Object.fromEntries = (entries: Iterable<readonly [PropertyKey, unknown]>) => {
   const made = realFromEntries(entries);
   taken.push(made);
   return made;
 };
 const realHasOwn = Object.hasOwn;
-Object.hasOwn = (target, name) => {
+Object.hasOwn = (target: object, name: PropertyKey) => {
   taken.push(target);
   return realHasOwn(target, name);
 };
@@ -786,7 +787,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
   it("take shared code from a folder under workflows/, and say which files are workflows", async () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Shared" });
-    const helper = `export const greeting = (name) => \`Hello, \${name}\`;\n`;
+    const helper = `export const greeting = (name: string) => \`Hello, \${name}\`;\n`;
     const greet = workflowFiles("greet", `  return greeting("Anna");`);
     const importing = (from: string) =>
       `import { greeting } from "${from}";\n${greet["workflows/greet.ts"]}`;
@@ -832,9 +833,16 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
     const admin = await personApi("admin");
     // Written by hand, past the SDK: the host is the boundary, not the SDK.
     const rogue = {
-      "workflows/rogue.ts": `export default {
+      "workflows/rogue.ts": `import type { WorkflowDefinition } from "@grasp-os/sdk/workflow";
+
+// Past the SDK: the engine as the host hands it to a run's code.
+type Engine = {
+  do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>;
+};
+
+export default {
   metadata: { id: "rogue", params: [] },
-  run: async (engine) => {
+  run: async (engine: Engine) => {
     await engine.do("$sneaky", {}, async () => "sneaked");
     // Steps the engine would refuse, which it fails the whole run for:
     // caught here, they must fail no more than their step.
@@ -848,7 +856,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
     try {
       await engine.do("$grasp:end", {}, async () => null);
     } catch (error) {
-      hijack = error.code;
+      hijack = String((error as { code?: string }).code);
     }
     try {
       await engine.do("failing", { retries: { limit: 0 } }, async () => {
@@ -860,7 +868,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
       name: "n".repeat(300),
     });
   },
-};
+} as unknown as WorkflowDefinition<never>;
 `,
       "workflows/rogue.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
 import definition from "./rogue.ts";
@@ -1106,12 +1114,12 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     const app = await appWith(admin, {
       ...workflowFiles(
         "outside",
-        `  const codeOf = async (key) => {
+        `  const codeOf = async (key: string) => {
     try {
       ${sendWith("key")};
       return "sent";
     } catch (error) {
-      return error.code;
+      return (error as { code?: string }).code;
     }
   };
   const outside = await codeOf("keys-outside");
@@ -1137,14 +1145,14 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
       try {
         ${sendWith('idempotencyKey + ":attempt-2"')};
       } catch (error) {
-        perAttempt = error.code;
+        perAttempt = String((error as { code?: string }).code);
       }
       // A constant key would answer every run with the first run's mail.
       let constant = "sent";
       try {
         ${sendWith('"invoice-INV-7"')};
       } catch (error) {
-        constant = error.code;
+        constant = String((error as { code?: string }).code);
       }
       return { perAttempt, constant };
     }

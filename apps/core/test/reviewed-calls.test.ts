@@ -312,7 +312,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
       "send",
       { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)} },
       async ({ idempotencyKey, input: mail }) =>
-        JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output)
+        JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output)
     );
   } catch (error) {
     throw error;
@@ -348,7 +348,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const admin = await personApi("admin");
     const files = workflowFiles(
       "tidy",
-      `  let app;
+      `  let app!: typeof env.APP;
   await step.do("prepare", { description: "Prepare" }, async () => {
     app = env.APP;
   });
@@ -415,7 +415,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
 queueMicrotask(() => {
   try {
     Object.assign(me, {
-      run: async (engine) => {
+      run: async (engine: { do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>; env: { APP: { callFunction: (...args: object[]) => Promise<unknown> } } }) => {
         await engine.do("tidy:x1", {}, async () => await engine.env.APP.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "swapped", execution: "swapped" }));
         return "swapped";
       },
@@ -424,8 +424,8 @@ queueMicrotask(() => {
 });
 `;
     const source = (files["workflows/tidy.ts"] ?? "").replace(
-      'import { workflow, z } from "@grasp-os/sdk/workflow";\n',
-      `import { workflow, z } from "@grasp-os/sdk/workflow";\n${swaps}`
+      '} from "@grasp-os/sdk/workflow";\n',
+      `} from "@grasp-os/sdk/workflow";\n${swaps}`
     );
     const app = await appWith(admin, {
       ...files,

@@ -680,6 +680,11 @@ export interface CodeKind {
   folder: string;
   /** The modules it may import besides its own files, and their flat names. */
   imports: ReadonlyMap<string, string>;
+  /**
+   * Whether its types are checked (`buildWorkflows`): then nothing in it
+   * may steer the check, no directive, suppression or ambient module.
+   */
+  typeChecked?: boolean;
 }
 
 /** Server code imports its own files and the Workers runtime. */
@@ -705,6 +710,7 @@ export const workflowCode: CodeKind = {
   imports: new Map(
     sdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
   ),
+  typeChecked: true,
 };
 
 /**
@@ -784,10 +790,17 @@ export const codeImportError = (
   file: string,
   files: ReadonlySet<string>
 ): string | undefined => {
-  // Its types are stripped, never checked (GRA-675 checks them): an
-  // ambient module there reaches nothing yet.
+  // An ambient module would declare, or shadow, a module by name in the
+  // type check, or `declare global` give every file globals its isolate
+  // doesn't have: code whose types are checked declares none. In code
+  // whose types are stripped (the v1 server's), it reaches nothing.
   if (ambient) {
-    return undefined;
+    if (kind.typeChecked !== true) {
+      return undefined;
+    }
+    return specifier === undefined
+      ? `declare global is never in ${kind.name.toLowerCase()} code: it would declare globals its isolate doesn't have, for every file.`
+      : `declare module "${specifier}" is never in ${kind.name.toLowerCase()} code: it would declare, or shadow, a module the SDK doesn't give it.`;
   }
   if (typeOnly) {
     return typeImportError(file, specifier, false);
