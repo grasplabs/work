@@ -757,13 +757,17 @@ export const computeSdkImports = [
 /** What core's compute call loads besides them (never importable). */
 export const computeRunnerImports = ["@grasp-os/sdk/compute-runner"] as const;
 
-/** Compute modules import their own files and `computeSdkImports`. */
+/**
+ * Compute modules import their own files and `computeSdkImports`, and are
+ * type-checked (`buildComputeModules`): nothing in them may steer it.
+ */
 export const computeCode: CodeKind = {
   name: "Compute module",
   folder: "code/",
   imports: new Map(
     computeSdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
   ),
+  typeChecked: true,
 };
 
 /**
@@ -819,10 +823,9 @@ export const codeImportError = (
 ): string | undefined => {
   // An ambient module would declare, or shadow, a module by name in the
   // type check, or `declare global` give every file globals its isolate
-  // doesn't have: code of a `typeChecked` kind declares none. The v1
-  // server's types are stripped, so there it reaches nothing. Compute
-  // modules are type-checked without this refusal yet (GRA-725), so there
-  // it still reaches their check.
+  // doesn't have: code of a `typeChecked` kind (App workflows, compute
+  // modules) declares none. The v1 server's types are stripped, and
+  // generated workflow code is the host's own, so there it reaches nothing.
   if (ambient) {
     if (kind.typeChecked !== true) {
       return undefined;

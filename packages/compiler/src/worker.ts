@@ -49,6 +49,7 @@ import {
   rewriteAppCodeImports,
   rewriteCodeImports,
   computeCodeWith,
+  computeSdkImports,
   generatedWorkflowCode,
   rewriteImports,
   screenTypeImportError,
@@ -389,6 +390,16 @@ const workflowTarget = serverTarget(
 );
 
 /**
+ * How a JSON workflow's compute modules are type-checked (type-check.ts):
+ * a worker's lib and no DOM, which their isolate doesn't have, no JSX,
+ * each file a module of its own; and by name only the SDK's modules they
+ * may import (`computeSdkImports`), with their own files. An approved
+ * package entry resolves to no file, so to the ambient module the host
+ * declares for it (`buildComputeModules`), never to anything of the kit.
+ */
+const computeTarget = serverTarget({}, new Set(computeSdkImports));
+
+/**
  * Type-checks the App against the kit's types and lints it against the
  * kit's design system.
  */
@@ -701,11 +712,11 @@ const computePackagesOf = (
 
 /**
  * Builds a JSON workflow's compute modules (`code/<file>.ts`): compiled as
- * App workflow code is, importing only each other,
- * `@grasp-os/sdk/compute` and the approved package entries their version
- * seals, if any (`computeCodeWith`, named by core in
- * `computePackagesFile`), and type-checked against that SDK's
- * declarations, as generated workflow code is (spec 19.1), each package
+ * App workflow code is, importing only each other, the compute SDK and
+ * the approved package entries their version seals, if any
+ * (`computeCodeWith`, named by core in `computePackagesFile`), nothing in
+ * them steering the check; and type-checked against that SDK's
+ * declarations with a worker's lib (`computeTarget`), each package
  * entry as a module of no declared types (a package carries none). Their
  * errors are their author's.
  */
@@ -738,9 +749,11 @@ export const buildComputeModules = (
             .map((entry) => `declare module ${JSON.stringify(entry)};`)
             .join("\n"),
         };
-  const diagnostics = typeCheck({ ...files, ...declared }, kit.types).filter(
-    (diagnostic) => isError(diagnostic)
-  );
+  const diagnostics = typeCheck(
+    { ...files, ...declared },
+    kit.types,
+    computeTarget
+  ).filter((diagnostic) => isError(diagnostic));
   return diagnostics.length > 0 ? { ok: false, diagnostics } : built;
 };
 
