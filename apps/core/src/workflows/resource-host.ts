@@ -64,7 +64,7 @@ import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { makeCall } from "./resource-calls.ts";
+import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
 
@@ -2283,6 +2283,15 @@ export class ResourceRunHost
               this.#requireCurrent(attempt);
             },
             fromAction: true,
+          });
+        },
+        refused: async (refusal) => {
+          await auditAdmissionRefusal(this.#env, this.#run.calling, {
+            build: this.#run.build.hash,
+            task: task.id,
+            attempt: attempt.number,
+            generation: attempt.generation,
+            ...refusal,
           });
         },
       }
