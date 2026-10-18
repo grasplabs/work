@@ -240,6 +240,8 @@ const OrgColumn = ({
   const opens = stageLines(view).open;
   const waits = view.knowledge.ready && view.knowledge.opened === null;
   const date = formatDate(dateOn(view.org, view.day));
+  // The last day the links worked: the plan's days count from day 0.
+  const lastDay = formatDate(dateOn(view.org, listenDays(view.org) - 1));
 
   if (folded) {
     return (
@@ -329,7 +331,7 @@ const OrgColumn = ({
         <div className="text-muted-foreground flex flex-none flex-col gap-1 border-t px-5 py-3 text-xs">
           <span>
             {view.closed
-              ? `The interviews closed on ${date}`
+              ? `The interviews closed on ${lastDay}`
               : `The interviews, on ${date}`}
           </span>
           <span className="text-foreground tabular-nums">
