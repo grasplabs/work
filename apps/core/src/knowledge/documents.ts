@@ -110,7 +110,7 @@ const fileTitle = (path: string): string => {
  */
 const titleOf = (
   path: string,
-  { type, frontmatter }: ParsedRecord,
+  { type, frontmatter }: ParsedDocument,
   found: readonly Section[]
 ): string => {
   const name =
@@ -134,7 +134,7 @@ export const indexedValuesOf = (
   path: string,
   text: string
 ): string[] | undefined => {
-  let parsed: ParsedRecord;
+  let parsed: ParsedDocument;
   try {
     parsed = parseBaseFields(path, text);
   } catch {
