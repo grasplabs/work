@@ -274,6 +274,63 @@ describe("blueprints", { timeout: 60_000 }, () => {
     });
   });
 
+  // Only reads of a collection are declarable now: a grant or a blueprint
+  // kept from before, holding a collection to write, is refused, never
+  // asked for again, and never an internal error.
+  it("ask for no collection to write, whatever an App or a blueprint held from before", async () => {
+    const owner = await personApi("builder");
+    const admin = await signedInApi(idp, "admin");
+    const source = await notesApp(owner);
+    const { collectionId } = await collectionWithNote(admin.api, {
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await requestGranted(
+      idp,
+      owner,
+      readCollection({ type: "app", appId: source }, collectionId)
+    );
+    const writes = async (actions: string[]) =>
+      await env.DB.prepare(
+        "UPDATE permissions SET actions = ? WHERE subject_id = ? AND object_type = 'collection'"
+      )
+        .bind(JSON.stringify(actions), source)
+        .run();
+    await writes(["read", "write"]);
+    const markedWhileWriting = await outcome(
+      owner.api.apps.blueprints.mark(source, 1)
+    );
+    await writes(["read"]);
+    const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
+    await env.DB.prepare("UPDATE blueprints SET permissions = ? WHERE id = ?")
+      .bind(
+        JSON.stringify([
+          {
+            object: { type: "collection", collectionId },
+            actions: ["read", "write"],
+            binding: "HANDBOOK",
+          },
+        ]),
+        blueprint
+      )
+      .run();
+    const name = `Copy ${unique()}`;
+    const created = await outcome(
+      owner.api.apps.blueprints.create(blueprint, { name })
+    );
+    const copies = await env.DB.prepare(
+      "SELECT count(*) AS copies FROM apps WHERE name = ?"
+    )
+      .bind(name)
+      .first<number>("copies");
+
+    expect({ markedWhileWriting, created, copies }).toStrictEqual({
+      markedWhileWriting: "permission.invalid",
+      created: "permission.invalid",
+      copies: 0,
+    });
+  });
+
   it("create an App with the same code and none of the data, audited", async () => {
     const [owner, maker, admin] = await Promise.all([
       personApi("builder"),
