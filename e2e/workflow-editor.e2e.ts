@@ -299,3 +299,95 @@ test("a builder sees every declared branch of the checked definition, and a test
     })
   ).toBeVisible();
 });
+
+/** A module whose `total` sums whole numbers, as a calculation. */
+const totalModule = `import { compute, v } from "@grasp-os/sdk/compute";
+
+export const total = compute({
+  input: v.array(v.number().integer().min(0)).max(100),
+  output: v.number().integer().min(0),
+  handler: (amounts) => amounts.reduce((all, amount) => all + amount, 0),
+});
+`;
+
+/** A definition of `name` whose one task calls `local:code/total.ts#total`. */
+const totalling = (name: string): string =>
+  JSON.stringify(
+    {
+      ...JSON.parse(definition(name, "unused")),
+      document: {
+        dsl: "1.0.3",
+        namespace: "workspace",
+        name,
+        version: "1.0.0",
+        title: name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: {
+              total: { kind: "compute", contract: "local:code/total.ts#total" },
+            },
+          },
+        },
+      },
+      output: {
+        schema: {
+          format: "json",
+          document: {
+            type: "object",
+            properties: { sum: { type: "number" } },
+            required: ["sum"],
+            additionalProperties: false,
+          },
+        },
+      },
+      do: [
+        {
+          add: {
+            call: "grasp.compute",
+            with: { binding: "total", arguments: "${ [1, 2, 3] }" },
+          },
+        },
+        { answer: { set: { sum: "${ . }" } } },
+      ],
+    },
+    null,
+    2
+  );
+
+test("a builder writes a module beside the definition, calls it through a local binding, and publishes both", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("workflowModules");
+  const page = await pageOf(builder);
+  const name = `totalled-${crypto.randomUUID().slice(0, 8)}`;
+  await page.goto("/workflows");
+  await page.getByLabel("Name of a new workflow").fill(name);
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+
+  // Without its module, the binding names nothing the workflow has.
+  await save(page, totalling(name));
+  await expect(
+    page.getByText("Revision 1 doesn't pass yet, and no revision has.")
+  ).toBeVisible();
+
+  await page.getByLabel("Path of a new module").fill("code/total.ts");
+  await page.getByRole("button", { name: "Add module" }).click();
+  await page.getByLabel("code/total.ts", { exact: true }).fill(totalModule);
+  await page.getByRole("button", { name: "Check and save" }).click();
+  await expect(
+    page.getByText("Revision 2 passes the profile and can be published.")
+  ).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Publish revision 2" }).click();
+  await expect(page.getByText("Published as version 1.")).toBeVisible({
+    timeout: 30_000,
+  });
+
+  // Read again, the draft carries the module it published.
+  await page.reload();
+  await expect(page.getByLabel("code/total.ts", { exact: true })).toHaveValue(
+    totalModule
+  );
+});

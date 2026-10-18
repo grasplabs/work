@@ -60,22 +60,24 @@ export const workflowShareSchema = workflowMemberSchema.extend({
  * the publisher built on (null for the first), so two publications don't
  * silently move the current version past each other.
  */
+/**
+ * The workflow's own modules, by path (`code/<file>.ts`): calculations its
+ * `grasp.compute` tasks call (workflow-modules.ts), within what a version
+ * carries.
+ */
+const workflowModulesSchema = z
+  .record(z.string(), z.string())
+  .superRefine((modules, context) => {
+    const error = workflowModulesError(modules);
+    if (error !== undefined) {
+      context.addIssue({ code: "custom", message: error });
+    }
+  });
+
 export const workflowPublishSchema = z.strictObject({
   definition: z.string(),
   basedOn: z.number().int().positive().nullable(),
-  /**
-   * The workflow's own modules, by path (`code/<file>.ts`): calculations
-   * its `grasp.compute` tasks call (workflow-modules.ts).
-   */
-  modules: z
-    .record(z.string(), z.string())
-    .superRefine((modules, context) => {
-      const error = workflowModulesError(modules);
-      if (error !== undefined) {
-        context.addIssue({ code: "custom", message: error });
-      }
-    })
-    .optional(),
+  modules: workflowModulesSchema.optional(),
 });
 
 export const workflowResourceErrors = defineErrorFamily({
@@ -693,6 +695,11 @@ export const workflowDraftEditSchema = z.strictObject({
       (text) => new TextEncoder().encode(text).byteLength <= 1024 * 1024,
       "A draft is at most 1 MiB of UTF-8."
     ),
+  /**
+   * Its modules, all of them: an edit says what the draft carries, so one
+   * that leaves them out drops none by mistake. Empty for none.
+   */
+  modules: workflowModulesSchema,
 });
 
 /**
@@ -714,6 +721,8 @@ export const workflowDraftPublishSchema = z.strictObject({
 export interface WorkflowDraft {
   revision: number;
   source: string;
+  /** Its own modules, by path, as this revision carries them. */
+  modules: Record<string, string>;
   problems: WorkflowDefinitionProblem[];
   checkpoint: {
     revision: number;
