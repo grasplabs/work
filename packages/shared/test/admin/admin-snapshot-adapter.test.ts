@@ -304,7 +304,8 @@ describe("an organization from core's admin snapshot", () => {
     expect(tom?.reminded).toBe(4);
     const sales = view.teams.find((team) => team.team.id === "sales");
     const ops = view.teams.find((team) => team.team.id === "ops");
-    expect([sales?.sent, sales?.heard]).toStrictEqual([0, 0]);
+    // Tom's link, the team's first, went out the day after Lisa was heard.
+    expect([sales?.sent, sales?.heard]).toStrictEqual([1, 0]);
     expect([ops?.sent, ops?.heard]).toStrictEqual([null, null]);
   });
 
@@ -724,6 +725,17 @@ describe("an organization from core's admin snapshot", () => {
       unknown: { contract: false, works: false },
       contractNeed: true,
     });
+  });
+
+  it("counts a team's links from when its colleagues' went out, and asks no one to read words core never sends", () => {
+    const { view } = shown();
+    const sales = view.teams.find((team) => team.team.id === "sales");
+
+    expect({
+      // Lisa finished on the first day; Tom's link went out the day after.
+      salesSent: sales?.sent,
+      read: view.needs.some((need) => need.kind === "read"),
+    }).toStrictEqual({ salesSent: 1, read: false });
   });
 
   it("leaves unknown what core doesn't hold", () => {
