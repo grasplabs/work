@@ -1291,7 +1291,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
               rule: "bindings",
               severity: "error",
               message:
-                "Line 8: Call the App's bindings as `env.NAME.method(…)`, `appServer(env).method(…)` or `appExports(env.NAME).method(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
+                "Line 8: Call the App's bindings as `env.NAME.method(…)`, `appServer(env).method(…)`, `appFunctions(env).query(…)` or `appExports(env.NAME).method(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
             },
           ],
         },

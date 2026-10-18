@@ -6,12 +6,6 @@
   // them out).
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    // A workflow calls the App's functions as `env.APP.callFunction(…)`,
-    // written out so the review of its steps reads each call (the SDK's
-    // describe.ts). The SDK types `env` as a record of bindings, so with
-    // this on, a binding read by name is possibly undefined, and no form
-    // the review reads checks. Off here only; GRA-711 types it.
-    "noUncheckedIndexedAccess": false,
     "paths": {
       "@xmldom/xmldom": ["../../types/xmldom.d.ts"],
       "#grasp/server": ["./server-types.ts"]
