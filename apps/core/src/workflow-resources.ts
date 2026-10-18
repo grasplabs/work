@@ -14,6 +14,8 @@ import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { graspLockSchema } from "@grasp-os/shared/packages";
+import type { GraspLock } from "@grasp-os/shared/packages";
 import { isAdmin, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import { actionUsesSchema } from "@grasp-os/shared/workflow-modules";
 import {
@@ -62,6 +64,7 @@ import type { Acting } from "./auth/identity.ts";
 import { boundEventsOf } from "./bound-workflow-events.ts";
 import type { PinnedEventBinding } from "./bound-workflow-events.ts";
 import {
+  dependencyLocks,
   sdkReleasePins,
   sdkResourceBindings,
   workflowResourceDraftInspections,
@@ -115,7 +118,11 @@ import type {
   ModuleContracts,
   ModulePackages,
 } from "./workflow-modules.ts";
-import { packagesHoldSql, packagesRefusal } from "./workflows/package-seal.ts";
+import {
+  packagesHoldSql,
+  packagesRefusal,
+  sealedPackagesSchema,
+} from "./workflows/package-seal.ts";
 import type {
   PackageSealer,
   SealedPackageManifest,
@@ -2432,7 +2439,74 @@ export type ExportedWorkflowVersion =
       readonly files: Readonly<Record<string, string>>;
       /** The exact versions of the workflows it binds, and its catalog kinds. */
       readonly bindings: readonly ExportedBinding[];
+      /** The approved packages its modules import, if any (`exportedPackages`). */
+      readonly packages: ExportedPackages | null;
     };
+
+/** What a version seals of its approved packages, as an export carries it. */
+export interface ExportedPackages {
+  readonly graphHash: string;
+  /** The entries its modules import, sorted. */
+  readonly entries: readonly string[];
+  /**
+   * The graph's lock without this deployment's build pins; null once this
+   * deployment no longer keeps it.
+   */
+  readonly lock: Omit<GraspLock, "artifacts"> | null;
+}
+
+/** Where a version's manifest seals its packages, as an export reads it. */
+const exportedPackagesSchema = z.object({
+  packages: sealedPackagesSchema.optional(),
+});
+
+/**
+ * What version manifest `manifest` of workflow `workflowId` seals of its
+ * approved packages, for its export: the graph, the entries its modules
+ * import, and the graph's lock without its build pins, which name this
+ * deployment's builds. Never the approval or the artifact the entries
+ * were copied from, which are this deployment's: the destination approves
+ * the graph again. Undefined for a manifest that doesn't read as one.
+ */
+const exportedPackages = async (
+  env: Env,
+  workflowId: string,
+  manifest: string
+): Promise<ExportedPackages | null | undefined> => {
+  const parsed = exportedPackagesSchema.safeParse(JSON.parse(manifest));
+  if (!parsed.success) {
+    return undefined;
+  }
+  const sealed = parsed.data.packages;
+  if (sealed === undefined) {
+    return null;
+  }
+  const row = await drizzle(env.DB)
+    .select({ lock: dependencyLocks.lock })
+    .from(dependencyLocks)
+    .where(
+      and(
+        eq(dependencyLocks.subjectType, "workflow"),
+        eq(dependencyLocks.subjectId, workflowId),
+        eq(dependencyLocks.graphHash, sealed.graphHash)
+      )
+    )
+    .get();
+  let lock: ExportedPackages["lock"] = null;
+  if (row !== undefined) {
+    const read = graspLockSchema.safeParse(JSON.parse(row.lock));
+    if (!read.success) {
+      return undefined;
+    }
+    const { artifacts: _pins, ...kept } = read.data;
+    lock = kept;
+  }
+  return {
+    graphHash: sealed.graphHash,
+    entries: Object.keys(sealed.entries).toSorted(),
+    lock,
+  };
+};
 
 /**
  * Version `version` of workflow `id`, for a definition export by `by`, who
@@ -2499,7 +2573,8 @@ export const exportedWorkflowVersion = async (
     row.manifestHash
   );
   const pinned = pinnedBindingsSchema.safeParse(JSON.parse(row.manifest));
-  if (!pinned.success) {
+  const packages = await exportedPackages(env, workflow.id, row.manifest);
+  if (!pinned.success || packages === undefined) {
     throw corrupt(workflow.id, version);
   }
   const bindings: ExportedBinding[] = [];
@@ -2536,6 +2611,7 @@ export const exportedWorkflowVersion = async (
     definition: row.definition,
     files: { [generatedPath]: loaded.source, ...loaded.compute.sources },
     bindings,
+    packages,
   };
 };
 

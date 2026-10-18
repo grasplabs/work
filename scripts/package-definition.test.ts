@@ -18,6 +18,7 @@ import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import { definitionPackageSchema } from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { canonicalText } from "@grasp-os/shared/json";
+import { graspLockSchema } from "@grasp-os/shared/packages";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -187,6 +188,7 @@ const definitionOf = (
       withheldConstraints: [],
       workflows: {},
       bindings: {},
+      packages: null,
     },
   },
   unresolved: [],
@@ -661,6 +663,113 @@ describe(
         },
         notices: ["| date-kit | 1.2.0 | unknown | the App's lock |"],
         refused: ["refused", "refused", "refused", "refused", "refused"],
+      });
+    });
+
+    it("pins a workflow version's approved packages exactly as its lock resolved them, and refuses one a project can't install", async () => {
+      /** The package with workflow `greet` sealing `packages`. */
+      const withPackages = (
+        packages: DefinitionPackage["workflows"][string]["packages"],
+        files: Record<string, string> = notesFiles()
+      ): DefinitionPackage => {
+        const definition = definitionOf(files);
+        const greet = definition.workflows["workspace/greet/1.0.0"];
+        if (greet === undefined) {
+          throw new Error("No greeting workflow");
+        }
+        return {
+          ...definition,
+          workflows: { "workspace/greet/1.0.0": { ...greet, packages } },
+        };
+      };
+      const sealed = (lock: string | null) => ({
+        graphHash: hash("9"),
+        entries: ["date-kit"],
+        lock: lock === null ? null : graspLockSchema.parse(JSON.parse(lock)),
+      });
+      const dateKit = (version: string) =>
+        lockOf({ "date-kit": version }, [
+          locked("date-kit", version, "MIT", { "tz-data": "2.0.1" }),
+          locked("tz-data", "2.0.1", "Apache-2.0"),
+        ]);
+      const { out } = scratch();
+      await packaged(withPackages(sealed(dateKit("1.2.0"))), out);
+      const project = z
+        .object({
+          dependencies: z.record(z.string(), z.string()),
+          overrides: z.record(z.string(), z.record(z.string(), z.string())),
+        })
+        .parse(
+          JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
+        );
+      const recorded = z
+        .object({
+          workflows: z.record(z.string(), z.object({ packages: z.unknown() })),
+        })
+        .parse(
+          JSON.parse(
+            readFileSync(path.join(out, "grasp-project.json"), "utf-8")
+          )
+        );
+      const notices = readFileSync(
+        path.join(out, "THIRD-PARTY-NOTICES.md"),
+        "utf-8"
+      );
+      const withAppLock = (version: string) => ({
+        ...notesFiles(),
+        "package.json": JSON.stringify({
+          dependencies: { "date-kit": `^${version}` },
+        }),
+        "grasp.lock.json": dateKit(version),
+      });
+      const refusals = {
+        // The App's lock and the workflow's pin one package at two versions.
+        conflicting: await refusalOf(
+          packaged(
+            withPackages(sealed(dateKit("1.2.0")), withAppLock("1.3.0")),
+            scratch().out
+          )
+        ),
+        // The same version in both is one pin.
+        agreeing: await refusalOf(
+          packaged(
+            withPackages(sealed(dateKit("1.2.0")), withAppLock("1.2.0")),
+            scratch().out
+          )
+        ),
+        unlocked: await refusalOf(
+          packaged(withPackages(sealed(null)), scratch().out)
+        ),
+        ownedByProject: await refusalOf(
+          packaged(
+            withPackages(
+              sealed(
+                lockOf({ react: "18.0.0" }, [locked("react", "18.0.0", "MIT")])
+              )
+            ),
+            scratch().out
+          )
+        ),
+      };
+      expect({
+        dateKit: project.dependencies["date-kit"],
+        overrides: project.overrides,
+        recorded: recorded.workflows["workspace/greet/1.0.0"]?.packages,
+        notices: notices
+          .split("\n")
+          .filter((line) => line.startsWith("| date-kit")),
+        refusals,
+      }).toStrictEqual({
+        dateKit: "1.2.0",
+        overrides: { "date-kit@1.2.0": { "tz-data": "2.0.1" } },
+        recorded: { graphHash: hash("9"), entries: ["date-kit"] },
+        notices: ["| date-kit | 1.2.0 | MIT | workspace/greet/1.0.0's lock |"],
+        refusals: {
+          conflicting: "refused",
+          agreeing: "ok",
+          unlocked: "refused",
+          ownedByProject: "refused",
+        },
       });
     });
 
