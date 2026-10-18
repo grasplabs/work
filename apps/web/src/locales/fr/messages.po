@@ -7588,8 +7588,12 @@ msgid "Write your answer"
 msgstr "Écrivez votre réponse"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer: {operations}"
-msgstr "Écritures qu’un modèle peut orienter : {operations}"
+msgid "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
+msgstr "Les écritures qu’un modèle peut orienter ne couvrent que les usages de chaque action, pas une tâche de modèle du workflow dont une tâche ultérieure transmet la réponse."
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Writes a model may steer: {target}"
+msgstr "Écritures qu’un modèle peut orienter : {target}"
 
 #: src/chat/thread.tsx
 msgid "Writing"

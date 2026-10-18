@@ -38,6 +38,7 @@ import type {
   WorkflowResourceVersion,
   WorkflowRole,
   WorkflowBinders,
+  SteeredWrite,
   WorkflowActionReview,
   WorkflowVersionAction,
   WorkflowVersionBinding,
@@ -1096,16 +1097,51 @@ type PinnedContract = Pick<
   "alias" | "kind" | "contractId" | "fingerprint"
 >;
 
+/** Where a version's manifest seals what its bindings pinned (`writeVersion`). */
+const manifestBindingsSchema = z.object({
+  bindings: z.array(
+    z.object({
+      alias: z.string(),
+      kind: z.enum(["workflow", ...catalogBindingKinds]),
+      contractId: z.string().nullable(),
+      fingerprint: z.string(),
+    })
+  ),
+});
+
 /**
- * `actions` as a version's review shows them (GRA-718): each with the
- * connector operations it may call that a model's answers may steer, when
- * it asks a model. An operation counts as a write unless the catalog
- * contract its binding pinned states it is read-only: the one the version
- * pinned, as a catalog key is published once and its row never changes
- * (the database refuses it). A binding, contract or operation that isn't
- * there counts as a write too, so the flag shows whenever it can't be
- * ruled out. Read from the actions as sealed and the catalog, never
- * inspected again.
+ * What version `row`'s bindings pinned, as its manifest seals them, never
+ * as a table that can be changed says: a review reads only what the
+ * version's hash covers.
+ */
+const sealedBindingsOf = (
+  row: typeof workflowResourceVersions.$inferSelect
+): PinnedContract[] => {
+  const parsed = manifestBindingsSchema.safeParse(JSON.parse(row.manifest));
+  if (!parsed.success) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return parsed.data.bindings.map(
+    ({ alias, kind, contractId, fingerprint }) => ({
+      alias,
+      kind,
+      contractId,
+      fingerprint,
+    })
+  );
+};
+
+/**
+ * `actions` as a version's review shows them (GRA-718): for each that asks
+ * a model, its uses that may write, which the model's answers may steer.
+ * A connector's operation counts as a write unless the catalog contract
+ * its binding pinned states it is read-only, and only while the catalog
+ * still holds that exact contract (its fingerprint the one the version
+ * sealed): a binding, contract or operation that isn't there, or a
+ * contract that changed, counts as a write. An operation binding's use (an
+ * App's export) always counts: its contract states nothing about reading.
+ * So the flag shows whenever a write can't be ruled out. Read from the
+ * version as sealed and the catalog, never inspected again.
  */
 const reviewedActions = async (
   env: Env,
@@ -1126,26 +1162,35 @@ const reviewedActions = async (
   const catalog = await resolveCatalogKeys(env, [...new Set(keys)]);
   const readOnly = (alias: string, operation: string): boolean => {
     const binding = connectorOf(alias);
-    const contract =
-      binding?.contractId === null || binding?.contractId === undefined
-        ? undefined
-        : catalog.get(binding.contractId);
+    if (binding === undefined || binding.contractId === null) {
+      return false;
+    }
+    const contract = catalog.get(binding.contractId);
     return (
       contract !== undefined &&
+      contract.fingerprint === binding.fingerprint &&
       contract.contract.operations?.[operation]?.readOnly === true
     );
   };
+  const steered = (
+    use: WorkflowVersionAction["uses"][number]
+  ): SteeredWrite[] => {
+    if (use.kind === "operation") {
+      return [{ alias: use.alias, kind: "operation" }];
+    }
+    if (use.kind !== "connector") {
+      return [];
+    }
+    const operations = use.operations.filter(
+      (operation) => !readOnly(use.alias, operation)
+    );
+    return operations.length === 0
+      ? []
+      : [{ alias: use.alias, kind: "connector", operations }];
+  };
   return actions.map((action) => ({
     ...action,
-    modelSteeredWrites: asksModel(action)
-      ? action.uses.flatMap((use) =>
-          use.kind === "connector"
-            ? use.operations
-                .filter((operation) => !readOnly(use.alias, operation))
-                .map((operation) => ({ alias: use.alias, operation }))
-            : []
-        )
-      : [],
+    modelSteeredWrites: asksModel(action) ? action.uses.flatMap(steered) : [],
   }));
 };
 
@@ -1171,7 +1216,11 @@ const versionOf = async (
     contractHash: row.contractHash,
     manifestHash: row.manifestHash,
     bindings,
-    actions: await reviewedActions(env, sealedActionsOf(row), bindings),
+    actions: await reviewedActions(
+      env,
+      sealedActionsOf(row),
+      sealedBindingsOf(row)
+    ),
     build: buildSummary(
       sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
     ),

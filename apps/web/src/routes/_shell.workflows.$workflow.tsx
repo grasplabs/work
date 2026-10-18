@@ -1,5 +1,5 @@
 import type {
-  ActionOperation,
+  SteeredWrite,
   WorkflowDraft,
   WorkflowResource,
   WorkflowActionReview,
@@ -9,6 +9,7 @@ import { Badge } from "@grasp-os/ui/components/badge";
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -45,14 +46,19 @@ import { TestRun } from "../workflows/test-run.tsx";
 // and, for one that asks a model, the writes its answers may steer
 // (GRA-718), which no reviewer should have to piece together.
 
-/** The writes a model's answers may steer in one action (GRA-718). */
-const SteeredWrites = ({ writes }: { writes: ActionOperation[] }) => {
-  const operations = formatList(
-    writes.map(({ alias, operation }) => `${alias}.${operation}`)
-  );
+/**
+ * One use whose writes a model's answers may steer (GRA-718), as its
+ * neighbouring use badge names it: a connector's alias and the operations
+ * that may write; an App export's alias alone, as any of it may write.
+ */
+const SteeredWriteBadge = ({ write }: { write: SteeredWrite }) => {
+  const target =
+    write.kind === "connector"
+      ? `${write.alias}: ${formatList(write.operations)}`
+      : write.alias;
   return (
     <Badge variant="destructive">
-      <Trans>Writes a model may steer: {operations}</Trans>
+      <Trans>Writes a model may steer: {target}</Trans>
     </Badge>
   );
 };
@@ -78,9 +84,9 @@ const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
                 : use.alias}
             </Badge>
           ))}
-          {action.modelSteeredWrites.length > 0 && (
-            <SteeredWrites writes={action.modelSteeredWrites} />
-          )}
+          {action.modelSteeredWrites.map((write) => (
+            <SteeredWriteBadge key={write.alias} write={write} />
+          ))}
         </li>
       ))}
     </ul>
@@ -98,6 +104,12 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
   }
   return (
     <Table>
+      <TableCaption>
+        <Trans>
+          Writes a model may steer cover the uses of each action alone, not a
+          model task of the workflow whose answer a later task passes on.
+        </Trans>
+      </TableCaption>
       <TableHeader>
         <TableRow>
           <TableHead>{t`Version`}</TableHead>

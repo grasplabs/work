@@ -593,20 +593,25 @@ export interface WorkflowVersionAction {
   uses: ActionUse[];
 }
 
-/** A connector operation one of a version's actions may call. */
-export interface ActionOperation {
-  alias: string;
-  operation: string;
-}
+/**
+ * A use whose writes a model's answers may steer, by its binding's alias:
+ * a connector's, with each of its operations that may write; or an
+ * operation binding's (an App's export), which may always write, as its
+ * contract states nothing about reading only.
+ */
+export type SteeredWrite =
+  | { alias: string; kind: "connector"; operations: string[] }
+  | { alias: string; kind: "operation" };
 
 /**
  * One of a version's own actions as its review shows it (GRA-718): as
- * sealed, and, when it asks a model, each connector operation it may call
- * that its pinned contract doesn't state is read-only, which the model's
- * answers may steer. Empty when it asks no model, or only reads.
+ * sealed, and, when it asks a model, each of its uses that may write, which
+ * the model's answers may steer. Empty when it asks no model, or only
+ * reads. It covers the action's own uses only, never a workflow's own
+ * model task whose answer feeds a later task's call.
  */
 export interface WorkflowActionReview extends WorkflowVersionAction {
-  modelSteeredWrites: ActionOperation[];
+  modelSteeredWrites: SteeredWrite[];
 }
 
 /**

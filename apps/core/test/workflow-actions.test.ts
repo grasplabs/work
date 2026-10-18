@@ -2,6 +2,7 @@
 import { v } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
@@ -184,6 +185,41 @@ export const notify = action({
 const connector = (operations: string[]): string =>
   `resource.connector("mail", { operations: ${JSON.stringify(operations)} })`;
 
+/** The flag of workflow `id`'s version as `by` lists it. */
+const listed = async (id: string, by: Identity) => {
+  const [version] = await workflowVersions(env, by, id);
+  return version?.actions.map(({ modelSteeredWrites }) => modelSteeredWrites);
+};
+/**
+ * Rewrites the bindings workflow `id`'s version seals, its manifest
+ * hash made to match, as only a write around the platform could.
+ */
+const resealed = async (
+  id: string,
+  edit: (bindings: { alias: string; contractId?: unknown }[]) => unknown[]
+) => {
+  const row = await env.DB.prepare(
+    "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+  )
+    .bind(id)
+    .first<{ manifest: string }>();
+  const manifest = z
+    .looseObject({
+      bindings: z.array(z.looseObject({ alias: z.string() })),
+    })
+    .parse(JSON.parse(row?.manifest ?? "{}"));
+  const text = JSON.stringify({
+    ...manifest,
+    bindings: edit(manifest.bindings),
+  });
+  await env.DB.prepare(
+    `INSERT OR REPLACE INTO workflow_resource_versions (workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at)
+      SELECT workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, ?, ?, author_id, created_at
+      FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1`
+  )
+    .bind(text, await sha256Hex(text), id)
+    .run();
+};
 /** Sends two mails and answers what the context holds. */
 const sendsTwice =
   notifyModule(`await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" });
@@ -495,9 +531,10 @@ describe("a JSON workflow's own actions", () => {
     });
   });
 
-  it("flags the writes an action's model may steer in its version's review: each operation its contract doesn't state is read-only, and only beside a model use", async () => {
+  it("flags the writes an action's model may steer in its version's review, counting as a write whatever it can't rule out, to every role alike", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
+    const reader = await person("user");
     // `mail.read` stated read-only; `mail.send` and `mail.draft` not, so
     // taken for writes.
     const mail = `mail-${unique()}`;
@@ -516,36 +553,52 @@ describe("a JSON workflow's own actions", () => {
     });
     const model = `writer-${unique()}`;
     await publishCatalogContract(env, admin, { key: model, kind: "model" });
+    // An App's export: its contract states nothing about reading only.
+    const contacts = `contacts-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key: contacts,
+      kind: "operation",
+      ...operation,
+    });
     const writer =
       'resource.model("writer", { output: v.object({ line: v.string() }) })';
+    const definitionSchema = z.looseObject({
+      document: z.looseObject({
+        metadata: z.object({
+          grasp: z.looseObject({
+            bindings: z.record(z.string(), z.unknown()),
+          }),
+        }),
+      }),
+    });
+    /** Publishes an action with `uses`; answers its flag, published and listed. */
     const reviewed = async (uses: string) => {
       const workflow = await createWorkflowResource(
         env,
         ada,
         `act-${unique()}`
       );
-      const definition = z
-        .looseObject({
-          document: z.looseObject({
-            metadata: z.object({
-              grasp: z.looseObject({
-                bindings: z.record(z.string(), z.unknown()),
-              }),
-            }),
-          }),
-        })
-        .parse(
-          JSON.parse(
-            definitionOf(workflow.name, {
-              mail: { kind: "connector", contract: mail },
-            })
-          )
-        );
+      await shareWorkflowResource(env, ada, workflow.id, {
+        type: "person",
+        id: reader.userId,
+        role: "user",
+      });
+      const definition = definitionSchema.parse(
+        JSON.parse(
+          definitionOf(workflow.name, {
+            mail: { kind: "connector", contract: mail },
+          })
+        )
+      );
+      const { bindings } = definition.document.metadata.grasp;
       if (uses.includes("writer")) {
-        definition.document.metadata.grasp.bindings.writer = {
-          kind: "model",
-          contract: model,
-        };
+        bindings.writer = { kind: "model", contract: model };
+      }
+      if (uses.includes("contacts")) {
+        bindings.contacts = { kind: "operation", contract: contacts };
+      }
+      if (!uses.includes('"mail"')) {
+        delete bindings.mail;
       }
       const published = await publishWorkflowVersion(env, ada, workflow.id, {
         definition: JSON.stringify(definition),
@@ -554,20 +607,24 @@ describe("a JSON workflow's own actions", () => {
           "code/notify.ts": notifyModule('return { status: "x" };', uses),
         },
       });
-      const [listed] = await workflowVersions(env, ada, workflow.id);
       return {
+        id: workflow.id,
         published: published.actions.map(
-          ({ modelSteeredWrites }) => modelSteeredWrites
-        ),
-        listed: listed?.actions.map(
           ({ modelSteeredWrites }) => modelSteeredWrites
         ),
       };
     };
-    const steered = [
-      { alias: "mail", operation: "mail.send" },
-      { alias: "mail", operation: "mail.draft" },
-    ];
+    const sendsAndDrafts = {
+      alias: "mail",
+      kind: "connector",
+      operations: ["mail.send", "mail.draft"],
+    };
+    const reads = {
+      alias: "mail",
+      kind: "connector",
+      operations: ["mail.read"],
+    };
+
     const modelAndWrites = await reviewed(
       `[${writer}, ${connector(["mail.send", "mail.draft", "mail.read"])}]`
     );
@@ -577,14 +634,84 @@ describe("a JSON workflow's own actions", () => {
     const writesAlone = await reviewed(
       `[${connector(["mail.send", "mail.draft"])}]`
     );
+    const modelAndExport = await reviewed(
+      `[${writer}, resource.operation("contacts")]`
+    );
+    // What it reads only once its contract is there, as the version
+    // pinned it: a binding the version doesn't seal, a contract the catalog
+    // doesn't hold, or one that isn't the contract pinned rules nothing out.
+    const unbound = await reviewed(`[${writer}, ${connector(["mail.read"])}]`);
+    await resealed(unbound.id, (bindings) =>
+      bindings.filter(({ alias }) => alias !== "mail")
+    );
+    const uncatalogued = await reviewed(
+      `[${writer}, ${connector(["mail.read"])}]`
+    );
+    await resealed(uncatalogued.id, (bindings) =>
+      bindings.map((binding) =>
+        binding.alias === "mail"
+          ? { ...binding, contractId: `missing-${unique()}` }
+          : binding
+      )
+    );
+    const before = {
+      modelAndWrites: await listed(modelAndWrites.id, ada),
+      reader: await listed(modelAndWrites.id, reader),
+      modelAndReads: await listed(modelAndReads.id, ada),
+      writesAlone: await listed(writesAlone.id, ada),
+      modelAndExport: await listed(modelAndExport.id, ada),
+      unbound: await listed(unbound.id, ada),
+      uncatalogued: await listed(uncatalogued.id, ada),
+    };
+    // A catalog row replaced around the platform (GRA-718's review: the
+    // database's immutability doesn't stop a replace), now stating every
+    // operation read-only, isn't the contract the version pinned.
+    const replacedText = JSON.stringify({
+      kind: "connector",
+      operations: {
+        "mail.send": { ...operation, readOnly: true },
+        "mail.draft": { ...operation, readOnly: true },
+        "mail.read": { ...operation, readOnly: true },
+      },
+    });
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO workflow_catalog_contracts (key, kind, contract, fingerprint, published_by, published_at)
+        SELECT key, kind, ?, ?, published_by, published_at FROM workflow_catalog_contracts WHERE key = ?`
+    )
+      .bind(replacedText, await sha256Hex(replacedText), mail)
+      .run();
     expect({
-      modelAndWrites,
-      modelAndReads,
-      writesAlone,
+      published: {
+        modelAndWrites: modelAndWrites.published,
+        modelAndReads: modelAndReads.published,
+        writesAlone: writesAlone.published,
+        modelAndExport: modelAndExport.published,
+      },
+      ...before,
+      replaced: await listed(modelAndWrites.id, ada),
     }).toStrictEqual({
-      modelAndWrites: { published: [steered], listed: [steered] },
-      modelAndReads: { published: [[]], listed: [[]] },
-      writesAlone: { published: [[]], listed: [[]] },
+      published: {
+        modelAndWrites: [[sendsAndDrafts]],
+        modelAndReads: [[]],
+        writesAlone: [[]],
+        modelAndExport: [[{ alias: "contacts", kind: "operation" }]],
+      },
+      modelAndWrites: [[sendsAndDrafts]],
+      reader: [[sendsAndDrafts]],
+      modelAndReads: [[]],
+      writesAlone: [[]],
+      modelAndExport: [[{ alias: "contacts", kind: "operation" }]],
+      unbound: [[reads]],
+      uncatalogued: [[reads]],
+      replaced: [
+        [
+          {
+            alias: "mail",
+            kind: "connector",
+            operations: ["mail.send", "mail.draft", "mail.read"],
+          },
+        ],
+      ],
     });
   });
 
