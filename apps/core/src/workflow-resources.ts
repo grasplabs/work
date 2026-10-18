@@ -161,10 +161,10 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 // - A version changing after publication. A version is a row written once
 //   (`(workflow_resource_id, version)` and its semantic version are unique,
 //   and the database refuses any update, deletion or insert over either,
-//   REPLACE included: migrations 0080 and 0101); publishing a semantic version again with
-//   other content is refused (`workflow.version_exists`), and with the
-//   same content answers the version already published, so a retried
-//   publication is the same publication.
+//   REPLACE included: migrations 0080 and 0101); publishing a semantic
+//   version again with other content is refused (`workflow.version_exists`),
+//   and with the same content answers the version already published, so a
+//   retried publication is the same publication.
 // - A version running other code than its definition's. Publication
 //   generates SDK TypeScript from the checked definition, compiles it and
 //   seals it into the version's manifest, by hash (workflow-builds.ts):
