@@ -903,6 +903,21 @@ export const windowExtentOf = (request: unknown): number | undefined => {
   }
 };
 
+/**
+ * Whether `request` calls one of a workflow reference's queries
+ * (workflow-reference-queries.ts): they read no store, so a live one is
+ * read again when the person's runs of the App change, not on a write.
+ */
+export const callsWorkflowQuery = (request: unknown): boolean => {
+  try {
+    return isWorkflowQueryPath(
+      readFunctionRequest(request).reference.contractId
+    );
+  } catch {
+    return false;
+  }
+};
+
 /** What a live query's evaluation answered, and what it read. */
 export interface EvaluatedQuery {
   readonly answer: FunctionAnswer;
