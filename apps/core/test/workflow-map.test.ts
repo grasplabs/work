@@ -717,6 +717,43 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     }).toStrictEqual({ notes: 30_000, drawnVersion: 1, drawnNotes: false });
   });
 
+  it("pages its figures for another App in an order no save changes, so a rename between pages loses or repeats none", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const ids = [];
+    for (const title of ["Bill", "Close", "Deliver"]) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they're made
+      const made = await save(admin, app, null, null, { ...drawn, title });
+      ids.push(savedSchema.parse(valueOf(made)).id);
+    }
+    const figuresSchema = z.object({
+      items: z.array(z.looseObject({ id: z.string() })),
+      nextCursor: z.string().nullable(),
+    });
+    const page = async (cursor: string | null) =>
+      figuresSchema.parse(
+        valueOf(
+          await call(admin, app, "figures.list", "query", {
+            pagination: { pageSize: 2, cursor },
+          })
+        )
+      );
+    const first = await page(null);
+    // The one not read yet is renamed to sort first by title.
+    const last = ids[2] ?? "";
+    const before = await opened(admin, app, last);
+    valueOf(
+      await save(admin, app, last, before?.current._rev ?? 0, {
+        ...drawn,
+        title: "Account",
+      })
+    );
+    const second = await page(first.nextCursor);
+    expect([...first.items, ...second.items].map(({ id }) => id)).toStrictEqual(
+      ids
+    );
+  });
+
   it("keeps a page of the list within what a query answers, however much its workflows hold", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await mapOf(admin);

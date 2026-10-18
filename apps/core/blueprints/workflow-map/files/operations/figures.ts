@@ -117,14 +117,18 @@ const figureOf = async (
   app: workflow.app,
 });
 
-/** Every workflow's figures, a page at a time, by title. */
+/**
+ * Every workflow's figures, a page at a time, in the order they were made:
+ * an order no save changes, so a reader paging through them while someone
+ * renames one reads each workflow once.
+ */
 export const list = query({
   args: { pagination: paginationOptionsValidator },
   returns: paginationResultValidator(figure),
   handler: async (ctx, args) => {
     const page = await ctx.db
       .query("workflows")
-      .withIndex("by_title")
+      .withIndex("by_created")
       .paginate({
         cursor: args.pagination.cursor,
         pageSize: Math.min(args.pagination.pageSize, pageMax),

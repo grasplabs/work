@@ -174,6 +174,7 @@ export const take = action({
   handler: async (ctx, args) => {
     await ctx.runQuery(builder, {});
     const read: MapFigure[] = [];
+    const seen = new Set<string>();
     let cursor: string | null = null;
     do {
       const page: { items: MapFigure[]; nextCursor: string | null } =
@@ -181,7 +182,14 @@ export const take = action({
         await ctx.resources.map.call("figures.list", {
           pagination: { pageSize: mapPage, cursor },
         });
-      read.push(...page.items);
+      // The map pages in an order no save changes; a workflow it answered
+      // already is still never frozen twice.
+      for (const item of page.items) {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          read.push(item);
+        }
+      }
       cursor = page.nextCursor;
     } while (cursor !== null);
     const now = new Date();

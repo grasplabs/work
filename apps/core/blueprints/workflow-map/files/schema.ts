@@ -101,7 +101,11 @@ export default defineSchema({
   teams: defineTable({
     title: v.string().trim().min(1).max(shortTextMax),
   }).index("by_title", ["title"]),
-  workflows: defineTable(workflowFields).index("by_title", ["title"]),
+  workflows: defineTable(workflowFields)
+    .index("by_title", ["title"])
+    // An order no save changes: another App reads every workflow a page
+    // at a time in it (operations/figures.ts), so none moves between pages.
+    .index("by_created", ["_createdAt"]),
   workflowVersions: defineTable({
     ...workflowFields,
     workflow: v.id("workflows"),
