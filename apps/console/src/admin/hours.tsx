@@ -16,11 +16,13 @@ import { Panel } from "./parts.tsx";
 const whyNone = ({
   told,
   approved,
+  unread,
 }: {
   told: boolean;
   approved: boolean;
+  unread: boolean;
 }): string => {
-  if (approved) {
+  if (approved && unread) {
     return "People agreed to what they said, but the work drawn from it isn’t read yet: the company’s own Grasp doesn’t hold it.";
   }
   return told
@@ -43,6 +45,7 @@ export const Hours = () => {
         {whyNone({
           told: view.told,
           approved: view.interviews.some((interview) => interview.approved),
+          unread: view.unknown.works,
         })}
       </p>
     </Panel>

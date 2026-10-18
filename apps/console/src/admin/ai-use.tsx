@@ -664,8 +664,19 @@ const Prices = () => (
   </ul>
 );
 
-/** What the month's spend is against what the contract covers, under its figure. */
-const coveredLineOf = (spend: number, covered: number | null): string => {
+/**
+ * What the month's spend is against what the contract covers, under its
+ * figure: nothing to measure it against while the contract isn't known,
+ * or isn't signed.
+ */
+const coveredLineOf = (
+  spend: number,
+  covered: number | null,
+  unknown: boolean
+): string => {
+  if (unknown) {
+    return "the contract isn’t known yet";
+  }
   if (covered === null) {
     return "no signed contract yet";
   }
@@ -719,7 +730,11 @@ export const AiUse = () => {
   const inMonth = month === null ? usage.thisMonth : now.total;
   const over = covered !== null && inMonth.spend > covered;
   const first = usage.months[0]?.month;
-  const coveredLine = coveredLineOf(inMonth.spend, covered);
+  const coveredLine = coveredLineOf(
+    inMonth.spend,
+    covered,
+    view.unknown.contract
+  );
 
   return (
     <>

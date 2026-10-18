@@ -69,7 +69,7 @@ const calls = (tokensIn: number, tokensOut: number, seconds = 0) => ({
  * read, 200 thousand written: €6), his voice (20 minutes: €3), and
  * core's own default model, which has no price (500 thousand read, 100
  * thousand written: its tokens count, not its cost). €24 in all, with
- * nothing signed.
+ * its contract not known.
  */
 const usedSnapshot = (): AdminSnapshot => {
   const empty = emptyAdminSnapshot("Acme");
@@ -121,7 +121,11 @@ describe("an organization's AI use and hours", () => {
       month: has(`${monthName(snapshot.now)}</span>`),
       inAll: has("In all, so far"),
       spend: html.split(">€24<").length - 1,
-      contract: has("no signed contract yet"),
+      // Core doesn't send the contract yet: unknown, not unsigned.
+      contract: [
+        has("the contract isn’t known yet"),
+        has("no signed contract yet"),
+      ],
       tokens: [
         has(">4.0 million<"),
         has("3.5 million read, 500 thousand written"),
@@ -150,7 +154,7 @@ describe("an organization's AI use and hours", () => {
       inAll: true,
       // In all so far, this month, and the numbers' total.
       spend: 3,
-      contract: true,
+      contract: [true, false],
       tokens: [true, true],
       voice: [true, true],
       byUse: [true, true, true, true],
