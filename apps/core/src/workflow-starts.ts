@@ -989,10 +989,6 @@ export const decideWorkflowStart = async (
       throw denied();
     }
   }
-  const packages = await packagesHolding(env, rule.actor, id, graphHash, {
-    ...base,
-    inputHash,
-  });
   const existing = await receiptOf(env, rule.invoker, rule.principal, key);
   if (existing !== undefined) {
     try {
@@ -1014,6 +1010,13 @@ export const decideWorkflowStart = async (
       throw error;
     }
   }
+  // A new start only: one admitted before, retried under its key, answers
+  // what it admitted, whatever was revoked since (its run, if it hasn't
+  // ended, stops at its next call).
+  const packages = await packagesHolding(env, rule.actor, id, graphHash, {
+    ...base,
+    inputHash,
+  });
   // Read after the invoker's code formed the input it starts with, so a
   // restricted read that fed it is seen (`restrictedStart`).
   const restricted = await restrictedStart(env, invoker);

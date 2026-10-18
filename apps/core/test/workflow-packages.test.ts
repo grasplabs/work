@@ -201,12 +201,19 @@ const publishDoubling = async (
   name: string,
   version: string,
   /** Code its module runs as it loads, before `double`. */
-  prelude = ""
+  prelude = "",
+  /** Its exports, if any besides `main`. */
+  exports?: Record<string, string>
 ) => {
   await publish({
     name,
     version,
-    manifest: { type: "module", main: "index.js", license: "MIT" },
+    manifest: {
+      type: "module",
+      main: "index.js",
+      license: "MIT",
+      ...(exports === undefined ? {} : { exports }),
+    },
     files: {
       "index.js": `${prelude}export const double = (value) => value * 2;`,
     },
@@ -221,7 +228,7 @@ const doubling = async (): Promise<string> => {
 };
 
 /** A workflow of a new builder's, and `pkg` resolved for it. */
-const workflowWith = async (pkg: string) => {
+const workflowWith = async (pkg: string, entries?: string[]) => {
   const builder = await person("builder");
   const workflow = await createWorkflowResource(env, builder, `p-${unique()}`);
   const { request } = await resolveDependencies(env, builder, {
@@ -230,6 +237,7 @@ const workflowWith = async (pkg: string) => {
     purpose: "Double the quarter's total.",
     targets: ["computation"],
     dependencies: { [pkg]: "^1.0.0" },
+    ...(entries === undefined ? {} : { entries }),
   });
   return { builder, workflow, request };
 };
@@ -694,8 +702,51 @@ describe("a workflow's modules importing approved packages", () => {
     ).resolves.toBe("workflow.packages_invalid");
   });
 
-  it("names two entries that differ in ~ and / apart", () => {
-    expect(packageModuleName("a~b")).not.toBe(packageModuleName("a/b"));
+  it("seals and runs a package whose name has a ~, apart from one with a /", async () => {
+    const admin = await approver();
+    const pkg = `dou~ble-${unique()}`;
+    await publishDoubling(pkg, "1.0.0");
+    const { builder, workflow, request } = await workflowWith(pkg);
+    await approve(admin, request);
+    await publishedWith(builder, workflow, pkg, request.graphHash);
+
+    expect({
+      apart: packageModuleName("a~b") !== packageModuleName("a/b"),
+      run: await ended(
+        builder,
+        workflow.id,
+        await started(builder, workflow.id)
+      ),
+    }).toStrictEqual({
+      apart: true,
+      run: { status: "completed", output: { status: "12" } },
+    });
+  });
+
+  it("answers a start admitted before the graph was revoked when it is asked again", async () => {
+    const admin = await approver();
+    const pkg = await doubling();
+    const { builder, workflow, request } = await workflowWith(pkg);
+    await approve(admin, request);
+    await publishedWith(builder, workflow, pkg, request.graphHash);
+    const key = unique();
+    const asked = async () =>
+      await startWorkflow(
+        env,
+        { type: "person", person: builder },
+        workflow.id,
+        { version: 1, input: { who: "Ada" }, key }
+      );
+    const first = await asked();
+    await end(admin, request, "revoked");
+
+    const again = await asked();
+    const fresh = await outcome(started(builder, workflow.id));
+
+    expect({ same: again.runId === first.runId, fresh }).toStrictEqual({
+      same: true,
+      fresh: "workflow.packages_revoked",
+    });
   });
 
   it("loads no package module its manifest doesn't seal", async () => {
@@ -754,8 +805,13 @@ describe("a workflow's modules importing approved packages", () => {
     const pkg = await doubling();
     const { workflow, request } = await workflowWith(pkg);
     await approve(admin, request);
-    // Every read of the policy finds it moved on since the last.
+    // Every read of the policy finds it moved on since the last, while
+    // the call runs: what it leaves to finish after (its audit) doesn't.
+    let racing = true;
     const db = racingDb(async (real) => {
+      if (!racing) {
+        return;
+      }
       await real
         .prepare(
           "INSERT INTO dependency_policy (id, generation) VALUES ('policy', 1) ON CONFLICT(id) DO UPDATE SET generation = generation + 1"
@@ -770,8 +826,36 @@ describe("a workflow's modules importing approved packages", () => {
         request.graphHash
       )
     );
+    racing = false;
 
     expect(answered).not.toBe("workflow.packages_revoked");
     expect(answered).toContain("couldn't be read");
+  });
+
+  it("imports an entry whose subpath takes it past a package name's length", async () => {
+    const admin = await approver();
+    const pkg = `double-${unique()}`;
+    // A subpath as long as an entry may be, past 214 characters together.
+    const subpath = "d".repeat(250 - pkg.length);
+    const entry = `${pkg}/${subpath}`;
+    await publishDoubling(pkg, "1.0.0", "", {
+      ".": "./index.js",
+      [`./${subpath}`]: "./index.js",
+    });
+    const { builder, workflow, request } = await workflowWith(pkg, [entry]);
+    await approve(admin, request);
+    await publishedWith(builder, workflow, entry, request.graphHash);
+
+    expect({
+      long: entry.length > 214,
+      run: await ended(
+        builder,
+        workflow.id,
+        await started(builder, workflow.id)
+      ),
+    }).toStrictEqual({
+      long: true,
+      run: { status: "completed", output: { status: "12" } },
+    });
   });
 });

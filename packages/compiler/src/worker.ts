@@ -16,6 +16,7 @@
  * (see `buildServer` and `buildWorkflows`): the same Babel, stripping
  * types only.
  */
+import { packageEntrySchema } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { compile } from "tailwindcss";
 
@@ -669,7 +670,9 @@ const computePackagesOf = (
   const packages = Array.isArray(value)
     ? value.filter(
         (entry): entry is string =>
-          typeof entry === "string" && entry.length > 0 && entry.length <= 214
+          typeof entry === "string" &&
+          entry.length > 0 &&
+          packageEntrySchema.safeParse(entry).success
       )
     : [];
   return Array.isArray(value) && packages.length === value.length

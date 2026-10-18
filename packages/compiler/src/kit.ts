@@ -146,9 +146,12 @@ const typescriptExtension = /\.tsx?$/u;
  * module (GRA-665).
  */
 export const packageModuleName = (entry: string): string =>
-  // `%` and `~` escaped first, so `~` stands only for `/`: no two entries
-  // (`a~b` and `a/b`, say) share a name.
-  `pkg~${entry.replaceAll("%", "%25").replaceAll("~", "%7E").replaceAll("/", "~")}.js`;
+  // `~` as `@` first, so `~` stands only for `/`: no two entries (`a~b` and
+  // `a/b`, say) share a name, in only the characters a release artifact's
+  // path takes. An entry (`packageEntrySchema`) has `@` only as its first
+  // character, a scope's, and never starts with `~`, so an `@` after the
+  // first is always a `~`.
+  `pkg~${entry.replaceAll("~", "@").replaceAll("/", "~")}.js`;
 
 /**
  * Where core names, among a compute build's files, the approved package
