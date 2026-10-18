@@ -111,7 +111,7 @@ const AnsweredRow = ({
   // Enough is known and the go is still to give: that is Grasp's to do.
   const waits = view.knowledge.ready && view.knowledge.opened === null;
   let contractLine = "";
-  if (contract.status === "signed") {
+  if (contract.status === "signed" && !view.unknown.contract) {
     contractLine = contract.ending
       ? `Ends on ${formatDate(contract.until)}`
       : `${euros(contract.fee)} a month`;
@@ -170,11 +170,7 @@ const AnsweredRow = ({
         variant="card"
       >
         <span className="flex flex-col">
-          <span>
-            {contract.status === "signed"
-              ? contract.plan
-              : contractWords[contract.status]}
-          </span>
+          <span>{contractName(view)}</span>
           <span
             className={cn(
               "text-xs",
@@ -287,6 +283,22 @@ const OrganizationRow = ({ organization }: { organization: Organization }) => {
   );
 };
 
+/** What the contract column says: unknown until the company's core holds one. */
+const contractName = ({ contract, unknown }: AdminView): string => {
+  if (unknown.contract) {
+    return "Not known yet";
+  }
+  return contract.status === "signed"
+    ? contract.plan
+    : contractWords[contract.status];
+};
+
+/** A sum over the organizations it is known for: a dash where it is known for none, and from how many where not for all. */
+const knownSum = (value: string, counted: number, of: number) => ({
+  value: counted === 0 ? "—" : value,
+  from: counted > 0 && counted < of ? `, from ${counted} of ${of}` : "",
+});
+
 /** What every answered organization adds up to. */
 const Portfolio = ({
   views,
@@ -296,6 +308,16 @@ const Portfolio = ({
   unread: number;
 }) => {
   const portfolio = portfolioOf(views);
+  const fees = knownSum(
+    euros(portfolio.fees),
+    portfolio.counted.fees,
+    portfolio.orgs
+  );
+  const freed = knownSum(
+    whole(portfolio.freed),
+    portfolio.counted.value,
+    portfolio.orgs
+  );
   return (
     <section
       aria-label="Every organization together"
@@ -311,13 +333,17 @@ const Portfolio = ({
           <Tile label="ready for Grasp’s go" value={portfolio.ready} />
           <Tile label="open, and in the platform" value={portfolio.open} />
           <Tile
-            label="a month under contract, before VAT"
-            value={euros(portfolio.fees)}
+            label={`a month under contract, before VAT${fees.from}`}
+            value={fees.value}
           />
           <Tile label="of AI used this month" value={euro(portfolio.spend)} />
           <Tile
-            label={`hours a week freed, worth ${euros(portfolio.value)} a month`}
-            value={whole(portfolio.freed)}
+            label={
+              portfolio.counted.value === 0
+                ? "hours a week freed: not known yet"
+                : `hours a week freed, worth ${euros(portfolio.value)} a month${freed.from}`
+            }
+            value={freed.value}
           />
         </div>
       </div>

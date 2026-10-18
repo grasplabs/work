@@ -66,6 +66,7 @@ export interface StageTodo {
 
 /** The stage each need belongs to; none for what stands beside the onboarding. */
 const NEED_STAGE: Record<Need["kind"], Stage | null> = {
+  paused: "interviews",
   transcript: "conversation",
   ask: "conversation",
   research: "research",

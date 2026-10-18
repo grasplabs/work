@@ -64,7 +64,8 @@ const liveClient = async () => {
  * A company whose first conversation Stephen read and of which 85% is
  * known, past the 80% it opens at, with nothing signed yet: as the model
  * has it, at the agreements, ready for Grasp's go, and with four things
- * that need Grasp (the go, both agreements and the contract).
+ * that need Grasp (the go and both agreements; its contract core doesn't
+ * hold, so nothing is known of it).
  */
 const readySnapshot = (name: string): AdminSnapshot => {
   const empty = emptyAdminSnapshot(name);
@@ -258,8 +259,8 @@ describe("the admin's frame", () => {
         "Agreed",
         "Not signed yet",
         "85% known. Ready for Grasp’s go",
-        "Being written",
-        'text-status-attention tabular-nums">4<',
+        "Not known yet",
+        'text-status-attention tabular-nums">3<',
       ].map((text) => acmeRow?.includes(text)),
       acmeNamed: acmeRow?.includes(acme.name),
       // What needs Grasp at Acme, said, and a way to it.
@@ -287,10 +288,17 @@ describe("the admin's frame", () => {
       counted: main.includes(
         "Counted from the 1 that answered now: 2 didn’t, and aren’t in these numbers."
       ),
+      // Fees and hours core doesn't hold yet are not known, not nothing.
+      unknownSums: ["a month under contract", "hours a week freed"].map(
+        (label) => {
+          const tile = main.slice(0, main.indexOf(label));
+          return tile.slice(tile.lastIndexOf("<div")).includes("—");
+        }
+      ),
       // In the sidebar, how many things need Grasp at Acme.
       acmeCount: acmeEntry
         .slice(0, acmeEntry.indexOf("</li>"))
-        .includes('4<span class="sr-only">things need Grasp</span>'),
+        .includes('3<span class="sr-only">things need Grasp</span>'),
     }).toStrictEqual({
       status: 200,
       title: true,
@@ -301,12 +309,39 @@ describe("the admin's frame", () => {
       down: { named: true, why: true, numbers: false },
       waiting: { named: true, why: true, numbers: false },
       counted: true,
+      unknownSums: [true, true],
       acmeCount: true,
     });
   });
 
+  it("says when Grasp paused the interviews, and marks where Grasp opens even at the last dot", async () => {
+    const paused = await liveClient();
+    const told = toldSnapshot("Paused", {
+      days: 14,
+      daysIn: 3,
+      leadTalked: true,
+    });
+    paused.account.admin = {
+      ...told,
+      paused: true,
+      gate: { ...told.gate, threshold: 98 },
+    };
+
+    const { html } = await page("/admin");
+    const main = html.slice(html.indexOf("<main"));
+    const row = rowOf(main, paused.clientId);
+
+    expect({
+      paused: main.includes(
+        "The interviews are paused: nobody can open or finish theirs until Grasp resumes them."
+      ),
+      // The one mark where Grasp opens, after the last of the dots.
+      marks: row.split("h-3.5 w-px").length - 1,
+    }).toStrictEqual({ paused: true, marks: 1 });
+  });
+
   it("puts every organization's most pressing need in today's list before any one's next", async () => {
-    // Four needs each: twelve, past the eight the list shows.
+    // Three needs each: nine, past the eight the list shows.
     const companies = await Promise.all(
       ["Acme", "Birch", "Cobalt"].map(async (name) => {
         const client = await liveClient();
