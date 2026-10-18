@@ -549,6 +549,27 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("says the interviews closed on the last day their links worked", async () => {
+    const closed = await liveClient();
+    const snapshot = toldSnapshot("Closed", {
+      days: 5,
+      daysIn: 10,
+      leadTalked: true,
+    });
+    closed.account.admin = snapshot;
+    // Five days from day 0: the links worked until the fifth, day 4.
+    const last = new Date(`${snapshot.plan?.start ?? ""}T12:00:00Z`);
+    last.setUTCDate(last.getUTCDate() + 4);
+
+    const { html } = await page(`/admin/organizations/${closed.clientId}`);
+
+    expect(
+      html.includes(
+        `The interviews closed on ${formatDate(last.toISOString().slice(0, 10))}`
+      )
+    ).toBeTruthy();
+  });
+
   it("sends what needs Grasp at a paused organization to its steps", async () => {
     const paused = await liveClient();
     paused.account.admin = {
