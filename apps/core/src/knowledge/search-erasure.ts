@@ -20,13 +20,18 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 // ASCII, a directory that can't be read) is rebuilt too: the rebuild is
 // the fallback, never skipped.
 //
-// What may stay: fragments of at most three characters, in the trigram
-// index and the words index's prefix indexes, which hold the same for any
-// text with those letters; never a whole token of a term longer than
-// that.
+// What may stay: fragments of at most three characters of a word without
+// digits, in the trigram index and the words index's prefix indexes, which
+// hold the same for any text with those letters; never a whole token of a
+// term longer than that, and of a token with a digit (an ID, a PIN, a
+// group of a number) never as much as three characters.
 //
-// Remote D1 may refuse what local workerd allows (turning secure-delete
-// on, reading `%_idx`); each refusal falls back to the rebuild, logged.
+// Nothing a lookup carries (the terms) is ever logged: a failed query's
+// error repeats its parameters, so only the error's name is.
+//
+// Secure deletes are turned on by the migration `0011_search_secure_delete`,
+// with a rebuild. Remote D1 may refuse what local workerd allows (reading
+// the setting or `%_idx`); each refusal falls back to the rebuild, logged.
 
 /**
  * Drops deleted rows' terms from the search index's pages for good, by
@@ -58,10 +63,12 @@ const secureDeleteIsOn = async (db: DrizzleD1Database): Promise<boolean> => {
 
 /**
  * Whether every delete in the search index is a secure one now, and the
- * index holds no tokens of rows deleted before: turned on, and the index
- * rebuilt, in one transaction, the first time, so whoever sees it on sees
- * a clean index. False when it can't be read or turned on (a platform
- * that refuses it): the purge then rebuilds after its writes, as before.
+ * index holds no tokens of rows deleted before. The migration turns it on,
+ * with a rebuild; should it be off all the same (a database the setting
+ * was lost on), it is turned on here, and the index rebuilt, in one
+ * transaction, so whoever sees it on sees a clean index. False when it
+ * can't be read or turned on (a platform that refuses it): the purge then
+ * rebuilds after its writes, as before.
  */
 export const secureDeleteReady = async (
   db: DrizzleD1Database
@@ -96,18 +103,56 @@ const plainAscii = /^[ -~]+$/u;
 const tokenBreak = /[^a-z0-9]+/u;
 
 /** A key into an index's page directory, and the whole token it is for. */
-interface IndexKey {
+export interface IndexKey {
   /** The table whose `%_idx` it is looked up in. */
   readonly table: "search_words" | "search_trigrams";
   /** A marker for the index (`0` the terms, `1` and `2` their prefixes), then the token. */
   readonly key: string;
+  /** How many of the token's characters a separator holds too many of. */
+  readonly least: number;
 }
 
+/** A token with a digit: an ID, a PIN, a group of a number. */
+const digit = /[0-9]/u;
+
+/** A token's windows of three characters, as the trigram index holds it. */
+const windowsOf = (token: string): string[] =>
+  Array.from({ length: Math.max(0, token.length - 2) }, (_, at) =>
+    token.slice(at, at + 3)
+  );
+
+/** The page-directory keys of one token (see `indexKeysOf`). */
+const keysOfToken = (token: string): IndexKey[] => {
+  const numeric = digit.test(token);
+  // A word's fragment of three, any text may leave; of a number, none.
+  const least = Math.min(numeric ? 3 : 4, token.length);
+  const short = token.length <= 3;
+  // A word's trigram only when it is the whole word; a number's, each.
+  const trigrams = numeric || token.length === 3 ? windowsOf(token) : [];
+  return [
+    { table: "search_words", key: `0${token}`, least },
+    ...(short || numeric
+      ? (["1", "2"] as const).map((marker): IndexKey => ({
+          table: "search_words",
+          key: `${marker}${token}`,
+          least: Math.min(3, token.length),
+        }))
+      : []),
+    ...trigrams.map((trigram): IndexKey => ({
+      table: "search_trigrams",
+      key: `0${trigram}`,
+      least: 3,
+    })),
+  ];
+};
+
 /**
- * The page-directory keys a whole token of `terms` would have, in each
- * index that can hold it whole: every token in the words index; one of
- * three characters or fewer also in the words index's prefix indexes, and
- * one of three in the trigram index. Undefined unless every term is plain
+ * The page-directory keys a token of `terms` would have, in each index
+ * that can hold it whole, or, for a token with a digit, three of its
+ * characters: every token in the words index; one of three characters or
+ * fewer, or with a digit, also in the words index's prefix indexes; one
+ * of three, or each three characters of one with a digit, in the trigram
+ * index. Undefined unless every term is plain
  * ASCII, whose tokens are exactly its runs of letters and digits, folded
  * to lower case (as `unicode61` and `trigram` fold them); anything else
  * is left to the rebuild.
@@ -126,22 +171,11 @@ export const indexKeysOf = (
         .filter((token) => token !== "")
     )
   );
-  return [...tokens].flatMap((token): IndexKey[] => [
-    { table: "search_words", key: `0${token}` },
-    ...(token.length <= 3
-      ? ([
-          { table: "search_words", key: `1${token}` },
-          { table: "search_words", key: `2${token}` },
-        ] as const)
-      : []),
-    ...(token.length === 3
-      ? ([{ table: "search_trigrams", key: `0${token}` }] as const)
-      : []),
-  ]);
+  return [...tokens].flatMap(keysOfToken);
 };
 
 /** A separator a lookup found for `key`, or null where there was none. */
-interface Found {
+export interface Found {
   readonly key: string;
   readonly separator: string | null;
 }
@@ -178,15 +212,26 @@ const separatorsOf = async (
 };
 
 /**
- * Whether `found`'s separator still holds its key's token: it begins the
- * key, for the token's whole length or at least four of its characters
- * (a fragment of three, any text with those letters may leave).
+ * Whether `found`'s separator still holds too much of its key's token: it
+ * begins the key, for at least `least` of the token's characters.
  */
-const holdsToken = ({ key, separator }: Found): boolean =>
+const holdsToken = ({ key, separator }: Found, least: number): boolean =>
   separator !== null &&
   separator.length > 1 &&
   key.startsWith(separator) &&
-  separator.length - 1 >= Math.min(4, key.length - 1);
+  separator.length - 1 >= least;
+
+/**
+ * Whether one of the separators `found` for `keys` (of one table) still
+ * holds too much of its token (`holdsToken`, each key's own `least`).
+ */
+export const holdsAny = (
+  keys: readonly IndexKey[],
+  found: readonly Found[]
+): boolean => {
+  const least = new Map(keys.map(({ key, least: at }) => [key, at]));
+  return found.some((one) => holdsToken(one, least.get(one.key) ?? 1));
+};
 
 /** Whether a page separator of the index still holds one of `keys`' tokens. */
 const separatorsHold = async (
@@ -202,7 +247,7 @@ const separatorsHold = async (
         table,
         ofTable.map(({ key }) => key)
       );
-      if (found.some(holdsToken)) {
+      if (holdsAny(ofTable, found)) {
         return true;
       }
     }
@@ -210,19 +255,25 @@ const separatorsHold = async (
   return false;
 };
 
+/** An error's name alone: never its message, which may repeat a query's terms. */
+export const errorNameOf = (error: unknown): string =>
+  error instanceof Error ? error.name : typeof error;
+
 /**
  * Leaves nothing of `terms` in the search index, after a purge's writes
  * deleted the rows that held them: when every delete was a secure one
- * (`secure`, from `secureDeleteReady` before the writes) and no page
- * separator holds a token of them, there is nothing left to do; otherwise
- * the index is rebuilt. Throws when the rebuild fails.
+ * (`secure`, from `secureDeleteReady` before the writes), the terms'
+ * tokens are known (`tokensKnown`: no occurrence was part of a longer
+ * token, as one beside a script written without spaces is, "東京Visser")
+ * and no page separator holds a token of them, there is nothing left to
+ * do; otherwise the index is rebuilt. Throws when the rebuild fails.
  */
 export const eraseFromSearchIndex = async (
   db: DrizzleD1Database,
   terms: readonly string[],
-  secure: boolean
+  { secure, tokensKnown }: { secure: boolean; tokensKnown: boolean }
 ): Promise<void> => {
-  const keys = secure ? indexKeysOf(terms) : undefined;
+  const keys = secure && tokensKnown ? indexKeysOf(terms) : undefined;
   if (keys !== undefined) {
     try {
       if (!(await separatorsHold(db, keys))) {
@@ -230,7 +281,10 @@ export const eraseFromSearchIndex = async (
       }
     } catch (error) {
       // Not readable here (a platform that refuses it): rebuilt instead.
-      log.warn("knowledge.purge.index_check_failed", errorFields(error));
+      // The error's name only: its message repeats the lookup's terms.
+      log.warn("knowledge.purge.index_check_failed", {
+        errorName: errorNameOf(error),
+      });
     }
   }
   await rebuildSearchIndex(db);

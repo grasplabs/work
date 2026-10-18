@@ -37,6 +37,7 @@ import type { DocumentRow } from "./documents.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
   eraseFromSearchIndex,
+  errorNameOf,
   rebuildSearchIndex,
   secureDeleteReady,
 } from "./search-erasure.ts";
@@ -102,8 +103,12 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // accent left out or encoded otherwise), a term joined to more of a word
 // ("Toms", "tomVisser": not removed, only counted when it starts the
 // word), memory already cached in a running isolate (never served again,
-// gone once evicted), D1's own point-in-time recovery, and anything
-// outside Knowledge. And it reaches too far where a name is an
+// gone once evicted), fragments of a word of at most three characters
+// left in the search index's page directory (search-erasure.ts: any text
+// with those letters leaves the same; a token with a digit, never three
+// of its characters), the pages SQLite freed, which keep their old bytes
+// until reused (D1 has no `PRAGMA secure_delete`), D1's own point-in-time
+// recovery, and anything outside Knowledge. And it reaches too far where a name is an
 // ordinary word too (Will, Mark, May): every "will" goes.
 
 /** How long an admin has to confirm a purge they prepared. */
@@ -227,8 +232,11 @@ const cleanSearchIndex = async (
     await cleanup();
   } catch (error) {
     // The data is already deleted by now; running the purge again, which
-    // always cleans up, finishes it.
-    log.error("knowledge.purge.rebuild_failed", errorFields(error));
+    // always cleans up, finishes it. The error's name only: a cleanup's
+    // query may carry the terms, which its error would repeat.
+    log.error("knowledge.purge.rebuild_failed", {
+      errorName: errorNameOf(error),
+    });
     throw knowledgeErrors.create("knowledge.purge_index_pending");
   }
 };
@@ -499,6 +507,54 @@ const joinedIn = (texts: (string | null)[], matcher: Matcher): number => {
   return total;
 };
 
+/**
+ * What the search index's `unicode61` tokenizer takes as part of a token
+ * and isn't plain ASCII: a letter, a digit or a private-use character of
+ * another script.
+ */
+const otherTokenCharacter = /^(?!\p{ASCII})[\p{L}\p{N}\p{Co}]$/u;
+
+/** The character (code point) of `text` that ends just before `index`. */
+const characterBefore = (text: string, index: number): string => {
+  if (index === 0) {
+    return "";
+  }
+  // Where a character of two UTF-16 units ends, its second unit.
+  const unit = text.codePointAt(index - 1) ?? 0;
+  const lowSurrogate = unit >= 0xdc_00 && unit <= 0xdf_ff;
+  const start = lowSurrogate && index >= 2 ? index - 2 : index - 1;
+  return String.fromCodePoint(text.codePointAt(start) ?? 0x20);
+};
+
+/** The character (code point) of `text` that starts at `index`. */
+const characterAt = (text: string, index: number): string =>
+  index >= text.length
+    ? ""
+    : String.fromCodePoint(text.codePointAt(index) ?? 0x20);
+
+/**
+ * Whether a term in `text` sits beside a character that, to the search
+ * index, makes it part of a longer token: one of a script written without
+ * spaces ("東京Visser", "Visserさん"), which the purge removes the term from
+ * but whose token holds the term and isn't the term's own. The index's
+ * check of a term's tokens (search-erasure.ts) can't find that token, so
+ * the index is rebuilt then.
+ */
+const besideLongerToken = (text: string, matcher: Matcher): boolean => {
+  if (!matcher.anywhere.test(text)) {
+    return false;
+  }
+  for (const { index, 0: found } of text.matchAll(matcher.remove)) {
+    if (
+      otherTokenCharacter.test(characterBefore(text, index)) ||
+      otherTokenCharacter.test(characterAt(text, index + found.length))
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
 /** A version's text and message, rewritten if they change. */
 const rewritten = (
   row: { text: string; message: string | null },
@@ -708,9 +764,10 @@ const rewriteVersions = async (
   upTo: number,
   matcher: Matcher,
   write: boolean
-): Promise<{ changed: number; joined: number }> => {
+): Promise<{ changed: number; joined: number; beside: boolean }> => {
   let changedVersions = 0;
   let joined = 0;
+  let beside = false;
   for (let after = 0; ;) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
     const page = await db
@@ -730,6 +787,7 @@ const rewriteVersions = async (
       .orderBy(asc(versions.number))
       .limit(versionsPerPage);
     const rows = page.map((row) => ({ row, changed: rewritten(row, matcher) }));
+    beside ||= rows.some(({ row }) => besideLongerToken(row.text, matcher));
     joined += joinedIn(
       rows.flatMap(({ row, changed }) => {
         const { text, message } = changed ?? row;
@@ -763,7 +821,7 @@ const rewriteVersions = async (
     }
     const last = page.at(-1);
     if (last === undefined || page.length < versionsPerPage) {
-      return { changed: changedVersions, joined };
+      return { changed: changedVersions, joined, beside };
     }
     after = last.number;
   }
@@ -849,12 +907,17 @@ const purgeDocument = async (
   person: Identity,
   named: Named,
   matcher: Matcher
-): Promise<Counts> => {
+): Promise<{ counts: Counts; beside: boolean }> => {
   const { document, collection } = named;
   const at = document.currentVersion;
   const earlier = await rewriteVersions(db, document, at - 1, matcher, true);
   const current = await versionOf(db, document, at);
   const changed = current && rewritten(current, matcher);
+  // A term the search index holds as part of a longer token, in this
+  // version or one before (indexed once, deleted by a save since).
+  const beside =
+    earlier.beside ||
+    (current !== undefined && besideLongerToken(current.text, matcher));
   const changedVersions = earlier.changed + (changed === undefined ? 0 : 1);
   const counts: Counts = {
     documents: changedVersions > 0 ? 1 : 0,
@@ -865,7 +928,7 @@ const purgeDocument = async (
     // an image in a PDF, which extraction never read): its originals go
     // all the same.
     await db.batch(forgetUploads(db, uploadsNamed(document)));
-    return counts;
+    return { counts, beside };
   }
   const text = changed?.text ?? current.text;
   await writeVersion(env, personWriter(person), {
@@ -896,7 +959,7 @@ const purgeDocument = async (
       ...forgetUploads(db, uploadsNamed(document)),
     ],
   });
-  return counts;
+  return { counts, beside };
 };
 
 /**
@@ -958,13 +1021,16 @@ const purgeContent = async (
     ),
   ]);
   const done: Counts[] = [];
+  let tokensKnown = true;
   for (const one of named) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
-    done.push(await purgeDocument(env, db, person, one, matcher));
+    const purged = await purgeDocument(env, db, person, one, matcher);
+    done.push(purged.counts);
+    tokensKnown &&= !purged.beside;
   }
   await cleanUpOriginals(env);
   await cleanSearchIndex(async () => {
-    await eraseFromSearchIndex(db, input.terms, secure);
+    await eraseFromSearchIndex(db, input.terms, { secure, tokensKnown });
   });
   return { purgeId, ...sum(done) };
 };

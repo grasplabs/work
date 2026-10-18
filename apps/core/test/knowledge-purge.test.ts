@@ -178,6 +178,14 @@ const indexedSections = async (): Promise<number> => {
   return row?.n ?? 0;
 };
 
+/** `value` as `length` letters, a to z: a word with no digit in it. */
+const lettersOf = (value: number, length: number): string =>
+  Array.from({ length }, (_, at) =>
+    String.fromCodePoint(
+      97 + (Math.floor(value / 26 ** (length - at - 1)) % 26)
+    )
+  ).join("");
+
 /** Saves `text` over what is at `path` now. */
 const saveOver = async (
   person: Person,
@@ -601,6 +609,135 @@ describe("a purge of content", setUpTime, () => {
       heldBefore: true,
       heldAfter: [],
     });
+  });
+
+  it("leaves nothing of a term the index held as part of a longer token, beside a script written without spaces", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    // The same words twice: plain in one document, and in the other
+    // followed by さん, which the index joins to them ("zq…さん"), and the
+    // purge doesn't. Enough to fill pages, so some page begins with a
+    // joined word right after its plain twin: its directory entry is the
+    // plain word and the first byte of さ. Letters only: a word with a
+    // digit is held to a stricter check of its own.
+    const stem = `zq${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+    const words = Array.from(
+      { length: 2000 },
+      (_, at) => `${stem}${lettersOf(at, 3)}`
+    );
+    const joined = await saveOver(
+      admin,
+      handbook.id,
+      "joined.md",
+      `# Words\n${words.map((word) => `${word}さん`).join(" ")}`
+    );
+    // The stem alone first: one term more before the pairs, so pages,
+    // which fill a pair at a time here, begin on a joined word.
+    await saveOver(
+      admin,
+      handbook.id,
+      "plain.md",
+      `# Words\n${stem} ${words.join(" ")}`
+    );
+    await env.KNOWLEDGE.prepare(
+      "INSERT INTO search_words (search_words) VALUES ('optimize')"
+    ).run();
+    const entryOf = (word: string) => `${hexOf(`0${word}`)}E3`;
+    const { results } = await env.KNOWLEDGE.prepare(
+      "SELECT hex(term) AS entry FROM search_words_idx WHERE hex(term) LIKE ?"
+    )
+      .bind(`${hexOf(`0${stem}`)}%E3`)
+      .all<{ entry: string }>();
+    const word = words.find((one) =>
+      results.some(({ entry }) => entry === entryOf(one))
+    );
+    await purged(admin, {
+      type: "content",
+      documentIds: [joined.id],
+      terms: [word ?? ""],
+      reason: "other",
+    });
+    const left = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS n FROM search_words_idx WHERE hex(term) = ?"
+    )
+      .bind(entryOf(word ?? ""))
+      .first<{ n: number }>();
+    const read = await admin.api.knowledge.getDocument(joined.id);
+    expect({
+      found: word !== undefined,
+      removed: !read.version.text.includes(`${word}さん`),
+      entriesLeft: left?.n,
+    }).toStrictEqual({ found: true, removed: true, entriesLeft: 0 });
+  });
+
+  it("never logs a purged term, though checking the index for it fails", async () => {
+    const admin = await personOf("admin");
+    const secret = `logged${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "people.md",
+      `# People\nWrite to ${secret}.`
+    );
+    // The index's directory refuses the lookup, whose failure repeats its
+    // query and parameters, as a platform's refusal would.
+    const real = env.KNOWLEDGE;
+    const knowledge: D1Database = {
+      prepare: (query) =>
+        real.prepare(
+          query.includes("_idx")
+            ? query.replace(
+                "WHERE segments.id IS NOT NULL",
+                "WHERE segments.id IS NOT NULL AND refused_here"
+              )
+            : query
+        ),
+      batch: async <T>(statements: D1PreparedStatement[]) =>
+        await real.batch<T>(statements),
+      exec: async (query) => await real.exec(query),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const { core } = await openRpc(admin.session, {
+      coreEnv: { ...env, KNOWLEDGE: knowledge },
+    });
+    const refusing = core.authenticate();
+    const logged: unknown[] = [];
+    const spies = (["log", "info", "warn", "error"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+        logged.push(args);
+      })
+    );
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [secret],
+      reason: "other",
+    };
+    try {
+      const { token } = await refusing.knowledge.preparePurge(input);
+      await refusing.knowledge.purge(input, token);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+    const lines = logged.map((args) => JSON.stringify(args));
+    expect({
+      checkFailed: lines.some((line) =>
+        line.includes("knowledge.purge.index_check_failed")
+      ),
+      leaked: lines.filter((line) => line.toLowerCase().includes(secret)),
+      heldAfter: await holding(secret),
+    }).toStrictEqual({ checkFailed: true, leaked: [], heldAfter: [] });
   });
 
   it("writes no more to the search index for a purge however large the corpus", async () => {
