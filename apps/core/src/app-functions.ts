@@ -20,6 +20,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { liveWindowMaxItems } from "@grasp-os/shared/store-limits";
 import { coreStepPrefix, stepIdempotencyKey } from "@grasp-os/shared/workflows";
+import { waitUntil } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -127,50 +128,63 @@ const fencedStore = (
   },
 });
 
+/** Whose call a refused use's evidence names (`keptUseRefusals`). */
+interface UseRefusalContext {
+  readonly app: AppId;
+  readonly version: number;
+  readonly principal: string;
+  readonly requestId: string;
+  readonly runId: string | null;
+}
+
+/** Writes `refusal` as `app.use.refused` for `context`; never throws. */
+const writeUseRefusal = async (
+  env: Env,
+  { app, version, principal, requestId, runId }: UseRefusalContext,
+  refusal: UseRefusal
+): Promise<void> => {
+  try {
+    await keepAuditEvent(env, drizzle(env.DB), {
+      actor: { type: "app", appId: app, part: "server" },
+      action: "app.use.refused",
+      target: { type: "app", id: app },
+      requestId,
+      detail: {
+        version,
+        person: principal,
+        runId,
+        function: refusal.function,
+        useKind: refusal.use.kind,
+        useName: refusal.use.name,
+        reason: refusal.reason,
+        errorCode: refusal.errorCode,
+      },
+    });
+  } catch (error) {
+    log.error("app.use.audit_failed", {
+      requestId,
+      errorCode: refusal.errorCode,
+      ...errorFields(error),
+    });
+  }
+};
+
 /**
  * How a real call of App `app`'s version `version` keeps the evidence of a
  * use its code asked for that its sealed manifest doesn't allow
  * (operations.ts, `Invocation.refusedUse`; GRA-279): `app.use.refused`, as
  * the App's server code acting for `principal`, every field core's own.
- * One that can't be kept is logged; the refusal stands either way.
+ * The write is the request's own work until it is kept: the host waits for
+ * it only so long (`useEvidenceWaitMs`), and one it stopped waiting for
+ * still finishes rather than ending with the call. One that can't be kept
+ * is logged; the refusal stands either way.
  */
 const keptUseRefusals =
-  (
-    env: Env,
-    context: {
-      readonly app: AppId;
-      readonly version: number;
-      readonly principal: string;
-      readonly requestId: string;
-      readonly runId: string | null;
-    }
-  ) =>
+  (env: Env, context: UseRefusalContext) =>
   async (refusal: UseRefusal): Promise<void> => {
-    const { app, version, principal, requestId, runId } = context;
-    try {
-      await keepAuditEvent(env, drizzle(env.DB), {
-        actor: { type: "app", appId: app, part: "server" },
-        action: "app.use.refused",
-        target: { type: "app", id: app },
-        requestId,
-        detail: {
-          version,
-          person: principal,
-          runId,
-          function: refusal.function,
-          useKind: refusal.use.kind,
-          useName: refusal.use.name,
-          reason: refusal.reason,
-          errorCode: refusal.errorCode,
-        },
-      });
-    } catch (error) {
-      log.error("app.use.audit_failed", {
-        requestId,
-        errorCode: refusal.errorCode,
-        ...errorFields(error),
-      });
-    }
+    const writing = writeUseRefusal(env, context, refusal);
+    waitUntil(writing);
+    await writing;
   };
 
 /**
