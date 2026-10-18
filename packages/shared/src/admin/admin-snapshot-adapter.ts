@@ -6,7 +6,6 @@ import type {
 import type { Role } from "../roles.ts";
 import { stateWith } from "./admin-state.ts";
 import type { Agreed, Member, Org, OrgState } from "./onboarding-admin.ts";
-import { LISTEN_DAYS } from "./onboarding.ts";
 import { orgOfSnapshot } from "./org-adapter.ts";
 import { daysBetween, NEW_CLIENT, NOTHING_SAID } from "./org-record.ts";
 import type {
@@ -159,11 +158,11 @@ const createdOf = (snapshot: AdminSnapshot, client: AdminClient): string =>
 const doneOf = (snapshot: AdminSnapshot, client: AdminClient): CoreDone => {
   const plan = planOf(snapshot);
   const start = plan?.start ?? createdOf(snapshot, client).slice(0, 10);
-  // As the admin counts the days: from the start, up to the end of the interviews, none before the team is told.
+  // As the admin counts the days: from the start, up to the end of its own plan, none before the team is told.
   const today =
     plan === null
       ? 0
-      : Math.min(Math.max(daysBetween(start, snapshot.now), 0), LISTEN_DAYS);
+      : Math.min(Math.max(daysBetween(start, snapshot.now), 0), plan.days);
   const { agreements, gate, kickoff } = snapshot;
   const { openedAt } = gate;
   let conversation: OrgState["conversation"] = "none";
@@ -197,8 +196,16 @@ const doneOf = (snapshot: AdminSnapshot, client: AdminClient): CoreDone => {
       gate.open && openedAt !== null
         ? Math.min(Math.max(daysBetween(start, openedAt), 0), today)
         : null,
+    // Core forgets a deleted interview at once but keeps when it was deleted, and the link still
+    // opens: an interview started since is a fresh one, not the one they deleted.
     deleted: snapshot.links.flatMap((link) =>
-      link.deletedAt === null ? [] : [link.person]
+      link.deletedAt === null ||
+      snapshot.interviews.some(
+        (interview) =>
+          interview.person === link.person && interview.startedAt !== null
+      )
+        ? []
+        : [link.person]
     ),
     conversation,
   };
