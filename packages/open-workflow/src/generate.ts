@@ -103,7 +103,7 @@ export const maxTaskExpressions = 64;
 export const maxStepExpressions = 128;
 
 /** The generator's identity: part of every build it makes. */
-export const generatorVersion = "grasp-open-workflow-ts/5";
+export const generatorVersion = "grasp-open-workflow-ts/6";
 
 /** Where the generated module is among a version's files. */
 export const generatedPath = ".grasp/workflow.ts";

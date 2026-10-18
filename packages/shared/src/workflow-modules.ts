@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // The custom modules a JSON workflow's version carries beside its
 // definition (platform specification 13.6): TypeScript files under
 // `code/`, each a module of calculations (`compute` from
@@ -36,7 +38,53 @@ export const workflowModuleLimits = {
   descriptorChars: 256 * 1024,
   /** The most of the workflow's bindings one action uses. */
   actionUses: 32,
+  /** The most operations an action declares it calls of one connector. */
+  actionUseOperations: 64,
+  /** The longest operation name, as connect names a connector's. */
+  operationChars: 256,
 } as const;
+
+/**
+ * A binding an action declares it uses, as its sealed contract holds it
+ * (GRA-704): a connector's with the exact operations it calls, each once;
+ * an operation binding's (an App export, one operation) with nothing more.
+ * The host refuses a call of any other operation.
+ */
+export const actionUseSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    alias: z.string().regex(actionUseAliasPattern),
+    kind: z.literal("connector"),
+    operations: z
+      .array(z.string().min(1).max(workflowModuleLimits.operationChars))
+      .min(1)
+      .max(workflowModuleLimits.actionUseOperations)
+      .refine((operations) => new Set(operations).size === operations.length),
+  }),
+  z.strictObject({
+    alias: z.string().regex(actionUseAliasPattern),
+    kind: z.literal("operation"),
+  }),
+]);
+
+/** A use as `actionUseSchema` reads it. */
+export type ActionUse = z.infer<typeof actionUseSchema>;
+
+/** A use as the host holds it once sealed: frozen, its operations too. */
+export type SealedUse =
+  | {
+      readonly alias: string;
+      readonly kind: "connector";
+      readonly operations: readonly string[];
+    }
+  | { readonly alias: string; readonly kind: "operation" };
+
+/** An action's uses: each alias once, at most `actionUses` of them. */
+export const actionUsesSchema = z
+  .array(actionUseSchema)
+  .max(workflowModuleLimits.actionUses)
+  .refine(
+    (uses) => new Set(uses.map(({ alias }) => alias)).size === uses.length
+  );
 
 /**
  * Why `modules` (by path) are more or other than a version carries, if

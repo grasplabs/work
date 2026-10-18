@@ -2,6 +2,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { passedBound } from "@grasp-os/shared/value-bounds";
+import type { SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
@@ -32,6 +33,9 @@ import { requireShape } from "./resource-calls.ts";
 // one capability more: the host's `call`, through which each of the
 // bindings it declared in `uses` is called. How each threat is closed:
 //
+// - Calling an operation it didn't declare. A connector's call names its
+//   operation, which the host takes only if the sealed use lists it
+//   (GRA-704): an action declared to send mail can't delete it.
 // - Reaching a binding it didn't declare. The host takes an alias only if
 //   the action's sealed contract lists it, with the kind it lists, and the
 //   call goes to the binding the run's start froze under that alias, of
@@ -110,19 +114,31 @@ const callBounds = {
  * before, and the host waits for every one before the task records.
  */
 class ActionHost extends RpcTarget {
-  readonly #uses: ReadonlyMap<string, string>;
+  /** Each declared use by alias: its kind, a connector's operations. */
+  readonly #uses: ReadonlyMap<
+    string,
+    { readonly kind: string; readonly operations: ReadonlySet<string> }
+  >;
   readonly #effects: ActionEffects;
   readonly #state: ActionHostState;
   #count = 0;
   #last: Promise<unknown> = Promise.resolve();
 
   constructor(
-    uses: readonly { readonly alias: string; readonly kind: string }[],
+    uses: readonly SealedUse[],
     effects: ActionEffects,
     state: ActionHostState
   ) {
     super();
-    this.#uses = new Map(uses.map(({ alias, kind }) => [alias, kind]));
+    this.#uses = new Map(
+      uses.map((use) => [
+        use.alias,
+        {
+          kind: use.kind,
+          operations: new Set(use.kind === "connector" ? use.operations : []),
+        },
+      ])
+    );
     this.#effects = effects;
     this.#state = state;
   }
@@ -156,10 +172,11 @@ class ActionHost extends RpcTarget {
     if (passedBound([alias, request], callBounds) !== undefined) {
       throw workflowResourceErrors.create("workflow.call_invalid");
     }
-    const kind = typeof alias === "string" ? this.#uses.get(alias) : undefined;
-    if (typeof alias !== "string" || kind === undefined) {
+    const use = typeof alias === "string" ? this.#uses.get(alias) : undefined;
+    if (typeof alias !== "string" || use === undefined) {
       throw workflowResourceErrors.create("workflow.call_denied");
     }
+    const { kind } = use;
     if (this.#count >= maxActionCalls) {
       throw workflowResourceErrors.create("workflow.action_call_limit", {
         limit: maxActionCalls,
@@ -171,6 +188,11 @@ class ActionHost extends RpcTarget {
       const parsed = connectorRequestSchema.safeParse(request);
       if (!parsed.success) {
         throw workflowResourceErrors.create("workflow.call_invalid");
+      }
+      // Only an operation its sealed contract declares (GRA-704): what
+      // review and approval saw, whatever name the action computes.
+      if (!use.operations.has(parsed.data.operation)) {
+        throw workflowResourceErrors.create("workflow.call_denied");
       }
       return await this.#effects.make(
         {
