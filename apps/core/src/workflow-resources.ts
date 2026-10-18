@@ -1832,6 +1832,158 @@ export const workflowSource = async (
   return { files };
 };
 
+/** A version's bindings, as its manifest pins them (`writeVersion`). */
+const pinnedBindingsSchema = z.object({
+  bindings: z.array(
+    z.object({
+      alias: z.string(),
+      kind: z.string(),
+      resourceId: z.string().nullable(),
+      resourceVersion: z.int().nullable(),
+    })
+  ),
+});
+
+/** A binding of a version, as a definition export follows it. */
+export type ExportedBinding =
+  | {
+      readonly alias: string;
+      readonly kind: "workflow";
+      readonly workflowId: string;
+      readonly version: number;
+    }
+  | { readonly alias: string; readonly kind: CatalogBindingKind };
+
+/**
+ * A workflow version as a definition export reads it (definition-export.ts),
+ * or why it can't: `missing` for a workflow or version that isn't there,
+ * `forbidden` for one `by` doesn't build, `not_executable` for one with no
+ * build to run.
+ */
+export type ExportedWorkflowVersion =
+  | { readonly status: "missing" | "forbidden" | "not_executable" }
+  | {
+      readonly status: "found";
+      readonly name: string;
+      readonly definitionVersion: string;
+      readonly profile: string;
+      readonly manifestHash: string;
+      readonly definitionHash: string;
+      readonly evaluatorHash: string;
+      readonly buildHash: string;
+      /** Its definition exactly as published, its hash checked. */
+      readonly definition: string;
+      /** The TypeScript generated from it, and its own modules as published. */
+      readonly files: Readonly<Record<string, string>>;
+      /** The exact versions of the workflows it binds, and its catalog kinds. */
+      readonly bindings: readonly ExportedBinding[];
+    };
+
+/**
+ * Version `version` of workflow `id`, for a definition export by `by`, who
+ * must build the workflow, as for its source (`workflowSource`): its
+ * definition and sealed build read back with every hash checked
+ * (`workflow.version_corrupt` otherwise), and what its manifest pins of its
+ * bindings. Never its parameters' values, its bindings' approvals or its
+ * runs: none of them is read.
+ */
+export const exportedWorkflowVersion = async (
+  env: Env,
+  by: Acting,
+  id: string,
+  version: number
+): Promise<ExportedWorkflowVersion> => {
+  const workflow = await liveWorkflow(env, id);
+  if (workflow === undefined) {
+    return { status: "missing" };
+  }
+  if ((await roleIn(env, by, workflow)) !== "builder") {
+    return { status: "forbidden" };
+  }
+  const row = await drizzle(env.DB)
+    .select({
+      definitionVersion: workflowResourceVersions.definitionVersion,
+      definition: workflowResourceVersions.definition,
+      definitionHash: workflowResourceVersions.definitionJsonHash,
+      profile: workflowResourceVersions.profileVersion,
+      evaluatorHash: workflowResourceVersions.evaluatorHash,
+      manifest: workflowResourceVersions.manifest,
+      manifestHash: workflowResourceVersions.manifestHash,
+    })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflow.id),
+        eq(workflowResourceVersions.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    return { status: "missing" };
+  }
+  let definitionHash: string | undefined;
+  try {
+    definitionHash = await definitionHashOf(JSON.parse(row.definition));
+  } catch {
+    definitionHash = undefined;
+  }
+  if (
+    definitionHash !== row.definitionHash ||
+    (await sha256Hex(row.manifest)) !== row.manifestHash
+  ) {
+    throw corrupt(workflow.id, version);
+  }
+  const build = sealedBuildOf(workflow.id, version, row.manifest);
+  if (!build.executable) {
+    return { status: "not_executable" };
+  }
+  const loaded = await loadWorkflowBuild(
+    env,
+    workflow.id,
+    version,
+    row.manifestHash
+  );
+  const pinned = pinnedBindingsSchema.safeParse(JSON.parse(row.manifest));
+  if (!pinned.success) {
+    throw corrupt(workflow.id, version);
+  }
+  const bindings: ExportedBinding[] = [];
+  for (const binding of pinned.data.bindings) {
+    const catalogKind = catalogBindingKinds.find(
+      (kind) => kind === binding.kind
+    );
+    if (
+      binding.kind === "workflow" &&
+      binding.resourceId !== null &&
+      binding.resourceVersion !== null
+    ) {
+      bindings.push({
+        alias: binding.alias,
+        kind: "workflow",
+        workflowId: binding.resourceId,
+        version: binding.resourceVersion,
+      });
+    } else if (catalogKind === undefined) {
+      throw corrupt(workflow.id, version);
+    } else {
+      bindings.push({ alias: binding.alias, kind: catalogKind });
+    }
+  }
+  return {
+    status: "found",
+    name: workflow.name,
+    definitionVersion: row.definitionVersion,
+    profile: row.profile,
+    manifestHash: row.manifestHash,
+    definitionHash: row.definitionHash,
+    evaluatorHash: row.evaluatorHash,
+    buildHash: build.hash,
+    definition: row.definition,
+    files: { [generatedPath]: loaded.source, ...loaded.compute.sources },
+    bindings,
+  };
+};
+
 /**
  * The modules version `version` of workflow `id` sealed, by path, read
  * back from its build with every hash checked: none for a version without

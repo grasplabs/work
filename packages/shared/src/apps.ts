@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import type { DefinitionPackage } from "./definition-packages.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { collectionIdSchema, identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
@@ -540,6 +541,12 @@ export interface AppsApi {
    * version alone, for anyone with a role in the App.
    */
   exports: (app: string) => Promise<CurrentExports>;
+  /**
+   * The App's definition package: its current sealed release and the
+   * workflow versions it binds, as portable source without secrets. For
+   * its builders, never Grasp staff; audited.
+   */
+  definition: (app: string) => Promise<DefinitionPackage>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;
