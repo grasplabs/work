@@ -1,25 +1,51 @@
-// Compile-time guarantees of a workflow's own actions (GRA-704): a
-// connector use declares the exact operations it calls, and
+// Compile-time guarantees of a workflow's own actions (GRA-704, GRA-700):
+// a connector use declares the exact operations it calls, and
 // `ctx.resources.<alias>.call` takes only those; an operation use takes
-// its arguments alone. This file is type-checked by `vp check` and never
+// its arguments alone; a model use's `generate` answers the shape it
+// declared, and takes instructions and an input alone. This file is type-checked by `vp check` and never
 // run: every `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
 import { action, resource, v } from "../src/action.ts";
-import type { ActionCtx } from "../src/action.ts";
+import type { ActionCtx, ModelRequest } from "../src/action.ts";
 import type { JsonValue } from "../src/value-descriptor.ts";
 
 const mail = resource.connector("mail", {
   operations: ["mail.send", "mail.list"],
 });
 const lookup = resource.operation("lookup");
+const writer = resource.model("writer", {
+  output: v.object({ line: v.string(), score: v.number() }),
+});
 
-declare const ctx: ActionCtx<readonly [typeof mail, typeof lookup]>;
+declare const ctx: ActionCtx<
+  readonly [typeof mail, typeof lookup, typeof writer]
+>;
 
 expectTypeOf(ctx.resources.mail.call)
   .parameter(0)
   .toEqualTypeOf<"mail.list" | "mail.send">();
 expectTypeOf(ctx.resources.lookup.call).parameters.toEqualTypeOf<[JsonValue]>();
+
+expectTypeOf(ctx.resources.writer.generate).parameters.toEqualTypeOf<
+  [ModelRequest]
+>();
+expectTypeOf(ctx.resources.writer.generate).returns.resolves.toEqualTypeOf<{
+  line: string;
+  score: number;
+}>();
+
+// A model use has no `call`.
+// @ts-expect-error -- a model is asked with `generate`
+void ctx.resources.writer.call;
+
+// A model use without the shape of its answers.
+// @ts-expect-error -- output is required
+resource.model("writer");
+
+// A model request names no model.
+// @ts-expect-error -- instructions and an input alone
+void ctx.resources.writer.generate({ instructions: "x", input: 1, model: "m" });
 
 // An operation the use didn't declare.
 // @ts-expect-error -- only "mail.send" and "mail.list"

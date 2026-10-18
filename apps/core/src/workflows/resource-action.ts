@@ -59,6 +59,12 @@ import { requireShape } from "./resource-calls.ts";
 //   (`ActionEffects.refused`) before the task fails: once per attempt,
 //   from what the host knows, a binding named only when it is declared.
 //   A refusal `make` gave has its own receipt there already.
+// - Model calls past the run's cap, or uncounted once its step replays
+//   (GRA-700). A model use's calls send the binding's own model the
+//   sealed output shape, never one the action makes up, and the host
+//   counts each against the run's `maxModelCalls` before it goes out, in
+//   the run object's own storage, so a replay or a failed attempt still
+//   counts it (resource-host.ts, `#reserveModelCall`).
 
 /** The most resource calls one attempt of an action makes. */
 export const maxActionCalls = 32;
@@ -77,6 +83,16 @@ const connectorRequestSchema = z.strictObject({
 
 /** What an action asks of an operation binding: its args. */
 const operationRequestSchema = z.strictObject({ arguments: jsonSchema });
+
+/**
+ * What an action asks of a model binding: instructions as text and an
+ * input. Never a model, a token budget or an output shape: the binding's
+ * model, the gateway's defaults and the sealed output (GRA-700).
+ */
+const modelRequestSchema = z.strictObject({
+  instructions: z.string().min(1),
+  input: jsonSchema,
+});
 
 /** What the host does for an action's resource calls (resource-host.ts). */
 export interface ActionEffects {
@@ -135,10 +151,17 @@ const callBounds = {
  * before, and the host waits for every one before the task records.
  */
 class ActionHost extends RpcTarget {
-  /** Each declared use by alias: its kind, a connector's operations. */
+  /**
+   * Each declared use by alias: its kind, a connector's operations, a
+   * model's sealed output descriptor.
+   */
   readonly #uses: ReadonlyMap<
     string,
-    { readonly kind: string; readonly operations: ReadonlySet<string> }
+    {
+      readonly kind: string;
+      readonly operations: ReadonlySet<string>;
+      readonly output: string | undefined;
+    }
   >;
   readonly #effects: ActionEffects;
   readonly #state: ActionHostState;
@@ -157,6 +180,7 @@ class ActionHost extends RpcTarget {
         {
           kind: use.kind,
           operations: new Set(use.kind === "connector" ? use.operations : []),
+          output: use.kind === "model" ? use.output : undefined,
         },
       ])
     );
@@ -256,6 +280,28 @@ class ActionHost extends RpcTarget {
           arguments: parsed.data.arguments,
           // An action passes its own values only: no parameter of the run.
           sensitive: [],
+        },
+        ordinal
+      );
+    }
+    if (kind === "model") {
+      const asked = modelRequestSchema.safeParse(request);
+      if (!asked.success || use.output === undefined) {
+        return this.#refuse(
+          "request_invalid",
+          alias,
+          workflowResourceErrors.create("workflow.call_invalid")
+        );
+      }
+      return await this.#effects.make(
+        {
+          name: "grasp.model",
+          binding: alias,
+          instructions: asked.data.instructions,
+          input: asked.data.input,
+          // The sealed descriptor, as the version published it: the shape
+          // the call asks for and its answer is checked against.
+          outputSchema: jsonSchema.parse(JSON.parse(use.output)),
         },
         ordinal
       );

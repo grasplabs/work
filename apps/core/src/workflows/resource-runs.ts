@@ -558,6 +558,8 @@ export interface ResourceRunMemory {
   leaseOf: ResourceHostHooks["leaseOf"];
   /** What the run keeps of its tried-once attempts (`TriedOnceMarks`). */
   triedOnce?: ResourceHostHooks["triedOnce"];
+  /** The model calls its actions made (`ActionModelCalls`). */
+  modelCalls?: ResourceHostHooks["modelCalls"];
   /** Aborts once the activation running the run is over. */
   over?: AbortSignal;
   /** Whether the run is still this activation's. */
@@ -729,6 +731,9 @@ export const runResourceWorkflow = async (
     sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
     ...(memory.triedOnce === undefined ? {} : { triedOnce: memory.triedOnce }),
+    ...(memory.modelCalls === undefined
+      ? {}
+      : { modelCalls: memory.modelCalls }),
     attemptCall: trackAttemptCalls(calls),
     tampered: (error) => {
       tampered ??= error;

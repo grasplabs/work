@@ -3611,3 +3611,229 @@ describe("an activation's share of core's CPU, for calls tried once", () => {
     });
   });
 });
+
+/**
+ * The module of action `greet`: `writer` asked twice (or `asks` times) for
+ * a line of the declared shape, its answer the lines joined.
+ */
+const greetModule = (
+  asks = 2
+) => `import { action, resource, v } from "@grasp-os/sdk/action";
+
+const writer = resource.model("writer", {
+  output: v.object({ line: v.string() }),
+});
+
+export const greet = action({
+  args: { who: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [writer],
+  handler: async (ctx, args) => {
+    const lines: string[] = [];
+    for (let ask = 0; ask < ${asks}; ask += 1) {
+      const { line } = await ctx.resources.writer.generate({
+        instructions: "Greet them.",
+        input: { who: args.who, ask },
+      });
+      lines.push(line);
+    }
+    return { status: lines.join(" / ") };
+  },
+});
+`;
+
+/** The task calling action `greet` with the run's `who`. */
+const greetTask = {
+  greet: {
+    call: "grasp.operation",
+    with: {
+      binding: "greet",
+      arguments: { who: "${ $workflow.input.who }" },
+    },
+  },
+};
+
+/**
+ * A workflow of `by`'s whose action `greet` asks `writer` (the allowed
+ * model, approved by `admin`) for lines, running `tasks`, its model calls
+ * limited to `maxModelCalls`.
+ */
+const writingWorkflow = async (
+  by: Identity,
+  admin: Identity,
+  {
+    tasks,
+    maxModelCalls,
+    asks,
+  }: { tasks: unknown[]; maxModelCalls: number; asks?: number }
+) => {
+  const key = `writer-${unique()}`;
+  await publishCatalogContract(env, admin, { key, kind: "model" });
+  const { workflow, executable } = await published(by, {
+    bindings: {
+      greet: { kind: "operation", contract: "local:code/greet.ts#greet" },
+      writer: { kind: "model", contract: key },
+    },
+    limits: { maxModelCalls },
+    tasks,
+    modules: { "code/greet.ts": greetModule(asks) },
+  });
+  const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "writer",
+    target: { kind: "model", model: allowedModel },
+    reviewed: { version: 1 },
+  });
+  return { workflow, executable, approval };
+};
+
+/** A JSON task asking `writer` once more, as a task of the run's own. */
+const writeAgain = {
+  again: {
+    call: "grasp.model",
+    with: {
+      binding: "writer",
+      instructions: "Greet them again.",
+      input: { who: "${ $workflow.input.who }" },
+      outputSchema: objectSchema({ line: { type: "string" } }),
+    },
+  },
+};
+
+describe("model resources of a JSON workflow's own actions", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("asks the binding's model for the declared shape, each call an effect of its own", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, executable } = await writingWorkflow(ada, admin, {
+      tasks: [greetTask, pause],
+      maxModelCalls: 2,
+    });
+    const gateway = gatewayAnswering(
+      answer('{"line":"Hello Ada"}'),
+      answer('{"line":"Hi again"}')
+    );
+    const runId = await started(ada, workflow.id);
+    const run = await ended(ada, workflow.id, runId);
+    const receipts = await receiptsOf(runId);
+    expect({
+      executable,
+      end: endOf(run),
+      // Two requests, though the run replayed after its pause.
+      requests: gateway.requests.length,
+      receipts: receipts.map(({ call, binding, outcome }) => ({
+        call,
+        binding,
+        outcome,
+      })),
+    }).toStrictEqual({
+      executable: true,
+      end: { status: "completed", output: { status: "Hello Ada / Hi again" } },
+      requests: 2,
+      receipts: ["started", "done", "started", "done"].map((outcome) => ({
+        call: "grasp.model",
+        binding: "writer",
+        outcome,
+      })),
+    });
+  });
+
+  it("counts an action's model calls against the run's limit, within its attempt and across a replay", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // The action spends the run's two calls; the task after its replay
+    // asks for a third.
+    const replayed = await writingWorkflow(ada, admin, {
+      tasks: [
+        greetTask,
+        pause,
+        writeAgain,
+        { finish: { set: { status: "done" } } },
+      ],
+      maxModelCalls: 2,
+    });
+    const replayGateway = gatewayAnswering(
+      answer('{"line":"Hello Ada"}'),
+      answer('{"line":"Hi again"}'),
+      answer('{"line":"Never sent"}')
+    );
+    const replayedEnd = await ended(
+      ada,
+      replayed.workflow.id,
+      await started(ada, replayed.workflow.id)
+    );
+    const replayRequests = replayGateway.requests.length;
+    vi.restoreAllMocks();
+    // One call left for an action that asks twice: the second is never sent.
+    const within = await writingWorkflow(ada, admin, {
+      tasks: [greetTask],
+      maxModelCalls: 1,
+    });
+    const withinGateway = gatewayAnswering(
+      answer('{"line":"Hello Ada"}'),
+      answer('{"line":"Never sent"}')
+    );
+    const withinEnd = await ended(
+      ada,
+      within.workflow.id,
+      await started(ada, within.workflow.id)
+    );
+    expect({
+      replayed: endOf(replayedEnd),
+      replayRequests,
+      within: endOf(withinEnd),
+      withinRequests: withinGateway.requests.length,
+    }).toStrictEqual({
+      replayed: { status: "failed", code: "workflow.model_call_limit" },
+      replayRequests: 2,
+      within: { status: "failed", code: "workflow.model_call_limit" },
+      withinRequests: 1,
+    });
+  });
+
+  it("fails on an answer outside the declared shape, and refuses the next call once its approval is revoked", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const shaped = await writingWorkflow(ada, admin, {
+      tasks: [greetTask],
+      maxModelCalls: 2,
+      asks: 1,
+    });
+    const shapedGateway = gatewayAnswering(answer('{"other":"Hello Ada"}'));
+    const shapedEnd = await ended(
+      ada,
+      shaped.workflow.id,
+      await started(ada, shaped.workflow.id)
+    );
+    const shapedRequests = shapedGateway.requests.length;
+    vi.restoreAllMocks();
+    const revoked = await writingWorkflow(ada, admin, {
+      tasks: [hold, greetTask],
+      maxModelCalls: 2,
+      asks: 1,
+    });
+    const revokedGateway = gatewayAnswering(answer('{"line":"Never sent"}'));
+    const revokedRun = await started(ada, revoked.workflow.id);
+    await revokeWorkflowBinding(
+      env,
+      admin,
+      revoked.workflow.id,
+      revoked.approval.id
+    );
+    const revokedEnd = await ended(ada, revoked.workflow.id, revokedRun);
+    expect({
+      shaped: endOf(shapedEnd),
+      shapedRequests,
+      revoked: endOf(revokedEnd),
+      revokedRequests: revokedGateway.requests.length,
+    }).toStrictEqual({
+      // The gateway's refusal of an answer outside the declared shape.
+      shaped: { status: "failed", code: "model.invalid_output" },
+      shapedRequests: 1,
+      revoked: { status: "failed", code: "workflow.call_denied" },
+      revokedRequests: 0,
+    });
+  });
+});

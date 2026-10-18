@@ -11,7 +11,8 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import {
-  actionUsesSchema,
+  actionUseAliasPattern,
+  actionUseSchema,
   workflowModuleLimits,
 } from "@grasp-os/shared/workflow-modules";
 import type { ActionUse, SealedUse } from "@grasp-os/shared/workflow-modules";
@@ -95,14 +96,30 @@ export interface ComputeContract {
 }
 
 /** `use` copied and frozen, its operations with it. */
-export const sealedUse = (use: ActionUse | SealedUse): SealedUse =>
-  use.kind === "connector"
-    ? Object.freeze({
+export const sealedUse = (use: ActionUse | SealedUse): SealedUse => {
+  switch (use.kind) {
+    case "connector": {
+      return Object.freeze({
         alias: use.alias,
         kind: use.kind,
         operations: Object.freeze([...use.operations]),
-      })
-    : Object.freeze({ alias: use.alias, kind: use.kind });
+      });
+    }
+    case "model": {
+      return Object.freeze({
+        alias: use.alias,
+        kind: use.kind,
+        output: use.output,
+      });
+    }
+    case "operation": {
+      return Object.freeze({ alias: use.alias, kind: use.kind });
+    }
+    default: {
+      return use satisfies never;
+    }
+  }
+};
 
 /** A version's compute modules, built and inspected for sealing. */
 export interface CompiledModules {
@@ -291,6 +308,19 @@ export const versionActionsOf = (
 
 const descriptorObject = z.record(z.string(), z.json());
 
+/**
+ * A use as the inspection answers it: as sealed (`actionUseSchema`), but a
+ * model's output as the descriptor itself, sealed as canonical JSON.
+ */
+const manifestUseSchema = z.union([
+  actionUseSchema,
+  z.strictObject({
+    alias: z.string().regex(actionUseAliasPattern),
+    kind: z.literal("model"),
+    output: descriptorObject,
+  }),
+]);
+
 const manifestSchema = z.record(
   z.string().max(512),
   z.discriminatedUnion("kind", [
@@ -303,10 +333,48 @@ const manifestSchema = z.record(
       kind: z.literal("operation"),
       input: descriptorObject,
       output: descriptorObject,
-      uses: actionUsesSchema,
+      uses: z
+        .array(manifestUseSchema)
+        .max(workflowModuleLimits.actionUses)
+        .refine(
+          (uses) => new Set(uses.map(({ alias }) => alias)).size === uses.length
+        ),
     }),
   ])
 );
+
+/**
+ * `use` as the version seals it: a model's output as canonical JSON,
+ * within what a load reads back, and a descriptor the SDK reads, or the
+ * publication is refused (`invalid` with `where`).
+ */
+const sealedManifestUse = (
+  use: z.infer<typeof manifestUseSchema>,
+  where: { file: string; name: string }
+): SealedUse => {
+  if (use.kind !== "model") {
+    return sealedUse(use);
+  }
+  const output =
+    typeof use.output === "string" ? use.output : canonicalJson(use.output);
+  let readable = output.length <= workflowModuleLimits.descriptorChars;
+  if (readable) {
+    try {
+      schemaFromDescriptor(output);
+    } catch {
+      readable = false;
+    }
+  }
+  if (!readable) {
+    throw invalid([
+      {
+        file: where.file,
+        message: `${where.name}'s use of \`${use.alias}\` declares an output that isn't a value the SDK reads, within ${workflowModuleLimits.descriptorChars} characters as JSON.`,
+      },
+    ]);
+  }
+  return sealedUse({ alias: use.alias, kind: "model", output });
+};
 
 /**
  * The contracts the inspection answered in `text`, checked against the
@@ -357,7 +425,14 @@ const contractsOf = (
       input: canonicalJson(input),
       output: canonicalJson(output),
       ...(declared.kind === "operation"
-        ? { uses: declared.uses.map(sealedUse) }
+        ? {
+            uses: declared.uses.map((use) =>
+              sealedManifestUse(use, {
+                file: groups.module ?? "",
+                name: groups.export ?? "",
+              })
+            ),
+          }
         : {}),
     };
     // As the version's load reads it back (workflow-builds.ts): a contract
