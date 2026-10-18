@@ -36,8 +36,9 @@ import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 //   reading context before it returns a sensitive collection's data
 //   (knowledge/access.ts), and an independent run never enters restricted
 //   mode after its start (restricted.ts): such a read is refused
-//   (`permission.restricted`) before anything is returned. A run started
-//   restricted reads it.
+//   (`permission.restricted`) before anything is returned, a search that
+//   finds nothing too, as that says something of what the collection
+//   holds (knowledge/search.ts). A run started restricted reads it.
 // - A template other than the one approved. A binding pins one version by
 //   its content's hash; content that no longer hashes to it serves
 //   nothing (`resource.unavailable`).

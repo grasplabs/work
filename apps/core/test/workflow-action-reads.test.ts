@@ -1,5 +1,6 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { agentIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
@@ -25,8 +26,10 @@ import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import type { StartInvoker } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { refusal, unique } from "./sign-in.ts";
@@ -126,6 +129,17 @@ const looksEverywhere =
       }),
     };`);
 
+/**
+ * Searches for what follows `search:` in the run's input, answering the
+ * titles found, or else reads the document it names.
+ */
+const searchesOrReads = lookModule(`if (args.doc.startsWith("search:")) {
+      const hits = await ctx.resources.docs.search({ text: args.doc.slice(7) });
+      return { status: JSON.stringify(hits.map(({ title }) => title)) };
+    }
+    const found = await ctx.resources.docs.read({ id: args.doc });
+    return { status: found.title };`);
+
 /** A definition of `name` calling action `look`, after `before`. */
 const definitionOf = (
   name: string,
@@ -172,9 +186,10 @@ const hold = { hold: { wait: "PT1S" } };
 
 /**
  * A workflow of `by`'s whose action reads `docs`, its one collection: the
- * handbook, or the sensitive salaries collection (`sensitive`), each
- * granted to the workflow and approved by `admin`, with `letter` a pinned
- * template version. Also a collection it was never granted.
+ * handbook everyone reads, the payroll team's own (`team`), or its
+ * sensitive salaries collection (`sensitive`), each granted to the
+ * workflow and approved by `admin`, with `letter` a pinned template
+ * version. Also a collection it was never granted.
  */
 const readingWorkflow = async (
   by: Identity,
@@ -182,8 +197,9 @@ const readingWorkflow = async (
   module: string,
   {
     sensitive = false,
+    team: teamOnly = false,
     before = [],
-  }: { sensitive?: boolean; before?: unknown[] } = {}
+  }: { sensitive?: boolean; team?: boolean; before?: unknown[] } = {}
 ) => {
   const keys = {
     knowledge: `docs-${unique()}`,
@@ -218,11 +234,12 @@ const readingWorkflow = async (
       text,
       ifVersion: 0,
     });
+  const teams = { access: "teams", teams: [team] } as const;
   const bound = await createCollection(
     env,
     teamAdmin,
-    sensitive
-      ? { name: "Salaries", access: "teams", teams: [team], sensitive: true }
+    sensitive || teamOnly
+      ? { name: sensitive ? "Salaries" : "Payroll", ...teams, sensitive }
       : { name: "Handbook", access: "everyone" }
   );
   const other = await createCollection(env, admin, {
@@ -279,17 +296,25 @@ const readingWorkflow = async (
   };
 };
 
-/** Starts version 1 of workflow `id` for `by`, its action reading `doc`. */
+/**
+ * Starts version 1 of workflow `id` for `by`, its action reading `doc`:
+ * as `by` themselves, or as another invoker of theirs.
+ */
 const started = async (
   by: Identity,
   id: string,
-  doc: string
+  doc: string,
+  invoker?: StartInvoker
 ): Promise<string> => {
   const { runId } = await startWorkflow(
     env,
-    { type: "person", person: by },
+    invoker ?? { type: "person", person: by },
     id,
-    { version: 1, input: { who: doc }, key: unique() }
+    {
+      version: 1,
+      input: { who: doc },
+      key: unique(),
+    }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -470,6 +495,187 @@ describe("a workflow action's knowledge and template uses", () => {
       // Content no longer the pinned hash's serves nothing.
       tampered: { status: "failed", code: "resource.unavailable" },
       sensitive: { status: "failed", code: "permission.restricted" },
+    });
+  });
+
+  it("read as the person the run acts for: a team's collection tells someone outside the team nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const bob = await person("user");
+    const { workflow, documents } = await readingWorkflow(
+      ada,
+      admin,
+      searchesOrReads,
+      { team: true }
+    );
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const endOf = async (by: Identity, doc: string) =>
+      await ended(by, workflow.id, await started(by, workflow.id, doc));
+    expect({
+      ada: {
+        search: await endOf(ada, "search:leave"),
+        read: await endOf(ada, documents.leave),
+      },
+      bob: {
+        search: await endOf(bob, "search:leave"),
+        read: await endOf(bob, documents.leave),
+      },
+    }).toStrictEqual({
+      ada: {
+        search: { status: "completed", output: { status: '["Leave"]' } },
+        read: { status: "completed", output: { status: "Leave" } },
+      },
+      // The same workflow, grant and approvals, started by someone the
+      // team leaves out: as if the collection held nothing.
+      bob: {
+        search: { status: "completed", output: { status: "[]" } },
+        read: { status: "failed", code: "resource.item_not_found" },
+      },
+    });
+  });
+
+  it("read a sensitive collection in a run restricted from its start, and refuse even a search that finds nothing to one that isn't", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, documents } = await readingWorkflow(
+      ada,
+      admin,
+      searchesOrReads,
+      { sensitive: true }
+    );
+    // An agent's start that names no chat starts restricted, failing
+    // closed (workflow-starts.ts, `restrictedStart`).
+    const agentId = agentIdSchema.parse(`agent-${unique()}`);
+    await granted(ada, admin, {
+      subject: { type: "agent", agentId },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    const agent: StartInvoker = {
+      type: "agent",
+      authority: {
+        subject: { type: "agent", agentId },
+        onBehalfOf: ada.userId,
+        mode: "interactive",
+      },
+    };
+    const endOf = async (doc: string, invoker?: StartInvoker) =>
+      await ended(
+        ada,
+        workflow.id,
+        await started(ada, workflow.id, doc, invoker)
+      );
+    expect({
+      restricted: {
+        search: await endOf("search:leave", agent),
+        read: await endOf(documents.leave, agent),
+      },
+      unrestricted: {
+        search: await endOf("search:leave"),
+        nothingFound: await endOf("search:zebra"),
+      },
+    }).toStrictEqual({
+      restricted: {
+        search: { status: "completed", output: { status: '["Leave"]' } },
+        read: { status: "completed", output: { status: "Leave" } },
+      },
+      unrestricted: {
+        search: { status: "failed", code: "permission.restricted" },
+        // Refused alike: an empty answer would still say what isn't there.
+        nothingFound: { status: "failed", code: "permission.restricted" },
+      },
+    });
+  });
+
+  it("refuse approving a collection no run's person may ever read: one only its owner reads, one only admins read, or one deleted", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const keys = {
+      knowledge: `docs-${unique()}`,
+      template: `letter-${unique()}`,
+    };
+    for (const kind of ["knowledge", "template"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await publishCatalogContract(env, admin, { key: keys[kind], kind });
+    }
+    const workflow = await createWorkflowResource(env, ada, `read-${unique()}`);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf(workflow.name, keys),
+      basedOn: null,
+      modules: { "code/look.ts": looksEverywhere },
+    });
+    const approving = async (collection: { id: string }) => {
+      const permissionId = await granted(ada, admin, {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "collection", collectionId: collection.id },
+        actions: ["read"],
+        binding: `DOCS_${unique().toUpperCase().replaceAll("-", "_")}`,
+      });
+      return async () => {
+        const error = await refusal(
+          approveWorkflowBinding(env, admin, workflow.id, {
+            alias: "docs",
+            target: { kind: "knowledge", permissionId },
+            reviewed: { version: 1 },
+          })
+        );
+        return z
+          .object({
+            code: z.string(),
+            details: z.object({ issues: z.array(z.string()) }),
+          })
+          .parse(error);
+      };
+    };
+    // A request already refuses a personal or admins-only collection
+    // (permissions.ts), and no collection's access changes yet: each is
+    // granted as one everyone reads, then becomes one no delegate reads,
+    // as only the database could make it now.
+    const collectionFor = async (name: string) =>
+      await createCollection(env, admin, { name, access: "everyone" });
+    const mine = await collectionFor("Mine");
+    const board = await collectionFor("Board");
+    const gone = await collectionFor("Gone");
+    const personal = await approving(mine);
+    const adminsOnly = await approving(board);
+    const deleted = await approving(gone);
+    await env.KNOWLEDGE.batch([
+      env.KNOWLEDGE.prepare(
+        "UPDATE collections SET access = 'me', owner = ? WHERE id = ?"
+      ).bind(ada.userId, mine.id),
+      env.KNOWLEDGE.prepare(
+        "UPDATE collections SET access = 'admins' WHERE id = ?"
+      ).bind(board.id),
+      env.KNOWLEDGE.prepare("DELETE FROM collections WHERE id = ?").bind(
+        gone.id
+      ),
+    ]);
+    const unreadable = {
+      code: "workflow.binding_invalid",
+      details: {
+        issues: [
+          "target.permissionId: A workflow can't read a personal or admins-only collection.",
+        ],
+      },
+    };
+    expect({
+      personal: await personal(),
+      adminsOnly: await adminsOnly(),
+      deleted: await deleted(),
+    }).toStrictEqual({
+      personal: unreadable,
+      adminsOnly: unreadable,
+      deleted: {
+        code: "workflow.binding_invalid",
+        details: {
+          issues: ["target.permissionId: That collection no longer exists."],
+        },
+      },
     });
   });
 
