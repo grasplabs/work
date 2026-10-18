@@ -99,6 +99,10 @@ msgstr "{app} necesita que alguien vuelva a iniciar sesión"
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Versión {version}"
 
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "{approvals, plural, one {# approval} other {# approvals}}"
+msgstr "{approvals, plural, one {# aprobación} other {# aprobaciones}}"
+
 #: src/engines/package-approvals.tsx
 msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
 msgstr "{approvals, plural, one {Esto termina # aprobación de estos paquetes.} other {Esto termina # aprobaciones de estos paquetes.}}"
@@ -1325,6 +1329,7 @@ msgstr "Todo"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "Aplicación"
 
@@ -1353,6 +1358,10 @@ msgstr "Aprobación"
 #: src/engines/screen-approval.tsx
 msgid "Approval taken back"
 msgstr "Aprobación retirada"
+
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "Approvals"
+msgstr "Aprobaciones"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
@@ -3430,6 +3439,7 @@ msgid "Kickoff"
 msgstr "Arranque"
 
 #: src/engines/resource-bindings.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 msgid "Kind"
 msgstr "Tipo"
 
@@ -3468,6 +3478,10 @@ msgstr "Idiomas en los que entrevista"
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Últimos 7 días"
+
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "Last decided"
+msgstr "Última decisión"
 
 #: src/dashboard/failed-workflows.tsx
 msgid "Last on {date}"
@@ -3737,6 +3751,7 @@ msgstr "Mover {title}"
 msgid "Moved old entries out of the audit trail"
 msgstr "Sacó entradas antiguas del registro de auditoría"
 
+#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/workflows/independent-workflows.tsx
 msgid "Name"
@@ -3822,6 +3837,10 @@ msgstr "Nuevo: falló mientras actuaba en tu nombre"
 #: src/workflows/triggers.tsx
 msgid "Next run: {next}"
 msgstr "Próxima ejecución: {next}"
+
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "No App or workflow has approved packages."
+msgstr "Ninguna app ni flujo de trabajo tiene paquetes aprobados."
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -3926,6 +3945,10 @@ msgstr "Ningún otro dominio ofrece todas las funciones que declara, públicas y
 #: src/engines/package-approvals.tsx
 msgid "No packages are approved for this domain."
 msgstr "No hay paquetes aprobados para este dominio."
+
+#: src/engines/package-approvals.tsx
+msgid "No packages are approved for this workflow."
+msgstr "No hay paquetes aprobados para este flujo de trabajo."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this domain before."
@@ -4348,6 +4371,10 @@ msgstr "Secciones del onboarding"
 msgid "Only if its condition holds"
 msgstr "Solo si se cumple su condición"
 
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "Only people who may approve packages see what is approved across the workspace."
+msgstr "Solo quienes pueden aprobar paquetes ven lo aprobado en todo el espacio de trabajo."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
 msgstr "Solo los modelos marcados como aptos para datos sensibles pueden recibir datos de una colección sensible (marcada en Conocimiento) o de una conexión sensible, o de un chat, dominio o ejecución que haya leído una."
@@ -4536,12 +4563,18 @@ msgstr "Paquete"
 
 #: src/engines/package-approvals.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.settings.packages.index.tsx
+#: src/routes/_shell.settings.tsx
 msgid "Packages"
 msgstr "Paquetes"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Packages for {domain}"
 msgstr "Paquetes para {domain}"
+
+#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+msgid "Packages for {workflow}"
+msgstr "Paquetes para {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -5512,6 +5545,7 @@ msgid "Show less"
 msgstr "Mostrar menos"
 
 #: src/knowledge/nav.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 msgid "Show more"
 msgstr "Mostrar más"
 
@@ -6083,6 +6117,10 @@ msgstr "No se pudo cargar la aplicación."
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "Se retiró la aprobación del código de esta aplicación y la aplicación se detuvo. Un administrador puede aprobarlo de nuevo en la página del dominio."
 
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
+msgstr "Las apps y flujos de trabajo que pueden usar paquetes npm aprobados. Abre uno para dar de baja o revocar lo que se le aprobó."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Las aplicaciones en las que pueden trabajar tus flujos de trabajo. Grasp solo hace lo que permites en cada una."
@@ -6354,6 +6392,10 @@ msgstr "La anterior"
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "The packages approved for this domain. You see them because you may approve packages; the rest of the domain is for its members."
 msgstr "Los paquetes aprobados para este dominio. Los ves porque puedes aprobar paquetes; el resto del dominio es para sus miembros."
+
+#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+msgid "The packages approved for this workflow's calculations. Retire or revoke them here."
+msgstr "Los paquetes aprobados para los cálculos de este flujo de trabajo. Dalos de baja o revócalos aquí."
 
 #: src/engines/package-approvals.tsx
 msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
@@ -7398,6 +7440,7 @@ msgstr "Calculó lo que podría mejorarse"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/runs-widget.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -7418,6 +7461,10 @@ msgstr "Flujo de trabajo {workflow}"
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Workflow not found"
 msgstr "Flujo de trabajo no encontrado"
+
+#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+msgid "Workflow packages"
+msgstr "Paquetes del flujo de trabajo"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"

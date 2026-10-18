@@ -2074,9 +2074,10 @@ export const deleteWorkflowResource = async (
       )
       .returning({ id: workflowResources.id }),
     outboxedIfChanged(db, entry(by, "workflow.deleted", workflow.id)),
-    // Packages asked for it wait for nobody once it is gone, and the locks
-    // only they named go, their files to cleanup (dependencies/requests.ts).
-    ...withdrawnWithWorkflow(db, by.actor ?? actorOf(by), workflow.id),
+    // Its packages end with it: approvals revoked, the request waiting
+    // withdrawn, and the locks only they named gone, their files to
+    // cleanup (dependencies/pending.ts).
+    ...withdrawnWithWorkflow(db, by, workflow.id),
     // Its draft (workflow-drafts.ts) is never read again, and may hold a
     // sensitive parameter's default: it goes once it is deleted.
     db.delete(workflowResourceDrafts).where(

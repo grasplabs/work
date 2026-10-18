@@ -2,6 +2,7 @@ import type {
   DependencySubject,
   NamedDependencySubject,
 } from "@grasp-os/shared/dependencies";
+import { roleErrors } from "@grasp-os/shared/roles";
 
 import { appFor } from "../apps.ts";
 import type { Acting } from "../auth/identity.ts";
@@ -25,6 +26,11 @@ export const builtSubject = async (
   if (subject.type === "app") {
     const { id, name } = await appFor(env, by, subject.id, "builder");
     return { type: "app", id, name };
+  }
+  // Grasp staff neither ask for, build nor read a workflow's packages,
+  // whatever role their session carries.
+  if (by.staff) {
+    throw roleErrors.create("role.forbidden");
   }
   const { id, name } = await requireWorkflowRole(
     env,
