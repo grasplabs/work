@@ -387,6 +387,9 @@ importers:
       jose:
         specifier: 'catalog:'
         version: 6.2.12
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.47.0(react@19.3.0)
       react:
         specifier: 'catalog:'
         version: 19.3.0

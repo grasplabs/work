@@ -171,9 +171,12 @@ const memberEntry = (
   detail: { userId },
 });
 
-/** The organization's members, by name. For admins. */
-const listMembers = async (env: Env, by: Identity): Promise<Member[]> => {
-  requireMemberAdmin(by);
+/**
+ * The organization's members, by name: for its admins (`listMembers`), and
+ * Grasp's admin (admin-snapshot.ts). It checks no permission: its callers
+ * must have checked who is asking first.
+ */
+export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
   const rows = await drizzle(env.DB)
     .select({
       userId: members.userId,
@@ -198,6 +201,12 @@ const listMembers = async (env: Env, by: Identity): Promise<Member[]> => {
       ? [{ ...member, role: parsed.data, joinedAt: joinedAt.toISOString() }]
       : [];
   });
+};
+
+/** The organization's members, by name. For admins. */
+const listMembers = async (env: Env, by: Identity): Promise<Member[]> => {
+  requireMemberAdmin(by);
+  return await membersOf(env);
 };
 
 /**
