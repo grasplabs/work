@@ -99,6 +99,13 @@
       "when": 1792332912662,
       "tag": "0013_drop_submissions",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792338856044,
+      "tag": "0014_sections_insert_triggers",
+      "breakpoints": true
     }
   ]
 }

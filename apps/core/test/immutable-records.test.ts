@@ -1,8 +1,10 @@
 /**
  * The records independent workflows freeze (migrations 0080, 0089, 0095
  * and 0101) can't be rewritten by an insert either: whatever form asks to
- * write over a key a table already holds, primary or unique, the database
- * refuses it and the row stays as it was. A new key is written as before.
+ * write over a key a table already holds, primary, unique or the implicit
+ * rowid, the database refuses it and the row stays as it was. A new key is
+ * written as before. Knowledge's sections refuse the same (knowledge
+ * migration 0014), so no replace leaves a search row behind.
  */
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -170,11 +172,19 @@ const tables: readonly ImmutableTable[] = [
   },
 ];
 
-const insertSql = (verb: string, table: string, row: Row, tail = "") => {
+const insertSql = (
+  verb: string,
+  table: string,
+  row: Row,
+  tail = "",
+  db: D1Database = env.DB
+) => {
   const columns = Object.keys(row).map((column) => `"${column}"`);
-  return env.DB.prepare(
-    `${verb} INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})${tail}`
-  ).bind(...Object.values(row));
+  return db
+    .prepare(
+      `${verb} INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})${tail}`
+    )
+    .bind(...Object.values(row));
 };
 
 /** The forms that resolve a conflict instead of failing on it. */
@@ -228,12 +238,30 @@ const seeded = async (spec: ImmutableTable): Promise<Row> => {
   return row;
 };
 
-const rowsOf = async (table: string) => {
-  const { results } = await env.DB.prepare(
-    `SELECT * FROM ${table} ORDER BY rowid`
-  ).all();
+/** A table's rows, each with its rowid. */
+const rowsOf = async (table: string, db: D1Database = env.DB) => {
+  const { results } = await db
+    .prepare(`SELECT rowid AS row_id, * FROM ${table} ORDER BY rowid`)
+    .all();
   return results;
 };
+
+const rowidOf = async (spec: ImmutableTable, row: Row): Promise<number> => {
+  const found = await env.DB.prepare(
+    `SELECT rowid AS id FROM ${spec.table} WHERE ${spec.key.map((column) => `"${column}" = ?`).join(" AND ")}`
+  )
+    .bind(...spec.key.map((column) => row[column]))
+    .first<{ id: number }>();
+  if (found === null) {
+    throw new Error(`No ${spec.table} row seeded`);
+  }
+  return found.id;
+};
+
+/** Whether `outcome` is the table's own refusal of `key`, not SQLite's. */
+const refusedBy = (outcome: string, table: string, key = "") =>
+  outcome.includes(`UNIQUE constraint failed: ${table}.${key}`) &&
+  outcome.includes(`(${table} `);
 
 describe("immutable records", () => {
   it.each(tables)(
@@ -268,9 +296,7 @@ describe("immutable records", () => {
         outcomes[form] = {
           // The table's own refusal, read as the unique violation it is,
           // and told from SQLite's by what it adds.
-          refused:
-            outcome.includes(`UNIQUE constraint failed: ${spec.table}.`) &&
-            outcome.includes(`(${spec.table} `),
+          refused: refusedBy(outcome, spec.table),
           unchanged: JSON.stringify(after) === JSON.stringify(before),
         };
       }
@@ -284,6 +310,167 @@ describe("immutable records", () => {
       );
     }
   );
+
+  it.each(tables)(
+    "$table refuses a new key under an old row's rowid",
+    async (spec) => {
+      const row = await seeded(spec);
+      const rowid = await rowidOf(spec, row);
+      // Everything else about it new: its parents, every key but the rowid.
+      const fresh = crypto.randomUUID();
+      const parents = spec
+        .parents(fresh)
+        .map((parent) => insertSql("INSERT", parent.table, parent.row));
+      if (parents.length > 0) {
+        await env.DB.batch(parents);
+      }
+      const before = await rowsOf(spec.table);
+      const replace = await refusal(
+        insertSql("INSERT OR REPLACE", spec.table, {
+          rowid,
+          ...spec.row(fresh),
+        })
+      );
+      const replaceInto = await refusal(
+        insertSql("REPLACE", spec.table, { rowid, ...spec.row(fresh) })
+      );
+      const after = await rowsOf(spec.table);
+      // The old row still there, its key is still taken: nothing can be
+      // written under it in its place.
+      const again = await refusal(
+        insertSql("INSERT", spec.table, { ...row, ...spec.change })
+      );
+      expect({
+        replace: refusedBy(replace, spec.table, "rowid"),
+        replaceInto: refusedBy(replaceInto, spec.table, "rowid"),
+        unchanged: JSON.stringify(after) === JSON.stringify(before),
+        again: again.includes(`UNIQUE constraint failed: ${spec.table}.`),
+      }).toStrictEqual({
+        replace: true,
+        replaceInto: true,
+        unchanged: true,
+        again: true,
+      });
+    }
+  );
+
+  it("refuses a section written over its key or rowid, which would leave its search row", async () => {
+    const db = env.KNOWLEDGE;
+    const id = crypto.randomUUID();
+    const section = (position: number): Row => ({
+      document_id: `doc-${id}`,
+      version: 1,
+      position,
+      headings: "[]",
+      text: `section ${position}`,
+    });
+    await db.batch([
+      insertSql(
+        "INSERT",
+        "collections",
+        {
+          id: `col-${id}`,
+          name: `col-${id}`,
+          description: "",
+          owner: "owner",
+          access: "all",
+          source: "local",
+          created_at: 1,
+        },
+        "",
+        db
+      ),
+      insertSql(
+        "INSERT",
+        "documents",
+        {
+          id: `doc-${id}`,
+          collection_id: `col-${id}`,
+          path: `doc-${id}.md`,
+          title: "Doc",
+          type: "page",
+          description: "",
+          owner: "owner",
+          tags: "[]",
+          current_version: 1,
+          created_at: 1,
+          updated_at: 1,
+        },
+        "",
+        db
+      ),
+      insertSql(
+        "INSERT",
+        "versions",
+        {
+          document_id: `doc-${id}`,
+          number: 1,
+          text: "",
+          author: "owner",
+          created_at: 1,
+        },
+        "",
+        db
+      ),
+      insertSql("INSERT", "sections", section(0), "", db),
+    ]);
+    const { id: rowid } = (await db
+      .prepare("SELECT rowid AS id FROM sections WHERE document_id = ?")
+      .bind(`doc-${id}`)
+      .first<{ id: number }>()) ?? { id: -1 };
+    const state = async () =>
+      JSON.stringify([
+        await rowsOf("sections", db),
+        await rowsOf("search_rows", db),
+      ]);
+    const before = await state();
+    const changed = { ...section(0), text: "changed" };
+    const outcomes = {
+      replace: await refusal(
+        insertSql("INSERT OR REPLACE", "sections", changed, "", db)
+      ),
+      upsert: await refusal(
+        insertSql(
+          "INSERT",
+          "sections",
+          changed,
+          " ON CONFLICT (document_id, position) DO UPDATE SET text = excluded.text",
+          db
+        )
+      ),
+      rowid: await refusal(
+        insertSql(
+          "INSERT OR REPLACE",
+          "sections",
+          { rowid, ...section(1) },
+          "",
+          db
+        )
+      ),
+    };
+    const after = await state();
+    // A new section is still written, and indexed.
+    await insertSql("INSERT", "sections", section(1), "", db).run();
+    const { results: indexed } = await db
+      .prepare(
+        "SELECT position FROM search_rows WHERE document_id = ? ORDER BY position"
+      )
+      .bind(`doc-${id}`)
+      .all<{ position: number }>();
+    expect({
+      replace: refusedBy(outcomes.replace, "sections", "document_id"),
+      upsert: refusedBy(outcomes.upsert, "sections", "document_id"),
+      rowid: refusedBy(outcomes.rowid, "sections", "rowid"),
+      unchanged: after === before,
+      indexed: indexed.map(({ position }) => position),
+    }).toStrictEqual({
+      replace: true,
+      upsert: true,
+      rowid: true,
+      unchanged: true,
+      indexed: [0, 1],
+    });
+  });
 
   it.each(tables)("$table takes a new key", async (spec) => {
     const first = await seeded(spec);

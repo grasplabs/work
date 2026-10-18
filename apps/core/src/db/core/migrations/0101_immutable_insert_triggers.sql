@@ -11,6 +11,12 @@
 -- (isUniqueViolation in db/d1.ts: a contract that exists, a parameter
 -- revision or a start receipt written as this ran) read it unchanged.
 -- `=` matches as the unique index does: a NULL never collides.
+--
+-- The rowid is a key too: none of these tables has an INTEGER PRIMARY KEY,
+-- so each row has an implicit rowid an insert may name, and REPLACE under
+-- a new key with an old row's rowid deleted that row just the same,
+-- leaving its key free for a plain insert. An insert that names no rowid
+-- has NEW.rowid -1 here, which no row has.
 CREATE TRIGGER `workflow_resource_versions_immutable_insert` BEFORE INSERT ON `workflow_resource_versions`
 WHEN EXISTS (
 	SELECT 1 FROM `workflow_resource_versions`
@@ -71,4 +77,46 @@ WHEN EXISTS (
 	SELECT 1 FROM `workflow_resource_runs` WHERE `id` = NEW.`id`
 ) BEGIN
 	SELECT RAISE(ABORT, 'UNIQUE constraint failed: workflow_resource_runs.id (workflow_resource_runs pin what they run and are kept)');
+END;
+--> statement-breakpoint
+CREATE TRIGGER `workflow_resource_versions_immutable_insert_rowid` BEFORE INSERT ON `workflow_resource_versions`
+WHEN EXISTS (
+	SELECT 1 FROM `workflow_resource_versions` WHERE rowid = NEW.rowid
+) BEGIN
+	SELECT RAISE(ABORT, 'UNIQUE constraint failed: workflow_resource_versions.rowid (workflow_resource_versions are immutable)');
+END;
+--> statement-breakpoint
+CREATE TRIGGER `workflow_start_receipts_immutable_insert_rowid` BEFORE INSERT ON `workflow_start_receipts`
+WHEN EXISTS (
+	SELECT 1 FROM `workflow_start_receipts` WHERE rowid = NEW.rowid
+) BEGIN
+	SELECT RAISE(ABORT, 'UNIQUE constraint failed: workflow_start_receipts.rowid (workflow_start_receipts are immutable)');
+END;
+--> statement-breakpoint
+CREATE TRIGGER `workflow_resource_params_immutable_insert_rowid` BEFORE INSERT ON `workflow_resource_params`
+WHEN EXISTS (
+	SELECT 1 FROM `workflow_resource_params` WHERE rowid = NEW.rowid
+) BEGIN
+	SELECT RAISE(ABORT, 'UNIQUE constraint failed: workflow_resource_params.rowid (workflow_resource_params are immutable)');
+END;
+--> statement-breakpoint
+CREATE TRIGGER `workflow_catalog_contracts_immutable_insert_rowid` BEFORE INSERT ON `workflow_catalog_contracts`
+WHEN EXISTS (
+	SELECT 1 FROM `workflow_catalog_contracts` WHERE rowid = NEW.rowid
+) BEGIN
+	SELECT RAISE(ABORT, 'UNIQUE constraint failed: workflow_catalog_contracts.rowid (workflow_catalog_contracts are immutable)');
+END;
+--> statement-breakpoint
+CREATE TRIGGER `trigger_resource_versions_immutable_insert_rowid` BEFORE INSERT ON `trigger_resource_versions`
+WHEN EXISTS (
+	SELECT 1 FROM `trigger_resource_versions` WHERE rowid = NEW.rowid
+) BEGIN
+	SELECT RAISE(ABORT, 'UNIQUE constraint failed: trigger_resource_versions.rowid (trigger_resource_versions are immutable)');
+END;
+--> statement-breakpoint
+CREATE TRIGGER `workflow_resource_runs_immutable_insert_rowid` BEFORE INSERT ON `workflow_resource_runs`
+WHEN EXISTS (
+	SELECT 1 FROM `workflow_resource_runs` WHERE rowid = NEW.rowid
+) BEGIN
+	SELECT RAISE(ABORT, 'UNIQUE constraint failed: workflow_resource_runs.rowid (workflow_resource_runs pin what they run and are kept)');
 END;
