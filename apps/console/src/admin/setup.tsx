@@ -1634,7 +1634,7 @@ export const OrgSetup = ({
         <div className="flex flex-col gap-6 pt-4">
           <Status
             clientId={clientId}
-            contractRead={admin.snapshot.contract !== null}
+            contractRead={!view.unknown.contract}
             needs={needs}
             setup={setup}
             view={view}
