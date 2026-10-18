@@ -116,15 +116,20 @@ export const look = action({
 });
 `;
 
-/** Searches, reads the document the run's input names, reads the letter. */
+/**
+ * Searches, reads the document the run's input names and the first hit by
+ * its ID, and reads the letter.
+ */
 const looksEverywhere =
   lookModule(`const hits = await ctx.resources.docs.search({ text: "leave" });
     const found = await ctx.resources.docs.read({ id: args.doc });
+    const first = await ctx.resources.docs.read({ id: hits[0]?.id ?? "" });
     const letter = await ctx.resources.letter.read();
     return {
       status: JSON.stringify({
         hits: hits.map(({ title }) => title),
         found: found.title,
+        first: first.title,
         greeting: letter.content,
       }),
     };`);
@@ -385,11 +390,14 @@ describe("a workflow action's knowledge and template uses", () => {
           status: JSON.stringify({
             hits: ["Leave"],
             found: "Leave",
+            // What a search found, read by the ID it answered.
+            first: "Leave",
             greeting: { greeting: "Dear" },
           }),
         },
       },
       receipts: [
+        ["grasp.knowledge", "docs"],
         ["grasp.knowledge", "docs"],
         ["grasp.knowledge", "docs"],
         ["grasp.template", "letter"],

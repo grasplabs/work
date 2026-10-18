@@ -121,8 +121,12 @@ export interface ModelResource<Output extends AnySchema = AnySchema> {
   readonly generate: (request: ModelRequest) => Promise<Infer<Output>>;
 }
 
-/** One search hit of a Knowledge collection: a title and an excerpt. */
+/**
+ * One search hit of a Knowledge collection: its document's ID, which a
+ * `read` takes, a title and an excerpt.
+ */
 export interface KnowledgeHit {
+  readonly id: string;
   readonly title: string;
   readonly excerpt: string;
 }

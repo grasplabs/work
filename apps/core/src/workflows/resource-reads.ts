@@ -118,6 +118,7 @@ const searched = async (
         )
     );
     return results.hits.map((hit) => ({
+      id: hit.documentId,
       title: hit.title,
       excerpt: hit.snippet,
     }));
