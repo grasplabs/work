@@ -101,6 +101,18 @@ describe("the brain of an organization", () => {
     );
   });
 
+  it("counts the facts agreed to, not those taken out at the read-back", () => {
+    const view = at(noordkade);
+    const approved = view.interviews.filter((interview) => interview.approved);
+    expect(approved.some((interview) => interview.out > 0)).toBeTruthy();
+    expect(brainOf(view).facts).toBe(
+      approved.reduce(
+        (sum, interview) => sum + interview.facts - interview.out,
+        0
+      )
+    );
+  });
+
   it("puts the largest gap in what is known first", () => {
     const { sources } = brainOf(at(veldkamp));
     const gaps = sources.map((each) => each.weight * (1 - each.known));
