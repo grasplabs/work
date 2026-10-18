@@ -407,6 +407,15 @@ const AgreedTile = ({
   </div>
 );
 
+/** While the company has paused its interviews: core lets nobody open or save one. */
+const pausedLine =
+  "The company has paused its interviews: nobody can open or go on with one until it resumes them.";
+
+/** Under a panel's title, while the interviews are paused. */
+const Paused = () => (
+  <p className="text-status-attention border-t px-5 py-3">{pausedLine}</p>
+);
+
 const councilWords = {
   yes: "Said yes",
   none: "No works council",
@@ -418,7 +427,7 @@ const councilWords = {
  * handling data, the company's own look at the risks to its people, and
  * the works council's yes where there is one.
  */
-const Agreed = ({ view }: { view: OrgView }) => {
+const Agreed = ({ view, paused }: { view: OrgView; paused: boolean }) => {
   const { agreed } = view.state;
   return (
     <Panel
@@ -446,9 +455,13 @@ const Agreed = ({ view }: { view: OrgView }) => {
         />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t px-5 py-3">
-        {mayInvite(agreed) ? (
+        {paused ? (
+          <span className="text-status-attention">{pausedLine}</span>
+        ) : null}
+        {!paused && mayInvite(agreed) ? (
           <Done>Interviews can start.</Done>
-        ) : (
+        ) : null}
+        {mayInvite(agreed) ? null : (
           <span className="text-status-attention">
             Interviews wait until all of this is in place.
           </span>
@@ -538,7 +551,9 @@ const leadLine = (view: OrgView, lead: PersonView, size: number): ReactNode => {
     return (
       <Done>
         Talked on {dayDate(view, lead.completed)}.{" "}
-        {counted(size, "colleague got a link.", "colleagues got a link.")}
+        {size === 0
+          ? "None of their colleagues has a link yet."
+          : counted(size, "colleague got a link.", "colleagues got a link.")}
       </Done>
     );
   }
@@ -593,9 +608,10 @@ const Leads = ({ view }: { view: OrgView }) => {
                 {leadLine(
                   view,
                   lead,
-                  // Who is away gets no link.
+                  // The colleagues whose links really went out: who is away
+                  // gets none, and the rest can wait for the team's work.
                   team.people.filter(
-                    (each) => !each.person.lead && each.state !== "away"
+                    (each) => each !== lead && each.sent !== null
                   ).length
                 )}
               </span>
@@ -638,9 +654,11 @@ const teamLine = (view: OrgView, team: OrgView["teams"][number]): string => {
 const Interviews = ({
   view,
   clientId,
+  paused,
 }: {
   view: OrgView;
   clientId: string;
+  paused: boolean;
 }) => {
   const { counts } = view;
   const days = listenDays(view.org);
@@ -655,6 +673,7 @@ const Interviews = ({
   if (!view.told) {
     return (
       <Panel description={description} title="Interviews">
+        {paused ? <Paused /> : null}
         <p className="text-muted-foreground border-t px-5 py-4">
           Nobody has a link yet. They go out once everything is agreed and the
           company has told its team.
@@ -665,6 +684,7 @@ const Interviews = ({
   const reminders = view.people.filter((each) => each.mayRemind).length;
   return (
     <Panel description={description} title="Interviews">
+      {paused ? <Paused /> : null}
       <div className="bg-border grid gap-px border-t sm:grid-cols-2 lg:grid-cols-4">
         <Tile
           label="have talked"
@@ -907,21 +927,24 @@ export const OrgSteps = ({
   view,
   stage,
   clientId,
+  paused,
 }: {
   view: OrgView;
   /** The step that is open. */
   stage: Stage;
   clientId: string;
+  /** The company has paused its interviews, which the model doesn't carry. */
+  paused: boolean;
 }) => (
   <>
     <StageList clientId={clientId} stage={stage} view={view} />
     {stage === "conversation" ? <Conversation view={view} /> : null}
     {stage === "research" ? <Research view={view} /> : null}
-    {stage === "agreed" ? <Agreed view={view} /> : null}
+    {stage === "agreed" ? <Agreed paused={paused} view={view} /> : null}
     {stage === "connected" ? <Company view={view} /> : null}
     {stage === "leads" ? <Leads view={view} /> : null}
     {stage === "interviews" ? (
-      <Interviews clientId={clientId} view={view} />
+      <Interviews clientId={clientId} paused={paused} view={view} />
     ) : null}
     {stage === "open" ? <Opens clientId={clientId} view={view} /> : null}
   </>

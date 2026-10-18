@@ -159,6 +159,11 @@ const conversationLine = (view: OrgView): string => {
   if (conversation === "in") {
     return "Brought in, not read yet";
   }
+  // What it brought, field by field, stays in the company's own Grasp: with
+  // none of it here, nothing can be said to be missing or not.
+  if (view.vision === null) {
+    return "Read";
+  }
   const missing = missingOf(view);
   return missing > 0
     ? `Read. ${missing} ${plural(missing, "thing", "things")} to ask the sponsor`

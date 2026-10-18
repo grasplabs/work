@@ -501,7 +501,7 @@ const Found = ({
           </span>
           <span className="text-muted-foreground flex flex-none items-center gap-2 text-xs">
             <Dot mark={markOf(each.state)} />
-            <span className="max-sm:hidden">
+            <span className="max-sm:sr-only">
               {each.out ? "Team does not take part" : linkWords[each.state]}
             </span>
           </span>
@@ -734,9 +734,16 @@ const TeamFigures = ({ view, team }: { view: OrgView; team: ChartTeam }) => {
   } else if (each.asked < people) {
     peopleSub = `${people - each.asked} ${people - each.asked === 1 ? "is" : "are"} away`;
   }
+  // The day the first colleague's link really went out: the team's own day
+  // is its lead's, and the colleagues' links can wait longer than that.
+  const firstSent = each.people
+    .filter((one) => one !== each.lead)
+    .flatMap((one) => (one.sent === null ? [] : [one.sent]))
+    .toSorted((a, b) => a - b)
+    .at(0);
   let linksSub = each.off ? "Does not take part" : "No links out yet";
-  if (each.sent !== null) {
-    linksSub = `Links out since ${formatDate(dateOn(view.org, each.sent))}`;
+  if (firstSent !== undefined) {
+    linksSub = `Links out since ${formatDate(dateOn(view.org, firstSent))}`;
   }
   return (
     <div className="@container border-t">
@@ -818,7 +825,7 @@ const TeamPeople = ({
                 </span>
                 <span className="text-muted-foreground flex flex-none items-center gap-2 text-xs">
                   <Dot mark={markOf(one.state)} />
-                  <span className="max-sm:hidden">
+                  <span className="max-sm:sr-only">
                     {one.out && one.state === "away"
                       ? "Not asked"
                       : linkWords[one.state]}

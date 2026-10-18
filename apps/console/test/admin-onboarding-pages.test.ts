@@ -231,7 +231,8 @@ describe("an organization's onboarding in the admin", () => {
       marked: steps.split("aria-current=").length - 1,
       opensLeads: stepOf(steps, "Team leads").includes(`href="${base}/steps"`),
       lines: [
-        "Read, nothing is missing",
+        // Core says it was read, not what it brought: nothing is claimed complete.
+        ">Read<",
         "Everything is in place",
         "1 of 2 talked",
         "Day 9 of 14. 1 of 3 talked",
@@ -256,6 +257,7 @@ describe("an organization's onboarding in the admin", () => {
       ].map((text) => html.includes(text)),
       // Nothing here sends a reminder.
       remind: html.includes(">Remind"),
+      complete: html.includes("nothing is missing"),
     }).toStrictEqual({
       status: 200,
       current: true,
@@ -266,6 +268,7 @@ describe("an organization's onboarding in the admin", () => {
       opensAgreed: true,
       leads: [true, true, true, true, true],
       remind: false,
+      complete: false,
     });
   });
 
@@ -360,6 +363,51 @@ describe("an organization's onboarding in the admin", () => {
     ).toStrictEqual([true, true]);
   });
 
+  it("says a team's links are out only once a colleague's link went out, not when its lead talked", async () => {
+    const snapshot = bakery();
+    // Lisa talked; Tom's link waits, for the team's work to be drawn.
+    const base = await liveClient({
+      ...snapshot,
+      links: snapshot.links.map((link) =>
+        link.person === "tom"
+          ? { ...link, sentAt: null, openedAt: null, state: "waiting" }
+          : link
+      ),
+      interviews: snapshot.interviews.filter(
+        (interview) => interview.person !== "tom"
+      ),
+    });
+
+    const leads = await page(`${base}/steps?stage=leads`);
+    const sales = await page(`${base}/organization?team=sales`);
+
+    expect({
+      lead: [
+        "Talked on 5 Oct 2026. None of their colleagues has a link yet.",
+        "colleague got a link",
+      ].map((text) => leads.html.includes(text)),
+      team: ["No links out yet", "Links out since"].map((text) =>
+        sales.html.includes(text)
+      ),
+    }).toStrictEqual({ lead: [true, false], team: [true, false] });
+  });
+
+  it("says the interviews are paused while the company has paused them", async () => {
+    const base = await liveClient({ ...bakery(), paused: true });
+
+    const agreed = await page(`${base}/steps?stage=agreed`);
+    const interviews = await page(`${base}/steps?stage=interviews`);
+    const paused =
+      "The company has paused its interviews: nobody can open or go on with one until it resumes them.";
+
+    expect({
+      agreed: [paused, "Interviews can start."].map((text) =>
+        agreed.html.includes(text)
+      ),
+      interviews: interviews.html.includes(paused),
+    }).toStrictEqual({ agreed: [true, false], interviews: true });
+  });
+
   it("opens a company that has nothing yet on what is agreed, with its first conversation still to come", async () => {
     const base = await liveClient(emptyAdminSnapshot("Bakkerij Noord"));
 
@@ -449,7 +497,8 @@ describe("an organization's onboarding in the admin", () => {
       sales: [
         "Sales</h2>",
         "Takes part in the interviews",
-        "Links out since 5 Oct 2026",
+        // Tom's link went out the day after Lisa talked.
+        "Links out since 6 Oct 2026",
         "Head of Sales",
         "Account manager",
         "Talking now",
@@ -465,9 +514,15 @@ describe("an organization's onboarding in the admin", () => {
       ].map((text) => logistics.html.includes(text)),
       // A team the company doesn't have: all of them.
       unknown: unknown.html.includes('aria-label="Open Sales"'),
+      // Where a person's link stands is still read out on a phone, where it isn't shown.
+      phone: [
+        sales.html.includes('class="max-sm:sr-only">Talking now'),
+        sales.html.includes('class="max-sm:hidden">Talking now'),
+      ],
     }).toStrictEqual({
       sales: Array.from({ length: 11 }, () => true),
       logistics: [true, true],
+      phone: [true, false],
       unknown: true,
     });
   });
