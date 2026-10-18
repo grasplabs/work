@@ -488,6 +488,25 @@ describe("the workflow map", { timeout: 60_000 }, () => {
     });
   });
 
+  it("holds no more teams than it lists", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const add = async (title: string) =>
+      codeOf(await call(admin, app, "teams.add", "mutation", { title }));
+    for (let count = 0; count < 100; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time
+      await add(`Team ${String(count).padStart(3, "0")}`);
+    }
+    const listed = z
+      .array(z.unknown())
+      .parse(valueOf(await call(admin, app, "teams.list", "query")));
+    // Its title sorts first: listed, it would push out the last one.
+    expect({ listed: listed.length, more: await add("AAA") }).toStrictEqual({
+      listed: 100,
+      more: "map.too_many_teams",
+    });
+  });
+
   it("takes no team that isn't one of its own, and designs nothing never drawn", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await mapOf(admin);

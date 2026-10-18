@@ -122,6 +122,9 @@ export const refusal = (code: string): string => {
     case "map.too_large": {
       return "This workflow is too large: shorten its steps, parameters or description.";
     }
+    case "map.too_many_teams": {
+      return "The map holds at most 100 teams: use one it has.";
+    }
     case "map.not_found": {
       return "This workflow is gone.";
     }
