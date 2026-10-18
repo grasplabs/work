@@ -429,6 +429,56 @@ describe(
       });
     });
 
+    it("type a name by the permission that holds it now over one revoked, whatever their kinds", async () => {
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Checked" });
+      const admin = await personApi("admin");
+      // MAIL once named a connection, taken back; now a collection.
+      const connection = await mailConnection();
+      await admin.api.permissions.revoke(
+        await requestGranted(idp, builder, {
+          subject: { type: "app", appId: app },
+          object: { type: "connection", connectionId: connection.id },
+          actions: ["mail.send"],
+          binding: "MAIL",
+        })
+      );
+      const { id: collectionId } = await admin.api.knowledge.createCollection({
+        name: `Mail ${crypto.randomUUID()}`,
+        access: "everyone",
+      });
+      await builder.api.permissions.request({
+        subject: { type: "app", appId: app },
+        object: { type: "collection", collectionId },
+        actions: ["read"],
+        binding: "MAIL",
+      });
+      const tried = async (body: string): Promise<string> => {
+        const { version } = await builder.api.apps.files.commit(
+          app,
+          { ...sampleApp(), ...checked(body) },
+          body
+        );
+        const outcome = await refusal(
+          builder.api.apps.versions.setCurrent(app, version)
+        );
+        return outcome === "ok"
+          ? "ok"
+          : (failedBuild.safeParse(outcome).data?.code ?? String(outcome));
+      };
+      // One after the other: each commit is the App's next version.
+      const asCollection = await tried(
+        '    return (await env.MAIL.search("refunds")).hits.length;'
+      );
+      const asConnection = await tried(
+        '    return (await env.MAIL.call("mail.send", {})).output;'
+      );
+      expect({ asCollection, asConnection }).toStrictEqual({
+        asCollection: "ok",
+        asConnection: "workflow.build_failed",
+      });
+    });
+
     it("keep a version typed as committed when making it current asks for its permissions again", async () => {
       const builder = await personApi("builder");
       const { id: app } = await builder.api.apps.create({ name: "Checked" });
