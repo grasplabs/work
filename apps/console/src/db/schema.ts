@@ -304,6 +304,25 @@ export const settings = sqliteTable(
 );
 
 /**
+ * When each client's core last answered the console's read of its admin
+ * snapshot (src/clients/admin.ts), and why its latest read failed. Never
+ * the snapshot or anything in it: the console holds no client data, so a
+ * client that doesn't answer is shown as not reachable since then, not
+ * from a copy.
+ */
+export const clientAdminReads = sqliteTable("client_admin_reads", {
+  clientId: text("client_id")
+    .primaryKey()
+    .references(() => clients.id),
+  /** When its core last answered; null before it ever did. */
+  lastAnsweredAt: timestamp("last_answered_at"),
+  /** Why the latest read failed, as a code (`AdminReadError`); null when it answered. */
+  error: text(),
+  /** When it was last asked. */
+  askedAt: timestamp("asked_at").notNull(),
+});
+
+/**
  * Grasp staff, as Access names them. Access decides who reaches the console;
  * this lists who may be granted staff access in a client's deployment.
  */

@@ -10,6 +10,13 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as AdminAskRouteImport } from './routes/admin/ask'
+import { Route as AdminIntegrationsRouteImport } from './routes/admin/integrations'
+import { Route as AdminLabRouteImport } from './routes/admin/lab'
+import { Route as AdminPlatformRouteImport } from './routes/admin/platform'
+import { Route as AdminSourcesRouteImport } from './routes/admin/sources'
 import { Route as ClientsClientIdRouteImport } from './routes/clients/$clientId'
 import { Route as ClientsNewRouteImport } from './routes/clients/new'
 import { Route as ReleasesIndexRouteImport } from './routes/releases/index'
@@ -17,11 +24,62 @@ import { Route as ReleasesReleaseIdRouteImport } from './routes/releases/$releas
 import { Route as ReleasesDiffRouteImport } from './routes/releases/diff'
 import { Route as RolloutsIndexRouteImport } from './routes/rollouts/index'
 import { Route as RolloutsRolloutIdRouteImport } from './routes/rollouts/$rolloutId'
+import { Route as AdminOrganizationsClientIdRouteImport } from './routes/admin/organizations/$clientId'
+import { Route as AdminOrganizationsClientIdIndexRouteImport } from './routes/admin/organizations/$clientId/index'
+import { Route as AdminOrganizationsClientIdAiUseRouteImport } from './routes/admin/organizations/$clientId/ai-use'
+import { Route as AdminOrganizationsClientIdBrainRouteImport } from './routes/admin/organizations/$clientId/brain'
+import { Route as AdminOrganizationsClientIdContractRouteImport } from './routes/admin/organizations/$clientId/contract'
+import { Route as AdminOrganizationsClientIdDataRouteImport } from './routes/admin/organizations/$clientId/data'
+import { Route as AdminOrganizationsClientIdDetailsRouteImport } from './routes/admin/organizations/$clientId/details'
+import { Route as AdminOrganizationsClientIdHoursRouteImport } from './routes/admin/organizations/$clientId/hours'
+import { Route as AdminOrganizationsClientIdIntegrationsRouteImport } from './routes/admin/organizations/$clientId/integrations'
+import { Route as AdminOrganizationsClientIdInterviewsRouteImport } from './routes/admin/organizations/$clientId/interviews'
+import { Route as AdminOrganizationsClientIdLogRouteImport } from './routes/admin/organizations/$clientId/log'
+import { Route as AdminOrganizationsClientIdMembersRouteImport } from './routes/admin/organizations/$clientId/members'
+import { Route as AdminOrganizationsClientIdOrganizationRouteImport } from './routes/admin/organizations/$clientId/organization'
+import { Route as AdminOrganizationsClientIdSetupRouteImport } from './routes/admin/organizations/$clientId/setup'
+import { Route as AdminOrganizationsClientIdStepsRouteImport } from './routes/admin/organizations/$clientId/steps'
+import { Route as AdminOrganizationsClientIdWorkflowsRouteImport } from './routes/admin/organizations/$clientId/workflows'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAskRoute = AdminAskRouteImport.update({
+  id: '/ask',
+  path: '/ask',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminIntegrationsRoute = AdminIntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminLabRoute = AdminLabRouteImport.update({
+  id: '/lab',
+  path: '/lab',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPlatformRoute = AdminPlatformRouteImport.update({
+  id: '/platform',
+  path: '/platform',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSourcesRoute = AdminSourcesRouteImport.update({
+  id: '/sources',
+  path: '/sources',
+  getParentRoute: () => AdminRoute,
 } as any)
 const ClientsClientIdRoute = ClientsClientIdRouteImport.update({
   id: '/clients/$clientId',
@@ -58,73 +116,304 @@ const RolloutsRolloutIdRoute = RolloutsRolloutIdRouteImport.update({
   path: '/rollouts/$rolloutId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminOrganizationsClientIdRoute =
+  AdminOrganizationsClientIdRouteImport.update({
+    id: '/organizations/$clientId',
+    path: '/organizations/$clientId',
+    getParentRoute: () => AdminRoute,
+  } as any)
+const AdminOrganizationsClientIdIndexRoute =
+  AdminOrganizationsClientIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdAiUseRoute =
+  AdminOrganizationsClientIdAiUseRouteImport.update({
+    id: '/ai-use',
+    path: '/ai-use',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdBrainRoute =
+  AdminOrganizationsClientIdBrainRouteImport.update({
+    id: '/brain',
+    path: '/brain',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdContractRoute =
+  AdminOrganizationsClientIdContractRouteImport.update({
+    id: '/contract',
+    path: '/contract',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdDataRoute =
+  AdminOrganizationsClientIdDataRouteImport.update({
+    id: '/data',
+    path: '/data',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdDetailsRoute =
+  AdminOrganizationsClientIdDetailsRouteImport.update({
+    id: '/details',
+    path: '/details',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdHoursRoute =
+  AdminOrganizationsClientIdHoursRouteImport.update({
+    id: '/hours',
+    path: '/hours',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdIntegrationsRoute =
+  AdminOrganizationsClientIdIntegrationsRouteImport.update({
+    id: '/integrations',
+    path: '/integrations',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdInterviewsRoute =
+  AdminOrganizationsClientIdInterviewsRouteImport.update({
+    id: '/interviews',
+    path: '/interviews',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdLogRoute =
+  AdminOrganizationsClientIdLogRouteImport.update({
+    id: '/log',
+    path: '/log',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdMembersRoute =
+  AdminOrganizationsClientIdMembersRouteImport.update({
+    id: '/members',
+    path: '/members',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdOrganizationRoute =
+  AdminOrganizationsClientIdOrganizationRouteImport.update({
+    id: '/organization',
+    path: '/organization',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdSetupRoute =
+  AdminOrganizationsClientIdSetupRouteImport.update({
+    id: '/setup',
+    path: '/setup',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdStepsRoute =
+  AdminOrganizationsClientIdStepsRouteImport.update({
+    id: '/steps',
+    path: '/steps',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
+const AdminOrganizationsClientIdWorkflowsRoute =
+  AdminOrganizationsClientIdWorkflowsRouteImport.update({
+    id: '/workflows',
+    path: '/workflows',
+    getParentRoute: () => AdminOrganizationsClientIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/admin/ask': typeof AdminAskRoute
+  '/admin/integrations': typeof AdminIntegrationsRoute
+  '/admin/lab': typeof AdminLabRoute
+  '/admin/platform': typeof AdminPlatformRoute
+  '/admin/sources': typeof AdminSourcesRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/clients/new': typeof ClientsNewRoute
   '/releases/$releaseId': typeof ReleasesReleaseIdRoute
   '/releases/diff': typeof ReleasesDiffRoute
   '/rollouts/$rolloutId': typeof RolloutsRolloutIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/releases/': typeof ReleasesIndexRoute
   '/rollouts/': typeof RolloutsIndexRoute
+  '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRouteWithChildren
+  '/admin/organizations/$clientId/ai-use': typeof AdminOrganizationsClientIdAiUseRoute
+  '/admin/organizations/$clientId/brain': typeof AdminOrganizationsClientIdBrainRoute
+  '/admin/organizations/$clientId/contract': typeof AdminOrganizationsClientIdContractRoute
+  '/admin/organizations/$clientId/data': typeof AdminOrganizationsClientIdDataRoute
+  '/admin/organizations/$clientId/details': typeof AdminOrganizationsClientIdDetailsRoute
+  '/admin/organizations/$clientId/hours': typeof AdminOrganizationsClientIdHoursRoute
+  '/admin/organizations/$clientId/integrations': typeof AdminOrganizationsClientIdIntegrationsRoute
+  '/admin/organizations/$clientId/interviews': typeof AdminOrganizationsClientIdInterviewsRoute
+  '/admin/organizations/$clientId/log': typeof AdminOrganizationsClientIdLogRoute
+  '/admin/organizations/$clientId/members': typeof AdminOrganizationsClientIdMembersRoute
+  '/admin/organizations/$clientId/organization': typeof AdminOrganizationsClientIdOrganizationRoute
+  '/admin/organizations/$clientId/setup': typeof AdminOrganizationsClientIdSetupRoute
+  '/admin/organizations/$clientId/steps': typeof AdminOrganizationsClientIdStepsRoute
+  '/admin/organizations/$clientId/workflows': typeof AdminOrganizationsClientIdWorkflowsRoute
+  '/admin/organizations/$clientId/': typeof AdminOrganizationsClientIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin/ask': typeof AdminAskRoute
+  '/admin/integrations': typeof AdminIntegrationsRoute
+  '/admin/lab': typeof AdminLabRoute
+  '/admin/platform': typeof AdminPlatformRoute
+  '/admin/sources': typeof AdminSourcesRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/clients/new': typeof ClientsNewRoute
   '/releases/$releaseId': typeof ReleasesReleaseIdRoute
   '/releases/diff': typeof ReleasesDiffRoute
   '/rollouts/$rolloutId': typeof RolloutsRolloutIdRoute
+  '/admin': typeof AdminIndexRoute
   '/releases': typeof ReleasesIndexRoute
   '/rollouts': typeof RolloutsIndexRoute
+  '/admin/organizations/$clientId/ai-use': typeof AdminOrganizationsClientIdAiUseRoute
+  '/admin/organizations/$clientId/brain': typeof AdminOrganizationsClientIdBrainRoute
+  '/admin/organizations/$clientId/contract': typeof AdminOrganizationsClientIdContractRoute
+  '/admin/organizations/$clientId/data': typeof AdminOrganizationsClientIdDataRoute
+  '/admin/organizations/$clientId/details': typeof AdminOrganizationsClientIdDetailsRoute
+  '/admin/organizations/$clientId/hours': typeof AdminOrganizationsClientIdHoursRoute
+  '/admin/organizations/$clientId/integrations': typeof AdminOrganizationsClientIdIntegrationsRoute
+  '/admin/organizations/$clientId/interviews': typeof AdminOrganizationsClientIdInterviewsRoute
+  '/admin/organizations/$clientId/log': typeof AdminOrganizationsClientIdLogRoute
+  '/admin/organizations/$clientId/members': typeof AdminOrganizationsClientIdMembersRoute
+  '/admin/organizations/$clientId/organization': typeof AdminOrganizationsClientIdOrganizationRoute
+  '/admin/organizations/$clientId/setup': typeof AdminOrganizationsClientIdSetupRoute
+  '/admin/organizations/$clientId/steps': typeof AdminOrganizationsClientIdStepsRoute
+  '/admin/organizations/$clientId/workflows': typeof AdminOrganizationsClientIdWorkflowsRoute
+  '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/admin/ask': typeof AdminAskRoute
+  '/admin/integrations': typeof AdminIntegrationsRoute
+  '/admin/lab': typeof AdminLabRoute
+  '/admin/platform': typeof AdminPlatformRoute
+  '/admin/sources': typeof AdminSourcesRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/clients/new': typeof ClientsNewRoute
   '/releases/$releaseId': typeof ReleasesReleaseIdRoute
   '/releases/diff': typeof ReleasesDiffRoute
   '/rollouts/$rolloutId': typeof RolloutsRolloutIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/releases/': typeof ReleasesIndexRoute
   '/rollouts/': typeof RolloutsIndexRoute
+  '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRouteWithChildren
+  '/admin/organizations/$clientId/ai-use': typeof AdminOrganizationsClientIdAiUseRoute
+  '/admin/organizations/$clientId/brain': typeof AdminOrganizationsClientIdBrainRoute
+  '/admin/organizations/$clientId/contract': typeof AdminOrganizationsClientIdContractRoute
+  '/admin/organizations/$clientId/data': typeof AdminOrganizationsClientIdDataRoute
+  '/admin/organizations/$clientId/details': typeof AdminOrganizationsClientIdDetailsRoute
+  '/admin/organizations/$clientId/hours': typeof AdminOrganizationsClientIdHoursRoute
+  '/admin/organizations/$clientId/integrations': typeof AdminOrganizationsClientIdIntegrationsRoute
+  '/admin/organizations/$clientId/interviews': typeof AdminOrganizationsClientIdInterviewsRoute
+  '/admin/organizations/$clientId/log': typeof AdminOrganizationsClientIdLogRoute
+  '/admin/organizations/$clientId/members': typeof AdminOrganizationsClientIdMembersRoute
+  '/admin/organizations/$clientId/organization': typeof AdminOrganizationsClientIdOrganizationRoute
+  '/admin/organizations/$clientId/setup': typeof AdminOrganizationsClientIdSetupRoute
+  '/admin/organizations/$clientId/steps': typeof AdminOrganizationsClientIdStepsRoute
+  '/admin/organizations/$clientId/workflows': typeof AdminOrganizationsClientIdWorkflowsRoute
+  '/admin/organizations/$clientId/': typeof AdminOrganizationsClientIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
+    | '/admin/ask'
+    | '/admin/integrations'
+    | '/admin/lab'
+    | '/admin/platform'
+    | '/admin/sources'
     | '/clients/$clientId'
     | '/clients/new'
     | '/releases/$releaseId'
     | '/releases/diff'
     | '/rollouts/$rolloutId'
+    | '/admin/'
     | '/releases/'
     | '/rollouts/'
+    | '/admin/organizations/$clientId'
+    | '/admin/organizations/$clientId/ai-use'
+    | '/admin/organizations/$clientId/brain'
+    | '/admin/organizations/$clientId/contract'
+    | '/admin/organizations/$clientId/data'
+    | '/admin/organizations/$clientId/details'
+    | '/admin/organizations/$clientId/hours'
+    | '/admin/organizations/$clientId/integrations'
+    | '/admin/organizations/$clientId/interviews'
+    | '/admin/organizations/$clientId/log'
+    | '/admin/organizations/$clientId/members'
+    | '/admin/organizations/$clientId/organization'
+    | '/admin/organizations/$clientId/setup'
+    | '/admin/organizations/$clientId/steps'
+    | '/admin/organizations/$clientId/workflows'
+    | '/admin/organizations/$clientId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin/ask'
+    | '/admin/integrations'
+    | '/admin/lab'
+    | '/admin/platform'
+    | '/admin/sources'
     | '/clients/$clientId'
     | '/clients/new'
     | '/releases/$releaseId'
     | '/releases/diff'
     | '/rollouts/$rolloutId'
+    | '/admin'
     | '/releases'
     | '/rollouts'
+    | '/admin/organizations/$clientId/ai-use'
+    | '/admin/organizations/$clientId/brain'
+    | '/admin/organizations/$clientId/contract'
+    | '/admin/organizations/$clientId/data'
+    | '/admin/organizations/$clientId/details'
+    | '/admin/organizations/$clientId/hours'
+    | '/admin/organizations/$clientId/integrations'
+    | '/admin/organizations/$clientId/interviews'
+    | '/admin/organizations/$clientId/log'
+    | '/admin/organizations/$clientId/members'
+    | '/admin/organizations/$clientId/organization'
+    | '/admin/organizations/$clientId/setup'
+    | '/admin/organizations/$clientId/steps'
+    | '/admin/organizations/$clientId/workflows'
+    | '/admin/organizations/$clientId'
   id:
     | '__root__'
     | '/'
+    | '/admin'
+    | '/admin/ask'
+    | '/admin/integrations'
+    | '/admin/lab'
+    | '/admin/platform'
+    | '/admin/sources'
     | '/clients/$clientId'
     | '/clients/new'
     | '/releases/$releaseId'
     | '/releases/diff'
     | '/rollouts/$rolloutId'
+    | '/admin/'
     | '/releases/'
     | '/rollouts/'
+    | '/admin/organizations/$clientId'
+    | '/admin/organizations/$clientId/ai-use'
+    | '/admin/organizations/$clientId/brain'
+    | '/admin/organizations/$clientId/contract'
+    | '/admin/organizations/$clientId/data'
+    | '/admin/organizations/$clientId/details'
+    | '/admin/organizations/$clientId/hours'
+    | '/admin/organizations/$clientId/integrations'
+    | '/admin/organizations/$clientId/interviews'
+    | '/admin/organizations/$clientId/log'
+    | '/admin/organizations/$clientId/members'
+    | '/admin/organizations/$clientId/organization'
+    | '/admin/organizations/$clientId/setup'
+    | '/admin/organizations/$clientId/steps'
+    | '/admin/organizations/$clientId/workflows'
+    | '/admin/organizations/$clientId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   ClientsClientIdRoute: typeof ClientsClientIdRoute
   ClientsNewRoute: typeof ClientsNewRoute
   ReleasesReleaseIdRoute: typeof ReleasesReleaseIdRoute
@@ -142,6 +431,55 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/ask': {
+      id: '/admin/ask'
+      path: '/ask'
+      fullPath: '/admin/ask'
+      preLoaderRoute: typeof AdminAskRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/integrations': {
+      id: '/admin/integrations'
+      path: '/integrations'
+      fullPath: '/admin/integrations'
+      preLoaderRoute: typeof AdminIntegrationsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/lab': {
+      id: '/admin/lab'
+      path: '/lab'
+      fullPath: '/admin/lab'
+      preLoaderRoute: typeof AdminLabRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/platform': {
+      id: '/admin/platform'
+      path: '/platform'
+      fullPath: '/admin/platform'
+      preLoaderRoute: typeof AdminPlatformRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/sources': {
+      id: '/admin/sources'
+      path: '/sources'
+      fullPath: '/admin/sources'
+      preLoaderRoute: typeof AdminSourcesRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/clients/$clientId': {
       id: '/clients/$clientId'
@@ -192,11 +530,195 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RolloutsRolloutIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/organizations/$clientId': {
+      id: '/admin/organizations/$clientId'
+      path: '/organizations/$clientId'
+      fullPath: '/admin/organizations/$clientId'
+      preLoaderRoute: typeof AdminOrganizationsClientIdRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/organizations/$clientId/': {
+      id: '/admin/organizations/$clientId/'
+      path: '/'
+      fullPath: '/admin/organizations/$clientId/'
+      preLoaderRoute: typeof AdminOrganizationsClientIdIndexRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/ai-use': {
+      id: '/admin/organizations/$clientId/ai-use'
+      path: '/ai-use'
+      fullPath: '/admin/organizations/$clientId/ai-use'
+      preLoaderRoute: typeof AdminOrganizationsClientIdAiUseRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/brain': {
+      id: '/admin/organizations/$clientId/brain'
+      path: '/brain'
+      fullPath: '/admin/organizations/$clientId/brain'
+      preLoaderRoute: typeof AdminOrganizationsClientIdBrainRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/contract': {
+      id: '/admin/organizations/$clientId/contract'
+      path: '/contract'
+      fullPath: '/admin/organizations/$clientId/contract'
+      preLoaderRoute: typeof AdminOrganizationsClientIdContractRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/data': {
+      id: '/admin/organizations/$clientId/data'
+      path: '/data'
+      fullPath: '/admin/organizations/$clientId/data'
+      preLoaderRoute: typeof AdminOrganizationsClientIdDataRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/details': {
+      id: '/admin/organizations/$clientId/details'
+      path: '/details'
+      fullPath: '/admin/organizations/$clientId/details'
+      preLoaderRoute: typeof AdminOrganizationsClientIdDetailsRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/hours': {
+      id: '/admin/organizations/$clientId/hours'
+      path: '/hours'
+      fullPath: '/admin/organizations/$clientId/hours'
+      preLoaderRoute: typeof AdminOrganizationsClientIdHoursRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/integrations': {
+      id: '/admin/organizations/$clientId/integrations'
+      path: '/integrations'
+      fullPath: '/admin/organizations/$clientId/integrations'
+      preLoaderRoute: typeof AdminOrganizationsClientIdIntegrationsRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/interviews': {
+      id: '/admin/organizations/$clientId/interviews'
+      path: '/interviews'
+      fullPath: '/admin/organizations/$clientId/interviews'
+      preLoaderRoute: typeof AdminOrganizationsClientIdInterviewsRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/log': {
+      id: '/admin/organizations/$clientId/log'
+      path: '/log'
+      fullPath: '/admin/organizations/$clientId/log'
+      preLoaderRoute: typeof AdminOrganizationsClientIdLogRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/members': {
+      id: '/admin/organizations/$clientId/members'
+      path: '/members'
+      fullPath: '/admin/organizations/$clientId/members'
+      preLoaderRoute: typeof AdminOrganizationsClientIdMembersRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/organization': {
+      id: '/admin/organizations/$clientId/organization'
+      path: '/organization'
+      fullPath: '/admin/organizations/$clientId/organization'
+      preLoaderRoute: typeof AdminOrganizationsClientIdOrganizationRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/setup': {
+      id: '/admin/organizations/$clientId/setup'
+      path: '/setup'
+      fullPath: '/admin/organizations/$clientId/setup'
+      preLoaderRoute: typeof AdminOrganizationsClientIdSetupRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/steps': {
+      id: '/admin/organizations/$clientId/steps'
+      path: '/steps'
+      fullPath: '/admin/organizations/$clientId/steps'
+      preLoaderRoute: typeof AdminOrganizationsClientIdStepsRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
+    '/admin/organizations/$clientId/workflows': {
+      id: '/admin/organizations/$clientId/workflows'
+      path: '/workflows'
+      fullPath: '/admin/organizations/$clientId/workflows'
+      preLoaderRoute: typeof AdminOrganizationsClientIdWorkflowsRouteImport
+      parentRoute: typeof AdminOrganizationsClientIdRoute
+    }
   }
 }
 
+interface AdminOrganizationsClientIdRouteChildren {
+  AdminOrganizationsClientIdAiUseRoute: typeof AdminOrganizationsClientIdAiUseRoute
+  AdminOrganizationsClientIdBrainRoute: typeof AdminOrganizationsClientIdBrainRoute
+  AdminOrganizationsClientIdContractRoute: typeof AdminOrganizationsClientIdContractRoute
+  AdminOrganizationsClientIdDataRoute: typeof AdminOrganizationsClientIdDataRoute
+  AdminOrganizationsClientIdDetailsRoute: typeof AdminOrganizationsClientIdDetailsRoute
+  AdminOrganizationsClientIdHoursRoute: typeof AdminOrganizationsClientIdHoursRoute
+  AdminOrganizationsClientIdIntegrationsRoute: typeof AdminOrganizationsClientIdIntegrationsRoute
+  AdminOrganizationsClientIdInterviewsRoute: typeof AdminOrganizationsClientIdInterviewsRoute
+  AdminOrganizationsClientIdLogRoute: typeof AdminOrganizationsClientIdLogRoute
+  AdminOrganizationsClientIdMembersRoute: typeof AdminOrganizationsClientIdMembersRoute
+  AdminOrganizationsClientIdOrganizationRoute: typeof AdminOrganizationsClientIdOrganizationRoute
+  AdminOrganizationsClientIdSetupRoute: typeof AdminOrganizationsClientIdSetupRoute
+  AdminOrganizationsClientIdStepsRoute: typeof AdminOrganizationsClientIdStepsRoute
+  AdminOrganizationsClientIdWorkflowsRoute: typeof AdminOrganizationsClientIdWorkflowsRoute
+  AdminOrganizationsClientIdIndexRoute: typeof AdminOrganizationsClientIdIndexRoute
+}
+
+const AdminOrganizationsClientIdRouteChildren: AdminOrganizationsClientIdRouteChildren =
+  {
+    AdminOrganizationsClientIdAiUseRoute: AdminOrganizationsClientIdAiUseRoute,
+    AdminOrganizationsClientIdBrainRoute: AdminOrganizationsClientIdBrainRoute,
+    AdminOrganizationsClientIdContractRoute:
+      AdminOrganizationsClientIdContractRoute,
+    AdminOrganizationsClientIdDataRoute: AdminOrganizationsClientIdDataRoute,
+    AdminOrganizationsClientIdDetailsRoute:
+      AdminOrganizationsClientIdDetailsRoute,
+    AdminOrganizationsClientIdHoursRoute: AdminOrganizationsClientIdHoursRoute,
+    AdminOrganizationsClientIdIntegrationsRoute:
+      AdminOrganizationsClientIdIntegrationsRoute,
+    AdminOrganizationsClientIdInterviewsRoute:
+      AdminOrganizationsClientIdInterviewsRoute,
+    AdminOrganizationsClientIdLogRoute: AdminOrganizationsClientIdLogRoute,
+    AdminOrganizationsClientIdMembersRoute:
+      AdminOrganizationsClientIdMembersRoute,
+    AdminOrganizationsClientIdOrganizationRoute:
+      AdminOrganizationsClientIdOrganizationRoute,
+    AdminOrganizationsClientIdSetupRoute: AdminOrganizationsClientIdSetupRoute,
+    AdminOrganizationsClientIdStepsRoute: AdminOrganizationsClientIdStepsRoute,
+    AdminOrganizationsClientIdWorkflowsRoute:
+      AdminOrganizationsClientIdWorkflowsRoute,
+    AdminOrganizationsClientIdIndexRoute: AdminOrganizationsClientIdIndexRoute,
+  }
+
+const AdminOrganizationsClientIdRouteWithChildren =
+  AdminOrganizationsClientIdRoute._addFileChildren(
+    AdminOrganizationsClientIdRouteChildren,
+  )
+
+interface AdminRouteChildren {
+  AdminAskRoute: typeof AdminAskRoute
+  AdminIntegrationsRoute: typeof AdminIntegrationsRoute
+  AdminLabRoute: typeof AdminLabRoute
+  AdminPlatformRoute: typeof AdminPlatformRoute
+  AdminSourcesRoute: typeof AdminSourcesRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+  AdminOrganizationsClientIdRoute: typeof AdminOrganizationsClientIdRouteWithChildren
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminAskRoute: AdminAskRoute,
+  AdminIntegrationsRoute: AdminIntegrationsRoute,
+  AdminLabRoute: AdminLabRoute,
+  AdminPlatformRoute: AdminPlatformRoute,
+  AdminSourcesRoute: AdminSourcesRoute,
+  AdminIndexRoute: AdminIndexRoute,
+  AdminOrganizationsClientIdRoute: AdminOrganizationsClientIdRouteWithChildren,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   ClientsClientIdRoute: ClientsClientIdRoute,
   ClientsNewRoute: ClientsNewRoute,
   ReleasesReleaseIdRoute: ReleasesReleaseIdRoute,
