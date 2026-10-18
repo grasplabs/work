@@ -831,9 +831,8 @@ export interface ClientInternals {
   onFence: (onFence: () => void) => () => void;
   /**
    * Calls `onDeleted` with the id of each file `files.delete` deleted,
-   * once core recorded it, until the function it answers is called: the
-   * file is gone through every resource that reads it, so each view of it
-   * shows it gone.
+   * once core recorded it, until the function it answers is called: each
+   * view of it shows it gone.
    */
   onFileDeleted: (onDeleted: (id: string) => void) => () => void;
   /**

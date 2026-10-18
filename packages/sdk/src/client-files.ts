@@ -255,7 +255,7 @@ export class ClientFiles {
    * client's fence count as its request started (`generation`), so a
    * refusal of one started before a fence never fences the client again;
    * `deleted` hears the id of each file deleted, once core recorded it,
-   * so every view of it, through any resource, shows it gone.
+   * so every view of it shows it gone.
    */
   constructor(
     transport: FileTransport | undefined,
@@ -355,7 +355,7 @@ export class ClientFiles {
     } catch (error) {
       return { failed: error };
     }
-    // Gone through every resource: each view of it shows it gone.
+    // Gone: each view of it shows it so.
     this.#deleted(id);
     return {};
   }

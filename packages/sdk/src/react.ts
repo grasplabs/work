@@ -463,9 +463,8 @@ export const useFile = <Reference extends FilesReference>(
     // A refusal stays until the screen is mounted again: a deletion that
     // finishes after it never turns it into the file gone.
     let refused = false;
-    // Deleted through this client, once core recorded it, through this
-    // resource or another that reads the same file: gone, never read again
-    // (core's answer would be that it isn't there).
+    // Deleted through this client, once core recorded it: gone, never read
+    // again (core's answer would be that it isn't there).
     const unwatch = internals.onFileDeleted((deleted) => {
       if (deleted === id && !refused) {
         stop.abort();
