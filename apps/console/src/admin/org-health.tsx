@@ -17,7 +17,7 @@ import type {
   HealthSignal,
 } from "@grasp-os/shared/admin/admin-health";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { LISTEN_DAYS } from "@grasp-os/shared/admin/onboarding";
+import { listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 
@@ -75,7 +75,8 @@ const sectionOf = (signal: HealthSignal): OrgSection => {
 };
 
 const interviewsLine = (
-  signal: Extract<HealthSignal, { area: "interviews" }>
+  signal: Extract<HealthSignal, { area: "interviews" }>,
+  view: AdminView
 ): string => {
   if (!signal.told) {
     return "Not started";
@@ -88,7 +89,7 @@ const interviewsLine = (
   }
   return signal.closed
     ? `${talked} of ${asked} talked, closed`
-    : `${talked} of ${asked} talked, day ${day} of ${LISTEN_DAYS}`;
+    : `${talked} of ${asked} talked, day ${day} of ${listenDays(view.org)}`;
 };
 
 const accountLine = (
@@ -127,7 +128,7 @@ const lineOf = (signal: HealthSignal, view: AdminView, held: Held): string => {
         : "Sign-in connected";
     }
     case "interviews": {
-      return interviewsLine(signal);
+      return interviewsLine(signal, view);
     }
     case "brain": {
       return `${signal.percent}% known, opens at ${signal.threshold}%`;

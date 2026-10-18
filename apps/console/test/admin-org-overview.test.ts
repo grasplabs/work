@@ -82,6 +82,69 @@ const peopleInSnapshot = (name: string): AdminSnapshot => ({
   },
 });
 
+/**
+ * A company told three days ago, on a plan of 21 days, with one team: its
+ * lead Lisa, who has talked, and Tom, both sent their link.
+ */
+const toldSnapshot = (name: string): AdminSnapshot => {
+  const empty = emptyAdminSnapshot(name);
+  const at = (back: number, hour: number) =>
+    new Date(
+      Date.parse(empty.now) - back * 86_400_000 + hour * 3_600_000
+    ).toISOString();
+  const told = at(3, 0);
+  return {
+    ...empty,
+    roster: {
+      teams: [
+        { id: "sales", name: "Sales", lead: "lisa", does: "", off: false },
+      ],
+      people: [
+        ["lisa", "Lisa"],
+        ["tom", "Tom"],
+      ].map(([id = "", person = ""]) => ({
+        id,
+        name: person,
+        email: "",
+        team: "sales",
+        title: "",
+        away: false,
+      })),
+    },
+    plan: { start: told.slice(0, 10), days: 21, at: told },
+    agreements: { processing: true, assessment: true, council: "none" },
+    agreed: true,
+    told: true,
+    links: ["lisa", "tom"].map((person) => ({
+      person,
+      sentAt: told,
+      openedAt: null,
+      remindedAt: null,
+      deletedAt: null,
+      state: person === "lisa" ? "completed" : "waiting",
+    })),
+    interviews: [
+      {
+        person: "lisa",
+        kind: "lead",
+        startedAt: at(3, 1),
+        completedAt: at(3, 2),
+        updatedAt: at(3, 2),
+        agreed: true,
+        phase: "readback",
+        stoppedAt: null,
+        minutes: 40,
+        facts: 4,
+        out: 0,
+        confirmed: 4,
+        rating: 5,
+        typed: false,
+        interviewer: "stephen",
+      },
+    ],
+  };
+};
+
 /** A company Grasp gave its go to a week ago, its platform open. */
 const openSnapshot = (name: string): AdminSnapshot => {
   const ready = readySnapshot(name);
@@ -210,5 +273,14 @@ describe("an organization's overview", () => {
     expect(html).toContain(
       'aria-label="Connections: Not yet. Sign-in connected, team leads not named yet"'
     );
+  });
+
+  it("counts the interviews' days to the company's own plan", async () => {
+    const acme = await liveClient();
+    acme.account.admin = toldSnapshot("Acme");
+
+    const { html } = await page(`/admin/organizations/${acme.clientId}`);
+
+    expect(signalOf(html, "Interviews")).toMatch(/talked, day \d+ of 21"/u);
   });
 });
