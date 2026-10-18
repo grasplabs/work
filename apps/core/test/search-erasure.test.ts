@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  collectionKeysOf,
   holdsAny,
   indexKeysOf,
   owedRebuildStaleMs,
@@ -133,6 +134,38 @@ describe("a purged term's page separators", () => {
       before: ["a-writing", "b-done", "c-died"],
       afterRebuild: ["a-writing"],
       afterAll: [],
+    });
+  });
+});
+
+/** The keys of `value` in `table`, or undefined when not checked. */
+const keysIn = (value: string, table: "search_words" | "search_trigrams") =>
+  collectionKeysOf(value)
+    ?.filter((key) => key.table === table)
+    .map(({ key }) => key);
+
+describe("a deleted collection's page separators", () => {
+  it("are checked for the trigrams that hold a short word whole with its neighbours", () => {
+    expect({
+      words: keysIn("Ask Jo.", "search_words"),
+      trigrams: keysIn("Ask Jo.", "search_trigrams"),
+      atTheEnd: keysIn("I", "search_trigrams"),
+    }).toStrictEqual({
+      words: ["0ask", "1ask", "2ask", "0jo", "1jo", "2jo"],
+      trigrams: ["0ask", "0 jo", "0jo."],
+      atTheEnd: [],
+    });
+  });
+
+  it("are checked through punctuation of any script, never a token they can't fold", () => {
+    expect({
+      dash: keysIn("plan — team’s", "search_words"),
+      accented: collectionKeysOf("café"),
+      otherScript: collectionKeysOf("Visserさん"),
+    }).toStrictEqual({
+      dash: ["0plan", "0team", "0s", "1s", "2s"],
+      accented: undefined,
+      otherScript: undefined,
     });
   });
 });
