@@ -1032,7 +1032,13 @@ describe("a purge of content", setUpTime, () => {
       name: "Handbook",
       access: "everyone",
     });
-    /** Purges a name from a document of its own, saying what it wrote. */
+    /**
+     * Purges a name from a document of its own, saying what it wrote and
+     * how often it rebuilt the whole index. Another document keeps the
+     * name: a page the name's tokens head is one the index still holds
+     * them on, whatever pages the corpus happens to fill, so the purge
+     * never owes a rebuild here.
+     */
     const purgeOne = async () => {
       const name = `purged${unique()}`;
       const document = await saveOver(
@@ -1041,7 +1047,8 @@ describe("a purge of content", setUpTime, () => {
         `${name}.md`,
         `# ${name}\nWrite to ${name} about leave.\n\n## More\nNothing else ${name}.`
       );
-      const counting = await countingWrites(admin);
+      await saveOver(admin, handbook.id, `kept-${name}.md`, `# Kept\n${name}.`);
+      const counting = await watchingPurge(admin);
       const input: PurgeInput = {
         type: "content",
         documentIds: [document.id],
@@ -1050,7 +1057,7 @@ describe("a purge of content", setUpTime, () => {
       };
       const { token } = await counting.api.knowledge.preparePurge(input);
       await counting.api.knowledge.purge(input, token);
-      return counting.written.rows;
+      return counting.written;
     };
     // Secure deletes turned on first, as any purge does.
     await purgeOne();
@@ -1070,9 +1077,72 @@ describe("a purge of content", setUpTime, () => {
     // A rebuild of the whole index writes at least a row for each section
     // it holds: what the corpus grew by would show, many times over.
     expect({
-      grewBy: large - small,
-      bound: large - small < added / 4,
-    }).toMatchObject({ bound: true });
+      grewBy: large.rows - small.rows,
+      bound: large.rows - small.rows < added / 4,
+      rebuilds: large.rebuilds,
+    }).toMatchObject({ bound: true, rebuilds: 0 });
+  });
+
+  it("doesn't rebuild for an ID whose trigram heads a page that other text still holds", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    for (let at = 0; at < 150; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await saveOver(
+        admin,
+        handbook.id,
+        `other-${at}.md`,
+        `# Other ${at}\n${unique()} ${unique()} text.\n\n## Part\nMore ${unique()}.`
+      );
+    }
+    await env.KNOWLEDGE.prepare(
+      "INSERT INTO search_trigrams (search_trigrams) VALUES ('optimize')"
+    ).run();
+    // A trigram that heads a page of the trigram index and that live text
+    // holds: an ID with it among its trigrams finds its separator held.
+    const { results: separators } = await env.KNOWLEDGE.prepare(
+      "SELECT CAST(term AS TEXT) AS term FROM search_trigrams_idx WHERE CAST(term AS TEXT) GLOB '0[a-z0-9][a-z0-9][a-z0-9]'"
+    ).all<{ term: string }>();
+    let heading: string | undefined;
+    for (const { term } of separators) {
+      // oxlint-disable-next-line no-await-in-loop -- one trigram at a time
+      const live = await env.KNOWLEDGE.prepare(
+        "SELECT 1 AS live FROM search_trigrams WHERE search_trigrams MATCH ? LIMIT 1"
+      )
+        .bind(`"${term.slice(1)}"`)
+        .first();
+      if (live !== null) {
+        heading = term.slice(1);
+        break;
+      }
+    }
+    // An ID with that trigram, which another document keeps too.
+    const id = `q${heading ?? ""}7`;
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "ticket.md",
+      `# Ticket\nCase ${id}.`
+    );
+    await saveOver(admin, handbook.id, "kept.md", `# Kept\nCase ${id}.`);
+    const watching = await watchingPurge(admin);
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [id],
+      reason: "other",
+    };
+    const { token } = await watching.api.knowledge.preparePurge(input);
+    await watching.api.knowledge.purge(input, token);
+    const read = await admin.api.knowledge.getDocument(document.id);
+    expect({
+      found: heading !== undefined,
+      removed: !read.version.text.includes(id),
+      rebuilds: watching.written.rebuilds,
+    }).toStrictEqual({ found: true, removed: true, rebuilds: 0 });
   });
 
   it("removes a term with accents from every table, though its tokens can't be checked one by one", async () => {
