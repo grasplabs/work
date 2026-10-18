@@ -517,11 +517,8 @@ export const compileModules = async (
   // the build is cached by (`computePackagesFile`).
   const files = {
     ...sources,
-    ...(packages === undefined
-      ? {}
-      : {
-          [computePackagesFile]: JSON.stringify(packages.entries.toSorted()),
-        }),
+    // Always core's: a file of this name from anywhere else never stands.
+    [computePackagesFile]: JSON.stringify(packages?.entries.toSorted() ?? []),
   };
   const packageModules = packages?.modules ?? {};
   let built: Awaited<ReturnType<typeof buildComputeModules>> | "late";

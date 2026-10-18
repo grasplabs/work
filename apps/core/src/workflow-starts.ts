@@ -1041,6 +1041,11 @@ export const decideWorkflowStart = async (
     sql`SELECT ${holds} AS holds`
   );
   if (decided.holds === 0) {
+    // Its packages revoked since they were read: said, and audited, as such.
+    await packagesHolding(env, rule.actor, id, graphHash, {
+      ...base,
+      inputHash,
+    });
     throw await deniedAt(env, id, version, { generation, configRevision });
   }
   return {

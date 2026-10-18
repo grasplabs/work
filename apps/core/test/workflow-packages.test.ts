@@ -1,5 +1,5 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { packageModuleName } from "@grasp-os/compiler";
+import { computePackagesFile, packageModuleName } from "@grasp-os/compiler";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -24,6 +24,7 @@ import {
 import { buildDependencies } from "../src/packages/build.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
+import { compileModules } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -37,7 +38,7 @@ import {
 import { noise, publish } from "./npm.ts";
 import { racingDb } from "./racing-db.ts";
 import { artifactKey } from "./sealed-apps.ts";
-import { auditedDuring, outcome, unique } from "./sign-in.ts";
+import { auditedDuring, outcome, refusal, unique } from "./sign-in.ts";
 
 // Approved npm packages a version of an independent workflow seals for
 // its compute modules (GRA-665, slice 3), from the threat model on the
@@ -857,5 +858,186 @@ describe("a workflow's modules importing approved packages", () => {
       long: true,
       run: { status: "completed", output: { status: "12" } },
     });
+  });
+
+  it("writes no version whose graph was retired as it was published", async () => {
+    const admin = await approver();
+    const pkg = await doubling();
+    const { builder, workflow, request } = await workflowWith(pkg);
+    await approve(admin, request);
+    // Built before, so publishing writes nothing of its own until the
+    // version's batch.
+    await buildDependencies(env, builder, {
+      workflow: workflow.id,
+      graphHash: request.graphHash,
+      target: "computation",
+      policyGeneration: await policyGeneration(drizzle(env.DB)),
+    });
+    let sealed = false;
+    let raced = false;
+    // Once its packages are sealed, the graph is retired before anything
+    // else the publication writes lands.
+    const db = racingDb(async () => {
+      if (sealed && !raced) {
+        raced = true;
+        await end(admin, request, "retired");
+      }
+    });
+    const sealing: typeof sealPackages = async (...args) => {
+      const done = await sealPackages(...args);
+      sealed = true;
+      return done;
+    };
+
+    const refused = await outcome(
+      publishWorkflowVersion(
+        { ...env, DB: db },
+        builder,
+        workflow.id,
+        {
+          definition: definitionOf(workflow.name),
+          basedOn: null,
+          modules: { "code/total.ts": moduleUsing(pkg) },
+          packages: { graphHash: request.graphHash },
+        },
+        sealing
+      )
+    );
+    const { results } = await env.DB.prepare(
+      "SELECT version FROM workflow_resource_versions WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .all();
+
+    expect({ raced, refused, versions: results.length }).toStrictEqual({
+      raced: true,
+      refused: "dependency.retired",
+      versions: 0,
+    });
+  });
+
+  it("says a start refused as its packages are revoked mid-decision was refused for them", async () => {
+    const admin = await approver();
+    const pkg = await doubling();
+    const { builder, workflow, request } = await workflowWith(pkg);
+    await approve(admin, request);
+    await publishedWith(builder, workflow, pkg, request.graphHash);
+    let raced = false;
+    // The graph is revoked just before the decision's last read of what
+    // holds (the one naming the pinned version).
+    const real = env.DB;
+    const db = new Proxy(real, {
+      get: (target, property) => {
+        if (property !== "prepare") {
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        }
+        return (query: string) => {
+          const statement = target.prepare(query);
+          if (raced || !query.includes("AS pinned")) {
+            return statement;
+          }
+          return new Proxy(statement, {
+            get: (inner, name) => {
+              const value: unknown = Reflect.get(inner, name);
+              if (typeof value !== "function") {
+                return value;
+              }
+              if (name === "bind") {
+                return (...values: unknown[]) => {
+                  const bound = inner.bind(...values);
+                  return new Proxy(bound, {
+                    get: (boundTarget, method) => {
+                      const run: unknown = Reflect.get(boundTarget, method);
+                      if (typeof run !== "function") {
+                        return run;
+                      }
+                      return async (...args: unknown[]): Promise<unknown> => {
+                        if (!raced) {
+                          raced = true;
+                          await end(admin, request, "revoked");
+                        }
+                        return await Reflect.apply(run, boundTarget, args);
+                      };
+                    },
+                  });
+                };
+              }
+              return (...args: unknown[]): unknown =>
+                Reflect.apply(value, inner, args);
+            },
+          });
+        };
+      },
+    });
+
+    let refused = "";
+    const events = await auditedDuring(async () => {
+      refused = await outcome(
+        startWorkflow(
+          { ...env, DB: db },
+          { type: "person", person: builder },
+          workflow.id,
+          { version: 1, input: { who: "Ada" }, key: unique() }
+        )
+      );
+    });
+
+    expect({
+      raced,
+      refused,
+      audited: outcomesOf(events, ["workflow.start.refused"]),
+    }).toStrictEqual({
+      raced: true,
+      refused: "workflow.packages_revoked",
+      audited: [
+        {
+          action: "workflow.start.refused",
+          reason: "workflow.packages_revoked",
+          failureCode: null,
+        },
+      ],
+    });
+  });
+
+  it("takes no list of packages from a workflow's own files", async () => {
+    const pkg = await doubling();
+    const builder = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      builder,
+      `p-${unique()}`
+    );
+
+    const refused = z
+      .object({
+        code: z.string(),
+        details: z.object({
+          diagnostics: z.array(z.object({ message: z.string() })),
+        }),
+      })
+      .parse(
+        await refusal(
+          compileModules(
+            env,
+            {
+              "code/total.ts": moduleUsing(pkg),
+              [computePackagesFile]: JSON.stringify([pkg]),
+            },
+            workflow.id
+          )
+        )
+      );
+
+    // Refused as it is built, the import itself: never taken as approved.
+    expect({
+      code: refused.code,
+      importRefused: refused.details.diagnostics.some(({ message }) =>
+        message.includes("can't be imported here")
+      ),
+    }).toStrictEqual({ code: "workflow.modules_invalid", importRefused: true });
   });
 });

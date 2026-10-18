@@ -10,6 +10,7 @@ import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { workflowReferenceLimits } from "@grasp-os/sdk/host";
 import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -74,6 +75,7 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
+import { failUnless, lockGuardFailed } from "./packages/locks.ts";
 import {
   memberEntry,
   requireNotStaff,
@@ -107,6 +109,7 @@ import type {
   ModuleContracts,
   ModulePackages,
 } from "./workflow-modules.ts";
+import { packagesHoldSql, packagesRefusal } from "./workflows/package-seal.ts";
 import type {
   PackageSealer,
   SealedPackageManifest,
@@ -1468,6 +1471,19 @@ const writeVersion = async (
         authorId: by.userId,
         createdAt,
       }),
+      // Only while the graph it seals is still approved (not retired, not
+      // revoked) as it lands: what was admitted when it was sealed may have
+      // ended since (`packagesRefusal` says how).
+      ...(packages === undefined
+        ? []
+        : [
+            failUnless(
+              db,
+              { type: "workflow", id: workflow.id },
+              packages.graphHash,
+              packagesHoldSql(workflow.id, packages.graphHash, ["approved"])
+            ),
+          ]),
       // The version's from now on, as long as it is.
       ...adoptReservations(db, owner, workflow.id, version),
       db
@@ -1522,6 +1538,15 @@ const writeVersion = async (
       await releaseBuild(env, { id: owner, version }, compiled);
     } catch (releaseError) {
       log.warn("workflow.build_release_failed", errorFields(releaseError));
+    }
+    // Its graph's approval ended as it was written: said as how.
+    if (packages !== undefined && lockGuardFailed(error)) {
+      const refused = await packagesRefusal(
+        db,
+        workflow.id,
+        packages.graphHash
+      );
+      throw dependencyErrors.create(refused ?? "dependency.stale");
     }
     throw error;
   }

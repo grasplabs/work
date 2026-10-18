@@ -1,6 +1,7 @@
 import { workflowDependencyTarget } from "@grasp-os/shared/dependencies";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import type { Acting } from "../auth/identity.ts";
@@ -47,9 +48,48 @@ export type PackageSealer = (
  * that seals it requires (workflow-starts.ts). A revoked graph, or one
  * approved for no `computation`, holds nothing.
  */
-export const packagesHoldSql = (workflow: string, graphHash: string): SQL =>
+export const packagesHoldSql = (
+  workflow: string,
+  graphHash: string,
+  statuses: readonly string[] = ["approved", "retired"]
+): SQL =>
   sql`EXISTS (SELECT 1 FROM dependency_requests AS approval
     WHERE approval.subject_type = 'workflow' AND approval.subject_id = ${workflow}
       AND approval.graph_hash = ${graphHash}
-      AND approval.status IN ('approved', 'retired')
+      AND approval.status IN (SELECT value FROM json_each(${JSON.stringify(statuses)}))
       AND EXISTS (SELECT 1 FROM json_each(approval.targets) WHERE value = ${workflowDependencyTarget}))`;
+
+/**
+ * Why workflow `workflow`'s graph `graphHash` no longer seals a new
+ * version, as its approvals stand now: retired, revoked, or never
+ * approved for `computation`; undefined while an approval is in force.
+ */
+export const packagesRefusal = async (
+  db: DrizzleD1Database,
+  workflow: string,
+  graphHash: string
+): Promise<
+  | "dependency.retired"
+  | "dependency.revoked"
+  | "dependency.approval_required"
+  | undefined
+> => {
+  const read = await db.get<{
+    approved: number;
+    retired: number;
+    revoked: number;
+  }>(
+    sql`SELECT ${packagesHoldSql(workflow, graphHash, ["approved"])} AS approved,
+      ${packagesHoldSql(workflow, graphHash, ["retired"])} AS retired,
+      ${packagesHoldSql(workflow, graphHash, ["revoked"])} AS revoked`
+  );
+  if (read.approved !== 0) {
+    return undefined;
+  }
+  if (read.retired !== 0) {
+    return "dependency.retired";
+  }
+  return read.revoked === 0
+    ? "dependency.approval_required"
+    : "dependency.revoked";
+};
