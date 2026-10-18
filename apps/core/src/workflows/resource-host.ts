@@ -1322,13 +1322,7 @@ export class ResourceRunHost
         // An action is tried once: its packages are admitted before it is
         // told to have run, so a check that can't answer for a moment
         // leaves it to a later attempt, never a failure kept for good.
-        if (
-          step.kind === "task" &&
-          step.task?.kind === "call" &&
-          step.task.call.name === "grasp.action"
-        ) {
-          await this.#actionPackagesAdmitted();
-        }
+        await this.#actionPackagesAdmitted(run, attempt, funded);
         ran();
         call = fn(this.#attemptHostOf(attempt));
       }
@@ -2310,15 +2304,31 @@ export class ResourceRunHost
   }
 
   /**
-   * `#packagesAdmitted` for an action's attempt, before it is told to have
-   * run: a refusal ends the run as a step's error does (never tried
+   * `#packagesAdmitted` for `run`'s attempt if it is an action's, before it
+   * is told to have run: a refusal ends the run as a step's error does (never tried
    * again, so a graph approved again meanwhile runs nothing it refused);
    * anything else is tried again, as an attempt that never started.
    */
-  async #actionPackagesAdmitted(): Promise<void> {
+  async #actionPackagesAdmitted(
+    { step }: StepRun,
+    attempt: StepAttempt,
+    funded: boolean
+  ): Promise<void> {
+    if (
+      step.kind !== "task" ||
+      step.task?.kind !== "call" ||
+      step.task.call.name !== "grasp.action"
+    ) {
+      return;
+    }
     try {
       await this.#packagesAdmitted();
     } catch (error) {
+      // Nothing of it ran: its share of the fuel goes back whole.
+      attempt.over = true;
+      if (funded) {
+        this.#activationFuel += Math.max(0, attempt.budget.fuel);
+      }
       throw workflowResourceErrors.codeOf(error) === "workflow.packages_revoked"
         ? toStepError(forIsolate(error))
         : error;
