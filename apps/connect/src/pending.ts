@@ -39,9 +39,9 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents, recordEventsIf } from "./audit.ts";
 import type { GuardedChange } from "./audit.ts";
+import { nativeConnector } from "./bundled-connectors.ts";
 import { providerName } from "./catalog.ts";
 import type { Connection } from "./connections.ts";
-import { nativeConnector } from "./connectors.ts";
 import { connections, idempotentCalls, pendingActions } from "./db/schema.ts";
 import type { DecidedCall } from "./decisions.ts";
 
