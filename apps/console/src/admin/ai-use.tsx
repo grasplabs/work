@@ -714,7 +714,10 @@ export const AiUse = () => {
   const [stack, setStack] = useState<Split>("model");
   const [table, setTable] = useState<Split>("purpose");
 
-  if (usage.total.spend === 0) {
+  // Nothing used is nothing counted: a model without a price adds tokens
+  // but no spend, and its use still shows.
+  const { tokensIn, tokensOut, spoken, heard, spend } = usage.total;
+  if (tokensIn + tokensOut + spoken + heard + spend === 0) {
     return <NothingUsed />;
   }
 
