@@ -8,27 +8,33 @@ import type {
   ReleaseManifest,
 } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 
 // A release's check evidence (`CheckEvidence`): what the host observed
 // checking it as it sealed it, recorded against the identities it names
-// and verified against them on every load. Threat model, and how each is
-// closed:
+// and verified against them on every load.
 //
+// What it protects, and what it doesn't: every field a load compares is
+// either the manifest's own or recomputed from artifacts the manifest's
+// hash already verified, and the two inspection hashes can't be
+// recomputed at all. So its integrity rests on the manifest hash in D1,
+// like the rest of the release: someone who can write both D1 and R2
+// can forge evidence as they can forge the release. The anchor outside
+// that storage is the audit chain: the seal's `app.release.sealed` entry
+// records the manifest hash and this evidence's hash
+// (`verificationReportHash`). Binding the evidence to something a storage
+// writer can't make (a Worker secret, or the audit chain on load) is a
+// follow-up. What the check closes:
+//
+// - A seal records evidence of something other than what it sealed: of
+//   other code, another SDK, another registration or other migration
+//   evidence than its artifacts and manifest hold, or for another source,
+//   release or profile. Loading recomputes what it can from the sealed
+//   artifacts, takes each identity from the manifest, and refuses the
+//   release unless the report is exactly that evidence.
 // - A success report vouches for itself: the evidence holds no verdict,
-//   only hashes of what the host's own checks read and made (both
-//   inspection texts, the registration they read, the type-checked
-//   modules, the SDK they ran with, the migration evidence). Nothing the
+//   only hashes of what the host's own checks read and made. Nothing the
 //   compiler or App code answers is taken for it.
-// - A report made for another source, release or profile is sealed with
-//   this one: it names each identity, and loading refuses it unless every
-//   one is the manifest's.
-// - A report vouches for code it didn't check: loading recomputes every
-//   hash it can from the sealed artifacts (the modules, the SDK, the
-//   registration in the contracts, the manifest's migration evidence) and
-//   refuses it unless each is the report's. The inspection texts aren't
-//   sealed, so their hashes are the host's record, bound by the manifest
-//   hash like the rest.
 // - A report is missing, or the manifest's report hash names another
 //   artifact: loading requires the one artifact at `checkEvidencePath`,
 //   under the hash the manifest names.
@@ -97,8 +103,8 @@ const evidenceOf = async (
       symbolicInspection: inspections.symbolicInspection,
       finalInspection: inspections.finalInspection,
       manifest: await sha256Hex(canonicalText(observed.manifest)),
-      checkedModules: await sha256Hex(canonicalText(observed.modules)),
-      sdkModules: await sha256Hex(canonicalText(observed.sdk)),
+      checkedModules: await sha256Hex(canonicalJson({ ...observed.modules })),
+      sdkModules: await sha256Hex(canonicalJson({ ...observed.sdk })),
       migrations: await sha256Hex(canonicalText(release.migrationEvidence)),
     },
   });

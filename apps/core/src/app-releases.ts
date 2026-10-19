@@ -1357,6 +1357,9 @@ export const sealRelease = async (
           manifestHash: hash,
           contractHash: releaseManifest.contractHash,
           schemaHash: schema,
+          // The check's evidence, by its hash: in the audit chain, out of
+          // the storage the release is kept in (check-evidence.ts).
+          verificationReportHash: releaseManifest.verificationReportHash,
           ...storeEvidence(bound),
         },
       }),

@@ -18,7 +18,9 @@ import { defineErrorFamily } from "./errors.ts";
  * The format of `ReleaseManifest` and of the check evidence it names:
  * version 2 records the evidence (`checkEvidenceSchema`) every load
  * verifies. A release sealed in another format is refused as such
- * (`version.format_unsupported`) and sealed again: none is read as this.
+ * (`version.format_unsupported`), sealing it again included, since its
+ * manifest is stored for good: a new version replaces it, and none is
+ * read as this.
  */
 export const releaseFormatVersion = 2;
 
@@ -135,7 +137,17 @@ export const releaseManifestSchema = z.strictObject({
   dependencyLockHash: sha256Schema,
   target: z.enum(["app", "workflow", "store"]),
   dataStoreBindings: z.array(dataStoreBindingSchema).max(16),
-  artifacts: z.array(releaseArtifactSchema).min(1).max(1024),
+  artifacts: z
+    .array(releaseArtifactSchema)
+    .min(1)
+    .max(1024)
+    // One artifact per path: a load keeps one text per path, so a second
+    // entry would be verified and then never be what runs.
+    .refine(
+      (artifacts) =>
+        new Set(artifacts.map(({ path }) => path)).size === artifacts.length,
+      { message: "Two artifacts can't share a path" }
+    ),
   bindings: z.array(resourceBindingSchema).max(64),
   verificationReportHash: sha256Schema,
   /** One per explicit migration the App declares, in its order. */
@@ -227,9 +239,9 @@ export const versionErrors = defineErrorFamily({
   "version.export_secret_found":
     "A file of this App or of a workflow it binds holds what looks like a secret, so it can't be exported. Remove it from that file, publish or seal again, then export.",
   "version.format_unsupported":
-    "This version was sealed in a release format this platform doesn't read. Seal it again.",
+    "This version was sealed in a release format this platform doesn't read. Publish a new version and make it current.",
   "version.protocol_unsupported":
-    "This version was sealed for a protocol between the platform and App code that this platform doesn't run. Seal it again.",
+    "This version was sealed for a protocol between the platform and App code that this platform doesn't run. Publish a new version and make it current.",
   "version.manifest_corrupt":
     "This version's sealed manifest no longer matches its hash.",
   "version.artifact_corrupt":

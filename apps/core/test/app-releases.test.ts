@@ -17,7 +17,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { inspected } from "../src/app-inspection.ts";
-import { loadRelease, sealRelease } from "../src/app-releases.ts";
+import {
+  loadDraftRelease,
+  loadRelease,
+  sealDraftRelease,
+  sealRelease,
+} from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   commitFiles,
@@ -283,6 +288,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
       expect.objectContaining({
         version: 1,
         manifestHash: release.manifestHash,
+        verificationReportHash: release.manifest.verificationReportHash,
         store: fixture.store,
       }),
     ]);
@@ -584,9 +590,17 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
         manifest.formatVersion = releaseFormatVersion - 1;
       },
     });
+    // Sealed for good: sealing the version again is refused the same way,
+    // so a new version is what replaces it.
     await expect(
-      failure(async () => await loadRelease(env, fixture.app, 1))
-    ).resolves.toBe("version.format_unsupported");
+      Promise.all([
+        failure(async () => await loadRelease(env, fixture.app, 1)),
+        failure(async () => await seal(fixture)),
+      ])
+    ).resolves.toStrictEqual([
+      "version.format_unsupported",
+      "version.format_unsupported",
+    ]);
   });
 
   it("is refused as another platform's when sealed for another protocol, not as tampering", async () => {
@@ -625,6 +639,28 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
     await rewrite(fixture.app, release, { manifest: change });
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it("is refused when two of its artifacts share a path, every hash rewritten", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    const entry = artifactAt(release, "modules/app~operations~notes.js");
+    await rewrite(fixture.app, release, {
+      last: (manifest) => {
+        const artifacts: readonly Json[] = Array.isArray(manifest.artifacts)
+          ? manifest.artifacts
+          : [];
+        // The same path again, under the bytes of another artifact.
+        const other = artifactAt(release, "modules/app~schema.js");
+        manifest.artifacts = [
+          ...artifacts,
+          { path: entry.path, sha256: other.sha256, bytes: other.bytes },
+        ];
+      },
+    });
     await expect(
       failure(async () => await loadRelease(env, fixture.app, 1))
     ).resolves.toBe("version.manifest_corrupt");
@@ -931,6 +967,99 @@ describe(
           await inspected(env, release.modules, release.sdk)
         ),
       });
+    });
+
+    it.each(["symbolicInspection", "finalInspection"])(
+      "loads with another %s hash: the inspection texts aren't sealed, so only the manifest hash and the audit chain bind it",
+      async (field) => {
+        const fixture = await appWith(notesFiles());
+        const release = await seal(fixture);
+        await rewrite(fixture.app, release, {
+          evidence: inSection("observed", (section) => {
+            section[field] = otherHash;
+          }),
+        });
+        await expect(refusedLoad(fixture.app)).resolves.toBe("loaded");
+      }
+    );
+
+    it("refuses a draft release whose evidence names another source", async () => {
+      const fixture = await appWith(notesFiles());
+      const key = { app: fixture.app, version: 2 };
+      const draft = await sealDraftRelease(
+        env,
+        key,
+        new Map(Object.entries(notesFiles()))
+      );
+      const bytes = new Map(
+        draft.artifacts.map(({ sha256, bytes: kept }) => [sha256, kept])
+      );
+      const read = async (sha256: string) =>
+        await Promise.resolve(bytes.get(sha256));
+      /** The draft with its evidence's source tree `tree`, every hash rewritten. */
+      const withSource = async (tree: string) => {
+        const manifest = jsonRecord(draft.manifest);
+        const entry = z
+          .object({ sha256: z.string() })
+          .parse(
+            (Array.isArray(manifest.artifacts) ? manifest.artifacts : []).find(
+              (artifact) =>
+                z.object({ path: z.string() }).parse(artifact).path ===
+                evidencePath
+            )
+          );
+        const evidence = jsonRecord(
+          new TextDecoder().decode(bytes.get(entry.sha256))
+        );
+        inSection("source", (section) => {
+          section.sourceTreeHash = tree;
+        })(evidence);
+        const text = canonicalJson(evidence);
+        const encoded = new TextEncoder().encode(text);
+        const sha256 = await sha256Hex(text);
+        bytes.set(sha256, encoded);
+        const artifacts: readonly Json[] = Array.isArray(manifest.artifacts)
+          ? manifest.artifacts
+          : [];
+        manifest.artifacts = artifacts.map((artifact) =>
+          z.object({ path: z.string() }).parse(artifact).path === evidencePath
+            ? { path: evidencePath, sha256, bytes: encoded.byteLength }
+            : artifact
+        );
+        manifest.verificationReportHash = sha256;
+        const manifestText = canonicalJson(manifest);
+        return {
+          manifest: manifestText,
+          manifestHash: await sha256Hex(manifestText),
+        };
+      };
+      const sealedTree = z
+        .object({ source: z.object({ sourceTreeHash: z.string() }) })
+        .parse(
+          JSON.parse(
+            new TextDecoder().decode(
+              bytes.get(
+                z
+                  .object({ verificationReportHash: z.string() })
+                  .parse(JSON.parse(draft.manifest)).verificationReportHash
+              )
+            )
+          )
+        ).source.sourceTreeHash;
+
+      const kept = await loadDraftRelease(
+        key,
+        await withSource(sealedTree),
+        read
+      );
+      const refused = await failure(
+        async () =>
+          await loadDraftRelease(key, await withSource(otherHash), read)
+      );
+      expect([kept.manifest.resourceVersion, refused]).toStrictEqual([
+        2,
+        "version.artifact_corrupt",
+      ]);
     });
 
     it("loads when recorded again consistently, every hash rewritten", async () => {
