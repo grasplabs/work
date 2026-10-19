@@ -963,9 +963,9 @@ export const dropForEndedRun = async (
  * Drops every held action under the step key core names, acting for the
  * person it names, held for a workflow run: the step settled without
  * taking their decision (core's workflows/resource-host.ts, an export's
- * step), so confirming one would send what no step collects. Only that
- * exact key, that person and workflow mode: another step's, person's or a
- * chat's actions stay. Each is recorded as `connection.action.dropped`,
+ * step), so confirming one would send what no step collects. Only an
+ * App's, under that exact key, for that person, in workflow mode: another
+ * step's, person's, a chat's or a workflow's own actions stay. Each is recorded as `connection.action.dropped`,
  * reason `step.settled`, by core itself.
  */
 export const dropForSettledStep = async (
@@ -979,7 +979,7 @@ export const dropForSettledStep = async (
   const { onBehalfOf, idempotencyKey } = parsed.data;
   await dropPendingActions(
     env,
-    sql`${pendingActions.idempotencyKey} = ${idempotencyKey} AND ${pendingActions.onBehalfOf} = ${onBehalfOf} AND ${pendingActions.mode} = 'workflow'`,
+    sql`${pendingActions.idempotencyKey} = ${idempotencyKey} AND ${pendingActions.onBehalfOf} = ${onBehalfOf} AND ${pendingActions.mode} = 'workflow' AND ${pendingActions.subjectType} = 'app'`,
     "step.settled",
     null
   );

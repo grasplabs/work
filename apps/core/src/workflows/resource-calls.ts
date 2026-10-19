@@ -14,6 +14,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { waitUntil } from "cloudflare:workers";
@@ -498,15 +499,18 @@ const dropMarginMs = 1000;
 /**
  * Drops whatever connect still holds under an export call's key `key` for
  * the run's person, once the App's method settled (GRA-748): a connection
- * call of the App's own that connect held for them. The call's step is
- * tried once and never runs the method again to take their decision
- * (resource-host.ts, `triedOnce`: untrusted App code can't be relied on to
- * do it twice to the same effect), so confirming the held action would
- * send what no step collects. Settled either way, failed or answered
- * (App code may catch the hold and answer all the same), the action goes,
- * audited by connect (`step.settled`). A drop that fails is logged and
- * changes nothing of the call, nor does one still going past a moment: confirming the action still finds its run isn't its App's,
- * and drops it then (pending-actions.ts, `runEnded`).
+ * call of the App's own that connect held for them. Hygiene, so the action
+ * doesn't sit in the person's list: the security control is that
+ * confirming it is refused as its run's end (pending-actions.ts,
+ * `runEnded`, which finds the run isn't its App's), whether or not this
+ * drop ever lands. The call's step is tried once and never runs the method
+ * again to take their decision (resource-host.ts, `triedOnce`: untrusted
+ * App code can't be relied on to do it twice to the same effect), so no
+ * step would collect what a confirmation sent. Settled either way, failed
+ * or answered (App code may catch the hold and answer all the same), the
+ * App's actions under that key go, audited by connect (`step.settled`).
+ * Only a key of the call's own run is ever dropped. A drop that fails, or
+ * is still going after a moment, is logged and changes nothing of the call.
  */
 const dropUncollected = async (
   env: Env,
@@ -514,6 +518,12 @@ const dropUncollected = async (
   key: string,
   deadline: number
 ): Promise<void> => {
+  // The run's own step's key, as `makeCall` gives every call it makes:
+  // never another run's.
+  if (runOfStepKey(key) !== run.runId) {
+    log.error("workflow.export_hold_drop_refused", { runId: run.runId });
+    return;
+  }
   const dropping = (async (): Promise<"dropped" | "failed"> => {
     try {
       await env.CONNECT.dropForSettledStep({
@@ -541,10 +551,7 @@ const dropUncollected = async (
     return "late";
   })();
   if ((await Promise.race([dropping, late])) === "late") {
-    log.warn("workflow.export_hold_drop_failed", {
-      runId: run.runId,
-      reason: "deadline",
-    });
+    log.warn("workflow.export_hold_drop_late", { runId: run.runId });
   }
 };
 

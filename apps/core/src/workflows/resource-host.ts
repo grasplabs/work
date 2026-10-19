@@ -2200,9 +2200,11 @@ export class ResourceRunHost
         // nothing new. An App export can answer `connect.held` too (a call
         // of its own held, in a restricted App), but its step is tried
         // once (`triedOnce`): running it again would run the App's code
-        // again, so it fails with the code, as any other answer, and what
-        // was held for it is dropped as the call settles (resource-calls.ts,
-        // `dropUncollected`), so nobody can confirm what no step collects.
+        // again, so it fails with the code, as any other answer. Confirming
+        // what was held for it is refused as its run's end
+        // (pending-actions.ts, `runEnded`), and it is dropped as the call
+        // settles (resource-calls.ts, `dropUncollected`), so it doesn't
+        // linger in its person's list.
         attempt.held ||=
           task.call.name === "grasp.connector" &&
           connectErrors.codeOf(error) === "connect.held";

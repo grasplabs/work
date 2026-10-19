@@ -6,6 +6,7 @@ import type {
   HeldCall,
   PendingAction,
 } from "@grasp-os/shared/connect";
+import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -1300,11 +1301,15 @@ describe("a side effect from chat", () => {
   it("of a step that settled without taking them are dropped, its own person's under its own key only", async () => {
     const anna = someone();
     const bob = someone();
-    const [settled, otherStep, otherPerson] = await Promise.all([
-      addConnection(),
-      addConnection(),
-      addConnection(),
-    ]);
+    const [settled, otherStep, otherPerson, chat, workflow, screen] =
+      await Promise.all([
+        addConnection(),
+        addConnection(),
+        addConnection(),
+        addConnection(),
+        addConnection(),
+        addConnection(),
+      ]);
     const run = `run-${crypto.randomUUID()}`;
     const signed = { restricted: true, origin: runOrigin };
     const key = `${run}:task:look`;
@@ -1314,6 +1319,39 @@ describe("a side effect from chat", () => {
         { ...mail(settled), idempotencyKey: key },
         signed
       )
+    );
+    // A chat's, and a workflow's own, under the same key: not an App's.
+    await hold(inChat(anna), { ...mail(chat), idempotencyKey: key });
+    await retried(
+      callAs(
+        authoritySchema.parse({
+          subject: { type: "workflow", workflowId: "workflow-1" },
+          onBehalfOf: anna.userId,
+          mode: "workflow",
+        }),
+        { ...mail(workflow), idempotencyKey: key },
+        {
+          restricted: true,
+          origin: {
+            permissionId: "permission-mail",
+            context: {
+              type: "workflowRun",
+              workflowId: "workflow-1",
+              runId: run,
+            },
+          },
+        }
+      )
+    );
+    // The App's own, with the person there: not a run's.
+    await callAs(
+      authoritySchema.parse({
+        subject: { type: "app", appId: "app-b" },
+        onBehalfOf: anna.userId,
+        mode: "interactive",
+        appVersion: 1,
+      }),
+      { ...mail(screen), idempotencyKey: key }
     );
     // Another step's, and another person's under the same key: not dropped.
     await retried(
@@ -1343,10 +1381,14 @@ describe("a side effect from chat", () => {
       waitingFor(bob),
     ]);
     expect({
-      anna: annas.map(({ connectionId }) => connectionId),
+      anna: annas.map(({ connectionId }) => connectionId).toSorted(),
       bob: bobs.map(({ connectionId }) => connectionId),
       ran: server.ran,
-    }).toStrictEqual({ anna: [otherStep], bob: [otherPerson], ran: [] });
+    }).toStrictEqual({
+      anna: [otherStep, chat, workflow, screen].toSorted(),
+      bob: [otherPerson],
+      ran: [],
+    });
   });
 
   it("keeps the inputs of calls an ended run didn't make, whatever their key, and drops its own", async () => {
