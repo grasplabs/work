@@ -687,9 +687,12 @@ const propose = async (
   // (`computation` alone).
   const subject = await builtSubject(env, by, subjectOfRef(proposal));
   const graph = canonicalGraph(proposal.graph);
+  // The total too: a resolve finding more or fewer below the kept ones
+  // is another review, never taken for the one waiting.
   const snapshot = canonicalJson({
     graph,
     findings: proposal.findings,
+    findingsTotal: proposal.findingsTotal,
     refused: proposal.refused,
   });
   const bytes = new TextEncoder().encode(snapshot).length;
@@ -775,31 +778,47 @@ export interface MalwareFound {
   advisory: string;
 }
 
+/** Most malware findings one refusal audits, each as its own event. */
+const malwareAuditedMax = 25;
+
 /**
  * Refuses a resolve of `subject`'s graph because packages in it are known
  * malware (`found`, GRA-699: Nick decided on 2026-10-19 that confirmed
- * malware is refused, every other finding only warns). Audited, and
- * stored as no request: nobody can approve what was never proposed.
+ * malware is refused, every other finding only warns). Audited, one event
+ * for each package and advisory (an audit value is identifier-sized), the
+ * first `malwareAuditedMax`, each saying how many were found; stored as no
+ * request: nobody can approve what was never proposed.
  */
 export const refuseMalware = async (
   env: Env,
   by: Acting,
   subject: DependencySubject,
-  found: readonly MalwareFound[]
+  found: readonly [MalwareFound, ...MalwareFound[]]
 ): Promise<never> => {
-  const packages = found.map(
-    (malware) => `${packageKey(malware.package)} (${malware.advisory})`
-  );
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
+  const actor = by.actor ?? actorOf(by);
+  const [first, ...rest] = found.slice(0, malwareAuditedMax).map((malware) =>
     outboxed(db, {
-      actor: by.actor ?? actorOf(by),
+      actor,
       action: "dependency.malware_refused",
       target: auditTargetOf(subject),
-      detail: { [subject.type]: subject.id, packages: packages.join(", ") },
-    }),
-  ]);
-  throw dependencyErrors.create("dependency.malware", { packages });
+      detail: {
+        [subject.type]: subject.id,
+        package: malware.package.name,
+        version: malware.package.version,
+        advisory: malware.advisory,
+        found: found.length,
+      },
+    })
+  );
+  if (first !== undefined) {
+    await auditedBatch(env, db, [first, ...rest]);
+  }
+  throw dependencyErrors.create("dependency.malware", {
+    packages: found.map(
+      (malware) => `${packageKey(malware.package)} (${malware.advisory})`
+    ),
+  });
 };
 
 /** How an App's or a workflow's dependencies stand, for its builders. */

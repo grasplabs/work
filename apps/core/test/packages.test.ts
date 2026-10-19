@@ -541,7 +541,8 @@ describe("the platform's own packages", () => {
 
   it("refuses a graph with a version known as malware, audited and stored as no request, and only warns on any other advisory", async () => {
     const { builder, app } = await builderWithApp();
-    const stream = named("flatmap-stream");
+    // A name as long as npm allows, near enough: what is audited of it fits.
+    const stream = named(`flatmap-stream-${"x".repeat(180)}`);
     const dates = named("dates");
     // Its install script would refuse it too: malware is refused as such.
     await publish(
@@ -593,7 +594,15 @@ describe("the platform's own packages", () => {
         code: "dependency.malware",
         details: { packages: [`${stream}@0.1.1 (GHSA-9x64-5r7x-2q53)`] },
       },
-      audited: [{ app, packages: `${stream}@0.1.1 (GHSA-9x64-5r7x-2q53)` }],
+      audited: [
+        {
+          app,
+          package: stream,
+          version: "0.1.1",
+          advisory: "GHSA-9x64-5r7x-2q53",
+          found: 1,
+        },
+      ],
       pendingAfterRefusal: null,
       warned: [{ severity: "critical", id: "GHSA-aaaa-bbbb-cccc" }],
     });
@@ -616,14 +625,27 @@ describe("the platform's own packages", () => {
       intentFor(app, { [dates]: "1.0.0" })
     );
     const review = await builder.api.dependencies.get(request.id);
+    // One more found, below those kept: the same findings, another total.
+    await advise(
+      dates,
+      advisory({ id: 5000, url: undefined, severity: "info" })
+    );
+    const { request: again } = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "1.0.0" })
+    );
+    const reviewAgain = await builder.api.dependencies.get(again.id);
     expect({
       kept: review.findings.length,
       counted: review.counts.findings,
       gravest: review.findings[0]?.id,
+      countedAgain: reviewAgain.counts.findings,
+      keptAgain: reviewAgain.findings,
     }).toStrictEqual({
       kept: dependencyMaxFindings,
       counted: dependencyMaxFindings + 1,
       gravest: "npm:9999",
+      countedAgain: dependencyMaxFindings + 2,
+      keptAgain: review.findings,
     });
   });
 

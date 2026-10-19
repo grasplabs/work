@@ -926,8 +926,9 @@ export const resolveDependencies = async (
       .map(({ name, version }) => ({ name, version }))
       .toSorted((a, b) => (packageKey(a) < packageKey(b) ? -1 : 1))
   );
-  if (malware.length > 0) {
-    await refuseMalware(env, by, asked, malware);
+  const [firstMalware, ...moreMalware] = malware;
+  if (firstMalware !== undefined) {
+    await refuseMalware(env, by, asked, [firstMalware, ...moreMalware]);
   }
   const refusals = refusalCollector();
   for (const node of nodes) {
