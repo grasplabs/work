@@ -856,10 +856,29 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
   const known = new Set(Object.keys(code));
   const modules: Record<string, string> = {};
   const errors: Diagnostic[] = [];
-  for (const [path, source] of Object.entries(code)) {
+  // Only server code becomes a module, whatever else is passed: what isn't
+  // is refused above, and never compiled, should that check ever miss it.
+  const compiled = Object.entries(code).filter(
+    ([path]) => appCodeKind(path) !== undefined
+  );
+  const named = new Map<string, string>();
+  for (const [path, source] of compiled) {
+    const name = appModuleName(path);
+    const taken = named.get(name);
+    if (taken !== undefined) {
+      errors.push(
+        problem(
+          "server",
+          `${path} would load as the same module as ${taken}: rename one of them.`,
+          { file: path }
+        )
+      );
+      continue;
+    }
+    named.set(name, path);
     const result = compileAppCodeFile(path, source, known);
     if ("code" in result) {
-      modules[appModuleName(path)] = result.code;
+      modules[name] = result.code;
     } else {
       errors.push(...result.errors);
     }

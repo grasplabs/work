@@ -1359,8 +1359,10 @@ export const reach = action({
       "operations/notes.json",
       "operations/view.tsx",
       "operations/types.d.ts",
-      // Never saved (a save refuses a hidden folder), never server code.
+      // Never saved (a save refuses each), never server code.
       "operations/.hidden/notes.ts",
+      "operations/../app.ts",
+      "operations//x.ts",
     ];
     const built = await buildAppCode(
       env,

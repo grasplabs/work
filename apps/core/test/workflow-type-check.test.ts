@@ -336,6 +336,51 @@ describe(
       });
     });
 
+    it("type a workflow by operations kept in a folder whose name has a dot", async () => {
+      const dotted = Object.fromEntries(
+        Object.entries(sampleApp()).map(([path, source]) => [
+          path.replace(/^operations\//u, "operations/v1.0/"),
+          path === "app.ts"
+            ? source.replaceAll('"./operations/', '"./operations/v1.0/')
+            : source,
+        ])
+      );
+      const typedFrom = (call: string) =>
+        Object.fromEntries(
+          Object.entries(typed(call)).map(([path, source]) => [
+            path,
+            source.replace(
+              '"../operations/sample.ts"',
+              '"../operations/v1.0/sample.ts"'
+            ),
+          ])
+        );
+      await expect(
+        Promise.all(
+          [
+            'APP.query("counter.hits", { name: "x" })',
+            'APP.query("counter.hits", { name: 1 })',
+          ].map(async (call) => await built({ ...dotted, ...typedFrom(call) }))
+        )
+      ).resolves.toStrictEqual([
+        { ok: true, files: [], warned: [] },
+        { ok: false, files: ["workflows/typed.ts"], warned: [] },
+      ]);
+    });
+
+    it("leave a stray declaration under operations/ out of a workflow's check, so it gives the workflows nothing", async () => {
+      await expect(
+        built({
+          ...sampleApp(),
+          "operations/types.d.ts": "declare var document: { title: string };\n",
+          ...checked("    return document.title;"),
+        })
+      ).resolves.toMatchObject({
+        ok: false,
+        files: ["workflows/checked.ts"],
+      });
+    });
+
     it("type a workflow by the operations of an App that registers a migration", async () => {
       await expect(
         built({
