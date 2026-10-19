@@ -552,7 +552,6 @@ const queued = async (
     now +
       askAgainMs({
         waited,
-        retryAfterSeconds: found.retryAfterSeconds,
         waitedMs,
         maxWaitMs: maxBuildWaitMs,
       })

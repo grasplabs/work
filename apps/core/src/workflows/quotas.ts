@@ -1216,8 +1216,8 @@ const placeGivenUp = async (
  * `workflow.lineage_limit` (active time or age), or
  * `workflow.lineage_busy` with the seconds after which an attempt under
  * way will have given back its hold, or `workflow.queued`, having queued
- * it, with the share it waits for and the seconds after which it asks
- * again at the latest. Any other refusal gives up the step's place in
+ * it, with the share it waits for and the seconds after which that share
+ * comes free at the latest (admission.ts, `waitOf`). Any other refusal gives up the step's place in
  * the queue, unless a newer attempt of the step wrote it (`placeGivenUp`).
  */
 export const admitAttempt = async (
