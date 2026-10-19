@@ -1203,7 +1203,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         return;
       }
       const shown = evaluation.carriedShown;
-      if (carried === evaluation.carried && shown !== undefined) {
+      // Only one read under the same roles: one read under others is
+      // never pushed under these (`#send`).
+      if (
+        carried === evaluation.carried &&
+        shown !== undefined &&
+        shown.roles === roles
+      ) {
         // Read again at the revision it shows: nothing new, but whoever
         // hasn't had it yet gets it.
         for (const listener of evaluation.listeners) {
@@ -1319,6 +1325,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         // and read again as they are now.
         if (evaluation.latest === snapshot) {
           evaluation.latest = undefined;
+        }
+        if (evaluation.carriedShown === snapshot) {
+          evaluation.carriedShown = undefined;
         }
         // Not sent: the read again may carry the same revision, and still
         // goes to it.
