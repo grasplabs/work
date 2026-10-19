@@ -22,6 +22,12 @@ const cloudflare = mockCloudflareApi(token, tenantToken);
 mockAccess();
 
 const db = consoleDatabase(env.DB);
+const tags = /<[^>]*>/gu;
+const spaces = /\s+/gu;
+
+/** The moment `ago` days before now. */
+const daysAgo = (ago: number) =>
+  new Date(Date.now() - ago * 86_400_000).toISOString();
 const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** A client recorded as `status`, on a new account in the fake. */
@@ -705,6 +711,92 @@ describe("the admin's frame", () => {
       },
       usage: [true, true],
       setup: [true, true],
+    });
+  });
+
+  it("lists an organization's members with where each stands and their role, ready before Grasp opens and in after", async () => {
+    const empty = emptyAdminSnapshot("Acme");
+    const members: AdminSnapshot["members"] = [
+      {
+        userId: "user-anna",
+        name: "Anna de Vries",
+        email: "anna@acme.test",
+        role: "admin",
+        joinedAt: daysAgo(3),
+      },
+      {
+        userId: "user-ben",
+        name: "Ben Okafor",
+        email: "ben@acme.test",
+        role: "builder",
+        joinedAt: daysAgo(1),
+      },
+    ];
+    const closed = await liveClient();
+    closed.account.admin = { ...empty, members };
+    const open = await liveClient();
+    open.account.admin = {
+      ...empty,
+      members,
+      gate: { ...empty.gate, open: true, openedAt: empty.now },
+    };
+    const nobody = await liveClient();
+    nobody.account.admin = empty;
+
+    const closedPage = await page(
+      `/admin/organizations/${closed.clientId}/members`
+    );
+    const openPage = await page(
+      `/admin/organizations/${open.clientId}/members`
+    );
+    const nobodyPage = await page(
+      `/admin/organizations/${nobody.clientId}/members`
+    );
+    /** The text of the list item naming `name`. */
+    const rowOfMember = (html: string, name: string): string => {
+      const at = html.indexOf(`>${name}</span>`);
+      return at === -1
+        ? ""
+        : html
+            .slice(html.lastIndexOf("<li", at), html.indexOf("</li>", at))
+            .replaceAll(tags, " ")
+            .replaceAll(spaces, " ")
+            .trim();
+    };
+    const joined = formatDate(daysAgo(3));
+
+    expect({
+      statuses: [closedPage, openPage, nobodyPage].map(({ status }) => status),
+      closed: {
+        anna: rowOfMember(closedPage.html, "Anna de Vries"),
+        ben: rowOfMember(closedPage.html, "Ben Okafor").includes("Builder"),
+        ready: closedPage.html.includes("are ready for when Grasp opens"),
+        seats: closedPage.html.includes(
+          "seats taken; the contract that gives them isn’t read yet"
+        ),
+        toCome: closedPage.html.includes(
+          "This section isn’t in the console yet."
+        ),
+      },
+      open: {
+        anna: rowOfMember(openPage.html, "Anna de Vries"),
+        in: openPage.html.includes("are in"),
+      },
+      nobody: nobodyPage.html.includes("Nobody has made an account yet."),
+    }).toStrictEqual({
+      statuses: [200, 200, 200],
+      closed: {
+        anna: `AV Anna de Vries anna@acme.test Ready Made an account on ${joined}. Comes in when Grasp opens. Role: Admin`,
+        ben: true,
+        ready: true,
+        seats: true,
+        toCome: false,
+      },
+      open: {
+        anna: `AV Anna de Vries anna@acme.test In In since ${joined}. Role: Admin`,
+        in: true,
+      },
+      nobody: true,
     });
   });
 
