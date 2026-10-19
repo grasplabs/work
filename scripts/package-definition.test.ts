@@ -693,6 +693,14 @@ describe(
       const version = `1.0.0+${"b".repeat(123)}`;
       const key = `workspace/greet/${version}`;
       const greet = definition.workflows["workspace/greet/1.0.0"];
+      // Published at that version: its definition says so, as its key does.
+      const files = {
+        ...greet?.files,
+        "workflow.json": greetingDefinition.replace(
+          '"version":"1.0.0"',
+          JSON.stringify({ version }).slice(1, -1)
+        ),
+      };
       await packaged(
         {
           ...definition,
@@ -700,13 +708,23 @@ describe(
             ...definition.app,
             workflows: { archiveNotes: key, summarizeNote: key },
           },
-          workflows: { [key]: greet },
+          workflows: { [key]: { ...greet, files } },
         },
         out
       );
-      expect(readdirSync(path.join(out, "workflows/greet"))).toStrictEqual([
-        version,
-      ]);
+      expect({
+        folders: readdirSync(path.join(out, "workflows/greet")),
+        version: z
+          .object({ document: z.object({ version: z.string() }) })
+          .parse(
+            JSON.parse(
+              readFileSync(
+                path.join(out, "workflows/greet", version, "workflow.json"),
+                "utf-8"
+              )
+            )
+          ).document.version,
+      }).toStrictEqual({ folders: [version], version });
     });
 
     it("refuses a directory that isn't empty, a package for another protocol, a key that isn't a workflow's, and dependencies with no lock", async () => {
