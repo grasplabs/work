@@ -136,7 +136,7 @@ export const builderFailure = (error: unknown, refusal: string): unknown => {
   );
 };
 
-/** The package builder building `whose` packages (an App's ID). */
+/** The package builder building `whose` packages: `app:<id>` or `workflow:<id>`, so an App and a workflow never share a sub-owner. */
 const builderFor = (
   env: PackageBuilderEnv,
   whose: string

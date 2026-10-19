@@ -1,8 +1,4 @@
-import type {
-  AgentProposer,
-  AppExports,
-  AppRecordTypes,
-} from "@grasp-os/shared/apps";
+import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
@@ -645,15 +641,6 @@ export const appVersions = sqliteTable(
      * previous release writes gets none.
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
-    /**
-     * The version's record types (JSON, `AppRecordTypes`), read from its
-     * `app/records.json` when it is committed (app-records.ts): so a save
-     * to Knowledge reads no files to find the types it is checked against.
-     */
-    records: text({ mode: "json" })
-      .$type<AppRecordTypes>()
-      .notNull()
-      .default(sql`'{}'`),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
@@ -815,6 +802,8 @@ export const sdkResourceBindings = sqliteTable(
         "model",
         "decision",
         "event",
+        "knowledge",
+        "template",
       ],
     }).notNull(),
     targetId: text("target_id").notNull(),
@@ -973,6 +962,7 @@ export const appResourceBindings = sqliteTable(
         "store",
         "statistics",
         "guests",
+        "app",
       ],
     }).notNull(),
     target: text().notNull(),
@@ -996,25 +986,6 @@ export const appResourceBindings = sqliteTable(
       .on(table.appId, table.alias)
       .where(sql`${table.status} = 'active'`),
   ]
-);
-
-/**
- * Which App a record type in a collection (a Knowledge collection, by ID)
- * belongs to: the first whose declaration took effect there
- * (knowledge/record-types.ts). Claimed when an App's write permission on
- * the collection is granted or its version is made current, and kept
- * while that App may write there with a version that declares the type;
- * another App claims it only once it no longer does.
- */
-export const recordTypeOwners = sqliteTable(
-  "record_type_owners",
-  {
-    collectionId: text("collection_id").notNull(),
-    type: text().notNull(),
-    appId: text("app_id").notNull(),
-    claimedAt: timestamp("claimed_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.collectionId, table.type] })]
 );
 
 /**
@@ -1868,9 +1839,13 @@ export const dependencyRequests = sqliteTable(
   "dependency_requests",
   {
     id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     sourceRevision: text("source_revision").notNull(),
     graphHash: text("graph_hash").notNull(),
     targets: text().notNull(),
@@ -1911,20 +1886,22 @@ export const dependencyRequests = sqliteTable(
     endedReason: text("ended_reason"),
   },
   (table) => [
-    // One request waits per App: a second pending row is refused.
+    // One request waits per subject: a second pending row is refused.
     uniqueIndex("dependency_requests_pending_idx")
-      .on(table.appId)
+      .on(table.subjectType, table.subjectId)
       .where(sql`status = 'pending'`),
-    // The approval an App got last (its status, and what a new request
+    // The approval a subject got last (its status, and what a new request
     // is compared with).
-    index("dependency_requests_app_idx").on(
-      table.appId,
+    index("dependency_requests_subject_idx").on(
+      table.subjectType,
+      table.subjectId,
       table.status,
       table.decidedAt
     ),
-    // Whether a graph is approved for an App: a proposal, and admission.
+    // Whether a graph is approved for a subject: a proposal, and admission.
     index("dependency_requests_graph_idx").on(
-      table.appId,
+      table.subjectType,
+      table.subjectId,
       table.graphHash,
       table.status
     ),
@@ -2005,9 +1982,13 @@ export const dependencyApprovers = sqliteTable(
 export const dependencyLocks = sqliteTable(
   "dependency_locks",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     lock: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
@@ -2019,7 +2000,11 @@ export const dependencyLocks = sqliteTable(
      */
     servedUntil: timestamp("served_until"),
   },
-  (table) => [primaryKey({ columns: [table.appId, table.graphHash] })]
+  (table) => [
+    primaryKey({
+      columns: [table.subjectType, table.subjectId, table.graphHash],
+    }),
+  ]
 );
 
 /**
@@ -2056,16 +2041,27 @@ export const packageCleanups = sqliteTable(
 export const dependencyBuildLeases = sqliteTable(
   "dependency_build_leases",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     target: text().notNull(),
     holder: text().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.appId, table.graphHash, table.target] }),
+    primaryKey({
+      columns: [
+        table.subjectType,
+        table.subjectId,
+        table.graphHash,
+        table.target,
+      ],
+    }),
     // The cron's sweep of leases that lapsed.
     index("dependency_build_leases_expires_at_idx").on(table.expiresAt),
   ]
@@ -2082,9 +2078,13 @@ export const dependencyBuildLeases = sqliteTable(
 export const dependencyAdmissionRefusals = sqliteTable(
   "dependency_admission_refusals",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     targets: text().notNull(),
     policyGeneration: integer("policy_generation").notNull(),
@@ -2094,7 +2094,8 @@ export const dependencyAdmissionRefusals = sqliteTable(
   (table) => [
     primaryKey({
       columns: [
-        table.appId,
+        table.subjectType,
+        table.subjectId,
         table.graphHash,
         table.targets,
         table.policyGeneration,
@@ -2723,6 +2724,12 @@ export const workflowStartReceipts = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
     /** When retention removed its input and parameter values. */
     detailsRemovedAt: timestamp("details_removed_at"),
+    /**
+     * Whether the start was decided in restricted mode (restricted.ts): an
+     * App's start while the App, or the chat of the agent whose call made
+     * it, had read restricted data. Its run is restricted for good.
+     */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -2799,6 +2806,11 @@ export const workflowResourceRuns = sqliteTable(
      * hasn't ended.
      */
     sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
+    /**
+     * Its start's `restricted`, pinned with it: every call of the run reads
+     * it here (restricted.ts), so no step, retry or replay runs without it.
+     */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     // A workflow's runs that haven't ended, for its deletion check.
@@ -2810,6 +2822,14 @@ export const workflowResourceRuns = sqliteTable(
     index("workflow_resource_runs_starting_idx")
       .on(table.createdAt)
       .where(sql`${table.status} = 'starting'`),
+    // One person's runs of a workflow, newest first, for an App's
+    // `workflows.<wf>.queries.runs` (workflow-reference-queries.ts).
+    index("workflow_resource_runs_principal_idx").on(
+      table.workflowResourceId,
+      table.principalId,
+      table.createdAt,
+      table.id
+    ),
   ]
 );
 
@@ -2848,7 +2868,15 @@ export const workflowCatalogContracts = sqliteTable(
   {
     key: text().primaryKey(),
     kind: text({
-      enum: ["operation", "connector", "model", "decision", "event"],
+      enum: [
+        "operation",
+        "connector",
+        "model",
+        "decision",
+        "event",
+        "knowledge",
+        "template",
+      ],
     }).notNull(),
     contract: text().notNull(),
     fingerprint: text().notNull(),
@@ -2876,7 +2904,15 @@ export const workflowBindingApprovals = sqliteTable(
       .references(() => workflowResources.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["operation", "connector", "model", "decision", "event"],
+      enum: [
+        "operation",
+        "connector",
+        "model",
+        "decision",
+        "event",
+        "knowledge",
+        "template",
+      ],
     }).notNull(),
     contractId: text("contract_id").notNull(),
     fingerprint: text().notNull(),
@@ -2917,6 +2953,80 @@ export const workflowResourceParams = sqliteTable(
     setBy: text("set_by").notNull(),
     setAt: timestamp("set_at").notNull(),
     valuesRemovedAt: timestamp("values_removed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * The draft of each independent workflow's next definition, as its
+ * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
+ * `revision` counting them from 1. An edit names the revision it read and
+ * inserts the next one, so of two concurrent edits the second is refused
+ * and the first stays. `source` is the text as edited, JSON or not;
+ * `problems` the profile's diagnostics of it (empty for one that passes),
+ * so a row with `checked` set is a checkpoint: a definition that passed,
+ * which the editor's diagram shows and which may be published. Only the
+ * latest row and the latest checkpoint are kept.
+ */
+export const workflowResourceDrafts = sqliteTable(
+  "workflow_resource_drafts",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    source: text().notNull(),
+    checked: integer({ mode: "boolean" }).notNull(),
+    problems: text().notNull(),
+    editedBy: text("edited_by").notNull(),
+    editedAt: timestamp("edited_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * The modules each draft revision carries (src/workflow-drafts.ts), one
+ * row per module: inserted with their revision, never changed, and kept
+ * and removed with it. A row each keeps every row within what D1 holds,
+ * however a revision's definition and modules add up.
+ */
+export const workflowResourceDraftModules = sqliteTable(
+  "workflow_resource_draft_modules",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    path: text().notNull(),
+    source: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.workflowResourceId, table.revision, table.path],
+    }),
+  ]
+);
+
+/**
+ * What the sandbox's inspection of a draft revision's modules answered
+ * (src/workflow-drafts.ts): kept with the revision, so a later edit that
+ * carries exactly the same modules (`modules_hash`) checks its definition
+ * against these contracts instead of running the modules again. Only an
+ * inspection that succeeded is kept; a publication always inspects anew.
+ */
+export const workflowResourceDraftInspections = sqliteTable(
+  "workflow_resource_draft_inspections",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    modulesHash: text("modules_hash").notNull(),
+    manifest: text().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.revision] }),

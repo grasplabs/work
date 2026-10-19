@@ -118,7 +118,7 @@ export default workflow(
   async (step, { env, input }) =>
     await step.do(
       "send",
-      { description: "Mail the mailbox again", sideEffect: true, retries: { limit: 0 }, input: { mailbox: "${from}", subject: String(input.payload.subject), body: "Again.", to: ["${to}"] } },
+      { description: "Mail the mailbox again", sideEffect: true, retries: { limit: 0 }, input: { mailbox: "${from}", subject: String((input.payload as { subject?: string }).subject), body: "Again.", to: ["${to}"] } },
       async ({ idempotencyKey, input: mail }) => {
         await env.MAIL.call("mail.send", mail, { idempotencyKey });
         return Object.hasOwn(input, "stamp") ? "stamped" : input.id;

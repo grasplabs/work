@@ -19,6 +19,13 @@ interface __BaseEnv_Env {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /**
+   * Grasp's OAuth apps at the apps that aren't suites (src/providers.ts),
+   * as JSON: `{"<provider>": {"id": "...", "secret": "..."}}`, by the
+   * provider an app's record names. An app without an entry can't be
+   * connected with OAuth.
+   */
+  APP_OAUTH_CLIENTS?: string;
+  /**
    * Grasp's key for the client's Composio project (src/composio.ts): lists
    * Composio's toolkits in the catalog. Without it, nothing of Composio is
    * offered or reached.

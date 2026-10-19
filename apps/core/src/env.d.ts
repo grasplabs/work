@@ -118,6 +118,11 @@ interface __BaseEnv_Env {
    */
   RELEASE_READ_MS?: string;
   /**
+   * Tests only: lowers how many bytes of text a definition export packages
+   * (src/definition-export.ts); never raises it.
+   */
+  DEFINITION_EXPORT_MAX_BYTES?: string;
+  /**
    * Tests only: lower bounds on an App's statistics points, `perCall/
    * perMinute` (src/app.ts, `claimStatistic`).
    */

@@ -1,3 +1,5 @@
+import type { Id } from "@grasp-os/sdk";
+import { useAction, useMutation } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
@@ -16,15 +18,18 @@ import {
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { useState } from "react";
 
-import { maturityLevels, snapshotRecordOf } from "./board";
+import { api } from "#grasp";
+
+import { maturityLevels } from "./board";
 import { whilePending } from "./pending";
-import { ask } from "./snapshot";
+import { settle } from "./snapshot";
 import type { Snapshot } from "./snapshot";
 
-/** What a take or a save answers: the snapshot's document. */
-interface Saved {
-  id: string;
-}
+/** Longest the decision a snapshot asks for is (schema.ts). */
+const decisionMax = 1000;
+
+/** Longest a snapshot's narrative is (schema.ts). */
+const narrativeMax = 30_000;
 
 const levels = Array.from({ length: maturityLevels + 1 }, (_, level) => ({
   value: String(level),
@@ -32,28 +37,32 @@ const levels = Array.from({ length: maturityLevels + 1 }, (_, level) => ({
 }));
 
 /**
- * Takes a snapshot of the Playbook now: the page's server freezes each
- * workflow's hours and signals; the person says the maturity.
+ * Takes a snapshot now: the page freezes each workflow of the map with
+ * its hours, and the signals; the person says the maturity.
  */
 export const TakeSnapshot = ({
   onTaken,
   onRefused,
 }: {
-  onTaken: (id: string) => void;
+  onTaken: (id: Id<"snapshots">) => void;
   onRefused: (code: string) => void;
 }) => {
   const [maturity, setMaturity] = useState<string | null>(null);
   const [taking, setTaking] = useState(false);
+  const takeSnapshot = useAction(api.snapshots.take);
   const take = async (): Promise<void> => {
     const answer = await whilePending(
       setTaking,
-      async () => await ask<Saved>("take", { maturity: Number(maturity) })
+      async () =>
+        await settle(
+          async () => await takeSnapshot({ maturity: Number(maturity) })
+        )
     );
     if ("error" in answer) {
       onRefused(answer.error);
       return;
     }
-    onTaken(answer.ok.id);
+    onTaken(answer.ok);
   };
   return (
     <div className="flex flex-wrap items-end gap-2">
@@ -83,14 +92,17 @@ export const TakeSnapshot = ({
       >
         Take a snapshot
       </Button>
+      <p className="text-muted-foreground w-full text-sm">
+        A snapshot freezes the workflow map&apos;s numbers and what runs, as you
+        may see them, for everyone who can open this page.
+      </p>
     </div>
   );
 };
 
 /**
  * The snapshot's narrative and the decision it asks for, saved as its
- * next version; what it froze stays as it was taken. The `write-board-page`
- * skill writes the same fields.
+ * next version; what it froze stays as it was taken.
  */
 export const NarrativeEditor = ({
   snapshot,
@@ -98,30 +110,34 @@ export const NarrativeEditor = ({
   onRefused,
 }: {
   snapshot: Snapshot;
-  onSaved: (id: string) => void;
+  onSaved: (id: Id<"snapshots">) => void;
   onRefused: (code: string) => void;
 }) => {
   const [decision, setDecision] = useState(
-    snapshotRecordOf(snapshot.record).decisionNeeded ?? ""
+    snapshot.record.decisionNeeded ?? ""
   );
   const [body, setBody] = useState(snapshot.body);
   const [saving, setSaving] = useState(false);
+  const write = useMutation(api.snapshots.write);
   const save = async (): Promise<void> => {
     const answer = await whilePending(
       setSaving,
       async () =>
-        await ask<Saved>("write", {
-          id: snapshot.id,
-          ifVersion: snapshot.version,
-          decisionNeeded: decision,
-          body,
-        })
+        await settle(
+          async () =>
+            await write({
+              id: snapshot.id,
+              expectedRevision: snapshot.revision,
+              decisionNeeded: decision,
+              narrative: body,
+            })
+        )
     );
     if ("error" in answer) {
       onRefused(answer.error);
       return;
     }
-    onSaved(answer.ok.id);
+    onSaved(snapshot.id);
   };
   return (
     <Card>
@@ -132,6 +148,7 @@ export const NarrativeEditor = ({
         <div className="flex flex-col gap-2">
           <Input
             aria-label="Edit the decision needed"
+            maxLength={decisionMax}
             placeholder="The one decision the board needs to make"
             value={decision}
             onChange={(event) => {
@@ -140,6 +157,7 @@ export const NarrativeEditor = ({
           />
           <Textarea
             aria-label="Edit the narrative"
+            maxLength={narrativeMax}
             placeholder="Where we stand and what changed, in a few lines"
             value={body}
             onChange={(event) => {

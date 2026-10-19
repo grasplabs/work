@@ -135,6 +135,14 @@ export const buildConnectors = async (
     if (connectors.some((each) => each.manifest.name === manifest.name)) {
       throw new Error(`Two connectors are named ${manifest.name}`);
     }
+    // An app's record says how to sign in to it, and its connector gets its
+    // token: one connector per app, so neither is in doubt.
+    if (
+      manifest.signIn !== undefined &&
+      connectors.some((each) => each.manifest.provider === manifest.provider)
+    ) {
+      throw new Error(`Two connectors are for the app ${manifest.provider}`);
+    }
     // oxlint-disable-next-line no-await-in-loop -- one connector at a time
     connectors.push({ manifest, code: await bundle(entry) });
   }

@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { requestGranted } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { hubspotLogo } from "./composio-api.ts";
 import { consentCode, tokensFor } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -316,14 +317,44 @@ describe("the catalog", () => {
     return await core.authenticate().connections;
   };
 
-  it("lists Composio's toolkits next to the native providers", async () => {
+  it("lists Composio's toolkits next to the native providers, each described, in one of Grasp's groups, and saying whose sign-in app it takes", async () => {
     const connections = await userConnections();
     const { entries, composio } = await connections.catalog();
     expect(composio).toBe("listed");
-    expect(entries.map(({ source, id }) => `${source}:${id}`)).toStrictEqual([
-      "native:microsoft",
-      "native:google",
-      "composio:hubspot",
+    expect(
+      entries.map(({ source, id, description, group, auth }) => ({
+        entry: `${source}:${id}`,
+        description,
+        group,
+        auth,
+      }))
+    ).toStrictEqual([
+      {
+        entry: "native:microsoft",
+        description:
+          "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+        group: "Email and calendar",
+        auth: "managed",
+      },
+      {
+        entry: "native:google",
+        description: "Gmail, Google Calendar, and files in Google Drive.",
+        group: "Email and calendar",
+        auth: "managed",
+      },
+      {
+        entry: "composio:hubspot",
+        description:
+          "HubSpot is a CRM platform for marketing, sales and service.",
+        group: "CRM",
+        auth: "managed",
+      },
+      {
+        entry: "composio:acme_erp",
+        description: null,
+        group: "Other",
+        auth: "own",
+      },
     ]);
   });
 
@@ -422,6 +453,35 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
+  it("is refused for a toolkit Composio holds no app for, connecting nothing", async () => {
+    const admin = await signedInAdmin();
+    await expect(
+      outcome(
+        admin.connections.connectToolkit({
+          ...request,
+          toolkit: "acme_erp",
+          tools: ["ACME_ERP_LIST_ORDERS"],
+        })
+      )
+    ).resolves.toBe("connection.own_auth_required");
+    // Recorded in the deployment's one log, as connect records it.
+    const events = await allEvents();
+    expect(
+      events.filter(
+        ({ action, actor, detail }) =>
+          action === "connection.connect" &&
+          actor?.type === "person" &&
+          actor.userId === admin.userId &&
+          detail.provider === "acme_erp"
+      )
+    ).toMatchObject([
+      {
+        source: "connect",
+        detail: { outcome: "refused", reason: "connection.own_auth_required" },
+      },
+    ]);
+  });
+
   it("sends the browser back nowhere but this origin", async () => {
     const admin = await signedInAdmin();
     await expect(
@@ -475,8 +535,13 @@ describe("offering catalog entries", () => {
       admin: entries.map(({ id, offered }) => `${id}:${offered}`),
       anna: await listed(anna.connections),
     }).toStrictEqual({
-      admin: ["microsoft:true", "google:false", "hubspot:false"],
-      anna: ["native:microsoft"],
+      admin: [
+        "microsoft:true",
+        "google:false",
+        "hubspot:false",
+        "acme_erp:true",
+      ],
+      anna: ["native:microsoft", "composio:acme_erp"],
     });
     const refused = await auditedDuring(async () => {
       await expect(
@@ -569,6 +634,7 @@ describe("offering catalog entries", () => {
       "native:microsoft",
       "native:google",
       "composio:hubspot",
+      "composio:acme_erp",
     ]);
     await expect(
       outcome(admin.connections.connectToolkit(toolkitRequest))

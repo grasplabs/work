@@ -281,6 +281,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: 'catalog:'
         version: 21.2.3
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:packages/sdk
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:packages/shared
