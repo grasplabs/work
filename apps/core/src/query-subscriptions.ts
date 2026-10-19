@@ -67,9 +67,11 @@ import type { SessionCheck } from "./session-check.ts";
 //   pushed goes out after the refusal.
 // - A snapshot stays on screen after access is lost, because nothing
 //   commits to what it read (spec 11.4): every write that can take a role
-//   in an App away tells the App's host once it committed
-//   (access-revocations.ts), and the host tells every connection of those
-//   people that follows the App (`#follow`), on every tab and isolate.
+//   in an App away, or its data from a build (an approval taken back, its
+//   data sensitive again, its release revoked), tells the App's host once
+//   it committed (access-revocations.ts), and the host tells every
+//   connection of those people that follows the App (`#follow`), on every
+//   tab and isolate.
 //   The connection reads the session again now (`forget`), then passes
 //   each of the App's queries through the gate: a refusal ends it as
 //   above, clearing the screen; roles that changed read it again. No
