@@ -262,6 +262,46 @@ const loadWaitsOf = async (run: string): Promise<number[]> =>
       .map(({ ms }) => ms)
   );
 
+/**
+ * When each of `run`'s rounds waiting for load wakes, in order: its
+ * sleep's deadline, as journaled.
+ */
+const loadWakesOf = async (run: string): Promise<number[]> =>
+  await runInDurableObject(runObject(run), (_object, state) =>
+    state.storage.sql
+      .exec<{ at: number }>(
+        "SELECT deadline AS at FROM steps WHERE type = 'sleep' AND name LIKE '%:busy:%' ORDER BY ordinal"
+      )
+      .toArray()
+      .map(({ at }) => at)
+  );
+
+/**
+ * Keeps the first lease of `run`'s attempts ending a second from now, again
+ * and again, until the returned stop is called: as when those ahead take
+ * each lease as it ends, so a step waiting for the share is told, round
+ * after round, that it comes free in a second, and never finds it free.
+ */
+const endingEverySecond = (run: string): (() => Promise<void>) => {
+  const ticking = { going: true };
+  const kept = (async () => {
+    while (ticking.going) {
+      // oxlint-disable-next-line no-await-in-loop -- each tick
+      await env.DB.prepare(
+        "UPDATE run_lineage_attempts SET admitted_at = ? - reserved_ms WHERE run_id = ? AND settled_at IS NULL"
+      )
+        .bind(Date.now() + 1000, run)
+        .run();
+      // oxlint-disable-next-line no-await-in-loop -- each tick
+      await scheduler.wait(200);
+    }
+  })();
+  return async () => {
+    ticking.going = false;
+    await kept;
+  };
+};
+
 /** How `run` failed, as its `workflow.run.failed` event names it; none yet. */
 const failedWith = async (run: string): Promise<unknown> => {
   const events = await allEvents();
@@ -1051,6 +1091,111 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       rounds: [5000, 10_000, 20_000],
       waits: 1,
     });
+  });
+
+  it("wait its backoff each round however soon the share's first lease ends, so a long wait takes a bounded number of rounds, each when its summary said", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      ...workflowFiles("noop", "  return 1;"),
+      ...workflowFiles("work", `${working("work", 10)}\n  return 1;`, {
+        work: 1,
+      }),
+    });
+    const holderRun = await builder.api.workflows.start(app, "noop");
+    await finished(holderRun.id);
+    const holder = {
+      run: holderRun.id,
+      root: holderRun.id,
+      subject: builder.userId,
+      resource: app,
+    };
+
+    const result = await withShares(
+      { workflowClientAttempts: 2, workflowQueuedStepMs: 40_000 },
+      async () => {
+        await admit(holder, "holder");
+        const stop = endingEverySecond(holderRun.id);
+        try {
+          const run = await builder.api.workflows.start(app, "work");
+          // Its third round: when its summary says it asks again, and when
+          // it wakes to, read together.
+          const { retryAt, wakesAt } = await eventually2(async () => {
+            const summary = await builder.api.screens.summary(app, run.id);
+            const wakes = await loadWakesOf(run.id);
+            expect(wakes).toHaveLength(3);
+            return { retryAt: summary.queued?.retryAt, wakesAt: wakes.at(-1) };
+          });
+          await finished(run.id, 60_000);
+          return {
+            failed: await failedWith(run.id),
+            rounds: await loadWaitsOf(run.id),
+            saidToWake: Math.abs((retryAt ?? 0) - (wakesAt ?? 0)) < 1500,
+          };
+        } finally {
+          await stop();
+        }
+      }
+    );
+
+    // Told a second each round, it waits five seconds doubling, then what
+    // is left of its forty: four rounds, not one a second.
+    expect(result).toStrictEqual({
+      failed: "workflow.queue_timeout",
+      rounds: [5000, 10_000, 20_000, 5000],
+      saidToWake: true,
+    });
+  });
+
+  it("ask again at the end of the round it sleeps in once a share comes free, and run", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      ...workflowFiles("noop", "  return 1;"),
+      ...workflowFiles("work", `${working("work", 10)}\n  return 1;`, {
+        work: 1,
+      }),
+    });
+    const holderRun = await builder.api.workflows.start(app, "noop");
+    await finished(holderRun.id);
+    const holder = {
+      run: holderRun.id,
+      root: holderRun.id,
+      subject: builder.userId,
+      resource: app,
+    };
+
+    const result = await withShares(
+      { workflowClientAttempts: 2, workflowQueuedStepMs: 60_000 },
+      async () => {
+        const held = await admit(holder, "holder");
+        const stop = endingEverySecond(holderRun.id);
+        let run: { id: string };
+        let wakesAt: number;
+        try {
+          run = await builder.api.workflows.start(app, "work");
+          // In its second round, ten seconds long, the share comes free.
+          wakesAt = await eventually2(async () => {
+            const wakes = await loadWakesOf(run.id);
+            expect(wakes).toHaveLength(2);
+            return wakes[1] ?? 0;
+          });
+        } finally {
+          await stop();
+        }
+        await settled(held);
+        await eventually(async () => {
+          await expect(liveStatus(run.id)).resolves.toBe("complete");
+        });
+        const sinceWake = Date.now() - wakesAt;
+        return {
+          rounds: await loadWaitsOf(run.id),
+          // Done within seconds of that round's end: not before it, nor a
+          // round later.
+          prompt: sinceWake >= 0 && sinceWake < 5000,
+        };
+      }
+    );
+
+    expect(result).toStrictEqual({ rounds: [5000, 10_000], prompt: true });
   });
 
   it("fail a step that waited for a share as long as a step may wait", async () => {
