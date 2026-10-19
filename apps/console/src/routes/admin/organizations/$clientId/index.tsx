@@ -2,10 +2,9 @@ import { Button } from "@grasp-os/ui/components/button";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "lucide-react";
 
-import {
-  SectionToCome,
-  useOrganization,
-} from "../../../../admin/organization.tsx";
+import { OrgBrief } from "../../../../admin/org-brief.tsx";
+import { OrgHealth } from "../../../../admin/org-health.tsx";
+import { useOrganization } from "../../../../admin/organization.tsx";
 import {
   needSection,
   sectionTo,
@@ -69,14 +68,32 @@ const NeedsHere = () => {
   );
 };
 
-const Overview = () => (
-  <>
-    <NeedsHere />
-    <SectionToCome />
-  </>
-);
+const Overview = () => {
+  const { admin, view } = useOrganization();
+  return (
+    <>
+      <OrgHealth
+        clientId={admin.client.id}
+        snapshot={admin.snapshot}
+        view={view}
+      />
+      <div className="grid items-start gap-6 xl:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
+          <NeedsHere />
+        </div>
+        <div className="flex min-w-0 flex-col gap-6">
+          <OrgBrief clientId={admin.client.id} view={view} />
+        </div>
+      </div>
+    </>
+  );
+};
 
-/** An organization's overview: what needs Grasp there, until the rest of the prototype's is ported. */
+/**
+ * An organization's overview, as the prototype's (`org-home.tsx`) has it:
+ * how it is doing on top, what needs Grasp there, and beside it the brief
+ * for the next call.
+ */
 export const Route = createFileRoute("/admin/organizations/$clientId/")({
   component: Overview,
 });
