@@ -33,6 +33,7 @@ import type {
   DependencyRequest,
   DependencyReview,
   DependencyStatus,
+  DependencyPackageRef,
   DependencySubject,
   DependencySubjectsInForce,
   DependencyTarget,
@@ -183,7 +184,9 @@ import {
 //
 // Not stopped here: a licence is what the package states of itself, and
 // findings (lookalike names, the registry's advisories, GRA-699) warn the
-// approver, never refuse: a graph without findings isn't shown to be safe.
+// approver, never refuse, but for known malware, which the resolver
+// refuses before proposing (`refuseMalware`): a graph without findings
+// isn't shown to be safe.
 // What a person approves is the graph by its hash, so what is later
 // fetched must match it byte for byte to be admitted.
 
@@ -764,6 +767,39 @@ export const proposeResolved = async (
 ): Promise<{ request: DependencyRequest; lock: GraspLock }> => {
   const { request, lock } = await propose(env, by, input, resolved);
   return { request, lock: lock ?? resolved.lock };
+};
+
+/** A package version a malware advisory affects, and the advisory. */
+export interface MalwareFound {
+  package: DependencyPackageRef;
+  advisory: string;
+}
+
+/**
+ * Refuses a resolve of `subject`'s graph because packages in it are known
+ * malware (`found`, GRA-699: Nick decided on 2026-10-19 that confirmed
+ * malware is refused, every other finding only warns). Audited, and
+ * stored as no request: nobody can approve what was never proposed.
+ */
+export const refuseMalware = async (
+  env: Env,
+  by: Acting,
+  subject: DependencySubject,
+  found: readonly MalwareFound[]
+): Promise<never> => {
+  const packages = found.map(
+    (malware) => `${packageKey(malware.package)} (${malware.advisory})`
+  );
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor: by.actor ?? actorOf(by),
+      action: "dependency.malware_refused",
+      target: auditTargetOf(subject),
+      detail: { [subject.type]: subject.id, packages: packages.join(", ") },
+    }),
+  ]);
+  throw dependencyErrors.create("dependency.malware", { packages });
 };
 
 /** How an App's or a workflow's dependencies stand, for its builders. */

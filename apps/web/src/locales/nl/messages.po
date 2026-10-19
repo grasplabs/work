@@ -10326,6 +10326,10 @@ msgid "Was refused adding a member to a domain"
 msgstr "Mocht geen lid aan een domein toevoegen"
 
 #: src/activity/audit-words.ts
+msgid "Was refused packages known as malware"
+msgstr "Pakketten geweigerd die bekendstaan als malware"
+
+#: src/activity/audit-words.ts
 msgid "Was refused packages nobody approved"
 msgstr "Kreeg pakketten geweigerd die niemand had goedgekeurd"
 

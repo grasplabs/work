@@ -44,7 +44,8 @@ import { z } from "zod";
 
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
-import { proposeResolved } from "../dependencies/requests.ts";
+import { proposeResolved, refuseMalware } from "../dependencies/requests.ts";
+import type { MalwareFound } from "../dependencies/requests.ts";
 import { builtSubject } from "../dependencies/subject-builders.ts";
 import { ofSubject } from "../dependencies/subjects.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
@@ -255,7 +256,11 @@ const whenFree = async <T>(call: () => Promise<T>): Promise<T> => {
 const findingsOf = async (
   env: Env,
   packages: readonly DependencyPackageRef[]
-): Promise<{ findings: DependencyFinding[]; total: number }> => {
+): Promise<{
+  findings: DependencyFinding[];
+  total: number;
+  malware: MalwareFound[];
+}> => {
   // By name in a Map: a package may be named `constructor`.
   const asked = new Map<string, string[]>();
   for (const { name, version } of packages) {
@@ -264,7 +269,7 @@ const findingsOf = async (
   const advisories = await whenFree(
     async () => await env.CONNECT.npmAdvisories(Object.fromEntries(asked))
   );
-  const security = packages.flatMap(({ name, version }) =>
+  const affecting = packages.flatMap(({ name, version }) =>
     (Object.hasOwn(advisories, name) ? (advisories[name] ?? []) : [])
       .filter(
         ({ vulnerableVersions }) =>
@@ -273,13 +278,16 @@ const findingsOf = async (
           // names none (`2.0.0-beta.1` in `<2.0.0`).
           satisfies(version, vulnerableVersions, { includePrerelease: true })
       )
-      .map((advisory): DependencyFinding => ({
-        kind: "security",
-        package: { name, version },
-        severity: advisory.severity,
-        id: advisory.id,
-        summary: advisory.title,
-      }))
+      .map((advisory) => ({ advisory, package: { name, version } }))
+  );
+  const security = affecting.map(
+    ({ advisory, package: ref }): DependencyFinding => ({
+      kind: "security",
+      package: ref,
+      severity: advisory.severity,
+      id: advisory.id,
+      summary: advisory.title,
+    })
   );
   const all = [...lookalikeFindings(packages), ...security];
   return {
@@ -289,6 +297,9 @@ const findingsOf = async (
       )
       .slice(0, dependencyMaxFindings),
     total: all.length,
+    malware: affecting.flatMap(({ advisory, package: ref }) =>
+      advisory.malware ? [{ package: ref, advisory: advisory.id }] : []
+    ),
   };
 };
 
@@ -935,7 +946,11 @@ export const resolveDependencies = async (
   // What the approver is shown about the graph's packages (GRA-699), before
   // the request is stored: a resolution whose advisories can't be read
   // fails, never stored as one without findings.
-  const { findings, total } = await findingsOf(env, graph.packages);
+  const { findings, total, malware } = await findingsOf(env, graph.packages);
+  // Known malware is refused, never proposed: every other finding warns.
+  if (malware.length > 0) {
+    await refuseMalware(env, by, asked, malware);
+  }
   // The lock is stored in the batch that stores the request: a request is
   // never without the lock its graph names, nor a lock without a request.
   // Admitted after the slow fetch and checks, right before it is stored.

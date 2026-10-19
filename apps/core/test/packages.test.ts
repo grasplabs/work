@@ -30,7 +30,7 @@ import {
 } from "./npm.ts";
 import type { Entries } from "./npm.ts";
 import { racingDb } from "./racing-db.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // Resolving an App's npm packages (src/packages/resolve.ts) from its threat
 // model: sources other than the registry, brand-new releases, a second
@@ -536,6 +536,62 @@ describe("the platform's own packages", () => {
       ],
       clean: [],
       inherited: "package.advisories_unchecked",
+    });
+  });
+
+  it("refuses a graph with a version known as malware, audited and stored as no request, and only warns on any other advisory", async () => {
+    const { builder, app } = await builderWithApp();
+    const stream = named("flatmap-stream");
+    const dates = named("dates");
+    await publish(
+      plain(stream, "0.1.1", { dependencies: { [dates]: "^1.0.0" } })
+    );
+    await publish(plain(dates, "1.0.0"));
+    // Embedded Malicious Code: malware, however grave the registry says.
+    await advise(
+      stream,
+      advisory({
+        url: "https://github.com/advisories/GHSA-9x64-5r7x-2q53",
+        vulnerable_versions: "=0.1.1",
+        severity: "moderate",
+        cwe: ["CWE-506"],
+      })
+    );
+    // Critical, but not malware: shown, never refused.
+    await advise(
+      dates,
+      advisory({
+        severity: "critical",
+        cwe: ["CWE-94"],
+        vulnerable_versions: "*",
+      })
+    );
+    let refused: Awaited<ReturnType<typeof failure>> | undefined;
+    const events = await auditedDuring(async () => {
+      refused = await failure(
+        builder.api.dependencies.resolve(intentFor(app, { [stream]: "0.1.1" }))
+      );
+    });
+    const { pending } = await builder.api.dependencies.status({ app });
+    const { request } = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "1.0.0" })
+    );
+    const review = await builder.api.dependencies.get(request.id);
+    expect({
+      refused,
+      audited: events
+        .filter(({ action }) => action === "dependency.malware_refused")
+        .map(({ detail }) => detail),
+      pendingAfterRefusal: pending,
+      warned: review.findings.map(({ severity, id }) => ({ severity, id })),
+    }).toStrictEqual({
+      refused: {
+        code: "dependency.malware",
+        details: { packages: [`${stream}@0.1.1 (GHSA-9x64-5r7x-2q53)`] },
+      },
+      audited: [{ app, packages: `${stream}@0.1.1 (GHSA-9x64-5r7x-2q53)` }],
+      pendingAfterRefusal: null,
+      warned: [{ severity: "critical", id: "GHSA-aaaa-bbbb-cccc" }],
     });
   });
 

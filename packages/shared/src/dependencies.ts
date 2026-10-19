@@ -692,6 +692,8 @@ export const dependencyErrors = defineErrorFamily({
     "Who approves dependencies, or what is approved, changed. Read the status again.",
   "dependency.retired":
     "These packages were retired for this App or workflow: what was built with them keeps working, but nothing new is built. Someone with the permission to approve dependencies can approve them again.",
+  "dependency.malware":
+    "A package is known malware, so Grasp refuses it: no approval can admit it. Remove it, and whatever brings it in.",
   "dependency.revoked":
     "These packages were revoked for this App or workflow and can't be used. Someone with the permission to approve dependencies can approve them again after a new review.",
 });

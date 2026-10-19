@@ -839,6 +839,8 @@ describe("the registry's advisories, through connect", () => {
         url: undefined,
         title: "x".repeat(400),
         severity: "low",
+        // Embedded Malicious Code: malware.
+        cwe: ["CWE-912", "CWE-506"],
       })
     );
     const answered = await connect.npmAdvisories({
@@ -871,12 +873,14 @@ describe("the registry's advisories, through connect", () => {
             severity: "high",
             title: "Prototype pollution in left-pad",
             vulnerableVersions: "<1.3.1",
+            malware: false,
           },
           {
             id: "npm:77",
             severity: "low",
             title: "x".repeat(300),
             vulnerableVersions: "<1.3.1",
+            malware: true,
           },
         ],
       },
@@ -909,6 +913,9 @@ describe("the registry's advisories, through connect", () => {
       manyVersions: Object.keys(manyVersions),
       unknownSeverity: await failing(() =>
         Response.json({ asked: [advisory({ severity: "severe" })] })
+      ),
+      cweNotAList: await failing(() =>
+        Response.json({ asked: [advisory({ cwe: "CWE-506" })] })
       ),
       noRange: await failing(() =>
         Response.json({ asked: [advisory({ vulnerable_versions: undefined })] })
@@ -945,6 +952,7 @@ describe("the registry's advisories, through connect", () => {
       kept: ["asked"],
       manyVersions: ["asked"],
       unknownSeverity: "package.registry_unavailable",
+      cweNotAList: "package.registry_unavailable",
       noRange: "package.registry_unavailable",
       notJson: "package.registry_unavailable",
       notARecord: "package.registry_unavailable",

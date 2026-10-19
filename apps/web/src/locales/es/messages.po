@@ -10326,6 +10326,10 @@ msgid "Was refused adding a member to a domain"
 msgstr "No se le permitió añadir un miembro a un dominio"
 
 #: src/activity/audit-words.ts
+msgid "Was refused packages known as malware"
+msgstr "Se rechazaron paquetes conocidos como malware"
+
+#: src/activity/audit-words.ts
 msgid "Was refused packages nobody approved"
 msgstr "Se le denegaron paquetes que nadie aprobó"
 

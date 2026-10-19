@@ -56,7 +56,9 @@ import { z } from "zod";
 //   kept only for the packages asked about, each advisory read strictly
 //   (an unknown severity or a malformed one fails the answer, never
 //   passes as no advisory), and an answer that can't be read is
-//   `package.registry_unavailable`, never an empty one.
+//   `package.registry_unavailable`, never an empty one. An advisory
+//   classified CWE-506 (Embedded Malicious Code) is passed on as malware,
+//   which core refuses: the bulk answer carries no other malware marker.
 
 const registry = new URL(npmRegistryOrigin);
 
@@ -663,7 +665,12 @@ const sentAdvisorySchema = z.object({
     .transform((title) => title.slice(0, 300)),
   severity: z.enum(advisorySeverities),
   vulnerable_versions: z.string().min(1).max(registryLimits.textLength),
+  /** The weaknesses it is classified as (`CWE-506`), when it says. */
+  cwe: z.array(z.string().max(32)).max(64).optional(),
 });
+
+/** Embedded Malicious Code: what marks an advisory as malware. */
+const malwareCwe = "CWE-506";
 
 /** A GitHub advisory's ID, as its URL names it. */
 const githubAdvisory = /\/advisories\/(?<id>GHSA(?:-[0-9a-z]{4}){3})$/u;
@@ -675,6 +682,7 @@ const advisoryOf = (sent: z.infer<typeof sentAdvisorySchema>): NpmAdvisory => ({
   severity: sent.severity,
   title: sent.title,
   vulnerableVersions: sent.vulnerable_versions,
+  malware: sent.cwe?.includes(malwareCwe) ?? false,
 });
 
 /**

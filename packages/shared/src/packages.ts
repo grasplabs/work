@@ -145,6 +145,13 @@ export const npmAdvisorySchema = z.strictObject({
   severity: z.enum(advisorySeverities),
   title: z.string().min(1).max(300),
   vulnerableVersions: z.string().min(1).max(registryLimits.textLength),
+  /**
+   * Whether it reports the package as malware: classified CWE-506,
+   * Embedded Malicious Code, the closest the registry's bulk answer comes
+   * to a malware verdict (it carries no type). Core refuses a graph with
+   * a version it affects (GRA-699, Nick's decision of 2026-10-19).
+   */
+  malware: z.boolean(),
 });
 export type NpmAdvisory = z.infer<typeof npmAdvisorySchema>;
 
