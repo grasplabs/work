@@ -1172,6 +1172,10 @@ msgstr "A step"
 msgid "A workflow is redesigned with AI and waits for its test."
 msgstr "A workflow is redesigned with AI and waits for its test."
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "A workflow to check or approve, a run waiting on you, or a change to a live workflow."
+msgstr "A workflow to check or approve, a run waiting on you, or a change to a live workflow."
+
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow with AI is in its test run."
 msgstr "A workflow with AI is in its test run."
@@ -1967,6 +1971,10 @@ msgstr "Before:"
 #: src/chat/builds.tsx
 msgid "Being built"
 msgstr "Being built"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Billing problems"
+msgstr "Billing problems"
 
 #: src/engines/resource-bindings.tsx
 msgid "Bind {alias}"
@@ -3189,6 +3197,7 @@ msgstr "Earlier versions"
 msgid "Edit"
 msgstr "Edit"
 
+#: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Email"
 msgstr "Email"
@@ -3275,6 +3284,10 @@ msgstr "Every call stays in the EU: yes."
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
 msgstr "Every invited team interviewed"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Every Monday: hours, runs, and what is waiting."
+msgstr "Every Monday: hours, runs, and what is waiting."
 
 #: src/brain/brain-atlas.ts
 msgid "Every one of them is interviewed."
@@ -3694,6 +3707,10 @@ msgstr "Grasp could not read this policy"
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
 msgstr "Grasp doesn't know where this came from, so it can't be resolved here."
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Grasp doesn’t send these emails yet. What you choose here applies once it does."
+msgstr "Grasp doesn’t send these emails yet. What you choose here applies once it does."
 
 #: src/landscape/usage-tab.tsx
 msgid "Grasp doesn't track who uses {appName} yet. Usage shows here once it does."
@@ -5465,6 +5482,10 @@ msgstr "Noticed in"
 #: src/brain/brain.ts
 msgid "Noticed in {source}"
 msgstr "Noticed in {source}"
+
+#: src/routes/_shell.settings.tsx
+msgid "Notifications"
+msgstr "Notifications"
 
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
@@ -8862,6 +8883,10 @@ msgstr "Week {week} of {weeks}"
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Week {week} of {weeks} · {stage}"
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Weekly summary"
+msgstr "Weekly summary"
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
 msgid "What"
@@ -9045,6 +9070,10 @@ msgctxt "column: when a run happened"
 msgid "When"
 msgstr "When"
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "When a payment fails or the card is about to run out, so you can fix it in time."
+msgstr "When a payment fails or the card is about to run out, so you can fix it in time."
+
 #: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"
 msgstr "When an email arrives for {localPart}"
@@ -9052,6 +9081,10 @@ msgstr "When an email arrives for {localPart}"
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
 msgstr "when someone starts it"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "When something needs you"
+msgstr "When something needs you"
 
 #: src/workflows/triggers.tsx
 msgid "When the event {event} happens"
@@ -9082,6 +9115,10 @@ msgstr "Where this app comes up"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
 msgstr "Which domains and agents hold permissions: {why}"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Which emails Grasp sends you. Only to you; nobody else’s change."
+msgstr "Which emails Grasp sends you. Only to you; nobody else’s change."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."
