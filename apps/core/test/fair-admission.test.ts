@@ -1154,12 +1154,14 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         const stop = endingEverySecond(holderRun.id);
         try {
           const run = await builder.api.workflows.start(app, "work");
-          // Its third round: when its summary says it asks again, and when
-          // it wakes to, read together.
+          // Its third round: when it wakes to, then when its summary says
+          // it asks again. Read in that order: the round's refusal wrote
+          // the summary's before the round began, so a summary read
+          // earlier could still show the round before.
           const { retryAt, wakesAt } = await eventually2(async () => {
-            const summary = await builder.api.screens.summary(app, run.id);
             const wakes = await loadWakesOf(run.id);
             expect(wakes).toHaveLength(3);
+            const summary = await builder.api.screens.summary(app, run.id);
             return { retryAt: summary.queued?.retryAt, wakesAt: wakes.at(-1) };
           });
           await finished(run.id, 60_000);
