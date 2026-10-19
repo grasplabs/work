@@ -967,6 +967,16 @@ export const pendingKeySchema = z.strictObject({
 export type PendingKey = z.input<typeof pendingKeySchema>;
 
 /**
+ * The step whose held actions core drops once it settled without taking
+ * their decision (`dropForSettledStep`): its key, for the run's person.
+ */
+export const settledStepSchema = z.strictObject({
+  onBehalfOf: identifierSchema,
+  idempotencyKey: identifierSchema,
+});
+export type SettledStep = z.input<typeof settledStepSchema>;
+
+/**
  * The held actions waiting for a signed-in person, over `/rpc`: only
  * their own. Grasp staff have none, and decide none.
  */
@@ -1352,6 +1362,14 @@ export interface ConnectApi extends PackageRegistryApi {
    * keep their inputs past it. Dropping again drops nothing.
    */
   dropForEndedRuns: (request: EndedRuns) => Promise<void>;
+  /**
+   * Drops every held action under a workflow step's key, acting for the
+   * run's person, once the step settled without taking their decision
+   * (an independent run's export step, GRA-748): confirming one would send
+   * what no step collects. Recorded as `connection.action.dropped`,
+   * reason `step.settled`. Dropping again drops nothing.
+   */
+  dropForSettledStep: (request: SettledStep) => Promise<void>;
   /**
    * Drops every held action an App's calls made through resource binding
    * `bindingId`, once core revoked or replaced it: none of them could run.

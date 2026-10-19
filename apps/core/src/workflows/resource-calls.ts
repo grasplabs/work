@@ -14,6 +14,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { waitUntil } from "cloudflare:workers";
@@ -489,6 +490,85 @@ const callStoreOperation = async (
   return requireShape(contract.output, answer, "output");
 };
 
+/** The longest an export call waits for its held actions' drop. */
+const dropWaitMs = 2000;
+
+/** What a drop's wait leaves of the call's time, to settle in. */
+const dropMarginMs = 1000;
+
+/** How long after a call's deadline its last held action can still land. */
+const lateHoldMs = 2000;
+
+/**
+ * Drops whatever connect still holds under an export call's key `key` for
+ * the run's person, once the App's method settled (GRA-748): a connection
+ * call of the App's own that connect held for them. Hygiene, so the action
+ * doesn't sit in the person's list: the security control is that
+ * confirming it is refused as its run's end (pending-actions.ts,
+ * `runEnded`, which finds the run isn't its App's), whether or not this
+ * drop ever lands. The call's step is tried once and never runs the method
+ * again to take their decision (resource-host.ts, `triedOnce`: untrusted
+ * App code can't be relied on to do it twice to the same effect), so no
+ * step would collect what a confirmation sent. Settled either way, failed
+ * or answered (App code may catch the hold and answer all the same), the
+ * App's actions under that key go, audited by connect (`step.settled`).
+ * Only a key of the call's own run is ever dropped. A drop that fails, or
+ * is still going after a moment, is logged and changes nothing of the call.
+ */
+const dropUncollected = async (
+  env: Env,
+  run: CallingRun,
+  key: string,
+  deadline: number
+): Promise<void> => {
+  // The run's own step's key, as `makeCall` gives every call it makes:
+  // never another run's.
+  if (runOfStepKey(key) !== run.runId) {
+    log.error("workflow.export_hold_drop_refused", { runId: run.runId });
+    return;
+  }
+  const drop = async (): Promise<"dropped" | "failed"> => {
+    try {
+      await env.CONNECT.dropForSettledStep({
+        onBehalfOf: run.principal,
+        idempotencyKey: key,
+      });
+      return "dropped";
+    } catch (error) {
+      log.warn("workflow.export_hold_drop_failed", {
+        runId: run.runId,
+        ...errorFields(error),
+      });
+      return "failed";
+    }
+  };
+  const dropping = drop();
+  // Finished even once the call no longer waits for it.
+  waitUntil(dropping);
+  // And once more just after the call's deadline: a connection call of the
+  // App's still on its way as the method settled (one that timed out) may
+  // reach connect after the first drop, but never once its capability,
+  // which expires by that deadline, has (bindings.ts).
+  waitUntil(
+    (async () => {
+      await scheduler.wait(Math.max(0, deadline - Date.now()) + lateHoldMs);
+      await drop();
+    })()
+  );
+  // Waited for a moment at most, and never into the call's last second: a
+  // slow drop never keeps the step's attempt, tried once, open past its
+  // deadline, which would fail a call that settled.
+  const late = (async (): Promise<"late"> => {
+    await scheduler.wait(
+      Math.max(0, Math.min(dropWaitMs, deadline - Date.now() - dropMarginMs))
+    );
+    return "late";
+  })();
+  if ((await Promise.race([dropping, late])) === "late") {
+    log.warn("workflow.export_hold_drop_late", { runId: run.runId });
+  }
+};
+
 /**
  * Calls the export `binding`'s operation target names, at the App version
  * it pins, with `args`, for the run's principal, under the effect's key:
@@ -625,6 +705,8 @@ const callOperation = async (
       throw releaseNotCurrent();
     }
     throw error;
+  } finally {
+    await dropUncollected(env, run, effect.key, effect.deadline);
   }
   // The App may have read restricted data as it answered: withheld from
   // a run that isn't restricted itself.
