@@ -194,6 +194,7 @@ const proposalFor = (app: string, version = "1.0.0") => ({
     platformPeers: { react: "19.2.0" },
   },
   findings: [],
+  findingsTotal: 0,
   refused: [],
 });
 

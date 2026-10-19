@@ -47,7 +47,7 @@ export const registryLimits = {
   /** The registry's answer of advisories for one graph, as sent (GRA-699). */
   advisoryBytes: 4 * 1024 * 1024,
   /** Most advisories connect passes on for one package. */
-  advisoriesPerPackage: 100,
+  advisoriesPerPackage: 1000,
 } as const;
 
 /** A dependency as a version lists it: the range, or whatever it names. */
@@ -163,7 +163,8 @@ export interface PackageRegistryApi {
   /**
    * The advisories the registry knows for the packages `request` names
    * (GRA-699), or `package.registry_unavailable`: never an empty answer
-   * for one it couldn't read.
+   * for one it couldn't read. `package.advisories_unchecked` for a request
+   * naming `constructor`, which the registry never answers.
    */
   npmAdvisories: (request: NpmAdvisoriesRequest) => Promise<NpmAdvisories>;
 }
@@ -179,6 +180,8 @@ export const packageErrors = defineErrorFamily({
   "package.redirect_refused":
     "The registry sent the request somewhere other than the registry.",
   "package.too_large": "The package is larger than Grasp takes.",
+  "package.advisories_unchecked":
+    "Advisories can't be checked for constructor: the npm registry refuses to answer for a package of that name.",
   "package.integrity_mismatch":
     "The registry sent other bytes than the package's integrity hash names.",
   "package.unsupported_source":

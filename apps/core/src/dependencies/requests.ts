@@ -17,6 +17,7 @@ import {
   subjectOfRef,
   dependencySummaryDirect,
   dependencySummaryFindings,
+  findingGravity,
   dependencyTargetSchema,
   packageKey,
 } from "@grasp-os/shared/dependencies";
@@ -181,9 +182,10 @@ import {
 //   graph keeps, or never lands.
 //
 // Not stopped here: a licence is what the package states of itself, and
-// a request reports no findings yet (no advisory source is read). What a
-// person approves is the graph by its hash, so what is later fetched must
-// match it byte for byte to be admitted.
+// findings (lookalike names, the registry's advisories, GRA-699) warn the
+// approver, never refuse: a graph without findings isn't shown to be safe.
+// What a person approves is the graph by its hash, so what is later
+// fetched must match it byte for byte to be admitted.
 
 type Row = typeof dependencyRequests.$inferSelect;
 
@@ -416,15 +418,6 @@ const pendingFor = async (
     )
     .get();
 
-/** How grave each severity is, for which findings a list shows first. */
-const gravity: Record<DependencyFinding["severity"], number> = {
-  critical: 4,
-  high: 3,
-  moderate: 2,
-  low: 1,
-  info: 0,
-};
-
 /** The lock a resolve proposes its graph with, stored in the same batch. */
 interface ResolvedLock {
   lock: GraspLock;
@@ -478,12 +471,14 @@ const newRequest = (
   summary: {
     direct: graph.direct.slice(0, dependencySummaryDirect).map(packageKey),
     findings: proposal.findings
-      .toSorted((a, b) => gravity[b.severity] - gravity[a.severity])
+      .toSorted(
+        (a, b) => findingGravity[b.severity] - findingGravity[a.severity]
+      )
       .slice(0, dependencySummaryFindings),
   },
   direct: graph.direct.length,
   packages: graph.packages.length,
-  findings: proposal.findings.length,
+  findings: proposal.findingsTotal,
   refused: proposal.refused.length,
   previous,
   status: "pending",

@@ -351,6 +351,10 @@ export const npmRegistryFake = () => {
       const body: unknown = JSON.parse(asked.at(-1)?.body ?? "{}");
       const named =
         typeof body === "object" && body !== null ? Object.keys(body) : [];
+      // As the registry does, for any body naming `constructor`.
+      if (named.includes("constructor")) {
+        return new Response("Service Unavailable", { status: 503 });
+      }
       return Response.json(
         Object.fromEntries(
           named.flatMap((name) => {

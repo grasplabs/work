@@ -847,8 +847,13 @@ describe("the registry's advisories, through connect", () => {
     });
     const [asked] = registry.asked;
     const body: unknown = JSON.parse(asked?.body ?? "null");
+    // The registry never answers for a package named constructor.
+    const unchecked = await outcome(
+      connect.npmAdvisories({ constructor: ["1.0.0"], clean: ["2.0.0"] })
+    );
     expect({
       answered,
+      unchecked,
       asked: {
         method: asked?.method,
         path: asked?.path,
@@ -875,6 +880,7 @@ describe("the registry's advisories, through connect", () => {
           },
         ],
       },
+      unchecked: "package.advisories_unchecked",
       asked: {
         method: "POST",
         path: bulkPath,

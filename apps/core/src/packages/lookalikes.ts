@@ -8,21 +8,28 @@ import type {
 // heuristic, a finding for the approver, never proof either way: a
 // package not flagged isn't shown to be what it seems.
 //
-// - Normalised alike: lowercase, `-`, `_` and `.` removed, it is a
-//   popular name so normalised (`reactdom` for `react-dom`); and a scoped
-//   name whose scope dropped is an unscoped popular one (`@evil/lodash`
-//   for `lodash`). A popular scoped name keeps its scope: `@types/react`
-//   isn't what `react`'s lookalikes look like.
-// - One edit away from a popular name of at least `minEditedLength`
+// A name, and each of its squat forms (`js`, `.js` or `-js` dropped from
+// its end, `node` from its start: `lodashjs`, `node-lodash`), looks like a
+// popular name when, so compared, it is:
+//
+// - normalised alike: lowercase, `-`, `_` and `.` removed (`reactdom` for
+//   `react-dom`). A popular scoped name keeps its scope: `@types/react`
+//   isn't what `react`'s lookalikes look like;
+// - or one edit away from a popular name of at least `minEditedLength`
 //   characters: a letter inserted, deleted, replaced, or two adjacent
 //   letters swapped (`expresss`, `lodahs`). Shorter names are left out:
 //   most short names are one edit from a popular one.
 //
-// A popular name itself is never flagged, nor a well-known package that
-// merely sits one edit from one (`preact`, `color`). A package of the
-// `@types` scope is compared as it is, never as its unscoped part:
-// DefinitelyTyped names each after the package it types (`@types/lodash`),
-// and npm lets only DefinitelyTyped publish there.
+// Both are `moderate`. A scoped name is compared by its unscoped part as
+// well, the same way, but one whose unscoped part is a popular name
+// exactly (`@emotion/react`) is only `info`: scopes name their packages
+// after what they serve, and the scope shows whose it is.
+//
+// Never flagged: a popular name itself; a well-known package that merely
+// sits one edit from one (`preact`, `tslint`), scoped or not; a package
+// of the `@types` scope by its unscoped part, as DefinitelyTyped names
+// each after the package it types (`@types/lodash`) and npm lets only
+// DefinitelyTyped publish there.
 
 /**
  * npm's most depended-upon packages, by name, as typosquats target them:
@@ -142,7 +149,14 @@ export const oneEditApart = (a: string, b: string): boolean => {
 const popular: ReadonlySet<string> = new Set(popularPackages);
 
 /** Well-known packages of their own, one edit from a popular name. */
-const knownDistinct: ReadonlySet<string> = new Set(["color", "preact"]);
+const knownDistinct: ReadonlySet<string> = new Set([
+  "color",
+  "colord",
+  "inquire",
+  "preact",
+  "reach",
+  "tslint",
+]);
 
 /** Scopes whose packages are named after the package they serve. */
 const namedAfterScopes: ReadonlySet<string> = new Set(["@types"]);
@@ -151,19 +165,25 @@ const namedAfterScopes: ReadonlySet<string> = new Set(["@types"]);
 const scopeOf = (name: string): string | undefined =>
   /^(?<scope>@[^/]+)\//u.exec(name)?.groups?.scope;
 
-/** The popular name `name` looks like, or undefined. */
-export const lookalikeOf = (name: string): string | undefined => {
-  if (popular.has(name) || knownDistinct.has(name)) {
-    return undefined;
-  }
-  // As it is, and, for a scoped name, as its unscoped part: each compared
-  // with the popular names as they are, scoped or not.
-  const scope = scopeOf(name);
-  const forms =
-    scope !== undefined && namedAfterScopes.has(scope)
-      ? [normalisedName(name)]
-      : [...new Set([normalisedName(name), normalisedName(unscoped(name))])];
-  return popularPackages.find((known) => {
+/**
+ * A normalised name and its squat forms: `js` dropped from its end
+ * (`.js` and `-js` are normalised to it), `node` from its start, and both.
+ */
+const squatForms = (normalised: string): string[] => {
+  const ends =
+    normalised.length > "js".length && normalised.endsWith("js")
+      ? [normalised, normalised.slice(0, -"js".length)]
+      : [normalised];
+  return ends.flatMap((form) =>
+    form.length > "node".length && form.startsWith("node")
+      ? [form, form.slice("node".length)]
+      : [form]
+  );
+};
+
+/** The popular name one of `forms` looks like, or undefined. */
+const popularLike = (forms: readonly string[]): string | undefined =>
+  popularPackages.find((known) => {
     const knownNormalised = normalisedName(known);
     return forms.some(
       (form) =>
@@ -172,6 +192,39 @@ export const lookalikeOf = (name: string): string | undefined => {
           oneEditApart(form, knownNormalised))
     );
   });
+
+/**
+ * What a name looks like: the popular name, and, when only its unscoped
+ * part is that name exactly, the scope it is published under.
+ */
+export interface Lookalike {
+  of: string;
+  scope?: string;
+}
+
+/** What `name` looks like, or undefined when it looks like no popular name. */
+export const lookalikeOf = (name: string): Lookalike | undefined => {
+  if (popular.has(name) || knownDistinct.has(name)) {
+    return undefined;
+  }
+  const whole = popularLike(squatForms(normalisedName(name)));
+  if (whole !== undefined) {
+    return { of: whole };
+  }
+  const scope = scopeOf(name);
+  const bare = unscoped(name);
+  if (
+    scope === undefined ||
+    namedAfterScopes.has(scope) ||
+    knownDistinct.has(bare)
+  ) {
+    return undefined;
+  }
+  if (popular.has(bare)) {
+    return { of: bare, scope };
+  }
+  const part = popularLike(squatForms(normalisedName(bare)));
+  return part === undefined ? undefined : { of: part };
 };
 
 /** A finding for each package of `packages` named like a popular one. */
@@ -179,16 +232,26 @@ export const lookalikeFindings = (
   packages: readonly DependencyPackageRef[]
 ): DependencyFinding[] =>
   packages.flatMap((ref) => {
-    const known = lookalikeOf(ref.name);
-    return known === undefined
-      ? []
-      : [
-          {
-            kind: "lookalike" as const,
-            package: { name: ref.name, version: ref.version },
+    const like = lookalikeOf(ref.name);
+    if (like === undefined) {
+      return [];
+    }
+    const finding = {
+      kind: "lookalike" as const,
+      package: { name: ref.name, version: ref.version },
+      id: null,
+    };
+    return [
+      like.scope === undefined
+        ? {
+            ...finding,
             severity: "moderate" as const,
-            id: null,
-            summary: `Its name looks like ${known}'s, a popular package: check it is the one meant.`,
+            summary: `Its name looks like ${like.of}'s, a popular package: check it is the one meant.`,
+          }
+        : {
+            ...finding,
+            severity: "info" as const,
+            summary: `Published under ${like.scope}, not the unscoped ${like.of}, a popular package: check it is the one meant.`,
           },
-        ];
+    ];
   });

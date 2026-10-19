@@ -1,4 +1,5 @@
 import { platformPeers } from "@grasp-os/compiler";
+import { dependencyMaxFindings } from "@grasp-os/shared/dependencies";
 import { sha512Integrity, toHex } from "@grasp-os/shared/encoding";
 import { packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
@@ -416,6 +417,9 @@ describe("the platform's own packages", () => {
     await publish(plain(merged, "1.0.0"));
     const beta = named("beta");
     await publish(plain(beta, "2.0.0-beta.1"));
+    // A scope's package named after the popular one it serves: noted only.
+    const scoped = `@${named("octo")}/request`;
+    await publish(plain(scoped, "1.0.0"));
     await advise(dates, advisory({}));
     // A prerelease of the release a range stops before: inside it.
     await advise(
@@ -453,6 +457,7 @@ describe("the platform's own packages", () => {
         [squat]: "1.0.0",
         [merged]: "1.0.0",
         [beta]: "2.0.0-beta.1",
+        [scoped]: "1.0.0",
       })
     );
     const review = await builder.api.dependencies.get(request.id);
@@ -462,14 +467,16 @@ describe("the platform's own packages", () => {
       intentFor(app, { [clean]: "1.0.0" })
     );
     const cleanReview = await builder.api.dependencies.get(cleanRequest.id);
-    // A name Object.prototype also has, resolved as any other.
+    // A name Object.prototype also has: asked of the registry as any
+    // other, which never answers for it, and says so.
     await publish(plain("constructor", "1.0.0"));
-    const { request: inherited } = await resolveDependencies(
-      env,
-      await builder.api.whoami(),
-      intentFor(app, { constructor: "1.0.0" })
+    const inherited = await failure(
+      resolveDependencies(
+        env,
+        await builder.api.whoami(),
+        intentFor(app, { constructor: "1.0.0" })
+      )
     );
-    const inheritedReview = await builder.api.dependencies.get(inherited.id);
     expect({
       findings: review.findings.map(({ kind, package: ref, severity, id }) => ({
         kind,
@@ -481,7 +488,7 @@ describe("the platform's own packages", () => {
         .filter(({ kind }) => kind === "lookalike")
         .map(({ summary }) => summary),
       clean: cleanReview.findings,
-      inherited: inheritedReview.findings,
+      inherited: inherited.code,
     }).toStrictEqual({
       // Gravest first.
       findings: [
@@ -510,6 +517,12 @@ describe("the platform's own packages", () => {
           id: "npm:3",
         },
         {
+          kind: "lookalike",
+          package: `${scoped}@1.0.0`,
+          severity: "info",
+          id: null,
+        },
+        {
           kind: "security",
           package: `${beta}@2.0.0-beta.1`,
           severity: "info",
@@ -519,9 +532,38 @@ describe("the platform's own packages", () => {
       lookalikes: [
         "Its name looks like lodash's, a popular package: check it is the one meant.",
         "Its name looks like react-dom's, a popular package: check it is the one meant.",
+        `Published under ${scoped.split("/")[0]}, not the unscoped request, a popular package: check it is the one meant.`,
       ],
       clean: [],
-      inherited: [],
+      inherited: "package.advisories_unchecked",
+    });
+  });
+
+  it("keeps the gravest findings a request can hold, and counts the rest", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    // One more than a request keeps, the gravest last.
+    for (let id = 1; id <= dependencyMaxFindings; id += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await advise(dates, advisory({ id, url: undefined, severity: "low" }));
+    }
+    await advise(
+      dates,
+      advisory({ id: 9999, url: undefined, severity: "critical" })
+    );
+    const { request } = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "1.0.0" })
+    );
+    const review = await builder.api.dependencies.get(request.id);
+    expect({
+      kept: review.findings.length,
+      counted: review.counts.findings,
+      gravest: review.findings[0]?.id,
+    }).toStrictEqual({
+      kept: dependencyMaxFindings,
+      counted: dependencyMaxFindings + 1,
+      gravest: "npm:9999",
     });
   });
 

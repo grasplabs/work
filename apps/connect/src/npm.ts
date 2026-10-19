@@ -707,7 +707,14 @@ export const npmAdvisories = async (input: unknown): Promise<NpmAdvisories> => {
   if (!response.ok) {
     await response.body?.cancel();
     log.warn("npm.advisories_failed", { status: response.status });
-    throw packageErrors.create("package.registry_unavailable");
+    // The registry answers 503 to any body naming `constructor` (seen
+    // live, 2026-10-19): no retry ever reads it, so say so rather than
+    // that the registry couldn't be reached.
+    throw packageErrors.create(
+      Object.hasOwn(asked, "constructor")
+        ? "package.advisories_unchecked"
+        : "package.registry_unavailable"
+    );
   }
   let reservation: Reservation | undefined;
   let text: string;

@@ -55,6 +55,11 @@ msgstr "{0, plural, one {# archivo cambiado en este chat, aún sin proponer} oth
 msgid "{0, plural, one {# finding reported} other {# findings reported}}"
 msgstr "{0, plural, one {# hallazgo notificado} other {# hallazgos notificados}}"
 
+#. placeholder {0}: review.counts.findings - review.findings.length
+#: src/dashboard/dependency-requests.tsx
+msgid "{0, plural, one {# more finding not shown: only the gravest are kept.} other {# more findings not shown: only the gravest are kept.}}"
+msgstr "{0, plural, one {# hallazgo más no se muestra: solo se conservan los más graves.} other {# hallazgos más no se muestran: solo se conservan los más graves.}}"
+
 #. placeholder {0}: request.counts.packages
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"

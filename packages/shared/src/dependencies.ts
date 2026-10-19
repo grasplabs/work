@@ -286,6 +286,11 @@ const findingSchema = z.strictObject({
 });
 export type DependencyFinding = z.infer<typeof findingSchema>;
 
+/** How grave each severity is: findings are shown, and kept, gravest first. */
+export const findingGravity: Readonly<
+  Record<DependencyFinding["severity"], number>
+> = { critical: 4, high: 3, moderate: 2, low: 1, info: 0 };
+
 /** Something a package needs to run that the platform refuses, such as an install script. */
 const refusedSchema = z.strictObject({
   package: packageRefSchema,
@@ -326,11 +331,24 @@ export const dependencyProposalSchema = z
     /** Where the packages would run. */
     targets: uniqueTargets,
     graph: dependencyGraphSchema,
+    /** The gravest findings, at most `dependencyMaxFindings`. */
     findings: z.array(findingSchema).max(dependencyMaxFindings),
+    /** How many findings there were before the gravest were kept. */
+    findingsTotal: z.int().min(0),
     refused: z.array(refusedSchema).max(dependencyMaxRefused),
   })
   .superRefine(
-    ({ app, workflow, targets, graph, findings, refused }, context) => {
+    (
+      { app, workflow, targets, graph, findings, findingsTotal, refused },
+      context
+    ) => {
+      if (findingsTotal < findings.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["findingsTotal"],
+          message: "At least the findings kept",
+        });
+      }
       if ((app === undefined) === (workflow === undefined)) {
         context.addIssue({
           code: "custom",

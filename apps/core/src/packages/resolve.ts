@@ -2,6 +2,7 @@ import { platformPeers, platformScope } from "@grasp-os/compiler";
 import {
   dependencyErrors,
   dependencyMaxFindings,
+  findingGravity,
   npmRegistryOrigin,
   packageKey,
   subjectOfRef,
@@ -218,15 +219,6 @@ const metadataRefusals = (version: NpmVersion): string[] => [
 const busyTries = 4;
 const firstBusyPauseMs = 500;
 
-/** How grave each severity is, gravest first in what a request keeps. */
-const graveness: Readonly<Record<DependencyFinding["severity"], number>> = {
-  critical: 4,
-  high: 3,
-  moderate: 2,
-  low: 1,
-  info: 0,
-};
-
 /**
  * What `call` asks connect, asked again after a pause while connect says
  * it is reading too much from the registry at once
@@ -263,7 +255,7 @@ const whenFree = async <T>(call: () => Promise<T>): Promise<T> => {
 const findingsOf = async (
   env: Env,
   packages: readonly DependencyPackageRef[]
-): Promise<DependencyFinding[]> => {
+): Promise<{ findings: DependencyFinding[]; total: number }> => {
   // By name in a Map: a package may be named `constructor`.
   const asked = new Map<string, string[]>();
   for (const { name, version } of packages) {
@@ -289,9 +281,15 @@ const findingsOf = async (
         summary: advisory.title,
       }))
   );
-  return [...lookalikeFindings(packages), ...security]
-    .toSorted((a, b) => graveness[b.severity] - graveness[a.severity])
-    .slice(0, dependencyMaxFindings);
+  const all = [...lookalikeFindings(packages), ...security];
+  return {
+    findings: all
+      .toSorted(
+        (a, b) => findingGravity[b.severity] - findingGravity[a.severity]
+      )
+      .slice(0, dependencyMaxFindings),
+    total: all.length,
+  };
 };
 
 /** One resolve's state: the graph so far, and what it read. */
@@ -937,7 +935,7 @@ export const resolveDependencies = async (
   // What the approver is shown about the graph's packages (GRA-699), before
   // the request is stored: a resolution whose advisories can't be read
   // fails, never stored as one without findings.
-  const findings = await findingsOf(env, graph.packages);
+  const { findings, total } = await findingsOf(env, graph.packages);
   // The lock is stored in the batch that stores the request: a request is
   // never without the lock its graph names, nor a lock without a request.
   // Admitted after the slow fetch and checks, right before it is stored.
@@ -952,6 +950,7 @@ export const resolveDependencies = async (
       targets: intent.targets,
       graph,
       findings,
+      findingsTotal: total,
       refused: [],
     },
     { lock, limits }
