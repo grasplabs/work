@@ -1170,38 +1170,60 @@ export const applyCancel = async (
 };
 
 /**
- * How long a screen's cancel stays admitted before the repair applies it:
- * the request that admitted it applies it at once, unless its stop failed.
+ * How long a screen's cancel stays admitted before the repair first applies
+ * it (its `next_at` as written, screen-workflows.ts): the request that
+ * admitted it applies it at once, unless its stop failed.
  */
-const cancelGraceMs = 60_000;
+export const cancelRepairAfterMs = 60_000;
 
 /** Most admitted cancels one repair applies. */
 const cancelsPerRepair = 20;
 
 /**
  * Applies again the screen cancels left admitted (their stop failed, or
- * their request ended first), oldest first, as the App asked them.
+ * their request ended first), those due first, as the App asked them:
+ * each claimed by its count and backing off on its own as its stop keeps
+ * failing, so one the engine always refuses never crowds out newer ones.
+ * Never given up, as an owed termination isn't: its run is left to end.
  */
 const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
-  const admitted = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const due = await db
     .select({
       id: workflowResourceRunControls.id,
       runId: workflowResourceRunControls.runId,
       appId: workflowResourceRunControls.appId,
+      attempts: workflowResourceRunControls.attempts,
     })
     .from(workflowResourceRunControls)
     .where(
       and(
         eq(workflowResourceRunControls.state, "admitted"),
-        lte(
-          workflowResourceRunControls.createdAt,
-          new Date(now.getTime() - cancelGraceMs)
-        )
+        lte(workflowResourceRunControls.nextAt, now)
       )
     )
-    .orderBy(asc(workflowResourceRunControls.createdAt))
+    .orderBy(asc(workflowResourceRunControls.nextAt))
     .limit(cancelsPerRepair);
-  for (const { id, runId, appId } of admitted) {
+  for (const { id, runId, appId, attempts } of due) {
+    const backoff = Math.min(repairAfterMs * 2 ** attempts, maxStartBackoffMs);
+    // oxlint-disable-next-line no-await-in-loop -- one at a time
+    const claimed = await db
+      .update(workflowResourceRunControls)
+      .set({
+        attempts: attempts + 1,
+        nextAt: new Date(now.getTime() + backoff),
+      })
+      .where(
+        and(
+          eq(workflowResourceRunControls.id, id),
+          eq(workflowResourceRunControls.state, "admitted"),
+          eq(workflowResourceRunControls.attempts, attempts)
+        )
+      )
+      .returning({ id: workflowResourceRunControls.id });
+    if (claimed.length === 0) {
+      continue;
+    }
     try {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await applyCancel(

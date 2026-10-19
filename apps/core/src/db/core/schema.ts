@@ -3007,6 +3007,13 @@ export const workflowResourceRunControls = sqliteTable(
     state: text({ enum: ["admitted", "applied", "superseded"] }).notNull(),
     createdAt: timestamp("created_at").notNull(),
     settledAt: timestamp("settled_at"),
+    /**
+     * How often the repair applied it while it stayed admitted, and when it
+     * may next (workflows/resource-runs.ts): each backs off on its own, so
+     * one whose stop keeps failing never crowds out newer ones.
+     */
+    attempts: integer().notNull().default(0),
+    nextAt: timestamp("next_at").notNull(),
   },
   (table) => [
     uniqueIndex("workflow_resource_run_controls_kind_idx").on(
@@ -3016,6 +3023,10 @@ export const workflowResourceRunControls = sqliteTable(
     index("workflow_resource_run_controls_run_idx").on(
       table.runId,
       table.state
+    ),
+    index("workflow_resource_run_controls_due_idx").on(
+      table.state,
+      table.nextAt
     ),
   ]
 );

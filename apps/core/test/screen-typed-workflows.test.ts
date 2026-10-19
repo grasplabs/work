@@ -1213,7 +1213,7 @@ describe(
       }, settles);
       // Admitted a while ago, its request ended before it asked the engine.
       await env.DB.prepare(
-        "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at) VALUES (?, ?, ?, ?, ?, 'cancel', 'admitted', ?)"
+        "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at, next_at) VALUES (?, ?, ?, ?, ?, 'cancel', 'admitted', ?, ?)"
       )
         .bind(
           crypto.randomUUID(),
@@ -1221,7 +1221,8 @@ describe(
           app,
           builder.userId,
           keyOf(),
-          Date.now() - 120_000
+          Date.now() - 120_000,
+          Date.now() - 60_000
         )
         .run();
       await repairResourceTerminations(env, new Date());

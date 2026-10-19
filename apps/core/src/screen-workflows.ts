@@ -41,7 +41,12 @@ import { appHost } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { coreStartKey } from "./workflow-start-intents.ts";
 import { appStartHoldsSql } from "./workflow-starts.ts";
-import { applyCancel, resultOf, runOf } from "./workflows/resource-runs.ts";
+import {
+  applyCancel,
+  cancelRepairAfterMs,
+  resultOf,
+  runOf,
+} from "./workflows/resource-runs.ts";
 import type { RunRow } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 
@@ -697,14 +702,17 @@ const controlled = async (
       return await receiptAnswer(env, row.workflowResourceId, "applied");
     }
     const id = crypto.randomUUID();
+    const now = Date.now();
     try {
       // Written only while the person may still start the workflow
       // through the binding, read in this statement; a twin sent at
       // once, under whatever key, writes nothing.
       await drizzle(env.DB).run(sql`INSERT INTO ${workflowResourceRunControls}
-        (id, run_id, app_id, principal_id, key, kind, state, created_at)
+        (id, run_id, app_id, principal_id, key, kind, state, created_at,
+          next_at)
         SELECT ${id}, ${row.id}, ${asking.app}, ${asking.by.userId},
-          ${command.idempotencyKey}, 'cancel', 'admitted', ${Date.now()}
+          ${command.idempotencyKey}, 'cancel', 'admitted', ${now},
+          ${now + cancelRepairAfterMs}
         WHERE ${mayStartSql(asking, resolved.alias, pin)}`);
     } catch (error) {
       // The twin's receipt, written first: answered below.
