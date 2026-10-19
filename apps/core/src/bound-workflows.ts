@@ -233,15 +233,17 @@ export const boundWorkflowsOf = async (
           });
         }
       }
+      // The exact version all of this was resolved from, for the seal.
+      const pin = { workflowId: workflow, version };
       if (eventBindings.length === 0) {
-        return { alias, events: {}, listens: {}, decisions };
+        return { alias, events: {}, listens: {}, decisions, pinned: pin };
       }
       try {
         const { events, listens } = boundEventsOf(
           eventBindings,
           await recordedListens(env, workflow, version)
         );
-        return { alias, events, listens, decisions };
+        return { alias, events, listens, decisions, pinned: pin };
       } catch (error) {
         // Corrupt data (a contract the catalog refuses, a version whose
         // stored contract no longer hashes): no events rather than no seal.
@@ -250,7 +252,7 @@ export const boundWorkflowsOf = async (
           alias,
           ...errorFields(error),
         });
-        return { alias, events: {}, listens: {}, decisions };
+        return { alias, events: {}, listens: {}, decisions, pinned: pin };
       }
     })
   );

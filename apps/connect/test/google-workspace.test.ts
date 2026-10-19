@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { nativeConnector } from "../src/connectors.ts";
+import { nativeConnector } from "../src/bundled-connectors.ts";
 import { accessTokenFor } from "../src/tokens.ts";
 import { connectAccount, outcome, ownAccount, someone } from "./connect.ts";
 import {

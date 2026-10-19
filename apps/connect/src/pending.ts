@@ -39,9 +39,9 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents, recordEventsIf } from "./audit.ts";
 import type { GuardedChange } from "./audit.ts";
+import { nativeConnector } from "./bundled-connectors.ts";
 import { providerName } from "./catalog.ts";
 import type { Connection } from "./connections.ts";
-import { nativeConnector } from "./connectors.ts";
 import { connections, idempotentCalls, pendingActions } from "./db/schema.ts";
 import type { DecidedCall } from "./decisions.ts";
 
@@ -964,9 +964,13 @@ export const dropForEndedRun = async (
  * while a side effect of it was held leaves the action, with its exact
  * input, until its person comes to confirm it (`dropForEndedRun`), which
  * they may never do. A held action's idempotency key starts with its
- * run's ID (`stepIdempotencyKey`), and its subject is the run's App: one
- * read per App, by the index of its held actions. Each is recorded as
- * `connection.action.dropped` with reason `run.ended`, by core itself.
+ * run's ID (`stepIdempotencyKey`). An App's run's actions are its App's:
+ * one read per App, by the index of its held actions. An independent
+ * workflow's run's are its workflow's, and those of every App its calls
+ * reached, however many hops on (an export calling another App's carries
+ * the run's key on): dropped by the run, whatever their subject, so none
+ * is missed. Each is recorded as `connection.action.dropped` with reason
+ * `run.ended`, by core itself.
  */
 export const dropForEndedRuns = async (
   env: Env,
@@ -976,27 +980,59 @@ export const dropForEndedRuns = async (
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
-  const byApp = new Map<string, string[]>();
-  for (const { appId, runId } of parsed.data.runs) {
-    byApp.set(appId, [...(byApp.get(appId) ?? []), encodeURIComponent(runId)]);
+  const bySubject = new Map<
+    string,
+    { type: "app" | "workflow"; id: string; runs: string[] }
+  >();
+  for (const ended of parsed.data.runs) {
+    const [type, id] =
+      "appId" in ended
+        ? (["app", ended.appId] as const)
+        : (["workflow", ended.workflowId] as const);
+    const subject = bySubject.get(`${type}:${id}`) ?? { type, id, runs: [] };
+    subject.runs.push(encodeURIComponent(ended.runId));
+    bySubject.set(`${type}:${id}`, subject);
   }
-  for (const [appId, runs] of byApp) {
-    // oxlint-disable-next-line no-await-in-loop -- one App at a time, each recorded
+  for (const { type, id: subjectId, runs } of bySubject.values()) {
+    // Each run's keys as a range of the key index: those starting with the
+    // run's encoded ID and `:`, which `encodeURIComponent` never leaves
+    // in an ID (nor `;`, the next character), so `abc` never takes `abcd`.
+    const keyed = JSON.stringify(runs);
+    // An independent run's, by the run alone; an App run's, by its App.
+    const ofSubject =
+      type === "workflow"
+        ? sql`1`
+        : sql`${pendingActions.subjectType} = ${type} AND ${pendingActions.subjectId} = ${subjectId}`;
+    // oxlint-disable-next-line no-await-in-loop -- one subject at a time, each recorded
     await dropPendingActions(
       env,
-      sql`${pendingActions.subjectType} = 'app' AND ${pendingActions.subjectId} = ${appId} AND ${pendingActions.mode} = 'workflow' AND substr(${pendingActions.idempotencyKey}, 1, instr(${pendingActions.idempotencyKey}, ':') - 1) IN ${runs}`,
+      sql`${ofSubject} AND ${pendingActions.mode} = 'workflow' AND ${pendingActions.id} IN (SELECT held.id FROM json_each(${keyed}) AS run
+        JOIN ${pendingActions} AS held
+          ON held.idempotency_key >= run.value || ':'
+            AND held.idempotency_key < run.value || ';')`,
       "run.ended",
       null
     );
     // Its calls of unknown outcome stay obligations of their person (the
     // effect may have happened), but nothing keeps their inputs past the
     // run's retention either: listed on, by what they were, without it.
-    // oxlint-disable-next-line no-await-in-loop -- one App at a time
+    // Only a run's own (`workflow` mode): a key of the same shape from
+    // anywhere else keeps its input.
+    const callsOfSubject =
+      type === "workflow"
+        ? sql`1`
+        : sql`${idempotentCalls.subjectType} = ${type} AND ${idempotentCalls.subjectId} = ${subjectId}`;
+    // oxlint-disable-next-line no-await-in-loop -- one subject at a time
     await drizzle(env.DB)
       .update(idempotentCalls)
       .set({ input: null })
       .where(
-        sql`${idempotentCalls.subjectType} = 'app' AND ${idempotentCalls.subjectId} = ${appId} AND ${idempotentCalls.input} IS NOT NULL AND substr(${idempotentCalls.idempotencyKey}, 1, instr(${idempotentCalls.idempotencyKey}, ':') - 1) IN ${runs}`
+        sql`${callsOfSubject} AND ${idempotentCalls.input} IS NOT NULL
+          AND json_extract(${idempotentCalls.origin}, '$.mode') = 'workflow'
+          AND rowid IN (SELECT called.rowid FROM json_each(${keyed}) AS run
+            JOIN ${idempotentCalls} AS called
+              ON called.idempotency_key >= run.value || ':'
+                AND called.idempotency_key < run.value || ';')`
       );
   }
 };

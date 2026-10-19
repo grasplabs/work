@@ -355,9 +355,7 @@ describe("saving a document", () => {
     }).toStrictEqual({
       frontmatter: {
         code: "knowledge.invalid",
-        issues: [
-          "frontmatter.type: one of doc, skill, memory, decision, file, or a record type an App declares for this collection",
-        ],
+        issues: ["frontmatter.type: one of doc, skill, memory, decision, file"],
       },
       path: {
         code: "knowledge.invalid",
@@ -408,7 +406,7 @@ describe("saving a document", () => {
     await env.KNOWLEDGE.prepare("UPDATE documents SET type = ? WHERE id = ?")
       .bind("Later kind!", later.id)
       .run();
-    // A record type an App declares, whether one does now or not.
+    // A type this release doesn't know, though it could name it.
     await env.KNOWLEDGE.prepare("UPDATE documents SET type = ? WHERE id = ?")
       .bind("task", declared.id)
       .run();

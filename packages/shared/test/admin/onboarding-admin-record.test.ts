@@ -281,7 +281,19 @@ describe("Stephen at an organization", () => {
   it("counts every stop in the part it happened in, and every mistake under its kind", () => {
     const view = at(noordkade);
     const stats = stephenOf(view);
-    const halfway = view.interviews.filter((interview) => !interview.approved);
+    // Someone talking now has stopped nowhere: the sample has some.
+    const talking = new Set(
+      view.people
+        .filter((each) => each.state === "progress")
+        .map((each) => each.person.id)
+    );
+    const unfinished = view.interviews.filter(
+      (interview) => !interview.approved
+    );
+    const halfway = unfinished.filter(
+      (interview) => !talking.has(interview.id)
+    );
+    expect(halfway.length).toBeLessThan(unfinished.length);
     expect(stats.stopped).toBe(halfway.length);
     expect(PHASES.reduce((sum, phase) => sum + stats.stops[phase], 0)).toBe(
       halfway.length
@@ -485,27 +497,65 @@ describe("what the company itself sees", () => {
     ).teams.filter((team) => !team.shown);
     expect(small.map((team) => team.people)).toStrictEqual([4]);
   });
+
+  it("counts who is asked to talk, as core shows the company, and leaves a hidden team out of everyone's numbers", () => {
+    // Compliance is five people: with one of them away, four are asked.
+    const compliance = at(noordkade).teams.find(
+      (team) => team.team.id === "compliance"
+    );
+    const [away] = compliance?.people ?? [];
+    const view = at(noordkade, { away: away ? [away.person.id] : [] });
+    const sees = companySees(view);
+    const hidden = sees.teams.find((team) => team.team.id === "compliance");
+    const shown = sees.teams.filter((team) => team.shown);
+    expect({
+      people: hidden?.people,
+      shown: hidden?.shown,
+      everyone: [sees.people, sees.completed, sees.stopped],
+    }).toStrictEqual({
+      people: 5,
+      shown: false,
+      everyone: [
+        shown.reduce((sum, team) => sum + team.people, 0),
+        shown.reduce((sum, team) => sum + team.completed, 0),
+        shown.reduce((sum, team) => sum + team.stopped, 0),
+      ],
+    });
+    expect(sees.completed).toBeLessThan(view.counts.completed);
+  });
 });
 
 describe("what is kept of the interviews", () => {
   it("counts the agreed ones, the ones that stopped, and what can still be deleted", () => {
     const view = at(noordkade);
-    const kept = keptOf(view);
+    const kept = keptOf(view, dateOn(noordkade, view.day));
     expect(kept.agreed + kept.halfway).toBe(view.interviews.length);
     expect(kept.deleted).toBe(0);
     expect(kept.deletable).toBeLessThanOrEqual(kept.agreed);
     // Months later nobody can ask any more.
-    expect(keptOf(at(hartog)).deletable).toBeLessThan(
-      keptOf(at(hartog)).agreed
+    const late = at(hartog);
+    const onLate = dateOn(hartog, late.day);
+    expect(keptOf(late, onLate).deletable).toBeLessThan(
+      keptOf(late, onLate).agreed
     );
   });
 
   it("loses an interview that was deleted on request", () => {
     const view = at(noordkade);
     const one = view.interviews.find((interview) => interview.approved);
-    const after = keptOf(at(noordkade, { deleted: one ? [one.id] : [] }));
-    expect(after.agreed).toBe(keptOf(view).agreed - 1);
+    const on = dateOn(noordkade, view.day);
+    const after = keptOf(at(noordkade, { deleted: one ? [one.id] : [] }), on);
+    expect(after.agreed).toBe(keptOf(view, on).agreed - 1);
     expect(after.deleted).toBe(1);
+  });
+
+  it("stops letting people ask once their days are up, though the two weeks have closed", () => {
+    const closed = at(noordkade, { day: LISTEN_DAYS });
+    const onClose = keptOf(closed, dateOn(noordkade, LISTEN_DAYS));
+    expect(onClose.deletable).toBeGreaterThan(0);
+    const monthLater = keptOf(closed, dateOn(noordkade, LISTEN_DAYS + 30));
+    expect(monthLater.agreed).toBe(onClose.agreed);
+    expect(monthLater.deletable).toBe(0);
   });
 });
 

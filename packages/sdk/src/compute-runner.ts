@@ -1,17 +1,24 @@
-// Loaded first: it takes the clock and randomness away before anything
-// else in the isolate evaluates.
-import { lockedDown } from "./compute-lockdown.ts";
+// Loaded first, as a side effect before every other import: it takes the
+// clock, randomness and the platform's globals away before anything else
+// in the isolate evaluates. A side-effect import keeps its place.
+import "./compute-lockdown.ts";
+import { actionHandler } from "./action.ts";
+import { lockedDown } from "./compute-locked.ts";
 import { computeHandler } from "./compute.ts";
 
-// What core's compute call runs in the isolate of a workflow's compute
-// modules (workflow-modules.ts): never imported by a workflow's own code
-// (compiler: `computeCode` imports only `@grasp-os/sdk/compute`). Two
-// things only:
+// What core runs in the isolate of a workflow's own modules
+// (workflow-modules.ts): never imported by a workflow's own code
+// (compiler: `computeCode` imports only `@grasp-os/sdk/compute` and
+// `@grasp-os/sdk/action`). Three things only:
 //
-// - `computeManifestOf`: the contracts of the calculations the modules
-//   export, read once as a version is published, so the host seals them;
+// - `computeManifestOf`: the contracts of the calculations and actions the
+//   modules export, read once as a version is published, so the host
+//   seals them;
 // - `runCompute`: one calculation run on one value, as a run's
-//   `grasp.compute` task asks for it.
+//   `grasp.compute` task asks for it;
+// - `runAction`: one action run on its arguments, as a run's
+//   `grasp.operation` task of a local binding asks for it, its resources
+//   calls of the one host capability core passes in.
 //
 // Everything in the isolate is untrusted, this module too: the host checks
 // what either answers, against its own bounds and the sealed contract.
@@ -30,7 +37,7 @@ const { stringify } = JSON;
  * `String.prototype.slice` or an `instanceof` hook changes nothing here,
  * so a thenable answer is refused however it is dressed up.
  */
-const { entries, getOwnPropertyDescriptor, hasOwn, keys } = Object;
+const { entries, freeze, getOwnPropertyDescriptor, hasOwn, keys } = Object;
 const { apply, get: reflectGet } = Reflect;
 const regexpExec: unknown = getOwnPropertyDescriptor(
   RegExp.prototype,
@@ -95,17 +102,25 @@ export const computeManifestOf = (modules: ComputeModules): string => {
     }
     for (const name of keys(namespace)) {
       const value = exportOf(namespace, name);
-      if (
-        !matches(exportPattern, name) ||
-        computeHandler(value) === undefined
-      ) {
+      if (!matches(exportPattern, name)) {
         continue;
       }
-      const contract = exportOf(value, "~compute");
-      manifest[`local:${path}#${name}`] = {
-        input: exportOf(contract, "input"),
-        output: exportOf(contract, "output"),
-      };
+      if (computeHandler(value) !== undefined) {
+        const contract = exportOf(value, "~compute");
+        manifest[`local:${path}#${name}`] = {
+          kind: "compute",
+          input: exportOf(contract, "input"),
+          output: exportOf(contract, "output"),
+        };
+      } else if (actionHandler(value) !== undefined) {
+        const contract = exportOf(value, "~action");
+        manifest[`local:${path}#${name}`] = {
+          kind: "operation",
+          input: exportOf(contract, "input"),
+          output: exportOf(contract, "output"),
+          uses: exportOf(contract, "uses"),
+        };
+      }
     }
   }
   return stringify(manifest);
@@ -175,5 +190,171 @@ export const runCompute = (
         failureMaxLength
       ),
     };
+  }
+};
+
+/** The host's one capability in an action's isolate: a resource call. */
+export interface ActionHost {
+  readonly call: (alias: string, request: unknown) => Promise<unknown>;
+}
+
+/** One action to run: its module and export, and its arguments. */
+export interface ActionRequest {
+  readonly module: string;
+  readonly export: string;
+  readonly input: unknown;
+}
+
+/** Why `error`, which an action threw, failed: its own message, as data. */
+const failureOf = (error: unknown, fallback: string): string => {
+  const message: unknown =
+    (typeof error === "object" && error !== null) || typeof error === "function"
+      ? getOwnPropertyDescriptor(error, "message")?.value
+      : undefined;
+  return cut(
+    typeof message === "string" ? message : fallback,
+    failureMaxLength
+  );
+};
+
+/**
+ * What one declared use gives an action, each call one of `callHost`'s:
+ * the host checks each against the sealed contract again, so this is a
+ * convenience, never the boundary.
+ */
+const resourceOf = (
+  kind: unknown,
+  alias: string,
+  callHost: (alias: string, call: unknown) => Promise<unknown>
+): object => {
+  if (kind === "connector") {
+    return {
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      call: (operation: unknown, args: unknown) =>
+        callHost(alias, { operation, arguments: args }),
+    };
+  }
+  if (kind === "knowledge") {
+    // Both methods; the host refuses one the use didn't declare.
+    return {
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      search: (request: unknown) =>
+        callHost(alias, {
+          operation: "search",
+          arguments: {
+            text: exportOf(request, "text"),
+            ...(exportOf(request, "limit") === undefined
+              ? {}
+              : { limit: exportOf(request, "limit") }),
+          },
+        }),
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      read: (request: unknown) =>
+        callHost(alias, {
+          operation: "read",
+          arguments: { id: exportOf(request, "id") },
+        }),
+    };
+  }
+  if (kind === "template") {
+    return {
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      read: () => callHost(alias, {}),
+    };
+  }
+  if (kind === "model") {
+    return {
+      // Its two fields read once each, as data: what reaches the host is
+      // plain values, never the object the action made.
+      // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+      generate: (request: unknown) =>
+        callHost(alias, {
+          instructions: exportOf(request, "instructions"),
+          input: exportOf(request, "input"),
+        }),
+    };
+  }
+  return {
+    // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
+    call: (args: unknown) => callHost(alias, { arguments: args }),
+  };
+};
+
+/**
+ * Runs the action `request` names on its arguments, its resources each a
+ * call of `host`'s: the handler's answer as JSON text, or why it failed.
+ * `ctx.resources` holds the aliases the action declared, and nothing
+ * else; the host checks each call against the sealed contract again, so
+ * what this builds is a convenience, never the boundary.
+ */
+export const runAction = async (
+  modules: ComputeModules,
+  request: ActionRequest,
+  host: ActionHost
+): Promise<ComputeAnswer> => {
+  requireLockedDown();
+  const value = hasOwn(modules, request.module)
+    ? exportOf(modules[request.module], request.export)
+    : undefined;
+  const handler = actionHandler(value);
+  const uses: unknown = exportOf(exportOf(value, "~action"), "uses");
+  const hostCall: unknown = reflectGet(host, "call");
+  if (
+    handler === undefined ||
+    !Array.isArray(uses) ||
+    typeof hostCall !== "function"
+  ) {
+    return { ok: false, message: "There is no such action." };
+  }
+  // Every call made, so the action answers only once each has settled:
+  // one it didn't wait for still reaches the host within its step.
+  const made: Promise<unknown>[] = [];
+  // The very promise the action gets: what it chains on it is a reaction
+  // registered before the runner's own wait, so a call it starts there is
+  // made before the runner looks again.
+  // oxlint-disable-next-line typescript/promise-function-async -- the very promise, not a new one
+  const callHost = (alias: string, call: unknown): Promise<unknown> => {
+    const calling: Promise<unknown> = (async () => {
+      const answer: unknown = await apply(hostCall, host, [alias, call]);
+      return answer;
+    })();
+    made.push(calling);
+    return calling;
+  };
+  // Until none is left: a call started while waiting is waited for too.
+  // By index, awaiting each: no array method or iterator module code could
+  // have replaced.
+  const settled = async (): Promise<void> => {
+    // oxlint-disable-next-line typescript/prefer-for-of -- by index: no iterator module code could replace
+    for (let index = 0; index < made.length; index += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, as made
+        await made[index];
+      } catch {
+        // Its refusal is the host's to keep.
+      }
+    }
+  };
+  const resources: Record<string, unknown> = {};
+  for (const use of uses) {
+    const alias: unknown = exportOf(use, "alias");
+    const kind: unknown = exportOf(use, "kind");
+    if (typeof alias !== "string") {
+      continue;
+    }
+    resources[alias] = freeze(resourceOf(kind, alias, callHost));
+  }
+  const ctx = freeze({ resources: freeze(resources) });
+  try {
+    const output: unknown = await handler(ctx, request.input);
+    await settled();
+    // Serialized here, so a `toJSON` on the answer runs locked down too.
+    const text = stringify(output);
+    return text === undefined
+      ? { ok: false, message: "The action answered no JSON value." }
+      : { ok: true, output: text };
+  } catch (error) {
+    await settled();
+    return { ok: false, message: failureOf(error, "The action threw") };
   }
 };

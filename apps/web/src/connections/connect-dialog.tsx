@@ -52,14 +52,15 @@ export const goTo = (started: { url: string } | undefined): void => {
 
 /**
  * Whether this person can start connecting `integration`: never Grasp
- * staff, never an entry that isn't offered (core refuses admins too); a
- * native provider for anyone, a Composio toolkit for admins.
+ * staff, never an entry that isn't offered (core refuses admins too), never
+ * one that needs the organization's own sign-in app (connect refuses it);
+ * a native provider for anyone, a Composio toolkit for admins.
  */
 export const canConnect = (
   integration: Integration,
   identity: Identity
 ): boolean => {
-  if (identity.staff || !integration.offered) {
+  if (identity.staff || !integration.offered || integration.auth === "own") {
     return false;
   }
   if (integration.source === "native") {

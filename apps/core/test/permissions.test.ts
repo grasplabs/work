@@ -14,6 +14,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { createStore } from "../src/data-stores.ts";
 import {
   authorize,
   grantPermission,
@@ -524,6 +525,52 @@ describe("permissions", () => {
       )
     );
     expect(refused).toStrictEqual(requests.map(() => "permission.invalid"));
+  });
+
+  // An App, a workflow and a store only read a collection (their stubs
+  // have no write): `write` would be granted and give them nothing.
+  it("let only an agent write a collection", async () => {
+    const admin = await permissionApi("admin");
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Notes ${unique()}`,
+      access: "everyone",
+    });
+    const flow = await admin.api.workflowResources.create(`notes-${unique()}`);
+    const store = await createStore(env, await admin.api.whoami());
+    const subjects: Record<string, PermissionSubjectInput> = {
+      app: await newApp(admin.api),
+      workflow: { type: "workflow", workflowId: flow.id },
+      store: { type: "store", storeId: store },
+      agent: { type: "agent", agentId: `agent-${crypto.randomUUID()}` },
+    };
+    const ask = async (
+      subject: PermissionSubjectInput,
+      actions: string[]
+    ): Promise<string> =>
+      await outcome(
+        admin.api.permissions.request({
+          subject,
+          object: { type: "collection", collectionId },
+          actions,
+          binding: actions.includes("write") ? "NOTES_WRITE" : "NOTES",
+        })
+      );
+    const asked: Record<string, { write: string; read: string }> = {};
+    for (const [name, subject] of Object.entries(subjects)) {
+      asked[name] = {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time
+        write: await ask(subject, ["read", "write"]),
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        read: await ask(subject, ["read"]),
+      };
+    }
+
+    expect(asked).toStrictEqual({
+      app: { write: "permission.invalid", read: "ok" },
+      workflow: { write: "permission.invalid", read: "ok" },
+      store: { write: "permission.invalid", read: "ok" },
+      agent: { write: "ok", read: "ok" },
+    });
   });
 
   it("are refused for an App that isn't in the registry", async () => {

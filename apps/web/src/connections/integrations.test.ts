@@ -38,6 +38,7 @@ const entry = (
   logo: null,
   description,
   group,
+  auth: "managed",
   offered: true,
 });
 

@@ -82,6 +82,11 @@ export const marks = query({
 
 export const stats = resource.statistics("stats", { operations: ${operations} });
 
+// What the declaration may leave out, called past its types on purpose:
+// the call is what refuses it.
+const loose = (client: object) =>
+  client as unknown as Record<string, (...input: unknown[]) => Promise<unknown>>;
+
 export const platform = resource.statistics("platform", {
   operations: ["read"],
   platform: ["platform.workflow_runs", "platform.improvement_signals"],
@@ -115,7 +120,7 @@ export const record = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       for (const point of JSON.parse(args.json)) {
-        await ctx.resources.stats.record(point);
+        await loose(ctx.resources.stats).record(point);
       }
     }),
 });
@@ -124,7 +129,7 @@ export const read = action({
   args: json,
   returns: v.string(),
   uses: [stats],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.stats.read(JSON.parse(args.json))),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.stats).read(JSON.parse(args.json))),
 });
 
 export const readMany = action({
@@ -134,7 +139,7 @@ export const readMany = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       for (let read = 0; read < args.count; read += 1) {
-        await ctx.resources.stats.read(JSON.parse(args.json));
+        await loose(ctx.resources.stats).read(JSON.parse(args.json));
       }
     }),
 });
@@ -154,7 +159,7 @@ export const readBurst = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       await Promise.all(
-        Array.from({ length: args.count }, async () => await ctx.resources.stats.read(JSON.parse(args.json)))
+        Array.from({ length: args.count }, async () => await loose(ctx.resources.stats).read(JSON.parse(args.json)))
       );
     }),
 });
@@ -1537,7 +1542,7 @@ const countingWorkflow = (
   measure: string,
   { afterwards = "", options = "retries: { limit: 0 }" } = {}
 ): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { workflow, z } from "@grasp-os/sdk/workflow";
+  [`workflows/${id}.ts`]: `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) => {
   const during = await step.do("count", { description: "Count", sideEffect: true, input: null, ${options} }, async () => {
@@ -1546,10 +1551,10 @@ export default workflow("${id}", { params: {}, input: z.unknown() }, async (step
     await env.APP.callFunction(${statsFunction("record")}, ${statsInput([{ measure, value: 1 }])});
     const read = await env.APP.callFunction(${statsFunction("read")}, ${statsInput({ measure, days: 2 })});
     ${afterwards}
-    return read;
+    return read as Json;
   });
   const after = await step.do("after", { description: "Read", input: null, retries: { limit: 0 } }, async () =>
-    await env.APP.callFunction(${statsFunction("read")}, ${statsInput({ measure, days: 2 })})
+    (await env.APP.callFunction(${statsFunction("read")}, ${statsInput({ measure, days: 2 })})) as Json
   );
   return { during, after };
 });
@@ -1601,11 +1606,11 @@ describe("a run's statistics", { timeout: 90_000 }, () => {
     };
     const reader = await statsApp(builder, {
       ...statsFiles(),
-      "workflows/reads.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/reads.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("reads", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("read", { description: "Read", input: null, retries: { limit: 0 } }, async () =>
-    await env.APP.callFunction(${statsFunction("platformRead")}, ${statsInput(query)})
+    (await env.APP.callFunction(${statsFunction("platformRead")}, ${statsInput(query)})) as Json
   )
 );
 `,
@@ -1672,7 +1677,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { read: null },
       ...countingWorkflow("counts", "counted"),
       // Its first attempt fails after its point; the second completes.
       ...countingWorkflow("retried", "retried", {
-        afterwards: `if (seen.ok && seen.value === 0) { throw new Error("Once more"); }`,
+        afterwards: `const marked = seen as { ok: boolean; value?: unknown }; if (marked.ok && marked.value === 0) { throw new Error("Once more"); }`,
         options: `retries: { limit: 1, delay: "1 second" }`,
       }),
       // Every attempt runs out of time after its point.
