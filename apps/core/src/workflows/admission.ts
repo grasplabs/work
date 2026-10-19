@@ -453,6 +453,23 @@ const servedInOrder = (
 };
 
 /**
+ * Whether any place still asks at `now`: one read of the queue's order
+ * index, so a share given back with no one waiting costs no more
+ * (share-wakes.ts).
+ */
+export const anyQueued = async (
+  db: DrizzleD1Database,
+  now: number
+): Promise<boolean> => {
+  const [row] = await db
+    .select({ one: sql<number>`1` })
+    .from(workflowAdmissionQueue)
+    .where(gt(workflowAdmissionQueue.seenAt, new Date(now - queueLiveMs)))
+    .limit(1);
+  return row !== undefined;
+};
+
+/**
  * The places still asking at `now` that serving the queue in order would
  * admit now (`servedInOrder`), as their step would ask: the first in line
  * for each share that has room, and no others. At most as many as the

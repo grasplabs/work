@@ -1,7 +1,7 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 import { drizzle } from "drizzle-orm/d1";
 
-import { queueFronts, sharesOf } from "./admission.ts";
+import { anyQueued, queueFronts, sharesOf } from "./admission.ts";
 import { runEngine } from "./engine.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission } from "./quotas.ts";
@@ -34,7 +34,8 @@ import type { AttemptAdmission } from "./quotas.ts";
 //   fails for it.
 // - A wake storm overloading core's database or the engine: one read of
 //   the queue per share given back (by its indexes, as an admission reads
-//   it), and as many wakes as the client's share at most.
+//   it), and as many wakes as the client's share at most. With no one
+//   queued, as most settles find it, one indexed read and nothing else.
 
 /** The prefix of the event type that wakes a step waiting for a share. */
 const shareWakePrefix = "grasp-share-";
@@ -48,16 +49,18 @@ export const shareWakeType = (stepHash: string): string =>
 
 /**
  * Wakes the steps a share given back may leave waiting for nothing but
- * their next ask (`queueFronts`). Never throws: a wake not sent leaves
- * its step to ask at the end of its round.
+ * their next ask (`queueFronts`). With no one queued, it reads the queue
+ * once, by its index, and nothing more: no policy, no order. Never
+ * throws: a wake not sent leaves its step to ask at the end of its round.
  */
 export const wakeQueueFronts = async (env: Env): Promise<void> => {
   try {
-    const fronts = await queueFronts(
-      drizzle(env.DB),
-      Date.now(),
-      sharesOf(await quotaPolicy(env))
-    );
+    const db = drizzle(env.DB);
+    const now = Date.now();
+    if (!(await anyQueued(db, now))) {
+      return;
+    }
+    const fronts = await queueFronts(db, now, sharesOf(await quotaPolicy(env)));
     const engine = runEngine(env);
     await Promise.all(
       fronts.map(async ({ runId, stepHash, deadline }) => {

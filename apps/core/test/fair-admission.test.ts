@@ -20,7 +20,7 @@ import type {
   AttemptOwner,
 } from "../src/workflows/quotas.ts";
 import { projectStatus, runActor, startRun } from "../src/workflows/runs.ts";
-import { shareWakeType } from "../src/workflows/share-wakes.ts";
+import { shareWakeType, wakingOnSettle } from "../src/workflows/share-wakes.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -312,6 +312,32 @@ const holdingOf = async (run: string): Promise<number> =>
   )
     .bind(run)
     .first<number>("held")) ?? 0;
+
+/**
+ * Core's environment, its database counting the statements that read the
+ * quota policy (`policyReads`), as a settle would make them.
+ */
+const countingPolicyReads = (): { env: Env; policyReads: () => number } => {
+  const database = env.DB;
+  let reads = 0;
+  const counted = new Proxy(database, {
+    get: (target, property) => {
+      if (property === "prepare") {
+        return (query: string) => {
+          if (query.includes("quota_policies")) {
+            reads += 1;
+          }
+          return target.prepare(query);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { env: { ...env, DB: counted }, policyReads: () => reads };
+};
 
 /** How `run` failed, as its `workflow.run.failed` event names it; none yet. */
 const failedWith = async (run: string): Promise<unknown> => {
@@ -1244,6 +1270,38 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       status: "complete",
       prompt: true,
       rounds: 2,
+    });
+  });
+
+  it("read no quota policy to settle an attempt while no one waits for a share, and read it once someone does", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const owner = await ownerOf(builder);
+    const waiter = await anotherRun(builder, owner);
+
+    const result = await withShares({ workflowClientAttempts: 2 }, async () => {
+      const settledWith = async (step: string): Promise<number> => {
+        const counting = countingPolicyReads();
+        const admission = await admitAttempt(env, owner, attemptOf(step));
+        await wakingOnSettle(counting.env, admission).settle();
+        return counting.policyReads();
+      };
+      const emptyQueue = await settledWith("alone");
+      // Its App's share is one: another run's step queues behind it.
+      const holding = await admitAttempt(env, owner, attemptOf("holding"));
+      const queued = shown(await admit(waiter, "waiting"));
+      const counting = countingPolicyReads();
+      await wakingOnSettle(counting.env, holding).settle();
+      return {
+        emptyQueue,
+        queued,
+        someoneWaiting: counting.policyReads() > 0,
+      };
+    });
+
+    expect(result).toStrictEqual({
+      emptyQueue: 0,
+      queued: "workflow.queued:app",
+      someoneWaiting: true,
     });
   });
 
