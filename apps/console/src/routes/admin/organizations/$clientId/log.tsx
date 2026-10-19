@@ -1,8 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { SectionToCome } from "../../../../admin/organization.tsx";
+import { OrgLog } from "../../../../admin/org-log.tsx";
+import { useOrganization } from "../../../../admin/organization.tsx";
+import { fetchOrganizationTrail } from "../../../../admin/trail.ts";
 
-/** An organization's Log: its title and where it comes from, until its content is ported. */
+const Log = () => (
+  <OrgLog trail={Route.useLoaderData()} view={useOrganization().view} />
+);
+
+/**
+ * An organization's Log (src/admin/org-log.tsx): what happened at the
+ * company, as its core answered, and what Grasp did to it in this console,
+ * as the console's audit log recorded it (`fetchOrganizationTrail`).
+ */
 export const Route = createFileRoute("/admin/organizations/$clientId/log")({
-  component: SectionToCome,
+  loader: async ({ params }) =>
+    await fetchOrganizationTrail({ data: { clientId: params.clientId } }),
+  component: Log,
 });

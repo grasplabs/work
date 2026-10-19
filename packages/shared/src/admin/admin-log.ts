@@ -37,7 +37,7 @@ export type LogSource =
 
 export interface LogItem {
   key: string;
-  /** The day it happened, as the reader's own calendar has it. */
+  /** The day it happened, in UTC (`utcDay`). */
   on: string;
   /** The moment, where that is known; what is only known by its day has none. */
   at: number | null;
@@ -52,13 +52,14 @@ export interface LogItem {
   source: LogSource;
 }
 
-const two = (value: number) => String(value).padStart(2, "0");
-
-/** The day a moment falls on, on the reader's own calendar. */
-export const localDay = (at: number): string => {
-  const date = new Date(at);
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
-};
+/**
+ * The day a moment falls on, in UTC as its hours and the console's times
+ * are: on the reader's own calendar, an entry near midnight would sit under
+ * a day its time doesn't belong to, and the server and the browser would
+ * put it under different days.
+ */
+export const utcDay = (at: number): string =>
+  new Date(at).toISOString().slice(0, 10);
 
 const HAND_TOPIC: Record<TrailEntry["what"], LogTopic> = {
   made: "setup",
@@ -231,7 +232,7 @@ const fromWorker = (event: OrgEvent, index: number): LogItem | null => {
   }
   return byWorker(event, about, {
     key: `worker-${index}`,
-    on: localDay(at),
+    on: utcDay(at),
     at,
     topic,
     problem: false,
@@ -241,7 +242,7 @@ const fromWorker = (event: OrgEvent, index: number): LogItem | null => {
 
 const fromHand = (entry: TrailEntry, index: number): LogItem => ({
   key: `hand-${index}`,
-  on: localDay(entry.at),
+  on: utcDay(entry.at),
   at: entry.at,
   topic: HAND_TOPIC[entry.what],
   actor: "grasp",
@@ -342,13 +343,17 @@ export const logDays = (
   });
 };
 
-/** How many entries each hour of one day has, by who did it: for a log that is one day long. What has no time is left out. */
+/**
+ * How many entries each hour of one day has, by who did it: for a log that is one day long. What
+ * has no time is left out. Hours are UTC's, as the console shows times, so a page drawn on the
+ * server and again in the reader's browser counts each entry in the same hour.
+ */
 export const logHours = (
   items: LogItem[]
 ): ({ hour: number } & Record<LogActor, number>)[] =>
   Array.from({ length: 24 }, (_, hour) => {
     const of = items.filter(
-      (item) => item.at !== null && new Date(item.at).getHours() === hour
+      (item) => item.at !== null && new Date(item.at).getUTCHours() === hour
     );
     return {
       hour,
