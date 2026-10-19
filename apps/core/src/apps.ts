@@ -1188,12 +1188,17 @@ export const setCurrentVersion = async (
     //
     // A failed sample of its migrations is looked for once more first:
     // the switch is where it is decided, since a store switched over
-    // supersedes the schema the version still current writes under. One
-    // that fails as or after the store switches comes too late, as one
-    // after the version was made current would: refusing the version
-    // then would only lock the current one out of its store. Where
-    // nothing switched now (no ready migration, or a store a lost batch
-    // switched before), the change itself still refuses one (`sampleGate`).
+    // supersedes the schema the version still current writes under, and
+    // refusing the version after it would only lock that one out of its
+    // store. Nothing a sample could fail on is left by then: the store
+    // switches only from ready, with no record left to transform (work
+    // queued again refuses it as `migration.pending`), and a sample of a
+    // ready store reads nothing, so it is `empty` and clears. A failure
+    // landing after this look read its records before the store was
+    // ready, and the backfill has since transformed and validated every
+    // one. Where nothing switched now (no ready migration, or a store a
+    // lost batch switched before), the change still refuses one
+    // (`sampleGate`).
     const { requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
@@ -1300,11 +1305,14 @@ export const setCurrentVersion = async (
     }
     if (sealedLayout) {
       // Revoked or deleted since it was checked, or a sample of its
-      // migrations failed since: refused as such.
+      // migrations failed since, where the change still checked that (its
+      // store didn't switch): refused as such.
       await requireRunnableRelease(env, appId, number);
-      const { requireMigrationEvidence } =
-        await import("./migration-evidence.ts");
-      await requireMigrationEvidence(env, appId, number);
+      if (sampleGate !== undefined) {
+        const { requireMigrationEvidence } =
+          await import("./migration-evidence.ts");
+        await requireMigrationEvidence(env, appId, number);
+      }
     }
     throw appErrors.create("app.conflict");
   }

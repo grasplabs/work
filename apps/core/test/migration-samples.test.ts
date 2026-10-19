@@ -13,6 +13,7 @@ import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { deriving, migrated, notesOf, refusalOf } from "./migrated-apps.ts";
+import { commit } from "./pending-stores.ts";
 import { person } from "./sealed-apps.ts";
 import { newRecordId } from "./store-schemas.ts";
 
@@ -719,6 +720,41 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       afterEmpty: "ok",
       current: 3,
       store: "active",
+    });
+  });
+
+  it("switches only a store with nothing left to sample", async () => {
+    const { fixture, store, asked } = await readyMigration();
+    const admin = await person("admin");
+    const ready = await sampleMigration(env, admin, asked);
+    // The version still current writes a note the migration has to
+    // transform: work again, so the store isn't ready to switch, and a
+    // sample has something to read.
+    await commit(
+      store,
+      fixture.firstSchema,
+      [
+        {
+          op: "insert",
+          table: "notes",
+          id: newRecordId(),
+          fields: { title: "Note late" },
+        },
+      ],
+      fixture.owner.userId
+    );
+    const switching = await refusalOf(async () => {
+      await requireStoreSchemaActive(env, fixture.app, 3, { activate: true });
+    });
+    const queued = await sampleMigration(env, admin, asked);
+    expect({
+      ready: [ready.outcome, ready.rows],
+      switching: switching.code,
+      queued: [queued.outcome, queued.rows],
+    }).toStrictEqual({
+      ready: ["empty", 0],
+      switching: "migration.pending",
+      queued: ["passed", 1],
     });
   });
 
