@@ -1037,6 +1037,42 @@ describe("role ceilings", () => {
     ).resolves.toBe("workflow.resource_unavailable");
   });
 
+  it("names a bound workflow no more once it is deleted, even to who built it", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    await shareWorkflowResource(env, ada, child.id, {
+      type: "person",
+      id: bob.userId,
+      role: "builder",
+    });
+    const parent = await workflowOf(bob, "parent");
+    const first = await publish(
+      bob,
+      parent.id,
+      bindingDefinition(parent.name, child.name)
+    );
+    // The parent binds it no more, so Ada may delete the child.
+    await publish(
+      bob,
+      parent.id,
+      definitionOf({ name: parent.name, version: "2.0.0" }),
+      first.version
+    );
+    const before = await workflowVersions(env, bob, parent.id);
+    await deleteWorkflowResource(env, ada, child.id);
+    const after = await workflowVersions(env, bob, parent.id);
+    const boundIn = (versions: typeof after) =>
+      versions.find(({ version }) => version === first.version)?.bindings[0]
+        ?.resourceId;
+
+    expect({ before: boundIn(before), after: boundIn(after) }).toStrictEqual({
+      before: child.id,
+      after: null,
+    });
+  });
+
   it("names a bound workflow only to its builders", async () => {
     const ada = await person("builder");
     const bob = await person("builder");

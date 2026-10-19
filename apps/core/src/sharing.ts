@@ -76,7 +76,7 @@ export const ceilingOf = (by: Pick<Identity, "role">): SharedRole =>
  */
 export const roleFromMembers = (
   by: Pick<Identity, "role">,
-  roles: readonly string[]
+  roles: readonly SharedRole[]
 ): SharedRole | undefined => {
   if (roles.length === 0) {
     return undefined;

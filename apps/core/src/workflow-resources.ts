@@ -2880,13 +2880,10 @@ const refuseDeletion = async (
   if (!blocked) {
     throw workflowResourceErrors.create("workflow.resource_busy");
   }
-  const visible: WorkflowBinders["binders"] = [];
-  for (const binder of binders) {
-    // oxlint-disable-next-line no-await-in-loop -- one role per binder, as `get` reads it
-    if ((await roleIn(env, by, binder)) !== undefined) {
-      visible.push({ id: binder.id, name: binder.name });
-    }
-  }
+  const roles = await rolesIn(env, by, binders);
+  const visible: WorkflowBinders["binders"] = binders.flatMap((binder) =>
+    roles.has(binder.id) ? [{ id: binder.id, name: binder.name }] : []
+  );
   throw workflowResourceErrors.create("workflow.resource_bound", {
     binders: visible,
     hidden: binders.length - visible.length,
