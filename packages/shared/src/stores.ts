@@ -713,8 +713,8 @@ export type SampleMigration = z.input<typeof sampleMigrationSchema>;
 /**
  * What a migration's dry run found: `passed` when its transform answered
  * every sampled record with what the target table takes, `failed` when it
- * didn't, `empty` when no record was left under its `fromSchema` to
- * sample. `failure` names the record and the transform's issues: for the
+ * didn't, `empty` when it had no record left to transform (done, or
+ * not started). `failure` names the record and the transform's issues: for the
  * admin who asked alone, kept nowhere (the receipt keeps the reason).
  */
 export interface MigrationSample {

@@ -2447,7 +2447,7 @@ export const guestMessages = sqliteTable(
  * (migration-samples.ts): its receipt, kept with the version's migration
  * evidence, which the release's sealed manifest holds for its fixtures.
  * Counts and codes only: no record's values, fields or IDs. `outcome` is
- * `passed`, `failed` or `empty` (no record left under `from_schema`);
+ * `passed`, `failed` or `empty` (no record left for it to transform);
  * `reason` the failure's code. The release it ran (`manifest_hash`) and the
  * schemas it ran between name what the sample vouches for. The latest
  * receipt of a migration decides; earlier ones stay as history.

@@ -905,8 +905,11 @@ const releaseCandidatesSchema = z
 /** What a migration's dry run asks the store to sample (`sampleMigration`). */
 const migrationSampleSchema = z.strictObject({
   table: tableNameSchema,
-  owned: z.boolean(),
-  fromSchema: z.string().regex(/^[0-9a-f]{64}$/u),
+  migration: z.string().min(1).max(128),
+  consumer: z.strictObject({
+    resourceId: z.string().min(1),
+    resourceVersion: z.number().int().min(1),
+  }),
   limit: z.number().int().min(1).max(transformBatchMaxRows),
 });
 
@@ -3646,29 +3649,70 @@ export class StoreHost {
    * the run's lease.
    */
   /**
-   * A sample of `table`'s records still under `fromSchema`, at most
-   * `limit` of them, for an explicit migration's dry run
-   * (migration-samples.ts, `sampleRows`): read in a transaction that
-   * writes nothing, so neither a record nor the backfill moves. Empty for
-   * a table the store doesn't hold.
+   * A sample of the records `migration` of `consumer`'s release still has
+   * to transform in `table`, at most `limit`, for its dry run
+   * (migration-samples.ts, `sampleRows`): from where its pending target's
+   * backfill stands, read in a transaction that writes nothing, so
+   * neither a record nor the backfill moves. Empty when no pending target
+   * of that release migrates the table with it (its migration done, or
+   * never started).
    */
   sampleMigration(
     storeId: StoreId,
-    sample: { table: string; owned: boolean; fromSchema: string; limit: number }
+    sample: {
+      table: string;
+      migration: string;
+      consumer: { resourceId: string; resourceVersion: number };
+      limit: number;
+    }
   ): MigrationRow[] {
-    const { table, owned, fromSchema, limit } = dataErrors.parse(
+    const { table, migration, consumer, limit } = dataErrors.parse(
       "data.invalid",
       migrationSampleSchema,
       sample
     );
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
-      const tableId = this.#tableRows().find(
-        ({ name }) => name === table
-      )?.tableId;
-      return tableId === undefined
-        ? []
-        : sampleRows(this.#db, { tableId, owned }, fromSchema, limit);
+      const pending = this.#pendingTarget();
+      const [resourceId, resourceVersion] = pending?.migrations?.consumer ?? [];
+      if (
+        pending === null ||
+        resourceId !== consumer.resourceId ||
+        resourceVersion !== consumer.resourceVersion
+      ) {
+        return [];
+      }
+      const migrated = this.#migratedTables(pending).find(
+        (found) => found.table === table && found.migration === migration
+      );
+      const row = this.#db
+        .select()
+        .from(backfills)
+        .where(eq(backfills.targetHash, pending.hash))
+        .get();
+      if (migrated === undefined || row === undefined) {
+        return [];
+      }
+      const cursor =
+        row.phase !== "scan" ||
+        row.cursorTable === null ||
+        row.cursorRecord === null ||
+        row.cursorOwner === null ||
+        row.cursorCreatedAt === null
+          ? null
+          : {
+              tableId: row.cursorTable,
+              ownerId: row.cursorOwner,
+              createdAt: row.cursorCreatedAt,
+              recordId: row.cursorRecord,
+            };
+      return sampleRows(
+        this.#db,
+        migrated,
+        pending.hash,
+        row.phase === "scan" ? { cursor } : null,
+        limit
+      );
     });
   }
 

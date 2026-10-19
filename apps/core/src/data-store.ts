@@ -131,7 +131,12 @@ export class DataStore extends DurableObject<Env> {
    */
   sampleMigration(
     storeId: StoreId,
-    sample: { table: string; owned: boolean; fromSchema: string; limit: number }
+    sample: {
+      table: string;
+      migration: string;
+      consumer: { resourceId: string; resourceVersion: number };
+      limit: number;
+    }
   ): string {
     return JSON.stringify(this.#live().sampleMigration(storeId, sample));
   }

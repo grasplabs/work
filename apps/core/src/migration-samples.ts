@@ -45,9 +45,11 @@ import { requireNotStaff } from "./sharing.ts";
 //   env and no network, as a backfill's batch does (`transformBatch`).
 // - The sample grows without bound: at most `migrationSampleMaxRows`
 //   records within a transform's bytes, in one sandbox call.
-// - A sample of the wrong records vouches for a release: only records
-//   still under the migration's `fromSchema`, from the store that version
-//   binds; the receipt names the release's manifest hash and both
+// - A sample of the wrong records vouches for a release: only records the
+//   release's pending migration still has to transform, from where its
+//   backfill stands in the store that version binds (a transformed record
+//   keeps its writer's schema hash, so the hash can't tell); none once it
+//   is done. The receipt names the release's manifest hash and both
 //   schemas. A sandbox that didn't answer records nothing, never a pass.
 //
 // The transform gets each sampled record's stored fields, as a real batch
@@ -79,8 +81,8 @@ const issueLength = 500;
 /**
  * Dry-runs `input`'s migration on a sample of the real records it would
  * transform, for `by`, an admin and not Grasp staff: its transform, in
- * the sandbox, on at most `input.rows` records of its table still under
- * its `fromSchema`, in the store its version binds. Keeps a receipt with
+ * the sandbox, on at most `input.rows` records of its table it still has
+ * to transform, in the store its version binds. Keeps a receipt with
  * the version's migration evidence and audits it, both without values;
  * answers the admin with the failing record and its issues as well.
  */
@@ -117,8 +119,8 @@ export const sampleMigration = async (
     JSON.parse(
       await storeObject(env, store).sampleMigration(store, {
         table: declared.table,
-        owned: access.read === "owner" || access.write === "owner",
-        fromSchema: declared.fromSchema,
+        migration: name,
+        consumer: { resourceId: app, resourceVersion: version },
         limit,
       })
     )

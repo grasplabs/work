@@ -169,8 +169,22 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
     }).toStrictEqual(before);
   });
 
-  it("finds nothing to sample once no record is left under the schema it transforms", async () => {
-    const { fixture } = await migrated(0, deriving);
+  it("finds nothing to sample once its migration transformed every record", async () => {
+    const { fixture, store, release } = await migrated(3, deriving);
+    // Transformed records keep their writer's schema hash: only the
+    // migration's own progress says none is left.
+    await vi.waitFor(
+      async () => {
+        await expect(
+          env.DATA_STORES.getByName(store.id).schemaStatus(
+            store.id,
+            release.manifest.schemaHash,
+            { resourceId: fixture.app, resourceVersion: 3 }
+          )
+        ).resolves.toMatchObject({ state: "ready" });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
     const admin = await person("admin");
     const sample = await sampleMigration(env, admin, {
       app: fixture.app,

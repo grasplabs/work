@@ -240,37 +240,51 @@ export const nextScanBatch = (
 };
 
 /**
- * A sample of `tableId`'s records still under `fromSchema`, for an
- * explicit migration's dry run (migration-samples.ts): the first of them
- * in scan order, at most `limit`, as one batch takes them (`batchOf`: one
- * owner's where the table is `owned`, within a transform's bytes). A
- * read: nothing of the backfill's moves, and no record changes.
+ * A sample of the records of `table` its pending migration still has to
+ * transform, for that migration's dry run (migration-samples.ts): while
+ * it scans (`scan`), the next its scan reads from the cursor, and once
+ * the scan is through (`scan` null) or found nothing more, the work
+ * queued for it, as a batch takes them (one owner's where the table
+ * is `owned`, within a transform's bytes), at most `limit`. A record's
+ * schema hash can't tell: a transformed record keeps its writer's. A
+ * read: unlike a work batch, it drops nothing, and nothing moves.
  */
 export const sampleRows = (
   db: Db,
-  table: { tableId: string; owned: boolean },
-  fromSchema: string,
+  table: MigratedTable,
+  target: string,
+  scan: { readonly cursor: ScanPosition | null } | null,
   limit: number
-): MigrationRow[] =>
-  batchOf(
-    db
-      .select()
-      .from(records)
-      .where(
-        and(
-          eq(records.tableId, table.tableId),
-          eq(records.schemaHash, fromSchema)
-        )
+): MigrationRow[] => {
+  const scanned =
+    scan === null ? null : nextScanBatch(db, [table], scan.cursor);
+  if (scanned !== null) {
+    return scanned.rows.slice(0, limit);
+  }
+  const queued = db
+    .select({ record: records })
+    .from(migrationWork)
+    .innerJoin(
+      records,
+      and(
+        eq(records.tableId, migrationWork.tableId),
+        eq(records.recordId, migrationWork.recordId)
       )
-      .orderBy(
-        asc(records.ownerId),
-        asc(records.createdAt),
-        asc(records.recordId)
+    )
+    .where(
+      and(
+        eq(migrationWork.targetHash, target),
+        eq(migrationWork.tableId, table.tableId)
       )
-      .limit(limit)
-      .all(),
+    )
+    .orderBy(asc(migrationWork.ownerId), asc(migrationWork.recordId))
+    .limit(limit)
+    .all();
+  return batchOf(
+    queued.map(({ record }) => record),
     table.owned
   ).map((row) => rowOf(row));
+};
 
 /** Queues `record` of `tableId` as work of `target`, once. */
 export const queueWork = (
