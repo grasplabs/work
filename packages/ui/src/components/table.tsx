@@ -2,6 +2,8 @@ import { watchEnds } from "@grasp-os/ui/lib/row-ends";
 import { cn } from "@grasp-os/ui/lib/utils";
 import * as React from "react";
 
+// A table with more columns than its room moves sideways inside itself, never the page. The
+// side with more columns behind it fades (`watchEnds` marks it), since nothing else would say so.
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div

@@ -5,7 +5,11 @@ import {
 import { defineProject } from "vite-plus";
 
 import { testConnectorsFile } from "./test/global-setup.ts";
-import { clients, testComposioKey } from "./test/provider-config.ts";
+import {
+  appClients,
+  clients,
+  testComposioKey,
+} from "./test/provider-config.ts";
 
 const migrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/migrations`
@@ -78,6 +82,8 @@ export default defineProject({
           MICROSOFT_CLIENT_SECRET: clients.microsoft.secret,
           GOOGLE_CLIENT_ID: clients.google.id,
           GOOGLE_CLIENT_SECRET: clients.google.secret,
+          // Grasp's apps at the apps, as test/app-provider.ts knows them.
+          APP_OAUTH_CLIENTS: JSON.stringify(appClients),
           // Grasp's key for Composio, as test/composio-api.ts checks it.
           COMPOSIO_API_KEY: testComposioKey,
           CONNECT_MIGRATIONS: migrations,

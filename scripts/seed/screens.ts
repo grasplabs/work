@@ -1,6 +1,6 @@
 /**
- * The demo engines' apps (core's screens): views their teams work from,
- * over the engine's own workflow runs, so the Engines page has apps to
+ * The demo domains' apps (core's screens): views their teams work from,
+ * over the domain's own workflow runs, so the Domains page has apps to
  * open and admins have a screen to approve. Each reads only what the
  * screen SDK gives any screen of its App (`useWorkflow`): no permission,
  * no connection.
@@ -34,6 +34,7 @@ import { useState } from "react";
 const dayMs = 24 * 60 * 60 * 1000;
 
 const statusLabels: Record<ScreenRun["status"], string> = {
+  queued: "Queued",
   running: "Running",
   waiting: "Waiting for a decision",
   paused: "Paused",
@@ -157,33 +158,39 @@ export default function ${name}() {
 }
 `;
 
-/** The screens of each engine, by engine name, then by screen name. */
+/**
+ * The screens of each domain, by domain name, then by screen name: the
+ * prototype's apps (`apps` in noordkade.ts), each over the runs of one
+ * workflow of its domain, since a screen reads only its own App's. The
+ * prototype's charts of revenue, tickets and leads read systems no
+ * connection brings yet.
+ */
 export const engineScreens: Record<string, Record<string, string>> = {
-  Finance: {
-    "invoice-approvals": workflowScreen({
-      name: "InvoiceApprovals",
+  "Purchase-to-Pay": {
+    "finance-cockpit": workflowScreen({
+      name: "FinanceCockpit",
       workflow: "supplier-invoices",
-      title: "Invoice approvals",
+      title: "Finance cockpit",
       intro:
-        "Supplier invoices above the limit, waiting for finance, and how the last month went.",
-      waitingTitle: "Waiting for your approval",
+        "The invoices still waiting for an approval, and how the last month went.",
+      waitingTitle: "Waiting for an approval",
     }),
   },
-  "Service desk": {
-    complaints: workflowScreen({
-      name: "Complaints",
-      workflow: "complaint-acknowledgement",
-      title: "Complaints",
+  "Issue-to-Resolution": {
+    "service-desk": workflowScreen({
+      name: "ServiceDesk",
+      workflow: "complaints",
+      title: "Service desk",
       intro:
         "Every complaint registered, and the compensation waiting for compliance.",
       waitingTitle: "Compensation to approve",
     }),
   },
-  "Client onboarding": {
-    handovers: workflowScreen({
-      name: "Handovers",
-      workflow: "file-handover",
-      title: "File handovers",
+  "Opportunity-to-Cash": {
+    "advice-pipeline": workflowScreen({
+      name: "AdvicePipeline",
+      workflow: "mortgage-files",
+      title: "My advice pipeline",
       intro: "Complete client files waiting for an adviser to take them over.",
       waitingTitle: "Files to take over",
     }),
@@ -191,10 +198,10 @@ export const engineScreens: Record<string, Record<string, string>> = {
 };
 
 /**
- * The engines whose screens an admin approves as the seed runs; the
+ * The domains whose screens an admin approves as the seed runs; the
  * others' wait for an admin, so the dashboard shows one to approve.
  */
 export const approvedScreens: ReadonlySet<string> = new Set([
-  "Finance",
-  "Client onboarding",
+  "Purchase-to-Pay",
+  "Opportunity-to-Cash",
 ]);

@@ -18,6 +18,8 @@ export const composioToolkits = [
     meta: {
       categories: [{ id: "crm", name: "CRM" }],
       tools_count: 2,
+      description:
+        "HubSpot is a CRM platform for marketing, sales and service. It brings teams together.",
       logo: "https://logos.composio.dev/api/hubspot",
     },
   },

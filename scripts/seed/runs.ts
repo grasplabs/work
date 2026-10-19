@@ -360,12 +360,24 @@ export const seedRuns = async ({
     if (!answered(answer) || decision === undefined) {
       return;
     }
-    await sessionOf(answer.by).api.decisions.answer(decision.id, {
+    const { decisions } = sessionOf(answer.by).api;
+    // As the decision's page answers: reviewed, confirmed, then answered
+    // with that confirmation.
+    const review = await decisions.review(decision.id, {
       approved: answer.approved,
       ...(answer.comment === undefined
         ? {}
         : { payload: { comment: answer.comment } }),
     });
+    if (review.state === "recorded") {
+      return;
+    }
+    const { confirmation } = await decisions.confirm(
+      decision.id,
+      review.decision.revision,
+      review.response
+    );
+    await decisions.answer(decision.id, review.response, confirmation);
   });
   await settled(
     db,

@@ -31,6 +31,7 @@ import type {
   OutboxedConnectorEvent,
   PendingAction,
   StartConnection,
+  ConnectWithKey,
   StartToolkitConnection,
   UnknownOutcome,
   UnknownOutcomeListing,
@@ -64,6 +65,7 @@ import { catalogLogo } from "./logos.ts";
 import { npmMetadata, npmTarball } from "./npm.ts";
 import {
   abandonFlow,
+  connectWithKey,
   disconnect,
   disconnectPersonal,
   finishConnection,
@@ -280,6 +282,12 @@ export default class Connect
       (await finishToolkitFlow(this.env, request)) ??
       (await finishConnection(this.env, request))
     );
+  }
+
+  async connectWithKey(
+    request: ConnectWithKey
+  ): Promise<{ connectionId: string }> {
+    return await connectWithKey(this.env, request);
   }
 
   async listConnections(

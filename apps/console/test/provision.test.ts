@@ -334,6 +334,7 @@ describe("provisioning a new client", () => {
         "ROUTER_SECRET",
       ],
       connect: [
+        "APP_OAUTH_CLIENTS",
         "CAPABILITY_SIGNING_KEY",
         "COMPOSIO_API_KEY",
         "GOOGLE_CLIENT_SECRET",
