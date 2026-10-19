@@ -1,3 +1,4 @@
+import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
@@ -14,6 +15,7 @@ import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
+import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
   appFunctionRoute,
@@ -275,6 +277,9 @@ const route = async (
   }
   if (pathname === onboardingSummaryPath) {
     return await onboardingSummaryResponse(request, env, requestId);
+  }
+  if (pathname === adminSnapshotPath) {
+    return await adminSnapshotResponse(request, env, requestId);
   }
   if (pathname === platformUpdatePath) {
     return await platformUpdateResponse(request, env, requestId);

@@ -15,11 +15,12 @@ import { z } from "zod";
 // isolate with this as its `globalOutbound`, so every request the
 // connector's code sends, by `fetch` or by following a redirect, arrives
 // here. Its props, which only connect sets and the connector can't read,
-// hold this call's token and the requests the called action declares
+// hold this call's credential (an access token, or an app's API key) and
+// the requests the called action declares
 // (threat model R9, Q11, EG1 to EG7). A request goes out only to one of
 // the connector's hosts, over HTTPS, as a method and path template the
 // action declares, with the connector's credential and method-override
-// headers stripped and the token added; anything else is refused before it
+// headers stripped and the call's credential added; anything else is refused before it
 // leaves. Redirects aren't followed, except one from a route that names
 // the hosts it may lead to (a download), which the handler follows itself,
 // once, without the token or anything of the connector's request. A
@@ -111,8 +112,14 @@ const egressPropsSchema = z.strictObject({
    * the resource the call's capability names.
    */
   values: z.record(z.string(), z.string()),
-  /** The connection's access token, for this call only. */
-  token: z.string().min(1),
+  /**
+   * The connection's credential, for this call only: its access token as
+   * a bearer token, or an app's API key in the header its record names.
+   */
+  credential: z.strictObject({
+    header: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+    value: z.string().min(1),
+  }),
   /** When this call's egress closes, in ms since the epoch. */
   expiresAt: z.number().int(),
 });
@@ -311,7 +318,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       );
     }
     const call = props.data;
-    const { connector, callId, hosts, token, expiresAt } = call;
+    const { connector, callId, hosts, credential, expiresAt } = call;
     const remainingMs = expiresAt - Date.now();
     if (remainingMs <= 0) {
       return refuse(call, "expired", url, method);
@@ -332,10 +339,12 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       return refuse(call, "route", url, method);
     }
     const headers = new Headers(request.headers);
-    for (const name of connectorHeadersRefused) {
+    // The credential's own header too: the connector can't send another
+    // key there, or a second copy that a provider might read first.
+    for (const name of [...connectorHeadersRefused, credential.header]) {
       headers.delete(name);
     }
-    headers.set("authorization", `Bearer ${token}`);
+    headers.set(credential.header, credential.value);
     let response: Response;
     try {
       response = await fetch(url, {

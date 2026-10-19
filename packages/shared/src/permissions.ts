@@ -231,6 +231,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // A workflow run's own App (its server methods), next to its permissions.
   "APP",
   "APP_CALL_TIMEOUT_MS",
+  // Grasp's OAuth apps at the apps that aren't suites (connect's providers.ts).
+  "APP_OAUTH_CLIENTS",
   "APPS",
   "ASSETS",
   "AUDIT_ARCHIVE",

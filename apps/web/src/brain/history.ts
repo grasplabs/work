@@ -1,4 +1,4 @@
-import type { Dated } from "./workspace.ts";
+import type { Dated } from "@grasp-os/shared/brain";
 
 /** What counts now: the newest value. On the same day, the one added last. */
 export const latest = <T extends Dated>(history: T[]): T | undefined =>

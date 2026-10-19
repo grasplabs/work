@@ -15,3 +15,8 @@ export const clients = {
 
 /** Grasp's key for Composio, as set on connect in the tests. */
 export const testComposioKey = "test-composio-key";
+
+/** Grasp's apps at the apps that aren't suites, as test/app-provider.ts knows them. */
+export const appClients = {
+  "sample-oauth": { id: "grasp-sample-oauth", secret: "sample-oauth-secret" },
+} as const;
