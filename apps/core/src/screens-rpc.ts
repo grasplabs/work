@@ -734,11 +734,11 @@ const errorLog = async (
 };
 
 /**
- * Lets go of `read` for a look that no longer needs its answer (no role),
- * without waiting for it: the callback is released at once, and a failure
- * of the read is never left unhandled.
+ * Marks `read` handled the moment a look starts it: its failure is never
+ * left unhandled, whether the look goes on to await it (`deliveryAt`,
+ * which still hears of it) or no longer needs it (no role).
  */
-const abandoned = async (read: Promise<unknown>): Promise<void> => {
+const handled = async (read: Promise<unknown>): Promise<void> => {
   try {
     await read;
   } catch {
@@ -833,9 +833,11 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
           // Begun before anything is awaited: shared with the other looks
           // of this revocation, and only with them (`standingNow`).
           const read = connection.standingNow(id, build);
+          // Handled at once, so a read that fails while the role is still
+          // being read is never left unhandled; `deliveryAt` still hears of
+          // it. Not awaited: the screen never waits for an unneeded read.
+          void handled(read);
           if (this.#closed || !(await hasRole())) {
-            // Not awaited: it never rejects, and the screen must not wait.
-            void abandoned(read);
             return false;
           }
           return (
@@ -1150,9 +1152,11 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
         // Begun before anything is awaited: shared with the other looks
         // of this revocation, and only with them (`#standingNow`).
         const read = this.#standingNow(app, artifact);
+        // Handled at once, so a read that fails while the role is still
+        // being read is never left unhandled; `deliveryAt` still hears of
+        // it. Not awaited: the screen never waits for an unneeded read.
+        void handled(read);
         if (!(await hasRole())) {
-          // Not awaited: it never rejects, and the screen must not wait.
-          void abandoned(read);
           return false;
         }
         return (
