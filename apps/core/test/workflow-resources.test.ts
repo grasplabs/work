@@ -347,8 +347,20 @@ describe("publishing a version", () => {
       unshared: seen,
       deleted: seen,
       versions: 2,
-      first: [{ resourceId: null, contractId: null }],
-      binds: [{ resourceId: null, contractId: null }],
+      // The contract key stays: Bob builds the parent, and its definition
+      // text, which he reads, names it.
+      first: [
+        {
+          resourceId: null,
+          contractId: `${workflowNamespace}/${child.name}/1.0.0`,
+        },
+      ],
+      binds: [
+        {
+          resourceId: null,
+          contractId: `${workflowNamespace}/${child.name}/1.0.0`,
+        },
+      ],
     });
   });
 
@@ -998,6 +1010,7 @@ describe("role ceilings", () => {
           kind: "workflow",
           resourceId: null,
           resourceVersion: null,
+          // Bob only uses the parent: its definition text isn't his.
           contractId: null,
           fingerprint: first.contractHash,
         },
@@ -1055,6 +1068,38 @@ describe("Grasp staff", () => {
         status: "ok",
       }),
     });
+  });
+
+  it("never publish a version that drops what the current version binds", async () => {
+    const ada = await person("builder");
+    const staff = await person("admin", [], true);
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    const workflow = await workflowOf(ada);
+    await publish(
+      ada,
+      workflow.id,
+      bindingDefinition(workflow.name, child.name)
+    );
+
+    expect({
+      dropped: await outcome(
+        publish(
+          staff,
+          workflow.id,
+          definitionOf({ name: workflow.name, version: "2.0.0" }),
+          1
+        )
+      ),
+      kept: await outcome(
+        publish(
+          staff,
+          workflow.id,
+          bindingDefinition(workflow.name, child.name, "2.0.0"),
+          1
+        )
+      ),
+    }).toStrictEqual({ dropped: "role.forbidden", kept: "ok" });
   });
 });
 
