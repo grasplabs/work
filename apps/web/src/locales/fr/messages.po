@@ -4348,11 +4348,15 @@ msgstr "Personne ne le lit"
 msgid "none"
 msgstr "aucune"
 
-#: src/routes/_shell.settings.billing.tsx
-#: src/routes/_shell.settings.pulse.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "None"
 msgstr "Aucune"
+
+#: src/routes/_shell.settings.billing.tsx
+#: src/routes/_shell.settings.pulse.tsx
+msgctxt "nothing set"
+msgid "None"
+msgstr "Aucun"
 
 #: src/activity/pending.tsx
 msgid "None current"

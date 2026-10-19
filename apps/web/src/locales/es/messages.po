@@ -4348,11 +4348,15 @@ msgstr "Nadie lo lee"
 msgid "none"
 msgstr "ninguna"
 
-#: src/routes/_shell.settings.billing.tsx
-#: src/routes/_shell.settings.pulse.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "None"
 msgstr "Ninguna"
+
+#: src/routes/_shell.settings.billing.tsx
+#: src/routes/_shell.settings.pulse.tsx
+msgctxt "nothing set"
+msgid "None"
+msgstr "Ninguno"
 
 #: src/activity/pending.tsx
 msgid "None current"

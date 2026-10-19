@@ -33,7 +33,7 @@ const StripeButton = ({ label }: { label: string }) => (
 /** What a row shows while Stripe keeps nothing for it. */
 const Nothing = () => (
   <span className="text-muted-foreground">
-    <Trans>None</Trans>
+    <Trans context="nothing set">None</Trans>
   </span>
 );
 

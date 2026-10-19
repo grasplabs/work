@@ -4348,9 +4348,13 @@ msgstr "Niemand liest es"
 msgid "none"
 msgstr "keine"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "None"
+msgstr "Keine"
+
 #: src/routes/_shell.settings.billing.tsx
 #: src/routes/_shell.settings.pulse.tsx
-#: src/routes/_shell.workflows.$workflow.tsx
+msgctxt "nothing set"
 msgid "None"
 msgstr "Keine"
 

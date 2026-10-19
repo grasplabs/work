@@ -35,7 +35,7 @@ const Domains = ({ domains: listed }: { domains: readonly string[] }) => (
   <div className="flex w-full flex-col gap-2">
     {listed.length === 0 ? (
       <span className="text-muted-foreground">
-        <Trans>None</Trans>
+        <Trans context="nothing set">None</Trans>
       </span>
     ) : (
       <div className="flex flex-wrap gap-1.5">
