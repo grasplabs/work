@@ -1180,10 +1180,12 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         await eventually(async () => {
           await expect(liveStatus(run.id)).resolves.toBe("complete");
         });
+        const sinceWake = Date.now() - wakesAt;
         return {
           rounds: await loadWaitsOf(run.id),
-          // Done within seconds of that round's end, not a round later.
-          prompt: Date.now() - wakesAt < 5000,
+          // Done within seconds of that round's end: not before it, nor a
+          // round later.
+          prompt: sinceWake >= 0 && sinceWake < 5000,
         };
       }
     );
