@@ -2146,6 +2146,56 @@ describe(
   "the v1 server's calls of a revoked build",
   { timeout: 60_000 },
   () => {
+    it("let go of a callback the App keeps once the approval is taken back, with nothing pushed after", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const app = await sampleApp(builder);
+      const review = await admin.api.screenTrust.review(app);
+      await admin.api.screenTrust.approve(app, {
+        version: review.version,
+        generation: review.generation,
+        artifacts: builtArtifacts(review.screens),
+      });
+      const bundle = await builder.api.screens.open(app, "notes");
+      await builder.api.screens.present(app, bundle.lease);
+      const received: unknown[] = [];
+      const state = { released: false };
+      const onChange = Object.assign(
+        (notes: unknown): void => {
+          received.push(notes);
+        },
+        {
+          [Symbol.dispose]: (): void => {
+            state.released = true;
+          },
+        }
+      );
+      // The App keeps it, and pushes what it holds at once.
+      await builder.api.screens.call(app, "watchNotes", [onChange]);
+      await vi.waitFor(() => {
+        expect(received).toStrictEqual([[]]);
+      });
+      const events = await auditedDuring(async () => {
+        await admin.api.screenTrust.revoke(app, bundle.artifact);
+        // Nothing written: the revocation alone lets go of it.
+        await vi.waitFor(
+          () => {
+            expect(state.released).toBeTruthy();
+          },
+          { timeout: 20_000, interval: 50 }
+        );
+      });
+      expect({
+        received,
+        refused: events
+          .filter(({ action }) => action === "app.artifact.refused")
+          .map(
+            ({ detail }) =>
+              `${detail.operation}/${detail.stage}: ${detail.reason}`
+          ),
+      }).toStrictEqual({ received: [[]], refused: ["call/push: revoked"] });
+    });
+
     it("hand a screen no error of its App's once the approval is taken back as it runs", async () => {
       const admin = await personApi("admin");
       const builder = await personApi("builder");

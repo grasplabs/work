@@ -44,7 +44,7 @@ import type { AppAnswer } from "./app.ts";
 import { appFor, findVersion, getApp, versionFiles } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
-import type { StillOpen } from "./page-callbacks.ts";
+import type { PageCallback, StillOpen } from "./page-callbacks.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { windowPages } from "./query-windows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -287,6 +287,11 @@ interface Frame {
    * the frame closed (`ScreenFrameRpc`); none for the connection's own.
    */
   dispatching?: () => void;
+  /**
+   * Has `look` called whenever the person's access to `app` may have
+   * dropped (`QuerySubscriptions.follow`), until let go of.
+   */
+  follow: (by: Identity, app: AppId, look: () => Promise<void>) => Disposable;
 }
 
 /**
@@ -316,6 +321,41 @@ const refusals = {
 };
 
 /**
+ * The page's callback `stub`, checked before each push (`callbackFor`),
+ * and looked at again whenever the person's access to `app` may have
+ * dropped (`Frame.follow`): refused then, by its own check, it lets
+ * itself go, which tells the screen at once, with nothing pushed.
+ * `released` is told once it is let go of, however that happens.
+ */
+const followedCallback = (
+  stub: PageCallback,
+  {
+    frame,
+    by,
+    app,
+    stillOpen,
+  }: {
+    frame: Frame;
+    by: Identity;
+    app: AppId;
+    stillOpen: StillOpen;
+  },
+  released: () => void
+): Callback & Disposable => {
+  const following: { held?: Disposable } = {};
+  const callback = callbackFor(stub, stillOpen, refusals, () => {
+    following.held?.[Symbol.dispose]();
+    released();
+  });
+  following.held = frame.follow(by, app, async () => {
+    if (!(await stillOpen())) {
+      callback[Symbol.dispose]();
+    }
+  });
+  return callback;
+};
+
+/**
  * The arguments for the App: plain data, and callbacks of the screen's
  * (how `live` in @grasp-os/sdk/screen subscribes), each as a function the
  * App can only call.
@@ -323,7 +363,8 @@ const refusals = {
 export const argumentsFor = (
   args: unknown[],
   stillOpen: StillOpen,
-  held?: Holder
+  held?: Holder,
+  following?: { frame: Frame; by: Identity; app: AppId }
 ): { passed: unknown[]; callbacks: Disposable[] } => {
   if (
     !args.every(
@@ -348,9 +389,14 @@ export const argumentsFor = (
     // Kept by the frame that passed it, if any, until it is let go of:
     // closing the frame lets go of it too, and a frame that closed while
     // this call was admitted keeps none.
-    const callback = callbackFor(arg, stillOpen, refusals, () => {
-      held?.forget(callback);
-    });
+    const callback =
+      following === undefined
+        ? callbackFor(arg, stillOpen, refusals, () => {
+            held?.forget(callback);
+          })
+        : followedCallback(arg, { ...following, stillOpen }, () => {
+            held?.forget(callback);
+          });
     callbacks.push(callback);
     held?.keep(callback);
     return callback;
@@ -386,7 +432,8 @@ const callServer = async (
   const { passed, callbacks } = argumentsFor(
     args,
     frame.stillOpen(by, id, artifact, "call"),
-    frame.held
+    frame.held,
+    { frame, by, app: id }
   );
   try {
     return await delivering(env, by, id, artifact, "call", async () => {
@@ -458,10 +505,14 @@ const watchRuns = async (
   if (subscriptions.size >= maxRunSubscriptions) {
     throw screenErrors.create("screen.too_many_subscriptions");
   }
-  const callback: Callback & Disposable = callbackFor(
+  const callback: Callback & Disposable = followedCallback(
     onChange,
-    frame.stillOpen(by, id, artifact, "watchRuns"),
-    refusals,
+    {
+      frame,
+      by,
+      app: id,
+      stillOpen: frame.stillOpen(by, id, artifact, "watchRuns"),
+    },
     () => {
       subscriptions.delete(callback);
       frame.held?.forget(callback);
@@ -682,6 +733,7 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
       dispatching: () => {
         this.#open();
       },
+      follow: (by, id, look) => connection.queries.follow(by, id, look),
     };
   }
 
@@ -968,6 +1020,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
           stage: "push",
         }));
     },
+    follow: (by, app, look) => this.#queries.follow(by, app, look),
   };
 
   /** This connection's live queries (query-subscriptions.ts). */

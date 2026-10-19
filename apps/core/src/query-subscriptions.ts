@@ -490,6 +490,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   readonly #following = new Map<AppId, Following>();
 
   /**
+   * The looks of the connection's other callbacks of each App (a server
+   * call's, a run subscription's: `follow`), called whenever the person's
+   * access to it may have dropped.
+   */
+  readonly #looks = new Map<AppId, Set<() => Promise<void>>>();
+
+  /**
    * How many times the person's access to each App may have dropped
    * (`#revoked`): a read or push of the App that one landed during is
    * read again rather than pushed. Per App, so events for one App never
@@ -1326,11 +1333,57 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
   }
 
-  /** Whether the connection still follows a query of `app`. */
+  /**
+   * Whether the connection still follows a query of `app`, or holds
+   * another callback of it (`follow`).
+   */
   #follows(app: AppId): boolean {
-    return [...this.#evaluations.values()].some(
-      (evaluation) => evaluation.app === app
+    return (
+      (this.#looks.get(app)?.size ?? 0) > 0 ||
+      [...this.#evaluations.values()].some(
+        (evaluation) => evaluation.app === app
+      )
     );
+  }
+
+  /**
+   * Has `look` called whenever `by`'s access to `app` may have dropped (a
+   * role taken away, a build's trust taken back: access-revocations.ts),
+   * as the connection's live queries of it are looked at again, until the
+   * returned handle is let go of: for a callback of the App's that isn't a
+   * live query (a server call's, a run subscription's), which checks its
+   * own access in `look` and lets itself go when refused, so what it last
+   * pushed doesn't stay on screen until its next push. Its own check
+   * before each push stays: a connection that can't follow still never
+   * pushes past a refusal.
+   */
+  follow(by: By, app: AppId, look: () => Promise<void>): Disposable {
+    let looks = this.#looks.get(app);
+    if (looks === undefined) {
+      looks = new Set();
+      this.#looks.set(app, looks);
+    }
+    looks.add(look);
+    if (this.#reads.revocable && !this.#following.has(app)) {
+      this.#follow(by.userId, app);
+    }
+    let held = true;
+    return {
+      [Symbol.dispose]: (): void => {
+        if (!held) {
+          return;
+        }
+        held = false;
+        const current = this.#looks.get(app);
+        current?.delete(look);
+        if (current?.size === 0) {
+          this.#looks.delete(app);
+        }
+        if (!this.#follows(app)) {
+          this.#unfollow(app);
+        }
+      },
+    };
   }
 
   /**
@@ -1469,6 +1522,18 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       if (evaluation.app === app) {
         void this.#recheck(evaluation, seen);
       }
+    }
+    for (const look of this.#looks.get(app) ?? []) {
+      void QuerySubscriptions.#lookAgain(look);
+    }
+  }
+
+  /** Calls `look`: a failure of it changes nothing for the others. */
+  static async #lookAgain(look: () => Promise<void>): Promise<void> {
+    try {
+      await look();
+    } catch (error) {
+      log.warn("query.callback_look_failed", errorFields(error));
     }
   }
 
