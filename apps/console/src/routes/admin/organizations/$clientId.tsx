@@ -1,14 +1,25 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
+import { createFileRoute, getRouteApi, notFound } from "@tanstack/react-router";
 
-import { AdminPage } from "../../../admin/page.tsx";
+import { OrganizationPage } from "../../../admin/organization.tsx";
 
-const Organization = () => <AdminPage title={Route.useLoaderData().name} />;
+/** Every organization, as the admin's layout read them. */
+const adminRoute = getRouteApi("/admin");
+
+const Organization = () => {
+  const { clientId } = Route.useParams();
+  const admin = adminRoute
+    .useLoaderData()
+    .find(({ client }) => client.id === clientId);
+  // The loader has made sure it is there.
+  return admin === undefined ? null : <OrganizationPage admin={admin} />;
+};
 
 /**
- * One organization in the admin: only its name until its own page, with
- * its column of sections, is ported. One the console doesn't know (or has
- * offboarded) is a page that isn't there. Under organizations/, not
- * beside the admin's sections: a client may be named `platform`.
+ * One organization in the admin: its column of sections beside the
+ * section it is on (src/admin/organization.tsx), each section a route
+ * under it. One the console doesn't know (or has offboarded) is a page
+ * that isn't there. Under organizations/, not beside the admin's
+ * sections: a client may be named `platform`.
  */
 export const Route = createFileRoute("/admin/organizations/$clientId")({
   loader: async ({ params, parentMatchPromise }) => {
