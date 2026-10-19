@@ -2443,6 +2443,44 @@ export const guestMessages = sqliteTable(
 );
 
 /**
+ * What an explicit migration's dry run on a sample of real records found
+ * (migration-samples.ts): its receipt, kept with the version's migration
+ * evidence, which the release's sealed manifest holds for its fixtures.
+ * Counts and codes only: no record's values, fields or IDs. `outcome` is
+ * `passed`, `failed` or `empty` (no record left under `from_schema`);
+ * `reason` the failure's code. The release it ran (`manifest_hash`) and the
+ * schemas it ran between name what the sample vouches for. The latest
+ * receipt of a migration decides; earlier ones stay as history.
+ */
+export const migrationSamples = sqliteTable(
+  "migration_samples",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    migration: text().notNull(),
+    storeId: text("store_id").notNull(),
+    outcome: text({ enum: ["passed", "failed", "empty"] }).notNull(),
+    rows: integer().notNull(),
+    owners: integer().notNull(),
+    reason: text(),
+    manifestHash: text("manifest_hash").notNull(),
+    fromSchema: text("from_schema").notNull(),
+    toSchema: text("to_schema").notNull(),
+    sampledBy: text("sampled_by").notNull(),
+    sampledAt: timestamp("sampled_at").notNull(),
+  },
+  (table) => [
+    index("migration_samples_latest_idx").on(
+      table.appId,
+      table.version,
+      table.migration,
+      table.sampledAt
+    ),
+  ]
+);
+
+/**
  * The deployment's business stores (src/data-stores.ts): an inventory,
  * never a copy of their records. Each store's records, receipts and
  * outbox live in its own Durable Object (src/data-store.ts), named by

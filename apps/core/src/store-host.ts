@@ -105,6 +105,7 @@ import {
 import { FileHost } from "./file-host.ts";
 import type { FileHolder, FileReader } from "./file-host.ts";
 import { liveRuns } from "./live-runs.ts";
+import { transformBatchMaxRows } from "./migration-transform.ts";
 import {
   assertTimeout,
   backoffMs,
@@ -134,6 +135,7 @@ import {
   outputRefusal,
   pendingMigrationsSchema,
   queueWork,
+  sampleRows,
   scanPositionSchema,
   scanRangeIds,
 } from "./store-migrations.ts";
@@ -900,6 +902,14 @@ const releaseCandidatesSchema = z
   .max(compatibleVersionsMax);
 
 /** One batch of a backfill, as its run asks for it (`fillMissing`). */
+/** What a migration's dry run asks the store to sample (`sampleMigration`). */
+const migrationSampleSchema = z.strictObject({
+  table: tableNameSchema,
+  owned: z.boolean(),
+  fromSchema: z.string().regex(/^[0-9a-f]{64}$/u),
+  limit: z.number().int().min(1).max(transformBatchMaxRows),
+});
+
 const backfillStepSchema = z.strictObject({
   target: backfillTargetSchema,
   attempt: z.number().int().min(1),
@@ -3635,6 +3645,33 @@ export class StoreHost {
    * A complete backfill answers complete to any run. Each batch renews
    * the run's lease.
    */
+  /**
+   * A sample of `table`'s records still under `fromSchema`, at most
+   * `limit` of them, for an explicit migration's dry run
+   * (migration-samples.ts, `sampleRows`): read in a transaction that
+   * writes nothing, so neither a record nor the backfill moves. Empty for
+   * a table the store doesn't hold.
+   */
+  sampleMigration(
+    storeId: StoreId,
+    sample: { table: string; owned: boolean; fromSchema: string; limit: number }
+  ): MigrationRow[] {
+    const { table, owned, fromSchema, limit } = dataErrors.parse(
+      "data.invalid",
+      migrationSampleSchema,
+      sample
+    );
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const tableId = this.#tableRows().find(
+        ({ name }) => name === table
+      )?.tableId;
+      return tableId === undefined
+        ? []
+        : sampleRows(this.#db, { tableId, owned }, fromSchema, limit);
+    });
+  }
+
   fillMissing(
     storeId: StoreId,
     step: BackfillStep

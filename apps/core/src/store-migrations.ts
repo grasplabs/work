@@ -239,6 +239,39 @@ export const nextScanBatch = (
   return null;
 };
 
+/**
+ * A sample of `tableId`'s records still under `fromSchema`, for an
+ * explicit migration's dry run (migration-samples.ts): the first of them
+ * in scan order, at most `limit`, as one batch takes them (`batchOf`: one
+ * owner's where the table is `owned`, within a transform's bytes). A
+ * read: nothing of the backfill's moves, and no record changes.
+ */
+export const sampleRows = (
+  db: Db,
+  table: { tableId: string; owned: boolean },
+  fromSchema: string,
+  limit: number
+): MigrationRow[] =>
+  batchOf(
+    db
+      .select()
+      .from(records)
+      .where(
+        and(
+          eq(records.tableId, table.tableId),
+          eq(records.schemaHash, fromSchema)
+        )
+      )
+      .orderBy(
+        asc(records.ownerId),
+        asc(records.createdAt),
+        asc(records.recordId)
+      )
+      .limit(limit)
+      .all(),
+    table.owned
+  ).map((row) => rowOf(row));
+
 /** Queues `record` of `tableId` as work of `target`, once. */
 export const queueWork = (
   db: Db,
