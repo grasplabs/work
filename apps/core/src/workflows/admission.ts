@@ -389,7 +389,18 @@ const queueServed = (
   const person = sql`coalesce(json_extract(s.persons, w.person_key), w.person_held)`;
   const app = sql`coalesce(json_extract(s.apps, w.app_key), w.app_held)`;
   const fits = sql`(s.client < ${literal(shares.client)} AND ${person} < ${literal(shares.person)} AND ${app} < ${literal(shares.app)})`;
+  // The leases held for each person and of each App, counted once over
+  // the held leases (a partial index; as many as the client's share),
+  // never once for each place waiting.
   return sql`WITH RECURSIVE
+    persons_held AS (
+      SELECT h.subject AS subject, count(*) AS n FROM ${pool.leases} AS h
+      WHERE ${holding(pool, now, sql`1`)} GROUP BY h.subject
+    ),
+    apps_held AS (
+      SELECT h.resource AS resource, count(*) AS n FROM ${pool.leases} AS h
+      WHERE ${holding(pool, now, sql`1`)} GROUP BY h.resource
+    ),
     waiting AS (
       SELECT row_number() OVER (ORDER BY u.turn, u.joined, u.run_id, u.step_hash) AS i,
         u.me AS me,
@@ -397,9 +408,11 @@ const queueServed = (
         u.step_hash AS step_hash,
         '$.x' || hex(u.subject) AS person_key,
         '$.x' || hex(u.resource) AS app_key,
-        ${running(pool, now, sql`h.subject = u.subject`)} AS person_held,
-        ${running(pool, now, sql`h.resource = u.resource`)} AS app_held
+        coalesce(ph.n, 0) AS person_held,
+        coalesce(ah.n, 0) AS app_held
       FROM (${places}) AS u
+      LEFT JOIN persons_held AS ph ON ph.subject = u.subject
+      LEFT JOIN apps_held AS ah ON ah.resource = u.resource
     ),
     served (i, me, client, persons, apps, person, app, fits) AS (
       SELECT 0, 0, ${running(pool, now, sql`1`)}, '{}', '{}', 0, 0, 0
