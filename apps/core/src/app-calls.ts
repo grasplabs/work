@@ -12,7 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { afterEffect, callerOf, tokenOf } from "./app-bindings.ts";
+import { afterEffect, countedCallerOf, tokenOf } from "./app-bindings.ts";
 import type { AppAnswer, CallPath } from "./app.ts";
 import { auditedBatch, keepAuditEvent, outboxed } from "./audit-outbox.ts";
 import { forSandbox } from "./bindings.ts";
@@ -481,12 +481,12 @@ export class AppExportBinding extends WorkerEntrypoint<
   ): Promise<AppAnswer> {
     const { caller: app, ...grant } = this.ctx.props;
     try {
-      let known: Awaited<ReturnType<typeof callerOf>>;
+      let known: Awaited<ReturnType<typeof countedCallerOf>>;
       // The caller is read once: its token goes on with the call.
       let token: string;
       try {
         token = tokenOf(caller);
-        known = await callerOf(this.env, app, { token }, "read");
+        known = await countedCallerOf(this.env, app, { token }, "read");
       } catch (error) {
         // A caller this App isn't running a call of: made up, ended, or
         // another App's. Recorded by the App the stub is its, as nobody

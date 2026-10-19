@@ -4,6 +4,7 @@ import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import type { AppId } from "@grasp-os/shared/ids";
 import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -67,6 +68,25 @@ export class App extends DurableObject {
       return "no binding";
     }
     return await tried(async () => await stub.call(as ?? caller, method, input));
+  }
+
+  // Makes each use in turn, \`times\` over, through the stub its binding
+  // names, in this one call: answers how many it made, and the code of
+  // the first one refused, if any.
+  async useMany(caller: Caller, uses: { binding: string; method: string; args: unknown[]; times: number }[]): Promise<unknown> {
+    let made = 0;
+    for (const { binding, method, args, times } of uses) {
+      const stub = (this.env as Record<string, any>)[binding];
+      for (let time = 0; time < times; time += 1) {
+        try {
+          await stub[method](caller, ...args);
+        } catch (error) {
+          return { made, refused: (error as { code?: string }).code ?? "unknown" };
+        }
+        made += 1;
+      }
+    }
+    return { made };
   }
 
   findCustomers(caller: Caller, input: { query: string }): unknown[] {
@@ -519,6 +539,14 @@ const answered = (probed: unknown): unknown =>
   typeof probed === "object" && probed !== null && "bytes" in probed
     ? "answered"
     : probed;
+
+/** `useMany`'s use: `times` reads of the collection under HANDBOOK. */
+const reads = (times: number) => ({
+  binding: "HANDBOOK",
+  method: "listDocuments",
+  args: [],
+  times,
+});
 
 describe("calls between Apps", { timeout: 60_000 }, () => {
   // Lets go of every hold the test made (`holds`).
@@ -1563,6 +1591,61 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       "ok",
       "ok",
     ]);
+  });
+
+  it("answer one call's stubs' reads and calls only up to its host-call budget, its writes not counted, and every call its own budget", async () => {
+    const admin = await personApi("admin");
+    const { collectionId } = await collectionWithNote(
+      { knowledge: admin.api.knowledge },
+      { name: "Handbook", access: "everyone" }
+    );
+    const [invoicing, crm] = await Promise.all([
+      newApp(admin, "Invoicing"),
+      newApp(admin, "CRM"),
+    ]);
+    await requestGranted(
+      idp,
+      admin,
+      readCollection({ type: "app", appId: invoicing }, collectionId)
+    );
+    await grantCalls(admin, invoicing, crm, ["read"], "CRM");
+    const useMany = async (uses: unknown[]) =>
+      await callApp(
+        env,
+        invoicing,
+        { userId: admin.userId, mode: "interactive" },
+        "useMany",
+        [uses]
+      );
+    const budget = platformLimits.invocationHostCalls;
+
+    expect({
+      // Statistics points are writes: the reads after them get the budget.
+      pointsThenReads: await useMany([
+        {
+          binding: "STATISTICS",
+          method: "record",
+          args: [{ measure: "uses", value: 1 }],
+          times: 5,
+        },
+        reads(budget),
+      ]),
+      tooManyReads: await useMany([reads(budget + 1)]),
+      // Another App's export is a call: it takes from the same budget.
+      readsThenCall: await useMany([
+        reads(budget),
+        {
+          binding: "CRM",
+          method: "call",
+          args: ["findCustomers", { query: "BV" }],
+          times: 1,
+        },
+      ]),
+    }).toStrictEqual({
+      pointsThenReads: { made: 5 + budget },
+      tooManyReads: { made: budget, refused: "operation.call_limit" },
+      readsThenCall: { made: budget, refused: "operation.call_limit" },
+    });
   });
 
   it("read exports, grants and the Apps a call reaches by index, never a whole table", async () => {

@@ -11,7 +11,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 
 import {
   afterEffect,
-  callerOf,
+  countedCallerOf,
   handedBack,
   stillAdmitted,
   tokenOf,
@@ -103,7 +103,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
         throw permissionErrors.create("permission.denied");
       }
       const token = tokenOf(caller);
-      const { authority, path, fence } = await callerOf(
+      const { authority, path, fence } = await countedCallerOf(
         this.env,
         app,
         { token },
