@@ -57,9 +57,10 @@ import { runEngine, runRetentionDays } from "./engine.ts";
 // lineage's row stays, as an App run's does), and
 // the values of a parameter revision once another replaced it that long
 // ago, or its workflow was deleted. The database lets nothing else of
-// either change (migration 0080): their IDs, hashes, revisions and who
-// did what stay, so a start sent again is still known by its key and
-// input's hash, and the revision in force is never touched.
+// either change, nor be written over by an insert by key or rowid
+// (migrations 0080, 0095 and 0101): their IDs, hashes, revisions and who did what stay, so a start
+// sent again is still known by its key and input's hash, and the revision
+// in force is never touched.
 //
 // Kept, each by rules of its own, not this retention's:
 // - The audit log: it has its own retention (audit-log.ts), and its

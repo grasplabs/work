@@ -304,12 +304,15 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Audit trail",
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
+        // What approved packages are in use, for anyone but Grasp staff:
+        // core lists it only to those who may approve packages.
+        "Packages",
         "Profile",
         "Notifications",
       ],
     },
-    builder: { nav, menu, settings: ["Profile", "Notifications"] },
-    user: { nav, menu, settings: ["Profile", "Notifications"] },
+    builder: { nav, menu, settings: ["Packages", "Profile", "Notifications"] },
+    user: { nav, menu, settings: ["Packages", "Profile", "Notifications"] },
   });
 });
 

@@ -112,6 +112,21 @@ export interface BoundWorkflow {
   readonly events: Readonly<Record<string, BoundWorkflowEvent>>;
   readonly listens: Readonly<Record<string, readonly string[]>>;
   readonly decisions: Readonly<Record<string, BoundWorkflowDecision>>;
+  /**
+   * The workflow version the host resolved all of the above from: the
+   * binding's, as a seal records it. The host reads a run's history or
+   * decisions through the reference only for a run of exactly this version,
+   * so a rebind never reads one version's journal against another's
+   * contract. None for an alias nothing was resolved for. Never part of a
+   * generated reference.
+   */
+  readonly pinned?: WorkflowPin;
+}
+
+/** A workflow resource's version, as the host resolved a binding to it. */
+export interface WorkflowPin {
+  readonly workflowId: string;
+  readonly version: number;
 }
 
 /**
@@ -186,7 +201,20 @@ const sealedWorkflow = (value: unknown): WorkflowBindingExtras => {
       context: sealedDescriptor(context),
     };
   }
-  return { alias, events, listens, decisions };
+  if (sealed.pinned === undefined) {
+    return { alias, events, listens, decisions };
+  }
+  const { workflowId, version } = sealedRecord(sealed.pinned, "a pin");
+  if (
+    typeof workflowId !== "string" ||
+    workflowId.length === 0 ||
+    typeof version !== "number" ||
+    !Number.isSafeInteger(version) ||
+    version < 1
+  ) {
+    return unsealed("a pin that isn't a workflow's version");
+  }
+  return { alias, events, listens, decisions, pinned: { workflowId, version } };
 };
 
 /**

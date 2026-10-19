@@ -46,7 +46,12 @@ export interface DecisionRecipient {
   link: string;
 }
 
-/** A method of a binding: it takes JSON and answers with it. */
+/**
+ * A method of a binding: it takes JSON and answers with it. The answer is
+ * typed `unknown`, as a binding's name doesn't say what it is (a
+ * connection, an App, a collection): a workflow's code narrows what it
+ * reads, to the answer's shape or to `Json` to return it from a step.
+ */
 export type BindingMethod = (...args: Json[]) => Promise<unknown>;
 
 /**
@@ -88,8 +93,9 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * for the person holds the step, as the run's own do.
  *
  * Write each call out where it happens, in the function of the step that
- * makes it: `env.NAME.method(…)`, `appServer(env).method(…)` or
- * `appExports(env.NAME).method(…)`, so the workflow's step list names
+ * makes it: `env.NAME.method(…)`, `appServer(env).method(…)`,
+ * `appFunctions(env).query(…)` or `appExports(env.NAME).method(…)`, so
+ * the workflow's step list names
  * every binding a step calls. `env`, a binding or a stub kept in a
  * variable, passed to a function, spread or read by a computed name
  * can't be read, and neither can a call in a function inside the step's

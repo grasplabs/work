@@ -99,6 +99,10 @@ msgstr "{app} necesita que alguien vuelva a iniciar sesión"
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Versión {version}"
 
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "{approvals, plural, one {# approval} other {# approvals}}"
+msgstr "{approvals, plural, one {# aprobación} other {# aprobaciones}}"
+
 #: src/engines/package-approvals.tsx
 msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
 msgstr "{approvals, plural, one {Esto termina # aprobación de estos paquetes.} other {Esto termina # aprobaciones de estos paquetes.}}"
@@ -289,10 +293,6 @@ msgstr "{doc} en {where} lleva {late, plural, one {# día} other {# días}} pasa
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# documento} other {# documentos}}"
-
-#: src/activity/pending.tsx
-msgid "{domain} already keeps {type} records here: this domain's won't apply."
-msgstr "{domain} ya guarda aquí registros de tipo {type}: los de este dominio no se aplicarán."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "{domain} doesn't get these packages."
@@ -1020,6 +1020,7 @@ msgstr "Acción"
 
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Actions"
 msgstr "Acciones"
 
@@ -1053,6 +1054,10 @@ msgstr "Añadir un widget"
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Add a word"
 msgstr "Añadir una palabra"
+
+#: src/workflows/module-files.tsx
+msgid "Add module"
+msgstr "Añadir módulo"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "Add note"
@@ -1280,10 +1285,6 @@ msgid "Another domain"
 msgstr "Otro dominio"
 
 #: src/activity/pending.tsx
-msgid "Another domain already keeps {type} records here: this domain's won't apply."
-msgstr "Otro dominio ya guarda aquí registros de tipo {type}: los de este dominio no se aplicarán."
-
-#: src/activity/pending.tsx
 msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
 msgstr "Desde que se leyó esta lista, otra versión de este dominio pasó a ser la actual. La lista ya la muestra: revisa esa versión y vuelve a aprobar."
 
@@ -1329,6 +1330,7 @@ msgstr "Todo"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "Aplicación"
 
@@ -1357,6 +1359,10 @@ msgstr "Aprobación"
 #: src/engines/screen-approval.tsx
 msgid "Approval taken back"
 msgstr "Aprobación retirada"
+
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "Approvals"
+msgstr "Aprobaciones"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
@@ -1590,6 +1596,10 @@ msgstr "Vinculado"
 msgid "Bound to"
 msgstr "Vinculado a"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Branch {name}"
+msgstr "Rama {name}"
+
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Ruta de navegación"
@@ -1690,6 +1700,10 @@ msgstr "Límites"
 #: src/routes/_shell.settings.models.tsx
 msgid "Caps an admin set on a domain's model, on the domain's Resources tab, on top of the deployment's budgets, and what the domain's actions spent through it. A workflow's own AI steps don't count here."
 msgstr "Los límites que un administrador fijó para el modelo de un dominio, en la pestaña Recursos del dominio, además de los presupuestos de la implementación, y lo que las acciones del dominio gastaron a través de él. Los pasos de IA propios de un flujo de trabajo no cuentan aquí."
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Case {name}, when it holds"
+msgstr "Caso {name}, cuando se cumple"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -1852,9 +1866,17 @@ msgstr "Chats"
 msgid "Chats with Grasp"
 msgstr "Chats con Grasp"
 
+#: src/workflows/definition-editor.tsx
+msgid "Check and save"
+msgstr "Comprobar y guardar"
+
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
 msgstr "Comprobó la cadena del registro de auditoría"
+
+#: src/workflows/definition-editor.tsx
+msgid "Checking…"
+msgstr "Comprobando…"
 
 #: src/engines/resource-bindings.tsx
 msgid "Choose a collection"
@@ -2157,6 +2179,10 @@ msgstr "no se pudo leer"
 msgid "Couldn't load this domain's workflows."
 msgstr "No se pudieron cargar los flujos de trabajo de este dominio."
 
+#: src/workflows/independent-workflows.tsx
+msgid "Create"
+msgstr "Crear"
+
 #: src/activity/audit-words.ts
 msgid "Created a collection"
 msgstr "Creó una colección"
@@ -2182,6 +2208,10 @@ msgstr "Crítica"
 msgctxt "kind of app"
 msgid "CRM"
 msgstr "CRM"
+
+#: src/workflows/independent-workflows.tsx
+msgid "Current version"
+msgstr "Versión actual"
 
 #: src/frame/person-menu.tsx
 msgid "Dark"
@@ -2258,6 +2288,15 @@ msgstr "Decisiones"
 msgid "Default: {fallback}"
 msgstr "Predeterminado: {fallback}"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgctxt "tab of a workflow"
+msgid "Definition"
+msgstr "Definición"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Definition version"
+msgstr "Versión de la definición"
+
 #: src/chat/chat-list.tsx
 msgid "Delete"
 msgstr "Eliminar"
@@ -2318,6 +2357,18 @@ msgstr "Detalles eliminados"
 msgctxt "kind of app"
 msgid "Developer tools"
 msgstr "Herramientas de desarrollo"
+
+#: src/workflows/definition-editor.tsx
+msgid "Diagram"
+msgstr "Diagrama"
+
+#: src/workflows/definition-editor.tsx
+msgid "Diagram of revision {checkpointRevision}"
+msgstr "Diagrama de la revisión {checkpointRevision}"
+
+#: src/workflows/definition-editor.tsx
+msgid "Diagram of the current version"
+msgstr "Diagrama de la versión actual"
 
 #: src/dashboard/outcome-card.tsx
 msgid "Did this happen? {who}"
@@ -2532,6 +2583,10 @@ msgstr "Correo y calendario"
 msgid "Employee interviews"
 msgstr "Entrevistas con empleados"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Ends the workflow"
+msgstr "Termina el flujo de trabajo"
+
 #: src/onboarding/staff-words.ts
 msgid "Enough is known ({known}% of {threshold}%): the company waits for Grasp's go"
 msgstr "Se sabe lo suficiente ({known} % de {threshold} %): la empresa espera el visto bueno de Grasp"
@@ -2695,6 +2750,7 @@ msgstr "Extrayendo"
 #: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
+#: src/workflows/workflow-diagram.tsx
 msgid "Failed"
 msgstr "Fallida"
 
@@ -2795,6 +2851,14 @@ msgstr "Plegar la navegación"
 #: src/routes/_shell.onboarding.tsx
 msgid "Fold the sections"
 msgstr "Plegar las secciones"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "For each {name}"
+msgstr "Para cada {name}"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "For each {name}, while it holds"
+msgstr "Para cada {name}, mientras se cumpla"
 
 #: src/connections/connect-dialog.tsx
 msgid "For everyone"
@@ -3097,6 +3161,10 @@ msgstr "RR. HH."
 msgid "If {condition}:"
 msgstr "Si {condition}:"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "If it fails"
+msgstr "Si falla"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "If the rest of the month goes like the days so far"
 msgstr "Si el resto del mes va como los días hasta ahora"
@@ -3121,6 +3189,14 @@ msgstr "En palabras de quien lo propone"
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
 msgid "In Workflows"
 msgstr "En Flujos de trabajo"
+
+#: src/workflows/independent-workflows.tsx
+msgid "Independent workflows"
+msgstr "Flujos de trabajo independientes"
+
+#: src/workflows/test-run.tsx
+msgid "Input"
+msgstr "Entrada"
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -3185,6 +3261,10 @@ msgstr "Se puede enviar una vez más, exactamente igual que antes. No se deshace
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
 msgstr "Cuenta como gastado en los presupuestos: lo máximo que podría haber costado. No se puede deshacer."
+
+#: src/workflows/workflow-diagram.tsx
+msgid "It declares no tasks."
+msgstr "No declara ninguna tarea."
 
 #: src/dashboard/outcome-card.tsx
 msgid "It didn't happen"
@@ -3350,6 +3430,10 @@ msgstr "Ir al mensaje más reciente"
 msgid "Just for you"
 msgstr "Solo para ti"
 
+#: src/workflows/definition-editor.tsx
+msgid "Keep my text"
+msgstr "Conservar mi texto"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Keep the answer"
 msgstr "Guardar la respuesta"
@@ -3369,6 +3453,7 @@ msgid "Kickoff"
 msgstr "Arranque"
 
 #: src/engines/resource-bindings.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 msgid "Kind"
 msgstr "Tipo"
 
@@ -3408,6 +3493,10 @@ msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Últimos 7 días"
 
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "Last decided"
+msgstr "Última decisión"
+
 #: src/dashboard/failed-workflows.tsx
 msgid "Last on {date}"
 msgstr "Última vez el {date}"
@@ -3437,6 +3526,10 @@ msgstr "Responsables"
 #: src/onboarding/staff-words.ts
 msgid "Leads talked: {count} of {of}"
 msgstr "Responsables que hablaron: {count} de {of}"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Leaves this list"
+msgstr "Sale de esta lista"
 
 #: src/knowledge/uploads.tsx
 msgid "Let go to add them"
@@ -3644,6 +3737,10 @@ msgctxt "severity of a finding"
 msgid "Moderate"
 msgstr "Moderada"
 
+#: src/workflows/module-files.tsx
+msgid "Modules"
+msgstr "Módulos"
+
 #: src/brain/brain.ts
 msgid "Monthly budget for AI"
 msgstr "Presupuesto mensual para IA"
@@ -3672,9 +3769,15 @@ msgstr "Mover {title}"
 msgid "Moved old entries out of the audit trail"
 msgstr "Sacó entradas antiguas del registro de auditoría"
 
+#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Nombre"
+
+#: src/workflows/independent-workflows.tsx
+msgid "Name of a new workflow"
+msgstr "Nombre de un nuevo flujo de trabajo"
 
 #: src/brain/brain.ts
 msgid "Named by"
@@ -3741,6 +3844,10 @@ msgstr "Nota nueva"
 msgid "New since the last approval: {added}"
 msgstr "Nuevo desde la última aprobación: {added}"
 
+#: src/workflows/independent-workflows.tsx
+msgid "New workflow"
+msgstr "Nuevo flujo de trabajo"
+
 #: src/dashboard/failed-workflows.tsx
 msgid "New: failed while acting for you"
 msgstr "Nuevo: falló mientras actuaba en tu nombre"
@@ -3748,6 +3855,10 @@ msgstr "Nuevo: falló mientras actuaba en tu nombre"
 #: src/workflows/triggers.tsx
 msgid "Next run: {next}"
 msgstr "Próxima ejecución: {next}"
+
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "No App or workflow has approved packages."
+msgstr "Ninguna app ni flujo de trabajo tiene paquetes aprobados."
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -3808,6 +3919,10 @@ msgstr "Sin cambios en archivos."
 msgid "No files yet."
 msgstr "Todavía no hay archivos."
 
+#: src/workflows/independent-workflows.tsx
+msgid "No independent workflow is shared with you yet."
+msgstr "Todavía no se ha compartido contigo ningún flujo de trabajo independiente."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
 msgstr "Ninguna integración coincide con tu búsqueda."
@@ -3837,6 +3952,10 @@ msgstr "Aún no hay archivos de memoria escritos."
 msgid "No model is set up for this deployment yet."
 msgstr "Aún no hay ningún modelo configurado en este despliegue."
 
+#: src/workflows/module-files.tsx
+msgid "No modules yet. A module holds calculations a task calls through a local binding."
+msgstr "Aún no hay módulos. Un módulo contiene cálculos que una tarea llama mediante una vinculación local."
+
 #: src/workflows/triggers.tsx
 msgid "No next run"
 msgstr "Sin próxima ejecución"
@@ -3848,6 +3967,10 @@ msgstr "Ningún otro dominio ofrece todas las funciones que declara, públicas y
 #: src/engines/package-approvals.tsx
 msgid "No packages are approved for this domain."
 msgstr "No hay paquetes aprobados para este dominio."
+
+#: src/engines/package-approvals.tsx
+msgid "No packages are approved for this workflow."
+msgstr "No hay paquetes aprobados para este flujo de trabajo."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this domain before."
@@ -3939,6 +4062,14 @@ msgstr "Nadie respondió a tiempo, así que esta decisión se ha cerrado."
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
 msgstr "Nadie ha aprobado aún el código de esta aplicación para los datos del dominio. Un administrador puede aprobarlo en la página del dominio."
 
+#: src/workflows/definition-editor.tsx
+msgid "Nobody has edited it since its current version."
+msgstr "Nadie lo ha editado desde su versión actual."
+
+#: src/workflows/definition-editor.tsx
+msgid "Nobody has edited it yet: it starts from a definition that passes."
+msgstr "Nadie lo ha editado todavía: empieza con una definición que pasa la comprobación."
+
 #: src/brain/brain-atlas.ts
 msgid "Nobody is named yet to approve a new tool."
 msgstr "Aún no se ha nombrado a nadie para aprobar una herramienta nueva."
@@ -3958,6 +4089,10 @@ msgstr "Nadie lo lee"
 #: src/routes/_shell.settings.models.tsx
 msgid "none"
 msgstr "ninguna"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "None"
+msgstr "Ninguna"
 
 #: src/activity/pending.tsx
 msgid "None current"
@@ -4056,6 +4191,11 @@ msgstr "Sin nombre del proveedor"
 msgid "Not offered"
 msgstr "No ofrecida"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+#: src/workflows/independent-workflows.tsx
+msgid "Not published"
+msgstr "No publicado"
+
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "Not released"
@@ -4122,6 +4262,10 @@ msgstr "Ahora no hay nada retenido para revisión."
 #: src/engines/resource-bindings.tsx
 msgid "Nothing is published for {contract} yet. Publish it first."
 msgstr "Aún no hay nada publicado para {contract}. Publica primero una versión."
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Nothing is published yet."
+msgstr "Todavía no hay nada publicado."
 
 #: src/workflows/history-view.tsx
 msgid "Nothing is recorded for this run."
@@ -4252,6 +4396,14 @@ msgstr "Onboarding"
 #: src/routes/_shell.onboarding.tsx
 msgid "Onboarding sections"
 msgstr "Secciones del onboarding"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Only if its condition holds"
+msgstr "Solo si se cumple su condición"
+
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "Only people who may approve packages see what is approved across the workspace."
+msgstr "Solo quienes pueden aprobar paquetes ven lo aprobado en todo el espacio de trabajo."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
@@ -4404,6 +4556,10 @@ msgstr "Otros dominios ahora pueden llamar a {name}, que {does}"
 msgid "Otherwise:"
 msgstr "Si no:"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Otherwise: {name}"
+msgstr "En otro caso: {name}"
+
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Output"
@@ -4437,12 +4593,19 @@ msgstr "Paquete"
 
 #: src/engines/package-approvals.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.settings.packages.index.tsx
+#: src/routes/_shell.settings.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Packages"
 msgstr "Paquetes"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Packages for {domain}"
 msgstr "Paquetes para {domain}"
+
+#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+msgid "Packages for {workflow}"
+msgstr "Paquetes para {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -4472,6 +4635,10 @@ msgstr "Pegado el {when}. Tráelo de nuevo para volver a leerlo."
 #: src/knowledge/document.tsx
 msgid "Path"
 msgstr "Ruta"
+
+#: src/workflows/module-files.tsx
+msgid "Path of a new module"
+msgstr "Ruta de un módulo nuevo"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Pause the interviews"
@@ -4643,6 +4810,20 @@ msgstr "Publicar una versión de {contract}"
 msgid "Publish as"
 msgstr "Publicar como"
 
+#. placeholder {0}: draft.revision
+#: src/workflows/definition-editor.tsx
+msgid "Publish revision {0}"
+msgstr "Publicar la revisión {0}"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Published"
+msgstr "Publicada"
+
+#. placeholder {0}: outcome.version
+#: src/workflows/definition-editor.tsx
+msgid "Published as version {0}."
+msgstr "Publicado como versión {0}."
+
 #. Product name: keep it as it is
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
@@ -4682,6 +4863,10 @@ msgstr "Ejecutó un flujo de trabajo"
 #: src/dashboard/report.ts
 msgid "Ran without a person: {share}"
 msgstr "Ejecutadas sin una persona: {share}"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Reached"
+msgstr "Alcanzada"
 
 #: src/activity/audit-log.tsx
 msgid "Read"
@@ -4846,6 +5031,10 @@ msgstr "Volver a cargar"
 msgid "Remove"
 msgstr "Quitar"
 
+#: src/workflows/module-files.tsx
+msgid "Remove {file}"
+msgstr "Quitar {file}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
 msgstr "¿Quitar a {name}?"
@@ -4993,6 +5182,18 @@ msgstr "Revisión vencida"
 msgid "Review the apps of {name}"
 msgstr "Revisar las aplicaciones de {name}"
 
+#: src/workflows/definition-editor.tsx
+msgid "Revision {revision} doesn't pass yet, and no revision has."
+msgstr "La revisión {revision} todavía no pasa la comprobación, y ninguna revisión la ha pasado."
+
+#: src/workflows/definition-editor.tsx
+msgid "Revision {revision} doesn't pass yet. The latest that passed is revision {passed}."
+msgstr "La revisión {revision} todavía no pasa la comprobación. La última que la pasó es la revisión {passed}."
+
+#: src/workflows/definition-editor.tsx
+msgid "Revision {revision} passes the profile and can be published."
+msgstr "La revisión {revision} pasa la comprobación del perfil y se puede publicar."
+
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
@@ -5115,6 +5316,7 @@ msgid "Running"
 msgstr "En curso"
 
 #: src/workflows/history-view.tsx
+#: src/workflows/workflow-diagram.tsx
 msgctxt "an attempt of a step"
 msgid "Running"
 msgstr "En curso"
@@ -5215,6 +5417,11 @@ msgstr "Guardar como PDF"
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
 msgstr "Guardar los acuerdos"
+
+#. placeholder {0}: draft.revision
+#: src/workflows/definition-editor.tsx
+msgid "Saved as revision {0}."
+msgstr "Guardado como revisión {0}."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Saved."
@@ -5377,6 +5584,7 @@ msgid "Show less"
 msgstr "Mostrar menos"
 
 #: src/knowledge/nav.tsx
+#: src/routes/_shell.settings.packages.index.tsx
 msgid "Show more"
 msgstr "Mostrar más"
 
@@ -5525,6 +5733,10 @@ msgctxt "who did it, in the log"
 msgid "Someone at the company"
 msgstr "Alguien de la empresa"
 
+#: src/workflows/definition-editor.tsx
+msgid "Someone changed this draft since you read it. Your text is still here: read their revision, then save again, or take theirs instead."
+msgstr "Alguien ha cambiado este borrador desde que lo leíste. Tu texto sigue aquí: lee su revisión y vuelve a guardar, o quédate con la suya."
+
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Someone chooses their own language when they open their link."
 msgstr "Cada persona elige su idioma al abrir su enlace."
@@ -5578,6 +5790,10 @@ msgstr "Parte interesada invitada a Grasp"
 msgid "Stakeholder named: the {role}"
 msgstr "Parte interesada designada: {role}"
 
+#: src/workflows/test-run.tsx
+msgid "Start a test run"
+msgstr "Iniciar una ejecución de prueba"
+
 #: src/knowledge/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Empezar de nuevo desde la versión {newerVersion}"
@@ -5601,6 +5817,10 @@ msgstr "Empezó a seguir una conexión tarde: los cambios anteriores no se leyer
 #: src/activity/audit-words.ts
 msgid "Started following what changes at a connection"
 msgstr "Empezó a seguir lo que cambia en una conexión"
+
+#: src/workflows/test-run.tsx
+msgid "Starting…"
+msgstr "Iniciando…"
 
 #: src/brain/brain.ts
 msgid "Statement"
@@ -5643,6 +5863,10 @@ msgstr "Stephen"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Stephen is reading it. This takes a minute."
 msgstr "Stephen lo está leyendo. Tarda un minuto."
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Steps"
+msgstr "Pasos"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -5735,6 +5959,10 @@ msgstr "Retirar la aprobación de {screen}"
 msgid "Take the go back"
 msgstr "Retirar el visto bueno"
 
+#: src/workflows/definition-editor.tsx
+msgid "Take theirs"
+msgstr "Quedarme con la suya"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Admite datos sensibles"
@@ -5805,6 +6033,10 @@ msgstr "Probar"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Test of {workflow}"
 msgstr "Prueba de {workflow}"
+
+#: src/workflows/test-run.tsx
+msgid "Test run of version {version}"
+msgstr "Ejecución de prueba de la versión {version}"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -5924,6 +6156,10 @@ msgstr "No se pudo cargar la aplicación."
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "Se retiró la aprobación del código de esta aplicación y la aplicación se detuvo. Un administrador puede aprobarlo de nuevo en la página del dominio."
 
+#: src/routes/_shell.settings.packages.index.tsx
+msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
+msgstr "Las apps y flujos de trabajo que pueden usar paquetes npm aprobados. Abre uno para dar de baja o revocar lo que se le aprobó."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Las aplicaciones en las que pueden trabajar tus flujos de trabajo. Grasp solo hace lo que permites en cada una."
@@ -5997,6 +6233,10 @@ msgstr "El contrato de encargo del tratamiento no está firmado"
 #: src/chat/composer.tsx
 msgid "The default, {each}"
 msgstr "Predeterminado, {each}"
+
+#: src/workflows/test-run.tsx
+msgid "The details of this run were removed when its retention ended."
+msgstr "Los detalles de esta ejecución se eliminaron al terminar su periodo de conservación."
 
 #: src/brain/brain.ts
 msgid "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
@@ -6075,6 +6315,10 @@ msgstr "El registro de auditoría completo"
 msgctxt "onboarding area section"
 msgid "The go"
 msgstr "El visto bueno"
+
+#: src/workflows/test-run.tsx
+msgid "The input isn't JSON."
+msgstr "La entrada no es JSON."
 
 #: src/onboarding/staff-words.ts
 msgid "The interview days are set"
@@ -6188,6 +6432,10 @@ msgstr "La anterior"
 msgid "The packages approved for this domain. You see them because you may approve packages; the rest of the domain is for its members."
 msgstr "Los paquetes aprobados para este dominio. Los ves porque puedes aprobar paquetes; el resto del dominio es para sus miembros."
 
+#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+msgid "The packages approved for this workflow's calculations. Retire or revoke them here."
+msgstr "Los paquetes aprobados para los cálculos de este flujo de trabajo. Dalos de baja o revócalos aquí."
+
 #: src/engines/package-approvals.tsx
 msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
 msgstr "No se pudieron leer de nuevo los paquetes, así que esta lista puede estar desactualizada: {unread}"
@@ -6220,6 +6468,26 @@ msgstr "La evaluación de riesgos no está hecha"
 #: src/routes/_shell.settings.spend.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 msgstr "Las reglas de la configuración de este despliegue no se pueden leer, así que se rechaza toda llamada a modelos. Contacta con Grasp."
+
+#: src/workflows/test-run.tsx
+msgid "The run completed."
+msgstr "La ejecución ha terminado."
+
+#: src/workflows/test-run.tsx
+msgid "The run failed."
+msgstr "La ejecución ha fallado."
+
+#: src/workflows/test-run.tsx
+msgid "The run is going."
+msgstr "La ejecución está en curso."
+
+#: src/workflows/test-run.tsx
+msgid "The run is starting."
+msgstr "La ejecución se está iniciando."
+
+#: src/workflows/test-run.tsx
+msgid "The run was stopped."
+msgstr "La ejecución se ha detenido."
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "The sponsor's answer"
@@ -6279,6 +6547,10 @@ msgstr "Sus herramientas"
 #: src/frame/person-menu.tsx
 msgid "Theme"
 msgstr "Tema"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Then {task}"
+msgstr "Después {task}"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
@@ -6576,6 +6848,10 @@ msgctxt "tab of a workflow"
 msgid "Triggers"
 msgstr "Disparadores"
 
+#: src/workflows/workflow-diagram.tsx
+msgid "Try"
+msgstr "Intentar"
+
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
@@ -6637,6 +6913,10 @@ msgstr "Fuente desconocida"
 #: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Evento ilegible"
+
+#: src/workflows/definition-editor.tsx
+msgid "Unsaved changes"
+msgstr "Cambios sin guardar"
 
 #: src/workflows/history-view.tsx
 msgid "Until {until}"
@@ -6706,8 +6986,13 @@ msgstr "Verificado"
 #: src/engines/screen-approval.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Version"
 msgstr "Versión"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Version {currentVersion}"
+msgstr "Versión {currentVersion}"
 
 #: src/knowledge/timeline.tsx
 msgid "Version {number}"
@@ -6725,11 +7010,16 @@ msgstr "Versión {number}, actual"
 msgid "Version {version}"
 msgstr "Versión {version}"
 
+#: src/workflows/test-run.tsx
+msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
+msgstr "La versión {version} no tiene una compilación que se ejecute, así que no se ejecutó nada: una de sus tareas usa algo que Grasp aún no puede ejecutar."
+
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
 msgstr "Versión para revisar: {version}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Versions"
 msgstr "Versiones"
@@ -6757,6 +7047,10 @@ msgstr "Página de visión"
 #: src/brain/brain.ts
 msgid "Vision page confirmed"
 msgstr "Página de visión confirmada"
+
+#: src/workflows/workflow-diagram.tsx
+msgid "Waiting"
+msgstr "En espera"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
@@ -7019,6 +7313,14 @@ msgstr "Lo que las acciones del dominio pueden gastar a través de esta vinculac
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "Lo que cuestan este mes ({month}, UTC) los modelos que trabajan para ti en Grasp, en dólares estadounidenses, según su precio."
 
+#: src/workflows/test-run.tsx
+msgid "What the run of version {traceVersion} did"
+msgstr "Lo que hizo la ejecución de la versión {traceVersion}"
+
+#: src/workflows/definition-editor.tsx
+msgid "What to fix"
+msgstr "Qué corregir"
+
 #: src/routes/_shell.dashboard.tsx
 msgid "What waits on you, each with its next step, and what could be better."
 msgstr "Lo que te espera, cada cosa con su siguiente paso, y lo que podría ir mejor."
@@ -7193,6 +7495,8 @@ msgstr "Calculó lo que podría mejorarse"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/runs-widget.tsx
+#: src/routes/_shell.settings.packages.index.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
@@ -7209,12 +7513,21 @@ msgid "Workflow {workflow}"
 msgstr "Flujo de trabajo {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgid "Workflow not found"
 msgstr "Flujo de trabajo no encontrado"
+
+#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
+msgid "Workflow packages"
+msgstr "Paquetes del flujo de trabajo"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"
 msgstr "Fallan pruebas de flujos de trabajo:"
+
+#: src/workflows/definition-editor.tsx
+msgid "workflow.json"
+msgstr "workflow.json"
 
 #: src/chat/builds.tsx
 #: src/dashboard/report.ts
@@ -7223,6 +7536,7 @@ msgstr "Fallan pruebas de flujos de trabajo:"
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Workflows"
@@ -7291,10 +7605,6 @@ msgctxt "settings group"
 msgid "Workspace"
 msgstr "Espacio de trabajo"
 
-#: src/activity/pending.tsx
-msgid "Would keep {claimed} records here"
-msgstr "Guardaría aquí registros de tipo {claimed}"
-
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Se ejecutaría tras la aprobación"
@@ -7302,6 +7612,14 @@ msgstr "Se ejecutaría tras la aprobación"
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Escribe tu respuesta"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
+msgstr "Las escrituras que un modelo puede dirigir cubren solo los usos de cada acción, no una tarea de modelo del flujo cuya respuesta pasa una tarea posterior."
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Writes a model may steer: {target}"
+msgstr "Escrituras que un modelo puede dirigir: {target}"
 
 #: src/chat/thread.tsx
 msgid "Writing"

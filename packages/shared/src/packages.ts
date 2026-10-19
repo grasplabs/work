@@ -198,6 +198,13 @@ export const packageLimits = {
   appLocks: 32,
   /** What one target's build makes, every file of it together. */
   artifactBytes: 16 * 1024 * 1024,
+  /**
+   * The most characters the approved packages' modules one workflow
+   * version seals have together (GRA-665): they are loaded with its build
+   * at every call, so they are bounded as its own modules are. A version
+   * sealed under a lower limit always loads under this one.
+   */
+  workflowPackageChars: 2 * 1024 * 1024,
 } as const;
 export type PackageLimits = Record<keyof typeof packageLimits, number>;
 
@@ -545,13 +552,29 @@ export const packageBuildAnswerSchema = z.discriminatedUnion("ok", [
 export type PackageBuildAnswer = z.infer<typeof packageBuildAnswerSchema>;
 
 /** What a build of an approved graph asks for. */
-export const packageBuildRequestSchema = z.strictObject({
-  app: appIdSchema,
-  graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
-  target: dependencyTargetSchema,
-  /** The dependency policy generation the caller read. */
-  policyGeneration: z.int().nonnegative(),
-});
+export const packageBuildRequestSchema = z
+  .strictObject({
+    /** Whose graph: an App's or a workflow's (exactly one). */
+    app: appIdSchema.optional(),
+    workflow: workflowResourceIdSchema.optional(),
+    graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
+    target: dependencyTargetSchema,
+    /** The dependency policy generation the caller read. */
+    policyGeneration: z.int().nonnegative(),
+  })
+  .refine(
+    ({ app, workflow }) => (app === undefined) !== (workflow === undefined),
+    { message: "Either an App or a workflow, not both", path: ["app"] }
+  )
+  // A workflow's packages are for its compute modules only.
+  .refine(
+    ({ workflow, target }) =>
+      workflow === undefined || target === workflowDependencyTarget,
+    {
+      message: `A workflow's packages are for ${workflowDependencyTarget} only`,
+      path: ["target"],
+    }
+  );
 export type PackageBuildRequest = z.input<typeof packageBuildRequestSchema>;
 
 /**

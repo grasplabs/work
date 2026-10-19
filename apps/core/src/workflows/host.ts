@@ -868,11 +868,14 @@ const attemptContextSchema = z.object({
 
 /**
  * Whether `attempt` may have kept statistics points to add up as it
- * completes its step: it called its App's methods, or a function of its
- * App's sealed release kept one by it.
+ * completes its step: it called its App's methods or its sealed
+ * functions. Then the step gets its marker as it completes, whether or
+ * not a point was kept, so a run of the step the engine makes again after
+ * that adds up nothing, also when the first recorded nothing
+ * (`commitStepStatistics`).
  */
 const keptStatistics = (attempt: StepAttempt): boolean =>
-  attempt.calledApp || attempt.recorded;
+  attempt.calledApp || attempt.recorded || attempt.functionCalls > 0;
 
 /**
  * Whether an attempt has no retry after it: its number as the engine's

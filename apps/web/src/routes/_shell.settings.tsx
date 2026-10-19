@@ -13,6 +13,7 @@ import {
   CircleHelpIcon,
   CoinsIcon,
   HistoryIcon,
+  PackageIcon,
   SparklesIcon,
   UserRoundIcon,
   UsersIcon,
@@ -25,6 +26,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // who may do what in it, then one's own account, one section at a time.
 // Only the sections core has something behind are here, and only those
 // the person may open are listed: Profile and Notifications for everyone;
+// Packages for all but Grasp staff (its list is for who may approve packages);
 // Members and roles, Models, AI spend, the audit trail and calls of unknown outcome for admins
 // (Members and roles, and unknown outcomes, never for Grasp staff). Core checks the role on every call
 // whatever is listed.
@@ -36,7 +38,8 @@ type SettingsPath =
   | "/settings/models"
   | "/settings/spend"
   | "/settings/audit"
-  | "/settings/outcomes";
+  | "/settings/outcomes"
+  | "/settings/packages";
 
 interface SettingsItem {
   label: MessageDescriptor;
@@ -52,6 +55,11 @@ const groupsFor = ({
   admin: boolean;
   staff: boolean;
 }): { id: string; title: MessageDescriptor; items: SettingsItem[] }[] => {
+  // Packages for everyone but Grasp staff: what it lists is for whoever
+  // may approve packages, a permission no role implies, so core says.
+  const packages: SettingsItem[] = staff
+    ? []
+    : [{ label: msg`Packages`, to: "/settings/packages", icon: PackageIcon }];
   const workspace: SettingsItem[] = admin
     ? [
         ...(staff
@@ -75,8 +83,9 @@ const groupsFor = ({
                 icon: CircleHelpIcon,
               },
             ]),
+        ...packages,
       ]
-    : [];
+    : packages;
   return [
     ...(workspace.length === 0
       ? []

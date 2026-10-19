@@ -14,10 +14,17 @@ import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
+import { buildComputeModules } from "../src/screens.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
+import {
+  editWorkflowDraft,
+  publishWorkflowDraft,
+  workflowDraft,
+} from "../src/workflow-drafts.ts";
 import { jsonTextDepth, runCompute } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
+  deleteWorkflowResource,
   publishWorkflowVersion,
   workflowSource,
   workflowVersions,
@@ -27,6 +34,7 @@ import { callCompute } from "../src/workflows/resource-compute.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
+import { steeringCases } from "./steering-cases.ts";
 
 // A JSON workflow's own compute modules (workflow-modules.ts,
 // resource-compute.ts), from the threat model on GRA-271: a calculation
@@ -529,6 +537,207 @@ describe("a JSON workflow's compute modules", () => {
     }
   });
 
+  it("starts a draft from the modules its current version sealed, and publishes a draft's own modules with it", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, totalModules);
+    const started = await workflowDraft(env, by, workflow.id);
+    // The draft changes a module, and the definition still calls it.
+    const changed = {
+      ...totalModules,
+      "code/sum.ts": `${sumModule}// counted again\n`,
+    };
+    const draft = await editWorkflowDraft(env, by, workflow.id, {
+      expectedRevision: 0,
+      source: definitionOf(workflow.name, { version: "1.1.0" }),
+      modules: changed,
+    });
+    await publishWorkflowDraft(env, by, workflow.id, {
+      revision: 1,
+      basedOn: 1,
+    });
+    const { files } = await workflowSource(env, by, workflow.id, 2);
+    const [latest] = await workflowVersions(env, by, workflow.id);
+    expect({
+      started: started.modules,
+      version: [latest?.version, latest?.build.executable],
+      problems: draft.problems,
+      checkpoint: draft.checkpoint?.revision,
+      modules: draft.modules,
+      sealed: files["code/sum.ts"],
+    }).toStrictEqual({
+      started: totalModules,
+      version: [2, true],
+      problems: [],
+      checkpoint: 1,
+      modules: changed,
+      sealed: changed["code/sum.ts"],
+    });
+  });
+
+  it("checks a draft's local bindings against its own modules, and keeps modules that don't build with their problems", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
+    const source = definitionOf(workflow.name);
+    // Without the module it binds, its binding is unknown.
+    const bare = await editWorkflowDraft(env, by, workflow.id, {
+      expectedRevision: 0,
+      source,
+      modules: {},
+    });
+    // A module that doesn't build is kept, with where the build says.
+    const broken = { "code/total.ts": "export const total = ;\n" };
+    const failing = await editWorkflowDraft(env, by, workflow.id, {
+      expectedRevision: 1,
+      source,
+      modules: broken,
+    });
+    const read = await workflowDraft(env, by, workflow.id);
+    expect({
+      bare: bare.problems.map(({ code }) => code),
+      failing: failing.problems
+        .map(({ code, pointer }) => `${code} ${pointer}`)
+        .filter((problem) => problem.startsWith("modules.")),
+      checkpoint: failing.checkpoint,
+      kept: read.modules,
+      published: await outcome(
+        publishWorkflowDraft(env, by, workflow.id, {
+          revision: 2,
+          basedOn: null,
+        })
+      ),
+    }).toStrictEqual({
+      bare: ["binding.unknown_contract"],
+      failing: ["modules.invalid /modules/code~1total.ts"],
+      checkpoint: null,
+      kept: broken,
+      published: "workflow.draft_unchecked",
+    });
+  });
+
+  it("runs a draft's modules in the sandbox again only when they change, checking each edit against their contracts", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
+    // The runtime's loader, which every sandboxed call starts an isolate
+    // with here, counting the isolates.
+    let runs = 0;
+    const loader = env.LOADER;
+    const counted = {
+      ...env,
+      LOADER: {
+        get: (...args: Parameters<typeof loader.get>) => {
+          runs += 1;
+          return loader.get(...args);
+        },
+        load: loader.load.bind(loader),
+      },
+    };
+    const edit = async (
+      expectedRevision: number,
+      source: string,
+      modules: Record<string, string>
+    ) => {
+      const before = runs;
+      const draft = await editWorkflowDraft(counted, by, workflow.id, {
+        expectedRevision,
+        source,
+        modules,
+      });
+      return {
+        ran: runs > before,
+        problems: draft.problems.map(({ code }) => code),
+      };
+    };
+    const first = await edit(0, definitionOf(workflow.name), totalModules);
+    // Only the definition changes: to an export the modules don't have,
+    // which their kept contracts still find.
+    const missing = await edit(
+      1,
+      definitionOf(workflow.name, { contract: "local:code/total.ts#missing" }),
+      totalModules
+    );
+    const back = await edit(2, definitionOf(workflow.name), totalModules);
+    const changed = await edit(3, definitionOf(workflow.name), {
+      ...totalModules,
+      "code/sum.ts": `${sumModule}// changed\n`,
+    });
+    expect({ first, missing, back, changed }).toStrictEqual({
+      first: { ran: true, problems: [] },
+      missing: { ran: false, problems: ["binding.unknown_contract"] },
+      back: { ran: false, problems: [] },
+      changed: { ran: true, problems: [] },
+    });
+  });
+
+  it("keeps a draft's modules and their inspections only with the revisions it keeps, and drops them with the workflow", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
+    const passing = definitionOf(workflow.name);
+    const failing = definitionOf(workflow.name, {
+      contract: "local:code/total.ts#missing",
+    });
+    // A checkpoint, then two whose modules pass and whose definition
+    // doesn't, then one whose modules don't build: the middle two go.
+    for (const [revision, [source, modules]] of [
+      [passing, totalModules],
+      [failing, totalModules],
+      [failing, totalModules],
+      [passing, { "code/other.ts": "export const other = ;\n" }],
+    ].entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one edit after the other
+      await editWorkflowDraft(env, by, workflow.id, {
+        expectedRevision: revision,
+        source,
+        modules,
+      });
+    }
+    const stored = async (): Promise<{
+      modules: string[];
+      inspections: number[];
+    }> => {
+      const [modules, inspections] = await env.DB.batch<{
+        revision: number;
+        path?: string;
+      }>([
+        env.DB.prepare(
+          "SELECT revision, path FROM workflow_resource_draft_modules WHERE workflow_resource_id = ? ORDER BY revision, path"
+        ).bind(workflow.id),
+        env.DB.prepare(
+          "SELECT revision FROM workflow_resource_draft_inspections WHERE workflow_resource_id = ? ORDER BY revision"
+        ).bind(workflow.id),
+      ]);
+      return {
+        modules: (modules?.results ?? []).map(
+          ({ revision, path }) => `${revision} ${path ?? ""}`
+        ),
+        inspections: (inspections?.results ?? []).map(
+          ({ revision }) => revision
+        ),
+      };
+    };
+    const kept = await stored();
+    await deleteWorkflowResource(env, by, workflow.id);
+    expect({ kept, deleted: await stored() }).toStrictEqual({
+      kept: {
+        modules: ["1 code/sum.ts", "1 code/total.ts", "4 code/other.ts"],
+        inspections: [1],
+      },
+      deleted: { modules: [], inspections: [] },
+    });
+  });
+
+  it("refuses an edit that doesn't say which modules the draft carries", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, totalModules);
+    await expect(
+      outcome(
+        editWorkflowDraft(env, by, workflow.id, {
+          expectedRevision: 0,
+          source: definitionOf(workflow.name, { version: "1.1.0" }),
+        })
+      )
+    ).resolves.toBe("workflow.resource_invalid");
+  });
+
   it("makes other modules another program, and another publication of the same version", async () => {
     const by = await builder();
     const first = await published(by, totalModules);
@@ -838,5 +1047,72 @@ export const total = compute({ input: v.array(v.string()), output: v.number(), h
       const refused = await publicationRefusal(by, modules);
       expect(refused.code).toBe("workflow.resource_invalid");
     }
+  });
+});
+
+/**
+ * The files and rules of the errors building `files` as a JSON workflow's
+ * compute modules said: `rule: "imports"` is the build's own refusal (a
+ * directive, a suppression, an ambient module), before any type check.
+ */
+const computeErrors = async (
+  files: Record<string, string>
+): Promise<{ files: string[]; rules: string[] }> => {
+  const build = await buildComputeModules(env, files, `c-${unique()}`);
+  const errors = build.ok
+    ? []
+    : build.diagnostics.filter(({ severity }) => severity === "error");
+  return {
+    files: [...new Set(errors.map(({ file }) => file ?? "(none)"))].toSorted(),
+    rules: [...new Set(errors.map(({ rule }) => rule))].toSorted(),
+  };
+};
+
+describe("a JSON workflow's compute modules, type-checked as they are built", () => {
+  it.each(steeringCases("@grasp-os/sdk/compute"))(
+    "refuse, in a module they share, %s, before the type check reads it",
+    async (_case, source) => {
+      await expect(
+        computeErrors({ ...totalModules, "code/extra.ts": source })
+      ).resolves.toStrictEqual({
+        files: ["code/extra.ts"],
+        rules: ["imports"],
+      });
+    }
+  );
+
+  it.each([
+    [
+      "a DOM global, which their isolate doesn't have",
+      "export const title = (): string => document.title;\n",
+    ],
+    [
+      "browser storage",
+      'export const kept = (): string | null => localStorage.getItem("x");\n',
+    ],
+    [
+      "a module of the kit's screens, for its types",
+      'import type { ReactNode } from "react";\nexport type Reached = ReactNode;\n',
+    ],
+    [
+      "another SDK module, for its types",
+      'import type { GraspClient } from "@grasp-os/sdk/client";\nexport type Reached = GraspClient;\n',
+    ],
+  ])("refuse %s", async (_case, source) => {
+    const { files } = await computeErrors({
+      ...totalModules,
+      "code/extra.ts": source,
+    });
+    expect(files).toStrictEqual(["code/extra.ts"]);
+  });
+
+  it("build modules that use only the compute SDK and a worker's globals", async () => {
+    await expect(
+      computeErrors({
+        ...totalModules,
+        "code/extra.ts":
+          "export const encoded = (text: string): number => new TextEncoder().encode(text).length;\n",
+      })
+    ).resolves.toStrictEqual({ files: [], rules: [] });
   });
 });

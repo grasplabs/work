@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import type { DefinitionPackage } from "./definition-packages.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { collectionIdSchema, identifierSchema } from "./ids.ts";
+import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
-import { recordTypeNameSchema } from "./knowledge.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
 import { platformLimits } from "./platform-limits.ts";
 import type { TriggerDeclaration } from "./workflows.ts";
@@ -363,8 +363,7 @@ export interface AppFilesApi {
    * opens without building. Answers once they are done with how they went
    * (`builds`). A build never fails the commit. Exports that aren't
    * valid (`appExportsPath`) do: the commit is refused with
-   * `app.exports_invalid`, naming the issues; and so do record types
-   * that aren't (`appRecordTypesPath`), with `app.records_invalid`.
+   * `app.exports_invalid`, naming the issues.
    * Changes that leave the files as they are: `app.nothing_to_commit`.
    * Of two commits at once, one is refused with `app.conflict`: read the
    * latest version and commit over it again.
@@ -394,7 +393,7 @@ export interface AppVersionsApi {
    * Makes a version the one that runs, after review or to roll back. By
    * anyone but one of the organization's admins (Grasp staff too, and a
    * rollback too), it asks again for the App's permissions on a
-   * connection, to write a collection, to start a workflow or to call
+   * connection, to start a workflow or to call
    * another App's exports other than all those marked `read`: they allow
    * nothing until an admin grants them again, which approves the version
    * they reviewed (`PermissionsApi.grant`). Code of a version no admin approved changes
@@ -540,6 +539,12 @@ export interface AppsApi {
    * version alone, for anyone with a role in the App.
    */
   exports: (app: string) => Promise<CurrentExports>;
+  /**
+   * The App's definition package: its current sealed release and the
+   * workflow versions it binds, as portable source without secrets. For
+   * its builders, never Grasp staff; audited.
+   */
+  definition: (app: string) => Promise<DefinitionPackage>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;
@@ -561,8 +566,6 @@ export const appErrors = defineErrorFamily({
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
   "app.exports_invalid":
     "The App's exports (app/exports.json) aren't valid, so it can't be committed.",
-  "app.records_invalid":
-    "The App's record types (app/records.json) aren't valid, so it can't be committed.",
   "app.export_not_found":
     "The App doesn't export that method: it never did, or its current version no longer does.",
   "app.call_invalid":
@@ -946,131 +949,3 @@ export const appExportsSchema = z
     message: `At most ${appMaxExports} exports`,
   });
 export type AppExports = z.infer<typeof appExportsSchema>;
-
-// Record types: the kinds of record an App keeps in a collection it may
-// write, such as a workflow map's `workflow`, declared in one file of its
-// code, so they are versioned with it: what a version declares never
-// changes, and changing a type takes a new version, which changes it
-// expand, then contract, as a schema does. A type in a collection is one
-// App's: the first whose declaration took effect there, while it holds a
-// permission to write there and its current version declares it (core's
-// knowledge/record-types.ts). Knowledge checks every write of a record of
-// the type to that collection against that App's declaration, whoever
-// writes: the App, the agent, or a person editing the text. Its schema is
-// JSON Schema, in the keywords an export's may use.
-
-/** Where an App declares its record types. */
-export const appRecordTypesPath = "app/records.json";
-
-/** Most record types one App declares. */
-export const appMaxRecordTypes = 32;
-
-/** Most characters of an App's record types file. */
-export const appRecordTypesMaxLength = 64_000;
-
-/** Most fields one record type keeps. */
-export const recordTypeMaxKept = 32;
-
-/** Most methods one record type gives kept fields to. */
-export const recordTypeMaxKeepers = 8;
-
-/** A method's name, as an export's is (`isExportName`). */
-const methodNameSchema = z.string().refine(isExportName, {
-  message:
-    "A method's name: a lowercase letter, then up to 63 letters and digits, and not a reserved name",
-});
-
-/**
- * One record type: the collection it is kept in, by ID, what it is, the
- * JSON Schema of its frontmatter (an object, in the keywords an export's
- * schemas may use), and optionally fields that only one method of the
- * App's server code sets (`kept`, a method and its fields each): its
- * record's `app` link, say, or what a snapshot froze. Every other write,
- * by a person or the agent too, keeps them as the version it goes over
- * has them. A type in a collection is one App's: the first whose
- * declaration took effect there (core's knowledge/record-types.ts).
- */
-export const appRecordTypeSchema = z
-  .strictObject({
-    collection: collectionIdSchema,
-    description: z.string().max(appLimits.descriptionLength).default(""),
-    schema: jsonSchemaSchema.refine((schema) => schema.type === "object", {
-      message: "A record's frontmatter is an object: `type: object`",
-    }),
-    kept: z
-      .array(
-        z.strictObject({
-          method: methodNameSchema,
-          fields: z.array(z.string().min(1).max(64)).min(1),
-        })
-      )
-      .max(recordTypeMaxKeepers)
-      .default([]),
-  })
-  .superRefine(({ schema, kept }, context) => {
-    const { properties } = schema;
-    const declared = new Set(
-      typeof properties === "object" && properties !== null
-        ? Object.keys(properties)
-        : []
-    );
-    const seen = new Set<string>();
-    for (const [group, { fields }] of kept.entries()) {
-      for (const [index, field] of fields.entries()) {
-        const path = ["kept", group, "fields", index];
-        if (!declared.has(field)) {
-          context.addIssue({
-            code: "custom",
-            path,
-            message: "A field the schema's properties declare",
-          });
-        }
-        if (seen.has(field)) {
-          context.addIssue({
-            code: "custom",
-            path,
-            message: "Each field is kept for one method only",
-          });
-        }
-        seen.add(field);
-      }
-    }
-    if (seen.size > recordTypeMaxKept) {
-      context.addIssue({
-        code: "custom",
-        path: ["kept"],
-        message: `At most ${recordTypeMaxKept} kept fields`,
-      });
-    }
-  });
-export type AppRecordType = z.infer<typeof appRecordTypeSchema>;
-
-/**
- * An App's record types file (`appRecordTypesPath`): each type by its
- * name, which is the `type` in its records' frontmatter.
- *
- * ```json
- * {
- *   "workflow": {
- *     "collection": "playbook",
- *     "description": "A workflow as it runs now, or as it should",
- *     "schema": {
- *       "type": "object",
- *       "properties": {
- *         "title": { "type": "string", "maxLength": 200 },
- *         "state": { "enum": ["drawn", "designed"] },
- *         "app": { "type": "object", "properties": { "appId": { "type": "string" } } }
- *       },
- *       "required": ["state"]
- *     },
- *     "kept": [{ "method": "link", "fields": ["app"] }]
- *   }
- * }
- * ```
- */
-export const appRecordTypesSchema = z
-  .record(recordTypeNameSchema, appRecordTypeSchema)
-  .refine((types) => Object.keys(types).length <= appMaxRecordTypes, {
-    message: `At most ${appMaxRecordTypes} record types`,
-  });
-export type AppRecordTypes = z.infer<typeof appRecordTypesSchema>;
