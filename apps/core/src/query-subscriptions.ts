@@ -958,16 +958,16 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       return { roles, by };
     }
     this.#cleared.delete(key);
-    // Someone without a role is refused as a read refuses them: nothing
-    // of the App disclosed.
+    // A build refused is refused as such; anyone else (no role, or none
+    // read by the time the access was) as a read refuses them: nothing of
+    // the App disclosed.
+    if (access === "revoked" || access === "unreviewed") {
+      return {
+        refusal: refusalResult(screenErrors.create(`screen.${access}`)),
+      };
+    }
     return {
-      refusal: refusalResult(
-        access === "role"
-          ? appErrors.create("app.not_found")
-          : screenErrors.create(
-              access === "revoked" ? "screen.revoked" : "screen.unreviewed"
-            )
-      ),
+      refusal: refusalResult(appErrors.create("app.not_found")),
     };
   }
 
