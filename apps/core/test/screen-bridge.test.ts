@@ -1054,12 +1054,15 @@ describe("screens", { timeout: 60_000 }, () => {
       return { opening, first, second, pushes: watching.received.length };
     });
 
-    // One reading for the first few seconds' calls and pushes, then one more.
+    // One reading for the first few seconds' calls and pushes, and one as
+    // the connection starts to follow the App's revocations for the
+    // callback it keeps (a revocation that landed in between is found by
+    // that reading), then one more.
     expect({
       opening: result.opening,
       first: result.first,
       second: result.second,
-    }).toStrictEqual({ opening: 1, first: 1, second: 2 });
+    }).toStrictEqual({ opening: 1, first: 2, second: 3 });
     expect(result.pushes).toBeGreaterThan(10);
   });
 
@@ -2222,13 +2225,27 @@ describe(
         builder.api.screens.call(app, "failingNotes", [nothing])
       );
       let revoked: Awaited<ReturnType<typeof failure>> | undefined;
+      const passed = { released: false };
+      const revoking = Object.assign(
+        async (): Promise<void> => {
+          await admin.api.screenTrust.revoke(app, bundle.artifact);
+        },
+        {
+          [Symbol.dispose]: (): void => {
+            passed.released = true;
+          },
+        }
+      );
       const events = await auditedDuring(async () => {
         revoked = await failure(
-          builder.api.screens.call(app, "failingNotes", [
-            async () => {
-              await admin.api.screenTrust.revoke(app, bundle.artifact);
-            },
-          ])
+          builder.api.screens.call(app, "failingNotes", [revoking])
+        );
+        // The revocation lets go of the callback the call passed too.
+        await vi.waitFor(
+          () => {
+            expect(passed.released).toBeTruthy();
+          },
+          { timeout: 20_000, interval: 50 }
         );
       });
 
@@ -2240,11 +2257,14 @@ describe(
           .map(
             ({ detail }) =>
               `${detail.operation}/${detail.stage}: ${detail.reason}`
-          ),
+          )
+          .toSorted(),
       }).toStrictEqual({
         approved: { code: "app.failed", carriesData: true },
         revoked: { code: "screen.revoked", carriesData: false },
-        refused: ["call/delivery: revoked"],
+        // The answer, and the callback it passed, let go of at the
+        // revocation.
+        refused: ["call/delivery: revoked", "call/push: revoked"],
       });
     });
   }
