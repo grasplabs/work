@@ -20,32 +20,44 @@ describe("moving a widget", () => {
   it("puts it in its new place, the ones between moving one over", () => {
     expect(placeWidget(defaultWidgets, "signals", 0)).toStrictEqual([
       "signals",
+      "return",
+      "goals",
+      "teams",
       "workflows",
       "engines",
       "runs",
     ]);
-    expect(placeWidget(defaultWidgets, "workflows", 2)).toStrictEqual([
+    expect(placeWidget(defaultWidgets, "return", 2)).toStrictEqual([
+      "goals",
+      "teams",
+      "return",
+      "workflows",
       "engines",
       "runs",
-      "workflows",
       "signals",
     ]);
   });
 
   it("goes no further than either end", () => {
-    expect(moveWidget(defaultWidgets, "workflows", -1)).toStrictEqual(
+    expect(moveWidget(defaultWidgets, "return", -1)).toStrictEqual(
       defaultWidgets
     );
     expect(moveWidget(defaultWidgets, "runs", 5)).toStrictEqual([
+      "return",
+      "goals",
+      "teams",
       "workflows",
       "engines",
       "signals",
       "runs",
     ]);
-    expect(moveWidget(defaultWidgets, "runs", -2)).toStrictEqual([
-      "runs",
+    expect(moveWidget(defaultWidgets, "teams", -2)).toStrictEqual([
+      "teams",
+      "return",
+      "goals",
       "workflows",
       "engines",
+      "runs",
       "signals",
     ]);
   });
@@ -58,12 +70,27 @@ describe("moving a widget", () => {
 
 describe("taking off and adding widgets", () => {
   it("takes one off, and adds it back last, never twice", () => {
-    const without = removeWidget(defaultWidgets, "engines");
-    expect(without).toStrictEqual(["workflows", "runs", "signals"]);
-    expect(missingWidgets(without)).toStrictEqual(["engines"]);
-    const again = addWidget(without, "engines");
-    expect(again).toStrictEqual(["workflows", "runs", "signals", "engines"]);
-    expect(addWidget(again, "engines")).toStrictEqual(again);
+    const without = removeWidget(defaultWidgets, "goals");
+    expect(without).toStrictEqual([
+      "return",
+      "teams",
+      "workflows",
+      "engines",
+      "runs",
+      "signals",
+    ]);
+    expect(missingWidgets(without)).toStrictEqual(["goals"]);
+    const again = addWidget(without, "goals");
+    expect(again).toStrictEqual([
+      "return",
+      "teams",
+      "workflows",
+      "engines",
+      "runs",
+      "signals",
+      "goals",
+    ]);
+    expect(addWidget(again, "goals")).toStrictEqual(again);
     expect(missingWidgets(again)).toStrictEqual([]);
   });
 
@@ -77,6 +104,12 @@ describe("taking off and adding widgets", () => {
     ).toBeTruthy();
     expect(differsFromDefault([])).toBeTruthy();
     expect(missingWidgets([])).toStrictEqual(defaultWidgets);
+  });
+
+  it("puts what a board saved before the newer widgets were there beside them", () => {
+    const saved = ["workflows", "engines", "runs", "signals"] as const;
+    expect(differsFromDefault(saved)).toBeTruthy();
+    expect(missingWidgets(saved)).toStrictEqual(["return", "goals", "teams"]);
   });
 });
 
