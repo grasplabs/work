@@ -1,5 +1,5 @@
 import type { OrgView } from "./onboarding-admin.ts";
-import { LISTEN_DAYS } from "./onboarding.ts";
+import { listenDays } from "./onboarding-admin.ts";
 
 /**
  * Where the interviews of an organization stand, as numbers to draw: how far everyone who is asked
@@ -59,14 +59,18 @@ export const talkedByDay = (view: OrgView): TalkedDay[] => {
       ? [each.completed]
       : []
   );
-  return Array.from({ length: LISTEN_DAYS + 1 }, (_, day): TalkedDay => {
-    if (!view.told || day > view.day) {
-      return { day, talked: null, total: null };
+  // As many days as the organization's own plan runs, the day it was told included.
+  return Array.from(
+    { length: listenDays(view.org) + 1 },
+    (_, day): TalkedDay => {
+      if (!view.told || day > view.day) {
+        return { day, talked: null, total: null };
+      }
+      return {
+        day,
+        talked: done.filter((at) => at === day).length,
+        total: done.filter((at) => at <= day).length,
+      };
     }
-    return {
-      day,
-      talked: done.filter((at) => at === day).length,
-      total: done.filter((at) => at <= day).length,
-    };
-  });
+  );
 };
