@@ -18,6 +18,7 @@ import type {
   KickoffView,
   VisionField,
 } from "@grasp-os/shared/kickoff";
+import { log } from "@grasp-os/shared/log";
 import { agreementsSchema, planSchema } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
@@ -50,6 +51,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   inArray,
   isNotNull,
   like,
@@ -175,6 +177,33 @@ export interface Took {
   seconds?: number;
 }
 
+/** One interview as Grasp's admin reads it from the store: no word of it. */
+export interface AdminInterviewFacts {
+  person: string;
+  kind: "own" | "lead";
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+  /** Where they stand, as their page last said; null before it saved. */
+  state: NonNullable<InterviewProgress["person"]> | null;
+  phase: NonNullable<InterviewProgress["phase"]> | null;
+  facts: number;
+  out: number;
+  confirmed: number;
+  rating: number | null;
+  typed: boolean;
+  interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
+}
+
+/** `text` as JSON, or undefined when it isn't JSON, for a schema to refuse. */
+const parsedJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
 /** Who did something, as the onboarding's log names them: never by name. */
 const whoIs = (by: AuditActor): string => {
   if (by.type === "person" || by.type === "staff") {
@@ -253,6 +282,43 @@ const logWhere = (filter: LogFilter, about: string[] | undefined) =>
 const counted = (value: number | undefined): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 
+/** How many interviews a snapshot read parses at once. */
+const adminFactsPage = 100;
+
+/** What the admin reads of one interview's progress: its numbers alone. */
+interface InterviewCounts {
+  state: NonNullable<InterviewProgress["person"]> | null;
+  phase: NonNullable<InterviewProgress["phase"]> | null;
+  facts: number;
+  out: number;
+  confirmed: number;
+  rating: number | null;
+  typed: boolean;
+  interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
+}
+
+const noCounts: InterviewCounts = {
+  state: null,
+  phase: null,
+  facts: 0,
+  out: 0,
+  confirmed: 0,
+  rating: null,
+  typed: false,
+  interviewer: null,
+};
+
+const countsOf = (progress: InterviewProgress): InterviewCounts => ({
+  state: progress.person,
+  phase: progress.phase,
+  facts: progress.facts.filter(({ out }) => out !== true).length,
+  out: progress.facts.filter(({ out }) => out === true).length,
+  confirmed: progress.confirmed,
+  rating: progress.rating ?? null,
+  typed: progress.mode === "type",
+  interviewer: progress.interviewer ?? null,
+});
+
 export class Onboarding extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
   #auditRetryMs = auditRetryMs.first;
@@ -280,6 +346,21 @@ export class Onboarding extends DurableObject<Env> {
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
     };
+  }
+
+  /**
+   * When who works where was last saved (ISO 8601), from the log; null
+   * before it was. The brain dates the teams' sizes by it.
+   */
+  rosterSavedAt(): string | null {
+    const [row] = this.#db
+      .select({ at: events.at })
+      .from(events)
+      .where(eq(events.what, "onboarding.roster.saved"))
+      .orderBy(desc(events.seq))
+      .limit(1)
+      .all();
+    return row?.at ?? null;
   }
 
   /** Whether interviews may happen now: not paused, and the agreements in. */
@@ -980,6 +1061,18 @@ export class Onboarding extends DurableObject<Env> {
     return known.length / visionFields.length;
   }
 
+  /**
+   * When the kickoff came in and how much of it is known, for Grasp's
+   * admin (admin-snapshot.ts): null before it is in. No word of it, nor its
+   * file's name, leaves the store.
+   */
+  kickoffFacts(): { at: string; known: number } | null {
+    const [row] = this.#db.select({ at: kickoff.at }).from(kickoff).all();
+    return row === undefined
+      ? null
+      : { at: row.at, known: this.kickoffKnown() };
+  }
+
   /** What the kickoff gives Stephen's context: empty before it is in. */
   kickoffBrief(): string {
     const { reading, answers } = this.kickoff();
@@ -1091,6 +1184,83 @@ export class Onboarding extends DurableObject<Env> {
         .from(links)
         .all(),
       interviews: [...this.#interviews().values()],
+    };
+  }
+
+  /**
+   * What Grasp's admin reads of the links and interviews (admin-snapshot.ts),
+   * by person: each link's times, and each interview as numbers. What was
+   * said is read here, inside the store, and only its counts leave it.
+   */
+  adminFacts(): {
+    told: boolean;
+    mapped: string[];
+    links: Omit<typeof links.$inferSelect, "keyMark" | "version">[];
+    interviews: AdminInterviewFacts[];
+  } {
+    // Only the counts are kept, read a page of interviews at a time, so a
+    // read of a large roster never holds every conversation at once. One
+    // interview's progress this core can't read leaves that interview with
+    // no counts, not the whole read failing; the log names the person by
+    // id alone, never what was kept.
+    const countsBy = new Map<string, InterviewCounts>();
+    let after = "";
+    for (;;) {
+      const page = this.#db
+        .select({ person: interviews.person, progress: interviews.progress })
+        .from(interviews)
+        .where(gt(interviews.person, after))
+        .orderBy(asc(interviews.person))
+        .limit(adminFactsPage)
+        .all();
+      for (const row of page) {
+        const progress = interviewProgressSchema.safeParse(
+          parsedJson(row.progress)
+        );
+        if (progress.success) {
+          countsBy.set(row.person, countsOf(progress.data));
+        } else {
+          log.warn("onboarding.admin_facts.unreadable", { person: row.person });
+        }
+      }
+      const last = page.at(-1);
+      if (last === undefined || page.length < adminFactsPage) {
+        break;
+      }
+      after = last.person;
+    }
+    const [row] = this.#db
+      .select({ toldAt: onboarding.toldAt })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const sent = this.#db
+      .select({
+        person: links.person,
+        sentAt: links.sentAt,
+        openedAt: links.openedAt,
+        remindedAt: links.remindedAt,
+        deletedAt: links.deletedAt,
+      })
+      .from(links)
+      .all();
+    return {
+      told: (row?.toldAt ?? null) !== null || sent.length > 0,
+      mapped: this.#db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(isNotNull(teams.mappedAt))
+        .all()
+        .map(({ id }) => id),
+      links: sent,
+      interviews: this.#db
+        .select()
+        .from(interviewStates)
+        .all()
+        .map((state) => ({
+          ...state,
+          ...(countsBy.get(state.person) ?? noCounts),
+        })),
     };
   }
 
