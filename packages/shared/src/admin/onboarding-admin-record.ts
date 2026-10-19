@@ -333,7 +333,15 @@ export const stephenOf = (view: OrgView): StephenStats => {
     Phase,
     number
   >;
-  const halfway = view.interviews.filter((interview) => !interview.approved);
+  // Someone talking now has stopped nowhere yet: theirs counts as started, not as stopped.
+  const talking = new Set(
+    view.people
+      .filter((each) => each.state === "progress")
+      .map((each) => each.person.id)
+  );
+  const halfway = view.interviews.filter(
+    (interview) => !interview.approved && !talking.has(interview.id)
+  );
   for (const interview of halfway) {
     if (interview.stoppedAt) {
       stops[interview.stoppedAt] += 1;
