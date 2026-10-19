@@ -1029,21 +1029,14 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
     Object.keys(candidates).length > 0 && buildAppTests(files).ok
       ? candidates
       : {};
-  // Not yet its migrations' own type errors: the SDK types a migration's
-  // row as any record, not as the table's previous shape, so a migration
-  // that spreads its row fails to check (GRA-690). What a migration names
-  // beyond its file (`rule: "imports"`) is refused all the same. Their
-  // imports are held by the build all the same, and they run where they
-  // reach nothing whatever their types say.
+  // Its migrations included: a migration's row is typed as the previous
+  // shape it declares (`input`), or as the stored JSON it is handed when
+  // it declares none, so a correct one checks and a wrong output fails here,
+  // before the host refuses it at run time anyway.
   const diagnostics = typeCheck(
     { ...appCodeFiles(files), ...tests },
     kit.types,
     appCodeTarget
-  ).filter(
-    ({ file, rule }) =>
-      file === undefined ||
-      appCodeKind(file) !== "migration" ||
-      !rule.startsWith("TS")
   );
   return diagnostics.some((diagnostic) => isError(diagnostic))
     ? { ok: false, diagnostics }
