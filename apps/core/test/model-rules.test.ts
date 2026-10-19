@@ -1044,46 +1044,33 @@ describe("model rules", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("refuse a workflow's AI step through an alias no admin bound, or one its App doesn't declare, before any model is asked", async () => {
+  // An alias its App doesn't declare as a text model never gets this
+  // far: making the version current refuses it (workflows.test.ts).
+  it("refuse a workflow's AI step through an alias no admin bound, before any model is asked", async () => {
     const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, {
-      ...workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
+    const app = await appWith(
+      builder,
+      workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
         extract: { total: 1234 },
-      }),
-      ...workflowFiles(
-        "stranger",
-        llm("retries: { limit: 2, delay: 1 },").replace(
-          'binding: "reader"',
-          'binding: "missing"'
-        ),
-        { extract: { total: 1234 } }
-      ),
-    });
-    const { fake, result: runs } = await withDeploymentRules(
+      })
+    );
+    const { fake, result: unbound } = await withDeploymentRules(
       { gateway, models: [workersAi, anthropic] },
       [],
       async () => {
-        const unbound = await builder.api.workflows.start(app, "reader");
-        const undeclared = await builder.api.workflows.start(app, "stranger");
-        await finished(unbound.id);
-        await finished(undeclared.id);
-        return { unbound: unbound.id, undeclared: undeclared.id };
+        const started = await builder.api.workflows.start(app, "reader");
+        await finished(started.id);
+        return started.id;
       }
     );
-    const refused = {
+    await expect(builder.api.workflows.status(unbound)).resolves.toMatchObject({
       status: "failed",
       failure: { error: { code: "resource.unavailable" } },
-    };
-    await expect(
-      Promise.all([
-        builder.api.workflows.status(runs.unbound),
-        builder.api.workflows.status(runs.undeclared),
-      ])
-    ).resolves.toMatchObject([refused, refused]);
+    });
     // Not retried, and nothing reached the gateway or its ledger.
     expect(fake.requests).toStrictEqual([]);
     const events = await eventsOf(
-      runActorOf({ runId: runs.unbound, app, workflow: "reader" })
+      runActorOf({ runId: unbound, app, workflow: "reader" })
     );
     expect(modelActions(events)).toStrictEqual([]);
   });
@@ -1217,51 +1204,6 @@ describe("model rules", { timeout: 60_000 }, () => {
       refused: [["model.budget_busy", "binding_day"]],
       actions: ["model.refused", "model.call"],
     });
-  });
-
-  it("refuse a workflow's AI step through a model resource with a structured output: the step brings its own schema", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, {
-      // A declaration whose answers are the App's own shape.
-      "app.ts": `import { app, resource, v } from "@grasp-os/sdk";
-
-import schema from "./schema.ts";
-
-export const reader = resource.model("reader", {
-  structuredOutput: v.object({ total: v.number() }),
-  maxOutputTokens: 32_768,
-});
-
-export default app({
-  name: "Models",
-  schema,
-  access: { tables: {} },
-  operations: {},
-  internalOperations: {},
-  screens: [],
-  uses: [reader],
-});
-`,
-      ...workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
-        extract: { total: 1234 },
-      }),
-    });
-    const { fake, result: run } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
-      [],
-      async () => {
-        // Bound by an admin all the same: it serves the App's actions.
-        await bindModel(app, "reader", anthropic);
-        const started = await builder.api.workflows.start(app, "reader");
-        await finished(started.id);
-        return started.id;
-      }
-    );
-    await expect(builder.api.workflows.status(run)).resolves.toMatchObject({
-      status: "failed",
-      failure: { error: { code: "resource.unavailable" } },
-    });
-    expect(fake.requests).toStrictEqual([]);
   });
 
   it("send a step's next attempt through its binding as it is then: none once revoked, the new one once replaced", async () => {

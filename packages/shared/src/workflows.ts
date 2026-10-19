@@ -37,6 +37,8 @@ export const workflowErrors = defineErrorFamily({
   "workflow.run_details_removed":
     "This run's details were removed when its retention ended, so there is nothing left to work out a fix from.",
   "workflow.build_failed": "The App's workflows don't build.",
+  "workflow.model_undeclared":
+    "A workflow's AI step goes through a model resource this version doesn't declare as a text model, so it can't be made current.",
   "workflow.tests_failed":
     "A workflow's tests fail, or it has none, so this version can't be made current.",
   "workflow.outside_step":

@@ -1003,31 +1003,82 @@ const choicesFor = async (
   };
 };
 
+/** A workflow's AI step, and the model resource it goes through. */
+export interface WorkflowAiStep {
+  /** The workflow's file, `workflows/<id>.ts`. */
+  readonly file: string;
+  readonly workflow: string;
+  readonly step: string;
+  /** Its `binding`, a literal its outline records. */
+  readonly binding: string;
+  readonly line: number;
+}
+
+/**
+ * The AI steps of the workflows in `files`, by the model resource each
+ * goes through (`step.llm`'s `binding`, a literal its outline records). A
+ * workflow whose steps can't be read gives none: it doesn't build.
+ */
+export const workflowAiSteps = (
+  files: Readonly<Record<string, string>>
+): WorkflowAiStep[] =>
+  Object.entries(files).flatMap(([file, source]) => {
+    const workflow = workflowIdOf(file);
+    const outline = workflow === undefined ? null : readOutline(source);
+    return outlineSteps(outline?.steps ?? []).flatMap((step) => {
+      const { binding } = step.options;
+      return workflow !== undefined &&
+        step.kind === "ai" &&
+        typeof binding === "string"
+        ? [{ file, workflow, step: step.name, binding, line: step.line }]
+        : [];
+    });
+  });
+
+/**
+ * Why `step` can't go through `resources`: the release's declarations,
+ * none for an App without one. Only a model resource without a structured
+ * output serves an AI step (`stepModelBinding`), as the step brings its own
+ * schema. Undefined when it can.
+ */
+export const aiStepProblem = (
+  resources: Readonly<Record<string, AnyResource>>,
+  { workflow, step, binding }: WorkflowAiStep
+): string | undefined => {
+  const declared = Object.hasOwn(resources, binding)
+    ? resources[binding]
+    : undefined;
+  const named = `AI step "${step}" of workflow "${workflow}" goes through "${binding}"`;
+  if (declared === undefined) {
+    return `${named}, which this version declares no resource as: declare it with \`resource.model("${binding}", …)\` in app.ts, or name a text model resource it declares.`;
+  }
+  if (declared["~resource"] !== "model") {
+    return `${named}, a ${declared["~resource"]} resource: an AI step goes through a text model resource.`;
+  }
+  if (declared.structuredOutput !== null) {
+    return `${named}, a model resource with a structured output: an AI step brings its own schema, so it goes through a text model resource (no \`output\`).`;
+  }
+  return undefined;
+};
+
 /**
  * The AI steps of `app`'s workflows at `version`, as `workflow:<id>/<step>`,
- * by the model resource each goes through (`step.llm`'s `binding`, a
- * literal its outline records): what a review shows using a resource
- * besides actions. A workflow whose steps can't be read shows none.
+ * by the model resource each goes through (`workflowAiSteps`): what a
+ * review shows using a resource besides actions.
  */
 const workflowUsers = async (
   env: Env,
   app: AppId,
   version: number
 ): Promise<Map<string, string[]>> => {
-  const files = await versionFiles(env, app, version);
   const users = new Map<string, string[]>();
-  for (const [path, source] of Object.entries(files)) {
-    const workflow = workflowIdOf(path);
-    const outline = workflow === undefined ? null : readOutline(source);
-    for (const step of outlineSteps(outline?.steps ?? [])) {
-      const { binding } = step.options;
-      if (step.kind === "ai" && typeof binding === "string") {
-        users.set(binding, [
-          ...(users.get(binding) ?? []),
-          `workflow:${workflow}/${step.name}`,
-        ]);
-      }
-    }
+  for (const { workflow, step, binding } of workflowAiSteps(
+    await versionFiles(env, app, version)
+  )) {
+    users.set(binding, [
+      ...(users.get(binding) ?? []),
+      `workflow:${workflow}/${step}`,
+    ]);
   }
   return users;
 };
