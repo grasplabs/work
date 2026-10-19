@@ -219,6 +219,19 @@ const granted = async (
 };
 
 /** `start` on workflow `id`, for `subject`. */
+/** The triggers a refusal's details name, if it names any. */
+const triggersIn = (failed: object | undefined): unknown => {
+  if (failed === undefined || !("details" in failed)) {
+    return undefined;
+  }
+  const { details } = failed;
+  return typeof details === "object" &&
+    details !== null &&
+    "triggers" in details
+    ? details.triggers
+    : undefined;
+};
+
 const startsOn = (
   subject: PermissionRequest["subject"],
   id: string
@@ -938,6 +951,150 @@ describe("a trigger starting a workflow", () => {
       },
       audited: { triggers: 1, trigger1: trigger.id },
       whileDisabled: "ok",
+    });
+  });
+
+  // The deletion's guard refuses for a hold that is gone by the time the
+  // refusal reads what holds it: tried again, then answered as busy, never
+  // as bound by nothing.
+  it("deletes a workflow whose hold went while its deletion was refused, and answers busy if it keeps coming back", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const deletion = async (
+      around: (deletes: number) => {
+        before: boolean | undefined;
+        after: boolean | undefined;
+      }
+    ) => {
+      const workflow = await workflowOf(ada);
+      const trigger = await createTriggerResource(env, ada, {
+        kind: "system",
+        workflowId: workflow.id,
+        version: 1,
+        config: { event: "note.created" },
+      });
+      await granted(
+        ada,
+        admin,
+        startsOn({ type: "trigger", triggerId: trigger.id }, workflow.id)
+      );
+      const enable = async (enabled: boolean | undefined) => {
+        if (enabled !== undefined) {
+          await env.DB.prepare(
+            "UPDATE trigger_resources SET enabled = ? WHERE id = ?"
+          )
+            .bind(enabled ? 1 : 0, trigger.id)
+            .run();
+        }
+      };
+      // Only the deletion's own batches count, those with its guarded
+      // update: the audit outbox may drain through the same database.
+      const deletions = new WeakSet<D1PreparedStatement>();
+      let attempts = 0;
+      const racing = new Proxy(env.DB, {
+        get: (target, property) => {
+          if (property === "prepare") {
+            return (query: string) => {
+              const statement = target.prepare(query);
+              if (
+                !/^update "workflow_resources" set "deleted_at"/iu.test(query)
+              ) {
+                return statement;
+              }
+              // What a batch gets is the statement bound to its values.
+              return new Proxy(statement, {
+                get: (prepared, key): unknown =>
+                  key === "bind"
+                    ? (...values: unknown[]) => {
+                        const bound = prepared.bind(...values);
+                        deletions.add(bound);
+                        return bound;
+                      }
+                    : Reflect.get(prepared, key),
+              });
+            };
+          }
+          if (property === "batch") {
+            return async (statements: D1PreparedStatement[]) => {
+              if (!statements.some((statement) => deletions.has(statement))) {
+                return await target.batch(statements);
+              }
+              attempts += 1;
+              const { before, after } = around(attempts);
+              await enable(before);
+              const result = await target.batch(statements);
+              await enable(after);
+              return result;
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      });
+      const answer: unknown = await refusal(
+        deleteWorkflowResource({ ...env, DB: racing }, ada, workflow.id)
+      );
+      const events = await allEvents();
+      const about = (action: string) =>
+        events.filter(
+          (event) => event.action === action && event.target?.id === workflow.id
+        );
+      const failed =
+        typeof answer === "object" && answer !== null ? answer : undefined;
+      return {
+        deleted:
+          failed !== undefined && "code" in failed ? failed.code : answer,
+        triggers: triggersIn(failed),
+        refused: about("workflow.delete_refused").map(
+          ({ detail }) => detail?.reason
+        ),
+        deletedEvents: about("workflow.deleted").length,
+        trigger: trigger.id,
+      };
+    };
+
+    // Disabled right after the refusal: the second try deletes it.
+    const once = await deletion((deletes) => ({
+      before: undefined,
+      after: deletes === 1 ? false : undefined,
+    }));
+    // Back before each try, gone after it: refused twice, busy.
+    const always = await deletion((deletes) => ({
+      before: deletes <= 2 ? true : undefined,
+      after: deletes <= 2 ? false : undefined,
+    }));
+    // Gone after the first try, back for good before the second: bound by
+    // it, and named.
+    const returned = await deletion((deletes) => ({
+      before: deletes === 2 ? true : undefined,
+      after: deletes === 1 ? false : undefined,
+    }));
+
+    expect({ once, always, returned }).toStrictEqual({
+      once: {
+        deleted: "ok",
+        triggers: undefined,
+        refused: [],
+        deletedEvents: 1,
+        trigger: once.trigger,
+      },
+      always: {
+        deleted: "workflow.resource_busy",
+        triggers: undefined,
+        refused: ["workflow.resource_busy"],
+        deletedEvents: 0,
+        trigger: always.trigger,
+      },
+      returned: {
+        deleted: "workflow.resource_bound",
+        triggers: { ids: [returned.trigger], hidden: 0 },
+        refused: ["workflow.resource_bound"],
+        deletedEvents: 0,
+        trigger: returned.trigger,
+      },
     });
   });
 
