@@ -355,6 +355,7 @@ const entries = [
     logo: null,
     description: null,
     group: "Email and calendar" as const,
+    auth: "managed" as const,
     offered: true,
   },
   {
@@ -366,6 +367,7 @@ const entries = [
     logo: null,
     description: null,
     group: "Email and calendar" as const,
+    auth: "managed" as const,
     offered: true,
   },
 ];
