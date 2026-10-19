@@ -130,12 +130,12 @@ import {
 //   a step waits longer each round, five seconds doubling to a minute
 //   (`askAgainSeconds`), and fails once its rounds have waited a day in
 //   all since it was last admitted (`workflowQueuedStepMs`,
-//   `workflow.queue_timeout`), spending none of its retries. A round never
-//   waits past when the share's first lease ends (`retryAfterSeconds`),
-//   though, which can be a second away again and again: the backoff alone
-//   doesn't bound the rounds of a day's wait. Only those rounds count: a
-//   pause, or a wait for its person after an admission, is not a wait for
-//   load (host.ts).
+//   `workflow.queue_timeout`), spending none of its retries. A round
+//   waits its backoff in full, however soon the refusal says a share
+//   comes free (`askAgainMs`): so a day's wait takes some 1,450 rounds at
+//   most, each of a few journal steps. Only those rounds count: a pause,
+//   or a wait for its person after an admission, is not a wait for load
+//   (host.ts), and each needs a person.
 // - A fake identity for an extra share: who a run acts for and its App
 //   come from its row (dispatcher.ts), never from its input or code, and
 //   people are the organization's members, from its identity provider.
@@ -144,8 +144,8 @@ import {
 //   person's share, so outsiders sending mail never take the App owner's
 //   share; a run started under another keeps its lineage root's.
 //   Starting more runs takes no more of any share.
-// - A gamed retry-after: core says when to ask again, from the leases it
-//   holds, and the run waits that long at most (host.ts); neither a
+// - A gamed retry-after: core says when to ask again, from its backoff
+//   (`askAgainMs`), and the run waits that long (host.ts); neither a
 //   workflow nor a person sets it, and asking sooner moves no one up the
 //   queue.
 // - A policy change missed: shares are read from the policy at each
@@ -217,8 +217,6 @@ const askAgainSeconds = (waited: number): number =>
 export interface AskingAgain {
   /** The rounds it waited for load in a row before this one. */
   waited: number;
-  /** What the refusal said, in seconds: the true wait, at the latest. */
-  retryAfterSeconds: number;
   /**
    * How long it has waited for load since it was last admitted: the sum
    * of its rounds' waits, never the time between, so a pause or a wait
@@ -231,25 +229,27 @@ export interface AskingAgain {
 
 /**
  * How long a waiting step waits before it asks again, in ms, and so when
- * it says it asks again: its backoff (`askAgainSeconds`), what the
- * refusal said and what is left of the time a step may wait
- * (`waitedMs`), whichever is soonest. One rule for the host's sleep, the
- * summary's `retryAt` and the timeout.
+ * it says it asks again: its backoff (`askAgainSeconds`), or what is left
+ * of the time a step may wait (`waitedMs`), whichever is sooner. One rule
+ * for the host's sleep, the summary's `retryAt` and the timeout.
+ *
+ * Never sooner because a refusal said a share comes free sooner
+ * (`retryAfterSeconds`): each round adds to the run's journal, and the
+ * first lease of a share can end a second away again and again, as those
+ * ahead take each lease that ends. Woken by it, a day's wait took some
+ * up to some 86,000 rounds; at its backoff, some 1,450 at most. The price is a share
+ * noticed later: within the round's backoff (five seconds, doubling to a
+ * minute), as one given back before its lease ended always was, not as
+ * its first lease ends. The queue's order doesn't change: a place holds
+ * back what it would take while it sleeps (`servedInOrder`), so no one
+ * passes it, and it asks again well within `queueLiveMs`.
  */
 export const askAgainMs = ({
   waited,
-  retryAfterSeconds,
   waitedMs,
   maxWaitMs,
 }: AskingAgain): number =>
-  Math.max(
-    0,
-    Math.min(
-      askAgainSeconds(waited) * 1000,
-      retryAfterSeconds * 1000,
-      maxWaitMs - waitedMs
-    )
-  );
+  Math.max(0, Math.min(askAgainSeconds(waited) * 1000, maxWaitMs - waitedMs));
 
 /**
  * How long a place in the queue lasts after its step last asked: longer
@@ -776,11 +776,9 @@ export const queuedRefusal = async (
   const rows = z.array(sharesRowSchema).safeParse(read).data;
   const { waitingFor, retryAfterSeconds } = waitOf(rows?.[0], shares, now);
   const at = new Date(now);
-  // When it asks again at the latest, as the host waits (`askAgainMs`):
-  // never after it would time out.
-  const retryAt = new Date(
-    now + askAgainMs({ waited, retryAfterSeconds, waitedMs, maxWaitMs })
-  );
+  // When it asks again, as the host waits (`askAgainMs`): never after it
+  // would time out.
+  const retryAt = new Date(now + askAgainMs({ waited, waitedMs, maxWaitMs }));
   const queue = workflowAdmissionQueue;
   const mine = placeIs(place);
   // Its place as this attempt left it: written or kept by it.

@@ -1392,14 +1392,18 @@ const askUntilServed = async (
 ): Promise<Admission | { held: Refusal }> => {
   const startedAt = Date.now();
   // Every moment since it began counts, its asks and notes too, not only
-  // its sleeps.
+  // its sleeps. A call waits in memory, journaling nothing, so it asks
+  // again as soon as the ledger says a share comes free, its backoff at
+  // most.
   const msLeft = (hintSeconds: number): number =>
-    askAgainMs({
-      waited: waiting.rounds,
-      retryAfterSeconds: hintSeconds,
-      waitedMs: Date.now() - startedAt,
-      maxWaitMs,
-    });
+    Math.min(
+      askAgainMs({
+        waited: waiting.rounds,
+        waitedMs: Date.now() - startedAt,
+        maxWaitMs,
+      }),
+      hintSeconds * 1000
+    );
   let last: { held: Refusal } | undefined = undefined;
   for (;;) {
     // Cancelled since it last asked: it asks no more, and stops as

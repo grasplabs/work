@@ -243,7 +243,8 @@ interface StepAttempt {
  * what became of it (`outcome_unknown`, listed for them with their held
  * actions); or its step queued for a share of the client's attempts
  * running at once (admission.ts), with the share and the seconds until it
- * asks again at the latest.
+ * comes free at the latest, as the refusal said: the step asks again after
+ * its backoff all the same (admission.ts, `askAgainMs`).
  */
 export type WaitReason =
   | { reason: "held" }
@@ -487,7 +488,6 @@ export const loadWaitAfter = (wait: LoadWait, marker: CoreMarker): LoadWait => {
   }
   const sleepMs = askAgainMs({
     waited: wait.rounds,
-    retryAfterSeconds: marker.busyFor,
     waitedMs: wait.waitedMs,
     maxWaitMs: marker.maxWaitMs,
   });

@@ -333,7 +333,6 @@ const admittedToBuild = async (
         retryAfterSeconds: wait.retryAfterSeconds,
         sleepMs: askAgainMs({
           waited,
-          retryAfterSeconds: wait.retryAfterSeconds,
           waitedMs,
           maxWaitMs: maxBuildWaitMs,
         }),
