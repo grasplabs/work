@@ -2526,28 +2526,35 @@ export const businessStoreMembers = sqliteTable(
  * published last. A deleted workflow keeps its row, with `deleted_at` set,
  * and is never served again.
  */
-export const workflowResources = sqliteTable("workflow_resources", {
-  id: text().primaryKey(),
-  name: text().notNull().unique(),
-  ownerId: text("owner_id").notNull(),
-  currentVersion: integer("current_version"),
-  createdAt: timestamp("created_at").notNull(),
-  deletedAt: timestamp("deleted_at"),
-  /**
-   * Moves on with every change of who may start or follow it: its members,
-   * and grants and revocations of permissions on it or of it
-   * (workflow-starts.ts). A start admitted under one generation is refused
-   * once it moved, so no start lands on authority that changed under it.
-   */
-  policyGeneration: integer("policy_generation").notNull().default(1),
-  /**
-   * The parameter revision in force (`workflow_resource_params`): 0 while
-   * no value was ever set. Every edit names the revision it read and
-   * moves it on; a start freezes the values of the revision it read, and
-   * is refused if an edit landed in between (workflow-starts.ts).
-   */
-  configRevision: integer("config_revision").notNull().default(0),
-});
+export const workflowResources = sqliteTable(
+  "workflow_resources",
+  {
+    id: text().primaryKey(),
+    name: text().notNull().unique(),
+    ownerId: text("owner_id").notNull(),
+    currentVersion: integer("current_version"),
+    createdAt: timestamp("created_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    /**
+     * Moves on with every change of who may start or follow it: its members,
+     * and grants and revocations of permissions on it or of it
+     * (workflow-starts.ts). A start admitted under one generation is refused
+     * once it moved, so no start lands on authority that changed under it.
+     */
+    policyGeneration: integer("policy_generation").notNull().default(1),
+    /**
+     * The parameter revision in force (`workflow_resource_params`): 0 while
+     * no value was ever set. Every edit names the revision it read and
+     * moves it on; a start freezes the values of the revision it read, and
+     * is refused if an edit landed in between (workflow-starts.ts).
+     */
+    configRevision: integer("config_revision").notNull().default(0),
+  },
+  (table) => [
+    // Listing reads a person's own workflows by owner (`listWorkflowResources`).
+    index("workflow_resources_owner_idx").on(table.ownerId),
+  ]
+);
 
 /**
  * Each published version of a workflow: written once, by its publication,

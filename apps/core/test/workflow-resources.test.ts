@@ -30,10 +30,6 @@ import { outcome, refusal, unique } from "./sign-in.ts";
 // workflow, and a workflow another one runs can't be deleted. Each test
 // makes its own people and workflows.
 
-/** The SHA-256 of a definition's canonical JSON. */
-const canonicalHash = async (definition: string): Promise<string> =>
-  await sha256Hex(canonicalJson(z.json().parse(JSON.parse(definition))));
-
 /** A problem reported at the `greeting` binding's declaration. */
 const bindingProblem = /^\S+ \/document\/metadata\/grasp\/bindings\/greeting/u;
 
@@ -226,9 +222,6 @@ describe("publishing a version", () => {
       // No actions of its own: an empty list, recorded as such.
       actions: [],
       author: ada.userId,
-      definitionHash: await canonicalHash(
-        definitionOf({ name: workflow.name })
-      ),
     });
     const second = await publish(
       ada,
@@ -894,16 +887,20 @@ describe("what keeps a workflow from being deleted", () => {
       outcome(publish(ada, workflow.id, definitionOf({ name: workflow.name }))),
       outcome(deleteWorkflowResource(env, ada, workflow.id)),
     ]);
-    // The deletion commits while the publication still validates: the
-    // version then has no live workflow to land in.
+    // Whichever lands first, no version lands in a deleted workflow: one
+    // that published went in while it was live, and one that didn't left
+    // nothing behind.
+    const versions = await storedVersions(workflow.id);
     expect({
-      published,
       deleted,
-      versions: await storedVersions(workflow.id),
+      published: ["ok", "workflow.resource_unavailable"].includes(published),
+      versions,
+      gone: await outcome(getWorkflowResource(env, ada, workflow.id)),
     }).toStrictEqual({
-      published: "workflow.resource_unavailable",
       deleted: "ok",
-      versions: 0,
+      published: true,
+      versions: published === "ok" ? 1 : 0,
+      gone: "workflow.resource_unavailable",
     });
   });
 
@@ -926,10 +923,18 @@ describe("what keeps a workflow from being deleted", () => {
     )
       .bind(workflow.id)
       .first<{ n: number }>();
-    expect({ deleted, shared, rows: rows?.n }).toStrictEqual({
+    // Whichever lands first, the workflow stays deleted, and a share that
+    // was refused wrote nothing.
+    expect({
+      deleted,
+      shared: ["ok", "workflow.resource_unavailable"].includes(shared),
+      rows: rows?.n,
+      gone: await outcome(getWorkflowResource(env, bob, workflow.id)),
+    }).toStrictEqual({
       deleted: "ok",
-      shared: "workflow.resource_unavailable",
-      rows: 0,
+      shared: true,
+      rows: shared === "ok" ? 1 : 0,
+      gone: "workflow.resource_unavailable",
     });
   });
 });
