@@ -89,14 +89,20 @@ import type { MemberRef } from "./sharing.ts";
 import {
   buildOf,
   buildSummary,
+  compiledTasksOf,
   compileWorkflow,
   loadWorkflowBuild,
+  reviewedTasksOf,
   adoptReservations,
   publicationReservation,
   releaseBuild,
   storeBuild,
 } from "./workflow-builds.ts";
-import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
+import type {
+  CompiledBuild,
+  SealedBuild,
+  SealedTask,
+} from "./workflow-builds.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import type { ResolvedCatalogContract } from "./workflow-catalog.ts";
 import {
@@ -1186,33 +1192,73 @@ const catalogOnce = (env: Env): CatalogLookup => {
   };
 };
 
+/** What a version's review shows of what a model may steer. */
+interface SteeringReview {
+  readonly actions: WorkflowActionReview[];
+  /** What the workflow's own model tasks may steer (GRA-727). */
+  readonly modelSteeredWrites: SteeredWrite[];
+}
+
+/** `writes` with each alias once, a connector's operations merged. */
+const mergedWrites = (writes: readonly SteeredWrite[]): SteeredWrite[] => {
+  const merged = new Map<string, SteeredWrite>();
+  for (const write of writes) {
+    const seen = merged.get(write.alias);
+    if (seen?.kind === "connector" && write.kind === "connector") {
+      merged.set(write.alias, {
+        ...seen,
+        operations: [...new Set([...seen.operations, ...write.operations])],
+      });
+    } else if (seen === undefined) {
+      merged.set(write.alias, write);
+    }
+  }
+  return [...merged.values()];
+};
+
+/** Whether `tasks` hold a JSON model task (`grasp.model`). */
+const asksModelInTasks = (tasks: readonly SealedTask[]): boolean =>
+  tasks.some(
+    (task) => task.kind === "call" && task.call.name === "grasp.model"
+  );
+
 /**
- * `actions` as a version's review shows them (GRA-718): for each that asks
- * a model, its uses that may write, which the model's answers may steer.
+ * What a version's review shows of the writes a model's answers may steer
+ * (GRA-718, GRA-727), read from the version as sealed and the catalog,
+ * never inspected again:
+ *
+ * - each action that asks a model: its uses that may write;
+ * - the workflow, when its build holds any model task: every write its
+ *   call tasks may make, a connector task's operation, an operation task's
+ *   export, and the writing uses of each action a task calls. Conservative:
+ *   any model task counts as reaching every call, whatever their order or
+ *   the flow of data between them.
+ *
  * A connector's operation counts as a write unless the catalog contract
  * its binding pinned states it is read-only, and only while the catalog
  * still holds that exact contract (its fingerprint the one the version
  * sealed): a binding, contract or operation that isn't there, or a
  * contract that changed, counts as a write. An operation binding's use (an
  * App's export) always counts: its contract states nothing about reading.
- * So the flag shows whenever a write can't be ruled out. Read from the
- * version as sealed and the catalog, never inspected again.
+ * So the flag shows whenever a write can't be ruled out.
  */
-const reviewedActions = async (
+const steeringReview = async (
   lookup: CatalogLookup,
   actions: readonly WorkflowVersionAction[],
-  bindings: readonly PinnedContract[]
-): Promise<WorkflowActionReview[]> => {
+  bindings: readonly PinnedContract[],
+  tasks: readonly SealedTask[]
+): Promise<SteeringReview> => {
   const connectorOf = (alias: string): PinnedContract | undefined =>
     bindings.find(
       (binding) => binding.alias === alias && binding.kind === "connector"
     );
-  const keys = actions.filter(asksModel).flatMap((action) =>
-    action.uses.flatMap((use) => {
-      const contractId =
-        use.kind === "connector" ? connectorOf(use.alias)?.contractId : null;
-      return typeof contractId === "string" ? [contractId] : [];
-    })
+  const tasksAskModel = asksModelInTasks(tasks);
+  const keys = bindings.flatMap((binding) =>
+    binding.kind === "connector" &&
+    typeof binding.contractId === "string" &&
+    (tasksAskModel || actions.some(asksModel))
+      ? [binding.contractId]
+      : []
   );
   const catalog = await lookup(keys);
   const readOnly = (alias: string, operation: string): boolean => {
@@ -1227,26 +1273,83 @@ const reviewedActions = async (
       contract.contract.operations?.[operation]?.readOnly === true
     );
   };
+  const connectorWrites = (
+    alias: string,
+    operations: readonly string[]
+  ): SteeredWrite[] => {
+    const writes = operations.filter(
+      (operation) => !readOnly(alias, operation)
+    );
+    return writes.length === 0
+      ? []
+      : [{ alias, kind: "connector", operations: writes }];
+  };
   const steered = (
     use: WorkflowVersionAction["uses"][number]
   ): SteeredWrite[] => {
     if (use.kind === "operation") {
       return [{ alias: use.alias, kind: "operation" }];
     }
-    if (use.kind !== "connector") {
+    return use.kind === "connector"
+      ? connectorWrites(use.alias, use.operations)
+      : [];
+  };
+  const taskWrites = (task: SealedTask): SteeredWrite[] => {
+    if (task.kind !== "call") {
       return [];
     }
-    const operations = use.operations.filter(
-      (operation) => !readOnly(use.alias, operation)
-    );
-    return operations.length === 0
-      ? []
-      : [{ alias: use.alias, kind: "connector", operations }];
+    const { call } = task;
+    if (call.name === "grasp.connector") {
+      return connectorWrites(call.binding, [call.operation]);
+    }
+    if (call.name === "grasp.operation") {
+      return [{ alias: call.binding, kind: "operation" }];
+    }
+    if (call.name === "grasp.action") {
+      const action = actions.find(({ binding }) => binding === call.binding);
+      // An action the version doesn't seal: nothing to rule out.
+      return action === undefined
+        ? [{ alias: call.binding, kind: "operation" }]
+        : action.uses.flatMap(steered);
+    }
+    // The host's clock, randomness and sleep, a calculation (pure) and a
+    // model call itself write nothing.
+    return [];
   };
-  return actions.map((action) => ({
-    ...action,
-    modelSteeredWrites: asksModel(action) ? action.uses.flatMap(steered) : [],
-  }));
+  return {
+    actions: actions.map((action) => ({
+      ...action,
+      modelSteeredWrites: asksModel(action) ? action.uses.flatMap(steered) : [],
+    })),
+    modelSteeredWrites: tasksAskModel
+      ? mergedWrites(tasks.flatMap(taskWrites))
+      : [],
+  };
+};
+
+/**
+ * The tasks version `row`'s build seals, for its review (GRA-727): read
+ * only when its manifest pins a model binding, the only binding a model
+ * task can name; none for a build that isn't executable, which runs none.
+ */
+const versionTasksOf = async (
+  env: Env,
+  row: typeof workflowResourceVersions.$inferSelect,
+  bindings: readonly PinnedContract[]
+): Promise<readonly SealedTask[]> => {
+  if (
+    !bindings.some(({ kind }) => kind === "model") ||
+    !sealedBuildOf(row.workflowResourceId, row.version, row.manifest).executable
+  ) {
+    return [];
+  }
+  return await reviewedTasksOf(
+    env,
+    row.workflowResourceId,
+    row.version,
+    row.manifest,
+    row.manifestHash
+  );
 };
 
 /**
@@ -1255,6 +1358,7 @@ const reviewedActions = async (
  * build are read from it (`workflow.version_corrupt` otherwise).
  */
 const versionOf = async (
+  env: Env,
   lookup: CatalogLookup,
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: WorkflowVersionBinding[]
@@ -1262,6 +1366,13 @@ const versionOf = async (
   if ((await sha256Hex(row.manifest)) !== row.manifestHash) {
     throw corrupt(row.workflowResourceId, row.version);
   }
+  const sealedBindings = sealedBindingsOf(row);
+  const review = await steeringReview(
+    lookup,
+    sealedActionsOf(row),
+    sealedBindings,
+    await versionTasksOf(env, row, sealedBindings)
+  );
   return {
     resourceId: row.workflowResourceId,
     version: row.version,
@@ -1271,11 +1382,8 @@ const versionOf = async (
     contractHash: row.contractHash,
     manifestHash: row.manifestHash,
     bindings,
-    actions: await reviewedActions(
-      lookup,
-      sealedActionsOf(row),
-      sealedBindingsOf(row)
-    ),
+    actions: review.actions,
+    modelSteeredWrites: review.modelSteeredWrites,
     build: buildSummary(
       sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
     ),
@@ -1449,6 +1557,7 @@ const publishedAs = async (
   const bindings = await bindingsOf(env, id);
   return {
     version: await versionOf(
+      env,
       catalogOnce(env),
       row,
       bindings.get(row.version) ?? []
@@ -1594,7 +1703,12 @@ const writeVersion = async (
   }
   const manifestHash = await sha256Hex(manifest);
   // Before anything is written: a publication that lands answers it.
-  const reviewed = await reviewedActions(catalogOnce(env), actions, bindings);
+  const reviewed = await steeringReview(
+    catalogOnce(env),
+    actions,
+    bindings,
+    compiledTasksOf(compiled)
+  );
   const createdAt = new Date();
   const db = drizzle(env.DB);
   // This publication's own reservations: another publishing the same
@@ -1721,7 +1835,8 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
-    actions: reviewed,
+    actions: reviewed.actions,
+    modelSteeredWrites: reviewed.modelSteeredWrites,
     build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
@@ -2033,6 +2148,7 @@ export const workflowVersions = async (
     rows.map(
       async (row) =>
         await versionOf(
+          env,
           lookup,
           row,
           (bindings.get(row.version) ?? []).map(
