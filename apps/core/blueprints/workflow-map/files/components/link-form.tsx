@@ -1,3 +1,4 @@
+import { useMutation } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -9,8 +10,10 @@ import {
 import { Input } from "@grasp-os/ui/components/input";
 import { useState } from "react";
 
-import { ask, recordOf } from "./playbook";
-import type { Outcome, Workflow } from "./playbook";
+import { api } from "#grasp";
+
+import { recordOf, settle } from "./store";
+import type { Outcome, Workflow } from "./store";
 
 /**
  * Links a designed workflow to the App workflow built from it, by the
@@ -18,7 +21,7 @@ import type { Outcome, Workflow } from "./playbook";
  * version, so it waits while the editor holds unsaved changes (`blocked`),
  * which would be lost, and while anything else is on its way (`busy`).
  * `onLink` runs the link it is given, and opens what it saved. For someone
- * who can't change the Playbook (`writable`), only the link it has.
+ * who can't change the map (`writable`), only the link it has.
  */
 export const LinkForm = ({
   workflow,
@@ -36,13 +39,16 @@ export const LinkForm = ({
   const linked = recordOf(workflow).app;
   const [appId, setAppId] = useState(linked?.appId ?? "");
   const [workflowId, setWorkflowId] = useState(linked?.workflowId ?? "");
+  const linkWorkflow = useMutation(api.map.link);
   const link = async (): Promise<Outcome<unknown>> =>
-    await ask<unknown>("link", {
-      documentId: workflow.id,
-      ifVersion: workflow.version,
-      appId: appId.trim(),
-      workflowId: workflowId.trim(),
-    });
+    await settle(
+      async () =>
+        await linkWorkflow({
+          id: workflow.id,
+          expectedRevision: workflow.revision,
+          app: { appId: appId.trim(), workflowId: workflowId.trim() },
+        })
+    );
   const empty = appId.trim() === "" || workflowId.trim() === "";
   if (!writable && linked === undefined) {
     return null;

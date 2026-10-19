@@ -73,7 +73,7 @@ export default workflow(
   "inbox",
   { params: {}, input: connectorEvent, triggers: ${triggers} },
   async (step, { input }) =>
-    await step.do("read", { description: "Read the mail event" }, async () => ({ id: input.id, subject: input.payload.subject }))
+    await step.do("read", { description: "Read the mail event" }, async () => ({ id: input.id, subject: (input.payload as { subject: string }).subject }))
 );
 `,
   "workflows/inbox.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";

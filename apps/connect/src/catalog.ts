@@ -18,8 +18,8 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
+import { nativeConnector } from "./bundled-connectors.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
-import { nativeConnector } from "./connectors.ts";
 import { providers } from "./providers.ts";
 
 // The catalog: what an admin can connect. The native providers come from
@@ -76,16 +76,16 @@ export const providerName = ({
 
 /** The native providers whose connector is in this release. */
 const nativeEntries = (): CatalogEntry[] =>
-  Object.values(providers).flatMap((provider) => {
-    const connector = nativeConnector(provider.server);
+  oauthProviderSchema.options.flatMap((id) => {
+    const connector = nativeConnector(providers[id].server);
     if (connector === undefined) {
       return [];
     }
     return [
       {
         source: "native",
-        id: provider.id,
-        ...nativeShown[provider.id],
+        id,
+        ...nativeShown[id],
         toolCount: Object.keys(connector.manifest.actions).length,
         logo: null,
         // Connect holds the deployment's own app for each provider.

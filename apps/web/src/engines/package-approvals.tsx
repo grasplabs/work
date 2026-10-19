@@ -436,7 +436,11 @@ export const PackageApprovals = ({
       )}
       {listed.approvals.length === 0 ? (
         <p className="text-muted-foreground">
-          <Trans>No packages are approved for this domain.</Trans>
+          {listed.subject.type === "workflow" ? (
+            <Trans>No packages are approved for this workflow.</Trans>
+          ) : (
+            <Trans>No packages are approved for this domain.</Trans>
+          )}
         </p>
       ) : (
         <ApprovalsTable listed={listed} onAsk={setAsked} />
