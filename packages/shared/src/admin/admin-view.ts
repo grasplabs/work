@@ -30,6 +30,7 @@ import type {
   Org,
   OrgState,
   OrgView,
+  Unknown,
 } from "./onboarding-admin.ts";
 import { present } from "./present.ts";
 
@@ -53,13 +54,17 @@ export interface AdminView extends OrgView {
   integrations: IntegrationView[];
   usage: Usage;
   value: Value;
+  /** What isn't known of the company yet: its contract and its work read as unknown, not as a draft or as none. */
+  unknown: Unknown;
 }
 
 /**
- * What needs Grasp first: a go to give, then what holds people up, then the first conversation
+ * What needs Grasp first: interviews it paused, as nobody gets on until it resumes them, then a
+ * go to give, then what holds people up, then the first conversation
  * that Stephen prepares from, then what can wait a day.
  */
 export const NEED_ORDER: readonly Need["kind"][] = [
+  "paused",
   "go",
   "short",
   "ending",
@@ -97,7 +102,9 @@ export const adminViewOf = (
 
   // What the company itself brings to Grasp's table, beside its onboarding.
   const needs: Need[] = [...view.needs];
-  if (contract.status !== "signed") {
+  const unknown = org.real?.unknown ?? { contract: false, works: false };
+  // A contract nobody has told the admin of yet is not one waiting to be signed.
+  if (contract.status !== "signed" && !unknown.contract) {
     needs.push({
       kind: "contract",
       sent: contract.status === "sent" ? (contract.sent ?? null) : null,
@@ -151,6 +158,7 @@ export const adminViewOf = (
     integrations,
     usage,
     value: valueOf(view, day),
+    unknown,
   };
 };
 
@@ -264,6 +272,8 @@ export interface Portfolio {
   /** Hours a week freed in live workflows, and what they are worth a month. */
   freed: number;
   value: number;
+  /** How many of them the fees, and the hours and their worth, are counted from: not those whose contract or work isn't known yet. */
+  counted: { fees: number; value: number };
 }
 
 export const portfolioOf = (views: AdminView[]): Portfolio => {
@@ -277,5 +287,9 @@ export const portfolioOf = (views: AdminView[]): Portfolio => {
     spend: sum((view) => view.usage.thisMonth.spend),
     freed: sum((view) => view.value.freed),
     value: sum((view) => view.value.value),
+    counted: {
+      fees: views.filter((view) => !view.unknown.contract).length,
+      value: views.filter((view) => !view.unknown.works).length,
+    },
   };
 };

@@ -30,9 +30,17 @@ import { present } from "./present.ts";
 
 /**
  * What does the work: the three models that read and write (the careful one, the quick one and
- * the small one), Stephen's voice, and his ears.
+ * the small one), Stephen's voice, and his ears; and any other model a deployment calls (core's
+ * own default is Workers AI's), counted with no price, for the admin has none for it.
  */
-export const MODELS = ["opus", "sonnet", "haiku", "voice", "ears"] as const;
+export const MODELS = [
+  "opus",
+  "sonnet",
+  "haiku",
+  "voice",
+  "ears",
+  "other",
+] as const;
 export type Model = (typeof MODELS)[number];
 
 /** The models as they are called. */
@@ -42,6 +50,7 @@ export const MODEL_NAMES: Record<Model, string> = {
   haiku: "Claude Haiku 4.5",
   voice: "ElevenLabs v4",
   ears: "ElevenLabs Scribe",
+  other: "Other models (not priced)",
 };
 
 /**
@@ -57,6 +66,8 @@ export const PRICES: Record<
   haiku: { tokensIn: 1, tokensOut: 5, minute: 0 },
   voice: { tokensIn: 0, tokensOut: 0, minute: 0.15 },
   ears: { tokensIn: 0, tokensOut: 0, minute: 0.01 },
+  // Not known: its tokens count, its spend stays out of the total.
+  other: { tokensIn: 0, tokensOut: 0, minute: 0 },
 };
 /** What the model read from what it had kept of an earlier call costs a tenth of reading it new. */
 export const KEPT_SHARE = 0.1;
@@ -147,6 +158,7 @@ const byModel = (): Record<Model, Use> => ({
   haiku: nothing(),
   voice: nothing(),
   ears: nothing(),
+  other: nothing(),
 });
 /** One of something for each model. */
 const forModels = <T>(make: (model: Model) => T): Record<Model, T> => ({
@@ -155,6 +167,7 @@ const forModels = <T>(make: (model: Model) => T): Record<Model, T> => ({
   haiku: make("haiku"),
   voice: make("voice"),
   ears: make("ears"),
+  other: make("other"),
 });
 /** One of something for each purpose. */
 const forPurposes = <T>(make: (purpose: Purpose) => T): Record<Purpose, T> => ({
@@ -277,7 +290,7 @@ export const usageOf = (
     month[purpose][model] = plus(month[purpose][model], used);
     months.set(monthOf(on), month);
     const that = days.get(on) ?? {
-      models: { opus: 0, sonnet: 0, haiku: 0, voice: 0, ears: 0 },
+      models: forModels(() => 0),
       purposes: { reading: 0, interviews: 0, drawing: 0, chat: 0, runs: 0 },
     };
     that.models[model] += used.spend;
@@ -389,7 +402,12 @@ export const usageOf = (
   }
 
   // Once Grasp is open: the chat of everyone who is in, and each workflow from the day it went live.
-  if (isOpen(view) && view.knowledge.opened !== null) {
+  // Worked out at a sample only: at a real organization, what the Worker counted is all there was.
+  if (
+    org.real === undefined &&
+    isOpen(view) &&
+    view.knowledge.opened !== null
+  ) {
     const opened = dateOn(org, view.knowledge.opened);
     const each = (
       from: string,

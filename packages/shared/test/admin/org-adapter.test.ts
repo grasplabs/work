@@ -629,7 +629,12 @@ describe("a real organization as the admin reads it", () => {
     const counted = meteredOf(snapshot.usage);
     expect(
       counted.map((each) => `${each.purpose}/${each.model}`).toSorted()
-    ).toStrictEqual(["drawing/opus", "interviews/sonnet", "interviews/voice"]);
+    ).toStrictEqual([
+      "drawing/opus",
+      "interviews/other",
+      "interviews/sonnet",
+      "interviews/voice",
+    ]);
     const sonnet = counted.find((each) => each.model === "sonnet");
     expect({
       tokensIn: sonnet?.use.tokensIn,
@@ -637,11 +642,14 @@ describe("a real organization as the admin reads it", () => {
       drawn: view.usage.matrix.drawing.opus.tokensOut,
       // A snapshot from before the Worker counted reads as nothing counted.
       before: orgOfSnapshot({ ...snapshot, usage: [] }).real?.metered,
+      other: counted.find((each) => each.model === "other")?.use,
     }).toStrictEqual({
       tokensIn: 500_000,
       counted: true,
       drawn: 1500,
       before: [],
+      // A model the admin has no price for is counted all the same, its spend unknown.
+      other: { tokensIn: 5, tokensOut: 5, spoken: 0, heard: 0, spend: 0 },
     });
     expect(sonnet?.use.spend).toBeCloseTo(
       0.1 * PRICES.sonnet.tokensIn +
