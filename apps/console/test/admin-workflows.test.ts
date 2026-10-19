@@ -142,7 +142,7 @@ describe("an organization's workflows", () => {
       figures: [true, true, true],
       // The head's row and one for each piece of work.
       rows: 21,
-      papers: `${papers.work.name} ${team(papers.team)} Known 6 of 13 5 of 5 1 question left Known`,
+      papers: `${papers.work.name} ${team(papers.team)} Known 6 of 13 5 of 5 1 thing missing Known`,
       intake: `${intake.work.name} ${team(intake.team)} Being mapped 2 of 5 2 of 5 5 things missing Being mapped`,
       teams: true,
       rules: true,
