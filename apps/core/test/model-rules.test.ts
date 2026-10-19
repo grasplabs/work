@@ -1415,7 +1415,7 @@ ${llm("retries: { limit: 2, delay: 1 },")}`,
           error: {
             code: "model.over_budget",
             message:
-              "This request could cost more than this model binding allows one request to cost, so it wasn't sent. Send less, or ask your admin to raise the binding's budget per request.",
+              "This model call could cost more than this model binding's cap per request has room for, so it was stopped before it went out. Send less, or ask your admin to raise the binding's budget per request.",
           },
         },
       },

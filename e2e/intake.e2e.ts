@@ -180,7 +180,7 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
   const reading = screen.getByRole("region", { name: "Notes being read" });
   const item = reading.getByRole("listitem").filter({ hasText: title });
   await expect(item).toContainText(
-    "Failed: This request could cost more than this model binding allows one request to cost",
+    "Failed: This model call could cost more than this model binding's cap per request has room for",
     { timeout: 30_000 }
   );
   await item.getByRole("button", { name: "Dismiss" }).click();

@@ -93,7 +93,7 @@ const overBudgetMessages: Readonly<Record<ModelBudgetCap, string>> = {
   binding_day:
     "This model binding's budget for the day is used up, so the App can make no more calls through it until the budget resets at midnight (UTC). Ask your admin to raise the binding's daily budget.",
   binding_request:
-    "This request could cost more than this model binding allows one request to cost, so it wasn't sent. Send less, or ask your admin to raise the binding's budget per request.",
+    "This model call could cost more than this model binding's cap per request has room for, so it was stopped before it went out. Send less, or ask your admin to raise the binding's budget per request.",
 };
 
 /** Whether `value` names a {@link ModelBudgetCap}. */
