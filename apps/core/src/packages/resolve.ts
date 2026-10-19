@@ -1,12 +1,15 @@
 import { platformPeers, platformScope } from "@grasp-os/compiler";
 import {
   dependencyErrors,
+  dependencyMaxFindings,
   npmRegistryOrigin,
   packageKey,
   subjectOfRef,
 } from "@grasp-os/shared/dependencies";
 import type {
+  DependencyFinding,
   DependencyGraph,
+  DependencyPackageRef,
   DependencyRequest,
   DependencySubject,
 } from "@grasp-os/shared/dependencies";
@@ -46,6 +49,7 @@ import { builtSubject } from "../dependencies/subject-builders.ts";
 import { ofSubject } from "../dependencies/subjects.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
 import type { PackageBuilderRun } from "./builder.ts";
+import { lookalikeFindings } from "./lookalikes.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
 // Resolving what an App's package.json asks for into one exact graph, and
@@ -214,6 +218,52 @@ const metadataRefusals = (version: NpmVersion): string[] => [
  */
 const busyTries = 4;
 const firstBusyPauseMs = 500;
+
+/** How grave each severity is, gravest first in what a request keeps. */
+const graveness: Readonly<Record<DependencyFinding["severity"], number>> = {
+  critical: 4,
+  high: 3,
+  moderate: 2,
+  low: 1,
+  info: 0,
+};
+
+/**
+ * What a request's approver is shown about `packages` (GRA-699): each
+ * named like a popular package (lookalikes.ts), and each advisory the
+ * registry knows, through connect, that affects its exact version, one
+ * whose range can't be read included. Gravest first, at most
+ * `dependencyMaxFindings`. Fails as connect does when the advisories
+ * can't be read: never none for a graph whose advisories weren't checked.
+ */
+const findingsOf = async (
+  env: Env,
+  packages: readonly DependencyPackageRef[]
+): Promise<DependencyFinding[]> => {
+  const asked: Record<string, string[]> = {};
+  for (const { name, version } of packages) {
+    (asked[name] ??= []).push(version);
+  }
+  const advisories = await env.CONNECT.npmAdvisories(asked);
+  const security = packages.flatMap(({ name, version }) =>
+    (Object.hasOwn(advisories, name) ? (advisories[name] ?? []) : [])
+      .filter(
+        ({ vulnerableVersions }) =>
+          validRange(vulnerableVersions) === null ||
+          satisfies(version, vulnerableVersions)
+      )
+      .map((advisory): DependencyFinding => ({
+        kind: "security",
+        package: { name, version },
+        severity: advisory.severity,
+        id: advisory.id,
+        summary: advisory.title,
+      }))
+  );
+  return [...lookalikeFindings(packages), ...security]
+    .toSorted((a, b) => graveness[b.severity] - graveness[a.severity])
+    .slice(0, dependencyMaxFindings);
+};
 
 /**
  * `name`'s metadata from connect, asked again after a pause while connect
@@ -880,6 +930,10 @@ export const resolveDependencies = async (
     )
   );
   const graph = graphOfLock(lock);
+  // What the approver is shown about the graph's packages (GRA-699), before
+  // the request is stored: a resolution whose advisories can't be read
+  // fails, never stored as one without findings.
+  const findings = await findingsOf(env, graph.packages);
   // The lock is stored in the batch that stores the request: a request is
   // never without the lock its graph names, nor a lock without a request.
   // Admitted after the slow fetch and checks, right before it is stored.
@@ -893,7 +947,7 @@ export const resolveDependencies = async (
       purpose: intent.purpose,
       targets: intent.targets,
       graph,
-      findings: [],
+      findings,
       refused: [],
     },
     { lock, limits }

@@ -5296,6 +5296,11 @@ msgid "London (GMT)"
 msgstr "Londen (GMT)"
 
 #: src/dashboard/dependency-requests.tsx
+msgctxt "kind of finding"
+msgid "Lookalike name"
+msgstr "Gelijkende naam"
+
+#: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Laag"

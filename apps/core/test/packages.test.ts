@@ -14,6 +14,7 @@ import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  advise,
   askedPaths,
   crafted,
   daysAgo,
@@ -46,6 +47,15 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
+/** An advisory as the registry sends one. */
+const advisory = (more: Record<string, unknown>) => ({
+  id: 1_000_001,
+  url: "https://github.com/advisories/GHSA-aaaa-bbbb-cccc",
+  title: "Regular expression denial of service",
+  severity: "high",
+  vulnerable_versions: "<1.2.1",
+  ...more,
+});
 /** A builder with a new App of theirs. */
 const builderWithApp = async () => {
   const builder = await personApi("builder");
@@ -393,6 +403,93 @@ describe("the platform's own packages", () => {
         builder.api.dependencies.resolve(intentFor(app, { react: "^18.0.0" }))
       )
     ).resolves.toMatchObject({ code: "package.peer_conflict" });
+  });
+
+  it("shows the approver each package named like a popular one, and each advisory affecting its exact version", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    // One letter swapped in lodash's name; normalised alike to react-dom.
+    const squat = "loadsh";
+    const merged = "reactdom";
+    await publish(plain(dates, "1.2.0"));
+    await publish(plain(squat, "1.0.0"));
+    await publish(plain(merged, "1.0.0"));
+    await advise(dates, advisory({}));
+    // Not this version: left out.
+    await advise(
+      dates,
+      advisory({
+        id: 2,
+        url: undefined,
+        vulnerable_versions: "<1.0.0",
+        severity: "critical",
+      })
+    );
+    // A range it can't read: kept, as it can't be ruled out.
+    await advise(
+      dates,
+      advisory({
+        id: 3,
+        url: undefined,
+        vulnerable_versions: "not a range",
+        severity: "low",
+      })
+    );
+    const { request } = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "1.2.0", [squat]: "1.0.0", [merged]: "1.0.0" })
+    );
+    const review = await builder.api.dependencies.get(request.id);
+    const clean = named("clean");
+    await publish(plain(clean, "1.0.0"));
+    const { request: cleanRequest } = await builder.api.dependencies.resolve(
+      intentFor(app, { [clean]: "1.0.0" })
+    );
+    const cleanReview = await builder.api.dependencies.get(cleanRequest.id);
+    expect({
+      findings: review.findings.map(({ kind, package: ref, severity, id }) => ({
+        kind,
+        package: `${ref.name}@${ref.version}`,
+        severity,
+        id,
+      })),
+      lookalikes: review.findings
+        .filter(({ kind }) => kind === "lookalike")
+        .map(({ summary }) => summary),
+      clean: cleanReview.findings,
+    }).toStrictEqual({
+      // Gravest first.
+      findings: [
+        {
+          kind: "security",
+          package: `${dates}@1.2.0`,
+          severity: "high",
+          id: "GHSA-aaaa-bbbb-cccc",
+        },
+        {
+          kind: "lookalike",
+          package: `${squat}@1.0.0`,
+          severity: "moderate",
+          id: null,
+        },
+        {
+          kind: "lookalike",
+          package: `${merged}@1.0.0`,
+          severity: "moderate",
+          id: null,
+        },
+        {
+          kind: "security",
+          package: `${dates}@1.2.0`,
+          severity: "low",
+          id: "npm:3",
+        },
+      ],
+      lookalikes: [
+        "Its name looks like lodash's, a popular package: check it is the one meant.",
+        "Its name looks like react-dom's, a popular package: check it is the one meant.",
+      ],
+      clean: [],
+    });
   });
 
   it("takes a dependency on React itself as the platform's, shown in the review", async () => {
@@ -983,6 +1080,10 @@ const busyFor = (times: number) => {
         };
       }
       // An RPC binding's methods are called on it, never bound.
+      if (property === "npmAdvisories") {
+        return async (request: Parameters<typeof target.npmAdvisories>[0]) =>
+          await target.npmAdvisories(request);
+      }
       return property === "npmTarball"
         ? async (request: Parameters<typeof target.npmTarball>[0]) =>
             await target.npmTarball(request)
@@ -993,6 +1094,45 @@ const busyFor = (times: number) => {
 };
 
 describe("an App's locks and the files they name", () => {
+  it("refuses a resolution whose advisories couldn't be read, storing no request as one without findings", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const identity = await builder.api.whoami();
+    const unread = new Proxy(env.CONNECT, {
+      get: (target, property): unknown => {
+        if (property === "npmAdvisories") {
+          return async () => {
+            await Promise.resolve();
+            throw packageErrors.create("package.registry_unavailable");
+          };
+        }
+        // An RPC binding's methods are called on it, never bound.
+        if (property === "npmMetadata") {
+          return async (name: string) => await target.npmMetadata(name);
+        }
+        return property === "npmTarball"
+          ? async (request: Parameters<typeof target.npmTarball>[0]) =>
+              await target.npmTarball(request)
+          : Reflect.get(target, property);
+      },
+    });
+    const outcome = await failure(
+      resolveDependencies(
+        { ...env, CONNECT: unread },
+        identity,
+        intentFor(app, { [dates]: "^1.0.0" })
+      )
+    );
+    expect({
+      code: outcome.code,
+      locks: await lockedGraphs(app),
+    }).toStrictEqual({
+      code: "package.registry_unavailable",
+      locks: [],
+    });
+  });
+
   it("stores no lock when its request can't be stored", async () => {
     const { builder, app } = await builderWithApp();
     const dates = named("dates");

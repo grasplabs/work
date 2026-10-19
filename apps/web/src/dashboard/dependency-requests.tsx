@@ -49,6 +49,7 @@ export const targetNames: Record<DependencyTarget, MessageDescriptor> = {
 const findingKinds: Record<DependencyFinding["kind"], MessageDescriptor> = {
   license: msg({ message: "Licence", context: "kind of finding" }),
   security: msg({ message: "Security", context: "kind of finding" }),
+  lookalike: msg({ message: "Lookalike name", context: "kind of finding" }),
 };
 
 const severities: Record<DependencyFinding["severity"], MessageDescriptor> = {

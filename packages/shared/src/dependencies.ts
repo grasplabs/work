@@ -276,7 +276,8 @@ export type DependencyGraph = z.infer<typeof dependencyGraphSchema>;
  * graph without findings isn't shown to be safe.
  */
 const findingSchema = z.strictObject({
-  kind: z.enum(["license", "security"]),
+  /** `lookalike`: named like a popular package (GRA-699). */
+  kind: z.enum(["license", "security", "lookalike"]),
   package: packageRefSchema,
   severity: z.enum(["info", "low", "moderate", "high", "critical"]),
   /** What names it elsewhere, such as an advisory's ID. */
