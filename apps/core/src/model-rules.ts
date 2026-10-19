@@ -190,6 +190,12 @@ export interface Refusal {
    * through; for `model.over_budget`, until the budget resets.
    */
   retryAfterSeconds?: number;
+  /**
+   * For `model.over_budget`: the cap that refused it (`because`) isn't
+   * told, only that a budget is used up, as to a guest, whose budgets are
+   * the member's who invited them (models.ts).
+   */
+  capUntold?: true;
   /** For `model.queued`: the share of the requests in flight it waits for. */
   waitingFor?: ModelShare;
   /**

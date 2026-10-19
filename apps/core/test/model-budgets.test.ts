@@ -310,7 +310,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       code: "model.over_budget",
       message:
-        "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+        "The model budget for the month of the person this call is made for is used up, so no more model calls can be made for them until it resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
       details: {
         model: workersAi,
         because: "user",
@@ -484,7 +484,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         sonnet: {
           code: "model.over_budget",
           message:
-            "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+            "The model budget for the month of the person this call is made for is used up, so no more model calls can be made for them until it resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
           details: {
             model: anthropic,
             because: "user",
@@ -509,6 +509,52 @@ describe("model budgets", { timeout: 60_000 }, () => {
       answered: "ok",
       after: { llama: "ok", sonnet: "model.over_budget" },
     });
+  });
+
+  it("word each used-up budget after the cap that refused it, with when it resets", async () => {
+    const app = appIdSchema.parse(crypto.randomUUID());
+    // Sonnet 4.5 reserves some $0.56: a cent leaves no room for it.
+    const sonnet = (more: Partial<ModelCall<undefined>> = {}) =>
+      hello({ model: anthropic, maxTokens: undefined, ...more });
+    const through = (budget: Record<string, number>) =>
+      sonnet({ binding: { app, alias: "WRITER", budget } });
+    const deployment = withRules(
+      { budgets: { deployment: { limit: 0.01 } } },
+      []
+    );
+    const open = withRules({}, []);
+    const told = async (refused: Promise<unknown>) => {
+      const { message, details } = await toldBy(refused);
+      return [details.because, message, typeof details.retryAfterSeconds];
+    };
+
+    expect([
+      await told(deployment.call(sonnet())),
+      await told(open.call(through({ perMonth: 0.01 }))),
+      await told(open.call(through({ perDay: 0.01 }))),
+      await told(open.call(through({ perRequest: 0.01 }))),
+    ]).toStrictEqual([
+      [
+        "deployment",
+        "This deployment's model budget for the month is used up, so no more model calls can be made until it resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
+        "number",
+      ],
+      [
+        "binding",
+        "This model binding's budget for the month is used up, so the App can make no more calls through it until the budget resets at the start of next month (UTC). Ask your admin to raise the binding's monthly budget.",
+        "number",
+      ],
+      [
+        "binding_day",
+        "This model binding's budget for the day is used up, so the App can make no more calls through it until the budget resets at midnight (UTC). Ask your admin to raise the binding's daily budget.",
+        "number",
+      ],
+      [
+        "binding_request",
+        "This model call could cost more than this model binding's cap per request has room for, so it was stopped before it went out. Send less, or ask your admin to raise the binding's budget per request.",
+        "undefined",
+      ],
+    ]);
   });
 
   it("suggest a wait from the calls under way only to the person they are all theirs, a fixed one where others' calls hold the budget, and none to a guest", async () => {
@@ -584,7 +630,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         guest: {
           code: "model.over_budget",
           message:
-            "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+            "A model budget this call counts against is used up, so this model call can't be made. Ask your admin to have Grasp raise the budget.",
           details: { model: anthropic, because: "user" },
         },
         // Someone else's call holds it: a fixed wait, nothing of its timing.

@@ -56,6 +56,7 @@ import {
   defaultModelEffort,
   modelEfforts,
   modelErrors,
+  overBudgetMessage,
 } from "@grasp-os/shared/models";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import {
@@ -1241,7 +1242,11 @@ const heldBecause = (
   // that member has calls under way is theirs to know. Held or used up,
   // in any scope, a guest hears the same: used up, with no wait.
   if (fixed) {
-    return { code: "model.over_budget", because: admitted.scope };
+    return {
+      code: "model.over_budget",
+      because: admitted.scope,
+      capUntold: true,
+    };
   }
   if ("heldUntil" in admitted) {
     return {
@@ -2157,8 +2162,8 @@ const refuse = async (
   if (code === "permission.context_invalid") {
     throw permissionErrors.create(code);
   }
-  const { retryAfterSeconds: retryAfter, waitingFor } = refusal;
-  throw modelErrors.create(code, {
+  const { retryAfterSeconds: retryAfter, waitingFor, capUntold } = refusal;
+  const error = modelErrors.create(code, {
     model: call.model,
     ...(because === undefined ? {} : { because }),
     ...(waitingFor === undefined ? {} : { waitingFor }),
@@ -2166,6 +2171,13 @@ const refuse = async (
     // full share, or one used up until it resets.
     ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }),
   });
+  // Worded after the cap that refused it, so nobody waits for the month
+  // when a day's or one request's cap said no; never to a guest, who is
+  // told only that a budget is used up.
+  if (code === "model.over_budget" && capUntold !== true) {
+    error.message = overBudgetMessage(because);
+  }
+  throw error;
 };
 
 /** Records a refusal, as `refuse` does, without throwing it. */
