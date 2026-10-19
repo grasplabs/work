@@ -32,6 +32,7 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -1142,15 +1143,19 @@ export const setCurrentVersion = async (
   // the version is made current, so neither a revocation nor the
   // retention sweep's deletion lands in between.
   const sealedLayout = isAppLayout(files);
+  let sampleGate: SQL | undefined;
   if (sealedLayout) {
     await requireRunnableRelease(env, appId, number);
     // Its migrations passed on their fixtures as it was sealed, even where
     // the store had nothing to transform; asked before its store, whose
     // backfill such a migration fails, so the refusal names the fixture.
     // Imported here for the same reason as the tests' runner below.
-    const { requireMigrationEvidence } =
+    const { noFailedSampleSql, requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
+    // And again as the version is made current: a sample that fails
+    // between here and then keeps it from being made current all the same.
+    sampleGate = noFailedSampleSql(appId, number);
     // Its store's contract holds its schema, or it waits; a ready explicit
     // migration passes here and takes over below, once every gate passed.
     await requireStoreSchemaActive(env, appId, number);
@@ -1201,7 +1206,8 @@ export const setCurrentVersion = async (
               eq(apps.id, appId),
               sql`${apps.currentVersion} IS ${previous}`,
               registrationHolds(appId, triggers),
-              sealedLayout ? runnableReleaseSql(appId, number) : undefined
+              sealedLayout ? runnableReleaseSql(appId, number) : undefined,
+              sampleGate
             )
           )
           .returning(),
@@ -1278,8 +1284,12 @@ export const setCurrentVersion = async (
       return await appFor(env, by, appId, "builder");
     }
     if (sealedLayout) {
-      // Revoked or deleted since it was checked: refused as such.
+      // Revoked or deleted since it was checked, or a sample of its
+      // migrations failed since: refused as such.
       await requireRunnableRelease(env, appId, number);
+      const { requireMigrationEvidence } =
+        await import("./migration-evidence.ts");
+      await requireMigrationEvidence(env, appId, number);
     }
     throw appErrors.create("app.conflict");
   }

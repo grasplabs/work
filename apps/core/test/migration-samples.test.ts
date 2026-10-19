@@ -2,11 +2,13 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { setCurrentVersion } from "../src/apps.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { sampleMigration } from "../src/migration-samples.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { abandonStoreBackfill } from "../src/store-abandon.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
+import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { deriving, migrated, notesOf, refusalOf } from "./migrated-apps.ts";
 import { person } from "./sealed-apps.ts";
@@ -157,6 +159,29 @@ const placeBackfill = async (
           Date.now()
         );
       }
+    }
+  );
+};
+
+/**
+ * Puts the note titled `from` right as `to`, in place: its revision
+ * stays, so the failed backfill isn't retried on it and only a sample
+ * reads it.
+ */
+const renameNote = async (
+  store: OpenStore,
+  from: string,
+  to: string
+): Promise<void> => {
+  await runInDurableObject(
+    env.DATA_STORES.getByName(store.id),
+    (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE sdk_records SET value_json = replace(value_json, ?, ?) WHERE instr(value_json, ?) > 0",
+        JSON.stringify(from),
+        JSON.stringify(to),
+        JSON.stringify(from)
+      );
     }
   );
 };
@@ -480,6 +505,65 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
     });
   });
 
+  it("keeps its version from being made current while its latest sample failed", async () => {
+    const { fixture, store } = await migrated(5, failingOnNote4, {
+      fixtures: '[{ row: { title: "Note" } }]',
+    });
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalOf(async () => {
+            await requireStoreSchemaActive(env, fixture.app, 3);
+          })
+        ).resolves.toMatchObject({ code: "migration.backfill_failed" });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
+    const admin = await person("admin");
+    const asked = {
+      app: fixture.app,
+      version: 3,
+      migration: "derive-category",
+    };
+    const madeCurrent = async () =>
+      await refusalOf(
+        async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      );
+
+    await sampleMigration(env, admin, asked);
+    const afterFailed = await madeCurrent();
+    // Three passing don't vouch for the five that failed.
+    const smaller = await sampleMigration(env, admin, { ...asked, rows: 3 });
+    const afterSmaller = await madeCurrent();
+    // Note 4 put right, five pass: the store's own gate is next.
+    await renameNote(store, marker, "Note four");
+    const same = await sampleMigration(env, admin, asked);
+    const afterSame = await madeCurrent();
+    // Failing again stands over the passes before it.
+    await renameNote(store, "Note four", marker);
+    await sampleMigration(env, admin, asked);
+    const afterAgain = await madeCurrent();
+
+    expect({
+      afterFailed,
+      smaller: [smaller.outcome, smaller.rows],
+      afterSmaller: afterSmaller.code,
+      same: [same.outcome, same.rows],
+      afterSame: afterSame.code,
+      afterAgain: afterAgain.code,
+    }).toStrictEqual({
+      afterFailed: {
+        code: "version.migration_sample_failed",
+        details: { migration: "derive-category", reason: "threw" },
+      },
+      smaller: ["passed", 3],
+      afterSmaller: "version.migration_sample_failed",
+      same: ["passed", 5],
+      afterSame: "migration.backfill_failed",
+      afterAgain: "version.migration_sample_failed",
+    });
+  });
+
   it("finds nothing to sample once its migration transformed every record", async () => {
     const { fixture, store, release } = await migrated(3, deriving);
     // Transformed records keep their writer's schema hash: only the
@@ -496,23 +580,66 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       },
       { timeout: 120_000, interval: 500 }
     );
-    const admin = await person("admin");
-    const sample = await sampleMigration(env, admin, {
+    // A sample that failed before the backfill got through.
+    const failedSample = async (): Promise<void> => {
+      await env.DB.prepare(
+        "INSERT INTO migration_samples (id, app_id, version, migration, store_id, outcome, rows, owners, reason, manifest_hash, from_schema, to_schema, sampled_by, sampled_at) VALUES (?, ?, 3, 'derive-category', ?, 'failed', 5, 1, 'threw', ?, ?, ?, ?, ?)"
+      )
+        .bind(
+          crypto.randomUUID(),
+          fixture.app,
+          store.id,
+          release.manifestHash,
+          fixture.firstSchema,
+          release.manifest.schemaHash,
+          fixture.owner.userId,
+          Date.now()
+        )
+        .run();
+    };
+    await failedSample();
+    const madeCurrent = async (db = env.DB) =>
+      await refusalOf(
+        async () =>
+          await setCurrentVersion(
+            { ...env, DB: db },
+            fixture.owner,
+            fixture.app,
+            3
+          )
+      );
+    const asked = {
       app: fixture.app,
       version: 3,
       migration: "derive-category",
-    });
+    };
+    const beforeEmpty = await madeCurrent();
+    const admin = await person("admin");
+    const sample = await sampleMigration(env, admin, asked);
+    // Failing again between the check and the change: refused by the
+    // change.
+    const raced = await madeCurrent(racingDb(failedSample, /update "apps"/iu));
+    await sampleMigration(env, admin, asked);
     const receipts = await receiptsOf(fixture.app);
+    const afterEmpty = await madeCurrent();
     expect({
       outcome: sample.outcome,
       rows: sample.rows,
       failure: sample.failure,
       receipts: receipts.map(({ outcome }) => outcome),
+      beforeEmpty: beforeEmpty.code,
+      raced: raced.code,
+      // Nothing left to transform: every record it wrote was validated,
+      // so the earlier failure has nothing left to show.
+      afterEmpty: afterEmpty.code,
     }).toStrictEqual({
       outcome: "empty",
       rows: 0,
       failure: null,
-      receipts: ["empty"],
+      receipts: ["failed", "empty", "failed", "empty"],
+      beforeEmpty: "version.migration_sample_failed",
+      raced: "version.migration_sample_failed",
+      afterEmpty: "ok",
     });
   });
 });
