@@ -60,6 +60,34 @@ const endedStatuses: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The independent run whose step called App `held.subject`'s export, as
+ * the App's held call's key names it (resource-calls.ts passes the
+ * step's key to the export, and the App's code takes no other), if the
+ * key names one: none for an App's own run's call, nor for a key of no
+ * step.
+ */
+const exportRunOf = async (env: Env, held: PendingAction) => {
+  const runId = runOfStepKey(held.idempotencyKey);
+  const named = held.subject.type === "app" ? runId : undefined;
+  const run =
+    named === undefined
+      ? undefined
+      : await drizzle(env.DB)
+          .select({
+            id: workflowResourceRuns.id,
+            workflowId: workflowResourceRuns.workflowResourceId,
+            version: workflowResourceRuns.version,
+            manifestHash: workflowResourceRuns.manifestHash,
+            principal: workflowResourceRuns.principalId,
+            status: workflowResourceRuns.status,
+          })
+          .from(workflowResourceRuns)
+          .where(eq(workflowResourceRuns.id, named))
+          .get();
+  return run;
+};
+
+/**
  * Whether the workflow run a held action came from has ended (or isn't
  * the App's, or the workflow's): its step's key names the run, whichever
  * of its App's code made the call. A paused run hasn't: it may be resumed.
@@ -90,11 +118,13 @@ const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
     .from(workflowRuns)
     .where(eq(workflowRuns.id, runId))
     .get();
-  return (
-    run === undefined ||
-    run.appId !== held.subject.appId ||
-    endedStatuses.has(run.status)
-  );
+  if (run === undefined) {
+    // The App's call an independent run's step made through its export:
+    // the key is that step's (`exportRunOf`).
+    const exporting = await exportRunOf(env, held);
+    return exporting === undefined || endedStatuses.has(exporting.status);
+  }
+  return run.appId !== held.subject.appId || endedStatuses.has(run.status);
 };
 
 /** How a task's step is named, and so its call's key (resource-host.ts). */
@@ -181,6 +211,42 @@ const requireHeldRunCallAllowed = async (
   await requireCallAuthority(env, run, binding);
 };
 
+/**
+ * Refuses (`workflow.call_denied`) a decision on an App's call that an
+ * independent run's step made through the App's export (`exportRunOf`),
+ * unless that run acts for `person` and the step the key names is a
+ * `grasp.operation` task of the run's sealed build: an export's call,
+ * which is how the App's code came to run with that key. The App's own
+ * authority for the call is checked as for any App's held call
+ * (`reauthorizedCapability`). No step waits on it: an export's step is
+ * tried once, and failed as held (resource-host.ts); the person confirms
+ * the action they were shown, as for an interactive App's.
+ */
+const requireHeldExportCallAllowed = async (
+  env: Env,
+  run: NonNullable<Awaited<ReturnType<typeof exportRunOf>>>,
+  idempotencyKey: string,
+  person: string
+): Promise<void> => {
+  const step = idempotencyKey.slice(idempotencyKey.indexOf(":") + 1);
+  const taskId = step.startsWith(taskStepPrefix)
+    ? step.slice(taskStepPrefix.length)
+    : undefined;
+  if (run.principal !== person || taskId === undefined) {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  const build = await loadWorkflowBuild(
+    env,
+    run.workflowId,
+    run.version,
+    run.manifestHash
+  );
+  const task = build.tasks.find(({ id }) => id === taskId);
+  if (task?.kind !== "call" || task.call.name !== "grasp.operation") {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+};
+
 /** Whether connect still holds the held action `id` for `person`. */
 const stillHeld = async (
   env: Env,
@@ -190,14 +256,11 @@ const stillHeld = async (
   (await env.CONNECT.pendingAction({ person, id })) !== null;
 
 /**
- * What a held action's run waits on it by (`wakingHeld`): none but a
- * workflow run's, of an App.
+ * What a held action's run waits on it by (`wakingHeld`): a workflow
+ * run's, of an App or of an independent workflow.
  */
 const heldWaitOf = (held: PendingAction) => ({
-  appId:
-    held.mode === "workflow" && held.subject.type === "app"
-      ? held.subject.appId
-      : null,
+  subject: held.mode === "workflow" ? held.subject : undefined,
   idempotencyKey: held.idempotencyKey,
 });
 
@@ -248,6 +311,18 @@ const confirmHeld = async (
     // authority for it holds, as its next call would need.
     if (held.subject.type === "workflow") {
       await requireHeldRunCallAllowed(env, held, identity.userId);
+    }
+    // An App's call made through its export by an independent run's step:
+    // only for that run's person, and only an export call's key.
+    const exporting =
+      held.mode === "workflow" ? await exportRunOf(env, held) : undefined;
+    if (exporting !== undefined) {
+      await requireHeldExportCallAllowed(
+        env,
+        exporting,
+        held.idempotencyKey,
+        identity.userId
+      );
     }
     capability = await reauthorizedCapability(
       env,

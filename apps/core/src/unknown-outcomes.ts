@@ -148,7 +148,7 @@ export const resolveUnknownOutcome = async (
   await wakingHeld(
     env,
     {
-      appId: found.key.subject.type === "app" ? found.key.subject.appId : null,
+      subject: found.key.subject,
       idempotencyKey: found.key.idempotencyKey,
     },
     async () => {
