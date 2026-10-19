@@ -17,6 +17,7 @@ import {
   createTriggerResource,
   deleteTriggerResource,
 } from "../src/trigger-resources.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
@@ -1374,6 +1375,15 @@ const deletedWorkflow = async (by: Acting, versions = ["1.0.0"]) => {
   return workflow;
 };
 
+/** Sets the status of every App binding to workflow `old`, as SQL. */
+const bound = async (old: { id: string }, status: string): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE app_workflow_bindings SET status = ? WHERE workflow_resource_id = ?"
+  )
+    .bind(status, old.id)
+    .run();
+};
+
 describe("releasing a deleted workflow's name", () => {
   it("lets an admin give it to a new workflow, which is another workflow", async () => {
     const admin = await person("admin");
@@ -1423,6 +1433,11 @@ describe("releasing a deleted workflow's name", () => {
       none: "workflow.name_unreleasable",
       invalid: "workflow.name_unreleasable",
     });
+    await expect(
+      eventsOf("workflow.name_release_refused", live.id)
+    ).resolves.toStrictEqual([
+      { name: live.name, reason: "workflow.name_unreleasable" },
+    ]);
   });
 
   it("is for the organization's admins only, never Grasp staff", async () => {
@@ -1436,8 +1451,19 @@ describe("releasing a deleted workflow's name", () => {
         await person("admin", [], true),
       ].map(async (by) => await outcome(releaseWorkflowName(env, by, old.name)))
     );
+    const refused = await eventsOf("workflow.name_release_refused", old.id);
+    const events = await allEvents();
+    const audited = events.filter(
+      ({ action, detail }) =>
+        action === "workflow.name_release_refused" &&
+        detail.name === old.name &&
+        detail.reason === "role.forbidden"
+    );
     expect({
       tries,
+      audited: audited.length,
+      // Refused before anything is read of the name: no workflow named.
+      targeted: refused.length,
       taken: await outcome(createWorkflowResource(env, ada, old.name)),
     }).toStrictEqual({
       tries: [
@@ -1446,6 +1472,8 @@ describe("releasing a deleted workflow's name", () => {
         "role.forbidden",
         "role.forbidden",
       ],
+      audited: 4,
+      targeted: 0,
       taken: "workflow.name_taken",
     });
   });
@@ -1460,7 +1488,7 @@ describe("releasing a deleted workflow's name", () => {
     const again = await Promise.all(
       ["1.0.0", "1.1.0"].map(
         async (version) =>
-          await outcome(
+          await problemCodes(
             publish(
               mallory,
               taken.id,
@@ -1493,7 +1521,10 @@ describe("releasing a deleted workflow's name", () => {
           (code) => typeof code === "string" && bindingProblem.test(code)
         ),
     }).toStrictEqual({
-      again: ["workflow.version_taken", "workflow.version_taken"],
+      again: [
+        ["workflow.version_taken /document/version"],
+        ["workflow.version_taken /document/version"],
+      ],
       unresolved: true,
     });
   });
@@ -1593,12 +1624,177 @@ describe("releasing a deleted workflow's name", () => {
       "UPDATE workflow_resources SET name_released_at = 1, name_released_by = 'x' WHERE id = ?",
       live.id
     );
+    const renamed = await written(
+      "UPDATE workflow_resources SET name = 'renamed-' || id WHERE id = ?",
+      old.id
+    );
+    const insertedReleased = await written(
+      "INSERT INTO workflow_resources (id, name, owner_id, created_at, deleted_at, name_released_at, name_released_by) VALUES (?, 'x-' || hex(randomblob(4)), 'x', 1, 1, 1, 'x')",
+      crypto.randomUUID()
+    );
+    // REPLACE over the released row would bring it back, live and holding
+    // nothing it may hold.
+    const replaced = await written(
+      "INSERT OR REPLACE INTO workflow_resources (id, name, owner_id, created_at) SELECT id, name, owner_id, created_at FROM workflow_resources WHERE id = ?",
+      old.id
+    );
+    const row = await env.DB.prepare(
+      "SELECT deleted_at IS NOT NULL AS deleted, name_released_at IS NOT NULL AS released FROM workflow_resources WHERE id = ?"
+    )
+      .bind(old.id)
+      .first<{ deleted: number; released: number }>();
     expect({
       undeleted: undeleted.includes("a released name stays released"),
       unreleased: unreleased.includes("a released name stays released"),
       liveReleased: liveReleased.includes(
         "only a deleted workflow's name is released"
       ),
-    }).toStrictEqual({ undeleted: true, unreleased: true, liveReleased: true });
+      renamed: renamed.includes("a released name stays released"),
+      insertedReleased: insertedReleased.includes(
+        "a new workflow holds its name"
+      ),
+      replaced: replaced.includes("a workflow keeps its row"),
+      row,
+    }).toStrictEqual({
+      undeleted: true,
+      unreleased: true,
+      liveReleased: true,
+      renamed: true,
+      insertedReleased: true,
+      replaced: true,
+      row: { deleted: 1, released: 1 },
+    });
+  });
+
+  it("lands once when two admins release it at the same time", async () => {
+    const ada = await person("builder");
+    const old = await deletedWorkflow(ada);
+    const [first, second] = await Promise.all([
+      outcome(releaseWorkflowName(env, await person("admin"), old.name)),
+      outcome(releaseWorkflowName(env, await person("admin"), old.name)),
+    ]);
+    expect({
+      first,
+      second,
+      released: await eventsOf("workflow.name.released", old.id),
+    }).toStrictEqual({
+      first: "ok",
+      second: "ok",
+      released: [{ name: old.name }],
+    });
+  });
+
+  it("tries again when what pinned it goes meanwhile, and gives up busy when pins keep coming back", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const pinnedBy = async () => {
+      const workflow = await workflowOf(ada);
+      await publish(ada, workflow.id, definitionOf({ name: workflow.name }));
+      const app = crypto.randomUUID();
+      await env.DB.prepare(
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+      )
+        .bind(app, ada.userId, Date.now())
+        .run();
+      await bindWorkflowToApp(env, ada, workflow.id, {
+        app,
+        alias: "greet",
+        version: 1,
+      });
+      await deleteWorkflowResource(env, ada, workflow.id);
+      return workflow;
+    };
+    // The binding goes between the miss and the count: the next try lands.
+    const gone = await pinnedBy();
+    const recovered = await outcome(
+      releaseWorkflowName(env, admin, gone.name, {
+        recounting: async () => {
+          await bound(gone, "removed");
+        },
+      })
+    );
+    // It goes before each count and comes back after: never settled.
+    const flapping = await pinnedBy();
+    const busy = await outcome(
+      releaseWorkflowName(env, admin, flapping.name, {
+        recounting: async () => {
+          await bound(flapping, "removed");
+        },
+        recounted: async () => {
+          await bound(flapping, "active");
+        },
+      })
+    );
+    expect({
+      recovered,
+      released: await eventsOf("workflow.name.released", gone.id),
+      busy,
+      refused: await eventsOf("workflow.name_release_refused", flapping.id),
+    }).toStrictEqual({
+      recovered: "ok",
+      released: [{ name: gone.name }],
+      busy: "workflow.name_busy",
+      refused: [{ name: flapping.name, reason: "workflow.name_busy" }],
+    });
+  });
+
+  it("keeps every earlier holder's versions out of reach, and starts a new holder's draft past them", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const first = await deletedWorkflow(ada, ["1.0.0"]);
+    await releaseWorkflowName(env, admin, first.name);
+    const second = await createWorkflowResource(env, ada, first.name);
+    await publish(
+      ada,
+      second.id,
+      definitionOf({ name: first.name, version: "2.0.0" })
+    );
+    await deleteWorkflowResource(env, ada, second.id);
+    await releaseWorkflowName(env, admin, first.name);
+    const third = await createWorkflowResource(env, ada, first.name);
+    const starter = await workflowDraft(env, ada, third.id);
+    // A checkpoint naming an earlier holder's version doesn't pass.
+    const checked = await editWorkflowDraft(env, ada, third.id, {
+      expectedRevision: 0,
+      source: definitionOf({ name: first.name, version: "2.0.0" }),
+      modules: {},
+    });
+    expect({
+      starter: z
+        .object({ document: z.object({ version: z.string() }) })
+        .parse(JSON.parse(starter.source)).document.version,
+      checked: checked.problems.map(
+        ({ code, pointer }) => `${code} ${pointer}`
+      ),
+      checkpoint: checked.checkpoint,
+      published: await Promise.all(
+        ["1.0.0", "2.0.0"].map(
+          async (version) =>
+            await problemCodes(
+              publish(
+                ada,
+                third.id,
+                definitionOf({ name: first.name, version })
+              )
+            )
+        )
+      ),
+      fresh: await outcome(
+        publish(
+          ada,
+          third.id,
+          definitionOf({ name: first.name, version: "3.0.0" })
+        )
+      ),
+    }).toStrictEqual({
+      starter: "3.0.0",
+      checked: ["workflow.version_taken /document/version"],
+      checkpoint: null,
+      published: [
+        ["workflow.version_taken /document/version"],
+        ["workflow.version_taken /document/version"],
+      ],
+      fresh: "ok",
+    });
   });
 });

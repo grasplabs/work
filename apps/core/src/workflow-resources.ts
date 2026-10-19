@@ -149,7 +149,11 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   (`releaseWorkflowName`, once nothing names any version of it). Even
 //   then its contract keys stay unanswered: no workflow publishes a
 //   semantic version it published, so a key never names two workflows
-//   and nobody's text binds the newcomer by naming an old key. A builder
+//   and nobody's text binds the newcomer by naming an old key. A key with
+//   a version the old workflow never published does resolve to the
+//   newcomer, for a publisher with a role in it, as it would have to any
+//   new version of the old one: an explicit choice of that version. A
+//   builder
 //   learns whether a name is held (`workflow.name_taken`), nothing else
 //   of it. Refused creations are audited, and each person may
 //   create at most the quota policy's `workflowResourcesPerPerson`,
@@ -716,6 +720,7 @@ const resolveWorkflowKey = async (
     .where(
       and(
         eq(workflowResources.name, groups.name),
+        isNull(workflowResources.nameReleasedAt),
         isNull(workflowResources.deletedAt),
         eq(workflowResourceVersions.definitionVersion, groups.version)
       )
@@ -880,6 +885,81 @@ const identityProblem = (
 });
 
 /**
+ * Whether a workflow that held `name` before, and whose name was released,
+ * published semantic version `version`: then no workflow publishes it
+ * again, so the contract key `workspace/<name>/<version>` its binders
+ * named stays unanswered, never answered by another workflow (GRA-562).
+ * Released workflows are deleted, so they publish nothing more: what this
+ * reads can't change under a publication.
+ */
+const versionTaken = async (
+  env: Env,
+  name: string,
+  version: string
+): Promise<boolean> => {
+  const taken = await drizzle(env.DB)
+    .select({ id: workflowResources.id })
+    .from(workflowResources)
+    .innerJoin(
+      workflowResourceVersions,
+      eq(workflowResourceVersions.workflowResourceId, workflowResources.id)
+    )
+    .where(
+      and(
+        eq(workflowResources.name, name),
+        isNotNull(workflowResources.nameReleasedAt),
+        eq(workflowResourceVersions.definitionVersion, version)
+      )
+    )
+    .get();
+  return taken !== undefined;
+};
+
+/** A semantic version's major number, or 0 for one that names none. */
+const majorOf = (version: string): number => {
+  const major = Number(version.split(".", 1)[0]);
+  return Number.isSafeInteger(major) && major >= 0 ? major : 0;
+};
+
+/**
+ * The first version a new draft of a workflow named `name` may publish
+ * (workflow-drafts.ts): 1.0.0, or, under a released name, the major
+ * version past every one its earlier holders published (`versionTaken`).
+ */
+export const firstFreeVersion = async (
+  env: Env,
+  name: string
+): Promise<string> => {
+  const rows = await drizzle(env.DB)
+    .select({ version: workflowResourceVersions.definitionVersion })
+    .from(workflowResources)
+    .innerJoin(
+      workflowResourceVersions,
+      eq(workflowResourceVersions.workflowResourceId, workflowResources.id)
+    )
+    .where(
+      and(
+        eq(workflowResources.name, name),
+        isNotNull(workflowResources.nameReleasedAt)
+      )
+    );
+  const highest = Math.max(0, ...rows.map(({ version }) => majorOf(version)));
+  return `${highest + 1}.0.0`;
+};
+
+/**
+ * The problem with a definition whose version a workflow that held this
+ * name before published (`versionTaken`).
+ */
+const versionTakenProblem: WorkflowDefinitionProblem = {
+  code: "workflow.version_taken",
+  message:
+    "A workflow that had this name before published this version, and its callers may still name it.",
+  pointer: "/document/version",
+  remedy: "Publish another version, such as the next major version.",
+};
+
+/**
  * The problem with a definition that has more listen tasks an App's
  * references would carry as event waits (those waiting only on a
  * browser-callable type) than a reference holds: sealing an App bound to
@@ -962,6 +1042,9 @@ const inspectDefinition = async (
     checked.identity.name !== workflow.name
   ) {
     return { ok: false, problems: [identityProblem(workflow)] };
+  }
+  if (await versionTaken(env, workflow.name, checked.identity.version)) {
+    return { ok: false, problems: [versionTakenProblem] };
   }
   // Its contract must fit a version's row, checked here so a draft that
   // passes is one that publishes (workflow-drafts.ts).
@@ -1978,40 +2061,6 @@ const packagesOf = (
         modules: sealed.modules,
       };
 
-/**
- * Refuses publishing semantic version `version` of a workflow named
- * `name` when a workflow that held the name before, and whose name was
- * released, published it (`workflow.version_taken`): the contract key
- * `workspace/<name>/<version>` its binders named stays unanswered, never
- * answered by another workflow. Released workflows are deleted, so they
- * publish nothing more: what this reads can't change under the
- * publication.
- */
-const requireUnreleasedVersion = async (
-  env: Env,
-  name: string,
-  version: string
-): Promise<void> => {
-  const taken = await drizzle(env.DB)
-    .select({ id: workflowResources.id })
-    .from(workflowResources)
-    .innerJoin(
-      workflowResourceVersions,
-      eq(workflowResourceVersions.workflowResourceId, workflowResources.id)
-    )
-    .where(
-      and(
-        eq(workflowResources.name, name),
-        isNotNull(workflowResources.nameReleasedAt),
-        eq(workflowResourceVersions.definitionVersion, version)
-      )
-    )
-    .get();
-  if (taken !== undefined) {
-    throw workflowResourceErrors.create("workflow.version_taken");
-  }
-};
-
 /** `publishWorkflowVersion`, answering bindings as pinned. */
 const publish = async (
   env: Env,
@@ -2094,7 +2143,6 @@ const publish = async (
   if (existing !== undefined) {
     return existing;
   }
-  await requireUnreleasedVersion(env, workflow.name, checked.identity.version);
   if (basedOn !== workflow.currentVersion) {
     throw workflowResourceErrors.create("workflow.version_conflict");
   }
@@ -3020,6 +3068,19 @@ const namedBySql = (id: string) => sql`SELECT
  */
 const releaseTries = 3;
 
+/**
+ * Points in a release's retry for tests to change what pins the workflow
+ * at (`recounting`, before its pins are counted again after a miss, and
+ * `recounted`, after); nothing passes them otherwise.
+ */
+export interface ReleaseSeam {
+  readonly recounting?: () => Promise<void>;
+  readonly recounted?: () => Promise<void>;
+}
+
+/** The most of a refused name an audit event keeps. */
+const workflowNameMaxShown = 128;
+
 /** What `namedBySql` counts, as a row. */
 const namedBySchema = z.object({
   binders: z.number(),
@@ -3042,24 +3103,52 @@ const namedBySchema = z.object({
  * the unique index skips it (migration 0103). Its contract keys never
  * resolve again, to it or to another: a workflow may not publish a
  * semantic version a released workflow of its name published
- * (`requireUnreleasedVersion`), so `workspace/<name>/<semver>` never
+ * (`versionTaken`), so `workspace/<name>/<semver>` never
  * names two workflows, and nobody's draft binds the newcomer by naming an
  * old key.
  */
 export const releaseWorkflowName = async (
   env: Env,
   by: Acting,
-  name: unknown
+  name: unknown,
+  seam: ReleaseSeam = {}
 ): Promise<void> => {
-  requireNotStaff(by);
-  if (!isAdmin(by.role)) {
-    throw roleErrors.create("role.forbidden");
+  const db = drizzle(env.DB);
+  const shown =
+    typeof name === "string" ? name.slice(0, workflowNameMaxShown) : null;
+  // Every refusal is audited, under the workflow that holds the name when
+  // one does.
+  const refuse = async (
+    reason: string,
+    error: Error,
+    holder?: string,
+    detail: Record<string, number> = {}
+  ): Promise<never> => {
+    await auditedBatch(env, db, [
+      outboxed(db, {
+        actor: by.actor ?? actorOf(by),
+        action: "workflow.name_release_refused",
+        ...(holder === undefined
+          ? {}
+          : { target: { type: targetType, id: holder } }),
+        detail: { name: shown, reason, ...detail },
+      }),
+    ]);
+    throw error;
+  };
+  if (by.staff || !isAdmin(by.role)) {
+    return await refuse("role.forbidden", roleErrors.create("role.forbidden"));
   }
+  const unreleasable = async (holder?: string): Promise<never> =>
+    await refuse(
+      "workflow.name_unreleasable",
+      workflowResourceErrors.create("workflow.name_unreleasable"),
+      holder
+    );
   const parsed = workflowNameSchema.safeParse(name);
   if (!parsed.success) {
-    throw workflowResourceErrors.create("workflow.name_unreleasable");
+    return await unreleasable();
   }
-  const db = drizzle(env.DB);
   const holder = await db
     .select({
       id: workflowResources.id,
@@ -3077,21 +3166,26 @@ export const releaseWorkflowName = async (
     const released = await db
       .select({ id: workflowResources.id })
       .from(workflowResources)
-      .where(eq(workflowResources.name, parsed.data))
+      .where(
+        and(
+          eq(workflowResources.name, parsed.data),
+          isNotNull(workflowResources.nameReleasedAt)
+        )
+      )
       .get();
     if (released !== undefined) {
       // Released already, and nobody took it since.
       return;
     }
-    throw workflowResourceErrors.create("workflow.name_unreleasable");
+    return await unreleasable();
   }
   if (holder.deletedAt === null) {
-    throw workflowResourceErrors.create("workflow.name_unreleasable");
+    return await unreleasable(holder.id);
   }
   // The release lands in one statement, only while nothing names the
   // workflow. One that lands nothing is asked why: released meanwhile by
   // another admin (a release), a pin that went in between (tried again,
-  // a few times), or a pin (refused).
+  // a few times, then `workflow.name_busy`), or a pin (refused).
   for (let tries = 1; ; tries += 1) {
     // oxlint-disable-next-line no-await-in-loop -- tried again only after a miss
     const [released] = await auditedBatch(env, db, [
@@ -3128,27 +3222,33 @@ export const releaseWorkflowName = async (
       return;
     }
     // oxlint-disable-next-line no-await-in-loop -- see above
+    await seam.recounting?.();
+    // oxlint-disable-next-line no-await-in-loop -- see above
     const counts = namedBySchema.parse(await db.get(namedBySql(holder.id)));
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await seam.recounted?.();
     const pinned = {
       binders: counts.binders,
       triggers: counts.triggers,
       appBindings: counts.app_bindings,
       liveRuns: counts.live_runs,
     };
-    const free = Object.values(pinned).every((count) => count === 0);
-    if (!free || tries >= releaseTries) {
-      // oxlint-disable-next-line no-await-in-loop -- once, as the loop ends
-      await auditedBatch(env, db, [
-        outboxed(
-          db,
-          entry(by, "workflow.name_release_refused", holder.id, {
-            name: parsed.data,
-            reason: "workflow.name_pinned",
-            ...pinned,
-          })
-        ),
-      ]);
-      throw workflowResourceErrors.create("workflow.name_pinned", pinned);
+    if (Object.values(pinned).some((count) => count > 0)) {
+      // oxlint-disable-next-line no-await-in-loop -- refused, the loop ends
+      return await refuse(
+        "workflow.name_pinned",
+        workflowResourceErrors.create("workflow.name_pinned", pinned),
+        holder.id,
+        pinned
+      );
+    }
+    if (tries >= releaseTries) {
+      // oxlint-disable-next-line no-await-in-loop -- refused, the loop ends
+      return await refuse(
+        "workflow.name_busy",
+        workflowResourceErrors.create("workflow.name_busy"),
+        holder.id
+      );
     }
   }
 };

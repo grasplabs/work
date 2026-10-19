@@ -103,8 +103,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "Only the name of a deleted workflow can be released.",
   "workflow.name_pinned":
     "Something still names a version of the deleted workflow: another workflow, a trigger, an App binding or a run that hasn't ended. Its name can be released once nothing does.",
-  "workflow.version_taken":
-    "A workflow that had this name before published this version, and its callers may still name it: publish another version.",
+  "workflow.name_busy":
+    "What names the deleted workflow kept changing while its name was released. Try again in a moment.",
   "workflow.definition_invalid":
     "The workflow definition doesn't pass the grasp-open-workflow/1 profile.",
   "workflow.identity_mismatch":

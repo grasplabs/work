@@ -34,6 +34,7 @@ import {
 import type { ModuleContracts } from "./workflow-modules.ts";
 import {
   definitionProblems,
+  firstFreeVersion,
   publishWorkflowVersion,
   requireWorkflowRole,
   sealedModules,
@@ -120,15 +121,19 @@ const boundedProblems = (
   ];
 };
 
-/** The draft of a workflow nobody has published yet: one that passes. */
-const starterDefinition = (name: string): string =>
+/**
+ * The draft of a workflow nobody has published yet: one that passes, at
+ * `version`, one no earlier holder of its name published
+ * (`firstFreeVersion`).
+ */
+const starterDefinition = (name: string, version: string): string =>
   `${JSON.stringify(
     {
       document: {
         dsl: "1.0.3",
         namespace: workflowNamespace,
         name,
-        version: "1.0.0",
+        version,
         title: name,
         metadata: {
           grasp: { profile: profileName, params: {}, bindings: {} },
@@ -280,7 +285,12 @@ const draftOf = async (
   if (latest === undefined) {
     return {
       revision: 0,
-      source: published ?? starterDefinition(workflow.name),
+      source:
+        published ??
+        starterDefinition(
+          workflow.name,
+          await firstFreeVersion(env, workflow.name)
+        ),
       modules:
         workflow.currentVersion === null
           ? {}
