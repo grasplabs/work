@@ -62,6 +62,7 @@ msgstr "{0, plural, one {# pakket in totaal, om te draaien in: {targets}} other 
 
 #. placeholder {0}: app.users
 #. placeholder {0}: team.people
+#: src/onboarding/send-plan-form.tsx
 #: src/policies/findings-table.tsx
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "{0, plural, one {# person} other {# people}}"
@@ -71,6 +72,11 @@ msgstr "{0, plural, one {# persoon} other {# personen}}"
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {Needs # thing Grasp refuses to run} other {Needs # things Grasp refuses to run}}"
 msgstr "{0, plural, one {Heeft # ding nodig dat Grasp weigert uit te voeren} other {Heeft # dingen nodig die Grasp weigert uit te voeren}}"
+
+#. placeholder {0}: held.length
+#: src/onboarding/send-plan-form.tsx
+msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
+msgstr "{0, plural, one {Het team dat je hebt uitgezonderd} other {De # teams die je hebt uitgezonderd}}"
 
 #. placeholder {0}: condition.moreThan
 #: src/policies/policy.ts
@@ -206,6 +212,10 @@ msgstr "{category} van {vendor}, met ingebouwde AI"
 msgid "{caught, plural, one {Would catch # app today.} other {Would catch # apps today.}}"
 msgstr "{caught, plural, one {Zou vandaag # app treffen.} other {Zou vandaag # apps treffen.}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
+msgstr "Dan wordt het {chosen}. Dit duurt ongeveer {minutes} minuten. Zullen we beginnen?"
+
 #: src/engines/resource-bindings.tsx
 msgid "{collection}: {name}"
 msgstr "{collection}: {name}"
@@ -262,6 +272,10 @@ msgstr "{count, plural, one {# wijziging wacht tot je die bevestigt of afwijst.}
 msgid "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
 msgstr "{count, plural, one {# gesprek kwam binnen: met het bestuur, de teams en hun mensen.} other {# gesprekken kwamen binnen: met het bestuur, de teams en hun mensen.}}"
 
+#: src/onboarding/document-drop.tsx
+msgid "{count, plural, one {# document added. I’m reading it.} other {# documents added. I’m reading them.}}"
+msgstr "{count, plural, one {# document toegevoegd. Ik lees het nu.} other {# documenten toegevoegd. Ik lees ze nu.}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# employee interviewed} other {# employees interviewed}}"
 msgstr "{count, plural, one {# medewerker geïnterviewd} other {# medewerkers geïnterviewd}}"
@@ -293,6 +307,10 @@ msgstr "{count, plural, one {Nog # domein zonder workflows om te tonen} other {N
 #: src/inbox/items.ts
 msgid "{count, plural, one {# package} other {# packages}}"
 msgstr "{count, plural, one {# pakket} other {# pakketten}}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "{count, plural, one {# person} other {# people}}"
+msgstr "{count, plural, one {# persoon} other {# personen}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {# piece of time-consuming work came up in what people said.} other {# pieces of time-consuming work came up in what people said.}}"
@@ -418,6 +436,10 @@ msgstr "{failed, plural, one {# mislukte run} other {# mislukte runs}} van {name
 msgid "{failures, plural, one {Once} other {# times}}"
 msgstr "{failures, plural, one {Eén keer} other {# keer}}"
 
+#: src/onboarding/document-drop.tsx
+msgid "{file} removed"
+msgstr "{file} verwijderd"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "{fileName} · uploaded by {uploadedBy} on {uploadedOn}"
 msgstr "{fileName} · geüpload door {uploadedBy} op {uploadedOn}"
@@ -470,6 +492,10 @@ msgstr "{gaps, plural, one {# leemte} other {# leemtes}}"
 msgid "{goals, plural, one {# goal} other {# goals}}"
 msgstr "{goals, plural, one {# doel} other {# doelen}}"
 
+#: src/onboarding/send-plan-form.tsx
+msgid "{going} of {count}"
+msgstr "{going} van {count}"
+
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -515,6 +541,10 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{label} · {count}"
 msgstr "{label} · {count}"
 
+#: src/onboarding/setup-parts.tsx
+msgid "{label}, on Grasp’s support site, in a new tab"
+msgstr "{label}, op de supportsite van Grasp, in een nieuw tabblad"
+
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
@@ -523,6 +553,14 @@ msgstr "{label}:"
 #: src/landscape/overview-tab.tsx
 msgid "{label}: open in {tabLabel}"
 msgstr "{label}: openen in {tabLabel}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
+msgstr "{leads, plural, one {Dank je. Ik begin met deze teamleider.} other {Dank je. Ik begin met deze # teamleiders.}}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "{leadsHeard} of {leads}"
+msgstr "{leadsHeard} van {leads}"
 
 #: src/brain/brain-atlas.ts
 msgid "{left, plural, one {# is not drawn yet.} other {# are not drawn yet.}}"
@@ -679,6 +717,10 @@ msgstr "{name} wijzigt de gegevens van het domein niet meer (schrijven → lezen
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} wijzigt nu de gegevens van het domein (lezen → schrijven)"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{name} takes part"
+msgstr "{name} doet mee"
+
 #. The last hour Pulse may report on a day
 #: src/settings/week-hours.tsx
 msgid "{name} until"
@@ -724,13 +766,17 @@ msgstr "{one} en {other} noemen allebei dezelfde overdracht, elk vanaf hun eigen
 msgid "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
 msgstr "{oneTeam} en {otherTeam} noemen allebei dezelfde overdracht, elk vanaf hun eigen kant."
 
-#: src/brain/region-marks.tsx
-msgid "{open, plural, one {# open question} other {# open questions}}"
-msgstr "{open, plural, one {# open vraag} other {# open vragen}}"
+#: src/onboarding/document-drop.tsx
+msgid "{only} isn’t a file I can read."
+msgstr "{only} kan ik niet lezen."
 
 #: src/brain/brain-atlas.ts
 msgid "{open} still open"
 msgstr "{open} nog open"
+
+#: src/onboarding/setup-steps.tsx
+msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
+msgstr "{openCount, plural, =0 {Niets wacht op jou} =1 {Nog maar één ding voor jou} other {# dingen voor jou}}"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "{out, plural, one {All in place: # link is out, the rest go by the plan.} other {All in place: # links are out, the rest go by the plan.}}"
@@ -775,6 +821,18 @@ msgstr "{people, plural, one {# persoon} other {# mensen}}"
 #: src/routes/_shell.settings.pulse.tsx
 msgid "{people, plural, one {Everyone in your directory, # person. Problems first.} other {Everyone in your directory, # people. Problems first.}}"
 msgstr "{people, plural, one {Iedereen in je directory, # persoon. Problemen eerst.} other {Iedereen in je directory, # mensen. Problemen eerst.}}"
+
+#: src/onboarding/about-story.tsx
+msgid "{percent}% known now"
+msgstr "Nu {percent}% bekend"
+
+#: src/onboarding/knowledge-bar.tsx
+msgid "{percent}% known. Your team can start at {threshold}%, and I keep learning after that."
+msgstr "{percent}% bekend. Je team kan starten bij {threshold}%, en daarna blijf ik leren."
+
+#: src/onboarding/knowledge-bar.tsx
+msgid "{percent}% known. Your team can start at {threshold}%."
+msgstr "{percent}% bekend. Je team kan starten bij {threshold}%."
 
 #. Who connected the app, then the day they did.
 #: src/routes/_shell.integrations.$integration.tsx
@@ -923,9 +981,21 @@ msgstr "{subject}: {actions} op {object}"
 msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 msgstr "{sunk, plural, one {# daarvan is een tijdvreter, zoals het team het zei.} other {# daarvan zijn tijdvreters, zoals de teams het zeiden.}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
+msgstr "{talked, plural, one {Ik sprak met # persoon.} other {Ik sprak met # mensen.}}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "{talked} of {of}"
+msgstr "{talked} van {of}"
+
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "{team} (team)"
 msgstr "{team} (team)"
+
+#: src/onboarding/setup-steps.tsx
+msgid "{team} has been quiet so far. A short message from {lead}, their lead, usually helps. I’ll remind everyone once myself."
+msgstr "{team} is tot nu toe stil. Een kort bericht van {lead}, hun teamleider, helpt meestal. Ik herinner iedereen zelf één keer."
 
 #: src/brain/brain.ts
 msgid "{team} interviewed"
@@ -1268,9 +1338,17 @@ msgstr "Een run van een workflow wacht op dit antwoord."
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Een zoekopdracht in {where} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
 
+#: src/onboarding/setup-steps.tsx
+msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
+msgstr "Een personeelslijst is de snelste weg: namen, e-mailadressen, teams en functies, als CSV- of Excelbestand. Ik gebruik hem alleen om te weten met wie ik moet praten."
+
 #: src/workflows/history-view.tsx
 msgid "A step"
 msgstr "Een stap"
+
+#: src/onboarding/setup-steps.tsx
+msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
+msgstr "Een team zonder teamleider krijgt zijn links op de eerste dag, en ik vraag iedereen wat ze doen."
 
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
@@ -1612,7 +1690,6 @@ msgstr "Admins waarschuwen bij, in procent van de dag- of maandlimiet"
 msgid "Alert at"
 msgstr "Waarschuwen bij"
 
-#: src/brain/atlas-overlays.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "Alles"
@@ -1664,9 +1741,21 @@ msgstr "Alle workflowtests slagen."
 msgid "Allowed models"
 msgstr "Toegestane modellen"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Almost done: is this your organization?"
+msgstr "Bijna klaar: is dit je organisatie?"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Almost there"
+msgstr "Bijna klaar"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Already decided: {model}"
 msgstr "Al besloten: {model}"
+
+#: src/onboarding/about-story.tsx
+msgid "Alright, here’s the plan."
+msgstr "Oké, dit is het plan."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -1729,9 +1818,17 @@ msgstr "Een app die niemand heeft goedgekeurd kreeg de gegevens van het domein n
 msgid "An app runs only once an admin approved its code. That happens on the domain's page."
 msgstr "Een app draait pas als een beheerder de code heeft goedgekeurd. Dat gebeurt op de pagina van het domein."
 
+#: src/onboarding/setup-steps.tsx
+msgid "An old format: save it as PDF or a newer file"
+msgstr "Een oud formaat: sla het op als pdf of nieuwer bestand"
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "and {more} more"
 msgstr "en nog {more}"
+
+#: src/onboarding/send-plan-form.tsx
+msgid "Another day"
+msgstr "Een andere dag"
 
 #: src/engines/resource-bindings.tsx
 msgid "Another domain"
@@ -2094,6 +2191,11 @@ msgstr "gevraagd door de agent, in hun chat"
 msgid "Asked the agent to fix a run"
 msgstr "De agent gevraagd een run te herstellen"
 
+#: src/onboarding/send-plan-form.tsx
+msgctxt "at an hour of the day: on Tuesday at 9:00"
+msgid "at"
+msgstr "om"
+
 #: src/workflows/runs.tsx
 msgid "At {step}: {error}"
 msgstr "Bij {step}: {error}"
@@ -2133,14 +2235,9 @@ msgstr "Beschikbaar, direct"
 msgid "Available, via Composio"
 msgstr "Beschikbaar, via Composio"
 
-#: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
 msgid "Back"
 msgstr "Terug"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Back to {destination}"
-msgstr "Terug naar {destination}"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -2180,6 +2277,14 @@ msgstr "Voor"
 msgctxt "note property"
 msgid "Before"
 msgstr "Voorheen"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Before I reach out, let your team know"
+msgstr "Laat je team het weten voordat ik contact opneem"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Before we start, which language do you prefer?"
+msgstr "Voordat we beginnen: welke taal heeft je voorkeur?"
 
 #. Read by screen readers before the old value.
 #: src/landscape/audit-trail.tsx
@@ -2264,7 +2369,6 @@ msgstr "Gekoppeld aan"
 
 #: src/brain/brain-nav.tsx
 #: src/frame/app-sidebar.tsx
-#: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
 msgstr "Brein"
@@ -2354,6 +2458,10 @@ msgstr "Door niemand"
 #: src/routes/_shell.settings.spend.tsx
 msgid "By person"
 msgstr "Per persoon"
+
+#: src/onboarding/setup-steps.tsx
+msgid "By team"
+msgstr "Per team"
 
 #: src/brain/brain.ts
 msgid "By the {role}"
@@ -2459,6 +2567,11 @@ msgstr "wijzigen"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Change"
 msgstr "Wijziging"
+
+#: src/onboarding/send-plan-form.tsx
+msgctxt "change which teams"
+msgid "Change"
+msgstr "Wijzigen"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -2597,6 +2710,10 @@ msgstr "In rekening brengen"
 msgid "Charge {amount} for this model call?"
 msgstr "{amount} in rekening brengen voor deze modelaanroep?"
 
+#: src/onboarding/about-story.tsx
+msgid "Chasing paperwork. Half of every file is waiting for payslips."
+msgstr "Achter papieren aan. De helft van elk dossier is wachten op loonstroken."
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chat"
@@ -2665,6 +2782,14 @@ msgstr "Kies een collectie"
 msgid "Choose a file"
 msgstr "Kies een bestand"
 
+#: src/onboarding/language-choice.tsx
+msgid "Choose your language"
+msgstr "Kies je taal"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Choose your staff list"
+msgstr "Kies je personeelslijst"
+
 #: src/activity/audit-log.tsx
 msgid "Clear"
 msgstr "Wissen"
@@ -2705,6 +2830,10 @@ msgstr "{name} sluiten"
 msgid "Close it for the onboarding"
 msgstr "Sluiten voor de onboarding"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Closes {closes}"
+msgstr "Sluit op {closes}"
+
 #: src/chat/thread.tsx
 msgid "Code"
 msgstr "Code"
@@ -2721,6 +2850,10 @@ msgstr "Code die het kan gebruiken is gewijzigd: {code}"
 #: src/chat/thread.tsx
 msgid "Code step"
 msgstr "Codestap"
+
+#: src/onboarding/setup-steps.tsx
+msgid "colleagues talked"
+msgstr "collega’s gesproken"
 
 #: src/knowledge/document.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -3009,6 +3142,11 @@ msgctxt "inbox item section"
 msgid "Context"
 msgstr "Context"
 
+#: src/onboarding/about-story.tsx
+#: src/onboarding/setup-steps.tsx
+msgid "Continue"
+msgstr "Doorgaan"
+
 #: src/engines/resource-bindings.tsx
 msgid "Contract"
 msgstr "Contract"
@@ -3023,8 +3161,13 @@ msgid "Conversations"
 msgstr "Gesprekken"
 
 #: src/chat/thread.tsx
+#: src/onboarding/setup-steps.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Copy"
+msgstr "Kopiëren"
 
 #: src/landscape/app-table.tsx
 msgid "Copy app ID"
@@ -3114,6 +3257,10 @@ msgstr "Klantgegevens"
 msgid "Customer records, messages, tickets, CRM fields or files that identify customers."
 msgstr "Klantgegevens, berichten, tickets, CRM-velden of bestanden die klanten identificeren."
 
+#: src/onboarding/about-story.tsx
+msgid "Customer service"
+msgstr "Klantenservice"
+
 #: src/frame/person-menu.tsx
 msgid "Dark"
 msgstr "Donker"
@@ -3182,6 +3329,10 @@ msgstr "Dag"
 msgctxt "log filter"
 msgid "Day"
 msgstr "Dag"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Day {day} of {days}"
+msgstr "Dag {day} van {days}"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Day the data processing agreement was signed"
@@ -3376,6 +3527,10 @@ msgstr "Dit signaal over {name} verbergen"
 msgid "Dismissed a knowledge signal"
 msgstr "Een kennissignaal genegeerd"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Do you have anything that explains how you work?"
+msgstr "Heb je iets dat uitlegt hoe jullie werken?"
+
 #: src/labels.ts
 msgid "Document"
 msgstr "Document"
@@ -3385,6 +3540,7 @@ msgid "Document not found"
 msgstr "Document niet gevonden"
 
 #: src/brain/brain.ts
+#: src/onboarding/document-drop.tsx
 msgid "Documents"
 msgstr "Documenten"
 
@@ -3478,6 +3634,7 @@ msgid "done"
 msgstr "klaar"
 
 #: src/chat/thread.tsx
+#: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
 msgstr "Klaar"
@@ -3517,6 +3674,7 @@ msgid "Drawn as a workflow: {workflow}"
 msgstr "Uitgetekend als workflow: {workflow}"
 
 #: src/knowledge/uploads.tsx
+#: src/onboarding/document-drop.tsx
 msgid "Drop files here"
 msgstr "Zet bestanden hier neer"
 
@@ -3566,6 +3724,7 @@ msgid "Earlier versions"
 msgstr "Eerdere versies"
 
 #: src/knowledge/document.tsx
+#: src/onboarding/setup-steps.tsx
 msgid "Edit"
 msgstr "Bewerken"
 
@@ -3677,6 +3836,10 @@ msgstr "Elk uitgenodigd team geïnterviewd"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Elke maandag: uren, runs en wat er wacht."
+
+#: src/onboarding/about-story.tsx
+msgid "Every morning I copy new tickets into a spreadsheet. There goes my first hour."
+msgstr "Elke ochtend kopieer ik nieuwe tickets naar een spreadsheet. Daar gaat mijn eerste uur."
 
 #: src/brain/brain-atlas.ts
 msgid "Every one of them is interviewed."
@@ -3858,6 +4021,10 @@ msgstr "Mislukt, opnieuw geprobeerd"
 msgid "Failed: {failed}"
 msgstr "Mislukt: {failed}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Fewer than {least} of {of}"
+msgstr "Minder dan {least} van {of}"
+
 #: src/landscape/landscape.ts
 msgid "Fewer than 10 users"
 msgstr "Minder dan 10 gebruikers"
@@ -3914,6 +4081,10 @@ msgctxt "heading of the column that filters the integrations"
 msgid "Filters"
 msgstr "Filters"
 
+#: src/onboarding/about-story.tsx
+msgid "Finance"
+msgstr "Financiën"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Finance and accounting"
@@ -3943,13 +4114,13 @@ msgstr "Vingerafdruk gekopieerd"
 msgid "Finish"
 msgstr "Afronden"
 
+#: src/onboarding/setup-steps.tsx
+msgid "First I need your staff list."
+msgstr "Eerst heb ik je personeelslijst nodig."
+
 #: src/landscape/landscape-overview.ts
 msgid "First seen"
 msgstr "Voor het eerst gezien"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Fit and center"
-msgstr "Passend maken en centreren"
 
 #: src/workflows/fix-in-chat.tsx
 msgid "Fix in chat"
@@ -4058,6 +4229,10 @@ msgctxt "where a decision comes from"
 msgid "From"
 msgstr "Van"
 
+#: src/onboarding/about-story.tsx
+msgid "From all of that, I work out where AI saves your team the most time."
+msgstr "Uit al die gesprekken haal ik waar AI je team de meeste tijd bespaart."
+
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "From the kickoff with the sponsor. What is changed here holds from the next interview turn on."
 msgstr "Uit de kick-off met de sponsor. Wat hier verandert, geldt vanaf de volgende beurt in een interview."
@@ -4065,6 +4240,10 @@ msgstr "Uit de kick-off met de sponsor. Wat hier verandert, geldt vanaf de volge
 #: src/landscape/data-tab.tsx
 msgid "From the permissions people granted and how the app is classified."
 msgstr "Op basis van de rechten die mensen gaven en hoe de app is ingedeeld."
+
+#: src/onboarding/setup-steps.tsx
+msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
+msgstr "Uit je HR- of salarissysteem. Microsoft 365 of Google kan later worden gekoppeld, samen met ons."
 
 #: src/brain/brain.ts
 msgid "Gap"
@@ -4187,6 +4366,10 @@ msgstr "Grasp is nu even druk. Verwijder dit beleid en upload het over een minuu
 msgid "Grasp is reading the policy"
 msgstr "Grasp leest het beleid"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Grasp is still putting the agreements in place. Your people’s links go out once that is done."
+msgstr "Grasp regelt de afspraken nog. De links van je mensen worden beschikbaar zodra dat klaar is."
+
 #: src/onboarding/staff-words.ts
 msgctxt "who did it, in the log"
 msgid "Grasp itself"
@@ -4288,6 +4471,10 @@ msgstr "Gast van {domain}, uitgenodigd voor {person}"
 msgid "Guests"
 msgstr "Gasten"
 
+#: src/onboarding/about-story.tsx
+msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
+msgstr "Mijn halve maandag gaat op aan facturen. Vaak mist het ordernummer, dus dan mail ik rond."
+
 #: src/brain/brain.ts
 msgid "Handover"
 msgstr "Overdracht"
@@ -4320,9 +4507,21 @@ msgstr "Gezondheidsinformatie van medewerkers of klanten die een nadere beoordel
 msgid "Held for review"
 msgstr "Vastgehouden voor beoordeling"
 
+#: src/onboarding/about-story.tsx
+msgid "Here’s the plan"
+msgstr "Dit is het plan"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Hi {admin}, I’m Stephen"
+msgstr "Hoi {admin}, ik ben Stephen"
+
 #: src/routes/guest.tsx
 msgid "Hi {name}"
 msgstr "Hoi {name}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Hi everyone,"
+msgstr "Hoi allemaal,"
 
 #: src/activity/audit-log.tsx
 msgid "Hide"
@@ -4379,6 +4578,10 @@ msgstr "Hoe Grasp weet van {appName}"
 msgid "How hard it thinks"
 msgstr "Hoe grondig het nadenkt"
 
+#: src/onboarding/about-story.tsx
+msgid "How long does one of those take you, Tim?"
+msgstr "Hoe lang ben je met zo’n factuur bezig, Tim?"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "How much has to be known before it opens"
 msgstr "Hoeveel bekend moet zijn voordat het opengaat"
@@ -4411,6 +4614,42 @@ msgstr "Hoe je in Grasp komt. Wachtwoorden en tweestapsverificatie lopen via het
 msgctxt "kind of app"
 msgid "HR"
 msgstr "HR"
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not find the columns. The first row should name them: name, email, team and job."
+msgstr "Ik kon de kolommen niet vinden. De eerste rij moet ze noemen: naam, e-mail, team en functie."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not keep it. Try again in a moment."
+msgstr "Ik kon het niet bewaren. Probeer het zo nog eens."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not read this file. A CSV or an Excel file works."
+msgstr "Ik kon dit bestand niet lezen. Een CSV- of Excelbestand werkt."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I couldn’t read this one"
+msgstr "Deze kon ik niet lezen"
+
+#: src/onboarding/about-story.tsx
+msgid "I do every interview myself. Here’s what that sounds like."
+msgstr "Elk interview doe ik zelf. Zo klinkt dat."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I sent it"
+msgstr "Ik heb het verstuurd"
+
+#: src/onboarding/setup-steps.tsx
+msgid "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."
+msgstr "Ik praat eerst met elke teamleider, zodat die over mij hoort voordat het team dat doet. Controleer wie welk team leidt, en welke teams meedoen."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I’ve handled everything else."
+msgstr "De rest heb ik zelf afgehandeld."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I’ve heard enough to open. There are just a few things I need from you first."
+msgstr "Ik heb genoeg gehoord om open te gaan. Ik heb eerst nog een paar dingen van je nodig."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "If {condition}:"
@@ -4453,6 +4692,10 @@ msgstr "In gebruik"
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
 msgid "In Workflows"
 msgstr "In Workflows"
+
+#: src/onboarding/setup-steps.tsx
+msgid "In your documents I saw {tools}."
+msgstr "In je documenten zag ik {tools}."
 
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
@@ -4801,10 +5044,6 @@ msgstr "Soort uitspraak"
 msgid "Knowledge"
 msgstr "Kennis"
 
-#: src/brain/atlas-overlays.tsx
-msgid "Known"
-msgstr "Bekend"
-
 #: src/onboarding/staff-words.ts
 msgid "Known: {known}% of the {threshold}% to open"
 msgstr "Bekend: {known}% van de {threshold}% om te openen"
@@ -4883,14 +5122,34 @@ msgstr "Recente activiteit"
 msgid "Layout"
 msgstr "Indeling"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Lead not yet"
+msgstr "Teamleider nog niet"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Lead of {name}"
+msgstr "Teamleider van {name}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Lead talked"
+msgstr "Teamleider sprak"
+
 #: src/onboarding/staff-words.ts
 msgctxt "onboarding stage"
 msgid "Leads"
 msgstr "Leads"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Leads get their link {when}. Everyone else right after their lead has talked to me."
+msgstr "Teamleiders krijgen hun link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken."
+
 #: src/onboarding/staff-words.ts
 msgid "Leads talked: {count} of {of}"
 msgstr "Leads gesproken: {count} van {of}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Leave out personnel files and anything about one person."
+msgstr "Laat personeelsdossiers en alles over één persoon weg."
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Leaves this list"
@@ -4909,12 +5168,17 @@ msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp kn
 msgstr "Laat een AI-app zoals Claude of ChatGPT met Grasp werken. Die leest wat Grasp weet en kan je een pagina laten zien. Voor al het andere vraagt die het je eerst hier: er verandert niets tenzij jij het toestaat."
 
 #: src/knowledge/uploads.tsx
+#: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Laat los om ze toe te voegen"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
 msgstr "De interviews weer laten lopen"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Let’s start"
+msgstr "Laten we beginnen"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Licence"
@@ -5071,6 +5335,10 @@ msgctxt "short name of the first step a team takes with AI, over a narrow column
 msgid "Mapped"
 msgstr "In kaart"
 
+#: src/onboarding/about-story.tsx
+msgid "Mark, where does the time go on a mortgage file?"
+msgstr "Mark, waar gaat de tijd heen bij een hypotheekdossier?"
+
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
@@ -5195,6 +5463,18 @@ msgstr "Modules"
 msgid "Monthly budget for AI"
 msgstr "Maandbudget voor AI"
 
+#: src/onboarding/setup-steps.tsx
+msgid "More about Pulse"
+msgstr "Meer over Pulse"
+
+#: src/onboarding/setup-steps.tsx
+msgid "More about the staff list"
+msgstr "Meer over de personeelslijst"
+
+#: src/onboarding/setup-steps.tsx
+msgid "More about these connections"
+msgstr "Meer over deze koppelingen"
+
 #: src/chat/chat-list.tsx
 msgid "More for {title}"
 msgstr "Meer voor {title}"
@@ -5211,9 +5491,17 @@ msgstr "Er is meer verstuurd dan hierboven staat. Lees precies wat is verstuurd.
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Er wordt meer verstuurd dan hierboven staat. Lees precies wat er wordt verstuurd voordat je bevestigt."
 
+#: src/onboarding/about-story.tsx
+msgid "Mortgage advice"
+msgstr "Hypotheekadvies"
+
 #: src/routes/_shell.landscape.index.tsx
 msgid "Mosaic"
 msgstr "Mozaïek"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Most people can’t name every tool they use, so a small app on the work laptops tells me. We set it up with you or your IT, or you skip it for now."
+msgstr "De meeste mensen kunnen niet elke tool noemen die ze gebruiken, dus een kleine app op de werklaptops vertelt het mij. We zetten hem op met jou of je IT, of je slaat het nu over."
 
 #: src/dashboard/widget-board.tsx
 msgid "Move"
@@ -5383,6 +5671,10 @@ msgstr "Volgende run: {next}"
 msgctxt "inbox: the action that settles an item"
 msgid "Next step"
 msgstr "Volgende stap"
+
+#: src/onboarding/send-plan-form.tsx
+msgid "Next week"
+msgstr "Volgende week"
 
 #: src/landscape/landscape-audit.ts
 #: src/routes/_shell.settings.members.tsx
@@ -5935,10 +6227,22 @@ msgstr "Niet aangeboden"
 msgid "Not on file yet."
 msgstr "Nog niet vastgelegd."
 
+#: src/onboarding/send-plan-form.tsx
+msgid "Not planned yet"
+msgstr "Nog niet gepland"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/independent-workflows.tsx
 msgid "Not published"
 msgstr "Niet gepubliceerd"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Not read: add it again"
+msgstr "Niet gelezen: voeg het opnieuw toe"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Not read: no connection"
+msgstr "Niet gelezen: geen verbinding"
 
 #: src/landscape/landscape-overview.ts
 msgid "Not recorded"
@@ -6168,10 +6472,18 @@ msgctxt "inbox sort"
 msgid "Oldest first"
 msgstr "Oudste eerst"
 
+#: src/onboarding/send-plan-form.tsx
+msgid "on {date} at {hour}"
+msgstr "op {date} om {hour}"
+
 #: src/chat/held-writes.tsx
 #: src/dashboard/outcome-card.tsx
 msgid "On {where}"
 msgstr "Op {where}"
+
+#: src/onboarding/send-plan-form.tsx
+msgid "On a later day"
+msgstr "Op een latere dag"
 
 #: src/chat/builds-state.ts
 msgid "on a schedule (its parameter {param}, {timeZone})"
@@ -6218,6 +6530,14 @@ msgstr "Onboarding"
 #: src/routes/_shell.onboarding.tsx
 msgid "Onboarding sections"
 msgstr "Onderdelen van de onboarding"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Onboarding steps"
+msgstr "Onboardingstappen"
+
+#: src/onboarding/about-story.tsx
+msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
+msgstr "Zodra ik ongeveer {threshold}% van het plaatje heb, kan je team beginnen. De rest vul ik onderweg aan."
 
 #: src/settings/pulse.ts
 msgctxt "Pulse status"
@@ -6404,10 +6724,6 @@ msgstr "Open: {open}"
 msgid "Opening the chat…"
 msgstr "Chat wordt geopend…"
 
-#: src/brain/note-reveal.tsx
-msgid "Opening the note"
-msgstr "De notitie gaat open"
-
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Opens at {threshold}%"
 msgstr "Gaat open bij {threshold}%"
@@ -6417,11 +6733,17 @@ msgid "Operations"
 msgstr "Bewerkingen"
 
 #: src/knowledge/uploads.tsx
+#: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "of kies ze op je computer"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
+msgid "Other"
+msgstr "Overig"
+
+#: src/onboarding/setup-steps.tsx
+msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Overig"
 
@@ -6445,10 +6767,18 @@ msgstr "Anders:"
 msgid "Otherwise: {name}"
 msgstr "Anders: {name}"
 
+#: src/onboarding/about-story.tsx
+msgid "Our first conversation gave me the big picture. Now I need the details."
+msgstr "Ons eerste gesprek gaf me het grote plaatje. Nu heb ik de details nodig."
+
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Output"
 msgstr "Uitvoer"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
+msgstr "In de komende twee weken krijg je een korte persoonlijke link om met Stephen te praten, de AI-interviewer van Grasp: teamleiders zo’n 20 minuten, de rest 10 tot 15. Met je stem of door te typen."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
@@ -6575,6 +6905,7 @@ msgctxt "status of a policy rule"
 msgid "Paused"
 msgstr "Gepauzeerd"
 
+#: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "Gepauzeerd: geen link gaat open en er gaat er geen uit. De links die aan de beurt zijn, gaan uit zodra de interviews weer lopen."
@@ -6590,6 +6921,10 @@ msgstr "Betaalbewijzen"
 #: src/export/export-menu.tsx
 msgid "PDF"
 msgstr "PDF"
+
+#: src/onboarding/document-drop.tsx
+msgid "PDF, Word, Excel, PowerPoint or text"
+msgstr "PDF, Word, Excel, PowerPoint of tekst"
 
 #: src/knowledge/uploads.tsx
 msgid "Pending"
@@ -6626,6 +6961,10 @@ msgstr "Gehoorde mensen"
 #: src/dashboard/signals.tsx
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Mensen wezen {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} {rejected} van {answered, plural, one {# antwoord} other {# antwoorden}} af bij stap {step} van {about}."
+
+#: src/onboarding/setup-steps.tsx
+msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
+msgstr "Mensen reageren beter als ze weten waarom ik contact opneem. Ik heb een bericht opgesteld dat je zelf kunt versturen. Kies daarna de dag waarop de gesprekken beginnen."
 
 #: src/routes/_shell.policies.index.tsx
 msgid "People using them"
@@ -6717,6 +7056,10 @@ msgstr "Persoon"
 msgid "Person or automated"
 msgstr "Persoon of automatisch"
 
+#: src/onboarding/setup-steps.tsx
+msgid "pieces of work found"
+msgstr "stukken werk gevonden"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Plan"
 msgstr "Abonnement"
@@ -6747,6 +7090,10 @@ msgstr "Beleid"
 msgctxt "inbox filter"
 msgid "Policies"
 msgstr "Beleid"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
+msgstr "Beleid, procedures, werkinstructies. Deel wat je hebt. Concepten zijn ook prima."
 
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"
@@ -6799,6 +7146,10 @@ msgstr "Vorige treffer"
 #: src/landscape/overview-tab.tsx
 msgid "Privacy policy"
 msgstr "Privacybeleid"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
+msgstr "Procedures, handboeken, handleidingen. Koppel de plekken waar ze staan, en ik lees alleen wat je met me deelt."
 
 #: src/policies/policy.ts
 msgid "Processing agreement {states}"
@@ -6929,6 +7280,11 @@ msgstr "lezen"
 msgid "Read"
 msgstr "Lezen"
 
+#: src/onboarding/document-drop.tsx
+msgctxt "a document, done reading"
+msgid "Read"
+msgstr "Gelezen"
+
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
 msgstr "De statistieken van een domein gelezen"
@@ -6990,6 +7346,10 @@ msgstr "Alleen-lezen"
 msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
 msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest; Grasp controleert dat niet. Een alleen-lezen-tool draait zonder te vragen. Een aanroep van elke andere tool vanuit een chat, of door iemand die een domein gebruikt, wacht tot die persoon bevestigt; een workflowrun voert hem uit als een van zijn stappen. Markeer een tool alleen als alleen-lezen als hij niets wijzigt: verkeerd gemarkeerd wijzigt hij dingen zonder te vragen."
 
+#: src/onboarding/document-drop.tsx
+msgid "Reading"
+msgstr "Lezen"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Reading policies is not set up yet. Add your own Anthropic key in Settings, under Models, and upload the policy again."
 msgstr "Beleid lezen is nog niet ingesteld. Voeg je eigen Anthropic-sleutel toe in Instellingen, onder Modellen, en upload het beleid opnieuw."
@@ -7006,6 +7366,10 @@ msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
 msgid "Reading what you wrote"
 msgstr "Je antwoord wordt gelezen"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Reading your staff list"
+msgstr "Je personeelslijst lezen"
+
 #: src/policies/policies-table.tsx
 msgctxt "Grasp is reading an uploaded policy"
 msgid "Reading…"
@@ -7020,6 +7384,7 @@ msgid "reads the domain's data"
 msgstr "leest de gegevens van het domein"
 
 #: src/knowledge/uploads.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Ready"
 msgstr "Klaar"
 
@@ -7133,6 +7498,7 @@ msgstr "Opnieuw laden"
 msgid "Remove"
 msgstr "Verwijderen"
 
+#: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "{file} verwijderen"
@@ -7696,9 +8062,17 @@ msgctxt "kind of finding"
 msgid "Security"
 msgstr "Beveiliging"
 
+#: src/onboarding/setup-steps.tsx
+msgid "See an example"
+msgstr "Bekijk een voorbeeld"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "See the models, AI spend and the audit trail"
 msgstr "De modellen, AI-uitgaven en de audittrail zien"
+
+#: src/onboarding/setup-steps.tsx
+msgid "See what needs you"
+msgstr "Bekijk wat je nodig heeft"
 
 #: src/brain/brain.ts
 msgid "Seen in use: not observed through sign-in or Pulse yet"
@@ -7780,6 +8154,10 @@ msgstr "Instellingen"
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Meerdere workflows draaien met AI, over het grootste deel van het handwerk."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Share your staff list"
+msgstr "Deel je personeelslijst"
+
 #: src/chat/builds.tsx
 msgid "Shared code changed"
 msgstr "Gedeelde code gewijzigd"
@@ -7787,10 +8165,6 @@ msgstr "Gedeelde code gewijzigd"
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Shared with"
 msgstr "Gedeeld met"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Show"
-msgstr "Tonen"
 
 #: src/landscape/audit-trail.tsx
 msgid "Show {more} more"
@@ -8002,9 +8376,17 @@ msgctxt "put a to-do card at the back of the pile"
 msgid "Skip"
 msgstr "Overslaan"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Skip for now"
+msgstr "Nu overslaan"
+
 #: src/policies/policy.ts
 msgid "SOC 2"
 msgstr "SOC 2"
+
+#: src/onboarding/document-drop.tsx
+msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
+msgstr "Niet alles is toegevoegd. Ik kan PDF, Word, Excel, PowerPoint en tekst lezen."
 
 #: src/onboarding/staff-words.ts
 msgctxt "who did it, in the log"
@@ -8115,6 +8497,10 @@ msgstr "Begonnen te volgen wat er bij een verbinding verandert"
 msgid "Starting…"
 msgstr "Bezig met starten…"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Starts {starts}"
+msgstr "Begint {starts}"
+
 #: src/policies/findings-table.tsx
 msgctxt "column: what a rule does to an app"
 msgid "State"
@@ -8162,6 +8548,10 @@ msgstr "Status"
 msgid "Stays by hand"
 msgstr "Blijft met de hand"
 
+#: src/onboarding/setup-frame.tsx
+msgid "Step {n}"
+msgstr "Stap {n}"
+
 #: src/workflows/history-view.tsx
 msgid "Step {ordinal}"
 msgstr "Stap {ordinal}"
@@ -8197,7 +8587,6 @@ msgid "Still deciding"
 msgstr "Beslist nog"
 
 #: src/brain/atlas-map.ts
-#: src/brain/atlas-overlays.tsx
 #: src/brain/brain.ts
 msgid "Still open"
 msgstr "Nog open"
@@ -8209,10 +8598,6 @@ msgstr "Nog open: {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "Nog open: {question} {who} kan het beantwoorden."
-
-#: src/brain/atlas-overlays.tsx
-msgid "Still waiting"
-msgstr "Wacht nog"
 
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
@@ -8272,6 +8657,10 @@ msgctxt "kind of app"
 msgid "Support"
 msgstr "Klantenservice"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Switch a team off and nobody in it gets a link."
+msgstr "Zet een team uit en niemand erin krijgt een link."
+
 #: src/frame/person-menu.tsx
 msgid "System"
 msgstr "Systeem"
@@ -8312,6 +8701,10 @@ msgstr "Besproken in {source}"
 msgid "Talked: {count} of {of}"
 msgstr "Gesproken: {count} van {of}"
 
+#: src/onboarding/setup-frame.tsx
+msgid "Talking to your team"
+msgstr "In gesprek met je team"
+
 #: src/brain/brain.ts
 msgid "Target design agreed"
 msgstr "Doelontwerp akkoord"
@@ -8331,6 +8724,10 @@ msgstr "Team"
 msgctxt "log filter"
 msgid "Team"
 msgstr "Team"
+
+#: src/onboarding/setup-steps.tsx
+msgid "team leads talked"
+msgstr "teamleiders gesproken"
 
 #: src/dashboard/report.ts
 msgid "Team leads: {leadsTalked} of {leads}"
@@ -8357,6 +8754,10 @@ msgstr "Teams en rollen"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Teams named"
 msgstr "Genoemde teams"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Teams under five people show only whether their lead talked, so nobody can be singled out."
+msgstr "Teams van minder dan vijf mensen laten alleen zien of hun teamleider heeft gepraat, zodat niemand eruit te pikken is."
 
 #: src/dashboard/widget-board.tsx
 msgctxt "dashboard widget: how far each team is with AI"
@@ -8426,6 +8827,18 @@ msgstr "Tekst"
 msgid "Text, at most {tokens} tokens"
 msgstr "Tekst, hoogstens {tokens} tokens"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Thank you, {admin}"
+msgstr "Dank je, {admin}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Thank you. From your staff list I can see {people} people in {teams} teams."
+msgstr "Dank je. In je personeelslijst zie ik {people} mensen in {teams} teams."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Thank you. I’m reading them now, and you can add more at any time."
+msgstr "Dank je. Ik lees ze nu, en je kunt altijd meer toevoegen."
+
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
 msgstr "Dat account hoort niet bij je organisatie."
@@ -8481,6 +8894,10 @@ msgstr "Dat transcript is te lang. Breng alleen het gesprek zelf binnen, zonder 
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Die manier van inloggen is hier niet ingesteld."
+
+#: src/onboarding/setup-steps.tsx
+msgid "That’s everything from you. Now I’ll talk to your team."
+msgstr "Dat was alles van jou. Nu ga ik in gesprek met je team."
 
 #: src/brain/brain.ts
 msgid "the {role}"
@@ -8594,6 +9011,10 @@ msgctxt "who did it, in the log"
 msgid "The company"
 msgstr "Het bedrijf"
 
+#: src/routes/setup.tsx
+msgid "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
+msgstr "Het Brain van het bedrijf: {percent}% bekend. Donkere stippen zijn wat ik weet, grijze wat ik nog moet leren."
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The company's look at the risks to its people, the data protection impact assessment. Grasp brings it filled in, and the company signs it off."
 msgstr "De blik van het bedrijf op de risico’s voor zijn mensen, de gegevensbeschermingseffectbeoordeling. Grasp brengt die ingevuld mee, en het bedrijf keurt hem goed."
@@ -8629,6 +9050,14 @@ msgstr "De verwerkersovereenkomst is niet getekend"
 #: src/landscape/data-tab.tsx
 msgid "The data this app touches and the teams that use it."
 msgstr "De data die deze app raakt en de teams die hem gebruiken."
+
+#: src/onboarding/send-plan-form.tsx
+msgid "The day after"
+msgstr "Overmorgen"
+
+#: src/onboarding/send-plan-form.tsx
+msgid "The day the other teams get their links"
+msgstr "De dag waarop de andere teams hun links krijgen"
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"
@@ -8711,6 +9140,10 @@ msgstr "Het bestand kon niet worden gelezen. Probeer een pdf of een tekstbestand
 msgid "The first {shown} by domain; more domains have models bound."
 msgstr "De eerste {shown} per domein; aan meer domeinen zijn modellen gekoppeld."
 
+#: src/onboarding/send-plan-form.tsx
+msgid "The first links go out"
+msgstr "De eerste links gaan eruit"
+
 #: src/engines/store-change-errors.ts
 msgid "the fixture's row doesn't fit what the migration takes"
 msgstr "de rij van het testrecord past niet bij wat de migratie aanneemt"
@@ -8724,6 +9157,10 @@ msgstr "De volledige audittrail"
 msgctxt "onboarding area section"
 msgid "The go"
 msgstr "Het startsein"
+
+#: src/onboarding/send-plan-form.tsx
+msgid "The hour the other teams get their links"
+msgstr "Het uur waarop de andere teams hun links krijgen"
 
 #: src/workflows/test-run.tsx
 msgid "The input isn't JSON."
@@ -8771,6 +9208,10 @@ msgstr "De kick-off zei: {text}"
 msgid "The kickoff with the company"
 msgstr "De kick-off met het bedrijf"
 
+#: src/onboarding/setup-steps.tsx
+msgid "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
+msgstr "De teamleiders van {going} teams krijgen hun link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken."
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "De link werkt tot {until}."
@@ -8782,6 +9223,10 @@ msgstr "De lijst is vol: verwijder een regel om er een toe te voegen."
 #: src/brain/brain-home.tsx
 msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
 msgstr "De geheugenbestanden, skills en uploads die je agents lezen, staan in <0>Kennis</0>."
+
+#: src/onboarding/setup-steps.tsx
+msgid "The message"
+msgstr "Het bericht"
 
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
@@ -8997,6 +9442,10 @@ msgstr "Thema"
 msgid "Then {task}"
 msgstr "Daarna {task}"
 
+#: src/onboarding/about-story.tsx
+msgid "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
+msgstr "Daarna praat ik zelf met je team: korte gesprekken, verspreid over twee weken. Daar leer ik het meest van."
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
 msgstr "Er zijn nog geen collecties die je kunt lezen."
@@ -9008,6 +9457,10 @@ msgstr "Er zijn nog geen domeinen die je kunt openen. Domeinen maak je in de cha
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "Er is geen gegevensregel: elk toegestaan model mag gevoelige gegevens krijgen."
+
+#: src/onboarding/setup-steps.tsx
+msgid "There is nobody in this list."
+msgstr "Er staat niemand in deze lijst."
 
 #: src/engines/store-changes.tsx
 msgid "These fields stay reserved with their current meaning: {reserved}."
@@ -9131,6 +9584,10 @@ msgstr "Dit domein heeft zo’n app niet."
 msgid "This domain has no version to run yet."
 msgstr "Dit domein heeft nog geen versie om te draaien."
 
+#: src/onboarding/setup-steps.tsx
+msgid "This is right"
+msgstr "Dit klopt"
+
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Dit is de toestemming zoals Grasp die nu formuleert. Het auditlog bewaart een hash van de exacte tekst die werd getoond."
@@ -9142,6 +9599,10 @@ msgstr "Deze link werkt niet. Vraag wie hem stuurde om een nieuwe."
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Deze link is verlopen. Vraag wie hem stuurde om een nieuwe."
+
+#: src/onboarding/setup-steps.tsx
+msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."
+msgstr "Deze lijst is te groot. Ik kan tot {peopleMost} mensen in maximaal {teamsMost} teams aan."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"
@@ -9259,9 +9720,21 @@ msgctxt "inbox tab: what waits on you"
 msgid "To do"
 msgstr "Te doen"
 
+#: src/onboarding/setup-steps.tsx
+msgid "To everyone"
+msgstr "Aan iedereen"
+
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "Om privé te houden wie er sprak, ontbreekt een team tot vijf van zijn mensen gevraagd zijn, en zijn aantal tot er drie gehoord zijn. Geen van beide betekent dat niemand meedeed."
+
+#: src/onboarding/send-plan-form.tsx
+msgid "To the team leads. Everyone else follows once their lead has talked."
+msgstr "Naar de teamleiders. Alle anderen volgen zodra hun teamleider heeft gesproken."
+
+#: src/onboarding/send-plan-form.tsx
+msgid "To these teams"
+msgstr "Naar deze teams"
 
 #: src/engines/package-approvals.tsx
 msgid "To use them again, someone who approves packages reviews them again."
@@ -9275,6 +9748,14 @@ msgstr "Vandaag"
 #: src/routes/_shell.settings.models.tsx
 msgid "Today ({day}, UTC)"
 msgstr "Vandaag ({day}, UTC)"
+
+#: src/onboarding/send-plan-form.tsx
+msgid "Tomorrow"
+msgstr "Morgen"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Too large to read"
+msgstr "Te groot om te lezen"
 
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
@@ -9380,6 +9861,10 @@ msgstr "Probeer een andere zoekopdracht, of wis de filters om de hele audittrail
 msgid "Trying again…"
 msgstr "Opnieuw proberen…"
 
+#: src/onboarding/about-story.tsx
+msgid "Twenty minutes each, easily. About fifteen a week."
+msgstr "Twintig minuten per stuk, makkelijk. Zo’n vijftien per week."
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: two sources disagree"
 msgid "Two answers"
@@ -9396,6 +9881,10 @@ msgstr "Onbeantwoorde vraag"
 #: src/landscape/landscape.ts
 msgid "Uncategorized"
 msgstr "Zonder categorie"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Under 5"
+msgstr "Onder de 5"
 
 #: src/dashboard/report.ts
 msgctxt "programme stage"
@@ -9534,6 +10023,10 @@ msgstr "Gebruik"
 #: src/routes/_shell.landscape.$appId.tsx
 msgid "Usage unknown"
 msgstr "Gebruik onbekend"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Use another list"
+msgstr "Een andere lijst gebruiken"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Use the chat, Knowledge and the apps shared with them"
@@ -9816,6 +10309,14 @@ msgstr "Verzamelwijze"
 msgid "Ways of collecting"
 msgstr "Verzamelwijzen"
 
+#: src/onboarding/setup-steps.tsx
+msgid "We open your platform once we’ve checked everything with you. You’ll hear from us."
+msgstr "We openen je platform zodra we alles met je hebben nagelopen. Je hoort van ons."
+
+#: src/onboarding/setup-steps.tsx
+msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
+msgstr "We willen minder tijd kwijt zijn aan herhaalwerk, zodat er meer tijd is voor onze klanten. Het gaat om hoe het werk loopt, niet om banen."
+
 #: src/dashboard/report.ts
 msgid "Week {week}"
 msgstr "Week {week}"
@@ -9905,6 +10406,10 @@ msgstr "Wat er gebeurde"
 #: src/routes/_shell.onboarding.log.tsx
 msgid "What happened at the company and what Grasp's staff did, the newest first."
 msgstr "Wat er bij het bedrijf gebeurde en wat Grasp-medewerkers deden, het nieuwste eerst."
+
+#: src/onboarding/setup-steps.tsx
+msgid "What happens next"
+msgstr "Wat er daarna gebeurt"
 
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "What he leaves alone"
@@ -10090,6 +10595,10 @@ msgstr "Als iets op jou wacht"
 msgid "When the event {event} happens"
 msgstr "Wanneer de gebeurtenis {event} plaatsvindt"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Where does the work get written down?"
+msgstr "Waar wordt het werk vastgelegd?"
+
 #: src/brain/brain-sections.ts
 msgid "Where everything came from: conversations, documents, Pulse and connections."
 msgstr "Waar alles vandaan komt: gesprekken, documenten, Pulse en koppelingen."
@@ -10116,10 +10625,6 @@ msgstr "Waar de leverancier zegt dat data wordt opgeslagen en verwerkt, en event
 msgid "Where this app comes up"
 msgstr "Waar deze app voorkomt"
 
-#: src/brain/atlas-overlays.tsx
-msgid "Where you are in the brain"
-msgstr "Waar je bent in de brain"
-
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Where your data lives, and the time Grasp uses."
 msgstr "Waar je data staat, en welke tijdzone Grasp gebruikt."
@@ -10131,6 +10636,10 @@ msgstr "Welke domeinen en agents toestemmingen hebben: {why}"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "Which emails Grasp sends you. Only to you; nobody else’s change."
 msgstr "Welke e-mails Grasp je stuurt. Dit geldt alleen voor jou, niet voor anderen."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Which tools do people actually use?"
+msgstr "Welke tools gebruiken mensen echt?"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."
@@ -10170,6 +10679,10 @@ msgstr "Wie beslist, wie kan blokkeren"
 msgid "Who does what"
 msgstr "Wie wat doet"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Who leads it?"
+msgstr "Wie leidt het?"
+
 #: src/onboarding/staff-words.ts
 msgctxt "what Grasp knows, by source"
 msgid "Who leads which team"
@@ -10191,6 +10704,10 @@ msgstr "Wie waar werkt"
 #: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Wie waar werkt, is binnen"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Who’s who at your company?"
+msgstr "Wie is wie in je bedrijf?"
 
 #: src/engines/package-approvals.tsx
 msgid "Why"
@@ -10445,6 +10962,10 @@ msgstr "Daar keur je het goed. {app} laat zien wat Grasp vraagt."
 msgid "You are signed in as Grasp staff, for a limited time."
 msgstr "Je bent aangemeld als medewerker van Grasp, voor beperkte tijd."
 
+#: src/onboarding/setup-steps.tsx
+msgid "You can close this page now. Come back here to see how far I am."
+msgstr "Je kunt deze pagina nu sluiten. Kom hier terug om te zien hoe ver ik ben."
+
 #: src/screens/screen-frame.tsx
 msgid "You can't open this domain's apps: your role doesn't allow it, or the domain has read data you can't read."
 msgstr "Je kunt de apps van dit domein niet openen: je rol staat het niet toe, of het domein heeft gegevens gelezen die jij niet mag lezen."
@@ -10460,6 +10981,10 @@ msgstr "Je hebt geen toegang tot deze organisatie. Vraag een beheerder."
 #: src/routes/guest.tsx
 msgid "You finished this chat. Thank you for your time."
 msgstr "Je hebt deze chat afgerond. Bedankt voor je tijd."
+
+#: src/onboarding/about-story.tsx
+msgid "You show me who’s who, where the documents are, and which tools people use."
+msgstr "Jij laat me zien wie wie is, waar de documenten staan en welke tools mensen gebruiken."
 
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
@@ -10510,6 +11035,10 @@ msgstr "Je besluit heeft niets veranderd."
 msgid "Your message"
 msgstr "Je bericht"
 
+#: src/frame/person-menu.tsx
+msgid "Your onboarding"
+msgstr "Jouw onboarding"
+
 #: src/dashboard/signals.tsx
 msgid "your organization"
 msgstr "je organisatie"
@@ -10521,6 +11050,14 @@ msgstr "Je organisatie gebruikt het via de toestemmingen die je geeft."
 #: src/routes/_shell.settings.security.tsx
 msgid "Your organization’s account"
 msgstr "Het account van je organisatie"
+
+#: src/onboarding/about-story.tsx
+msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
+msgstr "Eerst je mensen, documenten en tools. Dan twee weken korte gesprekken met je team. Bij {threshold}% kan je team beginnen."
+
+#: src/onboarding/setup-steps.tsx
+msgid "Your platform is open. We’ll walk you through it."
+msgstr "Je platform is open. We lopen het samen met je door."
 
 #: src/routes/_shell.policies.index.tsx
 msgctxt "tab: the company's own policy documents"
@@ -10540,14 +11077,10 @@ msgstr "Je rapport over week {week} is klaar"
 msgid "Your session has ended. Sign in again to go on."
 msgstr "Je sessie is verlopen. Log opnieuw in om verder te gaan."
 
+#: src/onboarding/knowledge-bar.tsx
+msgid "Your team can start at {threshold}%"
+msgstr "Je team kan starten bij {threshold}%"
+
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Je werkruimte, wie daarin wat mag doen, en je eigen account."
-
-#: src/brain/atlas-overlays.tsx
-msgid "Zoom in"
-msgstr "Inzoomen"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Zoom out"
-msgstr "Uitzoomen"

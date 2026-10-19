@@ -22,7 +22,7 @@ import type { ReactNode } from "react";
  * The bar above an admin page: the sidebar's trigger, then the admin and,
  * below its overview, the page. It stays in view while the page scrolls.
  */
-const AdminHeader = ({ page }: { page: string | null }) => (
+export const AdminHeader = ({ page }: { page: string | null }) => (
   <header className="bg-background sticky top-0 z-30 flex h-(--header-height) shrink-0 items-center border-b">
     {/* A square of its own, so the line beside it continues a column's edge. */}
     <div className="flex h-full w-12 flex-none items-center justify-center">
@@ -58,6 +58,25 @@ const AdminHeader = ({ page }: { page: string | null }) => (
   </header>
 );
 
+/** A page's title, with what it is for under it when there is a `description`, and `children` under that. */
+export const PageHeading = ({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children?: ReactNode;
+}) => (
+  <div className="flex flex-col gap-1">
+    <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
+    {description === undefined || description === "" ? null : (
+      <p className="text-muted-foreground text-sm">{description}</p>
+    )}
+    {children}
+  </div>
+);
+
 /**
  * An admin page titled `title`, with what it is for under it when there is
  * a `description`: the overview when `overview` (as wide as the
@@ -83,12 +102,7 @@ export const AdminPage = ({
         overview ? "max-w-7xl" : "max-w-5xl"
       )}
     >
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
-        {description === undefined ? null : (
-          <p className="text-muted-foreground text-sm">{description}</p>
-        )}
-      </div>
+      <PageHeading description={description} title={title} />
       {children}
     </div>
   </>
