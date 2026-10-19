@@ -10,7 +10,13 @@ import { describe, expect, it } from "vite-plus/test";
 import { dutchHandbook } from "./fixtures/dutch-knowledge.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 
 // Search as people use it: Dutch words find their sections with or without
 // diacritics, by prefix, inside compounds and with a typo; results rank
@@ -484,8 +490,196 @@ const filler = (seed: number, words: number) =>
       vocabulary[(seed * 31 + index * 17 + index * index) % vocabulary.length]
   ).join(" ");
 
+/** A statement as core prepared and bound it. */
+interface Bound {
+  query: string;
+  values: unknown[];
+}
+
+/**
+ * What D1's `first` answers of a statement's `results`: its first row, or
+ * that row's `column`, or `null` when there is none.
+ */
+const firstOf = (
+  results: Record<string, unknown>[],
+  column?: string
+): unknown => {
+  const [row] = results;
+  const answer = column === undefined ? row : row?.[column];
+  return answer ?? null;
+};
+
+/**
+ * `person`'s Knowledge API on a connection that keeps every statement it
+ * makes of the knowledge database, with its values, and adds up the rows
+ * they read (D1's `meta.rows_read`), the search indexes' own included.
+ */
+const recordingReads = async (person: Person) => {
+  const real = env.KNOWLEDGE;
+  const made: { rows: number; statements: Bound[] } = {
+    rows: 0,
+    statements: [],
+  };
+  // Each statement is kept as it runs, bound or not, however it runs,
+  // and the rows it read added as D1 says (`meta.rows_read`). Only `all`,
+  // `run` and a batch say: `first` and `raw` run through `all` too, once,
+  // their answers made from its rows. (A row's columns come back by name,
+  // so `raw` loses a column whose name another shares: a search that read
+  // so would show it, failing, never pass with its reads uncounted.)
+  const recorded = (
+    statement: D1PreparedStatement,
+    query: string,
+    values: unknown[] = []
+  ): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property) => {
+        if (property === "bind") {
+          return (...bound: unknown[]) =>
+            recorded(target.bind(...bound), query, bound);
+        }
+        const counted = async () => {
+          made.statements.push({ query, values });
+          const result = await target.all();
+          made.rows += result.meta.rows_read;
+          return result;
+        };
+        if (property === "all" || property === "run") {
+          return counted;
+        }
+        if (property === "first") {
+          return async (column?: string) => {
+            const { results } = await counted();
+            return firstOf(results, column);
+          };
+        }
+        if (property === "raw") {
+          return async (options?: { columnNames?: boolean }) => {
+            const { results } = await counted();
+            const rows = results.map((row) => Object.values(row));
+            const [first] = results;
+            return options?.columnNames === true
+              ? [first === undefined ? [] : Object.keys(first), ...rows]
+              : rows;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+  const knowledge: D1Database = {
+    prepare: (query) => recorded(real.prepare(query), query),
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      const results = await real.batch<T>(statements);
+      for (const { meta } of results) {
+        made.rows += meta.rows_read;
+      }
+      return results;
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+  const { core } = await openRpc(person.session, {
+    coreEnv: { ...env, KNOWLEDGE: knowledge },
+  });
+  const api: KnowledgeApi = core.authenticate().knowledge;
+  return { knowledge: api, made };
+};
+
+/** The tables that grow with what the knowledge base holds. */
+const corpusTables = new Set([
+  "collections",
+  "documents",
+  "sections",
+  "search_rows",
+  "search_words",
+  "search_trigrams",
+]);
+
+/** Words that may follow a table where an alias could stand. */
+const keywords = [
+  "AS",
+  "CROSS",
+  "FULL",
+  "GROUP",
+  "INNER",
+  "JOIN",
+  "LEFT",
+  "LIMIT",
+  "NATURAL",
+  "ON",
+  "ORDER",
+  "OUTER",
+  "RIGHT",
+  "UNION",
+  "USING",
+  "WHERE",
+  "WINDOW",
+];
+
+/**
+ * A table a query names after FROM or JOIN, and the alias it gives it, if
+ * any: never a keyword, which starts the next clause (another JOIN, ON).
+ */
+const namedPattern = new RegExp(
+  String.raw`\b(?:FROM|JOIN)\s+"?(?<table>\w+)"?(?:\s+(?:AS\s+)?"?(?!(?:${keywords.join("|")})\b)(?<alias>\w+)"?)?`,
+  "giu"
+);
+
+/**
+ * The corpus table each name in `query`'s plan stands for: the table
+ * itself, or an alias the query gave it, which SQLite's plan prints in
+ * its place.
+ */
+const corpusNamesOf = (query: string): Map<string, string> => {
+  const names = new Map([...corpusTables].map((table) => [table, table]));
+  for (const { groups } of query.matchAll(namedPattern)) {
+    // Names are compared as SQLite does: whatever their case.
+    const table = (groups?.table ?? "").toLowerCase();
+    const alias = (groups?.alias ?? "").toLowerCase();
+    if (corpusTables.has(table) && alias !== "") {
+      names.set(alias, table);
+    }
+  }
+  return names;
+};
+
+/** A step of a query plan that reads a table whole, or an index none of it. */
+const scanPattern =
+  /^SCAN (?<table>\S+)(?: VIRTUAL TABLE INDEX \d+:(?<constraints>\S*))?/u;
+
+/**
+ * The corpus tables `statement` reads whole, by SQLite's plan for it (an
+ * alias resolved to its table): a
+ * table scanned row by row, or a full-text index scanned without a MATCH
+ * or rowid constraint (FTS5's `M` and `=`).
+ */
+const tablesReadWhole = async ({ query, values }: Bound): Promise<string[]> => {
+  const { results } = await env.KNOWLEDGE.prepare(`EXPLAIN QUERY PLAN ${query}`)
+    .bind(...values)
+    .all<{ detail: string }>();
+  const names = corpusNamesOf(query);
+  return results.flatMap(({ detail }) => {
+    const step = scanPattern.exec(detail)?.groups;
+    const table = names.get((step?.table ?? "").toLowerCase());
+    if (table === undefined) {
+      return [];
+    }
+    const constrained = /[M=]/u.test(step?.constraints ?? "");
+    return constrained ? [] : [table];
+  });
+};
+
 describe("search speed", { timeout: 300_000 }, () => {
-  it("answers in about 100 ms over 5,000 sections", async () => {
+  // How long a search takes depends on how busy the machine is; how it
+  // finds what it finds doesn't. So this asks what keeps a search fast as
+  // the corpus grows (it answers in 3 to 25 ms on a laptop): it reaches
+  // sections only through its indexes, and a search for words few
+  // sections hold reads little, however much else there is.
+  it("finds sections through its indexes over 5,000 sections, reading a fraction of them", async () => {
     const person = await personOf("user");
     const sectionsOf = (document: number) =>
       Array.from(
@@ -498,7 +692,30 @@ describe("search speed", { timeout: 300_000 }, () => {
       text: [`# Document ${document}`, ...sectionsOf(document)].join("\n"),
     }));
     await collectionWith(person, [...documents, ...dutchHandbook]);
-    const queries = [
+    const held = await env.KNOWLEDGE.prepare(
+      "SELECT count(*) AS sections FROM sections"
+    ).first<{ sections: number }>();
+    const sections = held?.sections ?? 0;
+    const recording = await recordingReads(person);
+    /** The corpus tables `query`'s search read whole, and the rows it read. */
+    const searched = async (query: string) => {
+      recording.made.rows = 0;
+      recording.made.statements = [];
+      await recording.knowledge.search(query);
+      const whole = await Promise.all(
+        recording.made.statements.map(tablesReadWhole)
+      );
+      return {
+        readWhole: whole.flat(),
+        rows: recording.made.rows,
+        // Its own full-text statement was seen: what's asserted of the
+        // statements is of the search's.
+        seen: recording.made.statements.some(({ query: made }) =>
+          made.includes("search_words")
+        ),
+      };
+    };
+    const everyQuery = [
       "vakantiedagen",
       "financiele planning",
       "salaris",
@@ -508,18 +725,35 @@ describe("search speed", { timeout: 300_000 }, () => {
       "reiskostenvergoedng",
       "pensioenregeling",
     ];
-    // Warm up: the first query compiles and caches the statement.
-    await person.knowledge.search(queries[0] ?? "");
-    const timings: number[] = [];
-    for (const query of queries) {
-      const start = performance.now();
-      // oxlint-disable-next-line no-await-in-loop -- one at a time, to time each
-      await person.knowledge.search(query);
-      timings.push(performance.now() - start);
+    // Words only the handbook's few sections hold, one with a typo.
+    const rare = ["vakantiedagen", "pensioenregeling", "reiskostenvergoedng"];
+
+    const readWhole: Record<string, string[]> = {};
+    const seen: Record<string, boolean> = {};
+    const rows: Record<string, boolean> = {};
+    for (const query of everyQuery) {
+      // oxlint-disable-next-line no-await-in-loop -- one search at a time
+      const found = await searched(query);
+      readWhole[query] = found.readWhole;
+      seen[query] = found.seen;
+      if (rare.includes(query)) {
+        rows[query] = found.rows < sections / 10;
+      }
     }
-    // The aim is about 100 ms; on a laptop each takes 3 to 25 ms. CI
-    // machines are slower and shared, so the bound leaves them room while
-    // still catching a search that got many times slower.
-    expect(Math.max(...timings)).toBeLessThan(500);
+
+    expect({
+      sections: sections >= 5000,
+      seen,
+      readWhole,
+      rows,
+    }).toStrictEqual({
+      sections: true,
+      seen: Object.fromEntries(everyQuery.map((query) => [query, true])),
+      // Through the indexes, however many sections match: a word in
+      // thousands of them costs what they match, never the whole corpus.
+      readWhole: Object.fromEntries(everyQuery.map((query) => [query, []])),
+      // A word in a handful of sections reads little of the rest.
+      rows: Object.fromEntries(rare.map((query) => [query, true])),
+    });
   });
 });
