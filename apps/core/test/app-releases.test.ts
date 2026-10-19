@@ -40,6 +40,7 @@ import {
   buildAppCode,
   buildAppTests,
   buildScreens,
+  buildServer,
   buildWorkflows,
 } from "../src/screens.ts";
 import { allEvents } from "./audit-events.ts";
@@ -1890,6 +1891,57 @@ export const reach = action({
     }).toStrictEqual({ ok: false, refused: new Set(strays) });
   });
 
+  it("can't keep anything but one file per migration under migrations/: each is refused by name", async () => {
+    const strays = [
+      "migrations/lib/helper.ts",
+      "migrations/v1.0/derive.ts",
+      "migrations/notes.md",
+      "migrations/types.d.ts",
+      // Never saved (a save refuses each), never a migration.
+      "migrations/.hidden.ts",
+      "migrations/../app.ts",
+    ];
+    const built = await buildAppCode(
+      env,
+      {
+        ...notesFiles(),
+        ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
+      },
+      "app-test"
+    );
+    expect({
+      ok: built.ok,
+      refused: new Set(
+        built.ok
+          ? []
+          : built.diagnostics
+              .filter(({ message }) =>
+                message.includes("which holds only the App's migrations")
+              )
+              .map(({ file }) => file)
+      ),
+    }).toStrictEqual({ ok: false, refused: new Set(strays) });
+  });
+
+  it("builds a server class's code in a folder whose name has a dot", async () => {
+    const built = await buildServer(
+      env,
+      {
+        "app/server.ts":
+          'import { greeting } from "./lib.v2/greeting.ts";\n\nexport class App {\n  hello() {\n    return greeting;\n  }\n}\n',
+        "app/lib.v2/greeting.ts": 'export const greeting = "Hello";\n',
+        // Not code, and not refused: the App's exports live in app/.
+        "app/exports.json": "{}",
+      },
+      "app-test"
+    );
+    expect(
+      built.ok
+        ? Object.keys(built.modules).toSorted((a, b) => a.localeCompare(b))
+        : built.diagnostics
+    ).toStrictEqual(["app~app~lib.v2~greeting.js", "app~app~server.js"]);
+  });
+
   it("builds each operations file as a module of its own, dotted folders included", async () => {
     // A folder named like a file beside it: each still has its own module.
     const built = await buildAppCode(
@@ -2086,6 +2138,52 @@ const screenShowingProps = (line: string): string =>
   `${line}\nexport type Shown = Props;\nexport default function Notes() {\n  return null;\n}\n`;
 
 describe("screens", { timeout: 120_000 }, () => {
+  it("import a component kept in a folder whose name has a dot", async () => {
+    const built = await buildScreens(
+      env,
+      {
+        ...notesFiles(),
+        "components/v1.0/title.tsx":
+          "export function Title() {\n  return <h1>Notes</h1>;\n}\n",
+        "screens/notes.tsx":
+          'import { Title } from "../components/v1.0/title.tsx";\n\nexport default function Notes() {\n  return <Title />;\n}\n',
+      },
+      "app-test"
+    );
+    expect(errorsOf(built)).toStrictEqual([]);
+  });
+
+  it("can't keep anything but components under components/: each is refused by name", async () => {
+    const strays = [
+      "components/styles.css",
+      "components/data.json",
+      // Never saved (a save refuses each), never a component.
+      "components/.hidden/title.tsx",
+      "components/../app.tsx",
+      "components//title.tsx",
+    ];
+    const built = await buildScreens(
+      env,
+      {
+        ...notesFiles(),
+        "screens/notes.tsx":
+          "export default function Notes() {\n  return null;\n}\n",
+        ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
+      },
+      "app-test"
+    );
+    expect(
+      new Set(
+        saidSchema
+          .parse(built)
+          .diagnostics.filter(({ message }) =>
+            message.includes("which holds only the App's components")
+          )
+          .map(({ file }) => file)
+      )
+    ).toStrictEqual(new Set(strays));
+  });
+
   it("name for their types the App's own declarations, a folder's index among them", async () => {
     const declarations = {
       "components/types/index.d.ts":
@@ -2337,6 +2435,10 @@ describe("screens", { timeout: 120_000 }, () => {
     [
       "an operation in a dotted folder",
       'import { create } from "../operations/v1.0/notes.ts";',
+    ],
+    [
+      "a migration in a dotted folder",
+      'import derive from "../migrations/v1.0/derive.ts";',
     ],
     ["the host's SDK", 'import { inspectApp } from "@grasp-os/sdk/host";'],
   ])(

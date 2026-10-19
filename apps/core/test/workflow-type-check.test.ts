@@ -368,6 +368,43 @@ describe(
       ]);
     });
 
+    it("import code the workflows share from a folder whose name has a dot", async () => {
+      const files = checked("    return twice(21);");
+      const workflow = files["workflows/checked.ts"] ?? "";
+      await expect(
+        built({
+          ...sampleApp(),
+          ...files,
+          "workflows/checked.ts": `import { twice } from "./lib.v2/twice.ts";\n${workflow}`,
+          "workflows/lib.v2/twice.ts":
+            "export const twice = (value: number): number => value * 2;\n",
+        })
+      ).resolves.toStrictEqual({ ok: true, files: [], warned: [] });
+    });
+
+    it("refuse, by name, anything under workflows/ that isn't workflow code", async () => {
+      const strays = [
+        "workflows/notes.md",
+        "workflows/flow.json",
+        "workflows/types.d.ts",
+        // Never saved (a save refuses each), never workflow code.
+        "workflows/.hidden/x.ts",
+        "workflows/../app.ts",
+        "workflows//x.ts",
+      ];
+      await expect(
+        built({
+          ...sampleApp(),
+          ...checked("    return 1;"),
+          ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
+        })
+      ).resolves.toStrictEqual({
+        ok: false,
+        files: strays.toSorted((a, b) => (a < b ? -1 : 1)),
+        warned: [],
+      });
+    });
+
     it("leave a stray declaration under operations/ out of a workflow's check, so it gives the workflows nothing", async () => {
       await expect(
         built({
