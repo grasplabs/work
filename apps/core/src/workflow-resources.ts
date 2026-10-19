@@ -2718,20 +2718,15 @@ const bindersOf = async (env: Env, id: string): Promise<Live[]> =>
     .orderBy(asc(workflowResources.id));
 
 /**
- * Deletes workflow `id` for `by`, who must build it and isn't Grasp staff,
- * in one statement that requires the current version of no other live
- * workflow to bind it. Otherwise `workflow.resource_bound`, audited with
- * the binders' IDs, and answered with the binders `by` may see and a count
- * of those they may not (`WorkflowBinders`). Its row and versions stay,
- * never served again.
+ * Deletes workflow `id` in one statement that requires the current version
+ * of no other live workflow, no trigger, App binding or live run to hold
+ * it: whether it was deleted.
  */
-export const deleteWorkflowResource = async (
+const deletedOnce = async (
   env: Env,
   by: Acting,
-  id: unknown
-): Promise<void> => {
-  requireNotStaff(by);
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  id: string
+): Promise<boolean> => {
   const db = drizzle(env.DB);
   const [deleted] = await auditedBatch(env, db, [
     db
@@ -2742,30 +2737,30 @@ export const deleteWorkflowResource = async (
       })
       .where(
         and(
-          eq(workflowResources.id, workflow.id),
+          eq(workflowResources.id, id),
           isNull(workflowResources.deletedAt),
-          sql`NOT ${boundSql(workflow.id)}`
+          sql`NOT ${boundSql(id)}`
         )
       )
       .returning({ id: workflowResources.id }),
-    outboxedIfChanged(db, entry(by, "workflow.deleted", workflow.id)),
+    outboxedIfChanged(db, entry(by, "workflow.deleted", id)),
     // Its packages end with it: approvals revoked, the request waiting
     // withdrawn, and the locks only they named gone, their files to
     // cleanup (dependencies/pending.ts).
-    ...withdrawnWithWorkflow(db, by, workflow.id),
+    ...withdrawnWithWorkflow(db, by, id),
     // Its draft (workflow-drafts.ts) is never read again, and may hold a
     // sensitive parameter's default: it goes once it is deleted.
     db.delete(workflowResourceDrafts).where(
       sql`${workflowResourceDrafts.workflowResourceId} IN (SELECT id
-        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
     ),
     db.delete(workflowResourceDraftModules).where(
       sql`${workflowResourceDraftModules.workflowResourceId} IN (SELECT id
-        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
     ),
     db.delete(workflowResourceDraftInspections).where(
       sql`${workflowResourceDraftInspections.workflowResourceId} IN (SELECT id
-        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
     ),
     // The releases its approvals kept (workflow-bindings.ts) go back to
     // their retention once it is deleted.
@@ -2775,39 +2770,68 @@ export const deleteWorkflowResource = async (
         sql`${sdkReleasePins.holderId} IN (SELECT approval.id
           FROM workflow_binding_approvals AS approval
           JOIN workflow_resources AS workflow ON workflow.id = approval.workflow_resource_id
-          WHERE approval.workflow_resource_id = ${workflow.id}
+          WHERE approval.workflow_resource_id = ${id}
             AND workflow.deleted_at IS NOT NULL)`
       )
     ),
   ]);
-  if (deleted.length > 0) {
-    return;
-  }
-  if ((await liveWorkflow(env, workflow.id)) === undefined) {
-    throw unavailable();
-  }
-  const binders = await bindersOf(env, workflow.id);
-  const triggerRows = await drizzle(env.DB).all<{ id: string }>(
-    sql`${pinningTriggersSql(workflow.id)} ORDER BY trigger.id`
+  return deleted.length > 0;
+};
+
+/** What keeps workflow `id` from being deleted (`boundSql`), as read now. */
+interface Blockers {
+  binders: Live[];
+  triggers: string[];
+  appBindings: { id: string; app: string }[];
+  liveRuns: number;
+}
+
+/** What holds workflow `id` now: each kind `boundSql` refuses a deletion for. */
+const blockersOf = async (env: Env, id: string): Promise<Blockers> => {
+  const db = drizzle(env.DB);
+  const triggerRows = await db.all<{ id: string }>(
+    sql`${pinningTriggersSql(id)} ORDER BY trigger.id`
   );
-  const triggers = triggerRows.map(({ id: trigger }) => trigger);
-  const appBindings = await drizzle(env.DB).all<{ id: string; app: string }>(
-    sql`${pinningAppsSql(workflow.id)} ORDER BY pinned.app_id, pinned.id`
+  const appBindings = await db.all<{ id: string; app: string }>(
+    sql`${pinningAppsSql(id)} ORDER BY pinned.app_id, pinned.id`
   );
-  const [live] = await drizzle(env.DB).all<{ count: number }>(
-    sql`SELECT ${liveRunsSql(workflow.id)} AS count`
+  const [live] = await db.all<{ count: number }>(
+    sql`SELECT ${liveRunsSql(id)} AS count`
   );
-  const liveRuns = live?.count ?? 0;
+  return {
+    binders: await bindersOf(env, id),
+    triggers: triggerRows.map(({ id: trigger }) => trigger),
+    appBindings,
+    liveRuns: live?.count ?? 0,
+  };
+};
+
+/**
+ * Audits and throws the refusal of `by`'s deletion of workflow `id`:
+ * `workflow.resource_bound` with what holds it (`blockers`) when something
+ * does, the binders `by` may see and a count of those they may not; else
+ * `workflow.resource_busy`, the guard having refused it for something gone
+ * by the time it was read, twice.
+ */
+const refuseDeletion = async (
+  env: Env,
+  by: Acting,
+  id: string,
+  { binders, triggers, appBindings, liveRuns }: Blockers,
+  blocked: boolean
+): Promise<never> => {
+  const reason = blocked ? "workflow.resource_bound" : "workflow.resource_busy";
+  const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     outboxed(
       db,
       entry(
         by,
         "workflow.delete_refused",
-        workflow.id,
+        id,
         namedWithin(
           {
-            reason: "workflow.resource_bound",
+            reason,
             binders: binders.length,
             triggers: triggers.length,
             appBindings: appBindings.length,
@@ -2822,6 +2846,9 @@ export const deleteWorkflowResource = async (
       )
     ),
   ]);
+  if (!blocked) {
+    throw workflowResourceErrors.create("workflow.resource_busy");
+  }
   const visible: WorkflowBinders["binders"] = [];
   for (const binder of binders) {
     // oxlint-disable-next-line no-await-in-loop -- one role per binder, as `get` reads it
@@ -2829,7 +2856,7 @@ export const deleteWorkflowResource = async (
       visible.push({ id: binder.id, name: binder.name });
     }
   }
-  const details: WorkflowBinders = {
+  throw workflowResourceErrors.create("workflow.resource_bound", {
     binders: visible,
     hidden: binders.length - visible.length,
     // A workflow's builders manage every trigger that starts it
@@ -2837,17 +2864,48 @@ export const deleteWorkflowResource = async (
     triggers: { ids: triggers, hidden: 0 },
     // And remove any App binding to it (app-workflow-bindings.ts): they
     // see them all, with their Apps.
-    appBindings: appBindings.map(({ id: binding, app }) => ({
-      id: binding,
-      app,
-    })),
+    appBindings,
     liveRuns,
-  };
-  throw workflowResourceErrors.create("workflow.resource_bound", {
-    binders: details.binders,
-    hidden: details.hidden,
-    triggers: details.triggers,
-    appBindings: details.appBindings,
-    liveRuns: details.liveRuns,
-  });
+  } satisfies WorkflowBinders);
+};
+
+/**
+ * Deletes workflow `id` for `by`, who must build it and isn't Grasp staff,
+ * in one statement that requires the current version of no other live
+ * workflow to bind it. Otherwise `workflow.resource_bound`, audited with
+ * the binders' IDs, and answered with the binders `by` may see and a count
+ * of those they may not (`WorkflowBinders`). Its row and versions stay,
+ * never served again.
+ */
+export const deleteWorkflowResource = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  // A refusal that finds nothing binding it lost a race with whatever
+  // stopped binding it in between: tried once more, then answered as
+  // busy rather than as bound by nothing.
+  for (const last of [false, true]) {
+    // oxlint-disable-next-line no-await-in-loop -- the retry follows the attempt
+    if (await deletedOnce(env, by, workflow.id)) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    if ((await liveWorkflow(env, workflow.id)) === undefined) {
+      throw unavailable();
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const blockers = await blockersOf(env, workflow.id);
+    const blocked =
+      blockers.binders.length > 0 ||
+      blockers.triggers.length > 0 ||
+      blockers.appBindings.length > 0 ||
+      blockers.liveRuns > 0;
+    if (blocked || last) {
+      // oxlint-disable-next-line no-await-in-loop -- refused once, then thrown
+      await refuseDeletion(env, by, workflow.id, blockers, blocked);
+    }
+  }
 };
