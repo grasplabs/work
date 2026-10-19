@@ -2,7 +2,7 @@ import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -35,6 +35,7 @@ import { z } from "zod";
 import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import {
+  workflowResourceRunControls,
   workflowResourceRunTerminations,
   workflowResourceVersions,
   workflowResourceRuns,
@@ -1077,58 +1078,6 @@ const sendTermination = async (env: Env, runId: string): Promise<void> => {
     .where(eq(workflowResourceRunTerminations.runId, runId));
 };
 
-/** Most owed terminations one repair sends. */
-const terminationsPerRepair = 50;
-
-/**
- * Sends again the terminations core still owes the engine, those due
- * first, each backing off on its own as the engine refuses it (claimed by
- * its count, so two repairs never send one at once). Never given up: an
- * instance made before its cancel would otherwise keep its lease, or
- * sleep on to its alarm. From the cron, at `now`.
- */
-export const repairResourceTerminations = async (
-  env: Env,
-  now: Date = new Date()
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  const owed = await db
-    .select()
-    .from(workflowResourceRunTerminations)
-    .where(lte(workflowResourceRunTerminations.nextAt, now))
-    .orderBy(asc(workflowResourceRunTerminations.nextAt))
-    .limit(terminationsPerRepair);
-  for (const { runId, attempts } of owed) {
-    const backoff = Math.min(repairAfterMs * 2 ** attempts, maxStartBackoffMs);
-    // oxlint-disable-next-line no-await-in-loop -- one at a time
-    const claimed = await db
-      .update(workflowResourceRunTerminations)
-      .set({
-        attempts: attempts + 1,
-        nextAt: new Date(now.getTime() + backoff),
-      })
-      .where(
-        and(
-          eq(workflowResourceRunTerminations.runId, runId),
-          eq(workflowResourceRunTerminations.attempts, attempts)
-        )
-      )
-      .returning({ runId: workflowResourceRunTerminations.runId });
-    if (claimed.length === 0) {
-      continue;
-    }
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one at a time
-      await sendTermination(env, runId);
-    } catch (error) {
-      log.error("workflow.resource_run_terminate_failed", {
-        runId,
-        ...errorFields(error),
-      });
-    }
-  }
-};
-
 /**
  * Stops run `row`, which hasn't ended, as `actor` asks, audited under
  * them: whoever asks has been decided already (`terminateResourceRun`, a
@@ -1183,6 +1132,145 @@ export const stopResourceRun = async (
   await auditedBatch(env, db, [
     outboxed(db, terminatedEntry(actor, row, now?.status ?? row.status)),
   ]);
+};
+
+/**
+ * Asks the engine to stop run `runId` for cancel receipt `receiptId` (a
+ * screen's, screen-workflows.ts), as `actor`, unless it ended already,
+ * then settles the receipt by where the run is: `applied`, or `superseded`
+ * when it ended other than cancelled. Stopping is idempotent, so a cancel
+ * whose answer was lost, or whose stop failed, is applied again.
+ */
+export const applyCancel = async (
+  env: Env,
+  actor: AuditActor,
+  receiptId: string,
+  runId: string
+): Promise<void> => {
+  const before = await runOf(env, runId);
+  if (before !== undefined && unended.includes(before.status)) {
+    await stopResourceRun(env, actor, before);
+  }
+  const after = await runOf(env, runId);
+  const state =
+    after !== undefined &&
+    !unended.includes(after.status) &&
+    after.status !== "cancelled"
+      ? "superseded"
+      : "applied";
+  await drizzle(env.DB)
+    .update(workflowResourceRunControls)
+    .set({ state, settledAt: new Date() })
+    .where(
+      and(
+        eq(workflowResourceRunControls.id, receiptId),
+        eq(workflowResourceRunControls.state, "admitted")
+      )
+    );
+};
+
+/**
+ * How long a screen's cancel stays admitted before the repair applies it:
+ * the request that admitted it applies it at once, unless its stop failed.
+ */
+const cancelGraceMs = 60_000;
+
+/** Most admitted cancels one repair applies. */
+const cancelsPerRepair = 20;
+
+/**
+ * Applies again the screen cancels left admitted (their stop failed, or
+ * their request ended first), oldest first, as the App asked them.
+ */
+const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
+  const admitted = await drizzle(env.DB)
+    .select({
+      id: workflowResourceRunControls.id,
+      runId: workflowResourceRunControls.runId,
+      appId: workflowResourceRunControls.appId,
+    })
+    .from(workflowResourceRunControls)
+    .where(
+      and(
+        eq(workflowResourceRunControls.state, "admitted"),
+        lte(
+          workflowResourceRunControls.createdAt,
+          new Date(now.getTime() - cancelGraceMs)
+        )
+      )
+    )
+    .orderBy(asc(workflowResourceRunControls.createdAt))
+    .limit(cancelsPerRepair);
+  for (const { id, runId, appId } of admitted) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await applyCancel(
+        env,
+        { type: "app", appId: appIdSchema.parse(appId), part: "server" },
+        id,
+        runId
+      );
+    } catch (error) {
+      log.error("workflow.resource_run_cancel_failed", {
+        runId,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
+/** Most owed terminations one repair sends. */
+const terminationsPerRepair = 50;
+
+/**
+ * Applies the screen cancels left admitted (`repairAdmittedCancels`), then
+ * sends again the terminations core still owes the engine, those due
+ * first, each backing off on its own as the engine refuses it (claimed by
+ * its count, so two repairs never send one at once). Never given up: an
+ * instance made before its cancel would otherwise keep its lease, or
+ * sleep on to its alarm. From the cron, at `now`.
+ */
+export const repairResourceTerminations = async (
+  env: Env,
+  now: Date = new Date()
+): Promise<void> => {
+  await repairAdmittedCancels(env, now);
+  const db = drizzle(env.DB);
+  const owed = await db
+    .select()
+    .from(workflowResourceRunTerminations)
+    .where(lte(workflowResourceRunTerminations.nextAt, now))
+    .orderBy(asc(workflowResourceRunTerminations.nextAt))
+    .limit(terminationsPerRepair);
+  for (const { runId, attempts } of owed) {
+    const backoff = Math.min(repairAfterMs * 2 ** attempts, maxStartBackoffMs);
+    // oxlint-disable-next-line no-await-in-loop -- one at a time
+    const claimed = await db
+      .update(workflowResourceRunTerminations)
+      .set({
+        attempts: attempts + 1,
+        nextAt: new Date(now.getTime() + backoff),
+      })
+      .where(
+        and(
+          eq(workflowResourceRunTerminations.runId, runId),
+          eq(workflowResourceRunTerminations.attempts, attempts)
+        )
+      )
+      .returning({ runId: workflowResourceRunTerminations.runId });
+    if (claimed.length === 0) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await sendTermination(env, runId);
+    } catch (error) {
+      log.error("workflow.resource_run_terminate_failed", {
+        runId,
+        ...errorFields(error),
+      });
+    }
+  }
 };
 
 /**

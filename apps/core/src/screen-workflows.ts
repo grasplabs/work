@@ -6,6 +6,7 @@ import {
 import type { BoundWorkflow, WorkflowPin } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf } from "@grasp-os/shared/audit";
+import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -15,6 +16,7 @@ import {
   isRetryableCode,
   operationErrors,
 } from "@grasp-os/shared/operations";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -33,10 +35,12 @@ import {
   workflowResourceRuns,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
+import { isUniqueViolation } from "./db/d1.ts";
+import { appHost } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { coreStartKey } from "./workflow-start-intents.ts";
 import { appStartHoldsSql } from "./workflow-starts.ts";
-import { resultOf, runOf, stopResourceRun } from "./workflows/resource-runs.ts";
+import { applyCancel, resultOf, runOf } from "./workflows/resource-runs.ts";
 import type { RunRow } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 
@@ -79,11 +83,23 @@ import { tellQueryFollowers } from "./workflows/run-changes.ts";
 //   revisions, so the screen knows which snapshot settles it.
 // - What a run returned reaching anyone else: only the run's person sees
 //   its snapshot, through the App that started it, under the run's
-//   retention (`resultOf`).
+//   retention (`resultOf`). What it returned is projected by the output
+//   the App version that started it declared, refused if it doesn't fit;
+//   why it failed, only as a code the platform defines, in the platform's
+//   own words (`failureOf`): the engine's message, or a code of the
+//   workflow's own, can be made of what the run read through grants the
+//   App doesn't hold. A restricted run's result goes only through an App
+//   in restricted mode itself.
+// - A portable host: an App token from any origin, with no build core
+//   approved, starts, controls and follows no run yet (app-function-route.ts,
+//   portable-live.ts), until that is decided on its own.
 // - Controls this platform can't serialize yet: an independent run has no
 //   paused state of its own (the engine's pause shows as running), so
 //   pause and resume are refused (`workflow.control_refused`) and offered
-//   to nobody; cancel is the one control.
+//   to nobody; cancel is the one control, one receipt per run whatever key
+//   asks for it, settled once (`superseded` when the run ended otherwise
+//   first), and applied again by the repair when its stop failed
+//   (resource-runs.ts, `repairResourceTerminations`).
 
 /** A workflow reference, as the SDK sends it. */
 const referenceSchema = z.strictObject({
@@ -377,6 +393,10 @@ const cancelAsked = async (env: Env, runId: string): Promise<boolean> =>
     .where(eq(workflowResourceRunControls.runId, runId))
     .get()) !== undefined;
 
+/** The revisions of a run cancelling, and of its end (`revisionOf`). */
+const cancellingRevision = 3;
+const endedRevision = 4;
+
 /**
  * Run `row`'s revision: 1 while queued, 2 running, 3 running with a
  * cancel asked, 4 ended. A run's lifecycle only moves forward, so neither
@@ -386,16 +406,13 @@ const cancelAsked = async (env: Env, runId: string): Promise<boolean> =>
  */
 const revisionOf = (row: RunRow, cancelling: boolean): number => {
   if (isEnded(row.status)) {
-    return 4;
+    return endedRevision;
   }
   if (row.status === "starting") {
     return 1;
   }
-  return cancelling ? 3 : 2;
+  return cancelling ? cancellingRevision : 2;
 };
-
-/** The revision of a run whose cancel was applied: its end's. */
-const endedRevision = 4;
 
 /** A run's status, as a screen sees it. */
 const statusOf = {
@@ -406,48 +423,83 @@ const statusOf = {
   cancelled: "cancelled",
 } as const;
 
-/** The most of a failure's message a snapshot carries. */
-const messageMax = 2000;
-
 /**
- * The fingerprint of the contract the App version that started a run
- * declared for `alias`: the reference's own when it is the current
- * version's, so the screen tells a run of another contract apart.
+ * The contract the App version that started a run declared for `alias`:
+ * its fingerprint, so the screen tells a run of another contract apart,
+ * and its output, which what the run returned is projected by.
  */
-const startedFingerprint = async (
+const startedContract = async (
   env: Env,
   asking: Asking,
   resolved: Resolved,
   originAppVersion: number | null
-): Promise<string> => {
+): Promise<{ fingerprint: string; output: unknown }> => {
   if (originAppVersion === null) {
     throw workflowResourceErrors.create("workflow.run_unavailable");
   }
-  if (originAppVersion === asking.version) {
-    return resolved.fingerprint;
-  }
-  const started = await declaredIn(
-    await loadRelease(env, asking.app, originAppVersion),
-    resolved.alias
-  );
+  const started =
+    originAppVersion === asking.version
+      ? resolved
+      : await declaredIn(
+          await loadRelease(env, asking.app, originAppVersion),
+          resolved.alias
+        );
   if (started === undefined) {
     throw workflowResourceErrors.create("workflow.run_unavailable");
   }
-  return started.fingerprint;
+  return { fingerprint: started.fingerprint, output: started.declared.output };
 };
 
-/** What a failed run's snapshot says of why. */
-const failureOf = (
-  error: { code: string | null; message: string } | undefined
+/** What a step's failure reads as when its own words can't be shown. */
+const stepFailed = workflowErrors.create("workflow.step_failed");
+
+/**
+ * What a failed run's snapshot says of why: only a code the platform
+ * defines, with the platform's own words for it, any other as
+ * `workflow.step_failed`. Neither the engine's message nor a code merely
+ * in a platform namespace leaves: either can be made of what the run
+ * read through grants the App doesn't hold.
+ */
+export const failureOf = (
+  error: { code: string | null; message?: string } | undefined
 ) => {
-  const code = error?.code ?? "workflow.step_failed";
+  const code =
+    error?.code !== null &&
+    error?.code !== undefined &&
+    isExpectedCode(error.code)
+      ? error.code
+      : stepFailed.code;
   return {
     code,
-    message: (error?.message ?? "The run failed.").slice(0, messageMax),
+    message: expectedMessageOf(code) ?? stepFailed.message,
     category: categoryOf(code),
     retryable: isRetryableCode(code),
     requestId: null,
   };
+};
+
+/**
+ * What a completed run returned, projected by the output the App declared:
+ * `contract.invalid_return` for anything else, `workflow.run_details_removed`
+ * past its retention.
+ */
+const outputOf = (declared: unknown, output: unknown): Json => {
+  if (output === undefined) {
+    // The contract has a completed run's output, always: past its
+    // retention, there is none to show.
+    throw workflowResourceErrors.create("workflow.run_details_removed");
+  }
+  const checked = schemaFromDescriptor(JSON.stringify(declared))[
+    "~standard"
+  ].validate(output);
+  if (checked instanceof Promise || checked.issues !== undefined) {
+    throw operationErrors.create("contract.invalid_return");
+  }
+  const projected = z.json().safeParse(checked.value);
+  if (!projected.success) {
+    throw operationErrors.create("contract.invalid_return");
+  }
+  return projected.data;
 };
 
 /** Run `runId`'s snapshot for the asking person, and its revision. */
@@ -469,28 +521,33 @@ const runSnapshot = async (
   const cancelling = !ended && (await cancelAsked(env, row.id));
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
   const status = statusOf[row.status];
-  const result = ended ? await resultOf(env, row) : {};
-  const output =
-    row.status === "completed" ? z.json().safeParse(result.output) : undefined;
+  const contract = await startedContract(
+    env,
+    asking,
+    resolved,
+    originAppVersion
+  );
+  const returned = row.status === "completed" || row.status === "failed";
   if (
-    output !== undefined &&
-    (result.output === undefined || !output.success)
+    returned &&
+    row.restricted &&
+    !(await appHost(env, asking.app).isRestricted())
   ) {
-    // The contract has a completed run's output, always: past its
-    // retention, there is none to show.
-    throw workflowResourceErrors.create("workflow.run_details_removed");
+    // What a restricted run returned, or why it failed, only to an App in
+    // restricted mode itself: never out through one that isn't.
+    throw permissionErrors.create("permission.restricted");
   }
+  const result = returned ? await resultOf(env, row) : {};
+  const output =
+    row.status === "completed"
+      ? outputOf(contract.output, result.output)
+      : undefined;
   const value: Json = {
     runId: row.id,
     workflowId: row.workflowResourceId,
     workflowVersion: row.version,
     manifestHash: row.manifestHash,
-    fingerprint: await startedFingerprint(
-      env,
-      asking,
-      resolved,
-      originAppVersion
-    ),
+    fingerprint: contract.fingerprint,
     status,
     startedAt: status === "queued" ? null : row.createdAt.getTime(),
     finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
@@ -501,7 +558,7 @@ const runSnapshot = async (
       canCancel: !ended && !cancelling && mayStart,
       pendingControl: cancelling ? { kind: "cancel", stage: "applying" } : null,
     },
-    ...(output?.success === true ? { output: output.data } : {}),
+    ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
   };
   return { value, revision: revisionOf(row, cancelling) };
@@ -541,18 +598,31 @@ const started = async (
   };
 };
 
-/** The receipt of `id`, as `controlled` answers it. */
-const receiptOf = async (env: Env, id: string) =>
+/** Run `runId`'s cancel receipt, if one was asked for. */
+const cancelOf = async (env: Env, runId: string) =>
   await drizzle(env.DB)
     .select()
     .from(workflowResourceRunControls)
-    .where(eq(workflowResourceRunControls.id, id))
+    .where(
+      and(
+        eq(workflowResourceRunControls.runId, runId),
+        eq(workflowResourceRunControls.kind, "cancel")
+      )
+    )
     .get();
+
+/** A cancel receipt, as a screen is answered it. */
+const receiptAnswer = (state: "admitted" | "applied" | "superseded"): Json => ({
+  kind: "cancel",
+  state,
+  // Admitted, the run's cancelling revision; settled, its end's.
+  revision: state === "admitted" ? cancellingRevision : endedRevision,
+});
 
 /**
  * The control `command` asks of a run, admitted: its receipt. Only a
- * cancel; pause and resume can't be serialized with it for an independent
- * run yet (see the header).
+ * cancel, one per run whatever key asks for it; pause and resume can't be
+ * serialized with it for an independent run yet (see the header).
  */
 const controlled = async (
   env: Env,
@@ -571,17 +641,7 @@ const controlled = async (
   if (command.command !== "cancel") {
     throw workflowErrors.create("workflow.control_refused");
   }
-  const db = drizzle(env.DB);
-  const where = and(
-    eq(workflowResourceRunControls.runId, row.id),
-    eq(workflowResourceRunControls.principalId, asking.by.userId),
-    eq(workflowResourceRunControls.key, command.idempotencyKey)
-  );
-  let receipt = await db
-    .select()
-    .from(workflowResourceRunControls)
-    .where(where)
-    .get();
+  let receipt = await cancelOf(env, row.id);
   if (receipt === undefined) {
     if (isEnded(row.status)) {
       // Nothing to stop: a cancelled run's cancel is done; any other end
@@ -589,23 +649,25 @@ const controlled = async (
       if (row.status !== "cancelled") {
         throw workflowErrors.create("workflow.control_refused");
       }
-      return { kind: "cancel", state: "applied", revision: endedRevision };
+      return receiptAnswer("applied");
     }
     const id = crypto.randomUUID();
-    // Written only while the person may still start the workflow through
-    // the binding, read in this statement; the same key's twin, sent at
-    // once, writes nothing.
-    await db.run(sql`INSERT INTO ${workflowResourceRunControls}
-      (id, run_id, app_id, principal_id, key, kind, state, created_at)
-      SELECT ${id}, ${row.id}, ${asking.app}, ${asking.by.userId},
-        ${command.idempotencyKey}, 'cancel', 'admitted', ${Date.now()}
-      WHERE ${mayStartSql(asking, resolved.alias, pin)}
-      ON CONFLICT (run_id, principal_id, key) DO NOTHING`);
-    receipt = await db
-      .select()
-      .from(workflowResourceRunControls)
-      .where(where)
-      .get();
+    try {
+      // Written only while the person may still start the workflow
+      // through the binding, read in this statement; a twin sent at
+      // once, under whatever key, writes nothing.
+      await drizzle(env.DB).run(sql`INSERT INTO ${workflowResourceRunControls}
+        (id, run_id, app_id, principal_id, key, kind, state, created_at)
+        SELECT ${id}, ${row.id}, ${asking.app}, ${asking.by.userId},
+          ${command.idempotencyKey}, 'cancel', 'admitted', ${Date.now()}
+        WHERE ${mayStartSql(asking, resolved.alias, pin)}`);
+    } catch (error) {
+      // The twin's receipt, written first: answered below.
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+    }
+    receipt = await cancelOf(env, row.id);
     if (receipt === undefined) {
       throw workflowResourceErrors.create("workflow.start_denied");
     }
@@ -614,28 +676,15 @@ const controlled = async (
     }
   }
   if (receipt.state === "admitted") {
-    const now = await runOf(env, row.id);
-    if (now !== undefined && !isEnded(now.status)) {
-      // Asked of the engine as often as it takes: stopping a run is
-      // idempotent, and a cancel whose answer was lost is applied again.
-      await stopResourceRun(env, delegateActorOf(authorityOf(asking)), now);
-    }
-    await db
-      .update(workflowResourceRunControls)
-      .set({ state: "applied", settledAt: new Date() })
-      .where(
-        and(
-          eq(workflowResourceRunControls.id, receipt.id),
-          eq(workflowResourceRunControls.state, "admitted")
-        )
-      );
-    receipt = (await receiptOf(env, receipt.id)) ?? receipt;
+    await applyCancel(
+      env,
+      delegateActorOf(authorityOf(asking)),
+      receipt.id,
+      row.id
+    );
+    receipt = (await cancelOf(env, row.id)) ?? receipt;
   }
-  return {
-    kind: "cancel",
-    state: receipt.state,
-    revision: receipt.state === "applied" ? endedRevision : 3,
-  };
+  return receiptAnswer(receipt.state);
 };
 
 /**

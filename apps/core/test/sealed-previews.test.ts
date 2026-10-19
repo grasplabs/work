@@ -273,6 +273,59 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     });
   });
 
+  it("refuses a screen's workflow requests: a preview starts, controls and follows no run", async () => {
+    const { builder, app, chatId, revision } = await setUp();
+    const workflow = {
+      resourceId: app,
+      resourceVersion: 1,
+      contractId: "workflows.followUp",
+      fingerprint: "0".repeat(64),
+      kind: "workflow",
+    };
+    const pushed: QuerySnapshotPush[] = [];
+    const page = Object.assign(
+      (push: QuerySnapshotPush): void => {
+        pushed.push(push);
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          // Let go of: nothing more arrives.
+        },
+      }
+    );
+    const started = outcome(
+      await builder.api.chats.previewFunction(
+        chatId,
+        app,
+        revision,
+        JSON.stringify({
+          workflow,
+          command: "start",
+          input: {},
+          idempotencyKey: "0".repeat(32),
+        })
+      )
+    );
+    const watched = await builder.api.chats.previewWatchQuery(
+      chatId,
+      app,
+      revision,
+      JSON.stringify({ workflow, watch: "binding" }),
+      page
+    );
+    await vi.waitFor(() => {
+      expect(pushed.length).toBeGreaterThan(0);
+    });
+    await watched.release();
+    expect({
+      started,
+      watched: pushed.map(({ result }) => outcome({ result })),
+    }).toStrictEqual({
+      started: "contract.invalid_request",
+      watched: ["contract.invalid_request"],
+    });
+  });
+
   it("runs only what was sealed: a kept artifact changed since is refused", async () => {
     const { builder, app, chatId, revision } = await setUp();
     const request = await requestFor(

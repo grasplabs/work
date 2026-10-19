@@ -2983,11 +2983,13 @@ export const workflowResourceRunTerminations = sqliteTable(
 
 /**
  * The controls a person asked of an independent run through an App's
- * screen (screen-workflows.ts): one receipt per run, person and the
- * screen's idempotency key, so a request sent again while its answer was
- * lost answers the same receipt rather than ask twice. `admitted` until
- * the run's stop is asked of the engine, then `applied`. Only `cancel`
- * for now: an independent run can't be paused yet.
+ * screen (screen-workflows.ts): one receipt per run and kind, whatever
+ * key asked for it, so a request sent again while its answer was lost,
+ * or asked again under another key, answers the same receipt rather than
+ * ask twice. `admitted` until the run's stop is asked of the engine, then
+ * `applied`, or `superseded` when the run ended otherwise first. Written
+ * once and settled once (migration 0102's triggers). Only `cancel` for
+ * now: an independent run can't be paused yet.
  */
 export const workflowResourceRunControls = sqliteTable(
   "workflow_resource_run_controls",
@@ -3002,15 +3004,14 @@ export const workflowResourceRunControls = sqliteTable(
     principalId: text("principal_id").notNull(),
     key: text().notNull(),
     kind: text({ enum: ["cancel"] }).notNull(),
-    state: text({ enum: ["admitted", "applied"] }).notNull(),
+    state: text({ enum: ["admitted", "applied", "superseded"] }).notNull(),
     createdAt: timestamp("created_at").notNull(),
     settledAt: timestamp("settled_at"),
   },
   (table) => [
-    uniqueIndex("workflow_resource_run_controls_key_idx").on(
+    uniqueIndex("workflow_resource_run_controls_kind_idx").on(
       table.runId,
-      table.principalId,
-      table.key
+      table.kind
     ),
     index("workflow_resource_run_controls_run_idx").on(
       table.runId,

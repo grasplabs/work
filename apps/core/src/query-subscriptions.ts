@@ -177,6 +177,11 @@ interface Snapshot {
   readonly roles: string;
   /** Which of its evaluation's reads it came from (`Evaluation.reads`). */
   readonly read: number;
+  /**
+   * Where it stands among its evaluation's pushes (`Evaluation.revision`):
+   * what each subscription is sent by, whatever revision the push names.
+   */
+  readonly seq: number;
 }
 
 /**
@@ -217,7 +222,7 @@ export interface SnapshotCallback {
 /** One screen's subscription to a query. */
 interface Listener {
   readonly toPage: SnapshotCallback;
-  /** The latest revision sent to it. */
+  /** The latest of its evaluation's pushes sent to it (`Snapshot.seq`). */
   sent: number;
   /**
    * The first of its evaluation's reads it takes a result of: one begun
@@ -246,7 +251,21 @@ interface Evaluation {
   readonly artifact: string | undefined;
   readonly request: string;
   readonly listeners: Set<Listener>;
+  /** How many pushes it made: each push's `Snapshot.seq`. */
   revision: number;
+  /**
+   * The latest revision a value it read carried (`LiveRead.revision`), 0
+   * before any: what a push of its names, refusals included, and what a
+   * value read later is compared with. Kept apart from the count of its
+   * pushes, so no refusal ever moves it.
+   */
+  carried: number;
+  /**
+   * Its latest carried value's push, kept while that is what it shows: a
+   * subscription that has had nothing yet is offered it, and a read again
+   * at the same revision only offers it again.
+   */
+  carriedShown: Snapshot | undefined;
   /** The latest result, while a subscription still needs it. */
   latest: Snapshot | undefined;
   /** Its watch in the store, and what that watch read, once made. */
@@ -464,7 +483,7 @@ const allHaveLatest = (evaluation: Evaluation): boolean =>
       (evaluation.latest !== undefined &&
         evaluation.latest.read < listener.firstRead) ||
       (listener.pending === undefined &&
-        listener.sent >= (evaluation.latest?.push.revision ?? 0))
+        listener.sent >= (evaluation.latest?.seq ?? 0))
   );
 
 /** One connection's live queries. */
@@ -571,6 +590,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (this.#reads.revocable && !this.#following.has(app)) {
       this.#follow(by.userId, app);
     }
+    const kept = evaluation.latest ?? evaluation.carriedShown;
     if (evaluation.window && (evaluation.revision > 0 || evaluation.running)) {
       // A window already read, or being read, for another subscription:
       // this one, a Load
@@ -583,11 +603,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       } else if (!evaluation.queued && evaluation.timer === undefined) {
         this.#enqueue(evaluation, false);
       }
-    } else if (evaluation.latest !== undefined) {
+    } else if (kept !== undefined) {
       // A result kept for another subscription that hasn't taken it yet
-      // goes to this one too; otherwise a read on its way answers it, or a
-      // fresh one, admitted as the person's request, so not charged.
-      this.#offer(evaluation, listener, evaluation.latest);
+      // goes to this one too, as does the carried value it shows (kept
+      // fresh as the runs it reads change); otherwise a read on its way
+      // answers it, or a fresh one, admitted as the person's request, so
+      // not charged.
+      this.#offer(evaluation, listener, kept);
     } else if (
       !(evaluation.running || evaluation.queued) &&
       evaluation.timer === undefined
@@ -613,6 +635,8 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       request,
       listeners: new Set(),
       revision: 0,
+      carried: 0,
+      carriedShown: undefined,
       latest: undefined,
       watch: undefined,
       timer: undefined,
@@ -1172,27 +1196,52 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (evaluation.closed) {
       return;
     }
-    if (carried === undefined || !result.ok) {
-      evaluation.revision += 1;
-    } else if (carried < evaluation.revision) {
-      // Older than one pushed already: a read overtaken by a newer one.
-      return;
+    let named: number;
+    if (carried !== undefined && result.ok) {
+      if (carried < evaluation.carried) {
+        // Older than one pushed already: a read overtaken by a newer one.
+        return;
+      }
+      const shown = evaluation.carriedShown;
+      if (carried === evaluation.carried && shown !== undefined) {
+        // Read again at the revision it shows: nothing new, but whoever
+        // hasn't had it yet gets it.
+        for (const listener of evaluation.listeners) {
+          this.#offer(evaluation, listener, shown);
+        }
+        return;
+      }
+      evaluation.carried = carried;
+      named = carried;
     } else {
-      // The value's own revision: one read again at the same revision
-      // goes only to subscriptions without it yet (`#offer`).
-      evaluation.revision = carried;
+      // A refusal of one that carries revisions names the revision it
+      // last showed (a refusal is heard whatever revision it names), so
+      // the value read once it clears is shown again: never one past it.
+      named =
+        evaluation.carried > 0 ? evaluation.carried : evaluation.revision + 1;
     }
-    let push: QuerySnapshotPush = { revision: evaluation.revision, result };
+    evaluation.revision += 1;
+    let push: QuerySnapshotPush = { revision: named, result };
     let bytes = jsonBytes(push, screenLimits.answerBytes + 1);
     if (bytes > screenLimits.answerBytes) {
       push = {
-        revision: evaluation.revision,
+        revision: named,
         result: refusalResult(screenErrors.create("screen.answer_too_large")),
       };
       bytes = jsonBytes(push, screenLimits.answerBytes);
     }
-    const snapshot: Snapshot = { push, bytes, roles, read: evaluation.reads };
+    const snapshot: Snapshot = {
+      push,
+      bytes,
+      roles,
+      read: evaluation.reads,
+      seq: evaluation.revision,
+    };
     evaluation.latest = snapshot;
+    evaluation.carriedShown =
+      carried !== undefined && result.ok && push.result === result
+        ? snapshot
+        : undefined;
     evaluation.roles = roles;
     for (const listener of evaluation.listeners) {
       this.#offer(evaluation, listener, snapshot);
@@ -1215,7 +1264,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   #offer(evaluation: Evaluation, listener: Listener, snapshot: Snapshot): void {
     if (
       listener.released ||
-      snapshot.push.revision <= listener.sent ||
+      snapshot.seq <= listener.sent ||
       snapshot.read < listener.firstRead
     ) {
       return;
@@ -1253,7 +1302,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   ): Promise<void> {
     listener.inFlight = true;
     const sentBefore = listener.sent;
-    listener.sent = snapshot.push.revision;
+    listener.sent = snapshot.seq;
     this.#unsent += snapshot.bytes;
     try {
       // Every push of data passes the gate first, however long it waited.

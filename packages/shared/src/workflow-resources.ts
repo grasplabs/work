@@ -171,6 +171,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.app_binding_invalid":
     "That isn't a workflow version this App can bind.",
   "workflow.app_binding_unavailable": "This App has no such workflow binding.",
+  "workflow.portable_unavailable":
+    "An App's workflows can't be started, controlled or followed from a portable host yet: use the App in Grasp.",
   "workflow.call_denied":
     "This run may no longer make that call: the person it acts for, the approval or permission behind the binding, or the trigger, App or agent that started it lost what it needed since the run started.",
   "workflow.call_invalid":

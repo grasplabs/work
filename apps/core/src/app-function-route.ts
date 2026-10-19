@@ -26,6 +26,7 @@ import {
 } from "@grasp-os/shared/screens";
 import type { StreamCallAction } from "@grasp-os/shared/screens";
 import { idempotencyKeySchema } from "@grasp-os/shared/submissions";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 
 import {
   accessOf,
@@ -51,6 +52,7 @@ import {
   personRefusal,
   requireDelivery,
 } from "./screen-trust.ts";
+import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
@@ -556,6 +558,23 @@ const boundedCall = async (
       await recordPortableUse(env, person, id, portableSession);
     }
     const text = new TextDecoder().decode(body);
+    // A portable host's App token, from any origin and with no build core
+    // approved, starts and controls no run (screen-workflows.ts): refused
+    // until that is decided on its own (GRA-626).
+    if (portableSession !== undefined && isWorkflowRequest(text)) {
+      return Response.json({
+        result: {
+          ok: false,
+          error: refusalOf(
+            workflowResourceErrors.create("workflow.portable_unavailable"),
+            requestId
+          ),
+        },
+        provenance: null,
+        fingerprint: null,
+        manifestHash: null,
+      } satisfies FunctionAnswer);
+    }
     // A window counts as the pages it reads (query-windows.ts).
     await admitWindow(env, person, id, text);
     const artifact =

@@ -7,7 +7,14 @@ import {
   workflowFingerprint,
 } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
-import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { errorPayloadSchema, expectedMessageOf } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import {
+  appTokenPath,
+  portableFunctionPath,
+  portableLivePath,
+} from "@grasp-os/shared/portable";
+import type { PortableLiveApi } from "@grasp-os/shared/portable";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
@@ -17,29 +24,40 @@ import {
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { newWebSocketRpcSession } from "capnweb";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
+import { failureOf } from "../src/screen-workflows.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import {
+  repairResourceTerminations,
+  terminateResourceRun,
+} from "../src/workflows/resource-runs.ts";
+import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
+import { closeWhenTestEnds } from "./open-sockets.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { routed, signedInApi, unique } from "./sign-in.ts";
+import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 
 // A screen's typed `useWorkflow` through the real host (spec 10.4,
 // screen-workflows.ts; the threat model is on GRA-626): its starts and
@@ -119,6 +137,33 @@ const definitionOf = (
     ],
   });
 
+/**
+ * A definition of `name` whose expression fails on its input, in words
+ * that quote what it read.
+ */
+const failingOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      {
+        greet: {
+          set: { status: "${ $workflow.input.who | tonumber | tostring }" },
+        },
+      },
+    ],
+  });
+
 /** Someone signed in, and as core's own calls take them. */
 const signedIn = async (role: Role) => {
   const session = await signedInApi(idp, role);
@@ -186,18 +231,29 @@ const wireOf = (reference: Awaited<ReturnType<typeof workflowReference>>) => ({
  * bound to a greeting workflow that waits `hold` first, with the App's
  * `start` grant.
  */
-const requestsApp = async (hold?: string) => {
-  const admin = await signedIn("admin");
-  const builder = await signedIn("builder");
-  const workflow = await createWorkflowResource(
-    env,
-    builder.acting,
-    `greet-${unique()}`
-  );
-  await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition: definitionOf(workflow.name, hold),
-    basedOn: null,
-  });
+const requestsApp = async (
+  hold?: string,
+  /** The people and workflow of another App's fixture, bound here too. */
+  sharing?: {
+    readonly admin: Person;
+    readonly builder: Person;
+    readonly workflow: { readonly id: string; readonly name: string };
+  },
+  /** The workflow's definition, if not a greeting that waits `hold`. */
+  definition?: (name: string) => string
+) => {
+  const admin = sharing?.admin ?? (await signedIn("admin"));
+  const builder = sharing?.builder ?? (await signedIn("builder"));
+  const workflow =
+    sharing?.workflow ??
+    (await createWorkflowResource(env, builder.acting, `greet-${unique()}`));
+  if (sharing === undefined) {
+    await publishWorkflowVersion(env, builder.acting, workflow.id, {
+      definition:
+        definition?.(workflow.name) ?? definitionOf(workflow.name, hold),
+      basedOn: null,
+    });
+  }
   const fixture = await appWith(files(), "Requests", builder.acting);
   await bindWorkflowToApp(env, builder.acting, workflow.id, {
     app: fixture.app,
@@ -231,6 +287,7 @@ const requestsApp = async (hold?: string) => {
     app: fixture.app,
     workflow: workflow.id,
     workflowName: workflow.name,
+    sharing: { admin, builder, workflow },
     grant: asked.id,
     reference: await workflowReference(release, "followUp"),
   };
@@ -353,6 +410,12 @@ const following = async (
 
 /** How long a push or a run's change may take, and how often to look. */
 const settles = { timeout: 30_000, interval: 50 };
+
+/** What a failed run's snapshot says of `error`: its code and words. */
+const failureShown = (error: { code: string | null; message: string }) => {
+  const { code, message } = failureOf(error);
+  return { code, message };
+};
 
 /** A fresh command key, as the SDK makes one. */
 const keyOf = (): string => crypto.randomUUID().replaceAll("-", "");
@@ -758,6 +821,426 @@ describe(
       expect(second.received.map(({ revision }) => revision)).toStrictEqual([
         2,
       ]);
+    });
+
+    it("refuses a run's watch once the alias is rebound, then shows it again once rebound back, to new subscriptions too", async () => {
+      const fixture = await requestsApp("PT1H");
+      const { builder, app, reference } = fixture;
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const watched = await channel.start(read, { who: "Ada" });
+      const other = await channel.start(read, { who: "Bo" });
+      const watch = {
+        workflow: wireOf(reference),
+        watch: "run",
+        runId: watched.runId,
+      };
+      const first = await following(builder, app, lease, watch);
+      await vi.waitFor(() => {
+        expect(first.received.at(-1)?.revision).toBe(2);
+      }, settles);
+      // Rebound away: the next read, which another run's end causes, refuses.
+      await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
+        definition: definitionOf(fixture.workflowName, "PT1H", "2.0.0"),
+        basedOn: 1,
+      });
+      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
+        app,
+        alias: "followUp",
+        version: 2,
+      });
+      await terminateResourceRun(
+        env,
+        builder.acting,
+        fixture.workflow,
+        other.runId
+      );
+      await vi.waitFor(() => {
+        expect(first.received.at(-1)?.outcome).toBe("workflow.run_unavailable");
+      }, settles);
+      // Bound back, and read again as a new run starts: the same revision.
+      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
+        app,
+        alias: "followUp",
+        version: 1,
+      });
+      await channel.start(read, { who: "Cy" });
+      await vi.waitFor(() => {
+        expect(first.received.at(-1)?.revision).toBe(2);
+        expect(first.received.at(-1)?.outcome).toBeTypeOf("object");
+      }, settles);
+      const second = await following(builder, app, lease, watch);
+      await vi.waitFor(() => {
+        expect(second.received.length).toBeGreaterThan(0);
+      }, settles);
+      await first.subscription.release();
+      await second.subscription.release();
+      expect({
+        first: first.received.map(({ revision, outcome: shown }) =>
+          typeof shown === "string" ? shown : revision
+        ),
+        second: second.received.map(({ revision }) => revision),
+      }).toStrictEqual({
+        first: [2, "workflow.run_unavailable", 2],
+        second: [2],
+      });
+    });
+
+    it("shows a failed run only a code the platform defines, in its own words, never what the run read", async () => {
+      const { builder, app, reference } = await requestsApp(
+        undefined,
+        undefined,
+        failingOf
+      );
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stop = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "failed"
+        );
+      }, settles);
+      const { error } = channel.peekRun(read, handle.runId).value ?? {};
+      stop();
+      // A code the platform defines, in the platform's own words: nothing
+      // of what the run read.
+      expect({
+        code: error?.code,
+        message: error?.message,
+        leaks: JSON.stringify(error).includes("Ada"),
+      }).toStrictEqual({
+        code: "expression.failed",
+        message: expectedMessageOf("expression.failed"),
+        leaks: false,
+      });
+    });
+
+    it("words any failure the platform doesn't define as a step's, whatever the workflow said", () => {
+      const stepFailed = {
+        code: "workflow.step_failed",
+        message: expectedMessageOf("workflow.step_failed"),
+      };
+      expect({
+        ownCode: failureShown({
+          code: "test.secret",
+          message: "The secret is 42.",
+        }),
+        inANamespace: failureShown({
+          code: "workflow.secret_42",
+          message: "The secret is 42.",
+        }),
+        none: failureShown({ code: null, message: "The secret is 42." }),
+        platform: failureShown({
+          code: "expression.failed",
+          message: "It read Ada's salary.",
+        }),
+      }).toStrictEqual({
+        ownCode: stepFailed,
+        inANamespace: stepFailed,
+        none: stepFailed,
+        platform: {
+          code: "expression.failed",
+          message: expectedMessageOf("expression.failed"),
+        },
+      });
+    });
+
+    it("shows what a restricted run returned only through an App still in restricted mode", async () => {
+      const { builder, app, reference } = await requestsApp();
+      // Restricted as the start is decided, so its run is restricted for good.
+      await appHost(env, appIdSchema.parse(app)).restrict();
+      const lease = await screenOf(builder, app);
+      const read = readWorkflowReference(reference);
+      const handle = await workflowChannel(
+        screenClient(builder, app, lease)
+      ).start(read, { who: "Ada" });
+      const shownOnce = async () => {
+        const watched = await following(builder, app, lease, {
+          workflow: wireOf(reference),
+          watch: "run",
+          runId: handle.runId,
+        });
+        // Until it shows the run ended, or is refused.
+        await vi.waitFor(() => {
+          const last = watched.received.at(-1);
+          expect(
+            typeof last?.outcome === "string" || last?.revision === 4
+          ).toBeTruthy();
+        }, settles);
+        await watched.subscription.release();
+        const shown = watched.received.at(-1)?.outcome;
+        return typeof shown === "string"
+          ? shown
+          : z.object({ output: z.unknown() }).parse(shown).output;
+      };
+      const restricted = await shownOnce();
+      // As only a write around the platform could: the App out of it again.
+      await runInDurableObject(
+        appHost(env, appIdSchema.parse(app)),
+        async (_instance, state) => {
+          await state.storage.delete("restricted");
+        }
+      );
+      expect({ restricted, unrestricted: await shownOnce() }).toStrictEqual({
+        restricted: { status: "Hello, Ada" },
+        unrestricted: "permission.restricted",
+      });
+    });
+
+    it("shows App B nothing of App A's run of the same workflow, and refuses its cancel", async () => {
+      const appA = await requestsApp("PT1H");
+      const appB = await requestsApp(undefined, appA.sharing);
+      const { builder } = appA;
+      const leaseA = await screenOf(builder, appA.app);
+      const handle = await workflowChannel(
+        screenClient(builder, appA.app, leaseA)
+      ).start(readWorkflowReference(appA.reference), { who: "Ada" });
+      const leaseB = await screenOf(builder, appB.app);
+      const watched = await following(builder, appB.app, leaseB, {
+        workflow: wireOf(appB.reference),
+        watch: "run",
+        runId: handle.runId,
+      });
+      await vi.waitFor(() => {
+        expect(watched.received.length).toBeGreaterThan(0);
+      }, settles);
+      await watched.subscription.release();
+      expect({
+        seen: watched.received[0]?.outcome,
+        cancel: outcomeOf(
+          await called(
+            builder,
+            appB.app,
+            leaseB,
+            JSON.stringify({
+              workflow: wireOf(appB.reference),
+              command: "cancel",
+              runId: handle.runId,
+              idempotencyKey: keyOf(),
+            })
+          )
+        ),
+      }).toStrictEqual({
+        seen: "workflow.run_unavailable",
+        cancel: "workflow.run_unavailable",
+      });
+    });
+
+    it("refuses an App's workflows to its own server code's callers and to a portable host", async () => {
+      const { builder, admin, app, reference } = await requestsApp("PT1H");
+      const { generation } = await admin.api.screenTrust.review(app);
+      await admin.api.screenTrust.classify(app, "ordinary", generation);
+      const start = JSON.stringify({
+        workflow: wireOf(reference),
+        command: "start",
+        input: { who: "Ada" },
+        idempotencyKey: keyOf(),
+      });
+      const issued = await routed(`${appTokenPath}/${app}`, {
+        method: "POST",
+        headers: {
+          origin: clientOrigin,
+          "content-type": "application/json",
+          cookie: builder.session,
+        },
+        body: "{}",
+      });
+      const { token } = z
+        .object({ token: z.string() })
+        .parse(await issued.json());
+      const portableCall = await routed(`${portableFunctionPath}/${app}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: start,
+      });
+      const upgraded = await routed(`${portableLivePath}/${app}`, {
+        headers: { Upgrade: "websocket", Origin: hostOrigin },
+      });
+      const socket = upgraded.webSocket;
+      if (!socket) {
+        throw new Error(`Expected a WebSocket, got ${upgraded.status}`);
+      }
+      socket.accept();
+      closeWhenTestEnds(socket);
+      const live = newWebSocketRpcSession<PortableLiveApi>(socket);
+      const portableWatch = await outcome(
+        live
+          .connect(token)
+          .watchQuery(
+            JSON.stringify({ workflow: wireOf(reference), watch: "binding" }),
+            () => {
+              // Never followed.
+            }
+          )
+      );
+      expect({
+        // An agent's or another App's call of the App, as its server takes it.
+        agent: outcomeOf(
+          await callAppFunction(env, builder.acting, app, start)
+        ),
+        portableCall: outcomeOf(await portableCall.json()),
+        portableWatch,
+        runs: await env.DB.prepare(
+          "SELECT COUNT(*) AS runs FROM workflow_start_receipts WHERE invoker_id = ?"
+        )
+          .bind(app)
+          .first<number>("runs"),
+      }).toStrictEqual({
+        agent: "contract.invalid_request",
+        portableCall: "workflow.portable_unavailable",
+        portableWatch: "workflow.portable_unavailable",
+        runs: 0,
+      });
+    });
+
+    it("fences a screen whose build lost its approval at its run's next change", async () => {
+      const fixture = await requestsApp("PT1H");
+      const { builder, admin, app, reference } = fixture;
+      const { lease, artifact } = await builder.api.screens.open(app, "desk");
+      await builder.api.screens.present(app, lease);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stop = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      await admin.api.screenTrust.revoke(app, artifact);
+      await terminateResourceRun(
+        env,
+        builder.acting,
+        fixture.workflow,
+        handle.runId
+      );
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).error?.code).toBe(
+          "screen.revoked"
+        );
+      }, settles);
+      const fenced = channel.peekRun(read, handle.runId);
+      stop();
+      expect({ value: fenced.value, code: fenced.error?.code }).toStrictEqual({
+        value: undefined,
+        code: "screen.revoked",
+      });
+    });
+
+    it("applies a cancel whose stop never went out at the next repair, settling its receipt", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stop = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "running"
+        );
+      }, settles);
+      // Admitted a while ago, its request ended before it asked the engine.
+      await env.DB.prepare(
+        "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at) VALUES (?, ?, ?, ?, ?, 'cancel', 'admitted', ?)"
+      )
+        .bind(
+          crypto.randomUUID(),
+          handle.runId,
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000
+        )
+        .run();
+      await repairResourceTerminations(env, new Date());
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "cancelled"
+        );
+      }, settles);
+      stop();
+      await expect(
+        env.DB.prepare(
+          "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
+        )
+          .bind(handle.runId)
+          .first<string>("state")
+      ).resolves.toBe("applied");
+    });
+
+    it("starts one run for a key sent twice at once, and keeps one cancel receipt for a run however many keys ask, never changed after", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const start = JSON.stringify({
+        workflow: wireOf(reference),
+        command: "start",
+        input: { who: "Ada" },
+        idempotencyKey: keyOf(),
+      });
+      const [one, two] = await Promise.all([
+        called(builder, app, lease, start),
+        called(builder, app, lease, start),
+      ]);
+      const handle = z.object({ runId: z.string() }).parse(outcomeOf(one));
+      const cancel = () =>
+        JSON.stringify({
+          workflow: wireOf(reference),
+          command: "cancel",
+          runId: handle.runId,
+          idempotencyKey: keyOf(),
+        });
+      const cancels = await Promise.all([
+        called(builder, app, lease, cancel()),
+        called(builder, app, lease, cancel()),
+      ]);
+      const receipts = await env.DB.prepare(
+        "SELECT id, state FROM workflow_resource_run_controls WHERE run_id = ?"
+      )
+        .bind(handle.runId)
+        .all<{ id: string; state: string }>();
+      const id = receipts.results[0]?.id ?? "";
+      expect({
+        same: outcomeOf(two),
+        cancels: cancels.map(outcomeOf),
+        receipts: receipts.results.map(({ state }) => state),
+        reopened:
+          (await outcome(
+            env.DB.prepare(
+              "UPDATE workflow_resource_run_controls SET state = 'admitted', settled_at = NULL WHERE id = ?"
+            )
+              .bind(id)
+              .run()
+          )) === "ok",
+        deleted:
+          (await outcome(
+            env.DB.prepare(
+              "DELETE FROM workflow_resource_run_controls WHERE id = ?"
+            )
+              .bind(id)
+              .run()
+          )) === "ok",
+      }).toStrictEqual({
+        same: outcomeOf(one),
+        cancels: [
+          { kind: "cancel", state: "applied", revision: 4 },
+          { kind: "cancel", state: "applied", revision: 4 },
+        ],
+        receipts: ["applied"],
+        reopened: false,
+        deleted: false,
+      });
     });
   }
 );
