@@ -29,7 +29,6 @@ import {
 import type {
   GraspLock,
   LockedPackage,
-  NpmMetadata,
   NpmVersion,
   PackageInspection,
   PackageLimits,
@@ -229,6 +228,31 @@ const graveness: Readonly<Record<DependencyFinding["severity"], number>> = {
 };
 
 /**
+ * What `call` asks connect, asked again after a pause while connect says
+ * it is reading too much from the registry at once
+ * (`package.registry_busy`), a few times at most: then the refusal stands,
+ * and says to try again.
+ */
+const whenFree = async <T>(call: () => Promise<T>): Promise<T> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // One at a time: each pause waits on the one before.
+      // oxlint-disable-next-line no-await-in-loop
+      return await call();
+    } catch (error) {
+      if (
+        packageErrors.codeOf(error) !== "package.registry_busy" ||
+        attempt >= busyTries
+      ) {
+        throw error;
+      }
+      // oxlint-disable-next-line no-await-in-loop
+      await scheduler.wait(firstBusyPauseMs * 2 ** (attempt - 1));
+    }
+  }
+};
+
+/**
  * What a request's approver is shown about `packages` (GRA-699): each
  * named like a popular package (lookalikes.ts), and each advisory the
  * registry knows, through connect, that affects its exact version, one
@@ -244,13 +268,17 @@ const findingsOf = async (
   for (const { name, version } of packages) {
     (asked[name] ??= []).push(version);
   }
-  const advisories = await env.CONNECT.npmAdvisories(asked);
+  const advisories = await whenFree(
+    async () => await env.CONNECT.npmAdvisories(asked)
+  );
   const security = packages.flatMap(({ name, version }) =>
     (Object.hasOwn(advisories, name) ? (advisories[name] ?? []) : [])
       .filter(
         ({ vulnerableVersions }) =>
           validRange(vulnerableVersions) === null ||
-          satisfies(version, vulnerableVersions)
+          // As npm audit matches: a prerelease is inside a range that
+          // names none (`2.0.0-beta.1` in `<2.0.0`).
+          satisfies(version, vulnerableVersions, { includePrerelease: true })
       )
       .map((advisory): DependencyFinding => ({
         kind: "security",
@@ -263,33 +291,6 @@ const findingsOf = async (
   return [...lookalikeFindings(packages), ...security]
     .toSorted((a, b) => graveness[b.severity] - graveness[a.severity])
     .slice(0, dependencyMaxFindings);
-};
-
-/**
- * `name`'s metadata from connect, asked again after a pause while connect
- * says it is reading too much metadata at once (`package.registry_busy`),
- * a few times at most: then the refusal stands, and says to try again.
- */
-const metadataWhenFree = async (
-  env: Env,
-  name: string
-): Promise<NpmMetadata> => {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      // One at a time: each pause waits on the one before.
-      // oxlint-disable-next-line no-await-in-loop
-      return await env.CONNECT.npmMetadata(name);
-    } catch (error) {
-      if (
-        packageErrors.codeOf(error) !== "package.registry_busy" ||
-        attempt >= busyTries
-      ) {
-        throw error;
-      }
-      // oxlint-disable-next-line no-await-in-loop
-      await scheduler.wait(firstBusyPauseMs * 2 ** (attempt - 1));
-    }
-  }
 };
 
 /** One resolve's state: the graph so far, and what it read. */
@@ -330,7 +331,9 @@ class Resolution {
     name: string,
     ranges: ReadonlySet<string>
   ): Promise<NpmVersion[]> {
-    const { versions } = await metadataWhenFree(this.#env, name);
+    const { versions } = await whenFree(
+      async () => await this.#env.CONNECT.npmMetadata(name)
+    );
     return versions.filter((version) =>
       [...ranges].some((range) => satisfies(version.version, range))
     );

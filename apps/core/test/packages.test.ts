@@ -414,7 +414,19 @@ describe("the platform's own packages", () => {
     await publish(plain(dates, "1.2.0"));
     await publish(plain(squat, "1.0.0"));
     await publish(plain(merged, "1.0.0"));
+    const beta = named("beta");
+    await publish(plain(beta, "2.0.0-beta.1"));
     await advise(dates, advisory({}));
+    // A prerelease of the release a range stops before: inside it.
+    await advise(
+      beta,
+      advisory({
+        id: 4,
+        url: undefined,
+        vulnerable_versions: "<2.0.0",
+        severity: "info",
+      })
+    );
     // Not this version: left out.
     await advise(
       dates,
@@ -436,7 +448,12 @@ describe("the platform's own packages", () => {
       })
     );
     const { request } = await builder.api.dependencies.resolve(
-      intentFor(app, { [dates]: "1.2.0", [squat]: "1.0.0", [merged]: "1.0.0" })
+      intentFor(app, {
+        [dates]: "1.2.0",
+        [squat]: "1.0.0",
+        [merged]: "1.0.0",
+        [beta]: "2.0.0-beta.1",
+      })
     );
     const review = await builder.api.dependencies.get(request.id);
     const clean = named("clean");
@@ -482,6 +499,12 @@ describe("the platform's own packages", () => {
           package: `${dates}@1.2.0`,
           severity: "low",
           id: "npm:3",
+        },
+        {
+          kind: "security",
+          package: `${beta}@2.0.0-beta.1`,
+          severity: "info",
+          id: "npm:4",
         },
       ],
       lookalikes: [
@@ -1065,24 +1088,36 @@ const approverOf = async () => {
   };
 };
 
-/** Connect, refusing as busy the first `times` asks for metadata. */
-const busyFor = (times: number) => {
+/** Connect, refusing as busy the first `times` asks of `busy`. */
+const busyFor = (
+  times: number,
+  busy: "npmMetadata" | "npmAdvisories" = "npmMetadata"
+) => {
   const asked = { count: 0 };
+  const refuse = () => {
+    asked.count += 1;
+    if (asked.count <= times) {
+      throw packageErrors.create("package.registry_busy");
+    }
+  };
   const connect = new Proxy(env.CONNECT, {
     get: (target, property): unknown => {
+      // An RPC binding's methods are called on it, never bound.
       if (property === "npmMetadata") {
         return async (name: string) => {
-          asked.count += 1;
-          if (asked.count <= times) {
-            throw packageErrors.create("package.registry_busy");
+          if (busy === "npmMetadata") {
+            refuse();
           }
           return await target.npmMetadata(name);
         };
       }
-      // An RPC binding's methods are called on it, never bound.
       if (property === "npmAdvisories") {
-        return async (request: Parameters<typeof target.npmAdvisories>[0]) =>
-          await target.npmAdvisories(request);
+        return async (request: Parameters<typeof target.npmAdvisories>[0]) => {
+          if (busy === "npmAdvisories") {
+            refuse();
+          }
+          return await target.npmAdvisories(request);
+        };
       }
       return property === "npmTarball"
         ? async (request: Parameters<typeof target.npmTarball>[0]) =>
@@ -1450,16 +1485,27 @@ describe("an App's locks and the files they name", () => {
         intentFor(app, { [dates]: "^1.0.0" })
       )
     );
+    // The advisories too, asked once the whole graph is read.
+    const advisoriesOnce = busyFor(1, "npmAdvisories");
+    const advised = await resolveDependencies(
+      { ...env, CONNECT: advisoriesOnce.connect },
+      identity,
+      intentFor(app, { [dates]: "^1.0.0" })
+    );
     expect({
       resolved: resolved.lock.direct,
       askedOnce: once.asked.count,
       refused: refused.code,
       askedAlways: always.asked.count,
+      advised: advised.lock.direct,
+      advisoriesAsked: advisoriesOnce.asked.count,
     }).toStrictEqual({
       resolved: { [dates]: "1.0.0" },
       askedOnce: 2,
       refused: "package.registry_busy",
       askedAlways: 4,
+      advised: { [dates]: "1.0.0" },
+      advisoriesAsked: 2,
     });
   });
 });

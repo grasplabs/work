@@ -18,7 +18,11 @@ import type {
 //   letters swapped (`expresss`, `lodahs`). Shorter names are left out:
 //   most short names are one edit from a popular one.
 //
-// A popular name itself is never flagged.
+// A popular name itself is never flagged, nor a well-known package that
+// merely sits one edit from one (`preact`, `color`). A package of the
+// `@types` scope is compared as it is, never as its unscoped part:
+// DefinitelyTyped names each after the package it types (`@types/lodash`),
+// and npm lets only DefinitelyTyped publish there.
 
 /**
  * npm's most depended-upon packages, by name, as typosquats target them:
@@ -137,16 +141,28 @@ export const oneEditApart = (a: string, b: string): boolean => {
 
 const popular: ReadonlySet<string> = new Set(popularPackages);
 
+/** Well-known packages of their own, one edit from a popular name. */
+const knownDistinct: ReadonlySet<string> = new Set(["color", "preact"]);
+
+/** Scopes whose packages are named after the package they serve. */
+const namedAfterScopes: ReadonlySet<string> = new Set(["@types"]);
+
+/** `name`'s scope, `@types` for `@types/react`, or undefined. */
+const scopeOf = (name: string): string | undefined =>
+  /^(?<scope>@[^/]+)\//u.exec(name)?.groups?.scope;
+
 /** The popular name `name` looks like, or undefined. */
 export const lookalikeOf = (name: string): string | undefined => {
-  if (popular.has(name)) {
+  if (popular.has(name) || knownDistinct.has(name)) {
     return undefined;
   }
   // As it is, and, for a scoped name, as its unscoped part: each compared
   // with the popular names as they are, scoped or not.
-  const forms = [
-    ...new Set([normalisedName(name), normalisedName(unscoped(name))]),
-  ];
+  const scope = scopeOf(name);
+  const forms =
+    scope !== undefined && namedAfterScopes.has(scope)
+      ? [normalisedName(name)]
+      : [...new Set([normalisedName(name), normalisedName(unscoped(name))])];
   return popularPackages.find((known) => {
     const knownNormalised = normalisedName(known);
     return forms.some(

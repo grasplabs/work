@@ -40,6 +40,10 @@ describe("lookalike package names", () => {
           "core",
           "@types/reakt",
           "left-pad",
+          "@types/lodash",
+          "@types/lodahs",
+          "preact",
+          "color",
         ].map((name) => [name, lookalikeOf(name) ?? null])
       )
     ).toStrictEqual({
@@ -58,6 +62,12 @@ describe("lookalike package names", () => {
       core: null,
       "@types/reakt": "@types/react",
       "left-pad": null,
+      // DefinitelyTyped names its packages after what they type.
+      "@types/lodash": null,
+      "@types/lodahs": null,
+      // Packages of their own, one edit from react and colors.
+      preact: null,
+      color: null,
     });
   });
 });
