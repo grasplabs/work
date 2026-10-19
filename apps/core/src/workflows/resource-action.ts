@@ -63,6 +63,11 @@ import { requireShape } from "./resource-calls.ts";
 //   knowledge use reaches its binding's one collection, with only the
 //   operations it declares; a template use, its binding's pinned version.
 //   What each reads, as the run's person may, is resource-reads.ts's.
+// - A revoked package acting on (GRA-700). An action's module may import
+//   the approved packages its version seals (GRA-665), admitted as its
+//   attempt begins; each of its calls admits them again before it is made
+//   (resource-host.ts, `#action`), so a graph revoked mid-attempt makes no
+//   call more.
 // - Model calls past the run's cap, or uncounted once its step replays
 //   (GRA-700). A model use's calls send the binding's own model the
 //   sealed output shape, never one the action makes up, and the host

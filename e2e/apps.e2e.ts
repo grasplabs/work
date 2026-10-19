@@ -243,13 +243,7 @@ test("a builder finds an engine in the list, opens it and uses its app with live
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
   pageOf,
 }) => {
-  const everyone = [
-    "Chat",
-    "Knowledge",
-    "Domains",
-    "Workflows",
-    "Integrations",
-  ];
+  const everyone = ["Chat", "Brain", "Domains", "Workflows", "Integrations"];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
