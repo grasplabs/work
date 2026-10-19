@@ -22,6 +22,12 @@ const cloudflare = mockCloudflareApi(token, tenantToken);
 mockAccess();
 
 const db = consoleDatabase(env.DB);
+const tags = /<[^>]*>/gu;
+const spaces = /\s+/gu;
+
+/** The moment `ago` days before now. */
+const daysAgo = (ago: number) =>
+  new Date(Date.now() - ago * 86_400_000).toISOString();
 const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** A client recorded as `status`, on a new account in the fake. */
@@ -176,6 +182,31 @@ const columnEntryOf = (column: string, title: string): string => {
     ? ""
     : column.slice(column.lastIndexOf("<a", at), column.indexOf("</a>", at));
 };
+
+/** What an Integrations section says, part by part. */
+const integrationsOf = ({
+  status,
+  html,
+}: {
+  status: number;
+  html: string;
+}) => ({
+  status,
+  nothing: html.includes("Nothing connected yet</h2>"),
+  waits: html.includes("Grasp waits on the company’s own admin."),
+  connected: html.includes("What the company connected</h2>"),
+  notReported: html.includes(
+    "The company’s own Grasp doesn’t report what it connected yet."
+  ),
+  stillToConnect: html.includes("Still to connect</h2>"),
+  fromComposio: html.includes(
+    "Once Composio is connected, this fills in by itself."
+  ),
+  source: html.includes(
+    "What the company connected: the company’s own Grasp doesn’t hold it yet. What its workflows still need connected: from Composio, once it is connected."
+  ),
+  toCome: html.includes("This section isn’t in the console yet."),
+});
 
 describe("the admin's frame", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
@@ -473,6 +504,72 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("offers to add an organization from the overview: by hand, with Attio and Rooms shown but not yet to start from, on the newest release", async () => {
+    await publishRelease({ notes: "feat(core): older" });
+    const newest = await publishRelease({ notes: "feat(core): newest" });
+    await importReleases(env.RELEASES, db);
+
+    const overview = await page("/admin");
+    const { status, html } = await page("/admin/new-organization");
+    const main = html.slice(html.indexOf("<main"));
+    /** The choice `label` makes, up to the next one. */
+    const choiceOf = (label: string): string => {
+      const at = main.indexOf(label);
+      const start = main.lastIndexOf("<label", at);
+      return main.slice(start, main.indexOf("</label>", at));
+    };
+    const [hand, attio, rooms] = [
+      "By hand",
+      "A deal won in Attio",
+      "A proposal signed in Rooms",
+    ].map((label) => {
+      const choice = choiceOf(label);
+      return {
+        chosen: choice.includes('aria-checked="true"'),
+        disabled: choice.includes('aria-disabled="true"'),
+      };
+    });
+    const selected = main.slice(
+      main.lastIndexOf("<option", main.indexOf(" selected")),
+      main.indexOf("</option>", main.indexOf(" selected"))
+    );
+
+    expect({
+      link: overview.html.includes('href="/admin/new-organization"'),
+      status,
+      title: main.includes("New organization</h1>"),
+      choices: { hand, attio, rooms },
+      why: [
+        "Not yet: the console isn&#x27;t connected to Attio.",
+        "Not yet: the console isn&#x27;t connected to Rooms.",
+      ].map((text) => main.includes(text)),
+      fields: [
+        "name",
+        "clientId",
+        "admins",
+        "domains",
+        "entraTenantId",
+        "googleHostedDomain",
+        "releaseId",
+        "ring",
+        "accountId",
+      ].every((field) => main.includes(`name="${field}"`)),
+      newest: selected.includes(`value="${newest.id}"`),
+    }).toStrictEqual({
+      link: true,
+      status: 200,
+      title: true,
+      choices: {
+        hand: { chosen: true, disabled: false },
+        attio: { chosen: false, disabled: true },
+        rooms: { chosen: false, disabled: true },
+      },
+      why: [true, true],
+      fields: true,
+      newest: true,
+    });
+  });
+
   it("lays out an organization as the prototype does: its column of sections in order, what waits where, and where the overview comes from", async () => {
     const acme = await liveClient();
     acme.account.admin = readySnapshot("Acme");
@@ -642,6 +739,153 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("shows what a company connected only once it signed in, says core doesn't report its connections yet, and that what is still to connect comes from Composio", async () => {
+    const before = await liveClient();
+    before.account.admin = emptyAdminSnapshot("Before");
+    const signed = await liveClient();
+    const empty = emptyAdminSnapshot("Signed");
+    // Its directory is in, with every team's lead named: past its sign-in.
+    signed.account.admin = {
+      ...empty,
+      roster: {
+        teams: [
+          { id: "sales", name: "Sales", lead: "lea", does: "", off: false },
+        ],
+        people: [
+          {
+            id: "lea",
+            name: "Lea Lund",
+            email: "",
+            team: "sales",
+            title: "",
+            away: false,
+          },
+        ],
+      },
+    };
+
+    const beforePage = await page(
+      `/admin/organizations/${before.clientId}/integrations`
+    );
+    const signedPage = await page(
+      `/admin/organizations/${signed.clientId}/integrations`
+    );
+
+    expect({
+      before: integrationsOf(beforePage),
+      signed: integrationsOf(signedPage),
+    }).toStrictEqual({
+      before: {
+        status: 200,
+        nothing: true,
+        waits: true,
+        connected: false,
+        notReported: false,
+        stillToConnect: true,
+        fromComposio: true,
+        source: true,
+        toCome: false,
+      },
+      signed: {
+        status: 200,
+        nothing: false,
+        waits: false,
+        connected: true,
+        notReported: true,
+        stillToConnect: true,
+        fromComposio: true,
+        source: true,
+        toCome: false,
+      },
+    });
+  });
+
+  it("lists an organization's members with where each stands and their role, ready before Grasp opens and in after", async () => {
+    const empty = emptyAdminSnapshot("Acme");
+    const members: AdminSnapshot["members"] = [
+      {
+        userId: "user-anna",
+        name: "Anna de Vries",
+        email: "anna@acme.test",
+        role: "admin",
+        joinedAt: daysAgo(3),
+      },
+      {
+        userId: "user-ben",
+        name: "Ben Okafor",
+        email: "ben@acme.test",
+        role: "builder",
+        joinedAt: daysAgo(1),
+      },
+    ];
+    const closed = await liveClient();
+    closed.account.admin = { ...empty, members };
+    const open = await liveClient();
+    open.account.admin = {
+      ...empty,
+      members,
+      gate: { ...empty.gate, open: true, openedAt: empty.now },
+    };
+    const nobody = await liveClient();
+    nobody.account.admin = empty;
+
+    const closedPage = await page(
+      `/admin/organizations/${closed.clientId}/members`
+    );
+    const openPage = await page(
+      `/admin/organizations/${open.clientId}/members`
+    );
+    const nobodyPage = await page(
+      `/admin/organizations/${nobody.clientId}/members`
+    );
+    /** The text of the list item naming `name`. */
+    const rowOfMember = (html: string, name: string): string => {
+      const at = html.indexOf(`>${name}</span>`);
+      return at === -1
+        ? ""
+        : html
+            .slice(html.lastIndexOf("<li", at), html.indexOf("</li>", at))
+            .replaceAll(tags, " ")
+            .replaceAll(spaces, " ")
+            .trim();
+    };
+    const joined = formatDate(daysAgo(3));
+
+    expect({
+      statuses: [closedPage, openPage, nobodyPage].map(({ status }) => status),
+      closed: {
+        anna: rowOfMember(closedPage.html, "Anna de Vries"),
+        ben: rowOfMember(closedPage.html, "Ben Okafor").includes("Builder"),
+        ready: closedPage.html.includes("are ready for when Grasp opens"),
+        seats: closedPage.html.includes(
+          "seats taken; the contract that gives them isn’t read yet"
+        ),
+        toCome: closedPage.html.includes(
+          "This section isn’t in the console yet."
+        ),
+      },
+      open: {
+        anna: rowOfMember(openPage.html, "Anna de Vries"),
+        in: openPage.html.includes("are in"),
+      },
+      nobody: nobodyPage.html.includes("Nobody has made an account yet."),
+    }).toStrictEqual({
+      statuses: [200, 200, 200],
+      closed: {
+        anna: `AV Anna de Vries anna@acme.test Ready Made an account on ${joined}. Comes in when Grasp opens. Role: Admin`,
+        ben: true,
+        ready: true,
+        seats: true,
+        toCome: false,
+      },
+      open: {
+        anna: `AV Anna de Vries anna@acme.test In In since ${joined}. Role: Admin`,
+        in: true,
+      },
+      nobody: true,
+    });
+  });
+
   it("shows an organization whose core didn't answer by its name and why, with no sections", async () => {
     const down = await liveClient();
     down.account.unhealthy = 1000;
@@ -704,6 +948,7 @@ describe("the admin's frame", () => {
         "/admin",
         "/admin?phase=ready",
         "/admin/platform",
+        "/admin/new-organization",
         `/admin/organizations/${acme.clientId}`,
         `/admin/organizations/${acme.clientId}/contract`,
       ].map(async (path) => {
@@ -718,7 +963,7 @@ describe("the admin's frame", () => {
       answers,
       readers: acme.account.adminReaders,
     }).toStrictEqual({
-      answers: [403, 403, 403, 403, 403].map((status) => ({
+      answers: [403, 403, 403, 403, 403, 403].map((status) => ({
         status,
         body: "Forbidden",
       })),
