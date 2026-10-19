@@ -148,7 +148,11 @@ export const brainOf = (view: AdminView): BrainHealth => {
       off: team.off,
       agreed: theirs.length,
       asked: team.asked,
-      facts: theirs.reduce((sum, interview) => sum + interview.facts, 0),
+      // An interview counts every fact written down; those taken out at the read-back were not agreed to.
+      facts: theirs.reduce(
+        (sum, interview) => sum + interview.facts - interview.out,
+        0
+      ),
       works: team.works.length,
       known: team.works.filter(isKnown).length,
       questions: theirs.reduce(

@@ -22,8 +22,11 @@ import { DEFAULT_THRESHOLD, LISTEN_DAYS, WEIGHTS } from "./onboarding.ts";
 import type { DirectoryTeam } from "./onboarding.ts";
 import { present } from "./present.ts";
 
-/** What a person may do in a client's workspace. */
-export type MemberRole = "owner" | "admin" | "viewer";
+/**
+ * What a person may do in a client's workspace: the prototype's roles, and Grasp OS's own
+ * (`roleSchema` in ../roles.ts), whose builders and users the prototype had no word for.
+ */
+export type MemberRole = "owner" | "admin" | "builder" | "user" | "viewer";
 
 /**
  * Grasp's own side of an onboarding: every organization from its first conversation until Grasp
@@ -545,7 +548,8 @@ export interface RealHappened {
   metered: {
     day: string;
     purpose: "reading" | "interviews" | "drawing";
-    model: "opus" | "sonnet" | "haiku" | "voice" | "ears";
+    /** `other` for a model the admin has no price for: its spend counts as nothing. */
+    model: "opus" | "sonnet" | "haiku" | "voice" | "ears" | "other";
     use: {
       tokensIn: number;
       tokensOut: number;
@@ -554,6 +558,25 @@ export interface RealHappened {
       spend: number;
     };
   }[];
+  /**
+   * How much Grasp knows, in percent, as the organization counts it itself: Grasp OS's core counts
+   * it for its gate, from parts of its own, and that is the number the company sees. None where
+   * the admin counts it from its own sources.
+   */
+  known?: number;
+  /**
+   * Grasp's staff paused the interviews: until they resume them nobody can open their link or
+   * save what they said, as Grasp OS's core holds them. None where nothing pauses them.
+   */
+  paused?: boolean;
+  /** What isn't known of the organization yet (`StaffSnapshot.unknown`): read as unknown, not as a draft or as nothing. */
+  unknown?: Unknown;
+}
+
+/** Parts of an organization nothing is known of yet. */
+export interface Unknown {
+  contract: boolean;
+  works: boolean;
 }
 
 const clamp = (value: number, min = 0, max = 1) =>
@@ -1869,6 +1892,8 @@ export type StageStatus = "done" | "now" | "waits" | "later";
 
 /** Something that needs a person at Grasp. */
 export type Need =
+  /** Grasp's staff paused the interviews: nobody can open or finish theirs until Grasp resumes them. */
+  | { kind: "paused" }
   | { kind: "transcript" }
   | { kind: "ask"; fields: VisionField[] }
   | { kind: "research" }
@@ -1920,7 +1945,10 @@ export interface OrgKnowledge {
     known: number;
     points: number;
   }[];
-  /** The points of every source together: a point counts only once it is wholly in. */
+  /**
+   * The points of every source together: a point counts only once it is wholly in. Where the
+   * organization counts it itself (`RealHappened.known`), its number, and no sources.
+   */
   percent: number;
   threshold: number;
   /** Enough is known: it waits only for Grasp's go. */
@@ -2323,9 +2351,12 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     known: has[source],
     points: Math.floor(WEIGHTS[source] * has[source] + 1e-9),
   }));
-  const percent = sources.reduce((sum, each) => sum + each.points, 0);
+  // Where the organization counts it itself, its own number stands: the company sees that one.
+  const percent =
+    org.real?.known ?? sources.reduce((sum, each) => sum + each.points, 0);
   const knowledge: OrgKnowledge = {
-    sources,
+    // Core's number comes without its parts: the admin's own would not add up to it, so none.
+    sources: org.real?.known === undefined ? sources : [],
     percent,
     threshold: state.threshold,
     ready: percent >= state.threshold,
@@ -2354,6 +2385,9 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     STAGES.find((each) => stages[each] !== "done" && !optional(each)) ?? "open";
 
   const needs: Need[] = [];
+  if (told && org.real?.paused === true) {
+    needs.push({ kind: "paused" });
+  }
   if (!read) {
     needs.push({ kind: "transcript" });
   }
