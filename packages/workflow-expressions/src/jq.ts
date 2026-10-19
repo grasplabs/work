@@ -33,7 +33,14 @@ const importFuelByName: Readonly<Record<string, number>> = {
 
 /** How one jq run ended. */
 export type JqRun =
-  | { kind: "completed"; exitCode: number; stdout: string; stderr: string }
+  | {
+      kind: "completed";
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+      /** The fuel the run spent, of what it was given. */
+      fuelUsed: number;
+    }
   | { kind: "exhausted"; resource: "fuel" | "memory" | "stack" }
   | { kind: "crashed" };
 
@@ -125,7 +132,12 @@ const exhaustedBy = (error: unknown, meter: Meter): JqRun => {
  * synthetic environment, time conversion and output. No network, bindings
  * or host state.
  */
-export const runJq = async (program: string, stdin: string): Promise<JqRun> => {
+export const runJq = async (
+  program: string,
+  stdin: string,
+  /** The fuel the run gets: `runFuel`, or less where a budget has less left. */
+  given: number = runFuel
+): Promise<JqRun> => {
   const meter: Meter = { fuel: undefined, memoryRefused: false };
   const jq = await loadJq({
     instantiateWasm: (imports, onSuccess) => {
@@ -148,11 +160,12 @@ export const runJq = async (program: string, stdin: string): Promise<JqRun> => {
   if (meter.fuel === undefined) {
     throw new Error("jq started without its fuel global");
   }
-  meter.fuel.value = runFuel;
+  meter.fuel.value = Math.min(given, runFuel);
   try {
     // `--` ends the options: the program is never read as a flag.
     const { exitCode, stdout, stderr } = jq.raw(stdin, program, ["-c", "--"]);
-    return { kind: "completed", exitCode, stdout, stderr };
+    const fuelUsed = Math.min(given, runFuel) - Number(meter.fuel.value);
+    return { kind: "completed", exitCode, stdout, stderr, fuelUsed };
   } catch (error) {
     return exhaustedBy(error, meter);
   }

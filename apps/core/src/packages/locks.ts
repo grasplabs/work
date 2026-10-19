@@ -3,7 +3,10 @@ import {
   dependencyErrors,
   dependencyTargetSchema,
 } from "@grasp-os/shared/dependencies";
-import type { DependencyTarget } from "@grasp-os/shared/dependencies";
+import type {
+  DependencySubject,
+  DependencyTarget,
+} from "@grasp-os/shared/dependencies";
 import { canonicalJson } from "@grasp-os/shared/json";
 import {
   graspLockSchema,
@@ -23,9 +26,12 @@ import {
   dependencyRequests,
   packageCleanups,
 } from "../db/core/schema.ts";
+import { auditTargetOf, ofSubject } from "../dependencies/subjects.ts";
 
-// An App's locks as core stores them (`dependency_locks`), one per graph,
-// and what keeps their number bounded. What could go wrong, and what
+// An App's or a workflow's locks as core stores them (`dependency_locks`),
+// one per graph, and what keeps their number bounded. Every statement
+// here is one subject's: a lock, its room and its eviction are never
+// shared between subjects (GRA-665). What could go wrong, and what
 // stops it:
 //
 // - A lock without its request, or a request without its lock. The lock
@@ -107,6 +113,16 @@ const configsOf = async (
     )
   );
 
+/** That the row of alias `alias` is `subject`'s, as SQL. */
+const subjectIs = (alias: string, subject: DependencySubject): SQL =>
+  sql`${sql.raw(alias)}.subject_type = ${subject.type} AND ${sql.raw(alias)}.subject_id = ${subject.id}`;
+
+/** That the rows of aliases `a` and `b` are one subject's, as SQL. */
+const sameSubject = (a: string, b: string): SQL =>
+  sql.raw(
+    `${a}.subject_type = ${b}.subject_type AND ${a}.subject_id = ${b}.subject_id`
+  );
+
 /** Where a guard that fails says so: the lock column, left empty. */
 const guardFailure = "NOT NULL constraint failed: dependency_locks.lock";
 
@@ -121,35 +137,35 @@ export const lockGuardFailed = (error: unknown): boolean =>
 /**
  * A statement that fails the batch it is in, as a lock's guard does
  * (`lockGuardFailed`), unless `condition` holds as it runs: it inserts a
- * lock row of `app`'s graph `graphHash` with no lock, which the column
- * refuses.
+ * lock row of `subject`'s graph `graphHash` with no lock, which the
+ * column refuses.
  */
 export const failUnless = (
   db: DrizzleD1Database,
-  app: string,
+  subject: DependencySubject,
   graphHash: string,
   condition: SQL
 ) =>
   db
     .insert(dependencyLocks)
     .select(
-      sql`SELECT ${app}, ${graphHash}, NULL, 0, NULL WHERE NOT (${condition})`
+      sql`SELECT ${subject.type}, ${subject.id}, ${graphHash}, NULL, 0, NULL WHERE NOT (${condition})`
     );
 
 /**
- * That `app`'s graph `graphHash` is retired and approved by nothing else,
- * as SQL: its lock is frozen (`lockStatements`).
+ * That `subject`'s graph `graphHash` is retired and approved by nothing
+ * else, as SQL: its lock is frozen (`lockStatements`).
  */
-const frozenSql = (app: string, graphHash: string): SQL =>
-  sql`(EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${app} AND ${dependencyRequests.graphHash} = ${graphHash} AND ${dependencyRequests.status} = 'retired') AND NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${app} AND ${dependencyRequests.graphHash} = ${graphHash} AND ${dependencyRequests.status} = 'approved'))`;
+const frozenSql = (subject: DependencySubject, graphHash: string): SQL =>
+  sql`(EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${ofSubject(dependencyRequests, subject)} AND ${dependencyRequests.graphHash} = ${graphHash} AND ${dependencyRequests.status} = 'retired') AND NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${ofSubject(dependencyRequests, subject)} AND ${dependencyRequests.graphHash} = ${graphHash} AND ${dependencyRequests.status} = 'approved'))`;
 
 /**
- * That no pending, approved or retired request of its App names the lock
+ * That no pending, approved or retired request of its subject names the lock
  * `lock`. A retired graph's lock stays: the artifacts it pins are what
  * the graph keeps working with. A revoked one's goes.
  */
 const unused = (lock: string): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${sql.raw(lock)}.app_id AND ${dependencyRequests.graphHash} = ${sql.raw(lock)}.graph_hash AND ${dependencyRequests.status} IN ('pending', 'approved', 'retired'))`;
+  sql`NOT EXISTS (SELECT 1 FROM dependency_requests u WHERE ${sameSubject("u", lock)} AND u.graph_hash = ${sql.raw(lock)}.graph_hash AND u.status IN ('pending', 'approved', 'retired'))`;
 
 /**
  * That the lock `lock` is no longer in use: neither the App's pending
@@ -166,24 +182,24 @@ const unused = (lock: string): SQL =>
  * lock counts its room by, since its batch drops that request first.
  */
 const stale = (lock: string, waiting: "in use" | "replaced" = "in use"): SQL =>
-  sql`(COALESCE(${sql.raw(lock)}.served_until, 0) <= ${Date.now()} AND NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE r.app_id = ${sql.raw(lock)}.app_id AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (${sql.raw(waiting === "in use" ? "r.status = 'pending'" : "0")} OR r.status = 'retired' OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE n.app_id = r.app_id AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at)))))`;
+  sql`(COALESCE(${sql.raw(lock)}.served_until, 0) <= ${Date.now()} AND NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE ${sameSubject("r", lock)} AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (${sql.raw(waiting === "in use" ? "r.status = 'pending'" : "0")} OR r.status = 'retired' OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE ${sameSubject("n", "r")} AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at)))))`;
 
 /**
- * That the lock `lock` is one a new lock of `app` takes the room of, as
- * the statement runs: of its stale locks, the oldest by when they were
- * last approved, as many as the App holds past `cap` with the new one.
+ * That the lock `lock` is one a new lock of `subject` takes the room of,
+ * as the statement runs: of its stale locks, the oldest by when they were
+ * last approved, as many as the subject holds past `cap` with the new one.
  */
-const evicted = (lock: string, app: string, cap: number): SQL =>
-  sql`${sql.raw(lock)}.graph_hash IN (SELECT e.graph_hash FROM dependency_locks e WHERE e.app_id = ${app} AND ${stale("e")} ORDER BY (SELECT MAX(a.decided_at) FROM dependency_requests a WHERE a.app_id = e.app_id AND a.graph_hash = e.graph_hash AND a.status = 'approved') ASC LIMIT MAX(0, (SELECT COUNT(*) FROM dependency_locks c WHERE c.app_id = ${app}) - ${cap} + 1))`;
+const evicted = (lock: string, subject: DependencySubject, cap: number): SQL =>
+  sql`${sql.raw(lock)}.graph_hash IN (SELECT e.graph_hash FROM dependency_locks e WHERE ${subjectIs("e", subject)} AND ${stale("e")} ORDER BY (SELECT MAX(a.decided_at) FROM dependency_requests a WHERE ${sameSubject("a", "e")} AND a.graph_hash = e.graph_hash AND a.status = 'approved') ASC LIMIT MAX(0, (SELECT COUNT(*) FROM dependency_locks c WHERE ${subjectIs("c", subject)}) - ${cap} + 1))`;
 
 /**
- * The statements that delete each of `app`'s locks `which` selects (by an
+ * The statements that delete each of `subject`'s locks `which` selects (by an
  * alias it is given), after recording each tarball and pinned artifact it
  * named for cleanup (cleanup.ts): what another lock still names is kept.
  */
 const forgetLocks = (
   db: DrizzleD1Database,
-  app: string,
+  subject: DependencySubject,
   which: (lock: string) => SQL
 ) => {
   const now = Date.now();
@@ -191,7 +207,7 @@ const forgetLocks = (
     db
       .insert(packageCleanups)
       .select(
-        sql`SELECT json_extract(p.value, '$.integrity'), 'tarball', ${now} FROM ${dependencyLocks} l, json_each(l.lock, '$.packages') p WHERE l.app_id = ${app} AND ${which("l")}`
+        sql`SELECT json_extract(p.value, '$.integrity'), 'tarball', ${now} FROM ${dependencyLocks} l, json_each(l.lock, '$.packages') p WHERE ${subjectIs("l", subject)} AND ${which("l")}`
       )
       .onConflictDoUpdate({
         target: packageCleanups.key,
@@ -200,7 +216,7 @@ const forgetLocks = (
     db
       .insert(packageCleanups)
       .select(
-        sql`SELECT json_extract(pin.value, '$.hash'), 'build', ${now} FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE l.app_id = ${app} AND ${which("l")}`
+        sql`SELECT json_extract(pin.value, '$.hash'), 'build', ${now} FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE ${subjectIs("l", subject)} AND ${which("l")}`
       )
       .onConflictDoUpdate({
         target: packageCleanups.key,
@@ -208,7 +224,9 @@ const forgetLocks = (
       }),
     db
       .delete(dependencyLocks)
-      .where(and(eq(dependencyLocks.appId, app), which("dependency_locks"))),
+      .where(
+        and(ofSubject(dependencyLocks, subject), which("dependency_locks"))
+      ),
   ] as const;
 };
 
@@ -224,7 +242,7 @@ export interface LockWrite {
 type SQLiteBatchItem = Parameters<DrizzleD1Database["batch"]>[0][number];
 
 /**
- * The statements that store `fresh` as the lock of `app`'s graph, or add
+ * The statements that store `fresh` as the lock of `subject`'s graph, or add
  * its targets to the one stored, as part of a batch: an insert, after
  * the locks of older approvals give up their room, held to the App's
  * `appLocks` as it runs; or an update, only while the lock is
@@ -240,14 +258,19 @@ export const lockStatements = async (
   db: DrizzleD1Database,
   by: Acting,
   {
-    app,
+    subject,
     graphHash,
     fresh,
     limits,
-  }: { app: string; graphHash: string; fresh: GraspLock; limits: PackageLimits }
+  }: {
+    subject: DependencySubject;
+    graphHash: string;
+    fresh: GraspLock;
+    limits: PackageLimits;
+  }
 ): Promise<LockWrite> => {
   const where = and(
-    eq(dependencyLocks.appId, app),
+    ofSubject(dependencyLocks, subject),
     eq(dependencyLocks.graphHash, graphHash)
   );
   const row = await db
@@ -260,7 +283,7 @@ export const lockStatements = async (
   // each built for the target config the lock names. A resolve may add a
   // target it has no config for, never change one it has (a new config
   // waits for the graph to be approved again).
-  const retiredOnly = frozenSql(app, graphHash);
+  const retiredOnly = frozenSql(subject, graphHash);
   const read = await db.get<{ frozen: number }>(
     sql`SELECT ${retiredOnly} AS frozen`
   );
@@ -291,7 +314,7 @@ export const lockStatements = async (
   // is the one written: a batch with it lands only with that lock.
   const guard = failUnless(
     db,
-    app,
+    subject,
     graphHash,
     sql`EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${where} AND ${dependencyLocks.lock} = ${stored})`
   );
@@ -305,7 +328,7 @@ export const lockStatements = async (
       .from(dependencyLocks)
       .where(
         and(
-          eq(dependencyLocks.appId, app),
+          ofSubject(dependencyLocks, subject),
           sql`NOT ${stale("dependency_locks", "replaced")}`
         )
       )
@@ -320,11 +343,13 @@ export const lockStatements = async (
       lock: merged.lock,
       statements: [
         // Room first: the oldest approvals no longer in use give up theirs.
-        ...forgetLocks(db, app, (lock) => evicted(lock, app, limits.appLocks)),
+        ...forgetLocks(db, subject, (lock) =>
+          evicted(lock, subject, limits.appLocks)
+        ),
         db
           .insert(dependencyLocks)
           .select(
-            sql`SELECT ${app}, ${graphHash}, ${stored}, ${Date.now()}, NULL WHERE (SELECT COUNT(*) FROM ${dependencyLocks} WHERE ${dependencyLocks.appId} = ${app}) < ${limits.appLocks}`
+            sql`SELECT ${subject.type}, ${subject.id}, ${graphHash}, ${stored}, ${Date.now()}, NULL WHERE (SELECT COUNT(*) FROM ${dependencyLocks} WHERE ${ofSubject(dependencyLocks, subject)}) < ${limits.appLocks}`
           )
           .onConflictDoNothing(),
         guard,
@@ -342,7 +367,7 @@ export const lockStatements = async (
   // retired since, and the next attempt reads it frozen.
   const stillThawed = frozen
     ? []
-    : [failUnless(db, app, graphHash, sql`NOT ${retiredOnly}`)];
+    : [failUnless(db, subject, graphHash, sql`NOT ${retiredOnly}`)];
   if (merged.changed.length === 0) {
     return { lock: merged.lock, statements: [update, guard, ...stillThawed] };
   }
@@ -360,9 +385,9 @@ export const lockStatements = async (
       outboxed(db, {
         actor: by.actor ?? actorOf(by),
         action: "dependency.lock_targets_changed",
-        target: { type: "app", id: app },
+        target: auditTargetOf(subject),
         detail: {
-          app,
+          [subject.type]: subject.id,
           graphHash,
           targets: merged.changed.join(" "),
           ...from,
@@ -375,14 +400,16 @@ export const lockStatements = async (
 
 /**
  * The statements, for the end of a batch that supersedes or denies one of
- * `app`'s requests, that delete each of its locks no pending or approved
- * request names any more, recording their files for cleanup.
+ * `subject`'s requests, that delete each of its locks no pending or
+ * approved request names any more, recording their files for cleanup.
  */
-export const unusedLockStatements = (db: DrizzleD1Database, app: string) =>
-  forgetLocks(db, app, unused);
+export const unusedLockStatements = (
+  db: DrizzleD1Database,
+  subject: DependencySubject
+) => forgetLocks(db, subject, unused);
 
 /**
- * Records on `app`'s lock of `graphHash` that an address of one of its
+ * Records on `subject`'s lock of `graphHash` that an address of one of its
  * artifacts holds until `until`, before the address is handed out: until
  * then the lock keeps its room (`stale`). It writes only when it moves
  * the time on, so about once a window; the read in the same batch says
@@ -392,11 +419,15 @@ export const unusedLockStatements = (db: DrizzleD1Database, app: string) =>
  */
 export const holdLockFor = async (
   env: Env,
-  { app, graphHash, until }: { app: string; graphHash: string; until: number }
+  {
+    subject,
+    graphHash,
+    until,
+  }: { subject: DependencySubject; graphHash: string; until: number }
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const where = and(
-    eq(dependencyLocks.appId, app),
+    ofSubject(dependencyLocks, subject),
     eq(dependencyLocks.graphHash, graphHash)
   );
   const [, held] = await db.batch([
@@ -407,7 +438,7 @@ export const holdLockFor = async (
         and(where, sql`COALESCE(${dependencyLocks.servedUntil}, 0) < ${until}`)
       ),
     db
-      .select({ app: dependencyLocks.appId })
+      .select({ graphHash: dependencyLocks.graphHash })
       .from(dependencyLocks)
       .where(and(where, gte(dependencyLocks.servedUntil, new Date(until)))),
   ]);

@@ -56,6 +56,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   signInAgain: msg({ message: "Connection", context: "inbox item kind" }),
   externalDomain: msg({ message: "Domain", context: "inbox item kind" }),
   heldWrite: msg({ message: "Change", context: "inbox item kind" }),
+  unknownOutcome: msg({
+    message: "Did it happen?",
+    context: "inbox item kind: a change whose answer was lost",
+  }),
   permissionRequest: msg({ message: "Permission", context: "inbox item kind" }),
   packages: msg({ message: "Packages", context: "inbox item kind" }),
   appApproval: msg({ message: "App approval", context: "inbox item kind" }),
@@ -77,6 +81,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   signInAgain: KeyRoundIcon,
   externalDomain: GlobeIcon,
   heldWrite: PencilLineIcon,
+  unknownOutcome: CircleHelpIcon,
   permissionRequest: LockKeyholeIcon,
   packages: PackageIcon,
   appApproval: ShieldCheckIcon,

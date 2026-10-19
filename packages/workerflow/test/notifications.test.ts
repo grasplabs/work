@@ -29,6 +29,7 @@ import {
   handledAt,
   tick,
   eventOf,
+  fencesOf,
   hold,
   notifiedOf,
   notifyFailures,
@@ -56,6 +57,10 @@ const outboxEmpty = async (
     const journal = await journalOf(definition, id);
     return journal.run.notify_at === null ? journal : undefined;
   });
+
+/** The fence the host was told with the last batch of `id`'s ending in `status`. */
+const lastOver = (id: string, status: string): number | undefined =>
+  fencesOf(id).findLast(({ statuses }) => statuses.at(-1) === status)?.over;
 
 describe("a run's host", () => {
   it("is told each status the run takes, in order, numbered from 1", async () => {
@@ -199,6 +204,35 @@ describe("a run's host", () => {
     await outboxEmpty("orders", id);
 
     expect(statusesOf(id)).toStrictEqual(["queued", "running", "complete"]);
+  });
+
+  it("is told with each status the newest generation none of whose attempts holds: none while an attempt runs, its own once it lets go, past it once taken over", async () => {
+    const shipped = newId();
+    const ship = hold(shipped, "ship");
+    await workflow("orders").create({ id: shipped });
+    await within("ship to be held", ship.held);
+    await notifiedWith(shipped, "running");
+    await outboxEmpty("orders", shipped);
+    const instance = await workflow("orders").get(shipped);
+    await instance.terminate();
+    await notifiedWith(shipped, "terminated");
+    ship.release();
+
+    const napped = newId();
+    await workflow("napper").create({ id: napped });
+    await suspendedOn("napper", napped, "nap");
+    await notifiedWith(napped, "waiting");
+    await outboxEmpty("napper", napped);
+    const napper = await workflow("napper").get(napped);
+    await napper.pause();
+    await notifiedWith(napped, "paused");
+
+    expect({
+      running: lastOver(shipped, "running"),
+      terminated: lastOver(shipped, "terminated"),
+      waiting: lastOver(napped, "waiting"),
+      paused: lastOver(napped, "paused"),
+    }).toStrictEqual({ running: 0, terminated: 2, waiting: 1, paused: 1 });
   });
 
   it("can't leave a run resumed while its alarm hands the host the run's notifications without running it", async () => {

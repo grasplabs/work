@@ -172,7 +172,7 @@ interface KnowledgeDocument {
   collectionId: string;
   path: string;
   title: string;
-  /** \`doc\`, \`skill\`, \`memory\`, \`decision\`, \`file\`, or a record type an App declares. */
+  /** \`doc\`, \`skill\`, \`memory\`, \`decision\` or \`file\`. */
   type: string;
   /** When to use it. */
   description: string;

@@ -174,9 +174,15 @@ const listOf = (values: readonly string[]): SQL =>
 const ofApps = (ids: readonly string[]): SQL =>
   sql`+${workflowRuns.appId} IN ${listOf(ids)}`;
 
-/** That a run hasn't ended, never looked up by an index. */
+/**
+ * That a run's open decisions can still be answered, never looked up by an
+ * index: it hasn't ended, and nobody asked to cancel it. A cancel is
+ * admitted before the engine stops the run, and its decisions take no
+ * answer from then on (decisions.ts, `runUnended`), so they don't count
+ * as waiting for anyone.
+ */
 export const runUnended = (): SQL =>
-  sql`+${workflowRuns.status} IN ${listOf(unended)}`;
+  sql`(+${workflowRuns.status} IN ${listOf(unended)} AND ${workflowRuns.cancelRequestedAt} IS NULL)`;
 
 /**
  * That a run has a decision someone can still answer at `now`

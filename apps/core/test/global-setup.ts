@@ -13,18 +13,18 @@ import { testVersionModule } from "./compiler-version.ts";
 
 /**
  * The static assets core's tests serve: a stand-in frontend, so tests don't
- * wait for a build of apps/web, and the screen compiler and the extractor,
+ * wait for a build of apps/web, and the App compiler and the extractor,
  * as core's deploy puts them next to the frontend.
  */
 const testAssets = path.join(import.meta.dirname, "../dist/test-assets");
 
 /**
- * Builds the screen compiler as core's build does, in a process of its
+ * Builds the App compiler as core's build does, in a process of its
  * own: what the tests load and measure is then what a release ships, byte
  * for byte. Built in this process, Vite's own code would be the copy the
  * test runner transformed, and some of that ends up in the kit.
  */
-const buildScreenCompiler = (): void => {
+const buildAppCompiler = (): void => {
   execFileSync(
     process.execPath,
     [
@@ -41,7 +41,7 @@ const writeTestAssets = async (): Promise<void> => {
   cpSync(path.join(import.meta.dirname, "fixtures/assets"), testAssets, {
     recursive: true,
   });
-  buildScreenCompiler();
+  buildAppCompiler();
   await buildExtractor(testAssets);
 };
 

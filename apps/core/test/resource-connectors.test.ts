@@ -129,7 +129,8 @@ export const careless = action({
   returns: v.string(),
   uses: [mail],
   handler: async (ctx) => {
-    await ctx.resources.mail.call("send", { mailbox: "team@acme.test" });
+    // What its contract requires left out, past the types on purpose.
+    await ctx.resources.mail.call("send", { mailbox: "team@acme.test" } as never);
     return "sent";
   },
 });
@@ -143,6 +144,39 @@ export default app({
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: { mail: { send, inbox, careless, sendFresh, probe } },
+  internalOperations: {},
+  screens: [],
+  uses: [mail],
+});
+`,
+});
+
+/**
+ * An App declaring a mail connector of a contract no connector generates:
+ * past the types on purpose, which know every contract, so the binding is
+ * what refuses it.
+ */
+const unknownContractFiles = (): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+  "operations/mail.ts": `import { resource } from "@grasp-os/sdk";
+
+export const mail = resource.connector("mail", {
+  contract: "grasp.mail@1" as never,
+  actions: ["send", "list"] as never,
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { mail } from "./operations/mail.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Mailer",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: {},
   internalOperations: {},
   screens: [],
   uses: [mail],
@@ -906,7 +940,10 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       contract: "google-workspace.mail@1",
       bind: false,
     });
-    const unknown = await mailerApp({ contract: "grasp.mail@1", bind: false });
+    const unknown = await mailerApp({
+      files: unknownContractFiles(),
+      bind: false,
+    });
     const refusal = async ({ admin, approval }: Mailer) =>
       await failure(
         async () => await admin.api.resourceBindings.approve(approval)

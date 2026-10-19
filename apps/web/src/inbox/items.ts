@@ -1,4 +1,4 @@
-import type { PendingAction } from "@grasp-os/shared/connect";
+import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import type { Notification } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
@@ -20,7 +20,8 @@ import type { Loaded } from "../load-from-core.tsx";
 // item goes by itself once what it is about is settled. The prototype's
 // kinds are kept, so the filter and the marks are the same; what core
 // lists today fills those it has (a connection to sign in to again) and
-// kinds of its own: a change an agent wants to make, a permission an App
+// kinds of its own: a change an agent wants to make, a change sent for
+// the person whose answer was lost, a permission an App
 // or agent asked for, packages proposed for an engine, an engine's apps
 // whose code nobody approved, a workflow that failed while acting for the
 // person. Core keeps nothing the inbox adds (put away until a date, given
@@ -41,6 +42,7 @@ export type InboxKind =
   | "signInAgain"
   | "externalDomain"
   | "heldWrite"
+  | "unknownOutcome"
   | "permissionRequest"
   | "packages"
   | "appApproval"
@@ -56,6 +58,7 @@ export type Target =
 /** What an item was made from: what its page shows of it and acts on. */
 export type InboxSource =
   | { type: "held"; action: PendingAction }
+  | { type: "outcome"; outcome: UnknownOutcome }
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "packages"; request: DependencyRequest; policyGeneration: number }
   | { type: "screens"; waiting: ScreensWaiting }
@@ -104,6 +107,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   signInAgain: "apps",
   externalDomain: "apps",
   heldWrite: "apps",
+  unknownOutcome: "apps",
   permissionRequest: "apps",
   packages: "apps",
   appApproval: "apps",
@@ -143,11 +147,19 @@ export const heldName = (action: PendingAction): string => {
   return t`${title} on ${connection}`;
 };
 
-/** Where a held write came from: its chat, or its engine. */
-const heldAbout = ({ context }: PendingAction): Target =>
-  context.type === "chat"
-    ? { kind: "chat", chat: context.chatId }
-    : { kind: "engine", engine: context.appId };
+/**
+ * Where a held write came from: its chat, or its engine (an App's or a run
+ * of its workflow's). An independent workflow's run has no page to go to.
+ */
+const heldAbout = ({ context }: PendingAction): Target | undefined => {
+  if (context.type === "chat") {
+    return { kind: "chat", chat: context.chatId };
+  }
+  if (context.type === "workflowRun") {
+    return undefined;
+  }
+  return { kind: "engine", engine: context.appId };
+};
 
 /** A change an agent or App wants to make, held until the person approves it. */
 const heldItems = (
@@ -172,6 +184,44 @@ const heldItems = (
       // What asked for it waits on the answer.
       urgent: true,
       source: { type: "held", action },
+    };
+  });
+
+/** What a call of unknown outcome did, and where: its tool's title, or its action. */
+export const outcomeName = (outcome: UnknownOutcome): string => {
+  const title = outcome.description?.title ?? outcome.key.action;
+  const connection = outcome.connectionName ?? outcome.key.connectionId;
+  return t`${title} on ${connection}`;
+};
+
+/**
+ * A change Grasp sent for the person whose answer was lost: only they say
+ * whether it happened (the dashboard's `outcome-card.tsx`).
+ */
+const outcomeItems = (
+  outcomes: readonly UnknownOutcome[],
+  me: string
+): InboxItem[] =>
+  outcomes.map((outcome) => {
+    const who = outcomeName(outcome);
+    const connection = outcome.connectionName ?? outcome.key.connectionId;
+    return {
+      // Its key and its claim: the same call sent again and lost again
+      // is another item.
+      id: `outcome:${JSON.stringify([outcome.key, outcome.claim])}`,
+      kind: "unknownOutcome",
+      title: t`Did this happen? ${who}`,
+      context: who,
+      body: [],
+      facts: [
+        { label: t`Connection`, value: connection },
+        { label: t`Sent`, value: formatDateTime(outcome.sentAt) },
+      ],
+      forWhom: { person: me },
+      date: outcome.sentAt,
+      // A run may wait on the answer that was lost.
+      urgent: true,
+      source: { type: "outcome", outcome },
     };
   });
 
@@ -210,7 +260,9 @@ const packageItems = (
   policyGeneration: number
 ): InboxItem[] =>
   requests.map((request) => {
-    const engine = request.app.name;
+    // An App or a workflow, in one queue: only an App has a page to go to.
+    const engine = request.subject.name;
+    const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
     const targets = formatList(
       request.targets.map((target) => i18n._(targetNames[target]))
     );
@@ -222,6 +274,7 @@ const packageItems = (
       context: t`Packages for ${ph({ domain: engine })}`,
       body: [request.purpose],
       facts: [
+        { label: kind, value: engine },
         { label: t`Asked by`, value: request.requestedBy.name },
         {
           label: t`Packages`,
@@ -232,7 +285,10 @@ const packageItems = (
         },
         { label: t`Runs in`, value: targets },
       ],
-      about: { kind: "engine", engine: request.app.id },
+      about:
+        request.subject.type === "app"
+          ? { kind: "engine", engine: request.subject.id }
+          : undefined,
       forWhom: { role: t`package approvers` },
       date: request.requestedAt,
       urgent: false,
@@ -315,6 +371,7 @@ export const inboxItems = (
 ): InboxItem[] => {
   const me = viewer.name;
   const held = readyOf(waiting.held) ?? [];
+  const outcomes = readyOf(waiting.outcomes) ?? [];
   const requests = decidesRequests(viewer)
     ? readyOf(waiting.requests)
     : undefined;
@@ -349,6 +406,7 @@ export const inboxItems = (
   });
   return [
     ...heldItems(held, me),
+    ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
     ...(dependencies === undefined
       ? []
@@ -363,6 +421,7 @@ export const inboxItems = (
 export const unread = (waiting: Waiting): Loaded<unknown>[] => {
   const parts: (Loaded<unknown> | undefined)[] = [
     waiting.held,
+    waiting.outcomes,
     waiting.requests,
     waiting.dependencies,
     waiting.screens,

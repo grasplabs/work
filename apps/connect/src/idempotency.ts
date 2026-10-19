@@ -8,7 +8,7 @@ import type {
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { workContextSchema } from "@grasp-os/shared/permissions";
+import { codeSubjectId, workContextSchema } from "@grasp-os/shared/permissions";
 import type { CodeSubject } from "@grasp-os/shared/permissions";
 import { and, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -201,10 +201,10 @@ export interface StoredAnswer {
 
 const provenanceSchema = z.array(z.string());
 
-const subjectColumns = (subject: CodeSubject) =>
-  subject.type === "app"
-    ? { subjectType: subject.type, subjectId: subject.appId }
-    : { subjectType: subject.type, subjectId: subject.agentId };
+const subjectColumns = (subject: CodeSubject) => ({
+  subjectType: subject.type,
+  subjectId: codeSubjectId(subject),
+});
 
 const keyOf = (scope: IdempotencyScope) => {
   const { subjectType, subjectId } = subjectColumns(scope.subject);
@@ -234,7 +234,8 @@ export const rowKey = (row: Row) =>
  * exact input and where it came from, both as JSON (`input`, `origin`).
  */
 export interface Kept {
-  input: string;
+  /** Null for a call whose capability says its input is sensitive. */
+  input: string | null;
   origin: string;
 }
 
@@ -244,7 +245,11 @@ const storedOriginSchema = z.strictObject({
   appVersion: z.int().positive().nullable(),
   permissionId: z.string().min(1),
   context: workContextSchema,
-  /** Its context had read restricted data: every side effect of it waits. */
+  /**
+   * Recovering it needs its person: its context had read restricted data,
+   * so every side effect of it waits, or a recovery was refused since for
+   * needing their confirmation (`requireConfirmation`).
+   */
   restricted: z.boolean(),
   /**
    * The App's approved resource binding the call came through, if it
@@ -256,7 +261,7 @@ const storedOriginSchema = z.strictObject({
 
 /** What a call whose capability says `claims` keeps under its key. */
 export const keptOf = (claims: CapabilityClaims, input: Json): Kept => ({
-  input: JSON.stringify(input),
+  input: claims.sensitive ? null : JSON.stringify(input),
   origin: JSON.stringify({
     mode: claims.authority.mode,
     appVersion: claims.authority.appVersion ?? null,
@@ -499,6 +504,7 @@ export const idempotencyStore = (
             connectorVersion,
             input: kept?.input ?? null,
             origin: kept?.origin ?? null,
+            listId: crypto.randomUUID(),
           })
           .onConflictDoNothing()
           .returning({ state: idempotentCalls.state }),
@@ -669,7 +675,7 @@ export const idempotencyStore = (
  * `connect.resolved_done`; "it didn't" frees it for one send of the same
  * input (`freed`). Either takes a claim time of its own, so a recovery
  * that read the row before can't retake it, and drops what was kept of
- * the call.
+ * the call. "It didn't" applies only while the call's input is kept.
  */
 export const resolution = (
   database: D1Database,
@@ -683,7 +689,10 @@ export const resolution = (
     eq(idempotentCalls.state, row.state),
     eq(idempotentCalls.claimedAt, row.claimedAt),
     eq(idempotentCalls.inputHash, row.inputHash),
-    unknownNow(now)
+    unknownNow(now),
+    // "It didn't" only while what was sent is still kept for its person
+    // to read: retention may drop it between the read and this write.
+    choice === "not_happened" ? isNotNull(idempotentCalls.input) : undefined
   );
   if (where === undefined) {
     throw new Error("Expected a condition");

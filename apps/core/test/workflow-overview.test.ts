@@ -216,6 +216,8 @@ interface SeededRun {
   deciders?: string;
   /** The decision's deadline; a week after the run started unless given. */
   expiresAt?: number;
+  /** When a cancel of it was admitted, which the engine hasn't applied. */
+  cancelRequestedAt?: number;
 }
 
 /**
@@ -243,7 +245,7 @@ const seedRun = async (
         })
       : null;
   await env.DB.prepare(
-    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at, failure) VALUES (?, ?, ?, 1, NULL, ?, ?, ?, ?)"
+    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at, failure, cancel_requested_at) VALUES (?, ?, ?, 1, NULL, ?, ?, ?, ?, ?)"
   )
     .bind(
       id,
@@ -252,7 +254,8 @@ const seedRun = async (
       run.status,
       run.createdAt,
       run.endedAt ?? null,
-      failure
+      failure,
+      run.cancelRequestedAt ?? null
     )
     .run();
   if (run.decision !== undefined) {
@@ -606,7 +609,7 @@ describe("the Workflows page", buildTime, () => {
     ).resolves.toStrictEqual(["app.not_found", "workflow.invalid"]);
   });
 
-  it("counts a run whose open decision is past its deadline as running, with nothing to decide", async () => {
+  it("counts a run whose open decision is past its deadline, or whose cancel is admitted, as running, with nothing to decide", async () => {
     const owner = await personApi("builder");
     const app = await appOf(owner, `Invoices ${unique()}`, approveFiles);
     const now = Date.now();
@@ -619,6 +622,17 @@ describe("the Workflows page", buildTime, () => {
       decision: "open",
       deciders: `person:${owner.userId}`,
       expiresAt: now - day,
+    });
+    // Its cancel is admitted, and the engine hasn't stopped it yet: its
+    // decision takes no answer any more (decisions.ts, `runUnended`).
+    const cancelling = await seedRun(app, {
+      workflow: "approve",
+      status: "running",
+      createdAt: now - 9 * day,
+      decision: "open",
+      deciders: `person:${owner.userId}`,
+      expiresAt: now + day,
+      cancelRequestedAt: now - 60_000,
     });
     const [all, waiting, running, overview] = await Promise.all([
       owner.api.workflows.runs({ app }),
@@ -636,8 +650,15 @@ describe("the Workflows page", buildTime, () => {
     }).toStrictEqual({
       all: [
         { id: expired.id, status: "running", decision: null, failedAt: null },
+        {
+          id: cancelling.id,
+          status: "running",
+          decision: null,
+          failedAt: null,
+        },
       ],
       waiting: 0,
+      // Being cancelled, it isn't among the runs going on.
       running: [expired.id],
       counted: 0,
       last: "running",

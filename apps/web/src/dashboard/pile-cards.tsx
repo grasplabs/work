@@ -7,7 +7,6 @@ import {
   askedAgain,
   grantReviewed,
   objectOf,
-  RecordTypeClaims,
   reviewedVersion,
   reviewedVersionText,
   subjectOf,
@@ -140,7 +139,6 @@ export const RequestDetails = ({
           <Trans>In one chat only, for {requester}</Trans>
         </p>
       )}
-      <RecordTypeClaims directory={directory} request={request} />
       <p>
         <Trans>Version to review: {version}</Trans>
       </p>

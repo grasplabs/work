@@ -27,6 +27,8 @@ export const expressionErrors = defineErrorFamily({
   "expression.failed": "The expression failed.",
   "expression.resource_exhausted":
     "The expression ran out of its computation or memory budget.",
+  "expression.budget_exhausted":
+    "The expressions of this step together ran out of the computation one step may spend.",
   "expression.result_count": "The expression must produce exactly one result.",
   "expression.result_too_large": `The expression's result is over ${sizeText(evaluatorLimits.maxResultBytes)}.`,
   "expression.result_invalid": `The expression's result nests deeper than ${evaluatorLimits.maxJsonDepth} levels, or has a number or key that isn't allowed.`,

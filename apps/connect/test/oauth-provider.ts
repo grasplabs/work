@@ -26,6 +26,18 @@ export interface Account {
   audience?: string;
   /** Microsoft only: a B2B guest, signed in by this other identity provider. */
   guestFrom?: string;
+  /**
+   * Microsoft only: a sign-in name (UPN) that isn't the account's email
+   * address, which the ID token then names as its `email`.
+   */
+  signInName?: string;
+  /**
+   * The account's other addresses: Microsoft's `smtp:` proxy addresses, or
+   * Google's send-as addresses, verified unless `unverified` names them.
+   */
+  aliases?: string[];
+  /** Google only: send-as addresses Google hasn't verified. */
+  unverified?: string[];
 }
 
 /** One request connect sent to a provider. */
@@ -54,6 +66,8 @@ interface ProviderState {
   grants: Map<string, Account>;
   /** Every token issued (access and refresh) → its account. */
   holders: Map<string, Account>;
+  /** Answers the account's profile lookup instead, when set. */
+  profile: Answer | undefined;
 }
 
 const sameGrant = (a: Account, b: Account): boolean =>
@@ -75,7 +89,8 @@ const idTokenFor = (account: Account): string => {
       aud: audience,
       tid: tenant,
       oid: account.subject,
-      preferred_username: account.email,
+      preferred_username: account.signInName ?? account.email,
+      ...(account.signInName === undefined ? {} : { email: account.email }),
       idp: account.guestFrom,
     });
   }
@@ -99,6 +114,12 @@ const s256 = async (verifier: string): Promise<string> =>
 const oauthError = (error: string, status = 400): Response =>
   Response.json({ error, error_description: "Refused" }, { status });
 
+/** Where connect reads an account's own addresses (account-addresses.ts). */
+export const profileUrls: ReadonlySet<string> = new Set([
+  "https://graph.microsoft.com/v1.0/me",
+  "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs",
+]);
+
 const isProviderUrl = (url: URL): boolean =>
   url.host === "login.microsoftonline.com" ||
   url.host === "oauth2.googleapis.com";
@@ -118,6 +139,7 @@ export const fakeProviders = () => {
     rotate: undefined,
     grants: new Map(),
     holders: new Map(),
+    profile: undefined,
   };
   let counter = 0;
   const issue = (prefix: string): string => {
@@ -179,6 +201,69 @@ export const fakeProviders = () => {
     return oauthError("unsupported_grant_type");
   };
 
+  /**
+   * The account's own profile, as connect reads its addresses: Graph's
+   * `/me` (`mail`, `proxyAddresses`) or Gmail's send-as list, for the
+   * account the bearer token was issued to.
+   */
+  const profileOf = async (request: Request): Promise<Response> => {
+    if (state.profile !== undefined) {
+      const answered = await state.profile();
+      const location = answered.headers.get("location");
+      // As fetch does, unless asked not to: it follows a redirect, its
+      // headers (the bearer token too) along.
+      return answered.status >= 300 &&
+        answered.status < 400 &&
+        location !== null &&
+        request.redirect !== "manual"
+        ? await globalThis.fetch(location, { headers: request.headers })
+        : answered;
+    }
+    const token = (request.headers.get("authorization") ?? "").replace(
+      "Bearer ",
+      ""
+    );
+    const account = state.holders.get(token);
+    if (account === undefined) {
+      return Response.json(
+        { error: { code: "InvalidAuthenticationToken" } },
+        {
+          status: 401,
+        }
+      );
+    }
+    const aliases = account.aliases ?? [];
+    return account.provider === "microsoft"
+      ? Response.json({
+          mail: account.email,
+          proxyAddresses: [
+            `SMTP:${account.email}`,
+            ...aliases.map((alias) => `smtp:${alias}`),
+            // A SIP address for calls, which no mail is delivered to.
+            `SIP:${account.email.replace("@", "-voice@")}`,
+          ],
+        })
+      : Response.json({
+          // Each with its signature too, unless the request asks for only
+          // the fields it reads, as Gmail answers.
+          sendAs: [
+            { sendAsEmail: account.email, isPrimary: true },
+            ...aliases.map((alias) => ({
+              sendAsEmail: alias,
+              verificationStatus: "accepted",
+            })),
+            ...(account.unverified ?? []).map((alias) => ({
+              sendAsEmail: alias,
+              verificationStatus: "pending",
+            })),
+          ].map((entry) =>
+            new URL(request.url).searchParams.has("fields")
+              ? entry
+              : { ...entry, signature: "<p>Kind regards</p>".repeat(4000) }
+          ),
+        });
+  };
+
   const answer = async (url: URL, form: URLSearchParams): Promise<Response> => {
     if (url.pathname.endsWith("/token")) {
       return await tokenEndpoint(form);
@@ -209,10 +294,14 @@ export const fakeProviders = () => {
     state.refresh = undefined;
     state.revoke = undefined;
     state.rotate = undefined;
+    state.profile = undefined;
     const passThrough = globalThis.fetch;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
+      if (profileUrls.has(url.origin + url.pathname)) {
+        return await profileOf(request);
+      }
       if (!isProviderUrl(url)) {
         return await passThrough(input, init);
       }

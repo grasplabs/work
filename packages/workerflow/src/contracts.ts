@@ -33,8 +33,15 @@ export interface WorkflowEvent<Params = unknown> {
   };
 }
 
-/** What a step's callback is given. */
-export interface WorkflowStepContext {
+/**
+ * What a step's callback is given. `Delay` is the kind of retry delay the
+ * step was configured with, as on Cloudflare (`do`'s overloads pick it from
+ * the config): a static delay's context has its delay, a delay function's
+ * has none. `idempotencyKey` is Workerflow's, beside Cloudflare's fields.
+ */
+export interface WorkflowStepContext<
+  Delay extends WorkflowDuration | WorkflowDelayFunction = WorkflowDuration,
+> {
   readonly step: {
     readonly name: string;
     /**
@@ -65,17 +72,33 @@ export interface WorkflowStepContext {
   readonly idempotencyKey: string;
   /** The step's config, defaults filled in, as Cloudflare resolves it. */
   readonly config: {
-    readonly retries: {
-      readonly limit: number;
-      /** As given; absent when the delay is a function. */
-      readonly delay?: WorkflowDuration;
-      readonly backoff: WorkflowBackoff;
-    };
+    readonly retries: WorkflowContextRetries<Delay>;
     readonly timeout: WorkflowDuration;
     /** Present when the step is sensitive. */
     readonly sensitive?: "output";
   };
 }
+
+/**
+ * A step's retries as its context tells them: the delay as given when it
+ * is static, and none when it is a function.
+ */
+export type WorkflowContextRetries<
+  Delay extends WorkflowDuration | WorkflowDelayFunction,
+> = {
+  readonly limit: number;
+  readonly backoff: WorkflowBackoff;
+} & (Delay extends WorkflowDelayFunction
+  ? unknown
+  : { readonly delay: WorkflowDuration });
+
+/**
+ * The context the engine itself hands out, of either delay kind: a step's
+ * config is known only when it runs.
+ */
+export type AnyWorkflowStepContext = WorkflowStepContext<
+  WorkflowDuration | WorkflowDelayFunction
+>;
 
 export type WorkflowDurationLabel =
   | "second"
@@ -100,7 +123,7 @@ export type WorkflowBackoff = "constant" | "linear" | "exponential";
  * journaled; it is never asked again for that attempt. It has 5 seconds.
  */
 export type WorkflowDelayFunction = (input: {
-  ctx: WorkflowStepContext;
+  ctx: WorkflowStepContext<WorkflowDelayFunction>;
   error: Error;
 }) => WorkflowDuration | Promise<WorkflowDuration>;
 
@@ -127,13 +150,37 @@ export interface WorkflowStepConfig {
   readonly sensitive?: "output";
 }
 
+/** A config whose retry delay is a function: its context has no delay. */
+type WorkflowStepConfigWithDelayFunction = Omit<
+  WorkflowStepConfig,
+  "retries"
+> & {
+  readonly retries: {
+    readonly limit: number;
+    readonly delay: WorkflowDelayFunction;
+    readonly backoff?: WorkflowBackoff;
+  };
+};
+
+/** A config whose retry delay is static, or left out: its context has it. */
+type WorkflowStepConfigWithStaticDelay = Omit<WorkflowStepConfig, "retries"> & {
+  readonly retries?: {
+    readonly limit: number;
+    readonly delay: WorkflowDuration;
+    readonly backoff?: WorkflowBackoff;
+  };
+};
+
 /**
  * What a step's rollback is given, as Cloudflare gives it, and the key
  * and attempt of the rollback itself.
  */
-export interface WorkflowRollbackContext<Output = unknown> {
+export interface WorkflowRollbackContext<
+  Output = unknown,
+  Delay extends WorkflowDuration | WorkflowDelayFunction = WorkflowDuration,
+> {
   /** The step's own context, as its latest attempt was given it. */
-  readonly ctx: WorkflowStepContext;
+  readonly ctx: WorkflowStepContext<Delay>;
   /**
    * Why the run rolls back: the error that ended it, or, for a
    * `terminate({ rollback: true })`, an error named `Terminated`.
@@ -153,14 +200,21 @@ export interface WorkflowRollbackContext<Output = unknown> {
   readonly attempt: number;
 }
 
+/** The rollback context the engine itself hands out, of either delay kind. */
+export type AnyWorkflowRollbackContext<Output = unknown> =
+  WorkflowRollbackContext<Output, WorkflowDuration | WorkflowDelayFunction>;
+
 /**
  * A step's rollback: run, should the run roll back, after the rollbacks of
  * every step started after it. `rollbackConfig` takes `retries` and
  * `timeout`, with a step's defaults.
  */
-export interface WorkflowStepRollbackOptions<Output = unknown> {
+export interface WorkflowStepRollbackOptions<
+  Output = unknown,
+  Delay extends WorkflowDuration | WorkflowDelayFunction = WorkflowDuration,
+> {
   readonly rollback: (
-    context: WorkflowRollbackContext<Output>
+    context: WorkflowRollbackContext<Output, Delay>
   ) => Promise<void> | void;
   readonly rollbackConfig?: Pick<WorkflowStepConfig, "retries" | "timeout">;
 }
@@ -189,6 +243,11 @@ export interface WorkflowStep {
    * Rollbacks run in the reverse order their steps started in, each with
    * its own retries, journaled; the first that fails ends the rolling
    * back, and the run's status says so beside its own error.
+   *
+   * As on Cloudflare, the config's overloads pick the context's type by
+   * its retry delay: a function's context has no delay. The broad config
+   * stays last, or it would shadow them; its delay could be either kind,
+   * so its context may lack the delay, where Cloudflare's promises it.
    */
   do: (<T>(
     name: string,
@@ -197,9 +256,26 @@ export interface WorkflowStep {
   ) => Promise<T>) &
     (<T>(
       name: string,
-      config: WorkflowStepConfig,
+      config: WorkflowStepConfigWithDelayFunction,
+      callback: (
+        context: WorkflowStepContext<WorkflowDelayFunction>
+      ) => Promise<T> | T,
+      rollback?: WorkflowStepRollbackOptions<T, WorkflowDelayFunction>
+    ) => Promise<T>) &
+    (<T>(
+      name: string,
+      config: WorkflowStepConfigWithStaticDelay,
       callback: (context: WorkflowStepContext) => Promise<T> | T,
       rollback?: WorkflowStepRollbackOptions<T>
+    ) => Promise<T>) &
+    (<T>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: (context: AnyWorkflowStepContext) => Promise<T> | T,
+      rollback?: WorkflowStepRollbackOptions<
+        T,
+        WorkflowDuration | WorkflowDelayFunction
+      >
     ) => Promise<T>);
   /**
    * Resolves once `duration` has passed since this sleep was first

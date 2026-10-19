@@ -1,5 +1,9 @@
 import { decisionErrors } from "@grasp-os/shared/decisions";
-import type { DecisionView } from "@grasp-os/shared/decisions";
+import type {
+  DecisionConfirmation,
+  DecisionReview,
+  DecisionView,
+} from "@grasp-os/shared/decisions";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -13,7 +17,12 @@ import { z } from "zod";
 
 import { appFor } from "../apps.ts";
 import { workflowDecisions, workflowRuns } from "../db/core/schema.ts";
-import { answerableBy, answerDecision } from "../decisions/decisions.ts";
+import {
+  answerableBy,
+  answerDecision,
+  confirmDecision,
+  reviewDecision,
+} from "../decisions/decisions.ts";
 import { queuedRuns } from "./admission.ts";
 import {
   findRun,
@@ -267,21 +276,15 @@ export const screenRun = async (
 };
 
 /**
- * Answers the decision `decision` (its name in the workflow) of the App's
- * run `run`, for the person using the screen, as the decision's page does
- * (`answerDecision`): only someone it is from, never the run's starter
- * unless it names exactly them, once, before its deadline. Audited as
- * answered on a screen.
+ * The ID of the decision `decision` (its name in the workflow) of the
+ * App's run `run`; `decision.not_found` for any other.
  */
-export const decideScreenRun = async (
+const appDecision = async (
   env: Env,
-  by: Identity,
-  app: unknown,
+  app: AppId,
   run: unknown,
-  decision: unknown,
-  answer: unknown
-): Promise<DecisionView> => {
-  const { id } = await appFor(env, by, app, "user");
+  decision: unknown
+): Promise<string> => {
   const runId = runIdSchema.safeParse(run);
   if (!runId.success) {
     throw workflowErrors.create("workflow.invalid");
@@ -299,12 +302,91 @@ export const decideScreenRun = async (
       and(
         eq(workflowDecisions.runId, runId.data),
         eq(workflowDecisions.step, name),
-        eq(workflowRuns.appId, id)
+        eq(workflowRuns.appId, app)
       )
     )
     .get();
   if (!found) {
     throw decisionErrors.create("decision.not_found");
   }
-  return await answerDecision(env, by, found.id, answer, "screen");
+  return found.id;
+};
+
+/**
+ * What the page's trusted decision UI shows the person before they
+ * confirm the screen's answer to the decision `decision` (its name in
+ * the workflow) of the App's run `run` (`reviewDecision`).
+ */
+export const reviewScreenDecision = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  run: unknown,
+  decision: unknown,
+  answer: unknown
+): Promise<DecisionReview> => {
+  const { id } = await appFor(env, by, app, "user");
+  return await reviewDecision(
+    env,
+    by,
+    await appDecision(env, id, run, decision),
+    answer
+  );
+};
+
+/**
+ * Mints the person's one-use confirmation of the screen's answer to the
+ * decision `decision` (its name in the workflow) of the App's run `run`,
+ * once they confirmed it in the page's own dialog (`confirmDecision`),
+ * audited as confirmed for a screen. The page calls it; the screen's
+ * bridge never reaches it, and the screen never holds the confirmation.
+ */
+export const confirmScreenDecision = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  run: unknown,
+  decision: unknown,
+  revision: unknown,
+  answer: unknown
+): Promise<DecisionConfirmation> => {
+  const { id } = await appFor(env, by, app, "user");
+  return await confirmDecision(
+    env,
+    by,
+    await appDecision(env, id, run, decision),
+    revision,
+    answer,
+    "screen"
+  );
+};
+
+/**
+ * Answers the decision `decision` (its name in the workflow) of the App's
+ * run `run`, for the person using the screen, as the decision's page does
+ * (`answerDecision`): only someone it is from, never the run's starter
+ * unless it names exactly them, once, before its deadline, and only with
+ * the one-use confirmation the page minted once the person confirmed
+ * exactly this answer in its own dialog. The screen asks the page to
+ * answer, and never holds the confirmation. Audited as answered on a
+ * screen.
+ */
+export const decideScreenRun = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  run: unknown,
+  decision: unknown,
+  answer: unknown,
+  confirmation: unknown
+): Promise<DecisionView> => {
+  const { id } = await appFor(env, by, app, "user");
+  return await answerDecision(
+    env,
+    by,
+    await appDecision(env, id, run, decision),
+    answer,
+    confirmation,
+    "screen"
+  );
 };

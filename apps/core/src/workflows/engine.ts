@@ -5,8 +5,16 @@ import {
   runRetentionDefaultDays,
   runRetentionSchema,
 } from "@grasp-os/shared/deployment-config";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  workflowIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  WorkflowId,
+  WorkflowResourceId,
+} from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { Workflow } from "@grasp-os/workerflow/binding";
 import type { WorkflowOptions } from "@grasp-os/workerflow/binding";
@@ -64,9 +72,24 @@ export const internalWorkflows = ["extraction", "build", "backfill"] as const;
 
 export type InternalWorkflow = (typeof internalWorkflows)[number];
 
-/** What a run executes: an App's pinned workflow, or one of core's own. */
+/**
+ * What a run of an independent workflow is pinned to (resource-runs.ts):
+ * the workflow, its exact version, and the manifest that version sealed,
+ * which names the build it runs. The dispatcher loads nothing else.
+ */
+export interface PinnedResourceRun {
+  workflow: WorkflowResourceId;
+  version: number;
+  manifest: string;
+}
+
+/**
+ * What a run executes: an App's pinned workflow, an independent workflow's
+ * sealed version, or one of core's own.
+ */
 export type RunPin =
   | ({ type: "app" } & PinnedRun)
+  | ({ type: "resource" } & PinnedResourceRun)
   | { type: "internal"; workflow: InternalWorkflow };
 
 /** The one definition every run is a run of. */
@@ -87,17 +110,45 @@ const pinSchema = z.union([
       version,
     })),
   z
+    .tuple([
+      z.literal("resource"),
+      workflowResourceIdSchema,
+      z.int().positive(),
+      z.string().regex(/^[0-9a-f]{64}$/u),
+    ])
+    .transform(([, workflow, version, manifest]): RunPin => ({
+      type: "resource",
+      workflow,
+      version,
+      manifest,
+    })),
+  z
     .tuple([z.literal("internal"), z.enum(internalWorkflows)])
     .transform(([, workflow]): RunPin => ({ type: "internal", workflow })),
 ]);
 
 /** A pin as the engine keeps it: the run's opaque definition version. */
-const versionOf = (pin: RunPin): string =>
-  JSON.stringify(
-    pin.type === "app"
-      ? ["app", pin.app, pin.workflow, pin.version]
-      : ["internal", pin.workflow]
-  );
+const versionOf = (pin: RunPin): string => {
+  switch (pin.type) {
+    case "app": {
+      return JSON.stringify(["app", pin.app, pin.workflow, pin.version]);
+    }
+    case "resource": {
+      return JSON.stringify([
+        "resource",
+        pin.workflow,
+        pin.version,
+        pin.manifest,
+      ]);
+    }
+    case "internal": {
+      return JSON.stringify(["internal", pin.workflow]);
+    }
+    default: {
+      return pin satisfies never;
+    }
+  }
+};
 
 /**
  * What a run the engine activates is pinned to, from the definition and
@@ -125,6 +176,15 @@ export interface RunEngine {
     id: string;
     pinned: PinnedRun;
     input: Json | undefined;
+  }) => Promise<void>;
+  /**
+   * As `create`, for a run of an independent workflow, pinned to its
+   * version's sealed manifest.
+   */
+  createResource: (run: {
+    id: string;
+    pinned: PinnedResourceRun;
+    input: Json;
   }) => Promise<void>;
   /** As `create`, for a run of one of core's own workflows. */
   createInternal: (run: {
@@ -163,9 +223,18 @@ export interface RunEngine {
    * Delivers the run an event of `type`, which ends a wait on that type: it
    * carries nothing (`RunHost.waitForDecision`). `key` names the delivery:
    * the same key again is the same event, taken once. A run that has
-   * ended takes none, and that is no error.
+   * ended, or that the engine has no record of, takes none, and that is
+   * no error: there is nothing left to wake (workflows/wakes.ts). Answers
+   * `delivered` for those, and `refused` for an event the run will never
+   * take, sent again or not: its inbox is full, the event too large, or
+   * the key already names another event. Throws when the run can't be
+   * reached.
    */
-  sendEvent: (id: string, type: string, key: string) => Promise<void>;
+  sendEvent: (
+    id: string,
+    type: string,
+    key: string
+  ) => Promise<"delivered" | "refused">;
   /**
    * Removes the run, with all the engine kept of it, whether or not it has
    * ended; one it has no record of stays as it is. For a run core ended
@@ -281,6 +350,9 @@ export const runEngine = (env: Env): RunEngine => ({
   create: async ({ id, pinned, input }) => {
     await admit(env, id, { type: "app", ...pinned }, input);
   },
+  createResource: async ({ id, pinned, input }) => {
+    await admit(env, id, { type: "resource", ...pinned }, input);
+  },
   createInternal: async ({ id, workflow, input }) => {
     await admit(env, id, { type: "internal", workflow }, input);
   },
@@ -309,13 +381,11 @@ export const runEngine = (env: Env): RunEngine => ({
       payload: encode(null),
       key,
     });
-    if (
-      outcome !== "accepted" &&
-      outcome !== "duplicate" &&
-      outcome !== "ended"
-    ) {
-      throw new Error(`Run ${id} didn't take the event ${type}: ${outcome}`);
-    }
+    return outcome === "full" ||
+      outcome === "too_large" ||
+      outcome === "conflict"
+      ? "refused"
+      : "delivered";
   },
   remove: async (id) => {
     await runStub(env, id).deleteRun();

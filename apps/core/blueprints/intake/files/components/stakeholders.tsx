@@ -1,3 +1,4 @@
+import { useAction } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -17,8 +18,10 @@ import {
 } from "@grasp-os/ui/components/table";
 import { useState } from "react";
 
-import { ask, refusal } from "./intake";
-import type { GuestChat, Invited } from "./intake";
+import { api } from "#grasp";
+
+import { refusal, settle } from "./intake";
+import type { GuestChat } from "./intake";
 import { whilePending } from "./pending";
 
 /** How each chat's state reads. */
@@ -29,6 +32,12 @@ const statusLabels: Record<GuestChat["status"], string> = {
   expired: "expired",
 };
 
+/** A chat just made, with its link: shown once. */
+interface Invited {
+  chat: GuestChat;
+  link: string;
+}
+
 /** Longest name of someone invited. */
 const nameMax = 100;
 
@@ -36,12 +45,13 @@ const nameMax = 100;
 const NewLink = ({ invited }: { invited: Invited }) => (
   <div className="flex flex-col gap-1">
     <p className="text-sm">
-      Send this link to {invited.name} yourself. It works for them only, until{" "}
-      {new Date(invited.expiresAt).toLocaleDateString()}, and isn&apos;t shown
-      again: if it gets lost, revoke the chat and invite them again.
+      Send this link to {invited.chat.name} yourself. It works for them only,
+      until {new Date(invited.chat.expiresAt).toLocaleDateString()}, and
+      isn&apos;t shown again: if it gets lost, revoke the chat and invite them
+      again.
     </p>
     <Input
-      aria-label={`Link for ${invited.name}`}
+      aria-label={`Link for ${invited.chat.name}`}
       readOnly
       value={invited.link}
       onFocus={(event) => {
@@ -70,11 +80,14 @@ export const Stakeholders = ({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [invited, setInvited] = useState<Invited | null>(null);
+  const inviteGuest = useAction(api.chats.invite);
+  const revokeChat = useAction(api.chats.revoke);
 
   const invite = async (): Promise<void> => {
     const answer = await whilePending(
       setBusy,
-      async () => await ask<Invited>("invite", { name: name.trim() })
+      async () =>
+        await settle(async () => await inviteGuest({ name: name.trim() }))
     );
     if ("error" in answer) {
       setProblem(refusal(answer.error));
@@ -89,14 +102,14 @@ export const Stakeholders = ({
   const revoke = async (chat: GuestChat): Promise<void> => {
     const answer = await whilePending(
       setBusy,
-      async () => await ask<GuestChat>("revokeChat", chat.id)
+      async () => await settle(async () => await revokeChat({ id: chat.id }))
     );
     if ("error" in answer) {
       setProblem(refusal(answer.error));
       return;
     }
     setProblem("");
-    if (invited?.id === chat.id) {
+    if (invited?.chat.id === chat.id) {
       setInvited(null);
     }
     await onChanged();

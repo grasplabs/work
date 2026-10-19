@@ -26,6 +26,7 @@ import {
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
 import { PackagesDetails } from "../dashboard/dependency-requests.tsx";
+import { isUnresolvable, OutcomeDetails } from "../dashboard/outcome-card.tsx";
 import { RequestDetails } from "../dashboard/pile-cards.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
@@ -54,7 +55,12 @@ interface Act {
   /** The id of a line that says why it waits. */
   describedBy?: string;
   /** Asked once more before it is done, in a dialog: for a no that can't be taken back. */
-  confirm?: { title: string; description: string };
+  confirm?: {
+    title: string;
+    description: string;
+    /** How the dialog's button reads: destructive unless saying so is not. */
+    variant?: "default" | "destructive";
+  };
 }
 
 /** The height of one line in the list. Every line in the item falls on this rhythm too, in pixels. */
@@ -219,7 +225,7 @@ const ActButton = ({
               setConfirming(false);
               press();
             }}
-            variant="destructive"
+            variant={confirm.variant ?? "destructive"}
           >
             {act.label}
           </Button>
@@ -442,6 +448,103 @@ const HeldItem = ({
   );
 };
 
+/**
+ * A change whose answer was lost: "It happened" or "It didn't happen", each
+ * asked once more, as on the dashboard's pile (`outcome-card.tsx`). Saying
+ * it didn't happen lets it go out again, so it waits while part of what was
+ * sent is cut short and unseen, or no longer kept.
+ */
+const OutcomeItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "outcome" }>;
+}) => {
+  const { t } = useLingui();
+  const { outcome } = source;
+  const shown = useShown(outcome);
+  const unresolvableId = useId();
+  const removedId = useId();
+  const { busy, failure, decide } = useDecide(frame.onSaid);
+  const who = frame.item.context;
+  const connection = outcome.connectionName ?? outcome.key.connectionId;
+  const unresolvable = isUnresolvable(outcome);
+  const removed = outcome.input === null;
+  // The line that says why "It didn't happen" waits, if it does.
+  let whyNot: string | undefined;
+  if (unresolvable) {
+    whyNot = unresolvableId;
+  } else if (removed) {
+    whyNot = removedId;
+  } else if (shown.unseen) {
+    whyNot = shown.unseenId;
+  }
+  return (
+    <ItemFrame
+      acts={[
+        {
+          label: t`It happened`,
+          name: t`It happened: ${who}`,
+          // Saying it happened sends nothing: it doesn't wait for all of it to be seen.
+          disabled: unresolvable,
+          describedBy: unresolvable ? unresolvableId : undefined,
+          confirm: {
+            title: t`Say it happened?`,
+            description: t`Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on ${connection}.`,
+            variant: "default",
+          },
+          onPress: async () => {
+            await decide(
+              async (session) => {
+                await session.unknownOutcomes.resolve(
+                  outcome.key,
+                  "happened",
+                  outcome.claim
+                );
+              },
+              t`Said it happened: ${who}.`
+            );
+          },
+        },
+        {
+          label: t`It didn't happen`,
+          name: t`It didn't happen: ${who}`,
+          disabled: unresolvable || removed || shown.unseen,
+          describedBy: whyNot,
+          confirm: {
+            title: t`Say it didn't happen?`,
+            description: t`Grasp lets it be sent once more, exactly as before, and a run waiting on it sends it again now. Nothing is undone: if it did take effect on ${connection}, it takes effect twice.`,
+          },
+          onPress: async () => {
+            await decide(
+              async (session) => {
+                await session.unknownOutcomes.resolve(
+                  outcome.key,
+                  "not_happened",
+                  outcome.claim
+                );
+              },
+              t`Said it didn't happen: ${who}.`
+            );
+          },
+        },
+      ]}
+      busy={busy}
+      extra={
+        <OutcomeDetails
+          outcome={outcome}
+          removedId={removedId}
+          shown={shown}
+          unresolvableId={unresolvableId}
+        />
+      }
+      failure={failure}
+      frame={frame}
+    />
+  );
+};
+
 /** A permission request: approving grants it for the version of its App that was reviewed. */
 const RequestItem = ({
   frame,
@@ -509,7 +612,7 @@ const PackagesItem = ({
   const { busy, failure, run } = useCoreAction();
   const [review, setReview] = useState<DependencyReview>();
   const hintId = useId();
-  const engine = request.app.name;
+  const engine = request.subject.name;
   const who = frame.item.context;
   // Read again once it is decided. A refused decision stays, with why:
   // reading again would take the item, and the reason, away.
@@ -635,6 +738,9 @@ export const ItemDetail = (frame: Frame) => {
   const { source } = frame.item;
   if (source.type === "held") {
     return <HeldItem frame={frame} source={source} />;
+  }
+  if (source.type === "outcome") {
+    return <OutcomeItem frame={frame} source={source} />;
   }
   if (source.type === "request") {
     return <RequestItem frame={frame} source={source} />;

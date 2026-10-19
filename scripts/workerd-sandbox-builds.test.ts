@@ -64,6 +64,11 @@ const inspectionsSchema = z.array(
 describe("the package builder on the on-prem sandbox", () => {
   let supervisor: SandboxSupervisor;
   let coreUrl: string;
+  /** A pool of four, so the builder's share is two: one each for two Apps. */
+  let wide: SandboxSupervisor;
+  let wideUrl: string;
+  /** A second core isolate on that pool, so one App's builds come from two isolates at once. */
+  let otherUrl: string;
 
   beforeAll(async () => {
     supervisor = await startSandboxSupervisor({
@@ -84,25 +89,35 @@ describe("the package builder on the on-prem sandbox", () => {
     );
     const [release] = readdirSync(path.join(assets, "_compiler"));
     const built = path.join(assets, "_compiler", release ?? "");
-    coreUrl = await serveStandIn(
-      "builds-worker.ts",
-      supervisor.socket,
-      { SANDBOX_DEADLINE_MS: String(DEADLINE_MS) },
-      { PACKAGE_BUILDER: path.join(built, "package-builder.js") },
-      { ESBUILD_WASM: path.join(built, "esbuild.wasm") }
-    );
+    const standIn = async (socket: string): Promise<string> =>
+      await serveStandIn(
+        "builds-worker.ts",
+        socket,
+        { SANDBOX_DEADLINE_MS: String(DEADLINE_MS) },
+        { PACKAGE_BUILDER: path.join(built, "package-builder.js") },
+        { ESBUILD_WASM: path.join(built, "esbuild.wasm") }
+      );
+    coreUrl = await standIn(supervisor.socket);
+    wide = await startSandboxSupervisor({
+      workerd: nativeWorkerd,
+      processes: 4,
+      log: () => {},
+    });
+    wideUrl = await standIn(wide.socket);
+    otherUrl = await standIn(wide.socket);
   }, 300_000);
 
   afterAll(async () => {
-    await supervisor.stop();
+    await Promise.all([supervisor.stop(), wide.stop()]);
     cleanUp();
   });
 
   const call = async (
     query: string,
-    route = "/inspect"
+    route = "/inspect",
+    url = coreUrl
   ): Promise<z.infer<typeof outcomeSchema>> => {
-    const response = await fetch(`${coreUrl}${route.slice(1)}?${query}`, {
+    const response = await fetch(`${url}${route.slice(1)}?${query}`, {
       method: "POST",
     });
     return outcomeSchema.parse(await response.json());
@@ -265,17 +280,55 @@ describe("the package builder on the on-prem sandbox", () => {
     ).toBe(1);
   }, 60_000);
 
-  it("holds builds to one owner's share of the pool: past it, the builder is busy, not the package's fault", async () => {
-    // Two processes, so one owner holds one: the second call waits for the
-    // first's place, gives up while it's held, and is busy.
-    const first = call("builder=busy");
+  it("holds builds to one owner's share of the pool: past it, a build waits for a place, then runs, never the package's fault", async () => {
+    // Two processes, so the builders hold one: the second build, another
+    // App's in another isolate of core, asks again until the first's place
+    // comes free, then runs to its own deadline.
+    const first = call("builder=busy&app=app-first");
     await sleep(500);
-    const second = await call("builder=busy");
+    const second = await call("builder=busy&app=app-second");
 
     expect({
-      status: second.status,
-      httpStatus: second.httpStatus,
-    }).toStrictEqual({ status: "unavailable", httpStatus: 429 });
+      second: second.status,
+      waitedForTheFirst: second.ms > DEADLINE_MS,
+    }).toStrictEqual({ second: "bound", waitedForTheFirst: true });
     await expect(first).resolves.toMatchObject({ status: "bound" });
+  }, 60_000);
+
+  it("runs an App's next build once a build of its was given up on by its caller, never waiting on that one for good", async () => {
+    const next = await call("app=app-cancelled", "/cancelled-build", wideUrl);
+
+    expect(next.status).toBe("ok");
+  }, 60_000);
+
+  it("holds one App's builds to part of the builders' share, so another App's build still runs", async () => {
+    // The builders' share of four processes is two. One App's build holds
+    // one; its build from another isolate of core waits for that one.
+    const held = call("builder=busy&app=app-a", "/inspect", wideUrl);
+    await expect
+      .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 50 })
+      .toBe(1);
+    const waiting = call("builder=busy&app=app-a", "/inspect", otherUrl);
+    await expect
+      .poll(() => wide.stats().waitingForOwners, {
+        timeout: 5000,
+        interval: 50,
+      })
+      .toBe(1);
+    // The other place is another App's, while the first App's builds hold
+    // theirs and wait.
+    const other = await call("builder=busy&app=app-b", "/inspect", wideUrl);
+    const [first, second] = await Promise.all([held, waiting]);
+
+    expect({
+      other: other.status,
+      held: first.status,
+      // It asked again until the App's place came free, then ran.
+      waiting: second.status,
+    }).toStrictEqual({ other: "bound", held: "bound", waiting: "bound" });
+    // Every App's place given back once its process is gone.
+    await expect
+      .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 100 })
+      .toBe(0);
   }, 60_000);
 });

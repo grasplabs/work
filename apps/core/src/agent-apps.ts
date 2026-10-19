@@ -198,7 +198,14 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                 },
                 // On-prem, a child of the calling run's sandbox session: never
                 // waiting for a process the run holds while it waits for it.
-                parentSession
+                parentSession,
+                // Named on the workflows it starts, whose staged starts need
+                // the agent's permission again as they are dispatched.
+                {
+                  agentId: scope.agentId,
+                  workspaceId: scope.workspaceId,
+                  chatId: scope.chatId,
+                }
               );
               if (
                 answer.manifestHash !== null &&

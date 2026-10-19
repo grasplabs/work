@@ -74,16 +74,44 @@ export const echo = action({
   returns: v.string(),
   handler: async (_ctx, args) => args.word,
 });
+
+const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
+
+// Saves a note, and answers a token no second run would answer again.
+export const stamp = action({
+  args: {
+    title: noteFields.title,
+    pauseMs: v.number().integer().min(0).max(5000).default(0),
+    // How long it takes after its save, before it answers.
+    thenMs: v.number().integer().min(0).max(5000).default(0),
+  },
+  returns: v.object({ id: v.id("notes"), token: v.string() }),
+  uses: [create],
+  handler: async (ctx, args) => {
+    await pause(args.pauseMs);
+    const id = await ctx.runMutation(create, { title: args.title, body: "" });
+    await pause(args.thenMs);
+    return { id, token: crypto.randomUUID() };
+  },
+});
+
+// Answers as much as an operation may, which leaves no room for the rest
+// of a screen's answer.
+export const big = action({
+  args: {},
+  returns: v.string(),
+  handler: async () => "x".repeat(262_084),
+});
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { create, echo, get, list, remove, update } from "./operations/notes.ts";
+import { big, create, echo, get, list, remove, stamp, update } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { list, get, create, update, remove, echo } },
+  operations: { notes: { list, get, create, update, remove, echo, stamp, big } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -182,4 +210,13 @@ export const apiOf = (release: Release) => ({
     "mutation"
   >(release, "notes.remove"),
   echo: referenceTo<{ word?: string }, string, "action">(release, "notes.echo"),
+  stamp: referenceTo<
+    { title: string; pauseMs?: number; thenMs?: number },
+    { id: Id<"notes">; token: string },
+    "action"
+  >(release, "notes.stamp"),
+  big: referenceTo<Record<never, never>, string, "action">(
+    release,
+    "notes.big"
+  ),
 });

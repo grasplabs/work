@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { seedDependencyRequest } from "./dependency-request.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // The inbox, at its address: what waits on the person as a list, the item
 // chosen beside it with its actions, and what was done. Someone with
@@ -15,10 +15,10 @@ import { apiOf, pageOf, peopleIn } from "./people.ts";
 const pageRead = { timeout: 20_000 };
 
 test("someone with nothing waiting sees that nothing waits, and no activity", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("inbox");
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   await page.goto("/inbox");
 
   await expect(
@@ -44,7 +44,7 @@ test("someone with nothing waiting sees that nothing waits, and no activity", as
 });
 
 test("someone given the permission approves packages from the inbox, and the item leaves the list", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, builder, approver } = peopleIn("inbox");
   const asAdmin = apiOf(admin);
@@ -79,7 +79,7 @@ test("someone given the permission approves packages from the inbox, and the ite
     },
   });
 
-  const page = await pageOf(browser, approver);
+  const page = await pageOf(approver);
   await page.goto("/inbox");
   const list = page.getByRole("region", { name: "What waits on you" });
   const row = list.getByRole("button", { name: new RegExp(engine, "u") });
@@ -133,7 +133,7 @@ test("someone given the permission approves packages from the inbox, and the ite
   ).toHaveCount(1);
   await expect
     .poll(async () => {
-      const { approved } = await asBuilder.api.dependencies.status(app);
+      const { approved } = await asBuilder.api.dependencies.status({ app });
       return approved?.id;
     })
     .toBe(request.id);
@@ -143,10 +143,10 @@ test("someone given the permission approves packages from the inbox, and the ite
 });
 
 test("an admin reads what Grasp and people did, with the way to the audit trail", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("inbox");
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   await page.goto("/inbox");
 
   await page.getByRole("tab", { name: "Activity" }).click();

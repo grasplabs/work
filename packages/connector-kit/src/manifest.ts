@@ -90,6 +90,25 @@ export const effectAbsentMetaKey = "grasp-os/effect-absent";
 export const effectKeyPattern = /^[0-9a-f]{64}$/u;
 
 /**
+ * Call `_meta` key: the stamp core recorded for a workflow run's mail
+ * (32 lowercase hex characters), which connect sends to native connectors
+ * only, for a side effect. A mail tool puts it on the message it sends or
+ * drafts as {@link stampHeader}, so a copy that reaches a watched mailbox
+ * names the run that sent it (core's workflows/mail-stamps.ts). App code
+ * never chooses it: core makes it, outside the call's input.
+ */
+export const stampMetaKey = "grasp-os/stamp";
+
+/** A stamp, as core makes it: 16 random bytes, in lowercase hex. */
+export const stampPattern = /^[0-9a-f]{32}$/u;
+
+/**
+ * The header a mail tool puts a stamp on (`stampMetaKey`), and connect's
+ * mail events read it back from.
+ */
+export const stampHeader = "X-Grasp-Stamp";
+
+/**
  * How connect may recover a call of an action once its outcome is unknown
  * (spec 14.3): `none`, it stays unknown; `repeat`, it is sent again under
  * the same effect key, because it can't take effect twice (the provider

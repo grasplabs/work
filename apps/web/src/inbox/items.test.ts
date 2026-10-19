@@ -1,8 +1,9 @@
-import type { PendingAction } from "@grasp-os/shared/connect";
+import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import {
   appIdSchema,
   collectionIdSchema,
+  connectionIdSchema,
   permissionIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
@@ -39,9 +40,32 @@ const held = (id: string, requestedAt: string): PendingAction => ({
   binding: null,
 });
 
+/** A mail Grasp sent for the person whose answer was lost. */
+const outcome = (idempotencyKey: string, sentAt: string): UnknownOutcome => ({
+  key: {
+    subject: { type: "app", appId: app },
+    connectionId: connectionIdSchema.parse("connection-1"),
+    action: "send_mail",
+    idempotencyKey,
+  },
+  connectionName: "Microsoft 365 (anna@acme.test)",
+  resource: null,
+  description: { title: "Send an email", fields: [], complete: true },
+  input: "{}",
+  sentAt,
+  claim: 1,
+  origin: {
+    mode: "workflow",
+    appVersion: 3,
+    permissionId: "permission-1",
+    context: { type: "app", appId: app },
+  },
+  cursor: "1.abc",
+});
+
 const packages = (id: string, requestedAt: string): DependencyRequest => ({
   id,
-  app: { id: app, name: "Invoices" },
+  subject: { type: "app", id: app, name: "Invoices" },
   status: "pending",
   sourceRevision: "rev-1",
   purpose: "Draw the monthly totals as a chart.",
@@ -113,6 +137,10 @@ const waiting = (status: "active" | "needs_reauth" = "needs_reauth") =>
         held("held-new", "2026-10-13T08:00:00.000Z"),
       ],
     },
+    outcomes: {
+      state: "ready",
+      data: [outcome("mail-1", "2026-10-12T08:00:00.000Z")],
+    },
     failed: {
       state: "ready",
       data: {
@@ -169,6 +197,7 @@ describe(inboxItems, () => {
         "failed:failure-1",
         "held:held-new",
         "held:held-old",
+        `outcome:${JSON.stringify([outcome("mail-1", readAt).key, 1])}`,
         "packages:packages-1",
         "request:request-1",
         "screens:app-invoices",
@@ -198,10 +227,12 @@ describe(inboxItems, () => {
     const settled = {
       ...waiting("active"),
       held: { state: "ready", data: [] },
+      outcomes: { state: "ready", data: [] },
     } satisfies Waiting;
     const kinds = inboxItems(settled, admin, readAt).map(({ kind }) => kind);
     expect(kinds).not.toContain("signInAgain");
     expect(kinds).not.toContain("heldWrite");
+    expect(kinds).not.toContain("unknownOutcome");
   });
 
   it("makes nothing of a part that couldn't be read, and says which", () => {

@@ -30,6 +30,8 @@ export {
   appTestTimeoutMs,
   maxAppTestName,
   maxAppTests,
+  maxBufferedSnapshots,
+  maxLostInARow,
   runAppSuite,
   TestDefinitionError,
   testNamePattern,
@@ -42,7 +44,9 @@ export type {
   AppTestReport,
   AppTestResult,
   AppTestSession,
+  AppTestSubscription,
   AppTestSuite,
+  LiveQuery,
   PublicReference,
   TestPrincipal,
 } from "./app-test.ts";

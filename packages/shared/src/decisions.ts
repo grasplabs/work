@@ -35,6 +35,14 @@ export const decisionErrors = defineErrorFamily({
     "This decision has been answered, has timed out, or its run has ended.",
   "decision.too_many_deciders":
     "A decision asks at most 50 people: ask a smaller team or a role with fewer people.",
+  "decision.unconfirmed":
+    "This answer wasn't confirmed in Grasp, so it wasn't recorded. Answer again and confirm it.",
+  "decision.conflict":
+    "This decision changed since you opened it. Review it again before you answer.",
+  "decision.cancelled":
+    "You didn't confirm the answer, so nothing was recorded.",
+  "decision.asking_paused":
+    "This app can't ask you to confirm an answer right now: another is open, you cancelled one moments ago, or you cancelled twice. Reload the app to answer again.",
 });
 
 /**
@@ -63,6 +71,12 @@ export interface DecisionView {
   status: DecisionStatus;
   /** ISO 8601: no answer is taken from then on. */
   expiresAt: string;
+  /**
+   * The fingerprint of the review context shown here (what is asked, by
+   * which run, until when, of whom): an answer confirmed against another
+   * one is a `decision.conflict`, never an approval of what wasn't seen.
+   */
+  revision: string;
   /** Who answered, and when; only once answered. */
   decided?: {
     by: { userId: string; name: string };
@@ -81,6 +95,29 @@ export interface DecisionAnswerInput {
 }
 
 /**
+ * What the trusted host decision UI shows before a person confirms an
+ * answer: the decision as it stands, with its review context, and the
+ * answer as core will record it (`response`). `recorded` when the person
+ * already gave exactly that answer: it is the decision, and isn't asked
+ * for again.
+ */
+export type DecisionReview =
+  | { state: "review"; decision: DecisionView; response: DecisionAnswerInput }
+  | { state: "recorded"; decision: DecisionView };
+
+/**
+ * A one-use confirmation of one answer: minted by the trusted host
+ * decision UI once the person confirmed it, for them, that decision, its
+ * review context and that answer, and taken by the answer that uses it.
+ * Never handed to an App's screen.
+ */
+export interface DecisionConfirmation {
+  confirmation: string;
+  /** ISO 8601: no answer takes it from then on. */
+  expiresAt: string;
+}
+
+/**
  * A signed-in person's decisions. Every call checks the session, and that
  * the person is one the decision is from, as they are now: never the run's
  * starter, unless `from` is exactly `person:<them>`.
@@ -88,9 +125,28 @@ export interface DecisionAnswerInput {
 export interface DecisionsApi {
   /** A decision the person may answer. */
   get: (decision: string) => Promise<DecisionView>;
-  /** Answers a decision, once: the first answer is the decision. */
-  answer: (
+  /** What the person confirms before `answer` takes it. */
+  review: (
     decision: string,
     answer: DecisionAnswerInput
+  ) => Promise<DecisionReview>;
+  /**
+   * Mints the one-use confirmation of `answer`, as reviewed at `revision`,
+   * once the person confirmed it in the trusted host decision UI.
+   */
+  confirm: (
+    decision: string,
+    revision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionConfirmation>;
+  /**
+   * Answers a decision, once, with the confirmation of exactly that
+   * answer: the first answer is the decision. The same answer again, by
+   * the same person, is the recorded decision, needing no confirmation.
+   */
+  answer: (
+    decision: string,
+    answer: DecisionAnswerInput,
+    confirmation?: string
   ) => Promise<DecisionView>;
 }

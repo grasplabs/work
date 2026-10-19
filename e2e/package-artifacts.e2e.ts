@@ -1,10 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 import { z } from "zod";
 
+import { test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
 import { hostileName, seedHostileArtifact } from "./package-artifact.ts";
 import type { SeededArtifact } from "./package-artifact.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { serveAttacker } from "./screen-app.ts";
 import { origin } from "./stack.ts";
@@ -139,9 +140,9 @@ const workerReports = z.array(
 );
 
 test("a package's code started as a worker can't start another, import scripts or fetch elsewhere", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const workerUrl = new URL(`${seeded.address}${hostileName}.js`, origin).href;
   // No page of the deployment can start it any more: the product page's
   // policy allows no worker, and core refuses its same-origin requests for
@@ -217,9 +218,9 @@ test("a package's code started as a worker can't start another, import scripts o
 });
 
 test("a package's SVG opened on its own runs no script and loads nothing from elsewhere, nor does its stylesheet", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const requested: string[] = [];
   const blocked: string[] = [];
   page.on("request", (request) => {
@@ -260,7 +261,7 @@ test("a package's SVG opened on its own runs no script and loads nothing from el
 });
 
 test("a screen can't load a package's code, or bring in what the code would fetch", async ({
-  browser,
+  pageOf,
 }) => {
   const { core, api } = apiOf(builder);
   let app = "";
@@ -275,7 +276,7 @@ test("a screen can't load a package's code, or bring in what the code would fetc
   } finally {
     core[Symbol.dispose]();
   }
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
   await page.goto(`/domains/${app}/apps/widget/full`);
   const screen = page.frameLocator('iframe[title="widget app"]');

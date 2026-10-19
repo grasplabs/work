@@ -1,11 +1,10 @@
 import { signCapability } from "@grasp-os/shared/capability";
-import type { HeldBinding } from "@grasp-os/shared/capability";
-import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
 import type {
-  ConnectCall,
-  ConnectResult,
-  ResolutionChoice,
-} from "@grasp-os/shared/connect";
+  CapabilityDecision,
+  HeldBinding,
+} from "@grasp-os/shared/capability";
+import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
+import type { ConnectCall, ConnectResult } from "@grasp-os/shared/connect";
 import { isExpectedError, toOpaqueError } from "@grasp-os/shared/errors";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -51,6 +50,11 @@ export interface CallGrant {
    */
   readOnly?: boolean;
   /**
+   * The call's input holds a value core keeps from people (a workflow's
+   * sensitive parameter as a binding argument): connect keeps none of it.
+   */
+  sensitive?: boolean;
+  /**
    * When the work the call comes from must end, in milliseconds since the
    * epoch: the capability expires by then, whatever its usual lifetime.
    */
@@ -68,9 +72,9 @@ export interface CallGrant {
  * saying whether `context` is in restricted mode (connect then holds its
  * side effects for the person), whether the call may only read, and the
  * permission and context to check again should connect hold it for them.
- * `confirms` is the held action a person confirmed (pending-actions.ts);
- * `resolves`, what a person said of a call of unknown outcome
- * (unknown-outcomes.ts).
+ * `decision` is what a person decided of a call waiting for them: a held
+ * action confirmed, or a call of unknown outcome resolved, only ever
+ * signed through `reauthorizedCapability` (decided-calls.ts).
  * Core makes capabilities here and nowhere else, and nothing outside core
  * reaches this function.
  */
@@ -82,12 +86,12 @@ export const signedCall = async (
     connection,
     permissionId,
     readOnly,
+    sensitive,
     notAfter,
     binding,
   }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
-  confirms?: string,
-  resolves?: { choice: ResolutionChoice; claimedAt: number }
+  decision?: CapabilityDecision
 ) => {
   await authorize(env, authority, connection, action, permissionId, context);
   const restricted = await isRestricted(env, authority, context);
@@ -104,6 +108,7 @@ export const signedCall = async (
       ...scope,
       restricted,
       readOnly,
+      sensitive,
       notAfter,
       origin: {
         permissionId,
@@ -111,8 +116,7 @@ export const signedCall = async (
         ...(binding === undefined ? {} : { binding }),
       },
       context,
-      confirms,
-      resolves,
+      decision,
     }
   );
   return { capability, scope };
@@ -194,6 +198,8 @@ export const requireStepKey = (
 export interface StubCaller {
   authority: Authority;
   readOnly?: boolean;
+  /** Its input holds a sensitive value (`CallGrant.sensitive`). */
+  sensitive?: boolean;
   /** When the work it comes from must end: the capability expires by then. */
   notAfter?: number;
   /**
@@ -251,6 +257,7 @@ const signedStub = async (
       {
         authority: caller.authority,
         readOnly: caller.readOnly,
+        sensitive: caller.sensitive,
         notAfter: caller.notAfter,
         context,
         connection,
@@ -300,16 +307,14 @@ export const runStubCall = async (
     call
   );
   try {
-    // A run's mail to the deployment's domain carries the run's token,
-    // recorded before the call leaves, so the runs it starts join its
-    // lineage. A record that fails fails the call, which sent nothing.
+    // A run's mail carries the run's tokens, recorded before the call
+    // leaves (on its recipients at the deployment's domain, and as its
+    // stamp), so the runs it starts join its lineage. A record that fails
+    // fails the call, which sent nothing.
     const sent =
       stamping === undefined
         ? request
-        : {
-            ...request,
-            input: await stampedMail(env, stamping, request),
-          };
+        : { ...request, ...(await stampedMail(env, stamping, request)) };
     await stillAllowed?.();
     return await env.CONNECT.call(sent);
   } catch (error) {

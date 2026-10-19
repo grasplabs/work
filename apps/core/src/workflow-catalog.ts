@@ -9,6 +9,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  catalogBindingKinds,
   catalogContractSchema,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
@@ -16,26 +17,28 @@ import type {
   CatalogBindingKind,
   CatalogContractEntry,
 } from "@grasp-os/shared/workflow-resources";
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { workflowCatalogContracts } from "./db/core/schema.ts";
-import { isUniqueViolation } from "./db/d1.ts";
+import { inList, isUniqueViolation } from "./db/d1.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 
 // The host catalog of contracts independent workflows bind besides each
-// other (platform specification 13.2): operation, connector, model and
-// decision contracts, each a key and the SDK descriptors of what a call
-// passes and returns. A workflow's validation resolves its bindings'
+// other (platform specification 13.2): operation, connector, model,
+// decision and event contracts, each a key and the SDK descriptors of
+// what a call passes and returns, or of each event type's data. A workflow's validation resolves its bindings'
 // contract keys here; an admin's approval (workflow-bindings.ts) then names
 // what serves each. Threat model, and how each is closed:
 //
 // - A contract changing under the versions that pinned it: a key is
-//   published once and never changed (the database refuses updates and
-//   deletions); a new shape is a new key. A version pins a key and its
-//   fingerprint, the SHA-256 of the canonical contract.
+//   published once and never changed (the database refuses updates,
+//   deletions and any insert over a row it holds, by its key or its rowid,
+//   whatever the conflict clause: migrations 0080 and 0101); a new shape
+//   is a new key. A version pins a key and its fingerprint, the SHA-256 of
+//   the canonical contract.
 // - A contract the validator can't hold: published contracts are read by
 //   the profile's own catalog reader (`resolveContract`), with its limits,
 //   before they are stored; one it refuses is never stored.
@@ -44,14 +47,24 @@ import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 
 /** A stored contract, as a validation resolves it. */
 const storedSchema = z.strictObject({
-  kind: z.enum(["operation", "connector", "model", "decision"]),
+  kind: z.enum(catalogBindingKinds),
   input: z.string().optional(),
   output: z.string().optional(),
   response: z.string().optional(),
   operations: z
     .record(
       z.string(),
-      z.strictObject({ input: z.string(), output: z.string() })
+      z.strictObject({
+        input: z.string(),
+        output: z.string(),
+        readOnly: z.boolean().optional(),
+      })
+    )
+    .optional(),
+  events: z
+    .record(
+      z.string(),
+      z.strictObject({ data: z.string(), browser: z.boolean() })
     )
     .optional(),
 });
@@ -165,7 +178,9 @@ export const resolveCatalogKeys = async (
   const rows = await drizzle(env.DB)
     .select()
     .from(workflowCatalogContracts)
-    .where(inArray(workflowCatalogContracts.key, [...keys]));
+    // As one bound parameter: a version names at most 64, but an App's
+    // bound workflows together may name more than D1's 100.
+    .where(inList(workflowCatalogContracts.key, keys));
   for (const row of rows) {
     // oxlint-disable-next-line no-await-in-loop -- one hash per named contract
     if ((await sha256Hex(row.contract)) === row.fingerprint) {

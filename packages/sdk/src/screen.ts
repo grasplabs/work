@@ -637,8 +637,14 @@ export const useWorkflow = (
   /**
    * Answers the run's decision `decision` (its name in the workflow), if
    * the person may: someone it is from, never the run's starter unless it
-   * names exactly them. Rejects with `decision.forbidden` otherwise, and
-   * with `decision.closed` once it's answered or past its deadline.
+   * names exactly them. Grasp first shows the person, outside the screen,
+   * what is asked and what would be recorded, and records the answer only
+   * once they confirm it there; the same answer again, once recorded,
+   * asks nothing more. Rejects with `decision.cancelled` when they don't
+   * confirm (nothing is recorded), `decision.forbidden` when they may not
+   * answer, `decision.conflict` when what is asked changed meanwhile, and
+   * `decision.closed` once it's answered or past its deadline. Call it
+   * only from a person's own action, never on its own.
    */
   decide: (
     run: string,

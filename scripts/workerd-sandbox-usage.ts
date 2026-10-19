@@ -72,19 +72,31 @@ const vmRss = /^VmRSS:\s+(?<kib>\d+)\s+kB$/mu;
 
 /**
  * `/proc/<pid>/stat` after the command's closing parenthesis (the command
- * may hold spaces and parentheses itself): the state, then the fields up
- * to `utime` and `stime`, the 14th and 15th, in clock ticks.
+ * may hold spaces and parentheses itself): the state (3rd field), `flags`
+ * (9th), then `utime` and `stime` (14th and 15th), in clock ticks.
  */
 const procStat =
-  /\)\s+(?<state>\S)(?:\s+\S+){10}\s+(?<utime>\d+)\s+(?<stime>\d+)/u;
+  /\)\s+(?<state>\S)(?:\s+\S+){5}\s+(?<flags>\d+)(?:\s+\S+){4}\s+(?<utime>\d+)\s+(?<stime>\d+)/u;
+
+/**
+ * The kernel's `PF_EXITING` in a task's `flags`: set as the task starts to
+ * exit, before it lets go of its memory (`VmRSS` leaves its status then)
+ * and well before it's a zombie (`Z`). Never cleared: it can't come back.
+ */
+const exitingFlag = 0x4;
 
 /** Clock ticks per second in procfs: `USER_HZ`, 100 on every Linux ABI. */
 const userHz = 100;
 
 /**
  * `pid`'s usage on Linux: memory from `<procRoot>/<pid>/status`, CPU time
- * from `stat`. Its own state `Z` or `X` says it exited, though `kill(pid,
- * 0)` still finds it until it's reaped: a crash mid-call is the App's.
+ * from `stat`. Its own state `Z` or `X`, or `PF_EXITING` in its flags, says
+ * it exited or is exiting, though `kill(pid, 0)` still finds it until it's
+ * reaped: a crash mid-call is the App's.
+ *
+ * `stat` is read after `status`, never alongside it: a status without
+ * `VmRSS` from a process exiting meanwhile then always meets a `stat` that
+ * says so, never one from before it began to exit.
  */
 const procUsage = async (
   procRoot: string,
@@ -94,15 +106,18 @@ const procUsage = async (
   let status: string;
   let stat: string;
   try {
-    [status, stat] = await Promise.all([
-      readFile(path.join(procRoot, String(pid), "status"), "utf-8"),
-      readFile(path.join(procRoot, String(pid), "stat"), "utf-8"),
-    ]);
+    status = await readFile(
+      path.join(procRoot, String(pid), "status"),
+      "utf-8"
+    );
+    stat = await readFile(path.join(procRoot, String(pid), "stat"), "utf-8");
   } catch (error) {
     return goneOr(pid, exited, String(error));
   }
   const fields = procStat.exec(stat)?.groups;
-  if (fields?.state === "Z" || fields?.state === "X") {
+  // oxlint-disable-next-line no-bitwise -- the kernel's task flags
+  const exiting = (Number(fields?.flags ?? 0) & exitingFlag) !== 0;
+  if (fields?.state === "Z" || fields?.state === "X" || exiting) {
     return { kind: "gone" };
   }
   const kib = vmRss.exec(status)?.groups?.kib;
