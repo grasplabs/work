@@ -1,3 +1,4 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
   appIdSchema,
   runIdSchema,
@@ -12,12 +13,14 @@ import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
 import { queueLiveMs } from "../src/workflows/admission.ts";
+import { runEngine } from "../src/workflows/engine.ts";
 import { admitAttempt } from "../src/workflows/quotas.ts";
 import type {
   AttemptAdmission,
   AttemptOwner,
 } from "../src/workflows/quotas.ts";
 import { projectStatus, runActor, startRun } from "../src/workflows/runs.ts";
+import { shareWakeType } from "../src/workflows/share-wakes.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -256,7 +259,7 @@ const loadWaitsOf = async (run: string): Promise<number[]> =>
   await runInDurableObject(runObject(run), (_object, state) =>
     state.storage.sql
       .exec<{ ms: number }>(
-        "SELECT duration_ms AS ms FROM steps WHERE type = 'sleep' AND name LIKE '%:busy:%' ORDER BY ordinal"
+        "SELECT duration_ms AS ms FROM steps WHERE type IN ('sleep', 'waitForEvent') AND name LIKE '%:busy:%' ORDER BY ordinal"
       )
       .toArray()
       .map(({ ms }) => ms)
@@ -270,7 +273,7 @@ const loadWakesOf = async (run: string): Promise<number[]> =>
   await runInDurableObject(runObject(run), (_object, state) =>
     state.storage.sql
       .exec<{ at: number }>(
-        "SELECT deadline AS at FROM steps WHERE type = 'sleep' AND name LIKE '%:busy:%' ORDER BY ordinal"
+        "SELECT deadline AS at FROM steps WHERE type IN ('sleep', 'waitForEvent') AND name LIKE '%:busy:%' ORDER BY ordinal"
       )
       .toArray()
       .map(({ at }) => at)
@@ -301,6 +304,14 @@ const endingEverySecond = (run: string): (() => Promise<void>) => {
     await kept;
   };
 };
+
+/** How many of `run`'s attempts hold their share now: unsettled. */
+const holdingOf = async (run: string): Promise<number> =>
+  (await env.DB.prepare(
+    "SELECT count(*) AS held FROM run_lineage_attempts WHERE run_id = ? AND settled_at IS NULL"
+  )
+    .bind(run)
+    .first<number>("held")) ?? 0;
 
 /** How `run` failed, as its `workflow.run.failed` event names it; none yet. */
 const failedWith = async (run: string): Promise<unknown> => {
@@ -1198,6 +1209,106 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
     expect(result).toStrictEqual({ rounds: [5000, 10_000], prompt: true });
   });
 
+  it("run a queued step as soon as a run's attempt gives its share back, not at the end of the round it sleeps in", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      ...workflowFiles("slow", `${working("work", 8000)}\n  return 1;`, {
+        work: 1,
+      }),
+      ...workflowFiles("quick", `${working("work", 10)}\n  return 1;`, {
+        work: 1,
+      }),
+    });
+
+    const result = await withShares({ workflowClientAttempts: 2 }, async () => {
+      // An App's share is one: the quick run waits for the slow one's.
+      const slow = await builder.api.workflows.start(app, "slow");
+      await eventually(async () => {
+        await expect(holdingOf(slow.id)).resolves.toBe(1);
+      });
+      const quick = await builder.api.workflows.start(app, "quick");
+      await finished(slow.id);
+      const freedAt = Date.now();
+      await finished(quick.id);
+      const wakes = await loadWakesOf(quick.id);
+      return {
+        status: await liveStatus(quick.id),
+        // Its second round sleeps ten seconds from some five on: woken,
+        // it runs within seconds of the share coming back.
+        prompt: Date.now() - freedAt < 3000,
+        rounds: wakes.length,
+      };
+    });
+
+    expect(result).toStrictEqual({
+      status: "complete",
+      prompt: true,
+      rounds: 2,
+    });
+  });
+
+  it("ask once more for a wake no share sent, keeping its place and its turn", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      ...workflowFiles("noop", "  return 1;"),
+      ...workflowFiles("work", `${working("work", 10)}\n  return 1;`, {
+        work: 1,
+      }),
+    });
+    const holderRun = await builder.api.workflows.start(app, "noop");
+    await finished(holderRun.id);
+    const holder = {
+      run: holderRun.id,
+      root: holderRun.id,
+      subject: builder.userId,
+      resource: app,
+    };
+
+    const result = await withShares({ workflowClientAttempts: 2 }, async () => {
+      const held = await admit(holder, "holder");
+      const run = await builder.api.workflows.start(app, "work");
+      await eventually2(async () => {
+        await expect(loadWakesOf(run.id)).resolves.toHaveLength(2);
+      });
+      const joined = await env.DB.prepare(
+        "SELECT enqueued_at AS joined FROM workflow_admission_queue WHERE run_id = ?"
+      )
+        .bind(run.id)
+        .first<number>("joined");
+      // A forged wake, and the same again: one ask more, as its share is
+      // still taken.
+      const type = shareWakeType(await sha256Hex("work"));
+      await runEngine(env).sendEvent(run.id, type, "forged");
+      await runEngine(env).sendEvent(run.id, type, "forged");
+      await eventually2(async () => {
+        await expect(loadWakesOf(run.id)).resolves.toHaveLength(3);
+      });
+      const rejoined = await env.DB.prepare(
+        "SELECT enqueued_at AS joined FROM workflow_admission_queue WHERE run_id = ?"
+      )
+        .bind(run.id)
+        .first<number>("joined");
+      const whileHeld = await liveStatus(run.id);
+      await settled(held);
+      await finished(run.id, 40_000);
+      const wakes = await loadWakesOf(run.id);
+      return {
+        whileHeld,
+        keptPlace: joined !== null && joined === rejoined,
+        rounds: wakes.length,
+        status: await liveStatus(run.id),
+      };
+    });
+
+    // Its third round, twenty seconds, ran out: no wake came for it.
+    expect(result).toStrictEqual({
+      whileHeld: "waiting",
+      keptPlace: true,
+      rounds: 3,
+      status: "complete",
+    });
+  });
+
   it("fail a step that waited for a share as long as a step may wait", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(builder, {
@@ -1807,14 +1918,6 @@ const slow = (ms: number) =>
   return 1;`,
     { slow: 1 }
   );
-
-/** How many of `run`'s attempts hold their share now: unsettled. */
-const holdingOf = async (run: string): Promise<number> =>
-  (await env.DB.prepare(
-    "SELECT count(*) AS held FROM run_lineage_attempts WHERE run_id = ? AND settled_at IS NULL"
-  )
-    .bind(run)
-    .first<number>("held")) ?? 0;
 
 /** The generation of the activation that holds `run` now, in its object. */
 const generationOf = async (run: string): Promise<number> =>

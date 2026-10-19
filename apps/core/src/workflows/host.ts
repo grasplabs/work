@@ -75,6 +75,7 @@ import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { modelWaitRecorded } from "./model-waits.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import { shareWakeType } from "./share-wakes.ts";
 import { heldWakeType } from "./wakes.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
@@ -457,7 +458,8 @@ interface WaitedSoFar {
  *
  * Only an admission that ended in a hold is journaled as one. An attempt
  * admitted that then fails, whose retry by the engine in the same round is
- * refused for load, keeps counting from before its admission. That errs
+ * refused for load, keeps counting from before its admission. A round a
+ * share given back cut short (`loadRound`) counts in full too. Both err
  * safe: such a step times out sooner, never later.
  */
 export interface LoadWait {
@@ -741,6 +743,35 @@ const timedOut = /^(?:WorkflowTimeoutError: )?Execution timed out\b/u;
 export const isTimeout = (error: unknown): boolean =>
   error instanceof Error &&
   (error.name === "WorkflowTimeoutError" || timedOut.test(error.message));
+
+/**
+ * Waits round `prefix` of the step `step`'s wait for load, `sleepMs`
+ * long, as its refusal `marker` says: one queued for a share wakes early
+ * when a share is given back that it would now take (share-wakes.ts),
+ * and asks again; one whose lineage is busy sleeps it out.
+ */
+export const loadRound = async (
+  run: Pick<RunStep, "sleep" | "waitForEvent">,
+  prefix: string,
+  step: string,
+  marker: { queuedFor?: Share },
+  sleepMs: number
+): Promise<void> => {
+  if (marker.queuedFor === undefined) {
+    await run.sleep(prefix, sleepMs);
+    return;
+  }
+  try {
+    await run.waitForEvent(prefix, {
+      type: shareWakeType(await sha256Hex(step)),
+      timeout: sleepMs,
+    });
+  } catch (error) {
+    if (!isTimeout(error)) {
+      throw error;
+    }
+  }
+};
 
 /**
  * The steps a run waits in while a side effect is held. They are core's
@@ -1750,7 +1781,7 @@ export class RunHost extends RpcTarget {
         retryAfterSeconds: marker.busyFor,
       });
     }
-    await this.#step.sleep(prefix, sleepMs);
+    await loadRound(this.#step, prefix, step, marker, sleepMs);
     return prefix;
   }
 

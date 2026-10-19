@@ -66,6 +66,7 @@ import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
+import { wakingOnSettle } from "./share-wakes.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
 // a start's receipt admits its run, under the receipt's own ID, in the
@@ -768,10 +769,13 @@ export const runResourceWorkflow = async (
     },
     // The root of its own lineage: an independent run starts no runs.
     admitAttempt: async (attempt) =>
-      await admitAttempt(
+      wakingOnSettle(
         env,
-        { run: runId, root: runId, subject, resource: ownerOf(pin.workflow) },
-        attempt
+        await admitAttempt(
+          env,
+          { run: runId, root: runId, subject, resource: ownerOf(pin.workflow) },
+          attempt
+        )
       ),
   });
   const code = loadRunIsolate<ResourceAttemptHost>(

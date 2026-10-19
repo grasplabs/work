@@ -43,6 +43,7 @@ import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
+import { wakingOnSettle } from "./share-wakes.ts";
 
 // What every run executes (run-object.ts): each time the engine activates
 // a run, at its start and on every wake or recovery, the dispatcher loads
@@ -330,15 +331,18 @@ const runWorkflow = async (
       modelBinding: async (alias) =>
         await stepModelBinding(env, run.app, run.version, alias),
       admitAttempt: async (attempt) =>
-        await admitAttempt(
+        wakingOnSettle(
           env,
-          {
-            run: runId,
-            root: row.rootRunId ?? runId,
-            subject: run.shareSubject,
-            resource: run.app,
-          },
-          attempt
+          await admitAttempt(
+            env,
+            {
+              run: runId,
+              root: row.rootRunId ?? runId,
+              subject: run.shareSubject,
+              resource: run.app,
+            },
+            attempt
+          )
         ),
     });
     try {

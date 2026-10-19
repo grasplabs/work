@@ -236,13 +236,14 @@ export interface AskingAgain {
  * Never sooner because a refusal said a share comes free sooner
  * (`retryAfterSeconds`): each round adds to the run's journal, and the
  * first lease of a share can end a second away again and again, as those
- * ahead take each lease that ends. Woken by it, a day's wait took some
- * up to some 86,000 rounds; at its backoff, some 1,450 at most. The price is a share
- * noticed later: within the round's backoff (five seconds, doubling to a
- * minute), as one given back before its lease ended always was, not as
- * its first lease ends. The queue's order doesn't change: a place holds
- * back what it would take while it sleeps (`servedInOrder`), so no one
- * passes it, and it asks again well within `queueLiveMs`.
+ * ahead take each lease that ends. Asking as each ended, a day's wait took
+ * up to some 86,000 rounds; at its backoff, some 1,450 at most. A share given
+ * back wakes the step it would let in at once (share-wakes.ts), so it
+ * isn't left idle while that step sleeps; one whose lease only runs out
+ * is noticed within the round's backoff (five seconds, doubling to a
+ * minute). The queue's order doesn't change: a place holds back what it
+ * would take while it sleeps (`servedInOrder`), so no one passes it, and
+ * it asks again well within `queueLiveMs`.
  */
 export const askAgainMs = ({
   waited,
@@ -367,6 +368,48 @@ export interface Standing {
 }
 
 /**
+ * `places` (rows of `turn`, `joined`, `run_id`, `step_hash`, `me`,
+ * `subject` and `resource`) served in order at `now`, as the CTEs
+ * `waiting` (each place, numbered in order: `i`) and `served` (what each
+ * would find, and whether it takes a lease: `fits`), as `servedInOrder`
+ * says: the one rule both an admission and a wake (`queueFronts`) read.
+ */
+const queueServed = (
+  pool: Pool,
+  now: number,
+  shares: Shares,
+  places: SQL
+): SQL => {
+  // What a place would find, after those before it: its person's and its
+  // App's leases as taken so far, or as held, if none took one yet.
+  const person = sql`coalesce(json_extract(s.persons, w.person_key), w.person_held)`;
+  const app = sql`coalesce(json_extract(s.apps, w.app_key), w.app_held)`;
+  const fits = sql`(s.client < ${literal(shares.client)} AND ${person} < ${literal(shares.person)} AND ${app} < ${literal(shares.app)})`;
+  return sql`WITH RECURSIVE
+    waiting AS (
+      SELECT row_number() OVER (ORDER BY u.turn, u.joined, u.run_id, u.step_hash) AS i,
+        u.me AS me,
+        u.run_id AS run_id,
+        u.step_hash AS step_hash,
+        '$.x' || hex(u.subject) AS person_key,
+        '$.x' || hex(u.resource) AS app_key,
+        ${running(pool, now, sql`h.subject = u.subject`)} AS person_held,
+        ${running(pool, now, sql`h.resource = u.resource`)} AS app_held
+      FROM (${places}) AS u
+    ),
+    served (i, me, client, persons, apps, person, app, fits) AS (
+      SELECT 0, 0, ${running(pool, now, sql`1`)}, '{}', '{}', 0, 0, 0
+      UNION ALL
+      SELECT w.i, w.me,
+        s.client + ${fits},
+        CASE WHEN ${fits} THEN json_set(s.persons, w.person_key, ${person} + 1) ELSE s.persons END,
+        CASE WHEN ${fits} THEN json_set(s.apps, w.app_key, ${app} + 1) ELSE s.apps END,
+        ${person}, ${app}, ${fits}
+      FROM served AS s JOIN waiting AS w ON w.i = s.i + 1
+    )`;
+};
+
+/**
  * The queue served in order, up to and including `scope`'s attempt at
  * `place` (standing at `standing`), at `now`, as SQL: `served`, a row for
  * each place still asking ahead of it and a last row for the attempt
@@ -398,36 +441,49 @@ const servedInOrder = (
   const ahead = sql`q.seen_at > ${literal(now - queueLiveMs)}
     AND NOT (q.run_id = ${place.runId} AND q.step_hash = ${place.stepHash})
     AND (q.turn < ${literal(turn)} OR (q.turn = ${literal(turn)} AND (q.enqueued_at < ${literal(joined)} OR (q.enqueued_at = ${literal(joined)} AND (q.run_id, q.step_hash) < (${place.runId}, ${place.stepHash})))))`;
-  // What a place would find, after those before it: its person's and its
-  // App's leases as taken so far, or as held, if none took one yet.
-  const person = sql`coalesce(json_extract(s.persons, w.person_key), w.person_held)`;
-  const app = sql`coalesce(json_extract(s.apps, w.app_key), w.app_held)`;
-  const fits = sql`(s.client < ${literal(shares.client)} AND ${person} < ${literal(shares.person)} AND ${app} < ${literal(shares.app)})`;
-  return sql`WITH RECURSIVE
-    waiting AS (
-      SELECT row_number() OVER (ORDER BY u.turn, u.joined, u.run_id, u.step_hash) AS i,
-        u.me AS me,
-        '$.x' || hex(u.subject) AS person_key,
-        '$.x' || hex(u.resource) AS app_key,
-        ${running(pool, now, sql`h.subject = u.subject`)} AS person_held,
-        ${running(pool, now, sql`h.resource = u.resource`)} AS app_held
-      FROM (
-        SELECT q.turn AS turn, q.enqueued_at AS joined, q.run_id AS run_id, q.step_hash AS step_hash, 0 AS me, q.subject AS subject, q.resource AS resource
+  return queueServed(
+    pool,
+    now,
+    shares,
+    sql`SELECT q.turn AS turn, q.enqueued_at AS joined, q.run_id AS run_id, q.step_hash AS step_hash, 0 AS me, q.subject AS subject, q.resource AS resource
         FROM ${pool.queue} AS q WHERE ${ahead}
         UNION ALL
-        SELECT ${literal(turn)}, ${literal(joined)}, ${place.runId}, ${place.stepHash}, 1, ${scope.subject}, ${scope.resource}
-      ) AS u
-    ),
-    served (i, me, client, persons, apps, person, app, fits) AS (
-      SELECT 0, 0, ${running(pool, now, sql`1`)}, '{}', '{}', 0, 0, 0
-      UNION ALL
-      SELECT w.i, w.me,
-        s.client + ${fits},
-        CASE WHEN ${fits} THEN json_set(s.persons, w.person_key, ${person} + 1) ELSE s.persons END,
-        CASE WHEN ${fits} THEN json_set(s.apps, w.app_key, ${app} + 1) ELSE s.apps END,
-        ${person}, ${app}, ${fits}
-      FROM served AS s JOIN waiting AS w ON w.i = s.i + 1
-    )`;
+        SELECT ${literal(turn)}, ${literal(joined)}, ${place.runId}, ${place.stepHash}, 1, ${scope.subject}, ${scope.resource}`
+  );
+};
+
+/**
+ * The places still asking at `now` that serving the queue in order would
+ * admit now (`servedInOrder`), as their step would ask: the first in line
+ * for each share that has room, and no others. At most as many as the
+ * client's share: those a share given back may have left waiting for
+ * nothing but their next ask.
+ */
+export const queueFronts = async (
+  db: DrizzleD1Database,
+  now: number,
+  shares: Shares
+): Promise<{ runId: string; stepHash: string; deadline: number }[]> => {
+  const pool = attemptPool;
+  const served = queueServed(
+    pool,
+    now,
+    shares,
+    sql`SELECT q.turn AS turn, q.enqueued_at AS joined, q.run_id AS run_id, q.step_hash AS step_hash, 0 AS me, q.subject AS subject, q.resource AS resource
+        FROM ${pool.queue} AS q WHERE q.seen_at > ${literal(now - queueLiveMs)}`
+  );
+  const rows = await db.all(
+    sql`${served} SELECT w.run_id AS runId, w.step_hash AS stepHash, q.attempt_deadline AS deadline FROM served AS s JOIN waiting AS w ON w.i = s.i JOIN ${pool.queue} AS q ON q.run_id = w.run_id AND q.step_hash = w.step_hash WHERE s.fits LIMIT ${literal(shares.client)}`
+  );
+  return z
+    .array(
+      z.object({
+        runId: z.string(),
+        stepHash: z.string(),
+        deadline: z.number(),
+      })
+    )
+    .parse(rows);
 };
 
 /** The client's leases a row of `served` found: before its own. */
