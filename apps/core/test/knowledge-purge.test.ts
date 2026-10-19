@@ -1599,7 +1599,7 @@ describe("a purge of content", setUpTime, () => {
     });
   });
 
-  it("treats an address or a domain as one word, and removes it next to punctuation", async () => {
+  it("treats an address or a domain as one word, never found inside a longer one, and removes it next to punctuation", async () => {
     const admin = await personOf("admin");
     const handbook = await admin.api.knowledge.createCollection({
       name: "Handbook",
@@ -1609,23 +1609,64 @@ describe("a purge of content", setUpTime, () => {
       admin,
       handbook.id,
       "mail.md",
-      "# Mail\nNot tom.visser@acme.test.evil or evil.tom.visser@acme.test, but tom.visser@acme.test.\nOr (tom.visser@acme.test). Ask Tom.\nTom.Next stays, Jan-Tom goes."
+      "# Mail\nNot tom.visser@acme.test.evil or evil.tom.visser@acme.test, but tom.visser@acme.test.\nOr (tom.visser@acme.test)."
     );
     const { plan } = await purged(admin, {
       type: "content",
       documentIds: [document.id],
-      terms: ["tom.visser@acme.test", "Tom"],
+      terms: ["tom.visser@acme.test"],
       reason: "offboarding",
     });
     const read = await admin.api.knowledge.getDocument(document.id);
     expect({
       text: read.version.text,
-      // "tom.visser@acme.test.evil" and "Tom.Next" start longer words, in
-      // the version saved and in the one the purge saves.
+      // "tom.visser@acme.test.evil" starts a longer address, in the version
+      // saved and in the one the purge saves.
       inLongerWords: plan.inLongerWords,
     }).toStrictEqual({
-      text: "# Mail\nNot tom.visser@acme.test.evil or evil.tom.visser@acme.test, but (removed).\nOr ((removed)). Ask (removed).\nTom.Next stays, Jan-(removed) goes.",
-      inLongerWords: 4,
+      text: "# Mail\nNot tom.visser@acme.test.evil or evil.tom.visser@acme.test, but (removed).\nOr ((removed)).",
+      inLongerWords: 2,
+    });
+  });
+
+  it("removes a term wherever the search index keeps it as a token of its own, so no search finds it after", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    // The index's tokenizer ends a token at each of these (an underscore,
+    // a dot, an at sign, a soft hyphen, a zero-width joiner, a spacing
+    // vowel sign), where a name is still the name.
+    const name = `Visser${unique()}`;
+    const [softHyphen, joiner, visarga] = [0xad, 0x20_0d, 0x9_03].map(
+      (codePoint) => String.fromCodePoint(codePoint)
+    );
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name}_jan, Tom.${name}, ${name.toLowerCase()}@acme.test, ${name}${softHyphen}jan, ${name}${joiner}jan and ${name}${visarga} left.`
+    );
+    const heldBefore = await holding(name);
+    await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "offboarding",
+    });
+    const read = await admin.api.knowledge.getDocument(document.id);
+    const found = await admin.api.knowledge.search(name);
+    expect({
+      heldBefore: heldBefore.includes("search_words_data.block"),
+      text: read.version.text,
+      held: await holding(name),
+      found: found.hits.length,
+    }).toStrictEqual({
+      heldBefore: true,
+      text: `# Team\n(removed)_jan, Tom.(removed), (removed)@acme.test, (removed)${softHyphen}jan, (removed)${joiner}jan and (removed)${visarga} left.`,
+      held: [],
+      found: 0,
     });
   });
 
@@ -1745,7 +1786,7 @@ describe("a purge of content", setUpTime, () => {
     );
   });
 
-  it("finds whole words in any script, with accents and invisible characters as part of the word", async () => {
+  it("finds whole words in any script, with accents as part of the word and what ends the index's token ending it", async () => {
     const admin = await personOf("admin");
     const handbook = await admin.api.knowledge.createCollection({
       name: "Handbook",
@@ -1754,7 +1795,8 @@ describe("a purge of content", setUpTime, () => {
     // "José" twice: once with its accent as one character, which only a
     // Unicode-aware boundary keeps from ending "Jos", and once as an e and
     // a combining accent, which is part of the word, so "Jose" isn't all
-    // of it. A soft hyphen and a zero-width non-joiner sit inside words.
+    // of it. A soft hyphen and a zero-width non-joiner end a word, as they
+    // end the search index's token.
     const decomposed = `Jose${String.fromCodePoint(0x3_01)}`;
     const softHyphen = String.fromCodePoint(0xad);
     const nonJoiner = String.fromCodePoint(0x20_0c);
@@ -1762,7 +1804,7 @@ describe("a purge of content", setUpTime, () => {
       admin,
       handbook.id,
       "team.md",
-      `# Team\nRené, rené and RENÉ left; Renée stays.\nJos and Jose left; José and ${decomposed} stay.\nTom left; Tom${softHyphen}my and Tom${nonJoiner}s stay.`
+      `# Team\nRené, rené and RENÉ left; Renée stays.\nJos and Jose left; José and ${decomposed} stay.\nTom left; Tom${softHyphen}my and Tom${nonJoiner}s go.`
     );
     await purged(admin, {
       type: "content",
@@ -1772,7 +1814,7 @@ describe("a purge of content", setUpTime, () => {
     });
     const read = await admin.api.knowledge.getDocument(document.id);
     expect(read.version.text).toBe(
-      `# Team\n(removed), (removed) and (removed) left; Renée stays.\n(removed) and (removed) left; José and ${decomposed} stay.\n(removed) left; Tom${softHyphen}my and Tom${nonJoiner}s stay.`
+      `# Team\n(removed), (removed) and (removed) left; Renée stays.\n(removed) and (removed) left; José and ${decomposed} stay.\n(removed) left; (removed)${softHyphen}my and (removed)${nonJoiner}s go.`
     );
   });
 

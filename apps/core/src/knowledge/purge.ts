@@ -114,7 +114,9 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // Markdown or a line break, a term spelled otherwise (a variant, an
 // accent left out or encoded otherwise), a term joined to more of a word
 // ("Toms", "tomVisser": not removed, only counted when it starts the
-// word), memory already cached in a running isolate (never served again,
+// word; the index keeps those as other tokens, never the term), an
+// address or a domain inside a longer one ("evil.tom.visser@acme.test":
+// another address, counted only when the term starts it), memory already cached in a running isolate (never served again,
 // gone once evicted), fragments of a word of at most three characters
 // left in the search index's page directory (search-erasure.ts: any text
 // with those letters leaves the same; a token with a digit, never three
@@ -388,15 +390,17 @@ const unspacedScripts = String.raw`[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\
 
 /**
  * A character that makes a word longer, in any script written with
- * spaces: a letter, a digit, an underscore, a combining mark (an accent
- * written as its own code point stays part of its letter's word), or one
- * of the invisible characters that sit inside words: a soft hyphen, a
- * zero-width non-joiner or joiner, a word joiner. Not the other invisible
- * ones (bidi marks and isolates, a byte order mark), which wrap a name
- * rather than join it. `\b` knows only ASCII, so it would split "José"
- * after the "Jos".
+ * spaces: exactly what the search index's tokenizer (`unicode61
+ * remove_diacritics 2`) keeps inside a token, a letter, a digit, a
+ * private-use character or a combining mark (an accent written as its own
+ * code point stays part of its letter's word). Everything else ends a
+ * word, as it ends the index's token: an underscore, a soft hyphen, a
+ * zero-width joiner, a spacing vowel sign (GRA-698). A term is then
+ * removed wherever the index keeps it as a token of its own, so no search
+ * for it finds the document after ("Visser_jan"). `\b` knows only ASCII,
+ * so it would split "José" after the "Jos".
  */
-const joining = String.raw`(?!${unspacedScripts})[\p{L}\p{M}\p{N}_\u00AD\u200C\u200D\u2060]`;
+const joining = String.raw`(?!${unspacedScripts})[\p{L}\p{Mn}\p{N}\p{Co}]`;
 const startsJoining = new RegExp(`^${joining}`, "u");
 const endsJoining = new RegExp(`${joining}$`, "u");
 
@@ -411,16 +415,26 @@ const sidesOf = (term: string) => ({
   after: endsJoining.test(term),
 });
 
+/** A term that is an address or a domain: it holds a dot or an at sign. */
+const addressLike = /[.@]/u;
+
 /**
  * What joins a term to more of a word on a side where its edge joins: a
- * joining character, or a dot or an at sign with one past it, so a
- * domain or an address is one word ("tom.visser@acme.test" isn't found
- * in "tom.visser@acme.test.evil" or "evil.tom.visser@acme.test"). The
- * cost: "Tom" isn't found in "Tom.Next", with no space after the dot. A
- * hyphen doesn't join: "Jan-Tom" holds "Tom".
+ * joining character; and, for an address or a domain, a dot or an at
+ * sign with one past it, so it is one word ("tom.visser@acme.test" isn't
+ * found in "tom.visser@acme.test.evil" or "evil.tom.visser@acme.test",
+ * other addresses). For any other term a dot or an at sign ends a word,
+ * as it ends the index's token: "Visser" goes from "Tom.Visser" and
+ * "tom.visser@acme.test" (GRA-698). A hyphen doesn't join: "Jan-Tom"
+ * holds "Tom".
  */
-const joinedAfter = String.raw`[.@]?${joining}`;
-const joinedBefore = String.raw`${joining}[.@]?`;
+const joinsOf = (term: string): { after: string; before: string } =>
+  addressLike.test(term)
+    ? {
+        after: String.raw`[.@]?${joining}`,
+        before: String.raw`${joining}[.@]?`,
+      }
+    : { after: joining, before: joining };
 
 /**
  * A term, and nothing that joins it before, where its start joins. The
@@ -431,7 +445,7 @@ const joinedBefore = String.raw`${joining}[.@]?`;
 const startingWord = (term: string): string => {
   const itself = literal(term);
   return sidesOf(term).before
-    ? `${itself}(?<!${joinedBefore}${itself})`
+    ? `${itself}(?<!${joinsOf(term).before}${itself})`
     : itself;
 };
 
@@ -442,7 +456,7 @@ const startingWord = (term: string): string => {
  * are.
  */
 const wholeWord = (term: string): string =>
-  `${startingWord(term)}${sidesOf(term).after ? `(?!${joinedAfter})` : ""}`;
+  `${startingWord(term)}${sidesOf(term).after ? `(?!${joinsOf(term).after})` : ""}`;
 
 /**
  * A term as a pattern that matches it only where it starts a longer word
@@ -452,7 +466,9 @@ const wholeWord = (term: string): string =>
  * character can join.
  */
 const startOfWord = (term: string): string[] =>
-  sidesOf(term).after ? [`${startingWord(term)}(?=${joinedAfter})`] : [];
+  sidesOf(term).after
+    ? [`${startingWord(term)}(?=${joinsOf(term).after})`]
+    : [];
 
 /** Alternatives in any case, as one pattern; one that never matches if none. */
 const anyOf = (alternatives: string[]): RegExp =>
