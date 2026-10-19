@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { OpenStore } from "../src/data-stores.ts";
 import { sampleMigration } from "../src/migration-samples.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
+import { abandonStoreBackfill } from "../src/store-abandon.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { allEvents } from "./audit-events.ts";
 import { deriving, migrated, notesOf, refusalOf } from "./migrated-apps.ts";
@@ -356,7 +357,7 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
     });
   });
 
-  it("lets go of its lease however it ends, grants it to one at a time, and samples only its own pending change", async () => {
+  it("lets go of its lease however it ends, grants it to one at a time, and samples only its own live change", async () => {
     const { fixture, store } = await migrated(5, failingOnNote4, {
       fixtures: '[{ row: { title: "Note" } }]',
     });
@@ -398,12 +399,24 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
     const heldAfterUnavailable = await leasesOf(fixture.app);
     // Two at once: one runs, the other waits.
     const both = await Promise.all([taken(admin, asked), taken(admin, asked)]);
+    // Abandoned by an admin: nothing is left to read, but nothing was
+    // transformed either, so no receipt says "nothing left".
+    const failedBackfill = await env.DATA_STORES.getByName(
+      store.id
+    ).backfillStatus(store.id);
+    await abandonStoreBackfill(env, admin, {
+      store: store.id,
+      target: failedBackfill?.target,
+      attempt: failedBackfill?.attempt,
+    });
+    const abandoned = await taken(admin, asked);
     const receipts = await receiptsOf(fixture.app);
     expect({
       elsewhere,
       unavailable,
       heldAfterUnavailable,
       both: both.map(String).toSorted((a, b) => a.localeCompare(b)),
+      abandoned,
       receipts: receipts.map(({ outcome }) => outcome),
       held: await leasesOf(fixture.app),
     }).toStrictEqual({
@@ -411,6 +424,7 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       unavailable: true,
       heldAfterUnavailable: 0,
       both: ["migration.sample_busy", "ok"],
+      abandoned: "migration.abandoned",
       receipts: ["failed"],
       held: 0,
     });

@@ -239,6 +239,18 @@ export const sampleMigration = async (
         })
       )
     );
+    if (rows.length === 0) {
+      // Nothing left, unless an admin abandoned the migration: its
+      // backfill is gone, but it never transformed what was left.
+      const status = await storeObject(env, store).schemaStatus(
+        store,
+        release.manifest.schemaHash,
+        { resourceId: app, resourceVersion: version }
+      );
+      if (status.state === "abandoned") {
+        throw migrationErrors.create("migration.abandoned");
+      }
+    }
     const owners = new Set(rows.map(({ owner }) => owner)).size;
     // A sandbox out of reach throws (`SandboxUnavailableError`): nothing
     // is recorded, never a pass.
