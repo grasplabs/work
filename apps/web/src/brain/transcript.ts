@@ -3,7 +3,7 @@ import type {
   Statement,
   Transcript,
   TranscriptTurn,
-} from "./workspace.ts";
+} from "@grasp-os/shared/brain";
 
 /**
  * Statements as highlights in the conversation they came from. A statement is not stored against a

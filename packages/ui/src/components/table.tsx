@@ -94,13 +94,25 @@ function TableHead({
   );
 }
 
-/** `card` and `section` as for `TableHead`; `roomy` also gives each row more height. */
+/**
+ * `card` and `section` as for `TableHead`; `roomy` also gives each row more
+ * height, and `compact` and `comfortable` less or more, for a table whose
+ * reader picks its row height. `end` is a row's last, narrow cell (its
+ * chevron or menu).
+ */
 function TableCell({
   className,
   variant = "default",
   ...props
 }: React.ComponentProps<"td"> & {
-  variant?: "default" | "card" | "roomy" | "section";
+  variant?:
+    | "default"
+    | "card"
+    | "roomy"
+    | "section"
+    | "compact"
+    | "comfortable"
+    | "end";
 }) {
   return (
     <td
@@ -112,6 +124,9 @@ function TableCell({
         variant === "card" && "px-4 py-2",
         variant === "roomy" && "px-4 py-3",
         variant === "section" && "p-2 first:px-5 last:pr-5",
+        variant === "compact" && "px-4 py-1.5",
+        variant === "comfortable" && "px-4 py-5",
+        variant === "end" && "py-2 pr-3 pl-2",
         className
       )}
       {...props}

@@ -1,5 +1,6 @@
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
+import type { BrainApi } from "./brain.ts";
 import type { ChatsApi } from "./chat.ts";
 import type {
   ConnectionsApi,
@@ -94,6 +95,12 @@ export interface SessionApi {
   readonly apps: AppsApi;
   /** Knowledge: collections, documents and their versions. */
   readonly knowledge: KnowledgeApi;
+  /**
+   * What the company brain is built from, assembled from the onboarding,
+   * the Playbook's records and the connections, each as the person may
+   * read it.
+   */
+  readonly brain: BrainApi;
   /**
    * Knowledge usage signals, computed daily: what's missing or stale in the
    * collections the person owns.

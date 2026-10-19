@@ -70,7 +70,7 @@ export const FilterMenu = ({
           </>
         ) : null}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64" size="flush">
+      <PopoverContent align="end" className="w-64" variant="flush">
         <Command>
           <CommandInput placeholder={t`Filter`} />
           <CommandList>

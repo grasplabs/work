@@ -1,3 +1,4 @@
+import { dayOf } from "@grasp-os/shared/admin/org-record";
 import { requestErrors } from "@grasp-os/shared/errors";
 import { log } from "@grasp-os/shared/log";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
@@ -13,7 +14,7 @@ import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 import { consoleSigned } from "../console-signed.ts";
 import { errorResponse } from "../errors.ts";
 import { gateView } from "./gate.ts";
-import { closesOn, dayOf } from "./rules.ts";
+import { closesOn } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 
 // The onboarding as the console's grid shows it (GRA-325): where it

@@ -331,7 +331,7 @@ export const LogExport = ({ search }: { search: LogSearch }) => {
 };
 
 /** Who did it, by name where the page knows it, and the ID to filter by. */
-const actorOf = (
+export const actorOf = (
   actor: AuditActor,
   directory: Directory
 ): { label: string; id?: string } => {
