@@ -25,6 +25,7 @@ import {
   unique,
 } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { workflowFiles } from "./workflow-apps.ts";
 
 // Blueprints: a builder marks a version of an App as a blueprint, and
 // whoever has a role in the App and builds creates an App of their own
@@ -344,6 +345,42 @@ describe("blueprints", { timeout: 60_000 }, () => {
       copies: 0,
       filesLeft: 0,
     });
+  it("type a copy's workflows as the code it copies was, though it asks for none of the source's connections", async () => {
+    const [owner, maker] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const { id: source } = await owner.api.apps.create({
+      name: `Mail ${unique()}`,
+    });
+    const mail = await mailConnection();
+    await owner.api.permissions.request({
+      ...outlook(source, "MAIL"),
+      object: { type: "connection", connectionId: mail.id },
+    });
+    // Reads MAIL's answer as a connection's: typed only while MAIL is.
+    await release(
+      owner,
+      source,
+      workflowFiles(
+        "sender",
+        `  return await step.do("send", { description: "Send" }, async () => {
+    if (input === "never") {
+      return (await env.MAIL.call("mail.send", {})).output.length;
+    }
+    return 1;
+  });`,
+        { send: 1 }
+      )
+    );
+    await share(owner, source, maker, "user");
+    const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
+    const created = await maker.api.apps.blueprints.create(blueprint, named);
+    // Its first version is made current as the source's was; MAIL grants
+    // the copy nothing until it holds a permission of its own.
+    await expect(
+      outcome(maker.api.apps.versions.setCurrent(created.app.id, 1))
+    ).resolves.toBe("ok");
   });
 
   it("create an App with the same code and none of the data, audited", async () => {

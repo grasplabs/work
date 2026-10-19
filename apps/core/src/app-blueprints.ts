@@ -45,6 +45,7 @@ import { appMemoryPath } from "./knowledge/memory-files.ts";
 import {
   bindingKindsOf,
   declarableOf,
+  workflowBindingKinds,
   declaredRequests,
   toPermission,
 } from "./permissions.ts";
@@ -356,8 +357,21 @@ export const createFromBlueprint = async (
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,
-    // The App's permissions are the ones it is created with.
-    workflowBindings: bindingKindsOf(requests.rows),
+    // Typed as the code it copies was: the source version's binding
+    // names, which a copy keeps though it asks only for what it may
+    // declare (no connection or other App's exports), and the requests
+    // it is created with over them. Types grant nothing: a call is
+    // refused until the copy holds the permission.
+    workflowBindings: {
+      ...(blueprint.appId === null || blueprint.version === null
+        ? {}
+        : await workflowBindingKinds(
+            env,
+            appIdSchema.parse(blueprint.appId),
+            blueprint.version
+          )),
+      ...bindingKindsOf(requests.rows),
+    },
   };
   const db = drizzle(env.DB);
   // The App, only while the blueprint is still there and, for a marked
