@@ -269,6 +269,9 @@ const runWorkflow = async (
   // The refusal that caught the run's isolate tampering (host.ts), if any:
   // the run fails with it, whatever its code made of the refusal.
   let tampered: StepError | undefined;
+  // The wakes its attempts' settles sent (share-wakes.ts): awaited once
+  // the run's code is done, never before a step's outcome.
+  const wakes: Promise<void>[] = [];
   const result = await settledRun(async () => {
     const authority = await authorityOf(env, row);
     const { bindings, connections, apps } = await runBindingsFor(
@@ -342,7 +345,10 @@ const runWorkflow = async (
               resource: run.app,
             },
             attempt
-          )
+          ),
+          (wake) => {
+            wakes.push(wake);
+          }
         ),
     });
     try {
@@ -358,6 +364,7 @@ const runWorkflow = async (
       return await afterCpuKill(error, calls);
     }
   });
+  await Promise.all(wakes);
   if (!result.ok && memory.current?.() === false) {
     // Cancelled or taken over as it ran (its load let go, say): whoever
     // ended it, or the newer activation, records what comes of it.
