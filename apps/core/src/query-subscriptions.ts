@@ -318,6 +318,13 @@ export interface Reader {
 export interface LiveRead {
   readonly result: Result;
   readonly reads: EvaluatedQuery["reads"];
+  /**
+   * The revision its value carries, when it carries its own (a workflow
+   * run's snapshot, screen-workflows.ts): pushed under that revision, so a
+   * control's receipt names the snapshot that settles it. Otherwise each
+   * push is numbered after the last.
+   */
+  readonly revision?: number;
 }
 
 /**
@@ -388,7 +395,7 @@ export const screenReads = (
     check.forget?.();
   },
   evaluate: async (by, app, artifact, request, deadline, chargePages) => {
-    const { answer, reads } = await delivering(
+    const { answer, reads, revision } = await delivering(
       env,
       by,
       app,
@@ -397,7 +404,11 @@ export const screenReads = (
       async () =>
         await evaluateAppQuery(env, by, app, request, deadline, chargePages)
     );
-    return { result: answer.result, reads };
+    return {
+      result: answer.result,
+      reads,
+      ...(revision === undefined ? {} : { revision }),
+    };
   },
 });
 
@@ -802,7 +813,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // a window that spent it partway waits longer each time, so the
     // budget can refill enough for all of it.
     evaluation.budgetWaitMs = 0;
-    this.#publish(evaluation, result, before.roles);
+    this.#publish(evaluation, result, before.roles, evaluated.revision);
   }
 
   /**
@@ -1151,11 +1162,26 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   }
 
   /** Numbers `result` and offers it to every subscription of `evaluation`. */
-  #publish(evaluation: Evaluation, result: Result, roles: string): void {
+  #publish(
+    evaluation: Evaluation,
+    result: Result,
+    roles: string,
+    /** The revision the value carries, if its own (`LiveRead.revision`). */
+    carried?: number
+  ): void {
     if (evaluation.closed) {
       return;
     }
-    evaluation.revision += 1;
+    if (carried === undefined || !result.ok) {
+      evaluation.revision += 1;
+    } else if (carried < evaluation.revision) {
+      // Older than one pushed already: a read overtaken by a newer one.
+      return;
+    } else {
+      // The value's own revision: one read again at the same revision
+      // goes only to subscriptions without it yet (`#offer`).
+      evaluation.revision = carried;
+    }
     let push: QuerySnapshotPush = { revision: evaluation.revision, result };
     let bytes = jsonBytes(push, screenLimits.answerBytes + 1);
     if (bytes > screenLimits.answerBytes) {
@@ -1226,6 +1252,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     snapshot: Snapshot
   ): Promise<void> {
     listener.inFlight = true;
+    const sentBefore = listener.sent;
     listener.sent = snapshot.push.revision;
     this.#unsent += snapshot.bytes;
     try {
@@ -1244,6 +1271,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         if (evaluation.latest === snapshot) {
           evaluation.latest = undefined;
         }
+        // Not sent: the read again may carry the same revision, and still
+        // goes to it.
+        listener.sent = sentBefore;
         listener.behind = true;
         listener.behindBytes = 0;
       } else if (!listener.released) {

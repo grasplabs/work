@@ -2982,6 +2982,44 @@ export const workflowResourceRunTerminations = sqliteTable(
 );
 
 /**
+ * The controls a person asked of an independent run through an App's
+ * screen (screen-workflows.ts): one receipt per run, person and the
+ * screen's idempotency key, so a request sent again while its answer was
+ * lost answers the same receipt rather than ask twice. `admitted` until
+ * the run's stop is asked of the engine, then `applied`. Only `cancel`
+ * for now: an independent run can't be paused yet.
+ */
+export const workflowResourceRunControls = sqliteTable(
+  "workflow_resource_run_controls",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    principalId: text("principal_id").notNull(),
+    key: text().notNull(),
+    kind: text({ enum: ["cancel"] }).notNull(),
+    state: text({ enum: ["admitted", "applied"] }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [
+    uniqueIndex("workflow_resource_run_controls_key_idx").on(
+      table.runId,
+      table.principalId,
+      table.key
+    ),
+    index("workflow_resource_run_controls_run_idx").on(
+      table.runId,
+      table.state
+    ),
+  ]
+);
+
+/**
  * The host catalog of contracts independent workflows bind besides each
  * other (spec 13.2; src/workflow-catalog.ts): operation, connector, model
  * and decision contracts, each published once by an admin and never

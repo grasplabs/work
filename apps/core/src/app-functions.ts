@@ -59,6 +59,13 @@ import type {
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
 import {
+  answerWorkflowCommand,
+  isWorkflowRequest,
+  readWorkflowRequest,
+  readWorkflowWatch,
+  watchesWorkflow,
+} from "./screen-workflows.ts";
+import {
   callWorkflowQuery,
   isWorkflowQueryPath,
   readWorkflowWindow,
@@ -1078,6 +1085,90 @@ export const callAppFunction = async (
   });
 
 /**
+ * A screen's command of a workflow its App binds (screen-workflows.ts),
+ * answered as a call is: a watch sent as a call is no call.
+ */
+const workflowCommandAnswer = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: unknown,
+  request: unknown
+): Promise<FunctionAnswer> => {
+  const requestId = crypto.randomUUID();
+  try {
+    const read = readWorkflowRequest(request);
+    if (!("command" in read)) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const { value, manifestHash } = await answerWorkflowCommand(
+      env,
+      by,
+      app,
+      read
+    );
+    return {
+      result: { ok: true, value },
+      provenance: null,
+      fingerprint: read.workflow.fingerprint,
+      manifestHash,
+    };
+  } catch (error) {
+    return {
+      result: { ok: false, error: refusalOf(error, requestId) },
+      provenance: null,
+      fingerprint: null,
+      manifestHash: null,
+    };
+  }
+};
+
+/**
+ * A screen's watch of a workflow its App binds (screen-workflows.ts), read
+ * as a live query is, with the revision a run's snapshot carries: a
+ * command sent as a watch is no query.
+ */
+const workflowWatchRead = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: unknown,
+  request: string
+): Promise<EvaluatedQuery> => {
+  const requestId = crypto.randomUUID();
+  try {
+    const read = readWorkflowRequest(request);
+    if (!("watch" in read)) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const { value, revision, manifestHash } = await readWorkflowWatch(
+      env,
+      by,
+      app,
+      read
+    );
+    return {
+      answer: {
+        result: { ok: true, value },
+        provenance: null,
+        fingerprint: read.workflow.fingerprint,
+        manifestHash,
+      },
+      reads: undefined,
+      ...(revision === undefined ? {} : { revision }),
+    };
+  } catch (error) {
+    return {
+      answer: {
+        result: { ok: false, error: refusalOf(error, requestId) },
+        provenance: null,
+        fingerprint: null,
+        manifestHash: null,
+      },
+      reads: undefined,
+    };
+  }
+};
+
+/**
  * Calls a public function of App `app` for a screen of `by`'s, as
  * `callAppFunction` calls it, or reads a query's paginated window for it
  * (query-windows.ts). Never throws.
@@ -1090,7 +1181,9 @@ export const callScreenFunction = async (
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>
 ): Promise<FunctionAnswer> =>
-  await callFunction(env, by, app, request, { deadline, chargeWindow });
+  isWorkflowRequest(request)
+    ? await workflowCommandAnswer(env, by, app, request)
+    : await callFunction(env, by, app, request, { deadline, chargeWindow });
 
 /**
  * The extent of the window `request` asks for, or undefined when it asks
@@ -1107,10 +1200,14 @@ export const windowExtentOf = (request: unknown): number | undefined => {
 
 /**
  * Whether `request` calls one of a workflow reference's queries
- * (workflow-reference-queries.ts): they read no store, so a live one is
- * read again when the person's runs of the App change, not on a write.
+ * (workflow-reference-queries.ts), or watches a workflow's run or binding
+ * (screen-workflows.ts): they read no store, so a live one is read again
+ * when the person's runs of the App change, not on a write.
  */
 export const callsWorkflowQuery = (request: unknown): boolean => {
+  if (watchesWorkflow(request)) {
+    return true;
+  }
   try {
     return isWorkflowQueryPath(
       readFunctionRequest(request).reference.contractId
@@ -1131,6 +1228,11 @@ export interface EvaluatedQuery {
   readonly reads:
     | { readonly storeId: StoreId; readonly readSet: Record<string, number> }
     | undefined;
+  /**
+   * The revision of what it answered, when its value carries its own (a
+   * workflow run's snapshot): each push of it is numbered so.
+   */
+  readonly revision?: number;
 }
 
 /**
@@ -1147,6 +1249,9 @@ export const evaluateAppQuery = async (
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>
 ): Promise<EvaluatedQuery> => {
+  if (isWorkflowRequest(request)) {
+    return await workflowWatchRead(env, by, app, request);
+  }
   let reads: EvaluatedQuery["reads"];
   const answer = await callFunction(env, by, app, request, {
     deadline,

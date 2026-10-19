@@ -1,6 +1,6 @@
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf } from "@grasp-os/shared/audit";
-import type { AuditEntry } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -188,9 +188,14 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         WHERE EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
   );
 
-type RunRow = typeof workflowResourceRuns.$inferSelect;
+/** A run's row, as core keeps it. */
+export type RunRow = typeof workflowResourceRuns.$inferSelect;
 
-const runOf = async (env: Env, id: string): Promise<RunRow | undefined> =>
+/** Run `id`'s row, if there is one. */
+export const runOf = async (
+  env: Env,
+  id: string
+): Promise<RunRow | undefined> =>
   await drizzle(env.DB)
     .select()
     .from(workflowResourceRuns)
@@ -873,7 +878,7 @@ const keptFailureOf = (code: string): WorkflowResourceRun["error"] => {
  * failed only the code: the engine keeps a run for the retention it was
  * admitted with, which may since have been shortened, or lengthened.
  */
-const resultOf = async (
+export const resultOf = async (
   env: Env,
   row: RunRow
 ): Promise<Pick<WorkflowResourceRun, "output" | "error">> => {
@@ -1015,14 +1020,14 @@ export const resourceRunFor = async (
     : run;
 };
 
-/** `by`'s terminate of run `row`, as audited, the row then `status`. */
+/** `actor`'s terminate of run `row`, as audited, the row then `status`. */
 const terminatedEntry = (
-  by: Acting,
+  actor: AuditActor,
   row: RunRow,
   status: WorkflowRunStatus
 ): AuditEntry => ({
   ...runEntry(row, "workflow.run.terminated"),
-  actor: actorOf(by),
+  actor,
   detail: { ...runEntry(row, "workflow.run.terminated").detail, status },
 });
 
@@ -1033,7 +1038,7 @@ const terminatedEntry = (
  */
 const cancelStarting = async (
   env: Env,
-  by: Acting,
+  actor: AuditActor,
   row: RunRow
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
@@ -1049,7 +1054,7 @@ const cancelStarting = async (
         )
       )
       .returning({ id: workflowResourceRuns.id }),
-    outboxedIfChanged(db, terminatedEntry(by, row, "cancelled")),
+    outboxedIfChanged(db, terminatedEntry(actor, row, "cancelled")),
     owedTermination(db, row.id, "cancelled", now),
   ]);
   if (cancelled.length > 0) {
@@ -1125,6 +1130,62 @@ export const repairResourceTerminations = async (
 };
 
 /**
+ * Stops run `row`, which hasn't ended, as `actor` asks, audited under
+ * them: whoever asks has been decided already (`terminateResourceRun`, a
+ * builder's; a screen's cancel, screen-workflows.ts, the run's person's).
+ * See `terminateResourceRun` for how a run still starting is ended.
+ */
+export const stopResourceRun = async (
+  env: Env,
+  actor: AuditActor,
+  row: RunRow
+): Promise<void> => {
+  if (row.status === "starting" && (await cancelStarting(env, actor, row))) {
+    try {
+      await sendTermination(env, row.id);
+    } catch (error) {
+      // Cancelled all the same: the repair tells the engine.
+      log.error("workflow.resource_run_terminate_failed", {
+        runId: row.id,
+        ...errorFields(error),
+      });
+    }
+    return;
+  }
+  await runEngine(env).terminate(row.id);
+  // The engine took the terminate: audited below whatever this lookup
+  // does, the row left to the end's notification if it can't be read.
+  let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
+  try {
+    live = await runEngine(env).status(row.id);
+  } catch (error) {
+    log.error("workflow.resource_run_status_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+  }
+  if (live?.status === "terminated") {
+    // The end the engine confirms in answer to this, at once (no
+    // sequence): an ended run never changes again, so no later
+    // notification can be newer. A run that ended on its own first is
+    // left to its end's notification, which carries when it ended: the
+    // status doesn't, and taken now its row would say this call's time.
+    await projectResourceRun(env, row.id, {
+      status: live.status,
+      at: Date.now(),
+    });
+  }
+  const now = await runOf(env, row.id);
+  // Whoever asked, whatever the row took: the engine tells the run's
+  // projection of the termination as it happens, so the row may say
+  // cancelled before the statement above does.
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, terminatedEntry(actor, row, now?.status ?? row.status)),
+  ]);
+};
+
+/**
  * Stops run `runId` of workflow `id` for `by`, a builder of it (an admin
  * builds every workflow) who isn't Grasp staff, audited under `by`. The
  * way to end a run that waits long, or never started, before the workflow
@@ -1157,48 +1218,6 @@ export const terminateResourceRun = async (
   if (!unended.includes(row.status)) {
     throw workflowResourceErrors.create("workflow.run_ended");
   }
-  if (row.status === "starting" && (await cancelStarting(env, by, row))) {
-    try {
-      await sendTermination(env, row.id);
-    } catch (error) {
-      // Cancelled all the same: the repair tells the engine.
-      log.error("workflow.resource_run_terminate_failed", {
-        runId: row.id,
-        ...errorFields(error),
-      });
-    }
-    return await resourceRunFor(env, by, workflow.id, row.id);
-  }
-  await runEngine(env).terminate(row.id);
-  // The engine took the terminate: audited below whatever this lookup
-  // does, the row left to the end's notification if it can't be read.
-  let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
-  try {
-    live = await runEngine(env).status(row.id);
-  } catch (error) {
-    log.error("workflow.resource_run_status_failed", {
-      runId: row.id,
-      ...errorFields(error),
-    });
-  }
-  if (live?.status === "terminated") {
-    // The end the engine confirms in answer to this, at once (no
-    // sequence): an ended run never changes again, so no later
-    // notification can be newer. A run that ended on its own first is
-    // left to its end's notification, which carries when it ended: the
-    // status doesn't, and taken now its row would say this call's time.
-    await projectResourceRun(env, row.id, {
-      status: live.status,
-      at: Date.now(),
-    });
-  }
-  const now = await runOf(env, row.id);
-  // Whoever asked, whatever the row took: the engine tells the run's
-  // projection of the termination as it happens, so the row may say
-  // cancelled before the statement above does.
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxed(db, terminatedEntry(by, row, now?.status ?? row.status)),
-  ]);
+  await stopResourceRun(env, actorOf(by), row);
   return await resourceRunFor(env, by, workflow.id, row.id);
 };
