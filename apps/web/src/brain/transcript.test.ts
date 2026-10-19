@@ -1,3 +1,4 @@
+import type { Statement, Transcript } from "@grasp-os/shared/brain";
 import { describe, expect, it } from "vite-plus/test";
 
 import { testWorkspace } from "./test-workspace.ts";
@@ -11,7 +12,6 @@ import {
   turnParts,
   voices,
 } from "./transcript.ts";
-import type { Statement, Transcript } from "./workspace.ts";
 
 // The prototype's tests of statements as highlights in their
 // transcripts, on the brain's test company where they read its records.

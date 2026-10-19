@@ -509,21 +509,51 @@ interface PrincipalQueries {
   readonly reader: Reader;
 }
 
-/** What `work` answers, or a rejection once `ms` have passed. */
-const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
+/**
+ * What `work` answers, or a rejection once `ms` have passed, saying
+ * `overran` (by default that it didn't finish within them).
+ */
+const within = async <T>(
+  work: Promise<T>,
+  ms: number,
+  overran = `didn't finish within ${ms / 1000} seconds`
+): Promise<T> => {
   const limit = deadline(ms);
   try {
     return await Promise.race([work, whenAborted(limit.signal)]);
   } catch (error) {
     if (limit.stopped() === "timeout") {
-      throw new Error(`didn't finish within ${ms / 1000} seconds`, {
-        cause: error,
-      });
+      throw new Error(overran, { cause: error });
     }
     throw error;
   } finally {
     limit.clear();
   }
+};
+
+/**
+ * How long a suite started now may run, and what it is told once past
+ * that: its own limit (`suiteMs`), or what is left of the version's run
+ * (ending at `runEndsAt`), whichever ends first. The message names the
+ * limit that stopped it as configured, never the time that happened to be
+ * left when it started, so it reads the same on a slow host.
+ */
+const suiteDeadline = ({
+  suiteMs,
+  runMs,
+  runEndsAt,
+}: {
+  suiteMs: number;
+  runMs: number;
+  runEndsAt: number;
+}): { ms: number; overran: string } => {
+  const left = runEndsAt - Date.now();
+  return suiteMs <= left
+    ? { ms: suiteMs, overran: `didn't finish within ${suiteMs / 1000} seconds` }
+    : {
+        ms: left,
+        overran: `the version's tests ran past their ${runMs / 1000} seconds`,
+      };
 };
 
 /** What a suite's sessions are opened with. */
@@ -1179,6 +1209,7 @@ const runInSuiteSession = async (
     modules,
     testMs,
     suiteMs,
+    runMs,
     runEndsAt,
     opened,
   }: {
@@ -1187,6 +1218,8 @@ const runInSuiteSession = async (
     modules: Record<string, string>;
     testMs: number;
     suiteMs: number;
+    /** The version's whole test run's limit, for what an overrun says. */
+    runMs: number;
     /** When the version's test run is over: the suite runs no later. */
     runEndsAt: number;
     opened: (callId: string) => void;
@@ -1210,7 +1243,7 @@ const runInSuiteSession = async (
           args: [{ capability: suiteCapability(host) }],
           owner,
           cpuMs: testSandbox.limits.cpuMs,
-          wallMs: suiteMs,
+          wallMs: Math.min(suiteMs, runEndsAt - Date.now()),
         },
         {
           signal: giveUp.signal,
@@ -1228,11 +1261,13 @@ const runInSuiteSession = async (
               giveUp.abort();
               return;
             }
-            const ms = Math.min(suiteMs, left);
+            const { ms, overran } = suiteDeadline({
+              suiteMs,
+              runMs,
+              runEndsAt,
+            });
             timer = setTimeout(() => {
-              overrun.reject(
-                new Error(`didn't finish within ${ms / 1000} seconds`)
-              );
+              overrun.reject(new Error(overran));
             }, ms);
           },
         }
@@ -1290,11 +1325,12 @@ const suiteFailures = async (
   {
     testMs,
     suiteMs,
+    runMs,
     cleanupMs,
-    runEndsAt = Number.POSITIVE_INFINITY,
-  }: Pick<TestLimits, "testMs" | "suiteMs" | "cleanupMs"> & {
+    runEndsAt,
+  }: TestLimits & {
     /** When the version's whole test run is over (a time in milliseconds). */
-    runEndsAt?: number;
+    runEndsAt: number;
   }
 ): Promise<string[]> => {
   let parent: string | undefined;
@@ -1326,7 +1362,8 @@ const suiteFailures = async (
         modules: { ...modules, [mainModule]: testsMain(path, testMs) },
         env: {},
       })).getEntrypoint<AppTestsEntrypoint>("AppTests");
-      answer = await within(entry.run(host), suiteMs);
+      const { ms, overran } = suiteDeadline({ suiteMs, runMs, runEndsAt });
+      answer = await within(entry.run(host), ms, overran);
     } else {
       answer = await runInSuiteSession(sandboxHost, host, {
         owner: appTestOwnerOf(release.manifest.resourceId),
@@ -1334,6 +1371,7 @@ const suiteFailures = async (
         modules,
         testMs,
         suiteMs,
+        runMs,
         runEndsAt,
         opened: (callId) => {
           parent = callId;
@@ -1488,12 +1526,7 @@ export const appTestFailures = async (
           files,
           path,
           modules,
-          {
-            testMs: limits.testMs,
-            suiteMs: Math.min(limits.suiteMs, now),
-            runEndsAt: started + limits.runMs,
-            cleanupMs: limits.cleanupMs,
-          }
+          { ...limits, runEndsAt: started + limits.runMs }
         );
       };
       failures.push(

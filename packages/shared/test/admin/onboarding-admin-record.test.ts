@@ -281,7 +281,19 @@ describe("Stephen at an organization", () => {
   it("counts every stop in the part it happened in, and every mistake under its kind", () => {
     const view = at(noordkade);
     const stats = stephenOf(view);
-    const halfway = view.interviews.filter((interview) => !interview.approved);
+    // Someone talking now has stopped nowhere: the sample has some.
+    const talking = new Set(
+      view.people
+        .filter((each) => each.state === "progress")
+        .map((each) => each.person.id)
+    );
+    const unfinished = view.interviews.filter(
+      (interview) => !interview.approved
+    );
+    const halfway = unfinished.filter(
+      (interview) => !talking.has(interview.id)
+    );
+    expect(halfway.length).toBeLessThan(unfinished.length);
     expect(stats.stopped).toBe(halfway.length);
     expect(PHASES.reduce((sum, phase) => sum + stats.stops[phase], 0)).toBe(
       halfway.length

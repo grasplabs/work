@@ -46,10 +46,10 @@ export const useChecks = (): void => {
   void upload.upload(picked, { idempotencyKey: "x" });
 
   expectTypeOf(useFile(resources.attachments, file)).toEqualTypeOf<
-    FileView | undefined
+    FileView | null | undefined
   >();
   expectTypeOf(useFile(resources.attachments, "skip")).toEqualTypeOf<
-    FileView | undefined
+    FileView | null | undefined
   >();
   // @ts-expect-error -- null doesn't skip; only "skip" does
   void useFile(resources.attachments, null);

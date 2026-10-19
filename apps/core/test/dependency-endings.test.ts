@@ -99,7 +99,9 @@ const buildOf = async (
   { builder, app, request }: Approved,
   target: DependencyTarget
 ): Promise<PackageBuild> => {
-  const { policyGeneration } = await builder.api.dependencies.status(app);
+  const { policyGeneration } = await builder.api.dependencies.status({
+    app,
+  });
   return await builder.api.dependencies.build({
     app,
     graphHash: request.graphHash,
@@ -142,7 +144,7 @@ const servedStatus = async (build: PackageBuild): Promise<number> => {
 /** The App's lock of its graph, as core stores it, if it is there. */
 const storedLock = async ({ app, request }: Approved) => {
   const row = await env.DB.prepare(
-    "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    "SELECT lock FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
   )
     .bind(app, request.graphHash)
     .first<{ lock: string }>();
@@ -202,7 +204,7 @@ describe("revoking an App's approved packages", () => {
     const browser = await buildOf(approved, "browser");
     const servedBefore = await servedStatus(browser);
     const { policyGeneration: before } =
-      await approved.builder.api.dependencies.status(approved.app);
+      await approved.builder.api.dependencies.status({ app: approved.app });
 
     let ended: DependencyRequest[] = [];
     const events = await auditedDuring(async () => {
@@ -217,7 +219,9 @@ describe("revoking an App's approved packages", () => {
       // The page loading the artifact it was given.
       served: await servedStatus(browser),
     };
-    const status = await approved.builder.api.dependencies.status(approved.app);
+    const status = await approved.builder.api.dependencies.status({
+      app: approved.app,
+    });
     const after = {
       // Its lock goes, and the bytes built from it are queued to be deleted.
       lock: await storedLock(approved),
@@ -518,7 +522,7 @@ describe("retiring an App's approved packages", () => {
             artifacts: { [earlier]: lock.artifacts?.[compilerVersion] ?? {} },
           };
     await env.DB.prepare(
-      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+      "UPDATE dependency_locks SET lock = ? WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
     )
       .bind(JSON.stringify(moved), approved.app, approved.request.graphHash)
       .run();
@@ -568,7 +572,7 @@ describe("retiring an App's approved packages", () => {
     await end(admin, "retire", approved.request);
     // Every address handed out has expired: only retirement keeps it.
     await env.DB.prepare(
-      "UPDATE dependency_locks SET served_until = ? WHERE app_id = ?"
+      "UPDATE dependency_locks SET served_until = ? WHERE subject_type = 'app' AND subject_id = ?"
     )
       .bind(Date.now() - 1, approved.app)
       .run();
@@ -704,9 +708,9 @@ const buildWhile = async (
   during: () => Promise<unknown>
 ) => {
   const identity = await approved.builder.api.whoami();
-  const { policyGeneration } = await approved.builder.api.dependencies.status(
-    approved.app
-  );
+  const { policyGeneration } = await approved.builder.api.dependencies.status({
+    app: approved.app,
+  });
   let ran = false;
   const assets = new Proxy(env.ASSETS, {
     get: (assetsTarget, property): unknown => {
@@ -883,7 +887,9 @@ describe("who ends an approval, and on what", () => {
         })
       ),
     };
-    const status = await approved.builder.api.dependencies.status(approved.app);
+    const status = await approved.builder.api.dependencies.status({
+      app: approved.app,
+    });
 
     expect(refused).toStrictEqual({
       otherAdmin: "dependency.forbidden",
@@ -939,7 +945,7 @@ describe("who ends an approval, and on what", () => {
         )
       );
       const { approved: still } =
-        await approved.builder.api.dependencies.status(approved.app);
+        await approved.builder.api.dependencies.status({ app: approved.app });
       return { result, status: still?.status };
     };
 
@@ -1042,13 +1048,15 @@ describe("who ends an approval, and on what", () => {
       userId: approver.userId,
     });
 
-    const builderReads = await retired.builder.api.dependencies.approvals(
-      retired.app
-    );
-    const approverReads = await approver.api.dependencies.approvals(
-      retired.app
-    );
-    const adminReads = await admin.api.dependencies.approvals(revoked.app);
+    const builderReads = await retired.builder.api.dependencies.approvals({
+      app: retired.app,
+    });
+    const approverReads = await approver.api.dependencies.approvals({
+      app: retired.app,
+    });
+    const adminReads = await admin.api.dependencies.approvals({
+      app: revoked.app,
+    });
     const read = {
       builder: [
         builderReads.decides,
@@ -1057,11 +1065,13 @@ describe("who ends an approval, and on what", () => {
       approver: [
         approverReads.decides,
         approverReads.approvals.length,
-        approverReads.app.id,
+        approverReads.subject.id,
       ],
       // A revoked graph is in force no more: it isn't listed.
       revoked: adminReads.approvals,
-      stranger: await outcome(stranger.api.dependencies.approvals(retired.app)),
+      stranger: await outcome(
+        stranger.api.dependencies.approvals({ app: retired.app })
+      ),
     };
 
     expect(read).toStrictEqual({
@@ -1161,7 +1171,9 @@ describe("who ends an approval, and on what", () => {
 
     await admin.api.dependencies.revokeApprover(grant);
     const build = await buildOf(approved, "browser");
-    const status = await approved.builder.api.dependencies.status(approved.app);
+    const status = await approved.builder.api.dependencies.status({
+      app: approved.app,
+    });
 
     expect([build.approval, status.approved?.status]).toStrictEqual([
       approved.request.id,

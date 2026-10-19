@@ -3,51 +3,18 @@ import type {
   BacklinkPage,
   DocumentPage,
   DocumentRead,
-  DocumentSummary,
   FollowResult,
   HistoryPage,
   KnowledgeRead,
-  RecordPage,
-  RecordRead,
   SearchResults,
 } from "@grasp-os/shared/knowledge";
 import type { Authority } from "@grasp-os/shared/permissions";
-import {
-  submissionErrors,
-  submissionOptionsSchema,
-} from "@grasp-os/shared/submissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import {
-  callerOf,
-  handedBack,
-  stillAdmitted,
-  tokenOf,
-} from "../app-bindings.ts";
-import type { CallPath, InvocationKind } from "../app.ts";
-import { forSandbox } from "../bindings.ts";
+import { callerOf, handedBack } from "../app-bindings.ts";
 import type { AttemptFence } from "../workflows/attempt-fence.ts";
-import { collectionReads, readAsDelegate } from "./binding.ts";
+import { collectionReads } from "./binding.ts";
 import type { CollectionGrant } from "./binding.ts";
-import { submissionKey } from "./receipts.ts";
-import { declaredTypes } from "./record-types.ts";
-import {
-  canWriteAsDelegate,
-  getRecord,
-  listRecords,
-  saveRecordAsDelegate,
-} from "./records.ts";
-import type { Setter } from "./records.ts";
-
-/** Who a stub call is for, as `#callerOf` admits it. */
-interface Resolved {
-  authority: Authority;
-  setter: Setter;
-  readOnly: boolean;
-  /** The step's key, for a workflow run's caller. */
-  stepKey: string | undefined;
-  path: CallPath;
-}
 
 /**
  * A collection, as an App's server code holds it:
@@ -59,34 +26,13 @@ interface Resolved {
  * read of restricted data puts the App in restricted mode first, for
  * everyone using it.
  *
- * Each stub also reads and writes the collection's records, typed by the
- * record types Apps declare for it (records.ts, record-types.ts): a save
- * (`saveRecord`) only under a permission with `write`, for the caller and
- * with their rights, and says whether it would (`canWrite`), so App
- * screens offer only the changes core takes. A save through a stub whose
- * permission doesn't write is refused by the permission check, and
- * `canWrite` is `false` there.
+ * It only reads: an App keeps the records it writes in its own business
+ * store, never in a collection.
  */
 export class AppCollectionBinding extends WorkerEntrypoint<
   Env,
   CollectionGrant & { app: AppId }
 > {
-  /**
-   * Who `caller` is, the App method their call runs, and whether the call
-   * may only read, admitted for `use` (`callerOf`).
-   */
-  async #callerOf(caller: unknown, use: InvocationKind): Promise<Resolved> {
-    const { app } = this.ctx.props;
-    const resolved = await callerOf(this.env, app, caller, use);
-    return {
-      authority: resolved.authority,
-      setter: { app, method: resolved.method },
-      readOnly: resolved.kind === "read",
-      stepKey: resolved.idempotencyKey,
-      path: resolved.path,
-    };
-  }
-
   /**
    * What `read` read, given who `caller` is as the App's host knows them
    * once the read needs it (`callerOf`), handed on as `handedBack` says:
@@ -196,189 +142,5 @@ export class AppCollectionBinding extends WorkerEntrypoint<
       caller,
       async (authorityOf) => await this.#reads(authorityOf).follow(documentId)
     );
-  }
-
-  /**
-   * A document with its frontmatter as data (`record`) and its Markdown
-   * (`body`), read as `getDocument` reads it: how App code, which has no
-   * YAML parser, reads a record.
-   */
-  async getRecord(
-    caller: unknown,
-    documentId: unknown,
-    version?: unknown
-  ): Promise<RecordRead> {
-    const { context, permissionId } = this.ctx.props;
-    return await this.#leaving(
-      caller,
-      async (authorityOf) =>
-        await readAsDelegate(
-          this.env,
-          authorityOf,
-          context,
-          permissionId,
-          async (reader) =>
-            await getRecord(this.env, reader, documentId, version)
-        )
-    );
-  }
-
-  /**
-   * A page of records (`{ after?, limit?, type? }`, at most 20), each read
-   * as `getRecord` reads its current version, in one read with one audit
-   * event: how App code reads many records without a read for each. Those
-   * that don't fit their type any more are in `unreadable`.
-   */
-  async listRecords(caller: unknown, options?: unknown): Promise<RecordPage> {
-    const { context, permissionId, collectionId } = this.ctx.props;
-    return await this.#leaving(
-      caller,
-      async (authorityOf) =>
-        await readAsDelegate(
-          this.env,
-          authorityOf,
-          context,
-          permissionId,
-          async (reader) =>
-            await listRecords(this.env, reader, collectionId, options)
-        )
-    );
-  }
-
-  /**
-   * Whether `saveRecord` would write for `caller` now, by the checks it
-   * makes (`canWriteAsDelegate` in records.ts): a permission to write the
-   * collection, a caller who may change it themselves, an App that
-   * hasn't read restricted data, and a call that may change things (not
-   * one through an export marked `read`). A hint for showing only what
-   * core takes: each write is checked again.
-   */
-  async canWrite(caller: unknown): Promise<boolean> {
-    const { collectionId } = this.ctx.props;
-    return await this.#run(
-      caller,
-      "read",
-      async ({ authority, readOnly }, grant) =>
-        !readOnly &&
-        (await canWriteAsDelegate(
-          this.env,
-          authority,
-          grant.context,
-          grant.permissionId,
-          collectionId
-        ))
-    );
-  }
-
-  /**
-   * The record types this App owns in the collection now, of those it
-   * declares there (record-types.ts): only the owner's saves may set a
-   * type's kept fields, so an App checks it owns the types it is about to
-   * write before it starts a write of several records. A hint, like
-   * `canWrite`: each save is checked again.
-   */
-  async ownedTypes(caller: unknown): Promise<string[]> {
-    const { app, collectionId } = this.ctx.props;
-    try {
-      await callerOf(this.env, app, caller, "read");
-      const declared = await declaredTypes(this.env, collectionId);
-      return [...declared]
-        .filter(([, rule]) => rule.app === app)
-        .map(([type]) => type)
-        .toSorted();
-    } catch (error) {
-      throw forSandbox(error);
-    }
-  }
-
-  /**
-   * Saves a record for `caller` (`{ path, ifVersion, record, body,
-   * message? }`, `recordSaveSchema`), through the save pipeline, with
-   * versions: only under a permission that writes the collection, and only
-   * for someone who may change it themselves. The record's type checks
-   * it; the kept fields its declaration gives to the method this call
-   * runs in are set as `record` has them, and every other one is kept
-   * (records.ts, `writeRecord`). Never from a call that may only read
-   * (`app.read_only`), and only while the call still may write, asked
-   * again just before the write's batch: a call that ended, lost what let
-   * it in, or whose code was stopped while the save was on its way writes
-   * nothing.
-   *
-   * Each save keeps a receipt (receipts.ts) under the caller's
-   * `idempotencyKey` (`{ idempotencyKey? }`, 1 to 128 printable ASCII
-   * characters), scoped to the caller, this App's version and method,
-   * and this collection and permission: the save retried under it
-   * answers the save made, and writes nothing; other input under it is
-   * `submission.key_conflict`. A workflow step's saves go under its step,
-   * by the caller's key or, without one, by their input. Without a key,
-   * a screen's save is its own. The save commits only before its call's
-   * deadline, by the database's clock, and not once a newer attempt of
-   * it began.
-   */
-  async saveRecord(
-    caller: unknown,
-    input: unknown,
-    options?: unknown
-  ): Promise<DocumentSummary> {
-    const { app, collectionId } = this.ctx.props;
-    return await this.#run(
-      caller,
-      "write",
-      async ({ authority, setter, token, stepKey, path }, grant) => {
-        // Before anything is done: a key that isn't one does nothing.
-        const parsed = submissionOptionsSchema.safeParse(options);
-        if (!parsed.success) {
-          throw submissionErrors.create("submission.key_invalid");
-        }
-        const callerKey = parsed.data?.idempotencyKey;
-        return await saveRecordAsDelegate(
-          this.env,
-          authority,
-          grant.context,
-          grant.permissionId,
-          collectionId,
-          input,
-          setter,
-          async () => {
-            await stillAdmitted(this.env, app, token, "write");
-          },
-          (inputHash) => ({
-            ...submissionKey(stepKey, callerKey, inputHash),
-            scope: {
-              principal: authority.onBehalfOf,
-              chain: path.chain,
-              appVersion: authority.appVersion ?? 0,
-              method: setter.method,
-              collectionId,
-              permissionId: grant.permissionId,
-            },
-            deadline: path.deadline,
-          })
-        );
-      }
-    );
-  }
-
-  /**
-   * Runs `run` for `caller`, admitted for `use`, with errors as the
-   * sandbox sees them.
-   */
-  async #run<T>(
-    caller: unknown,
-    use: InvocationKind,
-    run: (
-      resolved: Resolved & { token: string },
-      grant: CollectionGrant
-    ) => Promise<T>
-  ): Promise<T> {
-    const { app: _app, ...grant } = this.ctx.props;
-    try {
-      // The caller is read once: its token is all that counts.
-      const token = tokenOf(caller);
-      const resolved = await this.#callerOf({ token }, use);
-      return await run({ ...resolved, token }, grant);
-    } catch (error) {
-      throw forSandbox(error);
-    }
   }
 }

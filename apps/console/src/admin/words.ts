@@ -7,7 +7,9 @@
  * its leads' and its works'), never anything someone wrote or said.
  */
 import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
+import type { Interviewer } from "@grasp-os/shared/admin/interviewer";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
+import type { Phase } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
   listenDays,
@@ -15,6 +17,8 @@ import {
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   ContractState,
+  KnowledgeSource,
+  LinkState,
   Need,
   OrgView,
   Settler,
@@ -52,8 +56,14 @@ export const formatDate = (iso: string): string => {
   return `${day} ${month} ${year}`;
 };
 
+/** "2026-09-02" as "2 Sep". */
+export const formatDay = (iso: string): string => {
+  const { month, day } = partsOf(iso);
+  return `${day} ${month}`;
+};
+
 /** "2026-09" as "Sep 2026". */
-const formatMonth = (iso: string): string => {
+export const formatMonth = (iso: string): string => {
   const { year, month } = partsOf(`${iso}-01`);
   return `${month} ${year}`;
 };
@@ -83,6 +93,31 @@ export const euro = (amount: number): string =>
 /** Hours and the like, as whole numbers. */
 export const whole = (value: number): string => wholeNumber.format(value);
 
+const oneDecimal = new Intl.NumberFormat("en", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+/** Tokens, said short: "17.2 million", "312 thousand", or the number itself. */
+export const tokens = (count: number): string => {
+  if (count >= 1e6) {
+    return `${oneDecimal.format(count / 1e6)} million`;
+  }
+  if (count >= 1e3) {
+    return `${whole(count / 1e3)} thousand`;
+  }
+  return whole(count);
+};
+
+const wholePercent = new Intl.NumberFormat("en", {
+  style: "percent",
+  maximumFractionDigits: 0,
+});
+
+/** A share, 0.42, as "42%". */
+export const formatPercent = (share: number): string =>
+  wholePercent.format(share);
+
 /** "a, b and c". */
 export const formatList = (items: string[]): string =>
   new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(
@@ -90,7 +125,7 @@ export const formatList = (items: string[]): string =>
   );
 
 /** One for one, many for the rest: `${count} ${plural(count, "thing", "things")}`. */
-const plural = (count: number, one: string, other: string): string =>
+export const plural = (count: number, one: string, other: string): string =>
   count === 1 ? one : other;
 
 /** The steps of an onboarding. */
@@ -111,6 +146,19 @@ export const phaseWords: Record<AdminPhase, string> = {
   interviews: "Interviews",
   ready: "Ready",
   open: "Open",
+};
+
+/** What each source of what Grasp knows about a company is (`knowledge-words.ts`). */
+export const knowledgeWords: Record<KnowledgeSource, string> = {
+  vision: "The first conversation and the research",
+  directory: "Who works where, from the sign-in",
+  sources: "Where the documents live, connected",
+  documents: "Documents dropped in",
+  pulse: "Pulse",
+  leadsKnown: "Team leads, from the HR platform",
+  leadsHeard: "Team leads interviewed",
+  everyoneHeard: "Everyone else interviewed",
+  review: "Workflows known",
 };
 
 /** Where a contract stands. */
@@ -320,4 +368,52 @@ export const needLine = (need: Need, view: OrgView): string => {
       return need satisfies never;
     }
   }
+};
+
+/** Where someone stands with their link (the prototype's `link` words). */
+export const linkWords: Record<LinkState, string> = {
+  waiting: "No link yet",
+  invited: "Invited",
+  opened: "Opened",
+  progress: "Talking now",
+  incomplete: "Stopped halfway",
+  completed: "Completed",
+  expired: "Link expired",
+  away: "Away",
+};
+
+/** The parts of an interview, as the person going through it sees them named. */
+export const interviewPhaseWords: Record<Phase, string> = {
+  open: "Hello",
+  you: "You and AI",
+  anchor: "One real case",
+  story: "Your story",
+  steps: "Step by step",
+  exceptions: "When it goes differently",
+  numbers: "The numbers",
+  result: "Done right",
+  readback: "Reading it back",
+};
+
+/** The interviewers by name. */
+export const interviewerNames: Record<Interviewer, string> = {
+  stephen: "Stephen",
+  claire: "Claire",
+};
+
+/** So many of so many have had their interview: "3 of 9 talked". */
+export const talkedWords = (count: number, total: number): string =>
+  `${count} of ${total} talked`;
+
+/** What each source of what Grasp knows about a company is (the prototype's `knowledge-words.ts`). */
+export const knowledgeSourceWords: Record<KnowledgeSource, string> = {
+  vision: "The first conversation and the research",
+  directory: "Who works where, from the sign-in",
+  sources: "Where the documents live, connected",
+  documents: "Documents dropped in",
+  pulse: "Pulse",
+  leadsKnown: "Team leads, from the HR platform",
+  leadsHeard: "Team leads interviewed",
+  everyoneHeard: "Everyone else interviewed",
+  review: "Workflows known",
 };
