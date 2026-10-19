@@ -186,6 +186,15 @@ const probingAssets = (program: string): Fetcher => ({
   connect: env.ASSETS.connect.bind(env.ASSETS),
 });
 
+/** A tarball's header, as core hands the builder one to read. */
+const header = {
+  key: "left-pad@1.3.0",
+  name: "left-pad",
+  version: "1.3.0",
+  integrity: "sha512-x",
+  size: 1,
+};
+
 /** What `entrypoint` answers to `method` with `args`: "worked", or why it refused. */
 const refusalOf = async (
   entrypoint: unknown,
@@ -287,6 +296,45 @@ describe(
           loaderCode(await code(env.ASSETS), settings, { DB: "a credential" })
         ).getEntrypoint();
         await expect(refusalOf(bound, method, args)).resolves.toBe("refused");
+      }
+    );
+
+    it.each([
+      [
+        "an inspection's",
+        "inspectRead",
+        (read: () => Promise<Uint8Array>) => [{}, [header], read],
+      ],
+      [
+        "a build's",
+        "buildRead",
+        (read: () => Promise<Uint8Array>) => [
+          { packages: [header] },
+          read,
+          async () => {
+            // Nothing is written.
+          },
+        ],
+      ],
+    ] as const)(
+      "refuse %s tarballs in an isolate handed a binding before reading a byte of them",
+      async (_case, method, argsWith) => {
+        let reads = 0;
+        const read = async (): Promise<Uint8Array> => {
+          reads += 1;
+          return await Promise.resolve(new Uint8Array(0));
+        };
+        const bound = env.LOADER.load(
+          loaderCode(
+            await packageBuilderCode(env.ASSETS),
+            packageBuilderSettings,
+            { DB: "a credential" }
+          )
+        ).getEntrypoint();
+        await expect(refusalOf(bound, method, argsWith(read))).resolves.toBe(
+          "refused"
+        );
+        expect(reads).toBe(0);
       }
     );
 
