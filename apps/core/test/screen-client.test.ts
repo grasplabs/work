@@ -2528,6 +2528,53 @@ const organizationRoleOf = async (userId: string) =>
     .bind(userId)
     .first<string>("role");
 
+/**
+ * The App hosts' namespace as a connection sees it that tells only
+ * `app`'s host of a revocation: every other `accessRevoked` is taken at
+ * once, without waking the host, and counted in `told`.
+ */
+const quickRevocations = (
+  namespace: Env["APPS"],
+  app: string,
+  told: { others: number }
+): Env["APPS"] =>
+  new Proxy(namespace, {
+    get: (target, property): unknown => {
+      if (property === "getByName") {
+        return (name: string) => {
+          const stub = target.getByName(name);
+          if (name === app) {
+            return stub;
+          }
+          return new Proxy(stub, {
+            get: (inner, method): unknown => {
+              if (method === "accessRevoked") {
+                return async () => {
+                  await Promise.resolve();
+                  told.others += 1;
+                };
+              }
+              const value: unknown = Reflect.get(inner, method);
+              if (typeof value !== "function") {
+                return value;
+              }
+              // A stub's method answers any property as another method,
+              // `bind` included: called through, never bound.
+              return (...args: unknown[]): unknown =>
+                Reflect.apply(value, inner, args);
+            },
+          });
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+
 /** A cleared screen: its last push a refusal, and core let go of it. */
 const refusedAndLetGo = { last: "app.not_found", released: true };
 
@@ -3504,18 +3551,29 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     });
   });
 
-  it("clears the screen of an admin demoted out of an App past the first page of Apps, at once", async () => {
+  it("clears the screen of an admin demoted out of an App past the first pages of Apps, at once", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");
     const demoted = await personApi("admin");
-    // Before it in ID order: it is on the second page.
-    await manyApps(admin.userId, 250, [demoted.userId], "!");
+    // Before it in ID order: it is on the third page.
+    await manyApps(admin.userId, 450, [demoted.userId], "!");
     const { lease } = await demoted.api.screens.open(opened.app, "notes");
     await demoted.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, demoted.api.screens, lease);
+    // The admin's own connection, whose word reaches only the opened App's
+    // host and takes no time for the others: what is told at once is
+    // what the change's own budget expands, however fast hosts wake.
+    const told = { others: 0 };
+    const { core } = await openRpc(admin.session, {
+      coreEnv: {
+        ...env,
+        APPS: quickRevocations(env.APPS, opened.app, told),
+      },
+    });
 
-    await admin.api.members.setRole(demoted.userId, "user");
+    await core.authenticate().members.setRole(demoted.userId, "user");
 
+    expect(told.others).toBeGreaterThanOrEqual(450);
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
