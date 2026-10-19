@@ -1168,14 +1168,19 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       async () => {
         const held = await admit(holder, "holder");
         const stop = endingEverySecond(holderRun.id);
-        const run = await builder.api.workflows.start(app, "work");
-        // In its second round, ten seconds long, the share comes free.
-        const wakesAt = await eventually2(async () => {
-          const wakes = await loadWakesOf(run.id);
-          expect(wakes).toHaveLength(2);
-          return wakes[1] ?? 0;
-        });
-        await stop();
+        let run: { id: string };
+        let wakesAt: number;
+        try {
+          run = await builder.api.workflows.start(app, "work");
+          // In its second round, ten seconds long, the share comes free.
+          wakesAt = await eventually2(async () => {
+            const wakes = await loadWakesOf(run.id);
+            expect(wakes).toHaveLength(2);
+            return wakes[1] ?? 0;
+          });
+        } finally {
+          await stop();
+        }
         await settled(held);
         await eventually(async () => {
           await expect(liveStatus(run.id)).resolves.toBe("complete");
