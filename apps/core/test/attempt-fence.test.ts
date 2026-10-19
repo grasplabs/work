@@ -2,7 +2,6 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { toHex } from "@grasp-os/shared/encoding";
 import {
   appIdSchema,
-  collectionIdSchema,
   permissionIdSchema,
   runIdSchema,
   workflowIdSchema,
@@ -22,7 +21,6 @@ import {
 import { callApp } from "../src/app.ts";
 import { runBindingsFor } from "../src/bindings.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { AppCollectionBinding } from "../src/knowledge/app-binding.ts";
 import type { CollectionBinding } from "../src/knowledge/binding.ts";
 import {
   AttemptHost,
@@ -39,7 +37,8 @@ import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
 import { aroundEngine, endLiveRuns, runObject, sleeping } from "./runs.ts";
-import { outcome as codeOfCall, signedInApi, unique } from "./sign-in.ts";
+import { outcome as codeOfCall, signedInApi } from "./sign-in.ts";
+import { v1AppWith } from "./v1-app-server.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // What leaves the host for an attempt's code passes one fence
@@ -577,20 +576,6 @@ const parking = (options = "") =>
     { park: null }
   );
 
-/** The tasks a records collection keeps (`app/records.json`). */
-const taskType = (collection: string) =>
-  JSON.stringify({
-    task: {
-      collection,
-      description: "Something to do",
-      schema: {
-        type: "object",
-        properties: { status: { enum: ["open", "done"] } },
-        required: ["status"],
-      },
-    },
-  });
-
 /**
  * A run of a new App of a builder's (`person`, or a new one), granted `mail.search` on a mail
  * connection of its own (MAIL) and `files` beside the App's, whose step
@@ -608,7 +593,7 @@ const parkedRun = async (
 ) => {
   const builder = person ?? (await personApi("builder"));
   const identity = await builder.api.whoami();
-  const app = appIdSchema.parse(await appWith(builder, files));
+  const app = appIdSchema.parse(await v1AppWith(builder, files));
   const server = await mailConnection([], mailWithSearch);
   const mailGrant = permissionIdSchema.parse(
     await requestGranted(idp, builder, {
@@ -666,6 +651,9 @@ const cancelledAfterCheck = async (
   );
 };
 
+// The v1 App server's stubs and caller tokens, which only its methods
+// reach: they go with it (GRA-645). A sealed function's calls are fenced
+// by the run's lease instead (run-functions.test.ts).
 describe(
   "a stub call of an App method a step's attempt runs",
   { timeout: 60_000 },
@@ -674,7 +662,7 @@ describe(
 
     it("acts only while the method still runs as its last check is made, the attempt's checked before", async () => {
       const builder = await personApi("builder");
-      const app = await appWith(
+      const app = await v1AppWith(
         builder,
         workflowFiles(
           "parks",
@@ -779,61 +767,6 @@ describe(
       expect(pointed).toBe("app.caller_invalid");
     });
 
-    it("writes no record once its run was cancelled after its last attempt check", async () => {
-      // The run acts for an admin, who may write to the collection.
-      const admin = await personApi("admin");
-      const { id: collectionId } = await admin.api.knowledge.createCollection({
-        name: `Tasks ${unique()}`,
-        access: "everyone",
-      });
-      let tasks = "";
-      const { identity, app, run, token, server } = await parkedRun(
-        { ...parking(), "app/records.json": taskType(collectionId) },
-        async (builder, appId) => {
-          tasks = await requestGranted(idp, builder, {
-            subject: { type: "app", appId },
-            object: { type: "collection", collectionId },
-            actions: ["read", "write"],
-            binding: "TASKS",
-          });
-        },
-        admin
-      );
-      const path = `tasks/${unique()}.md`;
-      const records = stubOn(AppCollectionBinding, {
-        app,
-        context: { type: "app", appId: app },
-        permissionId: permissionIdSchema.parse(tasks),
-        collectionId: collectionIdSchema.parse(collectionId),
-      });
-      const saved = await cancelledAfterCheck(
-        run,
-        identity,
-        2,
-        async () =>
-          await records.saveRecord(
-            { token },
-            {
-              path,
-              ifVersion: 0,
-              record: { type: "task", status: "open" },
-              body: "",
-            }
-          )
-      );
-      await server.release();
-      const written = await env.KNOWLEDGE.prepare(
-        "SELECT count(*) AS written FROM documents WHERE collection_id = ? AND path = ?"
-      )
-        .bind(collectionId, path)
-        .first<number>("written");
-
-      expect({ saved, written }).toStrictEqual({
-        saved: "app.caller_invalid",
-        written: 0,
-      });
-    });
-
     it("is refused by its App once its run's cancel was finished by the run's object, the revoke repeated there", async () => {
       const { identity, app, run, token, server } = await parkedRun();
       const host = appHost(env, app);
@@ -888,7 +821,7 @@ describe(
     it("starts no App call the attempt left queued once it has returned", async () => {
       const builder = await personApi("builder");
       const app = appIdSchema.parse(
-        await appWith(
+        await v1AppWith(
           builder,
           workflowFiles(
             "leaves",

@@ -24,6 +24,7 @@ import {
   asc,
   eq,
   isNotNull,
+  inArray,
   isNull,
   lte,
   gt,
@@ -130,6 +131,30 @@ export const purgeGraceMs = 2 * 60_000;
  */
 const writeLifetimeMs = 60 * 60_000;
 
+/**
+ * How long one finish's check of an upload's bytes holds the upload's
+ * claim (`publishable`), at most: another finish meanwhile waits for it
+ * rather than reading and hashing the whole file again. A check that
+ * never reports back (its request died) lets the next one claim it then:
+ * well within the page's time for an answer (`fileLimits.chunkSendMs`), so
+ * a finish sent again after a lost answer is answered before it gives up.
+ */
+export const finishClaimMs = fileLimits.chunkSendMs / 2;
+
+/** One finish's claim on an upload: until when, and settled when it ends. */
+interface FinishClaim {
+  readonly id: string;
+  readonly until: number;
+  readonly ended: Promise<null>;
+  readonly end: () => void;
+}
+
+/**
+ * How long after a failed removal of a write's object it is tried again:
+ * the alarm's own wait after its work failed (store-host.ts).
+ */
+export const removalRetryMs = 30_000;
+
 /** How often a file's readability is checked when its holders keep changing. */
 const readableAttempts = 3;
 
@@ -149,7 +174,7 @@ const sameHolders = (
 ): boolean => holdersKey(one) === holdersKey(other);
 
 /** Files the alarm deletes or purges per transaction. */
-const sweepPage = 50;
+export const sweepPage = 50;
 
 /** Audit events handed to core per hand-over. */
 const eventsPage = 50;
@@ -212,6 +237,8 @@ export interface FileContent extends FileDescription {
 
 /** An upload all of whose chunks arrived: what its check reads. */
 export interface Publishable {
+  /** This finish's claim on the upload, which `publish` ends. */
+  readonly claim: string;
   readonly chunks: readonly RecordedChunk[];
   readonly size: number;
   readonly sha256: string;
@@ -282,6 +309,8 @@ export class FileHost {
   readonly #env: Env;
   readonly #db: DrizzleSqliteDODatabase;
   readonly #store: FileStoreAccess;
+  /** The uploads a finish is checking now, by file: one check at a time. */
+  readonly #finishing = new Map<string, FinishClaim>();
 
   constructor(
     storage: DurableObjectStorage,
@@ -453,6 +482,11 @@ export class FileHost {
       }
       if (row.deletedHow === "cancelled") {
         return row;
+      }
+      // Its bytes weren't the file it declared: said so to whoever asks
+      // after, a finish that waited for the check among them.
+      if (row.deletedHow === "rejected") {
+        throw fileErrors.create("file.content_mismatch");
       }
       throw notFound();
     }
@@ -770,31 +804,84 @@ export class FileHost {
 
   /**
    * `principal`'s upload `fileId`, all of whose chunks arrived, for its
-   * check; or its state when it is published already (a finish sent
-   * again). `file.incomplete` while a chunk is missing.
+   * check, claimed for it until `publish` (or `finishClaimMs`); or its
+   * state when it is published already (a finish sent again).
+   * `file.incomplete` while a chunk is missing. While another finish's
+   * check holds the claim, this one waits for it to end, then answers as
+   * the upload is then: a finish sent again after a lost answer reads and
+   * hashes the file no second time.
    */
-  publishable(
+  async publishable(
     storeId: StoreId,
     principal: string,
     resource: unknown,
     fileId: unknown
-  ): Publishable | UploadState {
-    return this.#storage.transactionSync(() => {
-      const row = this.#ownUpload(storeId, principal, fileId, resource);
-      if (row.state !== "uploading") {
-        return this.#stateOf(row);
+  ): Promise<Publishable | UploadState> {
+    for (;;) {
+      const now = Date.now();
+      const found = this.#storage.transactionSync(
+        (): Publishable | UploadState | FinishClaim => {
+          const row = this.#ownUpload(storeId, principal, fileId, resource);
+          if (row.state !== "uploading") {
+            return this.#stateOf(row);
+          }
+          const chunks = this.#chunks(row.fileId);
+          if (chunks.length !== chunksOf(row.size)) {
+            throw fileErrors.create("file.incomplete");
+          }
+          const claim = this.#finishing.get(row.fileId);
+          if (claim !== undefined && claim.until > now) {
+            return claim;
+          }
+          const { promise: ended, resolve } = Promise.withResolvers<null>();
+          const id = crypto.randomUUID();
+          this.#finishing.set(row.fileId, {
+            id,
+            until: now + finishClaimMs,
+            ended,
+            end: () => {
+              resolve(null);
+            },
+          });
+          return {
+            claim: id,
+            chunks: chunks.map(({ key, sha256 }) => ({ key, sha256 })),
+            size: row.size,
+            sha256: row.sha256,
+            mimeType: typeOf(row),
+          };
+        }
+      );
+      if (!("ended" in found)) {
+        return found;
       }
-      const chunks = this.#chunks(row.fileId);
-      if (chunks.length !== chunksOf(row.size)) {
-        throw fileErrors.create("file.incomplete");
-      }
-      return {
-        chunks: chunks.map(({ key, sha256 }) => ({ key, sha256 })),
-        size: row.size,
-        sha256: row.sha256,
-        mimeType: typeOf(row),
-      };
-    });
+      // oxlint-disable-next-line no-await-in-loop -- until the check ends, then looked at again
+      await Promise.race([found.ended, scheduler.wait(found.until - now)]);
+    }
+  }
+
+  /**
+   * Ends the claim of `principal`'s finish on upload `fileId` whose check
+   * failed before it could say (R2 out, say), so the next finish checks
+   * at once rather than at the claim's end.
+   */
+  abandonFinish(fileId: string, claim: string): void {
+    // No lookup of the upload, which may have ended meanwhile: the claim
+    // is a key only the finish that took it has, never sent anywhere.
+    this.#endClaim(fileId, claim);
+  }
+
+  /**
+   * Ends finish claim `id` on `fileId`, letting any waiting one go on:
+   * only that one, never a claim another finish took once it expired.
+   */
+  #endClaim(fileId: string, id: string): void {
+    const claim = this.#finishing.get(fileId);
+    if (claim?.id !== id) {
+      return;
+    }
+    this.#finishing.delete(fileId);
+    claim.end();
   }
 
   /**
@@ -805,6 +892,25 @@ export class FileHost {
    * record holds it.
    */
   publish(
+    storeId: StoreId,
+    principal: string,
+    resource: unknown,
+    fileId: unknown,
+    verified: boolean,
+    claim: string
+  ): UploadState {
+    // Whatever it answers, this finish's check is over.
+    try {
+      return this.#published(storeId, principal, resource, fileId, verified);
+    } finally {
+      if (typeof fileId === "string") {
+        this.#endClaim(fileId, claim);
+      }
+    }
+  }
+
+  /** `publish`, its claim apart. */
+  #published(
     storeId: StoreId,
     principal: string,
     resource: unknown,
@@ -1198,10 +1304,21 @@ export class FileHost {
       .from(fileWrites)
       .where(eq(fileWrites.condemned, false))
       .all();
+    // Condemned and removed: kept, should a late put land, until a write
+    // could no longer land.
     const [condemned] = this.#db
       .select({ at: min(fileWrites.issuedAt) })
       .from(fileWrites)
-      .where(eq(fileWrites.condemned, true))
+      .where(
+        and(eq(fileWrites.condemned, true), isNotNull(fileWrites.removedAt))
+      )
+      .all();
+    // Condemned but its removal failed: due again a retry's wait after it
+    // was last tried, however often the store's activity sets the alarm.
+    const [unremoved] = this.#db
+      .select({ at: min(fileWrites.removeTriedAt) })
+      .from(fileWrites)
+      .where(and(eq(fileWrites.condemned, true), isNull(fileWrites.removedAt)))
       .all();
     const times = [
       event === undefined ? null : Date.now(),
@@ -1209,6 +1326,7 @@ export class FileHost {
       typeof unpurged?.at === "number" ? unpurged.at + purgeGraceMs : null,
       typeof unsettled?.at === "number" ? unsettled.at + purgeGraceMs : null,
       typeof condemned?.at === "number" ? condemned.at + writeLifetimeMs : null,
+      typeof unremoved?.at === "number" ? unremoved.at + removalRetryMs : null,
     ].filter((time): time is number => typeof time === "number");
     return times.length === 0 ? null : Math.min(...times);
   }
@@ -1220,6 +1338,14 @@ export class FileHost {
    * audit events over.
    */
   async sweep(storeId: StoreId, now = Date.now()): Promise<void> {
+    // Claims of finishes that never reported back (their request died),
+    // let go of once expired, so none outlives its upload in memory.
+    for (const [fileId, claim] of this.#finishing) {
+      if (claim.until <= now) {
+        this.#finishing.delete(fileId);
+        claim.end();
+      }
+    }
     this.#storage.transactionSync(() => {
       const due = this.#db
         .select()
@@ -1273,8 +1399,14 @@ export class FileHost {
         files: purgeable.length,
       });
     }
-    await this.#removeUnsettled(now);
-    await this.flushEvents();
+    try {
+      await this.#removeUnsettled(now);
+    } finally {
+      // Handed over however the removals went: R2 failing for a while
+      // never holds the audit events back. Its failure still fails the
+      // alarm, which tries again after its retry wait.
+      await this.flushEvents();
+    }
   }
 
   /**
@@ -1319,10 +1451,26 @@ export class FileHost {
       const due = this.#db
         .select({ key: fileWrites.key, issuedAt: fileWrites.issuedAt })
         .from(fileWrites)
-        .where(lte(fileWrites.issuedAt, now - purgeGraceMs))
-        // Writes not yet looked at first: those removed already, kept for
-        // a late put, never crowd them out of a page.
-        .orderBy(asc(fileWrites.condemned), asc(fileWrites.issuedAt))
+        .where(
+          and(
+            lte(fileWrites.issuedAt, now - purgeGraceMs),
+            // A removal that failed waits a retry's wait, however often
+            // the store's activity brings the alarm forward.
+            or(
+              isNull(fileWrites.removeTriedAt),
+              isNotNull(fileWrites.removedAt),
+              lte(fileWrites.removeTriedAt, now - removalRetryMs)
+            )
+          )
+        )
+        // Writes whose removal is still owed (not looked at yet, or a
+        // removal that failed) first: those removed already, kept for a
+        // late put, never crowd them out of a page.
+        .orderBy(
+          sql`${fileWrites.removedAt} IS NOT NULL`,
+          asc(fileWrites.condemned),
+          asc(fileWrites.issuedAt)
+        )
         .limit(sweepPage)
         .all();
       const condemned: string[] = [];
@@ -1337,9 +1485,11 @@ export class FileHost {
           .where(eq(fileChunks.key, key))
           .get();
         if (recorded === undefined) {
+          // Not removed until its removal succeeds: a failed one is due
+          // again at the alarm's next try (`nextDue`).
           this.#db
             .update(fileWrites)
-            .set({ condemned: true })
+            .set({ condemned: true, removedAt: null, removeTriedAt: now })
             .where(eq(fileWrites.key, key))
             .run();
           condemned.push(key);
@@ -1356,9 +1506,17 @@ export class FileHost {
       return;
     }
     await this.#env.FILES.delete(keys);
-    for (const key of done) {
-      this.#db.delete(fileWrites).where(eq(fileWrites.key, key)).run();
-    }
+    const removedAt = Date.now();
+    this.#storage.transactionSync(() => {
+      this.#db
+        .update(fileWrites)
+        .set({ removedAt })
+        .where(inArray(fileWrites.key, keys))
+        .run();
+      for (const key of done) {
+        this.#db.delete(fileWrites).where(eq(fileWrites.key, key)).run();
+      }
+    });
     log.info("app_file.unsettled_removed", { objects: keys.length });
   }
 

@@ -1,4 +1,6 @@
-// A workflow record as the Playbook keeps it, and the numbers the map
+import type { Id } from "@grasp-os/sdk";
+
+// A workflow's fields as the map reads them, and the numbers the map
 // shows for it: how many hours a week it takes, how many people and
 // handovers it has, and what a designed workflow is expected to save
 // against the drawn one.
@@ -44,13 +46,13 @@ export interface Parameter {
   value?: string;
 }
 
-/** A workflow record's fields, as the Playbook reads them. */
+/** A workflow's fields, as the map reads them (store.ts `recordFrom`). */
 export interface WorkflowRecord {
   type: "workflow";
-  title?: string;
+  title: string;
   state: "drawn" | "designed";
-  /** Its team's record, by path. */
-  team?: string;
+  /** Its team, by ID. */
+  team?: Id<"teams">;
   steps: Step[];
   parameters: Parameter[];
   gain?: { hoursPerWeek: number };
@@ -116,8 +118,8 @@ export const expectedGain = (
   return Math.max(0, Math.round(saved * 10) / 10);
 };
 
-// The workflow record type's limits (app/records.json, which the Playbook
-// checks again on every save). Each input is bounded; the gain is worked out from them, and a
+// A workflow's limits (schema.ts, which the store checks again on every
+// save). Each input is bounded; the gain is worked out from them, and a
 // product of in-range numbers can still pass its limit, so the map checks
 // it before saving (record.ts `draftProblem`).
 

@@ -13,6 +13,7 @@ import {
 import type {
   AppRequest,
   AppRequestInput,
+  CatalogEntry,
   CatalogSource,
   ConnectionScope,
   CatalogTool,
@@ -194,6 +195,24 @@ const hiddenEntries = async (env: Env): Promise<Set<string>> => {
     })
     .from(hiddenConnectors);
   return new Set(rows.map(({ source, id }) => entryKey(source, id)));
+};
+
+/**
+ * The catalog's entries, each with whether an admin hid it: what isn't
+ * hidden is what can be connected here, as everyone but an admin sees the
+ * catalog.
+ */
+export const catalogEntries = async (
+  env: Env
+): Promise<(CatalogEntry & { hidden: boolean })[]> => {
+  const [catalog, hidden] = await Promise.all([
+    env.CONNECT.catalog(),
+    hiddenEntries(env),
+  ]);
+  return catalog.entries.map((entry) => ({
+    ...entry,
+    hidden: hidden.has(entryKey(entry.source, entry.id)),
+  }));
 };
 
 /** Whether an admin hid the entry `source` `id`. */

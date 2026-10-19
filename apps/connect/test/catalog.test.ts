@@ -44,7 +44,7 @@ const toolkits: FakeToolkit[] = [
     description: null,
     tools: [{ slug: "LINEAR_LIST_ISSUES" }],
   },
-  // Composio holds no app for it: an admin would need one of their own.
+  // Composio holds no app for it: listed, as needing the organization's own.
   {
     slug: "acme_erp",
     name: "Acme ERP",
@@ -86,6 +86,13 @@ const { state: composio } = fakeComposioApi(toolkits, {
       name: "No count",
       composio_managed_auth_schemes: ["OAUTH2"],
     },
+    // Tools, but no account to connect: none of its own, nor Composio's.
+    {
+      slug: "no_account",
+      name: "No account",
+      no_auth: true,
+      meta: { tools_count: 2 },
+    },
   ],
 });
 
@@ -100,6 +107,7 @@ describe("the catalog", () => {
       ["native", "google", "Google Workspace"],
       ["composio", "hubspot", "HubSpot"],
       ["composio", "linear", "Linear"],
+      ["composio", "acme_erp", "Acme ERP"],
       ["composio", "notion", "Notion"],
     ]);
     expect(listed.entries.find(({ id }) => id === "hubspot")).toStrictEqual({
@@ -114,6 +122,7 @@ describe("the catalog", () => {
       description:
         "HubSpot is a CRM platform for marketing, sales and service.",
       group: "CRM",
+      auth: "managed",
     });
   });
 
@@ -138,13 +147,14 @@ describe("the catalog", () => {
         "CRM",
       ],
       ["linear", null, "Projects and tasks"],
+      ["acme_erp", "Acme ERP toolkit", "Other"],
       ["notion", null, "Other"],
     ]);
   });
 
   it("reads every page of Composio's list, with connect's key, following no redirect", async () => {
     await exports.default.catalog();
-    // Five toolkits and four other items, two to a page.
+    // Five toolkits and five other items, two to a page.
     expect(composio.requests).toHaveLength(5);
     expect(
       composio.requests.every(
@@ -154,15 +164,15 @@ describe("the catalog", () => {
     ).toBeTruthy();
   });
 
-  it("leaves out toolkits Composio holds no app for, those without tools, and items it can't read", async () => {
+  it("lists toolkits Composio holds no app for as needing the organization's own, and leaves out those without tools or an account, and items it can't read", async () => {
     const { entries } = await exports.default.catalog();
-    const ids = entries.map(({ id }) => id);
-    expect(ids).toStrictEqual([
-      "microsoft",
-      "google",
-      "hubspot",
-      "linear",
-      "notion",
+    expect(entries.map(({ id, auth }) => [id, auth])).toStrictEqual([
+      ["microsoft", "managed"],
+      ["google", "managed"],
+      ["hubspot", "managed"],
+      ["linear", "managed"],
+      ["acme_erp", "own"],
+      ["notion", "managed"],
     ]);
   });
 
@@ -320,6 +330,14 @@ describe("a catalog entry's tools", () => {
     ]);
   });
 
+  it("lists the tools of a toolkit that needs the organization's own app, so people see what connecting it would do", async () => {
+    const tools = await exports.default.catalogTools({
+      source: "composio",
+      id: "acme_erp",
+    });
+    expect(tools.map(({ name }) => name)).toStrictEqual(["ACME_LIST"]);
+  });
+
   it("lists a tool whose tags it can't read as one that changes things", async () => {
     const tools = await exports.default.catalogTools({
       source: "composio",
@@ -376,9 +394,9 @@ describe("a catalog entry's tools", () => {
       { source: "composio", id: "nobody" },
       { source: "composio", id: "../toolkits" },
       // Toolkits Composio lists, but the catalog doesn't.
-      { source: "composio", id: "acme_erp" },
       { source: "composio", id: "empty_kit" },
       { source: "composio", id: "no_count" },
+      { source: "composio", id: "no_account" },
       { source: "native", id: "hubspot" },
     ] as const;
     const ends = await Promise.all(

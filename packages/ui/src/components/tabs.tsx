@@ -6,20 +6,33 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
+// The room between the tabs and what they show: `none` where the row of
+// tabs sits in a bar of its own, ruled off from the panel under it.
+const tabsVariants = cva("group/tabs flex data-horizontal:flex-col", {
+  variants: {
+    spacing: {
+      default: "gap-2",
+      none: "gap-0",
+    },
+  },
+  defaultVariants: {
+    spacing: "default",
+  },
+});
+
 function Tabs({
   className,
   orientation = "horizontal",
+  spacing = "default",
   ...props
-}: TabsPrimitive.Root.Props) {
+}: TabsPrimitive.Root.Props & VariantProps<typeof tabsVariants>) {
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
       data-orientation={orientation}
+      data-spacing={spacing}
       orientation={orientation}
-      className={cn(
-        "group/tabs flex gap-2 data-horizontal:flex-col",
-        className
-      )}
+      className={cn(tabsVariants({ spacing }), className)}
       {...props}
     />
   );
@@ -31,7 +44,7 @@ function Tabs({
 // An end with more tabs behind it fades (`watchRow` marks it), since nothing else would say so,
 // and the open tab stays clear of that fade: both are the same 1.5rem.
 const tabsListVariants = cva(
-  "group/tabs-list text-muted-foreground relative inline-flex w-fit max-w-full scroll-px-6 items-center justify-start overflow-x-auto overflow-y-hidden rounded-lg p-[3px] group-data-horizontal/tabs:h-9 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col group-data-vertical/tabs:overflow-visible data-more-end:mask-r-from-[calc(100%-1.5rem)] data-more-start:mask-l-from-[calc(100%-1.5rem)] data-[variant=line]:rounded-none data-[variant=line]:group-data-horizontal/tabs:h-[41px] data-[variant=line]:group-data-horizontal/tabs:pb-2",
+  "group/tabs-list text-muted-foreground relative inline-flex w-fit max-w-full scroll-px-6 items-center justify-start overflow-x-auto overflow-y-hidden rounded-lg p-[3px] group-data-horizontal/tabs:h-9 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col group-data-vertical/tabs:overflow-visible data-more-end:mask-r-from-[calc(100%-1.5rem)] data-more-start:mask-l-from-[calc(100%-1.5rem)] data-[variant=line]:rounded-none data-[variant=line]:group-data-horizontal/tabs:h-10.25 data-[variant=line]:group-data-horizontal/tabs:pb-2",
   {
     variants: {
       variant: {
@@ -75,7 +88,7 @@ function TabsList({
       {variant === "line" ? (
         <TabsPrimitive.Indicator
           data-slot="tabs-indicator"
-          className="bg-foreground ease-sidebar absolute bottom-[3px] left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full transition-[translate,width] duration-300 group-data-vertical/tabs:hidden motion-reduce:transition-none"
+          className="bg-foreground ease-sidebar absolute bottom-0.75 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full transition-[translate,width] duration-300 group-data-vertical/tabs:hidden motion-reduce:transition-none"
         />
       ) : null}
     </TabsPrimitive.List>
@@ -90,7 +103,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
         "text-foreground/60 hover:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring dark:text-muted-foreground dark:hover:text-foreground relative inline-flex h-[calc(100%-1px)] flex-1 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-disabled:pointer-events-none aria-disabled:opacity-50 group-data-[variant=default]/tabs-list:data-active:shadow-sm group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
         "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
-        "after:bg-foreground after:absolute after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-vertical/tabs:group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        "after:bg-foreground after:absolute after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:-bottom-1.25 group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-vertical/tabs:group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
         className
       )}
       {...props}

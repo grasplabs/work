@@ -170,6 +170,10 @@ function Attachment({
   const shown = useFile(resources.attachments, file);
   const client = useClient();
   const detach = useMutation(api.notes.detachFile);
+  // Deleted: the row is gone too once the note's change reaches the list.
+  if (shown === null) {
+    return null;
+  }
   if (shown === undefined) {
     return <li role="status">Loading the file…</li>;
   }
@@ -513,7 +517,7 @@ export default function Notes() {
 }
 `;
 
-const fileViewScreen = `import { useFile, useUpload } from "@grasp-os/sdk/react";
+const fileViewScreen = `import { useClient, useFile, useUpload } from "@grasp-os/sdk/react";
 import type { FileRef } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
@@ -540,6 +544,9 @@ function Shown({
   if (hidden) {
     return <p>The file is hidden</p>;
   }
+  if (shown === null) {
+    return <p>The file is gone</p>;
+  }
   if (shown === undefined) {
     return <p role="status">Loading the file…</p>;
   }
@@ -553,11 +560,13 @@ function Shown({
 /** A file uploaded, then shown through one resource or the other. */
 export default function Notes() {
   const upload = useUpload(resources.attachments);
+  const client = useClient();
   const [file, setFile] = useState<FileRef | null>(null);
   const [viaPhotos, setViaPhotos] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [renders, setRenders] = useState(0);
   const [outcome, setOutcome] = useState("");
+  const [deletion, setDeletion] = useState("");
   return (
     <main className="flex flex-col gap-3 p-6">
       <h1 className="text-2xl font-semibold">Files</h1>
@@ -587,6 +596,23 @@ export default function Notes() {
       <Button onClick={() => setHidden((was) => !was)}>
         {hidden ? "Show the file" : "Hide the file"}
       </Button>
+      <Button
+        onClick={() => {
+          if (file !== null) {
+            client.files.delete(resources.attachments, file).then(
+              () => {
+                setDeletion("deleted");
+              },
+              (error: unknown) => {
+                setDeletion(error instanceof Error ? error.message : "failed");
+              }
+            );
+          }
+        }}
+      >
+        Delete the file
+      </Button>
+      <output aria-label="Deletion">{deletion}</output>
       {file === null ? null : (
         <Shown
           file={file}

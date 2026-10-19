@@ -15,6 +15,7 @@ import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminAskRouteImport } from './routes/admin/ask'
 import { Route as AdminIntegrationsRouteImport } from './routes/admin/integrations'
 import { Route as AdminLabRouteImport } from './routes/admin/lab'
+import { Route as AdminNewOrganizationRouteImport } from './routes/admin/new-organization'
 import { Route as AdminPlatformRouteImport } from './routes/admin/platform'
 import { Route as AdminSourcesRouteImport } from './routes/admin/sources'
 import { Route as ClientsClientIdRouteImport } from './routes/clients/$clientId'
@@ -69,6 +70,11 @@ const AdminIntegrationsRoute = AdminIntegrationsRouteImport.update({
 const AdminLabRoute = AdminLabRouteImport.update({
   id: '/lab',
   path: '/lab',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminNewOrganizationRoute = AdminNewOrganizationRouteImport.update({
+  id: '/new-organization',
+  path: '/new-organization',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminPlatformRoute = AdminPlatformRouteImport.update({
@@ -219,6 +225,7 @@ export interface FileRoutesByFullPath {
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
+  '/admin/new-organization': typeof AdminNewOrganizationRoute
   '/admin/platform': typeof AdminPlatformRoute
   '/admin/sources': typeof AdminSourcesRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
@@ -251,6 +258,7 @@ export interface FileRoutesByTo {
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
+  '/admin/new-organization': typeof AdminNewOrganizationRoute
   '/admin/platform': typeof AdminPlatformRoute
   '/admin/sources': typeof AdminSourcesRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
@@ -284,6 +292,7 @@ export interface FileRoutesById {
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
+  '/admin/new-organization': typeof AdminNewOrganizationRoute
   '/admin/platform': typeof AdminPlatformRoute
   '/admin/sources': typeof AdminSourcesRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
@@ -319,6 +328,7 @@ export interface FileRouteTypes {
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
+    | '/admin/new-organization'
     | '/admin/platform'
     | '/admin/sources'
     | '/clients/$clientId'
@@ -351,6 +361,7 @@ export interface FileRouteTypes {
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
+    | '/admin/new-organization'
     | '/admin/platform'
     | '/admin/sources'
     | '/clients/$clientId'
@@ -383,6 +394,7 @@ export interface FileRouteTypes {
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
+    | '/admin/new-organization'
     | '/admin/platform'
     | '/admin/sources'
     | '/clients/$clientId'
@@ -465,6 +477,13 @@ declare module '@tanstack/react-router' {
       path: '/lab'
       fullPath: '/admin/lab'
       preLoaderRoute: typeof AdminLabRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/new-organization': {
+      id: '/admin/new-organization'
+      path: '/new-organization'
+      fullPath: '/admin/new-organization'
+      preLoaderRoute: typeof AdminNewOrganizationRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/platform': {
@@ -698,6 +717,7 @@ interface AdminRouteChildren {
   AdminAskRoute: typeof AdminAskRoute
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
   AdminLabRoute: typeof AdminLabRoute
+  AdminNewOrganizationRoute: typeof AdminNewOrganizationRoute
   AdminPlatformRoute: typeof AdminPlatformRoute
   AdminSourcesRoute: typeof AdminSourcesRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -708,6 +728,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminAskRoute: AdminAskRoute,
   AdminIntegrationsRoute: AdminIntegrationsRoute,
   AdminLabRoute: AdminLabRoute,
+  AdminNewOrganizationRoute: AdminNewOrganizationRoute,
   AdminPlatformRoute: AdminPlatformRoute,
   AdminSourcesRoute: AdminSourcesRoute,
   AdminIndexRoute: AdminIndexRoute,

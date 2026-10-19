@@ -502,22 +502,34 @@ describe("what the company itself sees", () => {
 describe("what is kept of the interviews", () => {
   it("counts the agreed ones, the ones that stopped, and what can still be deleted", () => {
     const view = at(noordkade);
-    const kept = keptOf(view);
+    const kept = keptOf(view, dateOn(noordkade, view.day));
     expect(kept.agreed + kept.halfway).toBe(view.interviews.length);
     expect(kept.deleted).toBe(0);
     expect(kept.deletable).toBeLessThanOrEqual(kept.agreed);
     // Months later nobody can ask any more.
-    expect(keptOf(at(hartog)).deletable).toBeLessThan(
-      keptOf(at(hartog)).agreed
+    const late = at(hartog);
+    const onLate = dateOn(hartog, late.day);
+    expect(keptOf(late, onLate).deletable).toBeLessThan(
+      keptOf(late, onLate).agreed
     );
   });
 
   it("loses an interview that was deleted on request", () => {
     const view = at(noordkade);
     const one = view.interviews.find((interview) => interview.approved);
-    const after = keptOf(at(noordkade, { deleted: one ? [one.id] : [] }));
-    expect(after.agreed).toBe(keptOf(view).agreed - 1);
+    const on = dateOn(noordkade, view.day);
+    const after = keptOf(at(noordkade, { deleted: one ? [one.id] : [] }), on);
+    expect(after.agreed).toBe(keptOf(view, on).agreed - 1);
     expect(after.deleted).toBe(1);
+  });
+
+  it("stops letting people ask once their days are up, though the two weeks have closed", () => {
+    const closed = at(noordkade, { day: LISTEN_DAYS });
+    const onClose = keptOf(closed, dateOn(noordkade, LISTEN_DAYS));
+    expect(onClose.deletable).toBeGreaterThan(0);
+    const monthLater = keptOf(closed, dateOn(noordkade, LISTEN_DAYS + 30));
+    expect(monthLater.agreed).toBe(onClose.agreed);
+    expect(monthLater.deletable).toBe(0);
   });
 });
 

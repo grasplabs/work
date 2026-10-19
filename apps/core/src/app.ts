@@ -528,10 +528,14 @@ export type RunWatcher = Rpc.Stub<(change: RunChange) => Promise<void>>;
  * A connection's callback for the App's revocations (`followAccess`):
  * called with `true` when its person's role in the App may have dropped,
  * so it checks their access again now (query-subscriptions.ts), and with
- * `false` only to see that it is still there. It throws once the
- * connection no longer follows the App.
+ * `false` only to see that it is still there. Called with `false, true`
+ * when the person's independent runs the App started changed
+ * (`workflowRunsChanged`), so its workflow queries read again. It throws
+ * once the connection no longer follows the App.
  */
-export type AccessWatcher = Rpc.Stub<(revoked: boolean) => void>;
+export type AccessWatcher = Rpc.Stub<
+  (revoked: boolean, runsChanged?: boolean) => void
+>;
 
 /**
  * Most connections of one person that follow the App's revocations at
@@ -1610,6 +1614,32 @@ export class App extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Tells the connections of `userId` that follow the App's live queries
+   * that their independent runs the App started changed (run-changes.ts,
+   * `tellQueryFollowers`): each reads its workflow queries of the App
+   * again, as its person. Returns at once, with how many connections it
+   * told; a connection that is gone is dropped.
+   */
+  workflowRunsChanged(userId: string): number {
+    let told = 0;
+    for (const [id, follower] of this.#accessFollowers) {
+      if (follower.userId === userId) {
+        told += 1;
+        void this.#tellRunsChanged(id, follower.onRevoked);
+      }
+    }
+    return told;
+  }
+
+  async #tellRunsChanged(id: string, onRevoked: AccessWatcher): Promise<void> {
+    try {
+      await onRevoked(false, true);
+    } catch {
+      this.#dropFollower(id);
+    }
+  }
+
   #dropFollower(id: string): void {
     const follower = this.#accessFollowers.get(id);
     this.#accessFollowers.delete(id);
@@ -1657,8 +1687,8 @@ export class App extends DurableObject<Env> {
    * who it acts for (the caller of the running call `token` names), with
    * the version of the code the call runs, and, for a workflow run's step,
    * that step's idempotency key and its attempt, where the call is within
-   * calls between Apps (`path`), the method it calls, which a record's
-   * kept fields go by (knowledge/records.ts), and what it may do (`kind`).
+   * calls between Apps (`path`), the method it calls, and what it may do
+   * (`kind`).
    * For the App's stubs (app-bindings.ts, app-calls.ts) only, each of
    * which says whether its call changes anything (`use`): a call that may
    * only read is refused one that does, `app.read_only`, before any of it

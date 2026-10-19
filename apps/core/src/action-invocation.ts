@@ -158,7 +158,7 @@ type Record =
   | (Started & { readonly state: "expired" });
 
 /** An invocation this object runs now, or ran since it last woke. */
-interface Live {
+export interface Live {
   /** Which run it is (`Record`'s `runId`). */
   readonly runId: string;
   progress: Snapshot | null;
@@ -184,13 +184,13 @@ const line = (frame: InvocationFrame): Uint8Array =>
   encoder.encode(`${JSON.stringify(frame)}\n`);
 
 /** `error` as a result its reader gets, the request ID its own. */
-const refused = (error: unknown): OperationResult => ({
+export const refused = (error: unknown): OperationResult => ({
   ok: false,
   error: refusalOf(error, crypto.randomUUID()),
 });
 
 /** A stream of the one result `result`. */
-const resultOf = (result: OperationResult): ReadableStream<Uint8Array> =>
+export const resultOf = (result: OperationResult): ReadableStream<Uint8Array> =>
   new ReadableStream({
     start: (controller) => {
       controller.enqueue(line({ type: "result", seq: 1, result }));
@@ -221,7 +221,7 @@ export const accessOf = async (
 };
 
 /** Wakes every reader of `live` waiting for something new. */
-const wake = (live: Live): void => {
+export const wake = (live: Live): void => {
   const { changed: waiting } = live;
   live.changed = Promise.withResolvers();
   waiting.resolve(null);
@@ -233,7 +233,7 @@ const wake = (live: Live): void => {
  * the run is cancelled after `streamIdleCancelMs` unless someone
  * attaches again first.
  */
-const readerOf = (live: Live): ReadableStream<Uint8Array> => {
+export const readerOf = (live: Live): ReadableStream<Uint8Array> => {
   live.readers += 1;
   clearTimeout(live.idle);
   live.idle = undefined;
@@ -296,7 +296,7 @@ const readerOf = (live: Live): ReadableStream<Uint8Array> => {
  * `result`, saying why when a cancel was the object's own, because no one
  * followed it: a screen that comes back sees that, not its own cancel.
  */
-const withReason = (
+export const withReason = (
   result: OperationResult,
   unfollowed: boolean
 ): OperationResult =>
@@ -351,12 +351,20 @@ export class ActionInvocation extends DurableObject<Env> {
    * the last its result. A refusal is that result.
    */
   async open(spec: InvocationOpen): Promise<ReadableStream<Uint8Array>> {
+    // Input past what reads as a value (`jsonOf`) is refused here, recording
+    // nothing: hashed as none, two such inputs would share a key's run, the
+    // second joining the first or reading its receipt instead of being
+    // refused (`submission.key_conflict`).
+    const input = jsonOf(spec.call.input);
+    if (input === undefined && spec.call.input !== undefined) {
+      return resultOf(
+        refused(operationErrors.create("contract.invalid_request"))
+      );
+    }
     // In line from the first await on: a cancel sent after this open is
     // decided after it.
     return await this.#serially(async () => {
-      const inputHash = await sha256Hex(
-        canonicalJson(jsonOf(spec.call.input) ?? null)
-      );
+      const inputHash = await sha256Hex(canonicalJson(input ?? null));
       return await this.#decide(spec, inputHash);
     });
   }

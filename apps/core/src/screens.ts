@@ -5,27 +5,37 @@ import {
   appModuleName,
   buildFiles,
   compilerVersion,
+  isAppLayout,
   kitModuleName,
   kitModules,
   screenRuntime,
   limitErrors,
   computeModuleErrors,
+  computePackagesFile,
   openWorkflowErrors,
   serverFiles,
-  workflowFiles,
+  workflowBuildFiles,
 } from "@grasp-os/compiler";
 import type {
   AppCodeBuild,
+  CompileTarget,
   Diagnostic,
+  InspectTarget,
   ComputeModulesBuild,
   OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
   WorkflowBuild,
 } from "@grasp-os/compiler";
+import {
+  generatedPaths,
+  serverModuleSource,
+  symbolicModules,
+} from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   screenErrors,
   screenNameSchema,
@@ -33,6 +43,7 @@ import {
 } from "@grasp-os/shared/screens";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
+import { z } from "zod";
 
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
@@ -97,15 +108,20 @@ export const buildKey = async (files: AppFiles): Promise<string> =>
 const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
   // An App's server code carries the host's generated modules, held to
   // their own allowance, so they never count against the App's limits.
-  if (kind === "app") {
+  if (kind === "app" || kind === "app-check" || kind === "workflow") {
     return appCodeLimitErrors;
   }
   // A JSON workflow's generated module: one file, held to its own bound.
   if (kind === "open-workflow") {
     return openWorkflowErrors;
   }
-  // A JSON workflow's compute modules: held to their own bounds.
-  return kind === "compute" ? computeModuleErrors : limitErrors;
+  // A JSON workflow's compute modules: held to their own bounds, the list
+  // of approved packages core names beside them apart (`computePackagesFile`).
+  if (kind === "compute") {
+    return ({ [computePackagesFile]: _packages, ...modules }) =>
+      computeModuleErrors(modules);
+  }
+  return limitErrors;
 };
 
 /** A build refused before it started, or one that failed. */
@@ -120,19 +136,28 @@ export type BuildEnv = PlatformEnv & {
   FILES: Pick<R2Bucket, "get" | "put">;
 };
 
-/** The compiler's methods, by what they build. */
-const compilerMethods = {
-  screen: "build",
-  server: "buildServer",
-  workflow: "buildWorkflows",
-  app: "buildAppCode",
-  "app-tests": "buildAppTests",
-  "open-workflow": "buildOpenWorkflow",
-  compute: "buildComputeModules",
-} as const;
+/**
+ * What the compiler (`AppCompiler`) runs for each kind of build: its
+ * method and the target. Only inspection (`app`, the server code with
+ * stand-in generated modules) is `inspect`; a seal's checked server code
+ * (`app-check`) is `build("app")`, with every gate.
+ */
+const compilerCalls = {
+  screen: ["build", "screens"],
+  server: ["build", "server"],
+  workflow: ["build", "workflows"],
+  app: ["inspect", "app"],
+  "app-check": ["build", "app"],
+  "app-tests": ["build", "app-tests"],
+  "open-workflow": ["build", "open-workflow"],
+  compute: ["build", "compute"],
+} as const satisfies Record<
+  string,
+  readonly ["build", CompileTarget] | readonly ["inspect", InspectTarget]
+>;
 
-/** The kinds of build, by the compiler's method each runs. */
-type BuildKind = keyof typeof compilerMethods;
+/** The kinds of build, by the compiler call each runs. */
+type BuildKind = keyof typeof compilerCalls;
 
 /**
  * Whether the compiler's answer is shaped as a build: its code is core's
@@ -170,7 +195,8 @@ const compiled = async (
   files: AppFiles
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
-    const built = await runner.run("compiler", compilerMethods[kind], [files]);
+    const [method, target] = compilerCalls[kind];
+    const built = await runner.run("compiler", method, [target, files]);
     return { built, cache: true };
   } catch (error) {
     // A JSON workflow's generated module is never its author's to fix,
@@ -198,6 +224,104 @@ const compiled = async (
   }
 };
 
+const day = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a cached build is kept after it was last used: the cron's
+ * sweep deletes what is older (`sweepBuilds`). A build is the compiler's
+ * output for files core keeps, under its version, so one swept is built
+ * again, the same, the next time it is asked for: what runs never rests
+ * on the cache. Builds of an older compiler are never asked for again,
+ * and go once their time is up.
+ */
+export const buildKeepMs = 30 * day;
+
+/**
+ * How old a cached build may be and still be served as it is: past this,
+ * serving it writes it again (`cachedBuild`), so one in use never reaches
+ * `buildKeepMs`.
+ */
+const buildRefreshMs = buildKeepMs / 2;
+
+/** Where the builds' sweep left off: which kind, and R2's cursor in it. */
+const buildSweepKey = "builds-sweep.json";
+
+/** The most objects one run of the builds' sweep reads. */
+const buildSweepBatch = 500;
+
+/** The prefix each kind of build is cached under. */
+const buildPrefixes = Object.keys(compilerCalls).map(
+  (kind) => `${kind}-builds/`
+);
+
+const buildSweepSchema = z.object({
+  prefix: z
+    .int()
+    .min(0)
+    .max(buildPrefixes.length - 1),
+  cursor: z.string().optional(),
+});
+
+/** What a cached build is written with: when it was last used. */
+const usedNow = (): R2PutOptions => ({
+  customMetadata: { usedAt: String(Date.now()) },
+});
+
+/**
+ * When a cached build was last used: as it was last written, or, for one
+ * written before builds said so, when it was uploaded.
+ */
+const lastUsedOf = (object: R2Object): number => {
+  const usedAt = Number(object.customMetadata?.usedAt);
+  return Number.isFinite(usedAt) && usedAt > 0
+    ? usedAt
+    : object.uploaded.getTime();
+};
+
+/**
+ * Deletes cached builds last used more than `buildKeepMs` before `now`,
+ * from the cron: in code, not a bucket rule, so it runs wherever core
+ * does. One page of one kind's prefix a run, at most `buildSweepBatch`
+ * objects, from where the last run stopped; once a kind is done, the next
+ * run starts the next. A build is never last used after it was uploaded,
+ * so only those uploaded that long ago are read again, just before they
+ * go: one used since the listing is kept. R2 deletes take no condition,
+ * so one used between that read and the delete is still lost, and built
+ * again the next time it is asked for.
+ */
+export const sweepBuilds = async (env: Env, now: Date): Promise<void> => {
+  const stored = await env.FILES.get(buildSweepKey);
+  const parsed = buildSweepSchema.safeParse(
+    stored === null ? undefined : await stored.json()
+  );
+  const state = parsed.success ? parsed.data : { prefix: 0 };
+  const prefix = buildPrefixes[state.prefix] ?? "screen-builds/";
+  const listed = await env.FILES.list({
+    prefix,
+    limit: buildSweepBatch,
+    ...(state.cursor === undefined ? {} : { cursor: state.cursor }),
+  });
+  const unused = (object: R2Object): boolean =>
+    now.getTime() - lastUsedOf(object) > buildKeepMs;
+  const candidates = listed.objects.filter(
+    ({ uploaded }) => now.getTime() - uploaded.getTime() > buildKeepMs
+  );
+  const stillUnused = await Promise.all(
+    candidates.map(async ({ key }) => {
+      const head = await env.FILES.head(key);
+      return head !== null && unused(head) ? [key] : [];
+    })
+  );
+  const keys = stillUnused.flat();
+  if (keys.length > 0) {
+    await env.FILES.delete(keys);
+  }
+  const next = listed.truncated
+    ? { prefix: state.prefix, cursor: listed.cursor }
+    : { prefix: (state.prefix + 1) % buildPrefixes.length };
+  await env.FILES.put(buildSweepKey, JSON.stringify(next));
+};
+
 /**
  * The builds running now in this isolate, by whose build and its cache
  * key: a build
@@ -218,7 +342,9 @@ const buildsRunning = new Map<string, SharedRun<unknown>>();
  * build can't start the compiler on every request. A build that throws
  * isn't cached. Two requests in one isolate for a build that isn't cached
  * yet share one (`buildsRunning`); in two isolates they may both build
- * it, and build the same thing.
+ * it, and build the same thing. A cached build is kept `buildKeepMs` past
+ * its last use (`sweepBuilds`): one read older than `buildRefreshMs` is
+ * written again, so a build in use is never as old as the sweep's limit.
  */
 const cachedBuild = async <Build>(
   env: BuildEnv,
@@ -241,12 +367,26 @@ const cachedBuild = async <Build>(
   // cache is read: a deployment where nothing compiles has nothing cached
   // to serve.
   const runner = platformRunner(env, whose);
-  const cacheKey = `${kind}-builds/${await buildKey(files)}.json`;
+  // Under the call the build is, as well as its kind: a change to which
+  // compiler call a kind makes (`compilerCalls`) builds again, rather than
+  // serving what the old call built for as long as it is kept.
+  const [callMethod, callTarget] = compilerCalls[kind];
+  const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
   const cached = await env.FILES.get(cacheKey);
   if (cached) {
-    return await cached.json<Build>();
+    const text = await cached.text();
+    if (Date.now() - lastUsedOf(cached) > buildRefreshMs) {
+      try {
+        await env.FILES.put(cacheKey, text, usedNow());
+      } catch (error) {
+        // The build is served all the same: a refresh that failed is
+        // tried again at its next use, well before the sweep's limit.
+        log.warn("build.refresh_failed", errorFields(error));
+      }
+    }
+    return await new Response(text).json<Build>();
   }
   // Given up on (a build job's lease lost): it starts no compile, nor
   // after waiting on another's (`sharedRun`). One already running goes
@@ -268,7 +408,7 @@ const cachedBuild = async <Build>(
         );
       }
       if (answer.cache) {
-        await env.FILES.put(cacheKey, JSON.stringify(answer.built));
+        await env.FILES.put(cacheKey, JSON.stringify(answer.built), usedNow());
       }
       return answer.built;
     },
@@ -345,6 +485,35 @@ export const buildAppCode = async (
     signal
   );
 
+/** An App's server code with its tests: what `checkAppCode` reads. */
+const appCodeAndTestFiles = (files: AppFiles): AppFiles => ({
+  ...appTestFiles(files),
+  ...appCodeFiles(files),
+});
+
+/**
+ * Builds an App's server code of spec 8's layout as `buildAppCode` does,
+ * then type-checks it against the SDK's server side, with the host's
+ * generated modules among its files and no DOM (the compiler's
+ * `checkAppCode`): its modules, or why it fails, type errors included.
+ * What a seal holds a release to. Cached in R2 like the others.
+ */
+export const checkAppCode = async (
+  env: BuildEnv,
+  appFiles: AppFiles,
+  /** Whose build it is: the App's ID. */
+  whose: string,
+  signal?: AbortSignal
+): Promise<AppCodeBuild> =>
+  await cachedBuild<AppCodeBuild>(
+    env,
+    "app-check",
+    appFiles,
+    appCodeAndTestFiles,
+    whose,
+    signal
+  );
+
 /**
  * Builds an App's tests (`tests/**.ts`) into ES modules, in the
  * compiler's isolate, each held to what a test may import. Only the test
@@ -366,8 +535,27 @@ export const buildAppTests = async (
   );
 
 /**
+ * What a workflow build reads (`workflowBuildFiles`): the App's
+ * workflows, and the server code their types may name, with the host's
+ * generated modules as inspection has them (no App's version holds
+ * `.grasp/`): the constructors, the same for every App, and stand-ins for
+ * the references.
+ */
+const workflowInputs = (files: AppFiles): AppFiles => {
+  const selected = workflowBuildFiles(files);
+  return isAppLayout(selected)
+    ? {
+        ...selected,
+        ...symbolicModules(),
+        [generatedPaths.server]: serverModuleSource,
+      }
+    : selected;
+};
+
+/**
  * Builds an App's workflows (`workflows/**.ts`) into ES modules, in the
- * compiler's isolate. A build is cached in R2, like the server's.
+ * compiler's isolate, type-checked with the server code their types may
+ * name. A build is cached in R2, like the server's.
  */
 export const buildWorkflows = async (
   env: BuildEnv,
@@ -380,7 +568,7 @@ export const buildWorkflows = async (
     env,
     "workflow",
     appFiles,
-    workflowFiles,
+    workflowInputs,
     whose,
     signal
   );

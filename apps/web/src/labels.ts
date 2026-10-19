@@ -29,7 +29,7 @@ const documentTypeNames = {
 
 /**
  * A document's kind, as its page names it: a type the platform knows in
- * the person's language, a record type an App declares by its own name.
+ * the person's language, any other by its own name.
  */
 export const documentTypeLabel = (type: string): string =>
   isBuiltinDocumentType(type) ? i18n._(documentTypeNames[type]) : type;

@@ -1198,10 +1198,10 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     const lookup = workflowFiles(
       "lookup",
       `  const found = await step.do("find", { description: "Find the customer" }, async () =>
-    await appExports<{ findCustomers: (input: { query: string }) => unknown[] }>(env.CRM).findCustomers({ query: "BV" })
+    await appExports<{ findCustomers: (input: { query: string }) => Json[] }>(env.CRM).findCustomers({ query: "BV" })
   );
   await step.do("remember", { description: "Remember it" }, async () =>
-    await env.APP.call("remember", found)
+    (await env.APP.call("remember", found)) as Json
   );`,
       { find: [], remember: true }
     );
@@ -1210,10 +1210,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       ...Object.fromEntries(
         Object.entries(lookup).map(([path, text]) => [
           path,
-          text.replace(
-            "import { workflow, z }",
-            "import { appExports, workflow, z }"
-          ),
+          text.replace(" workflow, z }", " appExports, workflow, z }"),
         ])
       ),
     });
@@ -1610,10 +1607,10 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     const lookup = workflowFiles(
       "lookup",
       `  const found = await step.do("find", { description: "Find the customer" }, async () =>
-    await appExports<{ findCustomers: (input: { query: string }) => unknown[] }>(env.CRM).findCustomers({ query: "BV" })
+    await appExports<{ findCustomers: (input: { query: string }) => Json[] }>(env.CRM).findCustomers({ query: "BV" })
   );
   await step.do("remember", { description: "Remember it" }, async () =>
-    await env.APP.call("remember", found)
+    (await env.APP.call("remember", found)) as Json
   );`,
       { find: [], remember: true }
     );
@@ -1622,10 +1619,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       ...Object.fromEntries(
         Object.entries(lookup).map(([path, text]) => [
           path,
-          text.replace(
-            "import { workflow, z }",
-            "import { appExports, workflow, z }"
-          ),
+          text.replace(" workflow, z }", " appExports, workflow, z }"),
         ])
       ),
     });

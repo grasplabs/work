@@ -1,12 +1,13 @@
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
-import type { AuditActor } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError, issuesOf } from "@grasp-os/shared/errors";
 import {
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
+import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -22,6 +23,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { chatAuthority, chatContext } from "./agent-scope.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -34,14 +36,21 @@ import {
   workflowStartReceipts,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
+import { appHost } from "./durable-objects.ts";
 import { allowingPermissionSql } from "./permissions.ts";
+import { isRestricted } from "./restricted.ts";
 import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
 import { buildOf } from "./workflow-builds.ts";
 import type { SealedBuild } from "./workflow-builds.ts";
 import { frozenParams } from "./workflow-params.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
+import {
+  packagesHoldSql,
+  sealedPackagesSchema,
+} from "./workflows/package-seal.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
+import { tellQueryFollowers } from "./workflows/run-changes.ts";
 
 // Starting an independent workflow (platform specification 13.2, 15.1, 24):
 // who may, for whom, and on which exact version. Every start is admitted
@@ -127,18 +136,41 @@ import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 // - A binding to another workflow it may not start, or that is gone: the
 //   admitting statement requires the bound workflow live and an active
 //   `start` grant of this workflow's own on it.
+// - Restricted data carried into an unrestricted run: a start by an App
+//   that read restricted data, or made by the call of an agent whose chat
+//   did, starts in restricted mode (`restrictedStart`), read after the
+//   code formed its input; its receipt and run pin it, the database
+//   refuses any change of it, and every call of the run reads it there
+//   (restricted.ts), so no later step, retry or replay runs without it.
 // - A frozen snapshot changed later: a receipt, with its frozen params and
 //   bindings and their hashes, is a row written once; the database refuses
-//   any change of it but retention removing its input and values, and any
-//   deletion. Its audit event names the bindings' hash, never a
-//   parameter's value nor a hash of the values, which a guess at a short
-//   sensitive one could be checked against.
+//   any change of it but retention removing its input and values, any
+//   deletion, and any insert over its ID, key or rowid, whatever the
+//   conflict clause (migrations 0080, 0095 and 0101). Its audit event
+//   names the bindings' hash, never a parameter's value nor a hash of the
+//   values, which a guess at a short sensitive one could be checked
+//   against.
+
+/** The agent whose call of an App made the App's start, and its chat. */
+export interface StartingAgent {
+  readonly agentId: string;
+  readonly workspaceId: WorkspaceId;
+  readonly chatId: ChatId;
+}
 
 /** Who starts a workflow: what the host established, never the caller. */
 export type StartInvoker =
   | { type: "person"; person: Acting }
-  | { type: "app"; authority: Authority }
+  | { type: "app"; authority: Authority; agent?: StartingAgent | null }
   | { type: "agent"; authority: Authority; context?: WorkContext }
+  /**
+   * Nothing dispatches independent triggers yet. Once something does, a
+   * trigger fired by an event a workflow run caused (its mail, a connector
+   * event its call caused, a record its step wrote) must start its run as
+   * that run's descendant, as App triggers' stamped mail and events do
+   * (inbound-email.ts, connector-events.ts), or it opens a lineage of its
+   * own past the run's limits (GRA-692).
+   */
   | { type: "trigger"; triggerId: string };
 
 /**
@@ -165,6 +197,11 @@ export interface StartAuthorization {
   /** The bindings it froze (canonical JSON). */
   bindings: string;
   /**
+   * Whether it starts in restricted mode (`restrictedStart`): its run is
+   * restricted for good.
+   */
+  restricted: boolean;
+  /**
    * The executable identity of the version's build, which the start's run
    * is admitted for; null for a version without one: no run is admitted.
    */
@@ -177,6 +214,13 @@ export interface StartAuthorization {
    * approvals, permissions and workflows its bindings need as one value.
    */
   holds: SQL;
+  /**
+   * That the approved graph its version seals is still approved or retired
+   * (GRA-665), as SQL, part of `holds`: read on its own as the admitting
+   * batch runs, to say a refusal was this one. Always true for a version
+   * that seals none.
+   */
+  packages: SQL;
 }
 
 /**
@@ -197,7 +241,7 @@ const refusedStart = async (
   env: Env,
   actor: AuditActor,
   workflowId: string,
-  detail: Record<string, string | number | null>,
+  detail: Record<string, AuditDetailValue>,
   reason: string
 ): Promise<void> => {
   const db = drizzle(env.DB);
@@ -256,6 +300,39 @@ const appRoleSql = (
 const grantSql = (allowing: SQL): SQL =>
   sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
 
+/** Where a version's manifest seals the approved packages its modules import. */
+const manifestPackagesSchema = z.object({
+  packages: sealedPackagesSchema.optional(),
+});
+
+/**
+ * That the approved graph `graphHash` workflow `id`'s version seals still
+ * holds, as SQL for the admitting statement; a version that seals none
+ * holds it always. A graph revoked already starts nothing: refused, and
+ * audited (`workflow.packages_revoked`, decision 4 of GRA-665), before
+ * anything is admitted.
+ */
+const packagesHolding = async (
+  env: Env,
+  actor: AuditActor,
+  id: string,
+  graphHash: string | null,
+  detail: Record<string, AuditDetailValue>
+): Promise<SQL> => {
+  if (graphHash === null) {
+    return sql`1`;
+  }
+  const packages = packagesHoldSql(id, graphHash);
+  const approved = await drizzle(env.DB).get<{ holds: number }>(
+    sql`SELECT ${packages} AS holds`
+  );
+  if (approved.holds === 0) {
+    await refusedStart(env, actor, id, detail, "workflow.packages_revoked");
+    throw workflowResourceErrors.create("workflow.packages_revoked");
+  }
+  return packages;
+};
+
 /**
  * The live workflow `id` at `version`, its policy generation and the
  * version's manifest and input descriptor. A workflow that isn't live is
@@ -273,6 +350,8 @@ const pinned = async (
   inputDescriptor: string;
   /** The executable identity of its build; null when it has none. */
   buildHash: string | null;
+  /** The approved graph its modules import (GRA-665); null for none. */
+  graphHash: string | null;
 }> => {
   const row = await drizzle(env.DB)
     .select({
@@ -308,8 +387,12 @@ const pinned = async (
   // Read from the manifest the admitting statement pins by its hash: the
   // run is admitted for the build that manifest seals.
   let build: SealedBuild;
+  let graphHash: string | null;
   try {
     build = buildOf(row.manifest);
+    graphHash =
+      manifestPackagesSchema.parse(JSON.parse(row.manifest)).packages
+        ?.graphHash ?? null;
   } catch {
     throw workflowResourceErrors.create("workflow.version_corrupt");
   }
@@ -319,6 +402,7 @@ const pinned = async (
     manifestHash: row.manifestHash,
     inputDescriptor: JSON.stringify(input),
     buildHash: build.executable ? build.hash : null,
+    graphHash,
   };
 };
 
@@ -734,6 +818,73 @@ const deniedAt = async (
 };
 
 /**
+ * Whether a start by `invoker` starts in restricted mode (restricted.ts):
+ * an App's while the App has read restricted data, or the chat of the
+ * agent whose call made it has; an agent's while its chat has. A chat
+ * that can't be read, or an agent's start that names none, counts as
+ * restricted: failing closed. A person's or
+ * a trigger's carries no App's or chat's data, and never is.
+ *
+ * Read once, as the start is decided, after the code that asked for it
+ * formed its input: a flag is set before restricted data is returned and
+ * never cleared, so a read that fed the input is seen, and the receipt
+ * and run keep what was read (`admitWorkflowStart`).
+ */
+const restrictedStart = async (
+  env: Env,
+  invoker: StartInvoker
+): Promise<boolean> => {
+  const chatRestricted = async (
+    work: () => { authority: Authority; context: WorkContext }
+  ): Promise<boolean> => {
+    try {
+      const { authority, context } = work();
+      return await isRestricted(env, authority, context);
+    } catch (error) {
+      if (isExpectedError(error)) {
+        return true;
+      }
+      throw error;
+    }
+  };
+  switch (invoker.type) {
+    case "app": {
+      const { subject, onBehalfOf } = invoker.authority;
+      if (subject.type !== "app") {
+        throw denied();
+      }
+      if (await appHost(env, subject.appId).isRestricted()) {
+        return true;
+      }
+      const { agent } = invoker;
+      return agent === undefined || agent === null
+        ? false
+        : await chatRestricted(() => ({
+            authority: chatAuthority({
+              agentId: agent.agentId,
+              personId: onBehalfOf,
+            }),
+            context: chatContext(agent),
+          }));
+    }
+    case "agent": {
+      const { authority, context } = invoker;
+      // No chat to read: failing closed.
+      return context === undefined
+        ? true
+        : await chatRestricted(() => ({ authority, context }));
+    }
+    case "person":
+    case "trigger": {
+      return false;
+    }
+    default: {
+      return invoker satisfies never;
+    }
+  }
+};
+
+/**
  * Decides on `request` (`workflowStartSchema`: the exact version, the
  * input and the invoker's idempotency key) to start workflow `id` for
  * `invoker` (see the rules above). The invoker's own access is checked
@@ -798,6 +949,7 @@ export const decideWorkflowStart = async (
     manifestHash,
     inputDescriptor,
     buildHash,
+    graphHash,
   } = found;
   const base = {
     version,
@@ -860,6 +1012,16 @@ export const decideWorkflowStart = async (
       throw error;
     }
   }
+  // A new start only: one admitted before, retried under its key, answers
+  // what it admitted, whatever was revoked since (its run, if it hasn't
+  // ended, stops at its next call).
+  const packages = await packagesHolding(env, rule.actor, id, graphHash, {
+    ...base,
+    inputHash,
+  });
+  // Read after the invoker's code formed the input it starts with, so a
+  // restricted read that fed it is seen (`restrictedStart`).
+  const restricted = await restrictedStart(env, invoker);
   // Frozen now, from what was read above: the parameter values of the
   // revision in force, and what serves each binding.
   const params = await frozenParams(env, id, version, configRevision);
@@ -875,11 +1037,17 @@ export const decideWorkflowStart = async (
       WHERE pinned.workflow_resource_id = ${id} AND pinned.version = ${version}
         AND pinned.manifest_hash = ${manifestHash})
     AND ${requiredSql(id, version, JSON.stringify(bindings.required))}
+    AND ${packages}
     AND ${rule.holds})`;
   const decided = await drizzle(env.DB).get<{ holds: number }>(
     sql`SELECT ${holds} AS holds`
   );
   if (decided.holds === 0) {
+    // Its packages revoked since they were read: said, and audited, as such.
+    await packagesHolding(env, rule.actor, id, graphHash, {
+      ...base,
+      inputHash,
+    });
     throw await deniedAt(env, id, version, { generation, configRevision });
   }
   return {
@@ -898,9 +1066,11 @@ export const decideWorkflowStart = async (
       params,
       paramsRevision: configRevision,
       bindings: bindings.text,
+      restricted,
       buildHash,
       actor: rule.actor,
       holds,
+      packages,
     },
   };
 };
@@ -963,6 +1133,7 @@ export const admitWorkflowStart = async (
     bindingsHash,
     createdAt.getTime(),
     null,
+    authorization.restricted ? 1 : 0,
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
     ...noted,
@@ -979,15 +1150,20 @@ export const admitWorkflowStart = async (
     // them: a sensitive one stays out.
     paramsRevision: authorization.paramsRevision,
     bindingsHash,
+    restricted: authorization.restricted,
   };
   // Why it wasn't admitted, if it isn't: read in the admitting batch, just
   // before its insert, so the reason is the state it was refused in.
-  let refusedFor: { under: number } | undefined;
+  let refusedFor: { under: number; packaged: number } | undefined;
   beforeAdmit?.();
   try {
     const [[state]] = await auditedBatch(env, db, [
       db
-        .select({ under: sql<number>`${underRunLimit(authorization)}` })
+        .select({
+          under: sql<number>`${underRunLimit(authorization)}`.as("under"),
+          // Named, so no column of the statement shares its name.
+          packaged: sql<number>`(${authorization.packages})`.as("packaged"),
+        })
         .from(sql`(SELECT 1)`),
       db
         .insert(workflowStartReceipts)
@@ -1006,6 +1182,7 @@ export const admitWorkflowStart = async (
               manifestHash: authorization.manifestHash,
               buildHash: authorization.buildHash,
               principal: authorization.principal,
+              restricted: authorization.restricted,
               createdAt: createdAt.getTime(),
             }),
           ]),
@@ -1029,6 +1206,9 @@ export const admitWorkflowStart = async (
     }
     // The same key, admitted as this ran.
   }
+  // Its run, if this admitted one, joins the person's runs an App's
+  // workflow queries list: those followed live read again.
+  await tellQueryFollowers(env, id);
   const admitted = await receiptOf(
     env,
     authorization.invoker,
@@ -1049,8 +1229,18 @@ export const admitWorkflowStart = async (
       throw error;
     }
   }
-  // Refused by the cap on live runs, or by authority that changed: said
-  // as which, as the admitting batch found it.
+  // Refused by its packages revoked, by the cap on live runs, or by
+  // authority that changed: said as which, as the admitting batch found it.
+  if (refusedFor?.packaged === 0) {
+    await refusedStart(
+      env,
+      authorization.actor,
+      authorization.workflowId,
+      detail,
+      "workflow.packages_revoked"
+    );
+    throw workflowResourceErrors.create("workflow.packages_revoked");
+  }
   const limited = refusedFor?.under === 0;
   const reason = limited ? "workflow.run_limit" : "workflow.start_denied";
   await refusedStart(
