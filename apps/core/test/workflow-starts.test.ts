@@ -974,13 +974,40 @@ describe("a trigger starting a workflow", () => {
             .run();
         }
       };
-      let batches = 0;
+      // Only the deletion's own batches count, those with its guarded
+      // update: the audit outbox may drain through the same database.
+      const deletions = new WeakSet<D1PreparedStatement>();
+      let attempts = 0;
       const racing = new Proxy(env.DB, {
         get: (target, property) => {
+          if (property === "prepare") {
+            return (query: string) => {
+              const statement = target.prepare(query);
+              if (
+                !/^update "workflow_resources" set "deleted_at"/iu.test(query)
+              ) {
+                return statement;
+              }
+              // What a batch gets is the statement bound to its values.
+              return new Proxy(statement, {
+                get: (prepared, key): unknown =>
+                  key === "bind"
+                    ? (...values: unknown[]) => {
+                        const bound = prepared.bind(...values);
+                        deletions.add(bound);
+                        return bound;
+                      }
+                    : Reflect.get(prepared, key),
+              });
+            };
+          }
           if (property === "batch") {
             return async (statements: D1PreparedStatement[]) => {
-              batches += 1;
-              const { before, after } = around(batches);
+              if (!statements.some((statement) => deletions.has(statement))) {
+                return await target.batch(statements);
+              }
+              attempts += 1;
+              const { before, after } = around(attempts);
               await enable(before);
               const result = await target.batch(statements);
               await enable(after);
