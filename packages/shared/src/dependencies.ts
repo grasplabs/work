@@ -3,8 +3,11 @@ import { z } from "zod";
 import type { AgentProposer } from "./apps.ts";
 import { sha256Hex } from "./encoding.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { appIdSchema, identifierMaxLength } from "./ids.ts";
-import type { AppId } from "./ids.ts";
+import {
+  appIdSchema,
+  identifierMaxLength,
+  workflowResourceIdSchema,
+} from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 import type {
   DependencyIntent,
@@ -22,6 +25,48 @@ import type {
 // whole. Nothing here fetches, installs or runs a package; a package's own
 // words in a graph (a licence, a finding's summary) are shown as text,
 // never followed.
+
+/**
+ * What packages are requested for, approved for and locked for: an App,
+ * or an independent workflow resource (its compute modules, target
+ * `computation` only). Approvals are per subject: an App's approval
+ * covers no workflow, and a workflow's no App.
+ */
+export type DependencySubject =
+  | { type: "app"; id: string }
+  | { type: "workflow"; id: string };
+
+/** A subject as a caller names it: `{ app }` or `{ workflow }`, exactly one. */
+export const dependencySubjectRefSchema = z.union([
+  z.strictObject({ app: appIdSchema }),
+  z.strictObject({ workflow: workflowResourceIdSchema }),
+]);
+export type DependencySubjectRef = z.input<typeof dependencySubjectRefSchema>;
+
+/** The subject a caller's `{ app }` or `{ workflow }` names. */
+export const subjectOfRef = (ref: {
+  app?: string;
+  workflow?: string;
+}): DependencySubject =>
+  ref.workflow === undefined
+    ? { type: "app", id: ref.app ?? "" }
+    : { type: "workflow", id: ref.workflow };
+
+/** How a caller names `subject`: `{ app }` or `{ workflow }`. */
+export const refOfSubject = (
+  subject: DependencySubject
+): DependencySubjectRef =>
+  subject.type === "app" ? { app: subject.id } : { workflow: subject.id };
+
+/** A subject as the API shows it: what it is, and its name now. */
+export interface NamedDependencySubject {
+  type: DependencySubject["type"];
+  id: string;
+  name: string;
+}
+
+/** The only target a workflow's packages may be requested for. */
+export const workflowDependencyTarget = "computation";
 
 /** Where a package's code may run. A graph is approved for some, never all by default. */
 export const dependencyTargetSchema = z.enum([
@@ -271,7 +316,9 @@ const uniqueTargets = z
  */
 export const dependencyProposalSchema = z
   .strictObject({
-    app: appIdSchema,
+    /** Whose graph it is: an App's, or a workflow's (exactly one). */
+    app: appIdSchema.optional(),
+    workflow: workflowResourceIdSchema.optional(),
     sourceRevision: sourceRevisionSchema,
     /** Why the App needs them, in the proposer's words. */
     purpose: z.string().trim().min(1).max(500),
@@ -281,28 +328,47 @@ export const dependencyProposalSchema = z
     findings: z.array(findingSchema).max(dependencyMaxFindings),
     refused: z.array(refusedSchema).max(dependencyMaxRefused),
   })
-  .superRefine(({ graph, findings, refused }, context) => {
-    const known = new Set(graph.packages.map(packageKey));
-    const check = (path: string, refs: DependencyPackageRef[]): void => {
-      for (const ref of refs) {
-        if (!known.has(packageKey(ref))) {
-          context.addIssue({
-            code: "custom",
-            path: [path],
-            message: `${packageKey(ref)} isn't a package of the graph`,
-          });
-        }
+  .superRefine(
+    ({ app, workflow, targets, graph, findings, refused }, context) => {
+      if ((app === undefined) === (workflow === undefined)) {
+        context.addIssue({
+          code: "custom",
+          path: ["app"],
+          message: "Either an App or a workflow, not both",
+        });
       }
-    };
-    check(
-      "findings",
-      findings.map((finding) => finding.package)
-    );
-    check(
-      "refused",
-      refused.map((entry) => entry.package)
-    );
-  });
+      if (
+        workflow !== undefined &&
+        targets.some((target) => target !== workflowDependencyTarget)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["targets"],
+          message: `A workflow's packages are for ${workflowDependencyTarget} only`,
+        });
+      }
+      const known = new Set(graph.packages.map(packageKey));
+      const check = (path: string, refs: DependencyPackageRef[]): void => {
+        for (const ref of refs) {
+          if (!known.has(packageKey(ref))) {
+            context.addIssue({
+              code: "custom",
+              path: [path],
+              message: `${packageKey(ref)} isn't a package of the graph`,
+            });
+          }
+        }
+      };
+      check(
+        "findings",
+        findings.map((finding) => finding.package)
+      );
+      check(
+        "refused",
+        refused.map((entry) => entry.package)
+      );
+    }
+  );
 /** A proposal as the resolver makes it, with a plain string App ID. */
 export type DependencyProposal = z.input<typeof dependencyProposalSchema>;
 
@@ -373,7 +439,8 @@ export interface DependencySummary {
 /** A request, without its packages. */
 export interface DependencyRequest {
   id: string;
-  app: { id: AppId; name: string };
+  /** Whose graph it is: an App or a workflow, by its name now. */
+  subject: NamedDependencySubject;
   status: DependencyRequestStatus;
   /** The revision of the source the graph was resolved from: provenance. */
   sourceRevision: string;
@@ -467,8 +534,8 @@ export interface DependencyApprovals {
   policyGeneration: number;
   /** Whether the reader holds `dependencies.approve` now, so may retire or revoke them. */
   decides: boolean;
-  /** The App, by its name: all a reader who doesn't build it is told of it. */
-  app: { id: AppId; name: string };
+  /** The App or workflow, by its name: all a reader who doesn't build it is told of it. */
+  subject: NamedDependencySubject;
   /** Approved or retired, the newest decision first; at most {@link dependencyApprovalsListed}. */
   approvals: DependencyRequest[];
 }
@@ -496,6 +563,27 @@ export const dependencyApprovalsDigest = async (
 
 /** Most approvals `DependencyImpact.approvals` lists: the newest. */
 export const dependencyImpactListed = 50;
+
+/** How many subjects a page of the approvers' list of approvals in force shows. */
+export const dependencySubjectsListed = 100;
+
+/**
+ * The Apps and workflows that hold approvals in force (approved or
+ * retired), for someone who holds `dependencies.approve` now: each by its
+ * name, with how many approvals it holds, a page at a time by subject.
+ */
+export interface DependencySubjectsInForce {
+  /** Whether the reader holds `dependencies.approve` now; none listed otherwise. */
+  decides: boolean;
+  /** At most {@link dependencySubjectsListed}: one page. */
+  subjects: {
+    subject: NamedDependencySubject;
+    approvals: number;
+    decidedAt: string;
+  }[];
+  /** Where the next page starts (`inForce(next)`); null on the last. */
+  next: string | null;
+}
 
 /**
  * What a person decides when they retire or revoke an approved graph, and
@@ -540,7 +628,7 @@ export interface DependencyImpactArtifact {
 export interface DependencyImpact {
   /** The policy generation now: a decision names the one it was read under. */
   policyGeneration: number;
-  app: { id: AppId; name: string };
+  subject: NamedDependencySubject;
   graphHash: string;
   /**
    * The approvals of the graph still in force (approved or retired), the
@@ -580,13 +668,13 @@ export const dependencyErrors = defineErrorFamily({
   "dependency.stale":
     "This request changed, was decided or was replaced since you opened it. Open it again before deciding.",
   "dependency.approval_required":
-    "These packages aren't approved for this App. Someone with the permission to approve dependencies decides.",
+    "These packages aren't approved for this App or workflow. Someone with the permission to approve dependencies decides.",
   "dependency.policy_changed":
     "Who approves dependencies, or what is approved, changed. Read the status again.",
   "dependency.retired":
-    "These packages were retired for this App: what was built with them keeps working, but nothing new is built. Someone with the permission to approve dependencies can approve them again.",
+    "These packages were retired for this App or workflow: what was built with them keeps working, but nothing new is built. Someone with the permission to approve dependencies can approve them again.",
   "dependency.revoked":
-    "These packages were revoked for this App and can't be used. Someone with the permission to approve dependencies can approve them again after a new review.",
+    "These packages were revoked for this App or workflow and can't be used. Someone with the permission to approve dependencies can approve them again after a new review.",
 });
 
 /** Someone who holds `dependencies.approve`, as the API returns it. */
@@ -628,8 +716,8 @@ export interface DependenciesApi {
    * was approved, under the policy generation the caller read.
    */
   build: (request: PackageBuildRequest) => Promise<PackageBuild>;
-  /** How an App's dependencies stand, for its builders. */
-  status: (app: string) => Promise<DependencyStatus>;
+  /** How an App's or a workflow's dependencies stand, for its builders. */
+  status: (subject: DependencySubjectRef) => Promise<DependencyStatus>;
   /**
    * The requests waiting on the person: every pending one, if they hold
    * `dependencies.approve` now; none otherwise.
@@ -650,10 +738,15 @@ export interface DependenciesApi {
     decision: DependencyDecision
   ) => Promise<DependencyRequest>;
   /**
-   * An App's approvals in force (approved or retired), for one of its
+   * An App's or a workflow's approvals in force (approved or retired), for one of its
    * builders or someone who holds `dependencies.approve` now.
    */
-  approvals: (app: string) => Promise<DependencyApprovals>;
+  approvals: (subject: DependencySubjectRef) => Promise<DependencyApprovals>;
+  /**
+   * Every App and workflow holding approvals in force, for someone who
+   * holds `dependencies.approve` now; none for anyone else.
+   */
+  inForce: (cursor?: string) => Promise<DependencySubjectsInForce>;
   /**
    * What retiring or revoking the graph of approval `request` would touch,
    * for someone who holds `dependencies.approve` now.

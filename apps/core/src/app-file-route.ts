@@ -258,6 +258,9 @@ const statuses: Readonly<Record<string, number>> = {
   "file.type_unsupported": 422,
   "file.content_mismatch": 422,
   "request.too_large": 413,
+  // A body that took too long to arrive (`readAtMost`): lost, for the
+  // page to send again.
+  "request.timeout": 408,
   "file.referenced": 409,
   "file.cancelled": 409,
   "file.incomplete": 409,
@@ -482,10 +485,12 @@ const receiveChunk = async (
   // Read no further than a chunk may be, whatever the request says of its
   // length; then held to the size its place says (`admitChunk`).
   const stream = bodyOf(request);
+  // Given as long as the page gives a chunk to be sent: a slow link whose
+  // page still waits is never cut off first.
   const bytes =
     stream === null
       ? undefined
-      : await readAtMost(stream, fileLimits.chunkBytes);
+      : await readAtMost(stream, fileLimits.chunkBytes, fileLimits.chunkSendMs);
   if (
     hash === undefined ||
     bytes === undefined ||
@@ -571,8 +576,28 @@ const finish = async (
   if (isUploadState(upload)) {
     return upload;
   }
-  const verified = await verify(env, upload);
-  return await stub.publish(storeId, principal, resource, file, verified);
+  let verified: boolean;
+  try {
+    verified = await verify(env, upload);
+  } catch (error) {
+    // The check couldn't say: the next finish checks again at once.
+    try {
+      await stub.abandonFinish(file, upload.claim);
+    } catch (abandonError) {
+      // Its claim then runs out on its own; the check's failure is the
+      // answer.
+      log.warn("app_file.abandon_failed", errorFields(abandonError));
+    }
+    throw error;
+  }
+  return await stub.publish(
+    storeId,
+    principal,
+    resource,
+    file,
+    verified,
+    upload.claim
+  );
 };
 
 /**

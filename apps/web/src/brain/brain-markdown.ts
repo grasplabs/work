@@ -1,3 +1,4 @@
+import type { Transcript } from "@grasp-os/shared/brain";
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 
@@ -5,7 +6,6 @@ import { formatDay } from "../format.ts";
 import { folderName, given, kindLabel, quoted } from "./brain.ts";
 import type { Note, NoteEvent, NoteRef } from "./brain.ts";
 import { chapterOfTurns, placeLabel } from "./transcript.ts";
-import type { Transcript } from "./workspace.ts";
 
 interface ExportOptions {
   /** Where Grasp runs, so links in the file open the note or workflow there. */

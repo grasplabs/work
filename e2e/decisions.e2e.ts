@@ -71,7 +71,7 @@ export default function Asks() {
 }
 `;
 
-const approval = `import { workflow, z } from "@grasp-os/sdk/workflow";
+const approval = `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
 
 /** The App's \`remember\`, as the ask names it. */
 const remember = { contractId: "asks.remember", kind: "mutation" } as const;
@@ -82,9 +82,9 @@ export default workflow(
   async (step, { input, env }) =>
     await step.decision("review", {
       description: "Approve invoice INV-7",
-      from: input.from,
+      from: input.from as Person,
       ask: async ({ recipients }) => {
-        const kept = await env.APP.callFunction(remember, { recipients: JSON.stringify(recipients) });
+        const kept = (await env.APP.callFunction(remember, { recipients: JSON.stringify(recipients) })) as { ok: true } | { ok: false; error: unknown };
         if (!kept.ok) {
           throw kept.error;
         }

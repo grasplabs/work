@@ -7,9 +7,10 @@ import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { buildOnSave } from "../../src/save-builds.ts";
 import { buildScreens, buildServer } from "../../src/screens.ts";
-import { server, workflowFiles } from "../workflow-apps.ts";
+import { v1Server } from "../v1-app-server.ts";
+import { workflowFiles } from "../workflow-apps.ts";
 
-// The screen compiler on-prem: it runs on the sandbox host this project
+// The App compiler on-prem: it runs on the sandbox host this project
 // starts (src/platform-sandbox.ts), never in core's own process, whose
 // Loader here throws if a build reaches for it. A type built to recurse
 // holds TypeScript's checker for good: the supervisor ends it at its
@@ -64,7 +65,7 @@ const answerTime = async (): Promise<number> => {
   return Date.now() - started;
 };
 
-describe("the screen compiler on-prem", () => {
+describe("the App compiler on-prem", () => {
   it("builds an App's screens on the sandbox host, not in core", async () => {
     const built = await buildScreens(onPrem, screen(""), "app-test");
 
@@ -283,7 +284,7 @@ describe("the screen compiler on-prem", () => {
       version: 1,
       files: {
         ...screen(`// ${fresh}`),
-        "app/server.ts": `${server}\n// ${fresh}\n`,
+        "app/server.ts": `${v1Server}\n// ${fresh}\n`,
         ...workflowFiles(
           "single",
           `  return await step.do("only", { description: "${fresh}" }, async () => "done");`

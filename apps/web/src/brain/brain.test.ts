@@ -1,3 +1,4 @@
+import type { Workspace } from "@grasp-os/shared/brain";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -11,7 +12,6 @@ import {
 } from "./brain.ts";
 import type { Folder, Note, NoteEvent } from "./brain.ts";
 import { testWorkspace } from "./test-workspace.ts";
-import type { Workspace } from "./workspace.ts";
 
 // The prototype's tests of the brain, on a small made-up company
 // (test-workspace.ts) in place of the prototype's mock data: the same
@@ -729,5 +729,61 @@ describe("processIds", () => {
   it("gives a note the standard processes of the workflows it leads to, once each", () => {
     expect(note("team-onboarding").processIds).toStrictEqual(["o2c"]);
     expect(note("vision").processIds).toStrictEqual([]);
+  });
+});
+
+describe("a brain of a deployment that holds nothing yet", () => {
+  // As core's `brain.read` gives it before any onboarding or Playbook:
+  // no kickoff (a vision page without a source), no teams, no records.
+  const empty: Workspace = {
+    company: { name: "Organization", sector: "", people: 0 },
+    vision: {
+      ambition: "",
+      whyNow: "",
+      inviteTeamIds: [],
+      budget: [],
+      toolApproval: [],
+      sourceId: "",
+      version: 0,
+    },
+    goals: [],
+    teams: [],
+    tools: [],
+    sources: [],
+    statements: [],
+    candidates: [],
+    gaps: [],
+    workflows: [],
+    connections: [
+      {
+        name: "Microsoft 365",
+        status: "available",
+        via: "direct",
+        matches: ["Microsoft 365"],
+      },
+    ],
+    landscape: [],
+    policies: [],
+  };
+
+  it("is the company, its vision page and the empty source folders, linked to nothing that isn't there", () => {
+    const { notes } = buildBrain(empty);
+    const ids = notes.map(({ id }) => id);
+    expect({
+      ids,
+      dangling: notes
+        .flatMap(({ links }) => links)
+        .filter((id) => !ids.includes(id)),
+    }).toStrictEqual({
+      ids: [
+        "company",
+        "vision",
+        "sources-conversations",
+        "sources-pulse",
+        "sources-documents",
+        "sources-connections",
+      ],
+      dangling: [],
+    });
   });
 });
