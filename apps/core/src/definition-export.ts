@@ -46,6 +46,11 @@ import type { ExportedBinding } from "./workflow-resources.ts";
 //   deployment's resources, are only their hashes. What builders wrote
 //   into source is scanned for known secret formats, and the export is
 //   refused, naming the file, if one turns up: a scan, not a guarantee.
+//   The App's registration as sealed (`app.manifest`) and what its
+//   references type of each packaged workflow (`app.workflowContracts`:
+//   events, listens and decisions, never a pin, and none for a workflow
+//   the package doesn't carry) are no files, but are counted and scanned
+//   as files are.
 // - Someone exports what they can't read: only the App's builders (its
 //   admins among them), never Grasp staff; and only workflows they build,
 //   as for a workflow's source. A workflow they don't is listed as

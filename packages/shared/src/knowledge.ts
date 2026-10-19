@@ -326,15 +326,16 @@ const builtinDocumentTypes: ReadonlySet<string> = new Set(
   builtinDocumentTypeSchema.options
 );
 
-/** Whether `type` is one the platform knows, rather than one an App declares. */
+/** Whether `type` is one the platform knows, rather than one an older document names. */
 export const isBuiltinDocumentType = (
   type: string
 ): type is BuiltinDocumentType => builtinDocumentTypes.has(type);
 
 /**
- * A document's type: one the platform knows (`builtinDocumentTypeSchema`)
- * or any other its frontmatter names: lowercase letters, digits and single
- * hyphens, starting with a letter.
+ * A document's type: one the platform knows (`builtinDocumentTypeSchema`),
+ * or, read from an older document only, any other its frontmatter names:
+ * lowercase letters, digits and single hyphens, starting with a letter. A
+ * save needs a type the platform knows (`parseFrontmatter` in core).
  */
 export const documentTypeSchema = z
   .string()
