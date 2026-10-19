@@ -497,6 +497,19 @@ interface Bound {
 }
 
 /**
+ * What D1's `first` answers of a statement's `results`: its first row, or
+ * that row's `column`, or `null` when there is none.
+ */
+const firstOf = (
+  results: Record<string, unknown>[],
+  column?: string
+): unknown => {
+  const [row] = results;
+  const answer = column === undefined ? row : row?.[column];
+  return answer ?? null;
+};
+
+/**
  * `person`'s Knowledge API on a connection that keeps every statement it
  * makes of the knowledge database, with its values, and adds up the rows
  * they read (D1's `meta.rows_read`), the search indexes' own included.
@@ -507,8 +520,12 @@ const recordingReads = async (person: Person) => {
     rows: 0,
     statements: [],
   };
-  // Each statement is kept as it runs, bound or not, however it runs;
-  // the rows it read are added where D1 says (`all`, `run`, a batch).
+  // Each statement is kept as it runs, bound or not, however it runs,
+  // and the rows it read added as D1 says (`meta.rows_read`). Only `all`,
+  // `run` and a batch say: `first` and `raw` run through `all` too, once,
+  // their answers made from its rows. (A row's columns come back by name,
+  // so `raw` loses a column whose name another shares: a search that read
+  // so would show it, failing, never pass with its reads uncounted.)
   const recorded = (
     statement: D1PreparedStatement,
     query: string,
@@ -520,18 +537,32 @@ const recordingReads = async (person: Person) => {
           return (...bound: unknown[]) =>
             recorded(target.bind(...bound), query, bound);
         }
-        const value: unknown = Reflect.get(target, property);
+        const counted = async () => {
+          made.statements.push({ query, values });
+          const result = await target.all();
+          made.rows += result.meta.rows_read;
+          return result;
+        };
         if (property === "all" || property === "run") {
-          return async () => {
-            made.statements.push({ query, values });
-            const result = await target.all();
-            made.rows += result.meta.rows_read;
-            return result;
+          return counted;
+        }
+        if (property === "first") {
+          return async (column?: string) => {
+            const { results } = await counted();
+            return firstOf(results, column);
           };
         }
-        if (property === "first" || property === "raw") {
-          made.statements.push({ query, values });
+        if (property === "raw") {
+          return async (options?: { columnNames?: boolean }) => {
+            const { results } = await counted();
+            const rows = results.map((row) => Object.values(row));
+            const [first] = results;
+            return options?.columnNames === true
+              ? [first === undefined ? [] : Object.keys(first), ...rows]
+              : rows;
+          };
         }
+        const value: unknown = Reflect.get(target, property);
         return typeof value === "function"
           ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
           : value;
