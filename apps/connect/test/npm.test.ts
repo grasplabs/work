@@ -890,12 +890,17 @@ describe("the registry's advisories, through connect", () => {
       Response.json({ asked: [advisory()], unasked: [advisory()] })
     );
     const kept = await connect.npmAdvisories({ asked: ["1.0.0"] });
+    // A graph may hold many versions of one package: all asked at once.
+    const manyVersions = await connect.npmAdvisories({
+      asked: Array.from({ length: 65 }, (_, patch) => `1.0.${patch}`),
+    });
     const failing = async (respond: () => Response) => {
       registry.override(bulkPath, respond);
       return await outcome(connect.npmAdvisories({ asked: ["1.0.0"] }));
     };
     expect({
       kept: Object.keys(kept),
+      manyVersions: Object.keys(manyVersions),
       unknownSeverity: await failing(() =>
         Response.json({ asked: [advisory({ severity: "severe" })] })
       ),
@@ -932,12 +937,13 @@ describe("the registry's advisories, through connect", () => {
       ),
     }).toStrictEqual({
       kept: ["asked"],
+      manyVersions: ["asked"],
       unknownSeverity: "package.registry_unavailable",
       noRange: "package.registry_unavailable",
       notJson: "package.registry_unavailable",
       notARecord: "package.registry_unavailable",
       tooMany: "package.registry_unavailable",
-      tooLarge: "package.too_large",
+      tooLarge: "package.registry_unavailable",
       failed: "package.registry_unavailable",
       redirected: "package.registry_unavailable",
       invalidName: "package.invalid",

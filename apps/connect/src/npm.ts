@@ -723,6 +723,12 @@ export const npmAdvisories = async (input: unknown): Promise<NpmAdvisories> => {
     if (response.body !== null && !response.body.locked) {
       await response.body.cancel();
     }
+    // No package is too large here: an answer past the cap is one that
+    // can't be read, as the call's contract says.
+    if (packageErrors.codeOf(error) === "package.too_large") {
+      log.warn("npm.advisories_too_large", {});
+      throw packageErrors.create("package.registry_unavailable");
+    }
     throw error;
   } finally {
     reservation?.release();

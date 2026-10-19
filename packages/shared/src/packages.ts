@@ -111,7 +111,10 @@ export type NpmTarballRequest = z.infer<typeof npmTarballRequestSchema>;
  * name, with its exact versions; at most a graph's packages in all.
  */
 export const npmAdvisoriesRequestSchema = z
-  .record(packageNameSchema, z.array(exactVersionSchema).min(1).max(64))
+  .record(
+    packageNameSchema,
+    z.array(exactVersionSchema).min(1).max(dependencyMaxPackages)
+  )
   .refine(
     (asked) =>
       Object.values(asked).reduce(

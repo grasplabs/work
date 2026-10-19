@@ -462,6 +462,14 @@ describe("the platform's own packages", () => {
       intentFor(app, { [clean]: "1.0.0" })
     );
     const cleanReview = await builder.api.dependencies.get(cleanRequest.id);
+    // A name Object.prototype also has, resolved as any other.
+    await publish(plain("constructor", "1.0.0"));
+    const { request: inherited } = await resolveDependencies(
+      env,
+      await builder.api.whoami(),
+      intentFor(app, { constructor: "1.0.0" })
+    );
+    const inheritedReview = await builder.api.dependencies.get(inherited.id);
     expect({
       findings: review.findings.map(({ kind, package: ref, severity, id }) => ({
         kind,
@@ -473,6 +481,7 @@ describe("the platform's own packages", () => {
         .filter(({ kind }) => kind === "lookalike")
         .map(({ summary }) => summary),
       clean: cleanReview.findings,
+      inherited: inheritedReview.findings,
     }).toStrictEqual({
       // Gravest first.
       findings: [
@@ -512,6 +521,7 @@ describe("the platform's own packages", () => {
         "Its name looks like react-dom's, a popular package: check it is the one meant.",
       ],
       clean: [],
+      inherited: [],
     });
   });
 

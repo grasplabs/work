@@ -264,12 +264,13 @@ const findingsOf = async (
   env: Env,
   packages: readonly DependencyPackageRef[]
 ): Promise<DependencyFinding[]> => {
-  const asked: Record<string, string[]> = {};
+  // By name in a Map: a package may be named `constructor`.
+  const asked = new Map<string, string[]>();
   for (const { name, version } of packages) {
-    (asked[name] ??= []).push(version);
+    asked.set(name, [...(asked.get(name) ?? []), version]);
   }
   const advisories = await whenFree(
-    async () => await env.CONNECT.npmAdvisories(asked)
+    async () => await env.CONNECT.npmAdvisories(Object.fromEntries(asked))
   );
   const security = packages.flatMap(({ name, version }) =>
     (Object.hasOwn(advisories, name) ? (advisories[name] ?? []) : [])
