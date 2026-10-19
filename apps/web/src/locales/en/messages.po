@@ -4964,6 +4964,10 @@ msgstr "Its migration has transformed every record. It takes over when a release
 msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "Its migrations can't be read: it may rewrite the records of any table"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Its model tasks"
+msgstr "Its model tasks"
+
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
@@ -10963,8 +10967,8 @@ msgid "Write your answer"
 msgstr "Write your answer"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
-msgstr "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
+msgid "Writes a model may steer cover each action's own model uses and the workflow's own model tasks, each of which is taken to reach every call the workflow makes."
+msgstr "Writes a model may steer cover each action's own model uses and the workflow's own model tasks, each of which is taken to reach every call the workflow makes."
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Writes a model may steer: {target}"

@@ -106,8 +106,9 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
     <Table>
       <TableCaption>
         <Trans>
-          Writes a model may steer cover the uses of each action alone, not a
-          model task of the workflow whose answer a later task passes on.
+          Writes a model may steer cover each action&apos;s own model uses and
+          the workflow&apos;s own model tasks, each of which is taken to reach
+          every call the workflow makes.
         </Trans>
       </TableCaption>
       <TableHeader>
@@ -125,7 +126,19 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
             <TableCell>{version.definitionVersion}</TableCell>
             <TableCell>{formatDateTime(version.createdAt)}</TableCell>
             <TableCell>
-              <ActionEffects actions={version.actions} />
+              <div className="flex flex-col gap-1">
+                {version.modelSteeredWrites.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-muted-foreground">
+                      <Trans>Its model tasks</Trans>
+                    </span>
+                    {version.modelSteeredWrites.map((write) => (
+                      <SteeredWriteBadge key={write.alias} write={write} />
+                    ))}
+                  </div>
+                )}
+                <ActionEffects actions={version.actions} />
+              </div>
             </TableCell>
           </TableRow>
         ))}

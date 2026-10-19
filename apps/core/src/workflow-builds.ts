@@ -331,6 +331,28 @@ export type WorkflowLimits = z.infer<typeof workflowLimitsSchema>;
 export type SealedExpression = z.infer<typeof sealedExpressionSchema>;
 
 /**
+ * The tasks `compiled` seals (`tasks.json`), read from its own bytes before
+ * anything is stored: none for a build that isn't executable, which never
+ * runs a task. For a review of the version a publication answers.
+ */
+export const compiledTasksOf = (
+  compiled: CompiledBuild
+): readonly SealedTask[] => {
+  const { build } = compiled;
+  if (!build.executable) {
+    return [];
+  }
+  const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
+  const bytes =
+    entry === undefined ? undefined : compiled.bytes.get(entry.sha256);
+  if (bytes === undefined) {
+    throw new Error("A compiled build holds no tasks.json");
+  }
+  return tasksFileSchema.parse(JSON.parse(new TextDecoder().decode(bytes)))
+    .tasks;
+};
+
+/**
  * The executable identity of a build: its generator, protocol, compiler and
  * every artifact it runs (the generated and compiled code, the expression
  * table, the SDK), not the definition's text or the source map, whose

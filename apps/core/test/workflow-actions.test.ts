@@ -253,6 +253,24 @@ const resealed = async (
     ).bind(text, hash, id)
   );
 };
+/** A JSON task calling `mail`'s `op`. */
+const mailTask = (op: string) => ({
+  [`call-${op.replace(".", "-")}`]: {
+    call: "grasp.connector",
+    with: {
+      binding: "mail",
+      operation: op,
+      arguments: { to: "${ $workflow.input.who }", subject: "Hi" },
+    },
+  },
+});
+/** A version review flagging `writes` alike, published and listed by every role. */
+const flagged = (writes: unknown[]) => ({
+  executable: true,
+  published: writes,
+  builder: writes,
+  reader: writes,
+});
 /** Sends two mails and answers what the context holds. */
 const sendsTwice =
   notifyModule(`await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" });
@@ -759,6 +777,139 @@ describe("a JSON workflow's own actions", () => {
           },
         ],
       ],
+    });
+  });
+
+  it("flags the writes a workflow's own model tasks may steer, every write its calls may make once any model task is in its build", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const reader = await person("user");
+    const mail = `mail-${unique()}`;
+    const operation = {
+      input: descriptorOf(v.object({ to: v.string(), subject: v.string() })),
+      output: descriptorOf(v.object({ messageId: v.string() })),
+    };
+    await publishCatalogContract(env, admin, {
+      key: mail,
+      kind: "connector",
+      operations: {
+        "mail.send": operation,
+        "mail.read": { ...operation, readOnly: true },
+      },
+    });
+    const model = `writer-${unique()}`;
+    await publishCatalogContract(env, admin, { key: model, kind: "model" });
+    const contacts = `contacts-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key: contacts,
+      kind: "operation",
+      ...operation,
+    });
+    const ask = {
+      ask: {
+        call: "grasp.model",
+        with: {
+          binding: "writer",
+          instructions: "Write a line.",
+          input: { who: "${ $workflow.input.who }" },
+          outputSchema: objectSchema({ line: { type: "string" } }),
+        },
+      },
+    };
+    const exportTask = {
+      share: {
+        call: "grasp.operation",
+        with: {
+          binding: "contacts",
+          arguments: { to: "${ $workflow.input.who }", subject: "Hi" },
+        },
+      },
+    };
+    const definitionSchema = z.looseObject({
+      document: z.looseObject({
+        metadata: z.object({
+          grasp: z.looseObject({
+            bindings: z.record(z.string(), z.unknown()),
+          }),
+        }),
+      }),
+    });
+    /** Publishes `before` ahead of the action, which uses `operations` of mail. */
+    const reviewed = async (before: unknown[], operations: string[]) => {
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `act-${unique()}`
+      );
+      await shareWorkflowResource(env, ada, workflow.id, {
+        type: "person",
+        id: reader.userId,
+        role: "user",
+      });
+      const definition = definitionSchema.parse(
+        JSON.parse(
+          definitionOf(workflow.name, {
+            before,
+            mail: { kind: "connector", contract: mail },
+          })
+        )
+      );
+      const { bindings } = definition.document.metadata.grasp;
+      const text = JSON.stringify(before);
+      if (text.includes('"writer"')) {
+        bindings.writer = { kind: "model", contract: model };
+      }
+      if (text.includes('"contacts"')) {
+        bindings.contacts = { kind: "operation", contract: contacts };
+      }
+      const published = await publishWorkflowVersion(env, ada, workflow.id, {
+        definition: JSON.stringify(definition),
+        basedOn: null,
+        modules: {
+          "code/notify.ts": notifyModule(
+            'return { status: "x" };',
+            `[${connector(operations)}]`
+          ),
+        },
+      });
+      const [asBuilder] = await workflowVersions(env, ada, workflow.id);
+      const [asReader] = await workflowVersions(env, reader, workflow.id);
+      return {
+        executable: asBuilder?.build.executable,
+        published: published.modelSteeredWrites,
+        builder: asBuilder?.modelSteeredWrites,
+        reader: asReader?.modelSteeredWrites,
+      };
+    };
+    const send = {
+      alias: "mail",
+      kind: "connector",
+      operations: ["mail.send"],
+    };
+    expect({
+      // A model task, then a connector write: flagged, though the action
+      // after them only reads.
+      modelThenWrite: await reviewed(
+        [ask, mailTask("mail.send")],
+        ["mail.read"]
+      ),
+      // Only reads, the action's included.
+      modelThenRead: await reviewed(
+        [ask, mailTask("mail.read")],
+        ["mail.read"]
+      ),
+      // Writes with no model task: nothing a model's answer reaches.
+      writeAlone: await reviewed([mailTask("mail.send")], ["mail.send"]),
+      // The action the workflow calls writes: its use is flagged.
+      modelThenWritingAction: await reviewed([ask], ["mail.send"]),
+      // An App's export: always a write.
+      modelThenExport: await reviewed([ask, exportTask], ["mail.read"]),
+    }).toStrictEqual({
+      modelThenWrite: flagged([send]),
+      modelThenRead: flagged([]),
+      writeAlone: flagged([]),
+      modelThenWritingAction: flagged([send]),
+      modelThenExport: flagged([{ alias: "contacts", kind: "operation" }]),
     });
   });
 

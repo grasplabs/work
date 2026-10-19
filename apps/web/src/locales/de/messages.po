@@ -4964,6 +4964,10 @@ msgstr "Ihre Migration hat jeden Datensatz umgewandelt. Sie greift, wenn ein Rel
 msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "Seine Migrationen lassen sich nicht lesen: Es kann die Datensätze jeder Tabelle überschreiben"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Its model tasks"
+msgstr "Seine Modellaufgaben"
+
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "Die Standardwerte der neuen Felder werden ausgefüllt. Releases, die sie brauchen, können aktuell gemacht werden, sobald das abgeschlossen ist."
@@ -10963,8 +10967,8 @@ msgid "Write your answer"
 msgstr "Schreiben Sie Ihre Antwort"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
-msgstr "Schreibvorgänge, die ein Modell steuern kann, umfassen nur die Nutzungen der jeweiligen Aktion, nicht eine Modellaufgabe des Workflows, deren Antwort eine spätere Aufgabe weitergibt."
+msgid "Writes a model may steer cover each action's own model uses and the workflow's own model tasks, each of which is taken to reach every call the workflow makes."
+msgstr "Schreibvorgänge, die ein Modell steuern kann, umfassen die eigenen Modellnutzungen jeder Aktion und die eigenen Modellaufgaben des Workflows; von jeder wird angenommen, dass sie jeden Aufruf des Workflows erreicht."
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Writes a model may steer: {target}"
