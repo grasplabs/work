@@ -915,6 +915,20 @@ export const resolveDependencies = async (
       issues: ["dependencies: the platform provides every one of them"],
     });
   }
+  // What the approver is shown about the graph's packages (GRA-699), read
+  // before anything is fetched or refused: known malware is refused as
+  // such, and audited, before an install script or a tarball could refuse
+  // it as something else (every other finding warns). A resolution whose
+  // advisories can't be read fails, never stored as one without findings.
+  const { findings, total, malware } = await findingsOf(
+    env,
+    nodes
+      .map(({ name, version }) => ({ name, version }))
+      .toSorted((a, b) => (packageKey(a) < packageKey(b) ? -1 : 1))
+  );
+  if (malware.length > 0) {
+    await refuseMalware(env, by, asked, malware);
+  }
   const refusals = refusalCollector();
   for (const node of nodes) {
     for (const reason of metadataRefusals(node.meta)) {
@@ -943,14 +957,6 @@ export const resolveDependencies = async (
     )
   );
   const graph = graphOfLock(lock);
-  // What the approver is shown about the graph's packages (GRA-699), before
-  // the request is stored: a resolution whose advisories can't be read
-  // fails, never stored as one without findings.
-  const { findings, total, malware } = await findingsOf(env, graph.packages);
-  // Known malware is refused, never proposed: every other finding warns.
-  if (malware.length > 0) {
-    await refuseMalware(env, by, asked, malware);
-  }
   // The lock is stored in the batch that stores the request: a request is
   // never without the lock its graph names, nor a lock without a request.
   // Admitted after the slow fetch and checks, right before it is stored.

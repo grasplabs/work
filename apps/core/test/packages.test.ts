@@ -543,8 +543,12 @@ describe("the platform's own packages", () => {
     const { builder, app } = await builderWithApp();
     const stream = named("flatmap-stream");
     const dates = named("dates");
+    // Its install script would refuse it too: malware is refused as such.
     await publish(
-      plain(stream, "0.1.1", { dependencies: { [dates]: "^1.0.0" } })
+      plain(stream, "0.1.1", {
+        dependencies: { [dates]: "^1.0.0" },
+        scripts: { postinstall: "node steal.js" },
+      })
     );
     await publish(plain(dates, "1.0.0"));
     // Embedded Malicious Code: malware, however grave the registry says.
