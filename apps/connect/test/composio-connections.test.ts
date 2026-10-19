@@ -39,6 +39,13 @@ const composio = fakeComposioApi(
         { slug: "HUBSPOT_DELETE_CONTACT" },
       ],
     },
+    // Composio holds no app for it: it would take the organization's own.
+    {
+      slug: "acme_erp",
+      name: "Acme ERP",
+      managed: false,
+      tools: [{ slug: "ACME_ERP_LIST_ORDERS" }],
+    },
   ],
   {
     mcpTools: [
@@ -330,6 +337,31 @@ describe("connecting a Composio toolkit", () => {
     expect(ends).toStrictEqual(starts.map(() => "connection.invalid"));
     expect(composioWrites()).toStrictEqual([]);
     await expect(events()).resolves.toStrictEqual([]);
+  });
+
+  it("is refused for a toolkit Composio holds no app for, recorded, and makes nothing at Composio", async () => {
+    const admin = someone("admin");
+    await expect(
+      outcome(
+        start(admin, { toolkit: "acme_erp", tools: ["ACME_ERP_LIST_ORDERS"] })
+      )
+    ).resolves.toBe("connection.own_auth_required");
+    expect({
+      writes: composioWrites(),
+      held: heldAtComposio(),
+      flows: await flowsOf(admin),
+      cleanups: await cleanupsLeft(),
+    }).toStrictEqual({ writes: [], held: nothingHeld, flows: 0, cleanups: 0 });
+    const [refused, ...more] = await events();
+    expect(more).toStrictEqual([]);
+    expect(refused).toMatchObject({
+      action: "connection.connect",
+      detail: {
+        provider: "acme_erp",
+        outcome: "refused",
+        reason: "connection.own_auth_required",
+      },
+    });
   });
 
   it("isn't offered while connect has no Composio key", async () => {

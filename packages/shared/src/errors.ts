@@ -135,6 +135,7 @@ export const requestErrors = defineErrorFamily({
   "request.rate_limited": "Too many requests. Try again in a minute.",
   "request.too_deep": "A value in the request nests deeper than values may.",
   "request.too_large": "A value in the request holds more than a request may.",
+  "request.timeout": "The request took too long to arrive. Try again.",
   "request.unsupported_value":
     "A value in the request is of a kind calls don't take.",
   "request.too_expensive":

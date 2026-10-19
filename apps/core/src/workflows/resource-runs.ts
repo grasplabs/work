@@ -53,6 +53,7 @@ import {
 } from "./resource-host.ts";
 import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
+import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
@@ -160,6 +161,8 @@ export interface RunAdmission {
   manifestHash: string;
   buildHash: string;
   principal: string;
+  /** Whether its start was decided in restricted mode: pinned with it. */
+  restricted: boolean;
   createdAt: number;
 }
 
@@ -169,7 +172,7 @@ export interface RunAdmission {
  */
 export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
   db.insert(workflowResourceRuns).select(
-    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0
+    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0, ${run.restricted ? 1 : 0}
         WHERE EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
   );
 
@@ -210,6 +213,16 @@ const runEntry = (row: RunRow, action: string): AuditEntry => ({
     buildHash: row.buildHash,
   },
 });
+
+/** `entry`, naming `failureCode` when it records a failed end that has one. */
+const withFailure = (
+  entry: AuditEntry,
+  status: WorkflowRunStatus,
+  failureCode: string | null
+): AuditEntry =>
+  status === "failed" && failureCode !== null
+    ? { ...entry, detail: { ...entry.detail, failureCode } }
+    : entry;
 
 const endActions: Partial<Record<WorkflowRunStatus, string>> = {
   completed: "workflow.run.completed",
@@ -258,9 +271,16 @@ export const projectResourceRun = async (
             : lt(workflowResourceRuns.engineSequence, engine.sequence)
         )
       ),
+    // A failure names its code, as the run keeps it: a run that failed for
+    // packages revoked, say, says so in the audit log.
     ...(action === undefined
       ? []
-      : [outboxedIfChanged(db, runEntry(row, action))]),
+      : [
+          outboxedIfChanged(
+            db,
+            withFailure(runEntry(row, action), status, failureCode)
+          ),
+        ]),
     // Ended, it waits in the admission queue for nothing more: its places
     // go now, rather than keep others waiting until they lapse. After the
     // audit entry, which reads what the row's update changed.
@@ -274,6 +294,9 @@ export const projectResourceRun = async (
         ]
       : []),
   ]);
+  if (status !== row.status) {
+    await tellQueryFollowers(env, id);
+  }
 };
 
 /** Sends `row`'s start to the engine; throws when the engine didn't take it. */
@@ -409,6 +432,7 @@ const startAbandoned = async (
     }),
     owedTermination(db, row.id, "failed", now),
   ]);
+  await tellQueryFollowers(env, row.id);
 };
 
 /**
@@ -465,6 +489,7 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
           eq(workflowResourceRuns.status, "starting")
         )
       );
+    await tellQueryFollowers(env, row.id);
     return;
   }
   if (row.startAttempts >= maxStartAttempts || pastStarting) {
@@ -550,6 +575,8 @@ export interface ResourceRunMemory {
   leaseOf: ResourceHostHooks["leaseOf"];
   /** What the run keeps of its tried-once attempts (`TriedOnceMarks`). */
   triedOnce?: ResourceHostHooks["triedOnce"];
+  /** The model calls its actions made (`ActionModelCalls`). */
+  modelCalls?: ResourceHostHooks["modelCalls"];
   /** Aborts once the activation running the run is over. */
   over?: AbortSignal;
   /** Whether the run is still this activation's. */
@@ -715,9 +742,15 @@ export const runResourceWorkflow = async (
   );
   const calls: AttemptCall[] = [];
   let tampered: StepError | undefined;
+  // The run's own sandbox session on-prem, its actions' parent.
+  let sessionId: string | undefined;
   const host = new ResourceRunHost(env, step, run, {
+    sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
     ...(memory.triedOnce === undefined ? {} : { triedOnce: memory.triedOnce }),
+    ...(memory.modelCalls === undefined
+      ? {}
+      : { modelCalls: memory.modelCalls }),
     attemptCall: trackAttemptCalls(calls),
     tampered: (error) => {
       tampered ??= error;
@@ -744,6 +777,9 @@ export const runResourceWorkflow = async (
       attemptMethods: resourceAttemptMethods,
     },
     {
+      onSession: (id) => {
+        sessionId = id;
+      },
       ...(memory.over === undefined ? {} : { over: memory.over }),
       ...(memory.current === undefined ? {} : { current: memory.current }),
     }
@@ -946,6 +982,9 @@ const cancelStarting = async (
     outboxedIfChanged(db, terminatedEntry(by, row, "cancelled")),
     owedTermination(db, row.id, "cancelled", now),
   ]);
+  if (cancelled.length > 0) {
+    await tellQueryFollowers(env, row.id);
+  }
   return cancelled.length > 0;
 };
 

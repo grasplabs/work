@@ -68,7 +68,8 @@ export type ResourceKind =
   | "template"
   | "store"
   | "statistics"
-  | "guests";
+  | "guests"
+  | "app";
 
 /** What a declaration's config may say about a model. */
 export interface ModelConfig<Output extends AnySchema | undefined> {
@@ -209,6 +210,38 @@ export interface StatisticsConfig<
 
 /** What a guests resource may do with the App's guest chats. */
 export type GuestsOperation = "invite" | "list" | "read" | "revoke";
+/** The kinds of another App's public function an app resource may call. */
+export type AppFunctionKind = "query" | "mutation" | "action";
+
+/**
+ * One of another App's public functions, as an app resource declares it:
+ * its kind, its arguments (a map of field schemas, as that App declares
+ * the function's `args`) and its return, exactly as that App declares them.
+ */
+export interface AppFunctionConfig<
+  Shape extends ValueShape = ValueShape,
+  Returns extends AnySchema = AnySchema,
+> {
+  readonly kind: AppFunctionKind;
+  readonly args: Shape;
+  readonly returns: Returns;
+}
+
+/** What a declaration's config may say about another App. */
+export interface AppConfig<
+  Functions extends Readonly<Record<string, AppFunctionConfig>>,
+> {
+  /** The App's public functions this App calls, by path, e.g. `contacts.find`. */
+  readonly functions: Functions;
+}
+
+/** One of another App's functions as a declaration holds it: data only. */
+export interface AppFunctionShape {
+  readonly kind: AppFunctionKind;
+  /** The object descriptor of its arguments. */
+  readonly args: ValueDescriptor;
+  readonly returns: ValueDescriptor;
+}
 
 /** One store operation as a declaration holds it: data only. */
 export interface StoreOperationShape {
@@ -291,6 +324,21 @@ export interface GuestsResource<
   Operations extends readonly GuestsOperation[] = readonly GuestsOperation[],
 > extends DeclarationBase<"guests", Alias> {
   readonly operations: Operations;
+}
+
+/**
+ * A requirement of another App's public functions: the App is the one an
+ * admin binds it to, which must serve each exactly as declared.
+ */
+export interface AppResource<
+  Alias extends string = string,
+  Functions extends Readonly<Record<string, AppFunctionConfig>> = Readonly<
+    Record<string, AppFunctionConfig>
+  >,
+> extends DeclarationBase<"app", Alias> {
+  readonly functions: Readonly<Record<string, AppFunctionShape>>;
+  /** The functions' types, for types only: never set. */
+  readonly "~functions"?: Functions;
 }
 
 /**
@@ -379,7 +427,8 @@ export type AnyResource =
   | TemplateResource
   | StoreResource
   | StatisticsResource
-  | GuestsResource;
+  | GuestsResource
+  | AppResource;
 
 /** One search result from knowledge: a title and an excerpt of it. */
 export interface KnowledgeHit {
@@ -537,12 +586,26 @@ export type GuestsClient<Operations extends readonly GuestsOperation[]> =
       : unknown);
 
 /**
+ * What `ctx.resources.<alias>` is for another App: each declared function
+ * by its path, with its arguments, answering its return.
+ */
+export interface AppClient<
+  Functions extends Readonly<Record<string, AppFunctionConfig>>,
+> {
+  readonly call: <Path extends Extract<keyof Functions, string>>(
+    ...call: StoreCallArgs<Functions, Path>
+  ) => Promise<Infer<Functions[Path]["returns"]>>;
+}
+
+/**
  * A store call's arguments: each path of `Path` paired with its own
  * arguments, so a path that may be either of two needs arguments that fit
  * whichever it is, never just one of them.
  */
 type StoreCallArgs<
-  Operations extends Readonly<Record<string, StoreOperationConfig>>,
+  Operations extends Readonly<
+    Record<string, { readonly args: ValueShape; readonly returns: AnySchema }>
+  >,
   Path,
 > =
   Path extends Extract<keyof Operations, string>
@@ -586,6 +649,9 @@ interface ResourceClients<Resource> {
     : never;
   readonly guests: Resource extends GuestsResource<string, infer Operations>
     ? GuestsClient<Operations>
+    : never;
+  readonly app: Resource extends AppResource<string, infer Functions>
+    ? AppClient<Functions>
     : never;
 }
 
@@ -865,37 +931,55 @@ type StoreShapeOf = (config: Record<string, unknown>) => {
  */
 const checkedStoreOperations = (
   operations: unknown,
-  shapeOf: StoreShapeOf
-): Readonly<Record<string, StoreOperationShape>> => {
+  shapeOf: StoreShapeOf,
+  { actions = false }: { readonly actions?: boolean } = {}
+): Readonly<Record<string, AppFunctionShape>> => {
+  // An app resource's are another App's functions; a store resource's a
+  // store's operations: each refusal names what it was given.
+  const named = actions
+    ? { resource: "An app resource", key: "functions", one: "function" }
+    : {
+        resource: "A store resource",
+        key: "operations",
+        one: "store operation",
+      };
   if (!isPlainObject(operations)) {
-    return refuse("A store resource's `operations` is an object of paths.");
+    return refuse(
+      `${named.resource}'s \`${named.key}\` is an object of paths.`
+    );
   }
   const entries = Object.entries(operations);
   if (entries.length === 0 || entries.length > listMax) {
     return refuse(
-      `A store resource lists between 1 and ${listMax} operations.`
+      `${named.resource} lists between 1 and ${listMax} ${named.key}.`
     );
   }
-  const checked: Record<string, StoreOperationShape> = {};
+  const checked: Record<string, AppFunctionShape> = {};
   for (const [path, entry] of entries) {
     if (
       path.length > storeOperationPathMaxLength ||
       !storeOperationPathPattern.test(path)
     ) {
       return refuse(
-        `\`${path}\` isn't a store operation's path: up to four dotted names, at most ${storeOperationPathMaxLength} characters.`
+        `\`${path}\` isn't a ${named.one}'s path: up to four dotted names, at most ${storeOperationPathMaxLength} characters.`
       );
     }
     const config = checkedConfig(entry, ["kind", "args", "returns"]);
     const { kind } = config;
-    if (kind !== "query" && kind !== "mutation") {
+    if (
+      kind !== "query" &&
+      kind !== "mutation" &&
+      !(actions && kind === "action")
+    ) {
       return refuse(
-        "A store resource calls a store's queries and mutations, never its actions."
+        actions
+          ? "An app resource calls another App's queries, mutations and actions."
+          : "A store resource calls a store's queries and mutations, never its actions."
       );
     }
     const { args, returns } = shapeOf(config);
     if (args.kind !== "object") {
-      return refuse("A store operation's arguments are an object.");
+      return refuse(`A ${named.one}'s arguments are an object.`);
     }
     checked[path] = { kind, args, returns };
   }
@@ -906,7 +990,7 @@ const checkedStoreOperations = (
 const shapeFromSchemas: StoreShapeOf = (config) => {
   if (!isPlainObject(config.args)) {
     return refuse(
-      "A store operation's `args` is a map of field names to schemas, as its App declares them."
+      "An operation's `args` is a map of field names to schemas, as its App declares them."
     );
   }
   // SAFETY: `args` was checked to be a plain object; `v.object` checks
@@ -925,6 +1009,21 @@ const shapeFromData: StoreShapeOf = (config) => ({
   returns: readDescriptor(config.returns, 1, { nodes: 0 }),
 });
 
+/** An app declaration, from its alias and its functions as data. */
+const appDeclaration = (
+  alias: unknown,
+  functions: unknown,
+  shapeOf: StoreShapeOf
+): AppResource =>
+  // SAFETY: built from what was checked: the alias and the functions,
+  // each with its descriptors, as `AppResource` holds them.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  declared({
+    "~resource": "app",
+    alias: checkedAlias(alias),
+    functions: checkedStoreOperations(functions, shapeOf, { actions: true }),
+  }) as AppResource;
+
 /** A store declaration, from its alias and its operations as data. */
 const storeDeclaration = (
   alias: unknown,
@@ -937,7 +1036,12 @@ const storeDeclaration = (
   declared({
     "~resource": "store",
     alias: checkedAlias(alias),
-    operations: checkedStoreOperations(operations, shapeOf),
+    // SAFETY: without `actions`, every operation checked is a query or a
+    // mutation, as a store operation's shape holds.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    operations: checkedStoreOperations(operations, shapeOf) as Readonly<
+      Record<string, StoreOperationShape>
+    >,
   }) as StoreResource;
 
 /**
@@ -1178,6 +1282,30 @@ export const resource = Object.freeze({
     }) as GuestsResource<Alias, Operations>;
   },
   /**
+   * Some of another App's public functions, by path: queries, mutations
+   * and actions, each with exactly the arguments and return that App
+   * declares, so the host binds only an App that serves exactly that. Each
+   * call runs as the person this App's call acts for, under the other
+   * App's own roles.
+   */
+  app: <
+    const Alias extends string,
+    const Functions extends Readonly<Record<string, AppFunctionConfig>>,
+  >(
+    alias: Alias,
+    config: AppConfig<Functions>
+  ): AppResource<Alias, Functions> => {
+    const checked = checkedConfig(config, ["functions"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the functions given, by path.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return appDeclaration(
+      alias,
+      checked.functions,
+      shapeFromSchemas
+    ) as AppResource<Alias, Functions>;
+  },
+  /**
    * What the App's screens may do with files through the host: upload,
    * read, attach, delete. Listed in the App's `uses`, never a function's.
    */
@@ -1295,6 +1423,13 @@ export const readResourceDeclaration = (
   }
   if (kind === "guests") {
     return resource.guests(alias, loose);
+  }
+  if (kind === "app") {
+    const { functions, ...rest } = config;
+    if (Object.keys(rest).length > 0) {
+      return refuse("An app resource's config has only `functions`.");
+    }
+    return appDeclaration(alias, functions, shapeFromData);
   }
   if (kind === "files") {
     return resource.files(alias, loose);

@@ -193,7 +193,7 @@ export const hidden = resource.store("hidden", {
 });
 
 /** What a call answered, as JSON, or why it failed: its code and the store's. */
-const attempt = async (work) => {
+const attempt = async (work: () => Promise<unknown>): Promise<string> => {
   try {
     return JSON.stringify(await work());
   } catch (error) {
@@ -1289,7 +1289,12 @@ describe("a workflow calling a store's public operation", () => {
       await outcome(
         callApprovedStoreOperation(
           env,
-          { id: workflow.id, version: 1, approval: frozen },
+          {
+            id: workflow.id,
+            version: 1,
+            approval: frozen,
+            restrictedRun: null,
+          },
           { text },
           {
             actor: { type: "person", userId: ada.userId },
@@ -1354,7 +1359,7 @@ describe("a workflow calling a store's public operation", () => {
       await outcome(
         callApprovedStoreOperation(
           env,
-          { id: workflow.id, version: 1, approval },
+          { id: workflow.id, version: 1, approval, restrictedRun: null },
           { text: "from the run" },
           {
             actor: { type: "person", userId: ada.userId },
@@ -1373,10 +1378,24 @@ describe("a workflow calling a store's public operation", () => {
     });
     const noteMutation = "export const note = mutation({";
     const noteArgs = `${noteMutation}\n  args: { text: v.string() },`;
-    // The same shapes, now a query.
+    // The same shapes, now a query: one that reads, as a query may.
+    const noteBlock = `${noteArgs}
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("notes", { text: args.text });
+    return null;
+  },
+});`;
     const asQuery = await nextVersion(
       crm,
-      withNote(noteMutation, "export const note = query({"),
+      withNote(
+        noteBlock,
+        `export const note = query({
+  args: { text: v.string() },
+  returns: v.null(),
+  handler: async () => null,
+});`
+      ),
       2
     );
     const otherKind = await run();
@@ -1457,7 +1476,7 @@ describe("a workflow calling a store's public operation", () => {
       await outcome(
         callApprovedStoreOperation(
           env,
-          { id: workflow.id, version: 1, approval },
+          { id: workflow.id, version: 1, approval, restrictedRun: null },
           { name },
           {
             actor: { type: "person", userId: ada.userId },
@@ -1494,6 +1513,66 @@ describe("a workflow calling a store's public operation", () => {
         ["contacts.add", "store.restricted"],
         ["contacts.add", "store.restricted"],
       ],
+      crmSees: ["Ada"],
+    });
+  });
+
+  it("restricts the store's App before a restricted run's input reaches it, and answers that run", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const key = await contractOf(admin, crm.release, "contacts.add");
+    const workflow = await workflowOf(ada, key, byName);
+    const permissionId = await granted(
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "store", storeId: crm.store },
+        actions: ["contacts.add"],
+      },
+      null
+    );
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "lookup",
+      target: {
+        kind: "storeOperation",
+        permissionId,
+        operation: "contacts.add",
+        operationKind: "mutation",
+      },
+      reviewed: { version: 1 },
+    });
+    const runId = `run-${unique()}`;
+    const answered = await outcome(
+      callApprovedStoreOperation(
+        env,
+        { id: workflow.id, version: 1, approval, restrictedRun: runId },
+        { name: "Ada" },
+        {
+          actor: { type: "person", userId: ada.userId },
+          principal: ada.userId,
+          requestId: crypto.randomUUID(),
+          deadline: Date.now() + 30_000,
+          idempotencyKey: `step-${unique()}`,
+          runId: null,
+        }
+      )
+    );
+    const events = await allEvents();
+    expect({
+      answered: answered !== "resource.unavailable",
+      crmRestricted: await isRestricted(env, authorityOf(crm), contextOf(crm)),
+      entered: events
+        .filter(
+          ({ action, target }) =>
+            action === "context.restricted" && target?.id === crm.app
+        )
+        .map(({ provenance }) => provenance),
+      crmSees: await call(crm.owner, crm, "contacts.list"),
+    }).toStrictEqual({
+      answered: true,
+      crmRestricted: true,
+      entered: [[`workflow_run:${runId}`]],
       crmSees: ["Ada"],
     });
   });
@@ -1645,5 +1724,150 @@ describe("a shared store's commits", () => {
     expect(writers).toStrictEqual([
       { resource: desk.app, version: 1, principal: desk.owner.userId },
     ]);
+  });
+});
+
+/** An App whose store's mutation stages a start of the workflow it declares. */
+const trackerFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  requests: defineTable({ who: v.string() }),
+});
+`,
+  "operations/requests.ts": `import { resource, v } from "@grasp-os/sdk";
+import { mutation } from "#grasp/server";
+
+export const followUp = resource.workflow("followUp", {
+  input: v.object({ who: v.string() }),
+  output: v.object({ status: v.string() }),
+});
+
+export const file = mutation({
+  args: { who: v.string() },
+  returns: v.null(),
+  uses: [followUp],
+  handler: async (ctx, args) => {
+    await ctx.db.insert("requests", { who: args.who });
+    await ctx.afterCommit.start(followUp, { who: args.who });
+    return null;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { file, followUp } from "./operations/requests.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Tracker",
+  schema,
+  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
+  operations: { requests: { file } },
+  internalOperations: {},
+  screens: [],
+  uses: [followUp],
+});
+`,
+};
+
+/** An App filing requests in the Tracker's store through its store resource. */
+const frontFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  marks: defineTable({ label: v.string() }),
+});
+`,
+  "operations/front.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const tracker = resource.store("tracker", {
+  operations: {
+    "requests.file": { kind: "mutation", args: { who: v.string() }, returns: v.null() },
+  },
+});
+
+export const file = action({
+  args: { who: v.string() },
+  returns: v.string(),
+  uses: [tracker],
+  handler: async (ctx, args) => {
+    try {
+      await ctx.resources.tracker.call("requests.file", { who: args.who });
+      return JSON.stringify("filed");
+    } catch (error) {
+      const details = Object(Reflect.get(Object(error), "details"));
+      return "error:" + String(Reflect.get(details, "code") ?? Reflect.get(Object(error), "code"));
+    }
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { file, tracker } from "./operations/front.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Front",
+  schema,
+  access: { tables: { marks: { read: "owner", write: "owner" } } },
+  operations: { front: { file } },
+  internalOperations: {},
+  screens: [],
+  uses: [tracker],
+});
+`,
+};
+
+describe("a store operation starting a workflow", () => {
+  it("is refused after its commit, so a caller of another App's store, a run's included, starts nothing through it", async () => {
+    const admin = await person("admin");
+    const tracker = await sealedApp(trackerFiles, "Tracker");
+    const front = await sealedApp(frontFiles, "Front");
+    const permission = await granted(
+      admin,
+      {
+        subject: { type: "app", appId: front.app },
+        object: { type: "store", storeId: tracker.store },
+        actions: ["requests.file"],
+      },
+      front.release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: front.app,
+      alias: "tracker",
+      target: { kind: "store", permissionId: permission },
+      reviewed: { version: front.release.manifest.resourceVersion },
+    });
+    const answered = await call(front.owner, front, "front.file", {
+      who: "Ada",
+    });
+    const { outbox, commits } = await runInDurableObject(
+      env.DATA_STORES.getByName(tracker.store),
+      (_instance, state) => ({
+        outbox: state.storage.sql
+          .exec("SELECT id FROM sdk_change_outbox")
+          .toArray().length,
+        // Its mutation failed, so it saved nothing: not its record either.
+        commits: state.storage.sql
+          .exec<{ commits: number }>("SELECT commits FROM sdk_store")
+          .one().commits,
+      })
+    );
+    const receipts = await env.DB.prepare(
+      "SELECT count(*) AS count FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ?"
+    )
+      .bind(tracker.app)
+      .first<{ count: number }>();
+    expect({
+      answered,
+      outbox,
+      commits,
+      receipts: receipts?.count,
+    }).toStrictEqual({
+      answered: "error:resource.unavailable",
+      outbox: 0,
+      commits: 0,
+      receipts: 0,
+    });
   });
 });

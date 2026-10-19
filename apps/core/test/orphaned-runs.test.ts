@@ -3,11 +3,9 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { cancelRun } from "../src/workflows/controls.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { repairStarts, startRun } from "../src/workflows/runs.ts";
-import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -20,7 +18,15 @@ import {
   stepDone,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
+import {
+  appCall,
+  appWith,
+  bindStats,
+  hitsCall,
+  openGate,
+  runEvents,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // A run's row keeps the start it is to send the engine until the engine
 // confirms it. A start that stopped in between (core stopped) leaves a
@@ -231,7 +237,7 @@ const whileRefusingStarts = async <T>(
 /** A run whose step records a statistics point, then waits a day. */
 const counting = workflowFiles(
   "waits",
-  `  await step.do("work", { description: "Work" }, async () => await env.APP.call("point", "late"));
+  `  await step.do("work", { description: "Work" }, async () => await ${appCall("stats.point", "action", `{ measures: ["late"] }`)});
   await step.sleep("go", { description: "Wait", duration: "1 day" });
   return null;`,
   { work: null }
@@ -248,7 +254,7 @@ const counting = workflowFiles(
 const lateStart = async (cancelled: boolean) => {
   const builder = await personApi("builder");
   const app = await appWith(builder, counting);
-  await serverBuilt(app, 1);
+  await bindStats(app);
   const run = crypto.randomUUID();
   const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
   let refusedOnce = false;
@@ -309,12 +315,12 @@ const lateStart = async (cancelled: boolean) => {
   return { row: await rowStatus(run), recorded, kept: await keptOf() };
 };
 
-/** As `counting`, its step held open until the App counts `gate`. */
+/** As `counting`, its step held open until the App's gate opens. */
 const gatedCounting = workflowFiles(
   "waits",
   `  await step.do("work", { description: "Work" }, async () => {
-    await env.APP.call("point", "late");
-    while ((await env.APP.call("hits", "gate")) === 0) {
+    await ${appCall("stats.point", "action", `{ measures: ["late"] }`)};
+    while ((await ${hitsCall(`"gate"`)}) === 0) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     return null;
@@ -726,7 +732,7 @@ describe("starts core stopped in the middle of", () => {
   it("add up nothing of a step still out when its run's late start is marked failed, refusing its calls from then on", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, gatedCounting);
-    await serverBuilt(app, 1);
+    await bindStats(app);
     const run = crypto.randomUUID();
     const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
     const keptOf = async () =>
@@ -782,13 +788,7 @@ describe("starts core stopped in the middle of", () => {
     // more: the step's next call, its look at the gate, is refused, and the
     // step never completes to add up anything (were it to complete
     // first, its commit finds the run ended and writes nothing either).
-    await callApp(
-      env,
-      appIdSchema.parse(app),
-      { userId: builder.userId, mode: "interactive" },
-      "hit",
-      ["gate"]
-    );
+    await openGate(builder, app);
     await vi.waitFor(
       async () => {
         const actions = await actionsOf(run);

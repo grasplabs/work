@@ -123,6 +123,61 @@ const deepFreeze = (value: JsonValue): JsonValue => {
 };
 
 /**
+ * Counts what the workflow's own actions reach as used, as a task's call
+ * would be: sealed and approved with the rest. A use of a binding the
+ * definition doesn't declare, of another kind, or of its own modules is
+ * refused, and so is a declared operation its contract doesn't name.
+ * Worked to a fixed point: a binding first reached through a use is
+ * checked too, wherever the definition declares it.
+ */
+const markActionUses = (checker: Checker): void => {
+  const pending = [...checker.bindings.values()].filter(
+    ({ referenced }) => referenced
+  );
+  const checked = new Set<object>();
+  for (
+    let binding = pending.pop();
+    binding !== undefined;
+    binding = pending.pop()
+  ) {
+    if (checked.has(binding)) {
+      continue;
+    }
+    checked.add(binding);
+    for (const use of binding.contract?.uses ?? []) {
+      const used = checker.bindings.get(use.alias);
+      if (
+        used === undefined ||
+        used.kind !== use.kind ||
+        used.contractKey.startsWith("local:")
+      ) {
+        checker.report.error(
+          "binding.unknown_use",
+          { pointer: binding.pointer },
+          `Declare a ${use.kind} binding \`${use.alias}\` of the host catalog for the action to use.`,
+          { expected: `a ${use.kind} binding` }
+        );
+        continue;
+      }
+      used.referenced = true;
+      pending.push(used);
+      // Exactly the operations its catalog contract names (GRA-704): what
+      // the host lets the action call, and nothing it might add later.
+      for (const operation of use.operations ?? []) {
+        if (used.contract?.operations?.has(operation) !== true) {
+          checker.report.error(
+            "binding.unknown_operation",
+            { pointer: binding.pointer },
+            `Declare only operations \`${use.alias}\`'s contract names: it has no \`${operation}\`.`,
+            { expected: "an operation of the binding's contract" }
+          );
+        }
+      }
+    }
+  }
+};
+
+/**
  * Validates workflow.json, given as its text or its UTF-8 bytes. `options`
  * are the host's: its catalog of approved contracts, the module manifest of
  * the workflow's own code, and its ceilings.
@@ -173,6 +228,7 @@ export const validateWorkflow = async (
         checkReferences(checker, slot, compiled);
       }
     }
+    markActionUses(checker);
     // Advice last, once every check has run.
     for (const binding of checker.bindings.values()) {
       if (!binding.referenced) {

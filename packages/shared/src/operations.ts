@@ -114,7 +114,7 @@ export const operationErrors = defineErrorFamily({
   "resource.busy":
     "The store's operation couldn't run just now. Try again shortly.",
   "resource.limit_reached":
-    "The App used this resource as much as it may in one call, one minute or one day, or holds as much of it open as it may at once, so this request wasn't made. Its details name which.",
+    "The App used this resource as much as it may in one call, one minute or one day, holds as much of it open as it may at once, or made as deep, as round or as many calls between Apps as it may, so this request wasn't made. Its details name which.",
   "contract.invalid_resource_result":
     "A resource answered something its contract doesn't allow.",
   "contract.invalid_args": "The arguments don't fit the operation.",

@@ -517,6 +517,33 @@ export interface ChatsApi {
     onSnapshot: (snapshot: QuerySnapshotPush) => void
   ) => Promise<RunSubscriptionApi>;
   /**
+   * Starts (`stream`) or follows again (`attach`) a streaming action of
+   * the draft of an App of spec 8's layout in its preview, as a screen's
+   * `streamFunction` does (spec 10.7.6): run on its draft release and
+   * store, with no resources, under the request's key. Each frame goes
+   * to `onFrame`, one at a time, the next only once it took the last:
+   * the newest progress, then `result`, `refused` (the person, or the
+   * preview, no longer gets it) or `closed`. Until the hold is released.
+   */
+  previewStream: (
+    chatId: string,
+    app: string,
+    revision: number,
+    what: "stream" | "attach",
+    request: string,
+    onFrame: (frame: unknown) => Promise<unknown>
+  ) => Promise<RunSubscriptionApi>;
+  /**
+   * Asks the preview's invocation of the streaming action `request` names
+   * to stop: `{ requested }`, whether it was still running.
+   */
+  previewCancelStream: (
+    chatId: string,
+    app: string,
+    revision: number,
+    request: string
+  ) => Promise<{ requested: boolean }>;
+  /**
    * Tells the chat's agent of `problem`, one the preview of the draft at
    * `revision` ran into on `screen` (an uncaught error, an unhandled
    * rejection or a `console.error`). Its next check of the draft reads

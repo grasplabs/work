@@ -454,7 +454,7 @@ test("someone given the permission approves the packages proposed for an engine,
   ).toHaveCount(1);
   await expect
     .poll(async () => {
-      const { approved } = await asBuilder.api.dependencies.status(app);
+      const { approved } = await asBuilder.api.dependencies.status({ app });
       return approved?.id;
     })
     .toBe(request.id);
