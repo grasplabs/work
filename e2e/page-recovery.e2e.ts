@@ -58,9 +58,11 @@ test("a page whose file is gone after a release loads Grasp anew on Try again", 
   // The new release's files are there: trying again loads Grasp anew.
   await page.unroute(brainFiles);
   await page.getByRole("button", { name: "Try again" }).click();
+  // A fresh load reads the brain before its navigation shows, as on any
+  // first open of it (brain.e2e.ts).
   await expect(
     page.getByRole("complementary", { name: "The brain" })
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   expect(await sameDocument(page)).toBe(false);
 });
 

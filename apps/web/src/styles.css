@@ -1167,6 +1167,12 @@
       calc(var(--tear) * 2) var(--tear) round;
 }
 
+/* A name on the brain's atlas (brain/atlas-canvas.tsx): it fades, and goes invisible only once it has faded out. */
+@utility fade-shown {
+  transition-property: opacity, visibility;
+  transition-duration: 300ms;
+}
+
 /*
  * From the prototype (packages/grasp/src/index.css and
  * components/onboarding/): the client onboarding (routes/setup.tsx). Its
