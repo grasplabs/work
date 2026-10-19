@@ -97,6 +97,37 @@ export const KnowledgeDots = ({
 };
 
 /**
+ * A titled panel of a section: its title, what it shows under it, and
+ * beside them what can be done there (`action`); where there is no room
+ * beside them, that goes under the title, so the line under it keeps its
+ * width. Ported from the prototype's `SettingsSection`.
+ */
+export const Panel = ({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children?: ReactNode;
+}) => (
+  <section className="bg-card overflow-hidden rounded-xl border text-sm">
+    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-5 py-4">
+      <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
+        <h2 className="font-medium">{title}</h2>
+        {description === undefined ? null : (
+          <p className="text-muted-foreground">{description}</p>
+        )}
+      </div>
+      {action}
+    </div>
+    {children}
+  </section>
+);
+
+/**
  * So much of a whole as a small ring, dark on grey: for a number that is
  * a share of something. The circle is 100 around, so the dark part is the
  * percentage itself.

@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { SectionToCome } from "../../../../admin/organization.tsx";
+import { AiUse } from "../../../../admin/ai-use.tsx";
 
-/** An organization's AI use: its title and where it comes from, until its content is ported. */
+/** An organization's AI use: what it took, what that cost, and what did it. */
 export const Route = createFileRoute("/admin/organizations/$clientId/ai-use")({
-  component: SectionToCome,
+  component: AiUse,
 });
