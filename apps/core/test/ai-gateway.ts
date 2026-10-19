@@ -639,3 +639,12 @@ export const answeringGateway = (
  */
 export const fakeGateway = (...replies: GatewayReply[]) =>
   answeringGateway(() => replies.shift());
+
+/**
+ * The run and step a request told the gateway's log it came from
+ * (`runId/step`), if it named one.
+ */
+export const loggedRunStep = ({ headers }: GatewayRequest): unknown =>
+  z
+    .object({ runStep: z.unknown() })
+    .parse(JSON.parse(headers.get("cf-aig-metadata") ?? "{}")).runStep;

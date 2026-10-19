@@ -375,6 +375,9 @@ export const deploymentStaysInEu = (env: ModelsEnv): boolean => {
 /** What a call is for, such as `workflow.step` or `chat.turn`. */
 const purposePattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/u;
 
+/** Text without a slash. */
+const noSlash = /^[^/]+$/u;
+
 /**
  * What every request says about itself: its model and limits, and what the
  * rules and the audit log go by. A call adds its conversation; an agent
@@ -433,6 +436,20 @@ const sessionShape = {
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
+  /**
+   * For a workflow run's call: the run and the step it is made from, so the
+   * gateway's log, and a fixture provider behind it, can tell each step's
+   * requests apart (spec 28.2). Set by core's workflow hosts only, never
+   * by App code.
+   */
+  runStep: z
+    .strictObject({
+      // No slash: the gateway's entry splits the run from the step at
+      // the first one.
+      runId: z.string().min(1).max(128).regex(noSlash),
+      step: z.string().min(1).max(512),
+    })
+    .optional(),
   /**
    * For a workflow run's call: whose person share of the model requests in
    * flight it takes (model-admission.ts), from the run's row: who started
@@ -604,6 +621,12 @@ const gatewayHeaders = (call: Session): ProviderHeaders => ({
     purpose: call.purpose,
     actor: call.trigger.type,
     ...(call.requestId === undefined ? {} : { requestId: call.requestId }),
+    // One entry, not two: the gateway keeps five, and the provider
+    // request's ID (`withRequestId`) comes after these. A run ID holds no
+    // slash (`noSlash`), so the first one splits it from the step.
+    ...(call.runStep === undefined
+      ? {}
+      : { runStep: `${call.runStep.runId}/${call.runStep.step}` }),
   }),
 });
 
