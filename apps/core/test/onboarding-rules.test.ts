@@ -1,12 +1,8 @@
+import { addWorkingDays } from "@grasp-os/shared/admin/org-record";
 import type { Plan, Roster } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  addWorkingDays,
-  agreementsIn,
-  dueLinks,
-  progressOf,
-} from "../src/onboarding/rules.ts";
+import { agreementsIn, dueLinks, progressOf } from "../src/onboarding/rules.ts";
 import type {
   InterviewState,
   LinkFacts,
