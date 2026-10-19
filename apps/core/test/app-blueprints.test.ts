@@ -345,6 +345,8 @@ describe("blueprints", { timeout: 60_000 }, () => {
       copies: 0,
       filesLeft: 0,
     });
+  });
+
   it("type a copy's workflows as the code it copies was, though it asks for none of the source's connections", async () => {
     const [owner, maker] = await Promise.all([
       personApi("builder"),
@@ -373,11 +375,27 @@ describe("blueprints", { timeout: 60_000 }, () => {
         { send: 1 }
       )
     );
+    // MAIL is then a collection: what the blueprint declares, and the copy
+    // asks for, as it is marked.
+    const admin = await signedInApi(idp, "admin");
+    const [mailRequest] = await owner.api.permissions.list({
+      type: "app",
+      appId: source,
+    });
+    await admin.api.permissions.revoke(mailRequest?.id ?? "");
+    const { collectionId } = await collectionWithNote(admin.api, {
+      name: `Mail ${unique()}`,
+      access: "everyone",
+    });
+    await owner.api.permissions.request(
+      readCollection({ type: "app", appId: source }, collectionId, "MAIL")
+    );
     await share(owner, source, maker, "user");
     const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
     const created = await maker.api.apps.blueprints.create(blueprint, named);
-    // Its first version is made current as the source's was; MAIL grants
-    // the copy nothing until it holds a permission of its own.
+    // Its first version is made current as the source's was, MAIL read as
+    // the connection its code was written for; MAIL grants the copy
+    // nothing until it holds a permission of its own.
     await expect(
       outcome(maker.api.apps.versions.setCurrent(created.app.id, 1))
     ).resolves.toBe("ok");

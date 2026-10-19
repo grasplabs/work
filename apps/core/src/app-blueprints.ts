@@ -334,12 +334,6 @@ export const createFromBlueprint = async (
     pendingVersion: null,
     createdAt: now,
   };
-  const requests = declaredRequests(
-    by,
-    app,
-    blueprint.permissions,
-    blueprint.id
-  );
   const versionRow: VersionRow = {
     appId: app,
     version: 1,
@@ -357,12 +351,14 @@ export const createFromBlueprint = async (
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,
-    // Typed as the code it copies was: the source version's binding
-    // names, which a copy keeps though it asks only for what it may
-    // declare (no connection or other App's exports), and the requests
-    // it is created with over them. Types grant nothing: a call is
-    // refused until the copy holds the permission.
+    // Typed as the code it copies was: the requests it is created with,
+    // and over them the source version's binding names, which a copy
+    // keeps though it asks only for what it may declare (no connection or
+    // other App's exports), and which hold even where a name the
+    // blueprint declares is now another kind. Types grant nothing: a call
+    // is refused until the copy holds the permission.
     workflowBindings: {
+      ...bindingKindsOf(requests.rows),
       ...(blueprint.appId === null || blueprint.version === null
         ? {}
         : await workflowBindingKinds(
@@ -370,7 +366,6 @@ export const createFromBlueprint = async (
             appIdSchema.parse(blueprint.appId),
             blueprint.version
           )),
-      ...bindingKindsOf(requests.rows),
     },
   };
   const db = drizzle(env.DB);
