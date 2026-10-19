@@ -92,6 +92,7 @@ import {
   compiledTasksOf,
   compileWorkflow,
   loadWorkflowBuild,
+  reviewedTasksOf,
   adoptReservations,
   publicationReservation,
   releaseBuild,
@@ -1331,7 +1332,7 @@ const steeringReview = async (
  * only when its manifest pins a model binding, the only binding a model
  * task can name; none for a build that isn't executable, which runs none.
  */
-const reviewedTasksOf = async (
+const versionTasksOf = async (
   env: Env,
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: readonly PinnedContract[]
@@ -1342,13 +1343,13 @@ const reviewedTasksOf = async (
   ) {
     return [];
   }
-  const build = await loadWorkflowBuild(
+  return await reviewedTasksOf(
     env,
     row.workflowResourceId,
     row.version,
+    row.manifest,
     row.manifestHash
   );
-  return build.tasks;
 };
 
 /**
@@ -1370,7 +1371,7 @@ const versionOf = async (
     lookup,
     sealedActionsOf(row),
     sealedBindings,
-    await reviewedTasksOf(env, row, sealedBindings)
+    await versionTasksOf(env, row, sealedBindings)
   );
   return {
     resourceId: row.workflowResourceId,

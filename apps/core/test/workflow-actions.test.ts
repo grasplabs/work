@@ -11,7 +11,10 @@ import {
   workflowNamespace,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowResourceRun,
+  WorkflowResourceVersion,
+} from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -47,6 +50,7 @@ import type { BuiltCall } from "../src/workflows/resource-calls.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
 // A JSON workflow's own actions (workflow-modules.ts, resource-action.ts),
@@ -271,6 +275,52 @@ const flagged = (writes: unknown[]) => ({
   builder: writes,
   reader: writes,
 });
+/** The sealed build's tasks file. */
+const tasksPath = "tasks.json";
+
+/**
+ * Deletes the artifacts of a workflow's version 1 whose path `which`
+ * picks, answering how to put them back.
+ */
+const lose =
+  (which: (path: string) => boolean) =>
+  async (workflowId: string): Promise<() => Promise<void>> => {
+    const row = await env.DB.prepare(
+      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflowId)
+      .first<{ manifest: string }>();
+    const { build } = z
+      .object({
+        build: z.object({
+          artifacts: z.array(
+            z.object({ path: z.string(), sha256: z.string() })
+          ),
+        }),
+      })
+      .parse(JSON.parse(row?.manifest ?? "{}"));
+    const lost = await Promise.all(
+      build.artifacts
+        .filter(({ path }) => which(path))
+        .map(async ({ sha256 }) => {
+          const key = artifactKey(sha256);
+          const stored = await env.FILES.get(key);
+          const bytes = await stored?.arrayBuffer();
+          await env.FILES.delete(key);
+          return { key, bytes };
+        })
+    );
+    return async () => {
+      await Promise.all(
+        lost.map(async ({ key, bytes }) => {
+          if (bytes !== undefined) {
+            await env.FILES.put(key, bytes);
+          }
+        })
+      );
+    };
+  };
+
 /** Sends two mails and answers what the context holds. */
 const sendsTwice =
   notifyModule(`await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" });
@@ -794,6 +844,7 @@ describe("a JSON workflow's own actions", () => {
       kind: "connector",
       operations: {
         "mail.send": operation,
+        "mail.draft": operation,
         "mail.read": { ...operation, readOnly: true },
       },
     });
@@ -835,7 +886,13 @@ describe("a JSON workflow's own actions", () => {
       }),
     });
     /** Publishes `before` ahead of the action, which uses `operations` of mail. */
-    const reviewed = async (before: unknown[], operations: string[]) => {
+    const reviewed = async (
+      before: unknown[],
+      operations: string[],
+      // What befalls the sealed version while it is listed: undone after,
+      // as artifacts are shared by content.
+      befall?: (workflowId: string) => Promise<() => Promise<void>>
+    ) => {
       const workflow = await createWorkflowResource(
         env,
         ada,
@@ -872,8 +929,15 @@ describe("a JSON workflow's own actions", () => {
           ),
         },
       });
-      const [asBuilder] = await workflowVersions(env, ada, workflow.id);
-      const [asReader] = await workflowVersions(env, reader, workflow.id);
+      const undo = await befall?.(workflow.id);
+      let asBuilder: WorkflowResourceVersion | undefined;
+      let asReader: WorkflowResourceVersion | undefined;
+      try {
+        [asBuilder] = await workflowVersions(env, ada, workflow.id);
+        [asReader] = await workflowVersions(env, reader, workflow.id);
+      } finally {
+        await undo?.();
+      }
       return {
         executable: asBuilder?.build.executable,
         published: published.modelSteeredWrites,
@@ -904,12 +968,41 @@ describe("a JSON workflow's own actions", () => {
       modelThenWritingAction: await reviewed([ask], ["mail.send"]),
       // An App's export: always a write.
       modelThenExport: await reviewed([ask, exportTask], ["mail.read"]),
+      // A connector task and the action write through one alias: one
+      // write, each operation once.
+      modelThenBothWrite: await reviewed(
+        [ask, mailTask("mail.send")],
+        ["mail.send", "mail.draft", "mail.read"]
+      ),
+      // The review reads the sealed tasks alone: the rest of the build
+      // gone, it is still shown; the tasks gone, the version is corrupt.
+      buildGone: await reviewed(
+        [ask, mailTask("mail.send")],
+        ["mail.read"],
+        lose((path) => path !== tasksPath)
+      ),
+      tasksGone: await outcome(
+        reviewed(
+          [ask, mailTask("mail.send")],
+          ["mail.read"],
+          lose((path) => path === tasksPath)
+        )
+      ),
     }).toStrictEqual({
       modelThenWrite: flagged([send]),
       modelThenRead: flagged([]),
       writeAlone: flagged([]),
       modelThenWritingAction: flagged([send]),
       modelThenExport: flagged([{ alias: "contacts", kind: "operation" }]),
+      buildGone: flagged([send]),
+      tasksGone: "workflow.version_corrupt",
+      modelThenBothWrite: flagged([
+        {
+          alias: "mail",
+          kind: "connector",
+          operations: ["mail.send", "mail.draft"],
+        },
+      ]),
     });
   });
 
