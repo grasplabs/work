@@ -749,6 +749,10 @@ export const isTimeout = (error: unknown): boolean =>
  * long, as its refusal `marker` says: one queued for a share wakes early
  * when a share is given back that it would now take (share-wakes.ts),
  * and asks again; one whose lineage is busy sleeps it out.
+ *
+ * A queued round was a plain sleep of the same name before; there is no
+ * branch for a run suspended in one, as `#waitWhileHeld` has none for its
+ * own: Grasp has no release yet, so no such run outlives a deploy.
  */
 export const loadRound = async (
   run: Pick<RunStep, "sleep" | "waitForEvent">,

@@ -373,12 +373,16 @@ export interface Standing {
  * `waiting` (each place, numbered in order: `i`) and `served` (what each
  * would find, and whether it takes a lease: `fits`), as `servedInOrder`
  * says: the one rule both an admission and a wake (`queueFronts`) read.
+ * `untilFull`: the walk stops once the client's share is full, as no
+ * place after that takes one; an admission walks to its own row, whose
+ * counts it reads.
  */
 const queueServed = (
   pool: Pool,
   now: number,
   shares: Shares,
-  places: SQL
+  places: SQL,
+  untilFull = false
 ): SQL => {
   // What a place would find, after those before it: its person's and its
   // App's leases as taken so far, or as held, if none took one yet.
@@ -406,6 +410,7 @@ const queueServed = (
         CASE WHEN ${fits} THEN json_set(s.apps, w.app_key, ${app} + 1) ELSE s.apps END,
         ${person}, ${app}, ${fits}
       FROM served AS s JOIN waiting AS w ON w.i = s.i + 1
+      ${untilFull ? sql`WHERE s.client < ${literal(shares.client)}` : sql``}
     )`;
 };
 
@@ -482,12 +487,15 @@ export const queueFronts = async (
   shares: Shares
 ): Promise<{ runId: string; stepHash: string; deadline: number }[]> => {
   const pool = attemptPool;
+  // None while the client's share is full: no place would take one, so
+  // the queue isn't walked at all. Otherwise the walk stops once it is.
   const served = queueServed(
     pool,
     now,
     shares,
     sql`SELECT q.turn AS turn, q.enqueued_at AS joined, q.run_id AS run_id, q.step_hash AS step_hash, 0 AS me, q.subject AS subject, q.resource AS resource
-        FROM ${pool.queue} AS q WHERE q.seen_at > ${literal(now - queueLiveMs)}`
+        FROM ${pool.queue} AS q WHERE q.seen_at > ${literal(now - queueLiveMs)} AND ${running(pool, now, sql`1`)} < ${literal(shares.client)}`,
+    true
   );
   const rows = await db.all(
     sql`${served} SELECT w.run_id AS runId, w.step_hash AS stepHash, q.attempt_deadline AS deadline FROM served AS s JOIN waiting AS w ON w.i = s.i JOIN ${pool.queue} AS q ON q.run_id = w.run_id AND q.step_hash = w.step_hash WHERE s.fits LIMIT ${literal(shares.client)}`
