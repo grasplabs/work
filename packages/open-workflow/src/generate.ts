@@ -214,6 +214,40 @@ export type TaskSchemas = Readonly<
 >;
 
 /** One task of the generated module, and the steps it runs as. */
+/**
+ * The lines a task's code takes in the generated module, from 1, both
+ * ends included: where a diagnostic of the module is, in the definition's
+ * terms (`taskAtLine`).
+ */
+export interface TaskSpan {
+  readonly taskId: string;
+  readonly pointer: string;
+  readonly from: number;
+  readonly to: number;
+}
+
+/**
+ * The task whose generated code `line` falls in: the innermost, the one
+ * of the shortest span that holds it; undefined for a line of no task's
+ * (the module's own frame).
+ */
+export const taskAtLine = (
+  spans: readonly TaskSpan[],
+  line: number
+): TaskSpan | undefined => {
+  let inner: TaskSpan | undefined;
+  for (const span of spans) {
+    const holds = span.from <= line && line <= span.to;
+    if (
+      holds &&
+      (inner === undefined || span.to - span.from < inner.to - inner.from)
+    ) {
+      inner = span;
+    }
+  }
+  return inner;
+};
+
 export interface GeneratedTask {
   readonly id: string;
   readonly kind: LoweredKind;
@@ -280,6 +314,8 @@ export type Generation =
       readonly source: string;
       readonly expressions: readonly SealedExpression[];
       readonly tasks: readonly GeneratedTask[];
+      /** The lines each task's code takes in `source`. */
+      readonly spans: readonly TaskSpan[];
       readonly workflow: WorkflowFlow;
       /** The parameters expressions may read: those not sensitive. */
       readonly params: readonly string[];
@@ -579,6 +615,8 @@ interface Emitter {
   readonly lines: string[];
   readonly expressions: SealedExpression[];
   readonly tasks: GeneratedTask[];
+  /** The lines each task's code takes in the module (`TaskSpan`). */
+  readonly spans: TaskSpan[];
   /** Labels some `break` leaves: only those are written. */
   readonly usedLabels: Set<string>;
   /** Counts lists and tasks, for labels and variables of their own. */
@@ -1623,6 +1661,9 @@ const lowerTask = (
       })
     );
   }
+  emitter.spans.push(
+    Object.freeze({ taskId: id, pointer, from: line, to: emitter.lines.length })
+  );
   // A switch moves on through its cases; any other task, skipped or not,
   // through its own then: "A skipped task still applies its declared
   // transition" (spec 13.5). `end` leaves the workflow at once, past the
@@ -1821,6 +1862,7 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
     lines: [],
     expressions: [],
     tasks: [],
+    spans: [],
     usedLabels: new Set(),
     counter: 0,
   };
@@ -1873,6 +1915,7 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
         Object.freeze({ ...task, steps: Object.freeze([...task.steps]) })
       )
     ),
+    spans: Object.freeze([...emitter.spans]),
     workflow: Object.freeze({
       input: inputFrom !== undefined,
       output: outputAs !== undefined,

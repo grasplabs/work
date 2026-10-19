@@ -11,10 +11,12 @@ import {
   maxSealedPointerLength,
   maxTemplateItems,
   maxTemplateKeyLength,
+  taskAtLine,
 } from "@grasp-os/open-workflow/generate";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
+import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -450,10 +452,20 @@ export const compileWorkflow = async (
   }
   if (!built.ok) {
     const [first] = built.diagnostics;
+    // In the definition's terms: the task whose generated code the first
+    // diagnostic is in, by its JSON Pointer and ID.
+    const task =
+      first?.line === undefined
+        ? undefined
+        : taskAtLine(generated.spans, first.line);
     log.error("workflow.build_failed", {
       diagnostics: built.diagnostics.length,
       rule: first?.rule,
+      category:
+        first === undefined ? undefined : diagnosticCategory(first.rule),
       line: first?.line,
+      pointer: task?.pointer,
+      taskId: task?.taskId,
       message: first?.message.slice(0, 300),
     });
     throw workflowResourceErrors.create("workflow.build_failed");

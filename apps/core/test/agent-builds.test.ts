@@ -1264,6 +1264,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
               file: "workflows/tidy.ts",
               line: null,
               rule: "bindings",
+              category: "structure",
               severity: "error",
               message:
                 "Line 3: Write the workflow's function inline, as an arrow function: the third argument of `workflow`",
@@ -1282,6 +1283,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
               file: "workflows/lib/take.ts",
               line: null,
               rule: "bindings",
+              category: "structure",
               severity: "error",
               message: "Line 2: Don't use `globalThis` in a workflow's code",
             },
@@ -1289,6 +1291,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
               file: "workflows/sweep.ts",
               line: null,
               rule: "bindings",
+              category: "structure",
               severity: "error",
               message:
                 "Line 8: Call the App's bindings as `env.NAME.method(…)`, `appServer(env).method(…)`, `appFunctions(env).query(…)` or `appExports(env.NAME).method(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
