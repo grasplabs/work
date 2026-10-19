@@ -15,10 +15,15 @@ export const dashboardErrors = defineErrorFamily({
 
 /**
  * The widgets Grasp has for the board, in the order the board begins
- * with: where the workflows stand, each engine's workflows, the runs this
- * week, and what could be better.
+ * with: the prototype's four (what the work returns a month, the board's
+ * goals, how far each team is with AI, where the workflows stand), then
+ * each engine's workflows, the runs this week, and what could be better.
+ * A board saved before a widget was added keeps what it had.
  */
 export const standardWidgetIds = [
+  "return",
+  "goals",
+  "teams",
   "workflows",
   "engines",
   "runs",

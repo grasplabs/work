@@ -29,8 +29,9 @@ export const SettingsSection = ({
       aria-labelledby={id}
       className="bg-card overflow-hidden rounded-xl border text-sm"
     >
-      <div className="flex items-start justify-between gap-4 px-5 py-4">
-        <div className="flex min-w-0 flex-col gap-0.5">
+      {/* Where there is no room beside it, what can be done goes under the title, so the line under the title keeps its width. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-5 py-4">
+        <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
           <h2 className="font-medium" id={id}>
             {title}
           </h2>
