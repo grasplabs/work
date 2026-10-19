@@ -32,6 +32,7 @@ import { startAppBinding } from "./app-workflow-bindings.ts";
 import { appFor } from "./apps.ts";
 import {
   workflowResourceRunControls,
+  workflowResources,
   workflowResourceRuns,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
@@ -78,9 +79,12 @@ import { tellQueryFollowers } from "./workflows/run-changes.ts";
 //   grant) and the binding in force: read in the statement that writes the
 //   receipt, so a revocation between the two lets nothing through.
 // - Status and capability from different moments: a run's snapshot is one
-//   value under one revision, which moves only forward with the run's own
-//   lifecycle (`revisionOf`); a control's receipt carries the same
-//   revisions, so the screen knows which snapshot settles it.
+//   value under one revision, which moves only forward, with the run's
+//   lifecycle and with the policy generation of its workflow (`revisionOf`):
+//   an App grant revoked or given again is a revision of its own, and its
+//   screens read again as it changes (permissions.ts). A control's receipt
+//   carries the same revisions, so the screen knows which snapshot settles
+//   it.
 // - What a run returned reaching anyone else: only the run's person sees
 //   its snapshot, through the App that started it, under the run's
 //   retention (`resultOf`). What it returned is projected by the output
@@ -393,25 +397,50 @@ const cancelAsked = async (env: Env, runId: string): Promise<boolean> =>
     .where(eq(workflowResourceRunControls.runId, runId))
     .get()) !== undefined;
 
-/** The revisions of a run cancelling, and of its end (`revisionOf`). */
-const cancellingRevision = 3;
-const endedRevision = 4;
+/** Where a run is in its lifecycle, each later than the one before. */
+const stages = { queued: 1, running: 2, cancelling: 3, ended: 4 } as const;
+
+/** How many stages a policy generation holds (`revisionOf`). */
+const stagesPerGeneration = 4;
 
 /**
- * Run `row`'s revision: 1 while queued, 2 running, 3 running with a
- * cancel asked, 4 ended. A run's lifecycle only moves forward, so neither
- * does this, and everything a snapshot holds is decided by where the run
- * is in it (and by who may control it, which the gate, not the revision,
- * keeps current).
+ * The revision of a run at `stage` of its lifecycle under its workflow's
+ * policy generation `generation`, which every grant and revocation on the
+ * workflow moves on (workflow-resources.ts, `nextGeneration`): the App's
+ * `start` grant among them. Both only move forward, and a generation
+ * moved on is later than any stage of the one before, so the revision
+ * moves forward with either: what the person may do with the run (an App
+ * grant revoked or given again) is a revision of its own, never a change
+ * under the same one. Everything else a snapshot holds is the run's, or
+ * the gate's to keep current (the person's role, the build's trust).
  */
-const revisionOf = (row: RunRow, cancelling: boolean): number => {
+const revisionOf = (
+  generation: number,
+  stage: (typeof stages)[keyof typeof stages]
+): number => generation * stagesPerGeneration + stage;
+
+/** Run `row`'s stage, a cancel asked of it or not. */
+const stageOf = (
+  row: RunRow,
+  cancelling: boolean
+): (typeof stages)[keyof typeof stages] => {
   if (isEnded(row.status)) {
-    return endedRevision;
+    return stages.ended;
   }
   if (row.status === "starting") {
-    return 1;
+    return stages.queued;
   }
-  return cancelling ? cancellingRevision : 2;
+  return cancelling ? stages.cancelling : stages.running;
+};
+
+/** Workflow `id`'s policy generation now. */
+const generationOf = async (env: Env, id: string): Promise<number> => {
+  const row = await drizzle(env.DB)
+    .select({ generation: workflowResources.policyGeneration })
+    .from(workflowResources)
+    .where(eq(workflowResources.id, id))
+    .get();
+  return row?.generation ?? 0;
 };
 
 /** A run's status, as a screen sees it. */
@@ -561,7 +590,13 @@ const runSnapshot = async (
     ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
   };
-  return { value, revision: revisionOf(row, cancelling) };
+  return {
+    value,
+    revision: revisionOf(
+      await generationOf(env, row.workflowResourceId),
+      stageOf(row, cancelling)
+    ),
+  };
 };
 
 /** The start `command` asks for, admitted: its run's handle. */
@@ -611,12 +646,22 @@ const cancelOf = async (env: Env, runId: string) =>
     )
     .get();
 
-/** A cancel receipt, as a screen is answered it. */
-const receiptAnswer = (state: "admitted" | "applied" | "superseded"): Json => ({
+/**
+ * A cancel receipt of a run of workflow `workflowId`, as a screen is
+ * answered it: admitted, under the run's cancelling revision; settled,
+ * its end's.
+ */
+const receiptAnswer = async (
+  env: Env,
+  workflowId: string,
+  state: "admitted" | "applied" | "superseded"
+): Promise<Json> => ({
   kind: "cancel",
   state,
-  // Admitted, the run's cancelling revision; settled, its end's.
-  revision: state === "admitted" ? cancellingRevision : endedRevision,
+  revision: revisionOf(
+    await generationOf(env, workflowId),
+    state === "admitted" ? stages.cancelling : stages.ended
+  ),
 });
 
 /**
@@ -649,7 +694,7 @@ const controlled = async (
       if (row.status !== "cancelled") {
         throw workflowErrors.create("workflow.control_refused");
       }
-      return receiptAnswer("applied");
+      return await receiptAnswer(env, row.workflowResourceId, "applied");
     }
     const id = crypto.randomUUID();
     try {
@@ -684,7 +729,7 @@ const controlled = async (
     );
     receipt = (await cancelOf(env, row.id)) ?? receipt;
   }
-  return receiptAnswer(receipt.state);
+  return await receiptAnswer(env, row.workflowResourceId, receipt.state);
 };
 
 /**

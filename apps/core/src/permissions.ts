@@ -418,7 +418,8 @@ const parseId = (id: unknown): PermissionId => {
 
 /**
  * An App's server code gets its env when it starts: restarting it after a
- * grant or revoke gives it an env as the records are now. A revoked stub
+ * grant or revoke gives it an env as the records are now, and its screens'
+ * live workflow watches read again. A revoked stub
  * it still holds is refused anyway, on its next call. Best effort: the
  * change stands if the App can't be reached.
  */
@@ -430,7 +431,11 @@ const restartApp = async (
     return;
   }
   try {
-    await appHost(env, subject.appId).restart("Its permissions changed.");
+    const host = appHost(env, subject.appId);
+    await host.restart("Its permissions changed.");
+    // Its screens' live workflow watches read again: what the App may
+    // start changed (screen-workflows.ts).
+    await host.workflowPolicyChanged();
   } catch (error) {
     log.error("app.restart_failed", {
       appId: subject.appId,

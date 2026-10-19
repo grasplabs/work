@@ -417,6 +417,21 @@ const failureShown = (error: { code: string | null; message: string }) => {
   return { code, message };
 };
 
+/**
+ * Where in its lifecycle a run's revision says it is: 1 queued, 2
+ * running, 3 cancelling, 4 ended, whatever policy generation it is under.
+ */
+const stageOf = (revision: number | undefined): number | undefined =>
+  revision === undefined ? undefined : ((revision - 1) % 4) + 1;
+
+/** A cancel receipt with its revision as the stage it names. */
+const staged = (receipt: unknown) => {
+  const read = z
+    .object({ kind: z.string(), state: z.string(), revision: z.number() })
+    .parse(receipt);
+  return { ...read, revision: stageOf(read.revision) };
+};
+
 /** A fresh command key, as the SDK makes one. */
 const keyOf = (): string => crypto.randomUUID().replaceAll("-", "");
 
@@ -485,7 +500,7 @@ describe(
           workflowVersion: handle.workflowVersion,
         },
         shown: {
-          revision: shown.revision,
+          revision: stageOf(shown.revision),
           output: shown.value?.output,
           control: shown.value?.control,
           waits: shown.value?.waits,
@@ -547,9 +562,16 @@ describe(
       expect({
         running,
         pause,
-        receipt,
-        resent,
-        ended: { revision: ended.revision, control: ended.value?.control },
+        receipt: staged(receipt),
+        resent: staged(resent),
+        // The receipt names the very revision that shows the run ended.
+        settles:
+          z.object({ revision: z.number() }).parse(receipt).revision ===
+          ended.revision,
+        ended: {
+          revision: stageOf(ended.revision),
+          control: ended.value?.control,
+        },
       }).toStrictEqual({
         running: {
           canPause: false,
@@ -560,6 +582,7 @@ describe(
         pause: "workflow.control_refused",
         receipt: { kind: "cancel", state: "applied", revision: 4 },
         resent: { kind: "cancel", state: "applied", revision: 4 },
+        settles: true,
         ended: {
           revision: 4,
           control: {
@@ -796,6 +819,43 @@ describe(
       });
     });
 
+    it("tells a screen already following a run as the App's start grant is revoked and given again", async () => {
+      const fixture = await requestsApp("PT1H");
+      const { builder, admin, app, reference } = fixture;
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stop = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      const canCancel = () =>
+        channel.peekRun(read, handle.runId).value?.control.canCancel;
+      await vi.waitFor(() => {
+        expect(canCancel()).toBeTruthy();
+      }, settles);
+      await revokePermission(env, admin.acting, fixture.grant);
+      await vi.waitFor(() => {
+        expect(canCancel()).toBeFalsy();
+      }, settles);
+      const asked = await requestPermission(
+        env,
+        builder.acting,
+        {
+          subject: { type: "app", appId: appIdSchema.parse(app) },
+          object: { type: "workflow", workflowId: fixture.workflow },
+          actions: ["start"],
+          binding: "FOLLOW_UP",
+        },
+        rolesOf(builder.acting)
+      );
+      await grantPermission(env, admin.acting, asked.id, { version: 1 });
+      await vi.waitFor(() => {
+        expect(canCancel()).toBeTruthy();
+      }, settles);
+      stop();
+    });
+
     it("gives a second subscription to a run the revision the first already has", async () => {
       const { builder, app, reference } = await requestsApp("PT1H");
       const lease = await screenOf(builder, app);
@@ -809,7 +869,7 @@ describe(
       };
       const first = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
-        expect(first.received.at(-1)?.revision).toBe(2);
+        expect(stageOf(first.received.at(-1)?.revision)).toBe(2);
       }, settles);
       // The same run on the same connection: one reading, shared.
       const second = await following(builder, app, lease, watch);
@@ -819,7 +879,7 @@ describe(
       await first.subscription.release();
       await second.subscription.release();
       expect(second.received.map(({ revision }) => revision)).toStrictEqual([
-        2,
+        first.received.at(-1)?.revision,
       ]);
     });
 
@@ -838,7 +898,7 @@ describe(
       };
       const first = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
-        expect(first.received.at(-1)?.revision).toBe(2);
+        expect(stageOf(first.received.at(-1)?.revision)).toBe(2);
       }, settles);
       // Rebound away: the next read, which another run's end causes, refuses.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
@@ -867,7 +927,7 @@ describe(
       });
       await channel.start(read, { who: "Cy" });
       await vi.waitFor(() => {
-        expect(first.received.at(-1)?.revision).toBe(2);
+        expect(stageOf(first.received.at(-1)?.revision)).toBe(2);
         expect(first.received.at(-1)?.outcome).toBeTypeOf("object");
       }, settles);
       const second = await following(builder, app, lease, watch);
@@ -878,9 +938,9 @@ describe(
       await second.subscription.release();
       expect({
         first: first.received.map(({ revision, outcome: shown }) =>
-          typeof shown === "string" ? shown : revision
+          typeof shown === "string" ? shown : stageOf(revision)
         ),
-        second: second.received.map(({ revision }) => revision),
+        second: second.received.map(({ revision }) => stageOf(revision)),
       }).toStrictEqual({
         first: [2, "workflow.run_unavailable", 2],
         second: [2],
@@ -969,7 +1029,7 @@ describe(
         await vi.waitFor(() => {
           const last = watched.received.at(-1);
           expect(
-            typeof last?.outcome === "string" || last?.revision === 4
+            typeof last?.outcome === "string" || stageOf(last?.revision) === 4
           ).toBeTruthy();
         }, settles);
         await watched.subscription.release();
@@ -1213,7 +1273,7 @@ describe(
       const id = receipts.results[0]?.id ?? "";
       expect({
         same: outcomeOf(two),
-        cancels: cancels.map(outcomeOf),
+        cancels: cancels.map((answer) => staged(outcomeOf(answer))),
         receipts: receipts.results.map(({ state }) => state),
         reopened:
           (await outcome(
