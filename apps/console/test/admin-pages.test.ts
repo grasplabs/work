@@ -712,9 +712,6 @@ describe("the admin's frame", () => {
           columnOf(contract.html, acme.name),
           "Overview"
         ).includes('aria-current="page"'),
-        toCome: contract.html.includes(
-          "This section isn’t in the console yet."
-        ),
       },
       usage: [
         usage.html.includes("AI use</h1>"),
@@ -732,11 +729,143 @@ describe("the admin's frame", () => {
         source: true,
         current: true,
         overviewCurrent: false,
-        toCome: true,
       },
       usage: [true, true],
       setup: [true, true],
     });
+  });
+
+  it("says nothing is known of a contract core doesn't hold, with no draft or fee, beside the agreements as core has them", async () => {
+    const acme = await liveClient();
+    const empty = emptyAdminSnapshot("Acme");
+    acme.account.admin = {
+      ...empty,
+      agreements: {
+        processing: true,
+        assessment: false,
+        council: "waiting",
+        processingOn: "2026-09-02",
+      },
+      members: [
+        {
+          userId: "user-anna",
+          name: "Anna",
+          email: "anna@acme.test",
+          role: "admin",
+          joinedAt: "2026-09-03T09:00:00.000Z",
+        },
+        {
+          userId: "user-bram",
+          name: "Bram",
+          email: "bram@acme.test",
+          role: "user",
+          joinedAt: "2026-09-04T09:00:00.000Z",
+        },
+      ],
+    };
+
+    const { status, html } = await page(
+      `/admin/organizations/${acme.clientId}/contract`
+    );
+    /** The part of the page titled `title`, up to the next part. */
+    const partOf = (title: string): string => {
+      const at = html.indexOf(`>${title}</h2>`);
+      return at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));
+    };
+    /** The agreement named `name`, up to the next one. */
+    const agreementOf = (name: string): string => {
+      const part = partOf("Agreed before the first interview");
+      const at = part.indexOf(name);
+      return at === -1 ? "" : part.slice(at, part.indexOf("</li>", at));
+    };
+
+    expect({
+      status,
+      toCome: html.includes("This section isn’t in the console yet."),
+      summary: {
+        contract: html.includes("Not known yet"),
+        // Core holds no contract: it is neither a draft nor a fee of nothing.
+        draft: ["Being written", "not sent yet", "€0"].some((text) =>
+          html.includes(text)
+        ),
+        seats: html.includes("taken; the contract isn’t known yet"),
+        runs: html.includes("Still runs"),
+        fee: html.includes("Fee a month"),
+      },
+      terms: [
+        partOf("The terms").includes(
+          "Nothing is known about the contract yet."
+        ),
+        partOf("The terms").includes(
+          "Once Rooms is connected, this fills in by itself."
+        ),
+      ],
+      gives: [
+        partOf("What it gives the company").includes(
+          "Not known yet; 2 are taken."
+        ),
+        // What the model works out of AI use isn't what was used: the AI use section says what it is.
+        partOf("What it gives the company").includes("was used this month"),
+      ],
+      agreements: {
+        open: partOf("Agreed before the first interview").includes(
+          "Without all three, nobody is invited. 2 are still open."
+        ),
+        processing: agreementOf("Agreement on handling data").includes(
+          "In place since 2 Sep 2026"
+        ),
+        assessment: agreementOf(
+          "The company’s look at the risks to its people"
+        ).includes("Not signed yet"),
+        council: agreementOf("Works council").includes("Still deciding"),
+        others: partOf("Agreed before the first interview").includes(
+          "Who else handles the data"
+        ),
+      },
+      invoices: partOf("Invoices").includes(
+        "None known yet: nothing is known about the contract."
+      ),
+    }).toStrictEqual({
+      status: 200,
+      toCome: false,
+      summary: {
+        contract: true,
+        draft: false,
+        seats: true,
+        runs: false,
+        fee: false,
+      },
+      terms: [true, true],
+      gives: [true, false],
+      agreements: {
+        open: true,
+        processing: true,
+        assessment: true,
+        council: true,
+        others: true,
+      },
+      invoices: true,
+    });
+  });
+
+  it("says the agreements aren't recorded yet while core holds nothing of them, instead of reading that as no works council", async () => {
+    const acme = await liveClient();
+    acme.account.admin = emptyAdminSnapshot("Acme");
+
+    const { html } = await page(
+      `/admin/organizations/${acme.clientId}/contract`
+    );
+    const at = html.indexOf(">Agreed before the first interview</h2>");
+    const part =
+      at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));
+
+    expect({
+      description: part.includes(
+        "Nothing is recorded of them yet. Without all three, nobody is invited."
+      ),
+      notRecorded: part.split("Not recorded yet").length - 1,
+      noCouncil: part.includes("No works council"),
+    }).toStrictEqual({ description: true, notRecorded: 3, noCouncil: false });
   });
 
   it("shows what a company connected only once it signed in, says core doesn't report its connections yet, and that what is still to connect comes from Composio", async () => {
