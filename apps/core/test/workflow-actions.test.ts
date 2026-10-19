@@ -913,6 +913,77 @@ describe("a JSON workflow's own actions", () => {
     });
   });
 
+  it("refuses a model task that names no model binding, so a review that finds none in the seal reads no task", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await mailContract(admin);
+    const ask = {
+      ask: {
+        call: "grasp.model",
+        with: {
+          binding: "writer",
+          instructions: "Write a line.",
+          input: { who: "${ $workflow.input.who }" },
+          outputSchema: objectSchema({ line: { type: "string" } }),
+        },
+      },
+    };
+    const problems: string[] = [];
+    // No `writer` binding at all, then `writer` bound as a connector.
+    for (const writer of [undefined, { kind: "connector", contract: key }]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `act-${unique()}`
+      );
+      const definition = z
+        .looseObject({
+          document: z.looseObject({
+            metadata: z.object({
+              grasp: z.looseObject({
+                bindings: z.record(z.string(), z.unknown()),
+              }),
+            }),
+          }),
+        })
+        .parse(
+          JSON.parse(
+            definitionOf(workflow.name, {
+              before: [ask],
+              mail: { kind: "connector", contract: key },
+            })
+          )
+        );
+      if (writer !== undefined) {
+        definition.document.metadata.grasp.bindings.writer = writer;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const error = await refusal(
+        publishWorkflowVersion(env, ada, workflow.id, {
+          definition: JSON.stringify(definition),
+          basedOn: null,
+          modules: { "code/notify.ts": sendsTwice },
+        })
+      );
+      const parsed = z
+        .object({
+          code: z.string(),
+          details: z.object({
+            problems: z.array(z.object({ code: z.string() })),
+          }),
+        })
+        .parse(error);
+      problems.push(
+        `${parsed.code}: ${parsed.details.problems.map(({ code }) => code).join(", ")}`
+      );
+    }
+    expect(problems).toStrictEqual([
+      "workflow.definition_invalid: binding.unknown",
+      "workflow.definition_invalid: binding.wrong_kind",
+    ]);
+  });
+
   it("refuses a definition whose action uses a binding it doesn't declare, or of another kind", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
