@@ -67,10 +67,11 @@ import { z } from "zod";
 //   path, by POST with a body built here from the same checked names and
 //   versions, without credentials (it takes none), a redirect refused
 //   outright. A graph's versions fit one query batch (OSV takes 1000; a
-//   graph holds at most `dependencyMaxPackages`). The answer is counted
+//   graph holds at most `dependencyMaxPackages`). Each answer is counted
 //   and capped as it arrives and read strictly: one result for each
-//   query, in order, each a list of entries with IDs, nothing paged (a
-//   page token means part of the answer is missing). Only `MAL-` entries
+//   query, in order, each a list of entries with IDs. A query whose
+//   entries go on to another page is asked again by its page token alone,
+//   a few rounds and so many entries at most. Only `MAL-` entries
 //   are passed on, by ID alone; core refuses them as it does CWE-506.
 //   An answer that can't be read, or no answer, is
 //   `package.malware_unchecked`, never an empty one: core then refuses
@@ -715,28 +716,27 @@ const osvAnswerSchema = z.object({
         .array(z.object({ id: z.string().min(1).max(128) }))
         .max(registryLimits.osvEntriesPerVersion)
         .optional(),
-      // Part of the answer is on another page: not read, so refused.
-      next_page_token: z.never().optional(),
+      // More of this query's entries are on another page (more than OSV
+      // sends at once, or its time ran out): asked for next.
+      next_page_token: z.string().min(1).max(1024).optional(),
     })
   ),
 });
 
+/** One query of a batch: a version, and the page of its entries asked. */
+interface OsvQuery {
+  readonly name: string;
+  readonly version: string;
+  readonly pageToken?: string;
+}
+
 /**
- * The versions `input` names that OSV.dev reports as malware: each with
- * its `MAL-` report. Fails, never answering none, when OSV's answer
- * can't be read.
+ * OSV.dev's answer to one batch of `queries`: one result for each, in
+ * order, read strictly, or `package.malware_unchecked`.
  */
-export const npmMalwareReports = async (
-  input: unknown
-): Promise<NpmMalwareReports> => {
-  const asked = packageErrors.parse(
-    "package.invalid",
-    npmAdvisoriesRequestSchema,
-    input
-  );
-  const queries = Object.entries(asked).flatMap(([name, versions]) =>
-    versions.map((version) => ({ name, version }))
-  );
+const askOsv = async (
+  queries: readonly OsvQuery[]
+): Promise<z.infer<typeof osvAnswerSchema>["results"]> => {
   let response: Response;
   try {
     response = await fetch(osvQueryUrl, {
@@ -747,9 +747,10 @@ export const npmMalwareReports = async (
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        queries: queries.map(({ name, version }) => ({
+        queries: queries.map(({ name, version, pageToken }) => ({
           package: { ecosystem: "npm", name },
           version,
+          ...(pageToken === undefined ? {} : { page_token: pageToken }),
         })),
       }),
       signal: AbortSignal.timeout(requestTimeoutMs),
@@ -801,11 +802,57 @@ export const npmMalwareReports = async (
     log.warn("osv.unreadable", {});
     throw packageErrors.create("package.malware_unchecked");
   }
-  const reports = queries.flatMap(({ name, version }, at) =>
-    (answer.data.results[at]?.vulns ?? []).flatMap(({ id }) =>
-      id.startsWith(malwareReportPrefix) ? [{ name, version, id }] : []
-    )
+  return answer.data.results;
+};
+
+/**
+ * The versions `input` names that OSV.dev reports as malware: each with
+ * its `MAL-` report. Fails, never answering none, when OSV's answer
+ * can't be read, or needs more pages or entries than are read.
+ */
+export const npmMalwareReports = async (
+  input: unknown
+): Promise<NpmMalwareReports> => {
+  const asked = packageErrors.parse(
+    "package.invalid",
+    npmAdvisoriesRequestSchema,
+    input
   );
+  let pending: OsvQuery[] = Object.entries(asked).flatMap(([name, versions]) =>
+    versions.map((version) => ({ name, version }))
+  );
+  const reports: NpmMalwareReports = [];
+  let entries = 0;
+  // Each round asks again, by its page token, only for the queries whose
+  // entries went on: a few rounds, so many entries, at most.
+  for (let page = 0; pending.length > 0; page += 1) {
+    if (page >= registryLimits.osvPages) {
+      log.warn("osv.too_many_pages", {});
+      throw packageErrors.create("package.malware_unchecked");
+    }
+    // Each page follows from the last.
+    // oxlint-disable-next-line no-await-in-loop
+    const results = await askOsv(pending);
+    const next: OsvQuery[] = [];
+    for (const [at, { name, version }] of pending.entries()) {
+      const result = results[at];
+      const found = result?.vulns ?? [];
+      entries += found.length;
+      for (const { id } of found) {
+        if (id.startsWith(malwareReportPrefix)) {
+          reports.push({ name, version, id });
+        }
+      }
+      if (result?.next_page_token !== undefined) {
+        next.push({ name, version, pageToken: result.next_page_token });
+      }
+    }
+    if (entries > registryLimits.osvEntries) {
+      log.warn("osv.too_many_entries", {});
+      throw packageErrors.create("package.malware_unchecked");
+    }
+    pending = next;
+  }
   // An ID that names a report but isn't one OSV gives: unreadable.
   const read = npmMalwareReportsSchema.safeParse(reports);
   if (!read.success) {

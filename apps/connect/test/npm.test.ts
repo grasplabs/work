@@ -1044,9 +1044,6 @@ describe("OSV.dev's malware reports, through connect", () => {
       moreResults: await failing(() =>
         Response.json({ results: [{}, {}, {}] })
       ),
-      paged: await failing(() =>
-        Response.json({ results: [{ vulns: [], next_page_token: "x" }, {}] })
-      ),
       vulnsNotAList: await failing(() =>
         Response.json({ results: [{ vulns: { id: "MAL-2026-1" } }, {}] })
       ),
@@ -1082,7 +1079,6 @@ describe("OSV.dev's malware reports, through connect", () => {
       noResults: "package.malware_unchecked",
       fewerResults: "package.malware_unchecked",
       moreResults: "package.malware_unchecked",
-      paged: "package.malware_unchecked",
       vulnsNotAList: "package.malware_unchecked",
       noId: "package.malware_unchecked",
       notAReport: "package.malware_unchecked",
@@ -1092,6 +1088,77 @@ describe("OSV.dev's malware reports, through connect", () => {
       redirected: "package.malware_unchecked",
       invalidName: "package.invalid",
       elsewhere: [],
+    });
+  });
+
+  it("asks again, by its page token alone, for a version whose entries go on to another page, a few pages and entries at most", async () => {
+    osv.pageSize(1);
+    osv.report("left-pad", "1.3.0", "GHSA-p6mc-m468-83gw");
+    osv.report("left-pad", "1.3.0", "MAL-2026-12435");
+    osv.report("left-pad", "1.3.0", "GHSA-xxjr-mmjv-4gpg");
+    const paged = await connect.npmMalwareReports({
+      "left-pad": ["1.3.0"],
+      clean: ["2.0.0"],
+    });
+    const rounds = osv.asked.map(({ body }): unknown => JSON.parse(body));
+    for (let more = 0; more <= registryLimits.osvPages; more += 1) {
+      osv.report("left-pad", "1.3.1", `GHSA-${String(more)}`);
+    }
+    const tooManyPages = await outcome(
+      connect.npmMalwareReports({ "left-pad": ["1.3.1"] })
+    );
+    // More entries over the graph's versions than are ever read.
+    const versions = Math.ceil(
+      (registryLimits.osvEntries + 1) / registryLimits.osvEntriesPerVersion
+    );
+    osv.override(() =>
+      Response.json({
+        results: Array.from({ length: versions }, () => ({
+          vulns: Array.from(
+            { length: registryLimits.osvEntriesPerVersion },
+            (_, at) => ({ id: `GHSA-${String(at)}` })
+          ),
+        })),
+      })
+    );
+    const tooManyEntries = await outcome(
+      connect.npmMalwareReports({
+        many: Array.from({ length: versions }, (_, patch) => `1.0.${patch}`),
+      })
+    );
+    expect({ paged, rounds, tooManyPages, tooManyEntries }).toStrictEqual({
+      paged: [{ name: "left-pad", version: "1.3.0", id: "MAL-2026-12435" }],
+      rounds: [
+        {
+          queries: [
+            {
+              package: { ecosystem: "npm", name: "left-pad" },
+              version: "1.3.0",
+            },
+            { package: { ecosystem: "npm", name: "clean" }, version: "2.0.0" },
+          ],
+        },
+        {
+          queries: [
+            {
+              package: { ecosystem: "npm", name: "left-pad" },
+              version: "1.3.0",
+              page_token: "1",
+            },
+          ],
+        },
+        {
+          queries: [
+            {
+              package: { ecosystem: "npm", name: "left-pad" },
+              version: "1.3.0",
+              page_token: "2",
+            },
+          ],
+        },
+      ],
+      tooManyPages: "package.malware_unchecked",
+      tooManyEntries: "package.malware_unchecked",
     });
   });
 });

@@ -3,7 +3,9 @@
  * the real one where Grasp depends on it: a POST of `{ queries }`, each an
  * npm package by name and an exact version, at most 1000; one result per
  * query, in order, each `{ vulns: [{ id, modified }] }` or `{}` when it
- * knows none; a 400 for a body it doesn't take. A test reports versions
+ * knows none, and `next_page_token` when a version's entries go on past
+ * a page, which a query's `page_token` asks for next; a 400 for a body it
+ * doesn't take. A test reports versions
  * as malware (`MAL-…`) or with other entries (`GHSA-…`), makes OSV answer
  * something else, and reads back what was asked.
  *
@@ -25,16 +27,26 @@ export const osvFake = () => {
     redirect: string;
   }[] = [];
   let override: (() => Response) | undefined;
+  /** Most entries of one version OSV sends on one page. */
+  let perPage = 1000;
   /** What OSV answers a batch naming the package, instead of its own. */
   const failing = new Map<string, () => Response>();
 
   const badRequest = (message: string): Response =>
     Response.json({ code: 3, message }, { status: 400 });
 
+  /** `value`'s own `key`, when `value` is an object. */
+  const fieldOf = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null && Object.hasOwn(value, key)
+      ? Reflect.get(value, key)
+      : undefined;
+
   /** The queries a body holds, as OSV takes them, or why not. */
   const queriesOf = (
     body: unknown
-  ): { name: string; version: string }[] | string => {
+  ):
+    | { name: string; version: string; pageToken: string | undefined }[]
+    | string => {
     if (typeof body !== "object" || body === null || !("queries" in body)) {
       return "Missing queries";
     }
@@ -42,29 +54,26 @@ export const osvFake = () => {
     if (!Array.isArray(queries) || queries.length > 1000) {
       return "Too many queries";
     }
-    const read: { name: string; version: string }[] = [];
+    const read: {
+      name: string;
+      version: string;
+      pageToken: string | undefined;
+    }[] = [];
     const listed: unknown[] = queries;
     for (const query of listed) {
-      const pkg: unknown =
-        typeof query === "object" && query !== null && "package" in query
-          ? query.package
-          : undefined;
-      const version: unknown =
-        typeof query === "object" && query !== null && "version" in query
-          ? query.version
-          : undefined;
+      const pkg = fieldOf(query, "package");
+      const name = fieldOf(pkg, "name");
+      const version = fieldOf(query, "version");
+      const pageToken = fieldOf(query, "page_token");
       if (
-        typeof pkg !== "object" ||
-        pkg === null ||
-        !("ecosystem" in pkg) ||
-        pkg.ecosystem !== "npm" ||
-        !("name" in pkg) ||
-        typeof pkg.name !== "string" ||
-        typeof version !== "string"
+        fieldOf(pkg, "ecosystem") !== "npm" ||
+        typeof name !== "string" ||
+        typeof version !== "string" ||
+        (pageToken !== undefined && typeof pageToken !== "string")
       ) {
         return "Invalid query";
       }
-      read.push({ name: pkg.name, version });
+      read.push({ name, version, pageToken });
     }
     return read;
   };
@@ -102,16 +111,22 @@ export const osvFake = () => {
       }
     }
     return Response.json({
-      results: queries.map(({ name, version }) => {
+      results: queries.map(({ name, version, pageToken }) => {
         const known = entries.get(`${name}@${version}`);
-        return known === undefined
-          ? {}
-          : {
-              vulns: known.map((id) => ({
-                id,
-                modified: "2026-10-19T06:45:05.370871Z",
-              })),
-            };
+        if (known === undefined) {
+          return {};
+        }
+        const from = Number(pageToken ?? "0");
+        const page = known.slice(from, from + perPage);
+        return {
+          vulns: page.map((id) => ({
+            id,
+            modified: "2026-10-19T06:45:05.370871Z",
+          })),
+          ...(from + perPage < known.length
+            ? { next_page_token: String(from + perPage) }
+            : {}),
+        };
       }),
     });
   };
@@ -139,11 +154,16 @@ export const osvFake = () => {
         failing.set(name, respond);
       }
     },
+    /** Sends at most `entries` of one version's entries on a page. */
+    pageSize: (most: number): void => {
+      perPage = most;
+    },
     answer,
     /** Forgets everything reported, overridden and asked. */
     reset: (): void => {
       entries.clear();
       failing.clear();
+      perPage = 1000;
       override = undefined;
       asked.length = 0;
     },

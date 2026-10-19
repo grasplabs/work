@@ -50,8 +50,12 @@ export const registryLimits = {
   advisoriesPerPackage: 1000,
   /** OSV.dev's answer for one graph's versions, as sent (GRA-749). */
   osvBytes: 4 * 1024 * 1024,
-  /** Most OSV entries one version may carry before the answer is refused. */
+  /** Most OSV entries one version may carry on one page, as OSV sends. */
   osvEntriesPerVersion: 1000,
+  /** Most pages of OSV's answer asked for one graph. */
+  osvPages: 5,
+  /** Most OSV entries read for one graph, over every page. */
+  osvEntries: 20_000,
 } as const;
 
 /** A dependency as a version lists it: the range, or whatever it names. */
