@@ -31,14 +31,22 @@ const listeningSchema = z.object({
   socket: z.string(),
 });
 
+/** `line` as JSON, or null when it isn't. */
+const jsonOf = (line: string): unknown => {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+};
+
 /** Where the supervisor `child` listens, from the line saying so. */
 const socketOf = async (child: ChildProcess, output: () => string) => {
   const deadline = Date.now() + START_MS;
   while (Date.now() < deadline) {
-    for (const line of output().split("\n")) {
-      const parsed = listeningSchema.safeParse(
-        line.startsWith("{") ? JSON.parse(line) : null
-      );
+    // Whole lines only: the last may still be coming in.
+    for (const line of output().split("\n").slice(0, -1)) {
+      const parsed = listeningSchema.safeParse(jsonOf(line));
       if (parsed.success) {
         return parsed.data.socket;
       }
