@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  aiStepCalls,
   checkWorkflowBindings,
   checkWorkflowModule,
   describeWorkflow,
@@ -794,5 +795,84 @@ export default workflow("x", { params: {} }, async () => null);`)
     expect(() => describeWorkflow("")).toThrow(
       expect.objectContaining({ code: "workflow.invalid_definition" })
     );
+  });
+});
+
+/** An AI step named `read` through `binding`. */
+const llm = (binding: string): string =>
+  `await step.llm("read", { description: "Read", binding: "${binding}", instructions: "Read", input: "x", schema: {} });`;
+
+/** `source`'s AI steps, as `name:binding`. */
+const bindings = (source: string): string[] | undefined =>
+  aiStepCalls(source)?.map(({ name, binding }) => `${name}:${binding}`);
+
+describe(aiStepCalls, () => {
+  it("reads every AI step's name and binding, wherever it sits, and only the workflow's own step", () => {
+    expect({
+      plain: bindings(workflowSource(llm("reader"))),
+      inTry: bindings(workflowSource(`try { ${llm("reader")} } catch {}`)),
+      // Another variable of that name, by parameter, block or catch.
+      shadowed: bindings(
+        workflowSource(
+          `[1].map((step) => step.llm()); { const step = { llm: () => 1 }; step.llm(); } try {} catch (step) { step.llm(); } ${llm("reader")}`
+        )
+      ),
+      // A \`var\` is the function's: in the workflow function, the parameter again.
+      hoisted: bindings(
+        workflowSource(`if (input) { var step = 1; } ${llm("reader")}`)
+      ),
+      nestedVar: bindings(
+        workflowSource(
+          `const f = () => { if (1) { var step = { llm: () => 1 }; } step.llm(); }; ${llm("reader")}`
+        )
+      ),
+    }).toStrictEqual({
+      plain: ["read:reader"],
+      inTry: ["read:reader"],
+      shadowed: ["read:reader"],
+      hoisted: ["null:null", "null:null"],
+      nestedVar: ["read:reader"],
+    });
+  });
+
+  it("can't read a step taken any other way, or a binding its options may replace", () => {
+    expect({
+      kept: bindings(workflowSource("const ask = step; await ask.do();")),
+      computed: bindings(workflowSource('await step["llm"]("read", {});')),
+      spread: bindings(
+        workflowSource(
+          `await step.llm("read", { binding: "reader", ...{ binding: "other" } });`
+        )
+      ),
+      last: bindings(
+        workflowSource(
+          `await step.llm("read", { binding: "a", binding: "b" });`
+        )
+      ),
+    }).toStrictEqual({
+      kept: ["null:null"],
+      computed: ["null:null"],
+      spread: ["read:null"],
+      last: ["read:b"],
+    });
+  });
+
+  it("counts each llm call of a workflow whose context it can't read, and no mention in text", () => {
+    expect({
+      calls: bindings(
+        workflowSource(`const kept = env; ${llm("reader")}`, "step, { env }")
+      ),
+      text: bindings(
+        workflowSource(
+          'const kept = env; // llm\nawait step.do("x", { description: "llm" }, async () => 1);',
+          "step, { env }"
+        )
+      ),
+      unparsed: aiStepCalls("export default ("),
+    }).toStrictEqual({
+      calls: ["null:null"],
+      text: [],
+      unparsed: null,
+    });
   });
 });

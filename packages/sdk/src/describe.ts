@@ -1419,7 +1419,7 @@ export interface AiStepCall {
 /**
  * The scopes under `body` (itself included) that declare `name`: a
  * variable, function or class in a block, a parameter of a nested
- * function, a catch binding. A `var` counts in the block it is written in.
+ * function, a catch binding; a `var` in the function it is written in.
  */
 const scopesDeclaring = (body: Node, name: string): Set<Node> => {
   const scopes = new Set<Node>();
@@ -1428,8 +1428,16 @@ const scopesDeclaring = (body: Node, name: string): Set<Node> => {
       scopes.add(node);
     }
     if (declaredAround(node).includes(name)) {
+      // A `var` is its function's, wherever it is written: in the
+      // workflow function itself, it is the parameter declared again.
+      const declaration = ancestors.at(-1)?.node;
+      const hoisted =
+        declaration?.type === "VariableDeclaration" &&
+        declaration.kind === "var";
       const scope =
-        ancestors.findLast(({ node: above }) => isScope(above))?.node ?? body;
+        ancestors.findLast(({ node: above }) =>
+          hoisted ? isFunctionNode(above) : isScope(above)
+        )?.node ?? body;
       scopes.add(scope);
     }
   });
@@ -1495,13 +1503,47 @@ const aiStepCallOf = (
 };
 
 /**
+ * Each call of an `llm` method in `source`, as an AI step whose model
+ * can't be read: what is left to go by when the workflow's context can't
+ * be read. Comments and strings aren't calls. Null when it doesn't parse.
+ */
+const llmCallsIn = (source: string): AiStepCall[] | null => {
+  let file: Node;
+  try {
+    file = parseModule(source);
+  } catch (error) {
+    if (error instanceof WorkflowError) {
+      return null;
+    }
+    throw error;
+  }
+  const calls: AiStepCall[] = [];
+  visit(file, (node) => {
+    if (
+      node.type === "CallExpression" &&
+      node.callee.type === "MemberExpression" &&
+      nameOf(node.callee.property) === "llm"
+    ) {
+      calls.push({
+        name: null,
+        binding: null,
+        line: node.loc?.start.line ?? 0,
+      });
+    }
+  });
+  return calls;
+};
+
+/**
  * Every AI step the workflow in `source` may take, read from its code
  * whether or not its outline can be (`readOutline`): a step in a `try`
  * runs all the same. Any use of `step` that isn't `step.method(…)` (kept
  * in a variable, passed on, a computed method) may take one too, through
  * a model no one can read: it counts as an AI step with no `binding`.
- * Null when not even the workflow's context can be read, which its build
- * refuses (`checkWorkflowBindings`).
+ * When the workflow's context can't be read (`env` kept outside a step,
+ * say), each call of an `llm` method in its code counts as such a step;
+ * code that hides even that name is refused on each attempt by the host.
+ * Null when the code doesn't parse, which its build refuses.
  */
 export const aiStepCalls = (source: string): AiStepCall[] | null => {
   let context: ReturnType<typeof readContext>;
@@ -1509,7 +1551,7 @@ export const aiStepCalls = (source: string): AiStepCall[] | null => {
     context = readContext(source);
   } catch (error) {
     if (error instanceof WorkflowError) {
-      return null;
+      return llmCallsIn(source);
     }
     throw error;
   }

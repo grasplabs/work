@@ -620,6 +620,16 @@ ${mailStep("after")}`,
         { extract: { total: 1234 } }
       ),
     });
+    // Text isn't a call: an unreadable workflow that only mentions one.
+    const mentioned = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  const kept = env.MAIL; // no llm here
+  return await step.do("extract", { description: "Count", input: { kept: String(kept) } }, async () => 1);`,
+        { extract: 1 }
+      ),
+    });
     // Another variable named \`step\` is just that.
     const shadowed = await activating({
       ...own,
@@ -644,6 +654,7 @@ ${mailStep("after")}`,
       passed,
       spread,
       unreadable,
+      mentioned,
       shadowed,
       fits,
       unsealed,
@@ -679,9 +690,10 @@ ${mailStep("after")}`,
       unreadable: {
         code: "workflow.model_undeclared",
         steps: [
-          'workflows/reader.ts:1 An AI step of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
+          'workflows/reader.ts:5 An AI step of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
         ],
       },
+      mentioned: { code: "ok", steps: [] },
       shadowed: { code: "ok", steps: [] },
       fits: { code: "ok", steps: [] },
       unsealed: {
