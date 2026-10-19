@@ -13,6 +13,8 @@ import { z } from "zod";
 import type { NpmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import {
   npmAdviseUrl,
+  osvAnswerUrl,
+  osvReportUrl,
   npmAskedUrl,
   npmPublishUrl,
 } from "./connect-providers.ts";
@@ -60,6 +62,40 @@ export const advise = async (
   await providers.fetch(npmAdviseUrl, {
     method: "POST",
     body: JSON.stringify({ name, advisory }),
+  });
+};
+
+/** OSV.dev knows the entry `id` (`MAL-…` for malware) for `name@version`. */
+export const reportToOsv = async (
+  name: string,
+  version: string,
+  id: string
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  await providers.fetch(osvReportUrl, {
+    method: "POST",
+    body: JSON.stringify({ name, version, id }),
+  });
+};
+
+/**
+ * OSV.dev answers a batch naming `name` with `status` and nothing
+ * readable, or with its own answers again for `null`.
+ */
+export const osvAnswers = async (
+  name: string,
+  status: number | null
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  await providers.fetch(osvAnswerUrl, {
+    method: "POST",
+    body: JSON.stringify({ name, status }),
   });
 };
 

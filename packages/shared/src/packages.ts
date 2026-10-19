@@ -48,6 +48,10 @@ export const registryLimits = {
   advisoryBytes: 4 * 1024 * 1024,
   /** Most advisories connect passes on for one package. */
   advisoriesPerPackage: 1000,
+  /** OSV.dev's answer for one graph's versions, as sent (GRA-749). */
+  osvBytes: 4 * 1024 * 1024,
+  /** Most OSV entries one version may carry before the answer is refused. */
+  osvEntriesPerVersion: 1000,
 } as const;
 
 /** A dependency as a version lists it: the range, or whatever it names. */
@@ -158,6 +162,28 @@ export type NpmAdvisory = z.infer<typeof npmAdvisorySchema>;
 /** The advisories of each package asked about, by name: only those. */
 export type NpmAdvisories = Record<string, NpmAdvisory[]>;
 
+/**
+ * An OpenSSF malicious-packages report (`MAL-2026-12435`), as OSV.dev
+ * names one, the way connect passes it on (GRA-749): the ID alone, in
+ * the form OSV gives every `MAL-` entry.
+ */
+export const malwareReportIdSchema = z.string().regex(/^MAL-\d{4}-\d{1,12}$/u);
+
+/**
+ * The versions OSV.dev reports as malware (GRA-749), among those asked:
+ * each with the report that says so. None, when it reports none.
+ */
+export const npmMalwareReportsSchema = z
+  .array(
+    z.strictObject({
+      name: packageNameSchema,
+      version: exactVersionSchema,
+      id: malwareReportIdSchema,
+    })
+  )
+  .max(dependencyMaxPackages * 16);
+export type NpmMalwareReports = z.infer<typeof npmMalwareReportsSchema>;
+
 /** The registry, as connect reaches it for core. */
 export interface PackageRegistryApi {
   /** A package's metadata, or `package.not_found`. */
@@ -174,6 +200,14 @@ export interface PackageRegistryApi {
    * naming `constructor`, which the registry never answers.
    */
   npmAdvisories: (request: NpmAdvisoriesRequest) => Promise<NpmAdvisories>;
+  /**
+   * The versions `request` names that OSV.dev reports as malware
+   * (GRA-749), or `package.malware_unchecked`: never an empty answer for
+   * one it couldn't read.
+   */
+  npmMalwareReports: (
+    request: NpmAdvisoriesRequest
+  ) => Promise<NpmMalwareReports>;
 }
 
 /** Why fetching, unpacking, resolving or building a package was refused. */
@@ -187,6 +221,8 @@ export const packageErrors = defineErrorFamily({
   "package.redirect_refused":
     "The registry sent the request somewhere other than the registry.",
   "package.too_large": "The package is larger than Grasp takes.",
+  "package.malware_unchecked":
+    "Known malware couldn't be checked: OSV.dev couldn't be reached or answered unreadably. Try again in a minute.",
   "package.advisories_unchecked":
     "Advisories can't be checked for constructor: the npm registry refuses to answer for a package of that name.",
   "package.integrity_mismatch":

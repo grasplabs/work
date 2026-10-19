@@ -39,7 +39,11 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
-import type { NpmAdvisories, NpmMetadata } from "@grasp-os/shared/packages";
+import type {
+  NpmAdvisories,
+  NpmMalwareReports,
+  NpmMetadata,
+} from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
@@ -62,7 +66,12 @@ import {
   takeConnectorEvents,
 } from "./events.ts";
 import { catalogLogo } from "./logos.ts";
-import { npmAdvisories, npmMetadata, npmTarball } from "./npm.ts";
+import {
+  npmAdvisories,
+  npmMalwareReports,
+  npmMetadata,
+  npmTarball,
+} from "./npm.ts";
 import {
   abandonFlow,
   connectWithKey,
@@ -344,6 +353,11 @@ export default class Connect
   // oxlint-disable-next-line class-methods-use-this
   async npmAdvisories(request: unknown): Promise<NpmAdvisories> {
     return await npmAdvisories(request);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this
+  async npmMalwareReports(request: unknown): Promise<NpmMalwareReports> {
+    return await npmMalwareReports(request);
   }
 
   // The catalog (src/catalog.ts): what can be connected.

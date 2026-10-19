@@ -23,9 +23,11 @@ import {
   intentFor,
   manifestEntry,
   named,
+  osvAnswers,
   noise,
   plain,
   publish,
+  reportToOsv,
   refusalsOf,
 } from "./npm.ts";
 import type { Entries } from "./npm.ts";
@@ -605,6 +607,70 @@ describe("the platform's own packages", () => {
       ],
       pendingAfterRefusal: null,
       warned: [{ severity: "critical", id: "GHSA-aaaa-bbbb-cccc" }],
+    });
+  });
+
+  it("refuses a graph with a version OSV.dev reports as malware, which the registry's advisories don't carry, ignores its other entries, and proposes nothing when OSV can't be read", async () => {
+    const { builder, app } = await builderWithApp();
+    // As GitHub's malware advisories are: absent from the registry's bulk
+    // answer, present in OSV.dev as an OpenSSF malicious-packages report.
+    const squat = named("geeksquad-core");
+    const dates = named("dates");
+    await publish(
+      plain(squat, "9999.0.0", { dependencies: { [dates]: "^1.0.0" } })
+    );
+    await publish(plain(dates, "1.0.0"));
+    await reportToOsv(squat, "9999.0.0", "MAL-2026-12435");
+    // OSV's other entries are the registry's advisories' to show: not
+    // refused here.
+    await reportToOsv(dates, "1.0.0", "GHSA-35jh-r3h4-6jhm");
+    let refused: Awaited<ReturnType<typeof failure>> | undefined;
+    const events = await auditedDuring(async () => {
+      refused = await failure(
+        builder.api.dependencies.resolve(intentFor(app, { [squat]: "9999" }))
+      );
+    });
+    const { request } = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "1.0.0" })
+    );
+    // Unread, never taken as none: no request is proposed.
+    const unread = named("unread");
+    await publish(plain(unread, "1.0.0"));
+    await osvAnswers(unread, 503);
+    let unchecked: Awaited<ReturnType<typeof failure>> | undefined;
+    try {
+      unchecked = await failure(
+        builder.api.dependencies.resolve(intentFor(app, { [unread]: "1" }))
+      );
+    } finally {
+      await osvAnswers(unread, null);
+    }
+    const { pending } = await builder.api.dependencies.status({ app });
+    expect({
+      refused,
+      audited: events
+        .filter(({ action }) => action === "dependency.malware_refused")
+        .map(({ detail }) => detail),
+      proposed: request.status,
+      unchecked: unchecked?.code,
+      pending: pending?.id,
+    }).toStrictEqual({
+      refused: {
+        code: "dependency.malware",
+        details: { packages: [`${squat}@9999.0.0 (MAL-2026-12435)`] },
+      },
+      audited: [
+        {
+          app,
+          package: squat,
+          version: "9999.0.0",
+          advisory: "MAL-2026-12435",
+          found: 1,
+        },
+      ],
+      proposed: "pending",
+      unchecked: "package.malware_unchecked",
+      pending: request.id,
     });
   });
 

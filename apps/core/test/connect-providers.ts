@@ -12,6 +12,7 @@
  */
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
+import { osvFake } from "../../connect/test/osv-fake.ts";
 import { clients } from "../../connect/test/provider-config.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
@@ -58,6 +59,15 @@ export const npmPublishUrl = "https://npm-control.test/publish";
 /** POST `{ name, advisory }`: the registry knows `advisory` for `name`. */
 export const npmAdviseUrl = "https://npm-control.test/advise";
 
+/** POST `{ name, version, id }`: OSV.dev knows entry `id` for that version. */
+export const osvReportUrl = "https://osv-control.test/report";
+
+/**
+ * POST `{ name, status }`: OSV.dev answers a batch naming the package with
+ * that status and no results; `{ name, status: null }` restores its own.
+ */
+export const osvAnswerUrl = "https://osv-control.test/answer";
+
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
 
@@ -90,6 +100,7 @@ const losesAnswer = (mailbox) => {
   return true;
 };
 const npm = (${npmRegistryFake.toString()})();
+const osv = (${osvFake.toString()})();
 
 export default {
   async fetch(request) {
@@ -164,6 +175,19 @@ export default {
     }
     if (url.origin + url.pathname === ${JSON.stringify(graphDraftsUrl)}) {
       return Response.json({ drafts: graphDrafts.get(url.searchParams.get("mailbox")) ?? 0 });
+    }
+    if (url.hostname === "api.osv.dev") {
+      return await osv.answer(request);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(osvReportUrl)}) {
+      const { name, version, id } = await request.json();
+      osv.report(name, version, id);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(osvAnswerUrl)}) {
+      const { name, status } = await request.json();
+      osv.failFor(name, status === null ? undefined : () => new Response("Unavailable", { status }));
+      return new Response(null, { status: 204 });
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
