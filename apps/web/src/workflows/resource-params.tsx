@@ -148,7 +148,11 @@ const ParamField = ({
       edited: text !== base.text || checked !== base.checked || toggled,
       sensitive: param.sensitive,
     });
-    setBase(next.base);
+    // Kept as it is, it isn't set again: an update made while rendering
+    // renders again, and would for as long as the revisions differ.
+    if (next.base !== base) {
+      setBase(next.base);
+    }
     if (next.refill) {
       setText(fresh.text);
       setChecked(fresh.checked);
