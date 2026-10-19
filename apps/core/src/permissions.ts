@@ -430,17 +430,21 @@ const restartApp = async (
   if (subject.type !== "app") {
     return;
   }
+  const host = appHost(env, subject.appId);
   try {
-    const host = appHost(env, subject.appId);
-    try {
-      await host.restart("Its permissions changed.");
-    } finally {
-      // Its screens' live workflow watches read again, whether or not it
-      // restarted: what the App may start changed (screen-workflows.ts).
-      await host.workflowPolicyChanged();
-    }
+    await host.restart("Its permissions changed.");
   } catch (error) {
     log.error("app.restart_failed", {
+      appId: subject.appId,
+      ...errorFields(error),
+    });
+  }
+  // Its screens' live workflow watches read again, whether or not it
+  // restarted: what the App may start changed (screen-workflows.ts).
+  try {
+    await host.workflowPolicyChanged();
+  } catch (error) {
+    log.error("app.workflow_policy_tell_failed", {
       appId: subject.appId,
       ...errorFields(error),
     });
