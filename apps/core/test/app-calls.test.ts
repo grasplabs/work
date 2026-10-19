@@ -1619,20 +1619,22 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       );
     const budget = platformLimits.invocationHostCalls;
 
-    expect({
-      // Statistics points are writes: the reads after them get the budget.
-      pointsThenReads: await useMany([
-        {
-          binding: "STATISTICS",
-          method: "record",
-          args: [{ measure: "uses", value: 1 }],
-          times: 5,
-        },
-        reads(budget),
-      ]),
-      tooManyReads: await useMany([reads(budget + 1)]),
-      // Another App's export is a call: it takes from the same budget.
-      readsThenCall: await useMany([
+    // Statistics points are writes: the reads after them get the budget.
+    const pointsThenReads = await useMany([
+      {
+        binding: "STATISTICS",
+        method: "record",
+        args: [{ measure: "uses", value: 1 }],
+        times: 5,
+      },
+      reads(budget),
+    ]);
+    const tooManyReads = await useMany([reads(budget + 1)]);
+    // Another App's export is a call: it takes from the same budget, and
+    // its refusal is recorded for the call it was refused in.
+    let readsThenCall: unknown;
+    const events = await auditedDuring(async () => {
+      readsThenCall = await useMany([
         reads(budget),
         {
           binding: "CRM",
@@ -1640,11 +1642,28 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
           args: ["findCustomers", { query: "BV" }],
           times: 1,
         },
-      ]),
+      ]);
+    });
+
+    expect({
+      pointsThenReads,
+      tooManyReads,
+      readsThenCall,
+      refused: callsIn(events).map(({ detail }) => detail),
     }).toStrictEqual({
       pointsThenReads: { made: 5 + budget },
       tooManyReads: { made: budget, refused: "operation.call_limit" },
       readsThenCall: { made: budget, refused: "operation.call_limit" },
+      refused: [
+        {
+          method: "findCustomers",
+          version: 1,
+          person: admin.userId,
+          depth: 1,
+          outcome: "refused",
+          reason: "operation.call_limit",
+        },
+      ],
     });
   });
 
