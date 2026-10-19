@@ -10,6 +10,7 @@ import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   categoryOf,
@@ -729,13 +730,22 @@ const controlled = async (
     }
   }
   if (receipt.state === "admitted") {
-    await applyCancel(
-      env,
-      delegateActorOf(authorityOf(asking)),
-      receipt.id,
-      row.id
-    );
-    receipt = (await cancelOf(env, row.id)) ?? receipt;
+    try {
+      await applyCancel(
+        env,
+        delegateActorOf(authorityOf(asking)),
+        receipt.id,
+        row.id
+      );
+      receipt = (await cancelOf(env, row.id)) ?? receipt;
+    } catch (error) {
+      // Admitted all the same, which is what the screen is answered: the
+      // repair applies it again (resource-runs.ts, `repairAdmittedCancels`).
+      log.error("workflow.resource_run_cancel_failed", {
+        runId: row.id,
+        ...errorFields(error),
+      });
+    }
   }
   return await receiptAnswer(env, row.workflowResourceId, receipt.state);
 };
