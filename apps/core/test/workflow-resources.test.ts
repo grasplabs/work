@@ -347,7 +347,8 @@ describe("publishing a version", () => {
       unshared: seen,
       deleted: seen,
       versions: 2,
-      // The contract key stays: the definition text Bob reads names it.
+      // The contract key stays: Bob builds the parent, and its definition
+      // text, which he reads, names it.
       first: [
         {
           resourceId: null,
@@ -1009,7 +1010,8 @@ describe("role ceilings", () => {
           kind: "workflow",
           resourceId: null,
           resourceVersion: null,
-          contractId: `${workflowNamespace}/${child.name}/1.0.0`,
+          // Bob only uses the parent: its definition text isn't his.
+          contractId: null,
           fingerprint: first.contractHash,
         },
       ],

@@ -150,10 +150,10 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   as one that doesn't exist, so publishing can't probe for another
 //   workflow's contract. A binding is a requirement, never a grant: who
 //   may start the target is decided when it starts. A version's bindings
-//   name the target resource (its ID and internal version) only to its
-//   builders; anyone else sees the alias, the contract key and the
-//   contract's fingerprint. The key isn't masked: the definition text,
-//   which everyone who may read the version reads, names it.
+//   name the target resource (its ID and internal version) only to the
+//   target's builders. The contract key goes to them and to the binding
+//   workflow's builders, whose definition text names it anyway; anyone
+//   else sees only the alias and the contract's fingerprint.
 // - A stored version altered behind the registry's back. A definition is
 //   hashed as canonical JSON at publication and checked again before it
 //   is served; a contract is checked against its hash before a binding
@@ -1110,8 +1110,8 @@ const asksModel = (action: WorkflowVersionAction): boolean =>
 /** What a review reads of a version's binding: which contract it pinned. */
 type PinnedContract = Pick<
   WorkflowVersionBinding,
-  "alias" | "kind" | "fingerprint"
-> & { contractId: string | null };
+  "alias" | "kind" | "contractId" | "fingerprint"
+>;
 
 /** Where a version's manifest seals what its bindings pinned (`writeVersion`). */
 const manifestBindingsSchema = z.object({
@@ -1330,14 +1330,17 @@ export const bindingsOf = async (
 };
 
 /**
- * `bindings` as `by` may see them: which workflow resource each binds (its
- * ID and internal version) only where `by` builds that workflow; elsewhere
- * the alias, the contract key (which the definition text names anyway)
- * and the contract's fingerprint. Each target's role is read once.
+ * `bindings` of a workflow `by` has `roleInBinder` in, as `by` may see
+ * them: which workflow resource each binds (its ID and internal version)
+ * only where `by` builds that workflow; elsewhere only the alias and the
+ * contract's fingerprint, and the contract key too where `by` builds the
+ * binding workflow, whose definition text (which only its builders read)
+ * names it. Each target's role is read once.
  */
 const visibleTo = async (
   env: Env,
   by: Acting,
+  roleInBinder: WorkflowRole,
   bindings: readonly PinnedBinding[]
 ): Promise<Map<PinnedBinding, WorkflowVersionBinding>> => {
   const builds = new Map<string, boolean>();
@@ -1361,7 +1364,7 @@ const visibleTo = async (
             kind: binding.kind,
             resourceId: null,
             resourceVersion: null,
-            contractId: binding.contractId,
+            contractId: roleInBinder === "builder" ? binding.contractId : null,
             fingerprint: binding.fingerprint,
           },
     ])
@@ -1506,7 +1509,8 @@ const seenBy = async (
 ): Promise<WorkflowResourceVersion> => {
   const byVersion = await bindingsOf(env, version.resourceId);
   const pinned = byVersion.get(version.version) ?? [];
-  const visible = await visibleTo(env, by, pinned);
+  // Only a builder of the workflow publishes: its definition is theirs.
+  const visible = await visibleTo(env, by, "builder", pinned);
   return {
     ...version,
     bindings: pinned.map((binding) => visible.get(binding) ?? binding),
@@ -1734,9 +1738,20 @@ const publishSchema = workflowPublishSchema.refine(
   { path: ["definition"], message: "Larger than a definition may be" }
 );
 
-/** What identifies a binding: its alias and the exact version it binds. */
+/**
+ * What identifies a binding: its alias, its kind, and what it binds: the
+ * exact workflow version, or the catalog contract by its key (a catalog
+ * binding has no resource), so the same alias on another contract or
+ * kind is another binding.
+ */
 const bindingKey = (binding: PinnedBinding): string =>
-  `${binding.alias}\n${binding.resourceId}\n${binding.resourceVersion}`;
+  [
+    binding.alias,
+    binding.kind,
+    binding.contractId,
+    binding.resourceId,
+    binding.resourceVersion,
+  ].join("\n");
 
 /**
  * Refuses Grasp staff (`role.forbidden`) a publication whose bindings
@@ -2017,7 +2032,12 @@ export const workflowVersions = async (
     .where(eq(workflowResourceVersions.workflowResourceId, workflow.id))
     .orderBy(desc(workflowResourceVersions.version));
   const bindings = await bindingsOf(env, workflow.id);
-  const visible = await visibleTo(env, by, [...bindings.values()].flat());
+  const visible = await visibleTo(
+    env,
+    by,
+    workflow.role,
+    [...bindings.values()].flat()
+  );
   // One lookup for the whole listing: each contract read once.
   const lookup = catalogOnce(env);
   return await Promise.all(
