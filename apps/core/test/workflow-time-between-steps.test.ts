@@ -100,7 +100,7 @@ describe("a workflow run's time between steps", { timeout: 90_000 }, () => {
     }
   });
 
-  it("ends a run whose code waits on a timer between steps within the budget, keeping the steps before and running none after", async () => {
+  it("ends a run whose code waits on a timer between steps past its budget, keeping the steps before and running none after", async () => {
     const { builder, app } = await workflowApp(
       "lingers",
       `${waits(pastMs)}
