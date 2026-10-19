@@ -12,8 +12,13 @@ import { screenReferences } from "./kit.ts";
 export const screenFile = /^screens\/[\w-]+\.tsx$/u;
 // Folders are plain names, so a path can't step out of `components/`.
 export const componentFile = /^components\/(?:[\w-]+\/)*[\w.-]+\.tsx?$/u;
-/** Types the App's code can use but that aren't code, e.g. its server's. */
-export const declarationFile = /^[\w-]+\.d\.ts$/u;
+/**
+ * Types the App's code can use but that aren't code, e.g. its server's:
+ * at its root, or among its components. Never compiled into a module, so
+ * only a type import may name one (`declarationValueImportError`).
+ */
+export const declarationFile =
+  /^(?:[\w-]+|components\/(?:[\w-]+\/)*[\w.-]+)\.d\.ts$/u;
 
 /**
  * The files a build reads: screens, components and declarations, and the

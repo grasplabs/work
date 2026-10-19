@@ -373,6 +373,73 @@ export default function Desk() {
     ]);
   });
 
+  it("takes a component's declaration file as types alone, never as a module", async () => {
+    const built = await buildScreens(
+      env,
+      {
+        "screens/labels.tsx": `import type { Label } from "../components/labels";
+import { Tag } from "../components/tag";
+
+const label: Label = "urgent";
+
+export default function Labels() {
+  return <Tag label={label} />;
+}
+`,
+        "components/labels.d.ts": `export type Label = "urgent" | "later";
+export declare const labels: readonly Label[];
+`,
+        // A module beside its declaration: a value import names the module.
+        "components/tag.tsx": `export function Tag({ label }: { label: string }) {
+  return <span>{label}</span>;
+}
+`,
+        "components/tag.d.ts": `export declare function Tag(props: { label: string }): unknown;
+`,
+      },
+      "app-test"
+    );
+
+    expect(
+      built.ok ? Object.keys(built.modules).toSorted() : built
+    ).toStrictEqual(["app~components~tag.js", "app~screens~labels.js"]);
+  });
+
+  it("refuses a value import of a declaration file, which holds only types", async () => {
+    const built = await buildScreens(
+      env,
+      {
+        "screens/labels.tsx": `import { labels } from "../components/labels";
+import { more } from "../components/labels.d.ts";
+import { Ticket } from "../server";
+
+export default function Labels() {
+  return <p>{[labels, more, Ticket].join()}</p>;
+}
+`,
+        "components/labels.d.ts": `export declare const labels: readonly string[];
+export declare const more: readonly string[];
+`,
+        "server.d.ts": `export declare const Ticket: string;
+`,
+      },
+      "app-test"
+    );
+
+    expect(
+      built.ok
+        ? built
+        : built.diagnostics.map(
+            ({ file, line, rule, message }) =>
+              `${file}:${line} ${rule}: ${message}`
+          )
+    ).toStrictEqual([
+      'screens/labels.tsx:1 imports: "../components/labels" is components/labels.d.ts, a declaration file: it holds only types, so import it with import type.',
+      'screens/labels.tsx:2 imports: "../components/labels.d.ts" is components/labels.d.ts, a declaration file: it holds only types, so import it with import type.',
+      'screens/labels.tsx:3 imports: "../server" is server.d.ts, a declaration file: it holds only types, so import it with import type.',
+    ]);
+  });
+
   it("builds the same files once and serves them from the cache after", async () => {
     // Files of this test's own, so no earlier build is in the cache.
     const files = screen(`once ${crypto.randomUUID()}`);

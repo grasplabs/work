@@ -45,6 +45,7 @@ import type { Diagnostic } from "./diagnostic.ts";
 import {
   collectDirectives,
   collectImports,
+  declarationValueImportError,
   importError,
   codeImportError,
   rewriteAppCodeImports,
@@ -220,11 +221,16 @@ const compileFile = (
     };
   }
   const errors: Diagnostic[] = [];
+  const declarations = new Set(
+    [...typeFiles].filter((typeFile) => declarationFile.test(typeFile))
+  );
   for (const site of imports) {
-    // A type may also name the App's declarations (`typeFiles`).
+    // A type may also name the App's declarations (`typeFiles`); a value
+    // never does, as they compile to nothing.
     const message = site.typeOnly
       ? screenTypeImportError(site, path, typeFiles, kit)
-      : importError(site, path, files, kit);
+      : (declarationValueImportError(site, path, { files, declarations }) ??
+        importError(site, path, files, kit));
     if (message !== undefined) {
       errors.push(
         problem(
@@ -385,7 +391,8 @@ const checkScreens = (files: Record<string, string>): Diagnostic[] => {
 
 /**
  * Builds an App's screens: `screens/*.tsx`, the `components/` they use and
- * the declarations (`*.d.ts`) at the App's root.
+ * the declarations (`*.d.ts`) at the App's root and among its components,
+ * which are types alone and never modules.
  */
 export const buildScreens = async (
   files: Record<string, string>
