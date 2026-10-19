@@ -496,6 +496,9 @@ const dropWaitMs = 2000;
 /** What a drop's wait leaves of the call's time, to settle in. */
 const dropMarginMs = 1000;
 
+/** How long after a call's deadline its last held action can still land. */
+const lateHoldMs = 2000;
+
 /**
  * Drops whatever connect still holds under an export call's key `key` for
  * the run's person, once the App's method settled (GRA-748): a connection
@@ -524,7 +527,7 @@ const dropUncollected = async (
     log.error("workflow.export_hold_drop_refused", { runId: run.runId });
     return;
   }
-  const dropping = (async (): Promise<"dropped" | "failed"> => {
+  const drop = async (): Promise<"dropped" | "failed"> => {
     try {
       await env.CONNECT.dropForSettledStep({
         onBehalfOf: run.principal,
@@ -538,9 +541,20 @@ const dropUncollected = async (
       });
       return "failed";
     }
-  })();
+  };
+  const dropping = drop();
   // Finished even once the call no longer waits for it.
   waitUntil(dropping);
+  // And once more just after the call's deadline: a connection call of the
+  // App's still on its way as the method settled (one that timed out) may
+  // reach connect after the first drop, but never once its capability,
+  // which expires by that deadline, has (bindings.ts).
+  waitUntil(
+    (async () => {
+      await scheduler.wait(Math.max(0, deadline - Date.now()) + lateHoldMs);
+      await drop();
+    })()
+  );
   // Waited for a moment at most, and never into the call's last second: a
   // slow drop never keeps the step's attempt, tried once, open past its
   // deadline, which would fail a call that settled.

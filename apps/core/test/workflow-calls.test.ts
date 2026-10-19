@@ -18,6 +18,7 @@ import {
   appIdSchema,
   chatIdSchema,
   connectionIdSchema,
+  permissionIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
   workspaceIdSchema,
@@ -43,6 +44,7 @@ import { z } from "zod";
 
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
+import { callConnection } from "../src/bindings.ts";
 import { personOf } from "../src/connections.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
@@ -3993,7 +3995,8 @@ export const greet = action({
 /**
  * One App's server code: an export that sends a mail through the App's own
  * `MAIL` connection, under its caller's key, answering once it has, or, for
- * `catch`, answering all the same when the send is refused.
+ * `catch`, answering all the same when the send is refused; for `late`,
+ * answering before it sends at all.
  */
 const sendingServer = `import { DurableObject } from "cloudflare:workers";
 
@@ -4003,6 +4006,10 @@ type Stub = { call: (...args: unknown[]) => Promise<unknown> };
 export class App extends DurableObject {
   async lookUp(caller: Caller, input: { who: string }): Promise<unknown> {
     const mail = (this.env as unknown as Record<string, Stub>).MAIL;
+    if (input.who === "late") {
+      // Its send not yet made as it answers (the test makes it after).
+      return { greeting: "Not yet sent", key: caller.idempotencyKey ?? "" };
+    }
     try {
       await mail.call(caller, "mail.send", { to: input.who, subject: "Hello" }, { idempotencyKey: caller.idempotencyKey });
     } catch (error) {
@@ -4064,7 +4071,13 @@ const sendingRun = async (
   const starter = await startingApp(admin, admin, workflowId, {
     restricted: true,
   });
-  return { admin, app, workflowId, start: starter.start };
+  return {
+    admin,
+    app,
+    workflowId,
+    permissionId: asked.id,
+    start: starter.start,
+  };
 };
 
 describe("an App's call held as an independent run's step called its export", () => {
@@ -4164,6 +4177,63 @@ describe("an App's call held as an independent run's step called its export", ()
     const sent = await mail.did();
     expect({ end, sent: sent.calls }).toStrictEqual({
       end: { status: "completed", output: { status: "called" } },
+      sent: 0,
+    });
+  });
+
+  it("is dropped too when it reaches connect after the step settled, until its call's deadline has passed", async () => {
+    const mail = await mailConnection();
+    const { admin, app, workflowId, permissionId, start } = await sendingRun(
+      mail,
+      "late",
+      3
+    );
+    const runId = await start();
+    const end = endOf(await ended(admin, workflowId, runId));
+    // The App's send, arriving as one still on its way when its method
+    // answered would.
+    const key = stepIdempotencyKey(runId, "task:look");
+    const late = await settledCode(
+      callConnection(
+        env,
+        {
+          subject: { type: "app", appId: appIdSchema.parse(app) },
+          onBehalfOf: admin.userId,
+          mode: "workflow",
+          appVersion: 1,
+        },
+        { type: "app", appId: appIdSchema.parse(app) },
+        {
+          type: "connection",
+          connectionId: connectionIdSchema.parse(mail.id),
+        },
+        {
+          action: "mail.send",
+          input: { to: "late", subject: "Hello" },
+          idempotencyKey: key,
+        },
+        permissionIdSchema.parse(permissionId)
+      )
+    );
+    const heldUnderKey = async (): Promise<number> => {
+      const waitingFor = await env.CONNECT.listPendingActions(
+        await personOf(env, admin)
+      );
+      return waitingFor.filter(({ idempotencyKey }) => idempotencyKey === key)
+        .length;
+    };
+    const justAfter = await heldUnderKey();
+    await vi.waitFor(
+      async () => {
+        await expect(heldUnderKey()).resolves.toBe(0);
+      },
+      { timeout: 10_000, interval: 200 }
+    );
+    const sent = await mail.did();
+    expect({ end, late, justAfter, sent: sent.calls }).toStrictEqual({
+      end: { status: "completed", output: { status: "called" } },
+      late: "connect.held",
+      justAfter: 1,
       sent: 0,
     });
   });
