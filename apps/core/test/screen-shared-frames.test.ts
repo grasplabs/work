@@ -229,13 +229,19 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
       notesFrame.watchQuery(request, beforeFollower.callback)
     );
 
-    // Its first read done before the revocation: nothing of it is left
-    // to refuse while what follows is recorded, as nothing changes.
     await vi.waitFor(() => {
       expect(beforeFollower.titles).toStrictEqual([[]]);
     }, pushWait);
 
     await admin.api.screenTrust.revoke(app, notes.artifact);
+    // The revocation ends the live query it already had, once the App's
+    // open screens are told to look again (GRA-668), which happens after
+    // the revocation answers: refused, and recorded as a push refusal, at
+    // a moment of its own. Waited for here, so what follows records only
+    // what each frame then asks, whatever the timing.
+    await vi.waitFor(() => {
+      expect(beforeFollower.refused).toStrictEqual(["screen.revoked"]);
+    }, pushWait);
 
     let after: Record<string, unknown> = {};
     const events = await auditedDuring(async () => {
@@ -256,8 +262,15 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
       };
     });
 
-    expect({ before, after, refused: refusalsOf(events, app) }).toStrictEqual({
+    expect({
+      before,
+      // Nothing reached it after its build's approval was taken back.
+      beforePushed: beforeFollower.titles,
+      after,
+      refused: refusalsOf(events, app),
+    }).toStrictEqual({
       before: "ok",
+      beforePushed: [[]],
       after: {
         notes: "screen.revoked",
         notesRuns: "screen.revoked",
