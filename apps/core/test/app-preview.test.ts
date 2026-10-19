@@ -95,19 +95,14 @@ ${
     const listed = await HANDBOOK.listDocuments(caller);
     const guests = await GUESTS.list(caller);
     const found = await HANDBOOK.search(caller, "note");
-    const records = await HANDBOOK.listRecords(caller);
     const stats = await STATISTICS.read(caller, { measure: "opened", days: 1, where: {} });
     return {
       mail: await outcome(MAIL.call(caller, "mail.send", { to: "ben@acme.test", subject: "Hi" }, { idempotencyKey: "k" })),
       archive: await outcome(ARCHIVE.call(caller, "mail.send", { to: "ben@acme.test", subject: "Hi" }, { idempotencyKey: "k" })),
       listed: listed.documents.length,
       found: found.hits.length,
-      records: records.records.length,
       read: await outcome(HANDBOOK.getDocument(caller, documentId)),
       section: await outcome(HANDBOOK.read(caller, documentId)),
-      canWrite: await HANDBOOK.canWrite(caller),
-      owned: await HANDBOOK.ownedTypes(caller),
-      save: await outcome(HANDBOOK.saveRecord(caller, { path: "a.md", ifVersion: 0, record: {}, body: "" })),
       ledger: await outcome(LEDGER.call(caller, "book", {})),
       point: await outcome(STATISTICS.record(caller, { measure: "opened", value: 1 })),
       stats: stats.groups.length,
@@ -434,12 +429,8 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
         archive: refused,
         listed: 0,
         found: 0,
-        records: 0,
         read: "knowledge.not_found",
         section: "knowledge.not_found",
-        canWrite: false,
-        owned: [],
-        save: refused,
         ledger: refused,
         point: "ok",
         stats: 0,

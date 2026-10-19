@@ -54,7 +54,7 @@ import { action, doc, mutation, query } from "#grasp/server";
 
 // ${marker}
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const writer = resource.model("writer", { maxOutputTokens: 100 });
 

@@ -1,3 +1,5 @@
+import type { Id } from "@grasp-os/sdk";
+import { useMutation } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import {
@@ -9,12 +11,14 @@ import {
 } from "@grasp-os/ui/components/select";
 import { useRef, useState } from "react";
 
+import { api } from "#grasp";
+
 import { whilePending } from "./pending";
-import { ask } from "./playbook";
-import type { Team } from "./playbook";
+import { settle } from "./store";
+import type { Team } from "./store";
 import { shortTextMax } from "./totals";
 
-/** A workflow's team, picked from the Playbook's teams, or a new one. */
+/** A workflow's team, picked from the map's teams, or a new one. */
 export const TeamPicker = ({
   teams,
   team,
@@ -22,8 +26,8 @@ export const TeamPicker = ({
   onRefused,
 }: {
   teams: Team[];
-  team: string | null;
-  onChange: (team: string | null) => void;
+  team: Id<"teams"> | null;
+  onChange: (team: Id<"teams"> | null) => void;
   onRefused: (code: string) => void;
 }) => {
   const [added, setAdded] = useState<Team[]>([]);
@@ -31,6 +35,7 @@ export const TeamPicker = ({
   // While a team is being added: its button is off, and a second click
   // that lands before it is (a double click) adds nothing more.
   const [adding, setAdding] = useState(false);
+  const addTeam = useMutation(api.teams.add);
   const addingNow = useRef(false);
   const pending = (on: boolean): void => {
     addingNow.current = on;
@@ -38,8 +43,12 @@ export const TeamPicker = ({
   };
   const items = [
     { value: null, label: "No team" },
-    ...[...teams, ...added].map(({ path, title }) => ({
-      value: path,
+    // A team added here, until the live list has it too.
+    ...[
+      ...teams,
+      ...added.filter(({ id }) => !teams.some((known) => known.id === id)),
+    ].map(({ id, title }) => ({
+      value: id,
       label: title,
     })),
   ];
@@ -49,22 +58,23 @@ export const TeamPicker = ({
     }
     const answer = await whilePending(
       pending,
-      async () => await ask<Team>("addTeam", name.trim())
+      async () =>
+        await settle(async () => await addTeam({ title: name.trim() }))
     );
     if ("error" in answer) {
       onRefused(answer.error);
       return;
     }
-    setAdded([...added, answer.ok]);
+    setAdded([...added, { id: answer.ok, title: name.trim() }]);
     setName("");
-    onChange(answer.ok.path);
+    onChange(answer.ok);
   };
   return (
     <div className="flex flex-wrap items-end gap-2">
       <Select
         items={items}
         value={team}
-        onValueChange={(value: string | null) => {
+        onValueChange={(value: Id<"teams"> | null) => {
           onChange(value);
         }}
       >

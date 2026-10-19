@@ -10,6 +10,7 @@ import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { workflowReferenceLimits } from "@grasp-os/sdk/host";
 import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -19,6 +20,7 @@ import {
   requireBuilder,
   roleErrors,
 } from "@grasp-os/shared/roles";
+import { actionUsesSchema } from "@grasp-os/shared/workflow-modules";
 import {
   catalogBindingKinds,
   catalogKeySchema,
@@ -37,6 +39,9 @@ import type {
   WorkflowResourceVersion,
   WorkflowRole,
   WorkflowBinders,
+  SteeredWrite,
+  WorkflowActionReview,
+  WorkflowVersionAction,
   WorkflowVersionBinding,
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
@@ -63,12 +68,16 @@ import type { PinnedEventBinding } from "./bound-workflow-events.ts";
 import {
   sdkReleasePins,
   sdkResourceBindings,
+  workflowResourceDraftInspections,
+  workflowResourceDraftModules,
+  workflowResourceDrafts,
   workflowResourceMembers,
   workflowResources,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
+import { failUnless, lockGuardFailed } from "./packages/locks.ts";
 import {
   memberEntry,
   requireNotStaff,
@@ -94,8 +103,20 @@ import {
   compileModules,
   moduleLookup,
   modulesHashOf,
+  sealedUse,
+  versionActionsOf,
 } from "./workflow-modules.ts";
-import type { CompiledModules } from "./workflow-modules.ts";
+import type {
+  CompiledModules,
+  ModuleContracts,
+  ModulePackages,
+} from "./workflow-modules.ts";
+import { packagesHoldSql, packagesRefusal } from "./workflows/package-seal.ts";
+import type {
+  PackageSealer,
+  SealedPackageManifest,
+  SealedPackages,
+} from "./workflows/package-seal.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
@@ -139,9 +160,11 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   bounded so its row stays within D1's limit.
 // - A version changing after publication. A version is a row written once
 //   (`(workflow_resource_id, version)` and its semantic version are unique,
-//   and nothing updates them); publishing a semantic version again with
-//   other content is refused (`workflow.version_exists`), and with the
-//   same content answers the version already published, so a retried
+//   and the database refuses any update, deletion or insert over either
+//   or over a version's rowid, whatever the conflict clause: migrations
+//   0080 and 0101); publishing a semantic version again with other
+//   content is refused (`workflow.version_exists`), and with the same
+//   content answers the version already published, so a retried
 //   publication is the same publication.
 // - A version running other code than its definition's. Publication
 //   generates SDK TypeScript from the checked definition, compiles it and
@@ -787,16 +810,29 @@ const contractOf = (checked: CheckedWorkflow): StoredContract => {
   };
 };
 
+const identityCode = "workflow.identity_mismatch";
+
+/** A definition that names another workflow than `workflow`, as a problem. */
+const identityProblem = (
+  workflow: Pick<Live, "name">
+): WorkflowDefinitionProblem => ({
+  code: identityCode,
+  message:
+    "The definition names another workflow than this one: its namespace and name must be the workflow's own.",
+  pointer: "/document",
+  remedy: `Name this workflow: namespace "${workflowNamespace}" and name "${workflow.name}".`,
+});
+
 /**
- * Refuses a definition with more listen tasks an App's references would
- * carry as event waits (those waiting only on a browser-callable type)
- * than a reference holds: sealing an App bound to it would fail later,
- * where the builder can't see why.
+ * The problem with a definition that has more listen tasks an App's
+ * references would carry as event waits (those waiting only on a
+ * browser-callable type) than a reference holds: sealing an App bound to
+ * it would fail later, where the builder can't see why.
  */
-const requireReferenceableListens = (
+const referenceableListensProblem = (
   checked: CheckedWorkflow,
   catalog: Map<string, ResolvedCatalogContract>
-): void => {
+): WorkflowDefinitionProblem | undefined => {
   const bindings: PinnedEventBinding[] = [];
   for (const [alias, binding] of checked.bindings) {
     const events = catalog.get(binding.contract)?.contract.events;
@@ -807,17 +843,16 @@ const requireReferenceableListens = (
   const referenced = Object.keys(
     boundEventsOf(bindings, listensOf(checked)).listens
   ).length;
-  if (referenced > workflowReferenceLimits.listens) {
-    throw definitionInvalid([
-      {
-        code: "listen.too_many",
-        message: `More than ${workflowReferenceLimits.listens} tasks listen for events a screen sends, which an App's references can't hold.`,
-        pointer: "/do",
-        remedy:
-          "Listen for a screen's events in fewer tasks: a bounded loop of one listen covers repeats.",
-      },
-    ]);
+  if (referenced <= workflowReferenceLimits.listens) {
+    return undefined;
   }
+  return {
+    code: "listen.too_many",
+    message: `More than ${workflowReferenceLimits.listens} tasks listen for events a screen sends, which an App's references can't hold.`,
+    pointer: "/do",
+    remedy:
+      "Listen for a screen's events in fewer tasks: a bounded loop of one listen covers repeats.",
+  };
 };
 
 /**
@@ -827,16 +862,16 @@ const requireReferenceableListens = (
  * otherwise), and names this workflow (`workflow.identity_mismatch`).
  * Returns it with what each binding resolved to.
  */
-const checkDefinition = async (
+const inspectDefinition = async (
   env: Env,
   by: Acting,
-  workflow: Live,
+  workflow: Pick<Live, "name">,
   definition: string,
-  modules: CompiledModules | undefined
-): Promise<{
-  checked: CheckedWorkflow;
-  bindings: PinnedBinding[];
-}> => {
+  modules?: ModuleContracts
+): Promise<
+  | { ok: true; checked: CheckedWorkflow; bindings: PinnedBinding[] }
+  | { ok: false; problems: WorkflowDefinitionProblem[] }
+> => {
   // Every contract the definition names, resolved before validation,
   // which looks contracts up as it goes: workflows for `by`, catalog
   // contracts from the host catalog.
@@ -862,30 +897,47 @@ const checkDefinition = async (
     },
   });
   if (!result.ok) {
-    throw definitionInvalid(problemsOf(result.diagnostics));
+    return { ok: false, problems: problemsOf(result.diagnostics) };
   }
   const checked = result.workflow;
   if (
     checked.identity.namespace !== workflowNamespace ||
     checked.identity.name !== workflow.name
   ) {
-    throw workflowResourceErrors.create("workflow.identity_mismatch");
+    return { ok: false, problems: [identityProblem(workflow)] };
+  }
+  // Its contract must fit a version's row, checked here so a draft that
+  // passes is one that publishes (workflow-drafts.ts).
+  if (bytesOf(canonicalJson(contractOf(checked))) > contractMaxBytes) {
+    return {
+      ok: false,
+      problems: [
+        {
+          code: "contract.too_large",
+          message:
+            "The workflow's input, output and parameter schemas together are larger than a version may hold.",
+          pointer: "/input/schema",
+          remedy: "Keep the schemas smaller: move large constants into data.",
+        },
+      ],
+    };
   }
   // A run's output reaches whoever started it, who may only use the
   // workflow: a sensitive parameter stays out of every expression until
   // bindings that need one come (GRA-566).
   const sensitive = sensitiveReads(checked);
   if (sensitive.length > 0) {
-    throw definitionInvalid(
-      sensitive.map((read) => ({
+    return {
+      ok: false,
+      problems: sensitive.map((read) => ({
         code: "expression.sensitive_param",
         message:
           "An expression reads a sensitive parameter, or all parameters at once, which could pass its value on.",
         pointer: read.pointer,
         ...(read.taskId === undefined ? {} : { taskId: read.taskId }),
         remedy: "Read only parameters that aren't sensitive, each by its name.",
-      }))
-    );
+      })),
+    };
   }
   const bindings: PinnedBinding[] = [];
   for (const [alias, binding] of checked.bindings) {
@@ -922,8 +974,42 @@ const checkDefinition = async (
     });
   }
   bindings.sort((a, b) => (a.alias < b.alias ? -1 : 1));
-  requireReferenceableListens(checked, catalog);
-  return { checked, bindings };
+  const listens = referenceableListensProblem(checked, catalog);
+  if (listens !== undefined) {
+    return { ok: false, problems: [listens] };
+  }
+  return { ok: true, checked, bindings };
+};
+
+/**
+ * `definition` checked for publication (`inspectDefinition`): refused as
+ * `workflow.definition_invalid` with its problems otherwise.
+ */
+const checkDefinition = async (
+  env: Env,
+  by: Acting,
+  workflow: Pick<Live, "name">,
+  definition: string,
+  modules: CompiledModules | undefined
+): Promise<{
+  checked: CheckedWorkflow;
+  bindings: PinnedBinding[];
+}> => {
+  const inspected = await inspectDefinition(
+    env,
+    by,
+    workflow,
+    definition,
+    modules
+  );
+  if (!inspected.ok) {
+    const [first] = inspected.problems;
+    if (inspected.problems.length === 1 && first?.code === identityCode) {
+      throw workflowResourceErrors.create("workflow.identity_mismatch");
+    }
+    throw definitionInvalid(inspected.problems);
+  }
+  return { checked: inspected.checked, bindings: inspected.bindings };
 };
 
 /**
@@ -942,25 +1028,258 @@ const sealedBuildOf = (
   }
 };
 
-/** A version's row, as the registry answers it. */
-const versionOf = (
+/**
+ * Why a version's manifest is past `manifestMaxBytes`: the output shapes
+ * its actions declare for their model calls (GRA-700), sealed in it, when
+ * they hold most of it, pointing at the action with the largest; otherwise
+ * what it pins.
+ */
+const tooLargeProblem = (
+  actions: readonly WorkflowVersionAction[]
+): WorkflowDefinitionProblem => {
+  let total = 0;
+  let largest: { binding: string; bytes: number } | undefined;
+  for (const action of actions) {
+    for (const use of action.uses) {
+      if (use.kind === "model") {
+        const bytes = bytesOf(use.output);
+        total += bytes;
+        if (largest === undefined || bytes > largest.bytes) {
+          largest = { binding: action.binding, bytes };
+        }
+      }
+    }
+  }
+  if (largest === undefined || total * 2 < manifestMaxBytes) {
+    return {
+      code: "manifest.too_large",
+      message: "What the version pins is larger than a version may hold.",
+      pointer: "/document/metadata/grasp/bindings",
+      remedy: "Bind fewer workflows.",
+    };
+  }
+  return {
+    code: "manifest.too_large",
+    // Fixed text, as every problem's: the pointer names the action with
+    // the largest shape.
+    message:
+      "The output shapes the version's actions declare for their model calls are larger than a version may hold.",
+    pointer: `/document/metadata/grasp/bindings/${largest.binding}`,
+    remedy: "Declare smaller output shapes for the actions' model uses.",
+  };
+};
+
+/** Where a version's manifest says what its actions may do (GRA-709). */
+const manifestActionsSchema = z.object({
+  actions: z.array(
+    z.strictObject({
+      binding: z.string(),
+      module: z.string(),
+      export: z.string(),
+      uses: actionUsesSchema,
+    })
+  ),
+});
+
+/**
+ * What version `row`'s actions may do, as its manifest seals it: a
+ * manifest without them is malformed, as one without its build is.
+ */
+const sealedActionsOf = (
+  row: typeof workflowResourceVersions.$inferSelect
+): WorkflowVersionAction[] => {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(row.manifest);
+  } catch {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  const parsed = manifestActionsSchema.safeParse(manifest);
+  if (!parsed.success) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return parsed.data.actions;
+};
+
+/** Whether `action` asks a model (GRA-700). */
+const asksModel = (action: WorkflowVersionAction): boolean =>
+  action.uses.some(({ kind }) => kind === "model");
+
+/** What a review reads of a version's binding: which contract it pinned. */
+type PinnedContract = Pick<
+  WorkflowVersionBinding,
+  "alias" | "kind" | "contractId" | "fingerprint"
+>;
+
+/** Where a version's manifest seals what its bindings pinned (`writeVersion`). */
+const manifestBindingsSchema = z.object({
+  bindings: z.array(
+    z.object({
+      alias: z.string(),
+      kind: z.enum(["workflow", ...catalogBindingKinds]),
+      contractId: z.string().nullable(),
+      fingerprint: z.string(),
+    })
+  ),
+});
+
+/**
+ * What version `row`'s bindings pinned, as its manifest seals them, never
+ * as a table that can be changed says: a review reads only what the
+ * version's hash covers.
+ */
+const sealedBindingsOf = (
+  row: typeof workflowResourceVersions.$inferSelect
+): PinnedContract[] => {
+  const parsed = manifestBindingsSchema.safeParse(JSON.parse(row.manifest));
+  if (!parsed.success) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return parsed.data.bindings.map(
+    ({ alias, kind, contractId, fingerprint }) => ({
+      alias,
+      kind,
+      contractId,
+      fingerprint,
+    })
+  );
+};
+
+/** Reads catalog contracts by key: those the catalog holds intact. */
+type CatalogLookup = (
+  keys: readonly string[]
+) => Promise<Map<string, ResolvedCatalogContract>>;
+
+/**
+ * A lookup that reads each catalog key once, however many reviews of one
+ * answer ask for it, concurrently or not: a listing of many versions
+ * pinning the same contract reads and hashes it once.
+ */
+const catalogOnce = (env: Env): CatalogLookup => {
+  // Each key, by the read that loads it: set before anything is awaited,
+  // so a review asking at the same time shares that read.
+  const reads = new Map<
+    string,
+    Promise<Map<string, ResolvedCatalogContract>>
+  >();
+  return async (keys) => {
+    const missing = [...new Set(keys)].filter((key) => !reads.has(key));
+    if (missing.length > 0) {
+      const read = resolveCatalogKeys(env, missing);
+      for (const key of missing) {
+        reads.set(key, read);
+      }
+    }
+    const found = new Map<string, ResolvedCatalogContract>();
+    for (const key of keys) {
+      // oxlint-disable-next-line no-await-in-loop -- each read shared, once
+      const read = await reads.get(key);
+      const contract = read?.get(key);
+      if (contract !== undefined) {
+        found.set(key, contract);
+      }
+    }
+    return found;
+  };
+};
+
+/**
+ * `actions` as a version's review shows them (GRA-718): for each that asks
+ * a model, its uses that may write, which the model's answers may steer.
+ * A connector's operation counts as a write unless the catalog contract
+ * its binding pinned states it is read-only, and only while the catalog
+ * still holds that exact contract (its fingerprint the one the version
+ * sealed): a binding, contract or operation that isn't there, or a
+ * contract that changed, counts as a write. An operation binding's use (an
+ * App's export) always counts: its contract states nothing about reading.
+ * So the flag shows whenever a write can't be ruled out. Read from the
+ * version as sealed and the catalog, never inspected again.
+ */
+const reviewedActions = async (
+  lookup: CatalogLookup,
+  actions: readonly WorkflowVersionAction[],
+  bindings: readonly PinnedContract[]
+): Promise<WorkflowActionReview[]> => {
+  const connectorOf = (alias: string): PinnedContract | undefined =>
+    bindings.find(
+      (binding) => binding.alias === alias && binding.kind === "connector"
+    );
+  const keys = actions.filter(asksModel).flatMap((action) =>
+    action.uses.flatMap((use) => {
+      const contractId =
+        use.kind === "connector" ? connectorOf(use.alias)?.contractId : null;
+      return typeof contractId === "string" ? [contractId] : [];
+    })
+  );
+  const catalog = await lookup(keys);
+  const readOnly = (alias: string, operation: string): boolean => {
+    const binding = connectorOf(alias);
+    if (binding === undefined || binding.contractId === null) {
+      return false;
+    }
+    const contract = catalog.get(binding.contractId);
+    return (
+      contract !== undefined &&
+      contract.fingerprint === binding.fingerprint &&
+      contract.contract.operations?.[operation]?.readOnly === true
+    );
+  };
+  const steered = (
+    use: WorkflowVersionAction["uses"][number]
+  ): SteeredWrite[] => {
+    if (use.kind === "operation") {
+      return [{ alias: use.alias, kind: "operation" }];
+    }
+    if (use.kind !== "connector") {
+      return [];
+    }
+    const operations = use.operations.filter(
+      (operation) => !readOnly(use.alias, operation)
+    );
+    return operations.length === 0
+      ? []
+      : [{ alias: use.alias, kind: "connector", operations }];
+  };
+  return actions.map((action) => ({
+    ...action,
+    modelSteeredWrites: asksModel(action) ? action.uses.flatMap(steered) : [],
+  }));
+};
+
+/**
+ * A version's row, as the registry answers it: only once its manifest
+ * still hashes to what was sealed, since what its actions may do and its
+ * build are read from it (`workflow.version_corrupt` otherwise).
+ */
+const versionOf = async (
+  lookup: CatalogLookup,
   row: typeof workflowResourceVersions.$inferSelect,
   bindings: WorkflowVersionBinding[]
-): WorkflowResourceVersion => ({
-  resourceId: row.workflowResourceId,
-  version: row.version,
-  definitionVersion: row.definitionVersion,
-  profile: row.profileVersion,
-  definitionHash: row.definitionJsonHash,
-  contractHash: row.contractHash,
-  manifestHash: row.manifestHash,
-  bindings,
-  build: buildSummary(
-    sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
-  ),
-  author: row.authorId,
-  createdAt: row.createdAt.toISOString(),
-});
+): Promise<WorkflowResourceVersion> => {
+  if ((await sha256Hex(row.manifest)) !== row.manifestHash) {
+    throw corrupt(row.workflowResourceId, row.version);
+  }
+  return {
+    resourceId: row.workflowResourceId,
+    version: row.version,
+    definitionVersion: row.definitionVersion,
+    profile: row.profileVersion,
+    definitionHash: row.definitionJsonHash,
+    contractHash: row.contractHash,
+    manifestHash: row.manifestHash,
+    bindings,
+    actions: await reviewedActions(
+      lookup,
+      sealedActionsOf(row),
+      sealedBindingsOf(row)
+    ),
+    build: buildSummary(
+      sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
+    ),
+    author: row.authorId,
+    createdAt: row.createdAt.toISOString(),
+  };
+};
 
 /** The bindings of the versions of `id`, by version. */
 export const bindingsOf = async (
@@ -1123,7 +1442,11 @@ const publishedAs = async (
   }
   const bindings = await bindingsOf(env, id);
   return {
-    version: versionOf(row, bindings.get(row.version) ?? []),
+    version: await versionOf(
+      catalogOnce(env),
+      row,
+      bindings.get(row.version) ?? []
+    ),
     modulesHash: sealedModulesHash(row),
   };
 };
@@ -1199,6 +1522,10 @@ interface Publication {
   compiled: CompiledBuild;
   /** The hash of the modules published with it, null for none. */
   modulesHash: string | null;
+  /** What its own actions may do, from the contracts its build seals. */
+  actions: WorkflowVersionAction[];
+  /** The approved packages its modules import, if any (GRA-665). */
+  packages: SealedPackageManifest | undefined;
 }
 
 /**
@@ -1220,20 +1547,11 @@ const writeVersion = async (
     bindings,
     compiled,
     modulesHash,
+    actions,
+    packages,
   } = publication;
-  const contract = contractOf(checked);
-  const contractText = canonicalJson(contract);
-  if (bytesOf(contractText) > contractMaxBytes) {
-    throw definitionInvalid([
-      {
-        code: "contract.too_large",
-        message:
-          "The workflow's input, output and parameter schemas together are larger than a version may hold.",
-        pointer: "/input/schema",
-        remedy: "Keep the schemas smaller: move large constants into data.",
-      },
-    ]);
-  }
+  // Bounded when the definition was checked (`inspectDefinition`).
+  const contractText = canonicalJson(contractOf(checked));
   const contractHash = await sha256Hex(contractText);
   const version = (workflow.currentVersion ?? 0) + 1;
   const definitionVersion = checked.identity.version;
@@ -1251,22 +1569,30 @@ const writeVersion = async (
     evaluatorHash: jqProvenance.sha256,
     contractHash,
     bindings: bindings.map((binding) => ({ ...binding })),
+    // What its own actions may do, as its build seals them (GRA-709): read
+    // back for review, never derived again.
+    actions: actions.map((action) => ({
+      binding: action.binding,
+      module: action.module,
+      export: action.export,
+      // Each use exactly as sealed, a model's output included (GRA-700).
+      uses: action.uses.map((use) => sealedUse(use)),
+    })),
     // What the version runs, sealed with it: its build's artifacts by
     // hash, and its executable identity (workflow-builds.ts).
     build: compiled.build,
+    // The approved graph its modules import, which every start and call
+    // admits again (workflows/sealed-packages.ts); the entries' code is
+    // among the build's artifacts.
+    ...(packages === undefined ? {} : { packages }),
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
-    throw definitionInvalid([
-      {
-        code: "manifest.too_large",
-        message: "What the version pins is larger than a version may hold.",
-        pointer: "/document/metadata/grasp/bindings",
-        remedy: "Bind fewer workflows.",
-      },
-    ]);
+    throw definitionInvalid([tooLargeProblem(actions)]);
   }
   const manifestHash = await sha256Hex(manifest);
+  // Before anything is written: a publication that lands answers it.
+  const reviewed = await reviewedActions(catalogOnce(env), actions, bindings);
   const createdAt = new Date();
   const db = drizzle(env.DB);
   // This publication's own reservations: another publishing the same
@@ -1305,6 +1631,19 @@ const writeVersion = async (
         authorId: by.userId,
         createdAt,
       }),
+      // Only while the graph it seals is still approved (not retired, not
+      // revoked) as it lands: what was admitted when it was sealed may have
+      // ended since (`packagesRefusal` says how).
+      ...(packages === undefined
+        ? []
+        : [
+            failUnless(
+              db,
+              { type: "workflow", id: workflow.id },
+              packages.graphHash,
+              packagesHoldSql(workflow.id, packages.graphHash, ["approved"])
+            ),
+          ]),
       // The version's from now on, as long as it is.
       ...adoptReservations(db, owner, workflow.id, version),
       db
@@ -1360,6 +1699,15 @@ const writeVersion = async (
     } catch (releaseError) {
       log.warn("workflow.build_release_failed", errorFields(releaseError));
     }
+    // Its graph's approval ended as it was written: said as how.
+    if (packages !== undefined && lockGuardFailed(error)) {
+      const refused = await packagesRefusal(
+        db,
+        workflow.id,
+        packages.graphHash
+      );
+      throw dependencyErrors.create(refused ?? "dependency.stale");
+    }
     throw error;
   }
   return {
@@ -1371,6 +1719,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
+    actions: reviewed,
     build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
@@ -1417,27 +1766,69 @@ const requireStaffKeepsBindings = async (
   }
 };
 
+/**
+ * Refuses a publication that names packages it can't seal: one whose
+ * caller seals none (only a builder's own publication does, the RPC's),
+ * or with no modules to import them.
+ */
+const requireSealable = (
+  asked: { graphHash: string } | undefined,
+  sealer: PackageSealer | undefined,
+  sources: Readonly<Record<string, string>>
+): void => {
+  if (asked === undefined) {
+    return;
+  }
+  if (sealer === undefined) {
+    throw workflowResourceErrors.create("workflow.packages_invalid", {
+      reason: "This publication can't seal packages.",
+    });
+  }
+  if (Object.keys(sources).length === 0) {
+    throw workflowResourceErrors.create("workflow.packages_invalid", {
+      reason: "Packages are for the workflow's modules, and it has none.",
+    });
+  }
+};
+
+/** What modules of `sealed`'s may import, for their build (`compileModules`). */
+const packagesOf = (
+  sealed: SealedPackages | undefined
+): ModulePackages | undefined =>
+  sealed === undefined
+    ? undefined
+    : {
+        entries: Object.keys(sealed.manifest.entries),
+        modules: sealed.modules,
+      };
+
 /** `publishWorkflowVersion`, answering bindings as pinned. */
 const publish = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  sealer: PackageSealer | undefined
 ): Promise<WorkflowResourceVersion> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const {
     definition,
     basedOn,
     modules: sources = {},
+    packages: asked,
   } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     publishSchema,
     input
   );
-  // Its modules are part of what is published: the same definition with
-  // other modules is another publication.
+  requireSealable(asked, sealer, sources);
+  // Its modules are part of what is published, and so are the packages
+  // they import: the same definition with other modules or packages is
+  // another publication.
   const modulesHash =
-    Object.keys(sources).length === 0 ? null : await modulesHashOf(sources);
+    Object.keys(sources).length === 0
+      ? null
+      : await modulesHashOf(sources, asked?.graphHash);
   // A retry of a publication that was saved answers the saved version
   // before its bindings are resolved again: the builder may have lost
   // their role in a workflow it binds since, or that workflow been
@@ -1451,12 +1842,18 @@ const publish = async (
   if (saved !== undefined) {
     return saved;
   }
+  // The approved graph sealed first (admitted for this workflow as a new
+  // use, built, each entry's module read): its modules import them.
+  const sealed =
+    asked === undefined
+      ? undefined
+      : await sealer?.(env, by, workflow.id, asked.graphHash);
   // Built and inspected first: validation resolves `local:` bindings
   // against what they export.
   const modules =
     modulesHash === null
       ? undefined
-      : await compileModules(env, sources, workflow.id);
+      : await compileModules(env, sources, workflow.id, packagesOf(sealed));
   const { checked, bindings } = await checkDefinition(
     env,
     by,
@@ -1509,6 +1906,8 @@ const publish = async (
       bindings,
       compiled,
       modulesHash,
+      actions: versionActionsOf(checked.bindings, modules),
+      packages: sealed?.manifest,
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
@@ -1563,13 +1962,44 @@ const publish = async (
  * published answers that version if the definition is the same, and is
  * refused otherwise.
  */
+/**
+ * What keeps `definition` from being published to `workflow` by `by`, as
+ * `checkDefinition` checks it: empty when nothing does. Its refusals of
+ * the definition are answered as problems, at their pointers; anything
+ * else (the catalog unreachable) is thrown. What drafts are checked with
+ * (workflow-drafts.ts), so a checkpoint is exactly what would publish:
+ * against `modules`, the draft's own, built as a publication builds them.
+ */
+export const definitionProblems = async (
+  env: Env,
+  by: Acting,
+  workflow: Pick<Live, "name">,
+  definition: string,
+  modules?: ModuleContracts
+): Promise<WorkflowDefinitionProblem[]> => {
+  const inspected = await inspectDefinition(
+    env,
+    by,
+    workflow,
+    definition,
+    modules
+  );
+  return inspected.ok ? [] : inspected.problems;
+};
+
 export const publishWorkflowVersion = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /**
+   * Seals the approved packages the input names (`sealPackages`): only a
+   * builder's own publication passes it; without it, a publication that
+   * names packages is refused.
+   */
+  sealer?: PackageSealer
 ): Promise<WorkflowResourceVersion> =>
-  await seenBy(env, by, await publish(env, by, id, input));
+  await seenBy(env, by, await publish(env, by, id, input, sealer));
 
 /** Every version of workflow `id`, newest first, for anyone with a role. */
 export const workflowVersions = async (
@@ -1585,12 +2015,18 @@ export const workflowVersions = async (
     .orderBy(desc(workflowResourceVersions.version));
   const bindings = await bindingsOf(env, workflow.id);
   const visible = await visibleTo(env, by, [...bindings.values()].flat());
-  return rows.map((row) =>
-    versionOf(
-      row,
-      (bindings.get(row.version) ?? []).map(
-        (binding) => visible.get(binding) ?? binding
-      )
+  // One lookup for the whole listing: each contract read once.
+  const lookup = catalogOnce(env);
+  return await Promise.all(
+    rows.map(
+      async (row) =>
+        await versionOf(
+          lookup,
+          row,
+          (bindings.get(row.version) ?? []).map(
+            (binding) => visible.get(binding) ?? binding
+          )
+        )
     )
   );
 };
@@ -1681,6 +2117,189 @@ export const workflowSource = async (
     }
   }
   return { files };
+};
+
+/** A version's bindings, as its manifest pins them (`writeVersion`). */
+const pinnedBindingsSchema = z.object({
+  bindings: z.array(
+    z.object({
+      alias: z.string(),
+      kind: z.string(),
+      resourceId: z.string().nullable(),
+      resourceVersion: z.int().nullable(),
+    })
+  ),
+});
+
+/** A binding of a version, as a definition export follows it. */
+export type ExportedBinding =
+  | {
+      readonly alias: string;
+      readonly kind: "workflow";
+      readonly workflowId: string;
+      readonly version: number;
+    }
+  | { readonly alias: string; readonly kind: CatalogBindingKind };
+
+/**
+ * A workflow version as a definition export reads it (definition-export.ts),
+ * or why it can't: `missing` for a workflow or version that isn't there,
+ * `forbidden` for one `by` doesn't build, `not_executable` for one with no
+ * build to run.
+ */
+export type ExportedWorkflowVersion =
+  | { readonly status: "missing" | "forbidden" | "not_executable" }
+  | {
+      readonly status: "found";
+      readonly name: string;
+      readonly definitionVersion: string;
+      readonly profile: string;
+      readonly manifestHash: string;
+      readonly definitionHash: string;
+      readonly evaluatorHash: string;
+      readonly buildHash: string;
+      /** Its definition exactly as published, its hash checked. */
+      readonly definition: string;
+      /** The TypeScript generated from it, and its own modules as published. */
+      readonly files: Readonly<Record<string, string>>;
+      /** The exact versions of the workflows it binds, and its catalog kinds. */
+      readonly bindings: readonly ExportedBinding[];
+    };
+
+/**
+ * Version `version` of workflow `id`, for a definition export by `by`, who
+ * must build the workflow, as for its source (`workflowSource`): its
+ * definition and sealed build read back with every hash checked
+ * (`workflow.version_corrupt` otherwise), and what its manifest pins of its
+ * bindings. Never its parameters' values, its bindings' approvals or its
+ * runs: none of them is read.
+ */
+export const exportedWorkflowVersion = async (
+  env: Env,
+  by: Acting,
+  id: string,
+  version: number
+): Promise<ExportedWorkflowVersion> => {
+  const workflow = await liveWorkflow(env, id);
+  if (workflow === undefined) {
+    return { status: "missing" };
+  }
+  if ((await roleIn(env, by, workflow)) !== "builder") {
+    return { status: "forbidden" };
+  }
+  const row = await drizzle(env.DB)
+    .select({
+      definitionVersion: workflowResourceVersions.definitionVersion,
+      definition: workflowResourceVersions.definition,
+      definitionHash: workflowResourceVersions.definitionJsonHash,
+      profile: workflowResourceVersions.profileVersion,
+      evaluatorHash: workflowResourceVersions.evaluatorHash,
+      manifest: workflowResourceVersions.manifest,
+      manifestHash: workflowResourceVersions.manifestHash,
+    })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflow.id),
+        eq(workflowResourceVersions.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    return { status: "missing" };
+  }
+  let definitionHash: string | undefined;
+  try {
+    definitionHash = await definitionHashOf(JSON.parse(row.definition));
+  } catch {
+    definitionHash = undefined;
+  }
+  if (
+    definitionHash !== row.definitionHash ||
+    (await sha256Hex(row.manifest)) !== row.manifestHash
+  ) {
+    throw corrupt(workflow.id, version);
+  }
+  const build = sealedBuildOf(workflow.id, version, row.manifest);
+  if (!build.executable) {
+    return { status: "not_executable" };
+  }
+  const loaded = await loadWorkflowBuild(
+    env,
+    workflow.id,
+    version,
+    row.manifestHash
+  );
+  const pinned = pinnedBindingsSchema.safeParse(JSON.parse(row.manifest));
+  if (!pinned.success) {
+    throw corrupt(workflow.id, version);
+  }
+  const bindings: ExportedBinding[] = [];
+  for (const binding of pinned.data.bindings) {
+    const catalogKind = catalogBindingKinds.find(
+      (kind) => kind === binding.kind
+    );
+    if (
+      binding.kind === "workflow" &&
+      binding.resourceId !== null &&
+      binding.resourceVersion !== null
+    ) {
+      bindings.push({
+        alias: binding.alias,
+        kind: "workflow",
+        workflowId: binding.resourceId,
+        version: binding.resourceVersion,
+      });
+    } else if (catalogKind === undefined) {
+      throw corrupt(workflow.id, version);
+    } else {
+      bindings.push({ alias: binding.alias, kind: catalogKind });
+    }
+  }
+  return {
+    status: "found",
+    name: workflow.name,
+    definitionVersion: row.definitionVersion,
+    profile: row.profile,
+    manifestHash: row.manifestHash,
+    definitionHash: row.definitionHash,
+    evaluatorHash: row.evaluatorHash,
+    buildHash: build.hash,
+    definition: row.definition,
+    files: { [generatedPath]: loaded.source, ...loaded.compute.sources },
+    bindings,
+  };
+};
+
+/**
+ * The modules version `version` of workflow `id` sealed, by path, read
+ * back from its build with every hash checked: none for a version without
+ * modules, or one whose build doesn't run, which seals none. For the
+ * workflow's builders, whose role the caller has checked.
+ */
+export const sealedModules = async (
+  env: Env,
+  workflowId: string,
+  version: number
+): Promise<Record<string, string>> => {
+  const row = await drizzle(env.DB)
+    .select({ manifest: workflowResourceVersions.manifest })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflowId),
+        eq(workflowResourceVersions.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  if (!sealedBuildOf(workflowId, version, row.manifest).executable) {
+    return {};
+  }
+  const build = await loadWorkflowBuild(env, workflowId, version);
+  return { ...build.compute.sources };
 };
 
 /**
@@ -2002,9 +2621,24 @@ export const deleteWorkflowResource = async (
       )
       .returning({ id: workflowResources.id }),
     outboxedIfChanged(db, entry(by, "workflow.deleted", workflow.id)),
-    // Packages asked for it wait for nobody once it is gone, and the locks
-    // only they named go, their files to cleanup (dependencies/requests.ts).
-    ...withdrawnWithWorkflow(db, by.actor ?? actorOf(by), workflow.id),
+    // Its packages end with it: approvals revoked, the request waiting
+    // withdrawn, and the locks only they named gone, their files to
+    // cleanup (dependencies/pending.ts).
+    ...withdrawnWithWorkflow(db, by, workflow.id),
+    // Its draft (workflow-drafts.ts) is never read again, and may hold a
+    // sensitive parameter's default: it goes once it is deleted.
+    db.delete(workflowResourceDrafts).where(
+      sql`${workflowResourceDrafts.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+    ),
+    db.delete(workflowResourceDraftModules).where(
+      sql`${workflowResourceDraftModules.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+    ),
+    db.delete(workflowResourceDraftInspections).where(
+      sql`${workflowResourceDraftInspections.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+    ),
     // The releases its approvals kept (workflow-bindings.ts) go back to
     // their retention once it is deleted.
     db.delete(sdkReleasePins).where(

@@ -39,7 +39,6 @@ import { z } from "zod";
 import { appsFoundBy, requireAppRole } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
 import { exportsIn } from "./app-exports.ts";
-import { recordTypesIn } from "./app-records.ts";
 import {
   auditedBatch,
   outboxed,
@@ -58,7 +57,6 @@ import {
 } from "./db/core/schema.ts";
 import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
-import { requireOwnTypes } from "./knowledge/record-types.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
@@ -699,9 +697,6 @@ export const commitFiles = async (
   }
   const exported = exportsIn(files);
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
-  const records = recordTypesIn(files);
-  // None another App already has where this one may write.
-  await requireOwnTypes(env, appId, records);
   await storeTree(env, appId, { tree, json });
 
   const row: VersionRow = {
@@ -718,7 +713,6 @@ export const commitFiles = async (
     workflowCalls,
     exports: exported,
     proposedBy: null,
-    records,
   };
   const db = drizzle(env.DB);
   try {
@@ -874,9 +868,6 @@ export const proposeDraft = async (
   }
   const exported = exportsIn(files);
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
-  const records = recordTypesIn(files);
-  // None another App already has where this one may write.
-  await requireOwnTypes(env, appId, records);
   await storeTree(env, appId, { tree, json });
   const row: VersionRow = {
     appId,
@@ -892,7 +883,6 @@ export const proposeDraft = async (
     workflowCalls,
     exports: exported,
     proposedBy: by.via ?? null,
-    records,
   };
   const db = drizzle(env.DB);
   try {

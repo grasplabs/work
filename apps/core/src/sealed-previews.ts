@@ -1,17 +1,36 @@
 import { manifestText } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId, StoreId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
+import { streamMaxRunning } from "@grasp-os/shared/operation-limits";
+import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { jsonBytes } from "@grasp-os/shared/screens";
+import {
+  idempotencyKeySchema,
+  submissionErrors,
+} from "@grasp-os/shared/submissions";
 import { exports } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
+import {
+  keepsReceipt,
+  readerOf,
+  refused as refusedResult,
+  resultOf,
+  wake,
+  withReason,
+} from "./action-invocation.ts";
+import type { Live } from "./action-invocation.ts";
 import { operationRoles } from "./app-access.ts";
 import {
   publicOperationOf,
@@ -84,6 +103,34 @@ import type { Draft } from "./workspace.ts";
 // - What App code keeps of one invocation acts in another's: every
 //   invocation runs in a fresh isolate of the release runner, whose
 //   channel stops working once it ends, as for every call of an App.
+//
+// A streaming action (spec 10.7.6) runs here too, on the same release and
+// store, with no resources, held by the preview that started it: one
+// invocation per person and key, which a start joins (with the same
+// input), an attach reads again without starting, and a cancel stops,
+// as a live screen's does (action-invocation.ts), read through the same
+// latest-snapshot reader. So:
+// - It outlives its preview: dropping the preview cancels every
+//   invocation it holds, and each protected step of the run checks the
+//   preview is still the one running, so nothing more commits; an attach
+//   once it's gone is `submission.expired`.
+// - It escapes its budgets: this object (all of one person's chats)
+//   runs at most `streamMaxRunning` at once (a start past them records
+//   nothing), each ends by `serverInvocationWallMs`, and one nobody
+//   follows is cancelled after `streamIdleCancelMs`. While it runs only
+//   its latest snapshot is kept; once settled, no snapshot, and its
+//   receipt only when its result is small (`receiptBytes`), at most
+//   `receiptsKept` of them in this object, oldest forgotten first: an
+//   attach of one forgotten is `submission.expired`. Never the input or a
+//   progress log.
+// - Another key's input, another action, or another person: the key is
+//   the person's own and the action's (`streamName`), and other input
+//   under it is `submission.key_conflict`.
+// - A key's protection outlasting this object: invocations and receipts
+//   live in its memory alone, as the preview's store holds only fixture
+//   data. A restart forgets them (an attach is then `submission.expired`,
+//   a start under the same key runs anew), which a preview, changing
+//   nothing real, can afford.
 
 /** What one chat's preview of one App runs: its revision, release and store. */
 interface Running {
@@ -94,7 +141,61 @@ interface Running {
   readonly release: Promise<Release>;
   /** The preview's store, once it is made. */
   store?: Promise<OpenStore>;
+  /** Its streaming actions' invocations, by `streamName`, oldest first. */
+  readonly streams: Map<string, PreviewStream>;
 }
+
+/** One streaming action's invocation in a preview (`SealedPreviews.openStream`). */
+interface PreviewStream {
+  /** The SHA-256 of its input's canonical JSON: all a key conflict needs. */
+  readonly inputHash: string;
+  readonly live: Live;
+}
+
+/** Forgets `held`, which `of` holds as `named`, if it still holds that one. */
+const forget = (of: Running, named: string, held: Live): void => {
+  if (of.streams.get(named)?.live === held) {
+    of.streams.delete(named);
+  }
+};
+
+/** The most settled invocations' receipts one object keeps, of all its previews. */
+const receiptsKept = 8;
+
+/** The largest result whose receipt is kept, as JSON: a larger one isn't. */
+const receiptBytes = 16 * 1024;
+
+/**
+ * The key of `personId`'s invocation of the action `call` names under
+ * `key`, as a live invocation's name (`invocationName`): never anyone
+ * else's, nor another action's under the same key.
+ */
+const streamName = (
+  personId: string,
+  call: FunctionRequest,
+  key: string
+): string =>
+  canonicalJson([
+    personId,
+    call.reference.contractId,
+    call.reference.fingerprint,
+    key,
+  ]);
+
+/**
+ * The streaming action `request` names, with the key it must have:
+ * `contract.invalid_request` for anything else.
+ */
+const streamRequestOf = (
+  request: unknown
+): { call: FunctionRequest; key: string } => {
+  const call = readFunctionRequest(request);
+  const key = idempotencyKeySchema.safeParse(call.idempotencyKey);
+  if (!key.success || call.reference.kind !== "action") {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  return { call, key: key.data };
+};
 
 /** What a call of a preview's function answers, and what a query read. */
 export interface PreviewAnswer {
@@ -154,6 +255,8 @@ export class SealedPreviews {
   readonly #discarding = new Set<string>();
   /** What each preview runs, by `nameOf`. In memory: a restart loads it again. */
   readonly #running = new Map<string, Running>();
+  /** The receipts kept of settled invocations, oldest first (`#kept`). */
+  readonly #receipts: { running: Running; name: string; live: Live }[] = [];
 
   constructor(
     ctx: DurableObjectState,
@@ -233,43 +336,13 @@ export class SealedPreviews {
       const release = await this.#loaded(chatId, app, running);
       const path = publicOperationOf(release, call.reference);
       const store = await this.#storeOf(chatId, app, running, release);
-      const name = nameOf(chatId, app);
-      const requireCurrent = (): void => {
-        if (this.#running.get(name) !== running) {
-          throw appErrors.create("app.preview_outdated");
-        }
-      };
-      const invocation: Invocation = {
-        principal: personId,
-        consumer: { resourceId: app, resourceVersion: running.version },
+      const invocation = this.#invocationOf(chatId, personId, app, running, {
         store,
         requestId,
         deadline:
           options.deadline ??
           Date.now() + platformLimits.serverInvocationWallMs,
-        runId: null,
-        // The one gate, before the call starts and each commit: the
-        // preview is still the draft's, and the person still a member who
-        // builds the App.
-        authorize: async () => {
-          requireCurrent();
-          const role = await memberRole(this.#env.DB, personId);
-          if (role === undefined) {
-            throw permissionErrors.create("permission.person_inactive");
-          }
-          const roles = await operationRoles(
-            this.#env,
-            { userId: personId, role },
-            app
-          );
-          if (!roles.appBuilder) {
-            throw roleErrors.create("role.forbidden");
-          }
-          requireCurrent();
-          return roles;
-        },
-        // No resources: a preview reaches no outside system.
-      };
+      });
       const observe = hasTables(release)
         ? (readSet: Record<string, number>) => {
             reads = { storeId: storeIdSchema.parse(store.id), readSet };
@@ -279,19 +352,7 @@ export class SealedPreviews {
         observe === undefined
           ? invocation
           : { ...invocation, observeReads: observe };
-      const preview = {
-        workspaceId: workspaceIdSchema.parse(this.#ctx.id.name),
-        chatId,
-        revision: running.revision,
-      };
-      // Each isolate tailed for the chat's preview alone: what the draft's
-      // function writes with `console` goes to the agent's next check of
-      // this revision (server-logs.ts), as data.
-      const hosted = hostedRelease(this.#env, release, (fn) =>
-        exports.AppTail({
-          props: { app, version: null, preview, method: fn },
-        })
-      );
+      const hosted = this.#hostedOf(chatId, app, running, release);
       const result = await (call.window === undefined
         ? callOperation(
             hosted,
@@ -330,6 +391,296 @@ export class SealedPreviews {
   }
 
   /**
+   * The invocation of a call of `running`, for `personId`, on `store`:
+   * its one gate, before the call starts and each commit, checks the
+   * preview is still the draft's, and the person still a member who
+   * builds the App. No resources: a preview reaches no outside system.
+   */
+  #invocationOf(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    running: Running,
+    {
+      store,
+      requestId,
+      deadline,
+    }: { store: OpenStore; requestId: string; deadline: number }
+  ): Invocation {
+    const name = nameOf(chatId, app);
+    const requireCurrent = (): void => {
+      if (this.#running.get(name) !== running) {
+        throw appErrors.create("app.preview_outdated");
+      }
+    };
+    return {
+      principal: personId,
+      consumer: { resourceId: app, resourceVersion: running.version },
+      store,
+      requestId,
+      deadline,
+      runId: null,
+      authorize: async () => {
+        requireCurrent();
+        const role = await memberRole(this.#env.DB, personId);
+        if (role === undefined) {
+          throw permissionErrors.create("permission.person_inactive");
+        }
+        const roles = await operationRoles(
+          this.#env,
+          { userId: personId, role },
+          app
+        );
+        if (!roles.appBuilder) {
+          throw roleErrors.create("role.forbidden");
+        }
+        requireCurrent();
+        return roles;
+      },
+    };
+  }
+
+  /**
+   * `release` as the operation host runs it for `running`: each isolate
+   * tailed for the chat's preview alone, so what the draft's function
+   * writes with `console` goes to the agent's next check of this revision
+   * (server-logs.ts), as data.
+   */
+  #hostedOf(
+    chatId: ChatId,
+    app: AppId,
+    running: Running,
+    release: Release
+  ): ReturnType<typeof hostedRelease> {
+    const preview = {
+      workspaceId: workspaceIdSchema.parse(this.#ctx.id.name),
+      chatId,
+      revision: running.revision,
+    };
+    return hostedRelease(this.#env, release, (fn) =>
+      exports.AppTail({
+        props: { app, version: null, preview, method: fn },
+      })
+    );
+  }
+
+  /**
+   * Starts, joins or (`attach`) reads again `personId`'s invocation of the
+   * streaming action `request` names (its text, as a screen sends it) in
+   * the preview of `draft`, by the request's key (see the header), and
+   * answers what its reader is sent: JSON lines of progress, then its
+   * result, as a live invocation's (action-invocation.ts). A refusal of
+   * the invocation is that result; a request that isn't a streaming
+   * action's is thrown (`contract.invalid_request`), as is a preview gone
+   * meanwhile (`app.preview_outdated`).
+   */
+  async openStream(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    draft: Draft,
+    request: unknown,
+    attach: boolean
+  ): Promise<ReadableStream<Uint8Array>> {
+    const { call, key } = streamRequestOf(request);
+    // Input past what reads as a value is refused, never hashed as none:
+    // two such inputs would share a key's run.
+    const input = jsonOf(call.input);
+    if (input === undefined && call.input !== undefined) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    // Which preview it is for is decided now, with the draft the caller
+    // just read, before anything awaits: a draft saved meanwhile drops
+    // this preview, and the stream is then refused rather than recreate
+    // it over the newer one. An attach reads only what runs: a preview
+    // not running holds nothing, and none is sealed just to say so.
+    const running = attach
+      ? this.#runningAt(chatId, app, draft)
+      : this.#runningFor(chatId, app, draft);
+    const inputHash = await sha256Hex(canonicalJson(input ?? null));
+    if (
+      running !== undefined &&
+      this.#running.get(nameOf(chatId, app)) !== running
+    ) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    const name = streamName(personId, call, key);
+    const known = running?.streams.get(name);
+    if (known !== undefined) {
+      return known.inputHash === inputHash
+        ? readerOf(known.live)
+        : resultOf(
+            refusedResult(submissionErrors.create("submission.key_conflict"))
+          );
+    }
+    if (running === undefined || attach) {
+      return resultOf(
+        refusedResult(submissionErrors.create("submission.expired"))
+      );
+    }
+    const under = [...this.#running.values()]
+      .flatMap(({ streams }) => [...streams.values()])
+      .filter(({ live }) => live.result === undefined).length;
+    if (under >= streamMaxRunning) {
+      return resultOf(
+        refusedResult(
+          operationErrors.create("operation.stream_limit", {
+            maxRunning: streamMaxRunning,
+          })
+        )
+      );
+    }
+    const live: Live = {
+      runId: crypto.randomUUID(),
+      progress: null,
+      result: undefined,
+      readers: 0,
+      stop: new AbortController(),
+      unfollowed: false,
+      needsFollowers: true,
+      idle: undefined,
+      changed: Promise.withResolvers(),
+    };
+    running.streams.set(name, { inputHash, live });
+    const run = async (): Promise<void> => {
+      const outcome = await this.#runStream(
+        chatId,
+        personId,
+        app,
+        running,
+        call,
+        live
+      );
+      clearTimeout(live.idle);
+      live.idle = undefined;
+      live.result = withReason(outcome.result, live.unfollowed);
+      // Settled, it keeps no snapshot: its readers get its result next.
+      live.progress = null;
+      wake(live);
+      // A dropped preview keeps no receipt: nothing can attach to it, and
+      // it would take the place of a current preview's. Nor does a run
+      // that ran nothing of the App's, as a live one keeps none
+      // (`keepsReceipt`): the same key may run again once, say, the
+      // sandbox is back.
+      if (this.#running.get(nameOf(chatId, app)) !== running) {
+        return;
+      }
+      if (keepsReceipt(outcome)) {
+        this.#kept(running, name, live);
+      } else {
+        forget(running, name, live);
+      }
+    };
+    this.#ctx.waitUntil(run());
+    return readerOf(live);
+  }
+
+  /**
+   * Asks `personId`'s invocation of the streaming action `request` names
+   * in the preview of `draft` to stop: as at its deadline, its result
+   * saying what is known. Answers whether it was still running, never
+   * what stopping did; false for an invocation the preview doesn't hold.
+   */
+  async cancelStream(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    draft: Draft,
+    request: unknown
+  ): Promise<boolean> {
+    await Promise.resolve();
+    const { call, key } = streamRequestOf(request);
+    const known = this.#runningAt(chatId, app, draft)?.streams.get(
+      streamName(personId, call, key)
+    );
+    if (known === undefined || known.live.result !== undefined) {
+      return false;
+    }
+    known.live.stop.abort();
+    return true;
+  }
+
+  /**
+   * Runs the streaming action `call` of `running`, for `personId`, as a
+   * preview's call runs (`call`), its progress published to `live` and
+   * cancelled by `live.stop`: what it answered, a refusal included.
+   */
+  async #runStream(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    running: Running,
+    call: FunctionRequest,
+    live: Live
+  ): Promise<{ result: OperationResult; reached: boolean; effects: number }> {
+    const requestId = crypto.randomUUID();
+    // As a live run reports them (`invokeAppAction`): whether the
+    // operation host was reached, and how many effects the run made.
+    let reached = false;
+    let effects = 0;
+    try {
+      const release = await this.#loaded(chatId, app, running);
+      const path = publicOperationOf(release, call.reference);
+      const store = await this.#storeOf(chatId, app, running, release);
+      const invocation = this.#invocationOf(chatId, personId, app, running, {
+        store,
+        requestId,
+        deadline: Date.now() + platformLimits.serverInvocationWallMs,
+      });
+      reached = true;
+      const result = await callOperation(
+        this.#hostedOf(chatId, app, running, release),
+        invocation,
+        { path, kind: call.reference.kind },
+        call.input,
+        {
+          ...(call.idempotencyKey === undefined
+            ? {}
+            : { idempotencyKey: call.idempotencyKey }),
+          progress: {
+            publish: (value: Json) => {
+              live.progress = { seq: (live.progress?.seq ?? 0) + 1, value };
+              wake(live);
+            },
+          },
+          cancelled: live.stop.signal,
+          onEffect: () => {
+            effects += 1;
+          },
+        }
+      );
+      return { result, reached, effects };
+    } catch (error) {
+      return { result: refusedResult(error), reached, effects };
+    }
+  }
+
+  /**
+   * Keeps the receipt of `live`, settled, which `running` holds as
+   * `name`: only when its result is small, then at most `receiptsKept` in
+   * this object, the oldest forgotten first.
+   */
+  #kept(running: Running, name: string, live: Live): void {
+    if (jsonBytes(live.result, receiptBytes) > receiptBytes) {
+      forget(running, name, live);
+      return;
+    }
+    this.#receipts.push({ running, name, live });
+    while (this.#receipts.length > receiptsKept) {
+      const oldest = this.#receipts.shift();
+      if (oldest !== undefined) {
+        forget(oldest.running, oldest.name, oldest.live);
+      }
+    }
+  }
+
+  /** The preview of `draft` running now, if one runs its revision. */
+  #runningAt(chatId: ChatId, app: AppId, draft: Draft): Running | undefined {
+    const known = this.#running.get(nameOf(chatId, app));
+    return known?.revision === draft.revision ? known : undefined;
+  }
+
+  /**
    * The preview of `draft`: the one running, while it runs the draft's
    * revision; otherwise a new one, the one before dropped first.
    */
@@ -347,6 +698,7 @@ export class SealedPreviews {
       revision: draft.revision,
       version,
       release: this.#sealed(chatId, app, draft, version),
+      streams: new Map(),
     };
     // Not left unhandled while nothing awaits it: each call that does
     // hears how it went.
@@ -551,6 +903,17 @@ export class SealedPreviews {
   drop(chatId: ChatId, app: string): void {
     const running = this.#running.get(nameOf(chatId, app));
     this.#running.delete(nameOf(chatId, app));
+    // Its streaming actions stop, and commit nothing more: each protected
+    // step checks the preview is still the one running.
+    for (const { live } of running?.streams.values() ?? []) {
+      live.stop.abort();
+    }
+    // Its receipts go with it.
+    for (let at = this.#receipts.length - 1; at >= 0; at -= 1) {
+      if (this.#receipts[at]?.running === running) {
+        this.#receipts.splice(at, 1);
+      }
+    }
     this.#ctx.storage.transactionSync(() => {
       this.#forgetRelease(chatId, app);
     });

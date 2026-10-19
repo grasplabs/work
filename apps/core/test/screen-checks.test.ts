@@ -1,8 +1,9 @@
-import { startScreenCompiler } from "@grasp-os/compiler";
+import { startAppCompiler } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { callStub } from "../src/sandboxed.ts";
 import { buildScreens } from "../src/screens.ts";
 
 /** A typical screen: a list with a filter, on the kit, with its own component. */
@@ -268,9 +269,11 @@ describe("screen checks", { timeout: 60_000 }, () => {
   });
 
   it("checks a typical screen quickly once the isolate is warm", async () => {
-    const compiler = startScreenCompiler(env.LOADER, env.ASSETS);
+    const compiler = startAppCompiler(env.LOADER, env.ASSETS);
     // The first check parses the kit's declarations; later ones reuse them.
-    await expect(compiler.check(typicalApp)).resolves.toStrictEqual([]);
+    await expect(compiler.check("screens", typicalApp)).resolves.toStrictEqual(
+      []
+    );
 
     // The fastest of a few runs: a shared runner's pauses (other jobs,
     // garbage collection) only ever add time. A warm check takes about
@@ -283,10 +286,77 @@ describe("screen checks", { timeout: 60_000 }, () => {
     for (let run = 0; run < 3; run += 1) {
       const started = performance.now();
       // oxlint-disable-next-line no-await-in-loop -- runs are timed one at a time
-      await compiler.check(typicalApp);
+      await compiler.check("screens", typicalApp);
       timings.push(performance.now() - started);
     }
 
     expect(Math.min(...timings)).toBeLessThan(5000);
+  });
+});
+
+describe("the App compiler's surface", { timeout: 60_000 }, () => {
+  it("never checks clean a screen its build refuses for an import", async () => {
+    const compiler = startAppCompiler(env.LOADER, env.ASSETS);
+    const leaking = {
+      ...typicalApp,
+      "screens/leak.tsx":
+        'import { createClient } from "@grasp-os/sdk/client";\n\nexport default function Leak() {\n  return <p>{typeof createClient}</p>;\n}\n',
+    };
+    const [built, checked] = await Promise.all([
+      compiler.build("screens", leaking),
+      compiler.check("screens", leaking),
+    ]);
+    expect({
+      built: built.ok,
+      checked: checked
+        .filter(({ severity }) => severity === "error")
+        .map(({ file, rule }) => ({ file, rule })),
+    }).toStrictEqual({
+      built: false,
+      checked: [{ file: "screens/leak.tsx", rule: "imports" }],
+    });
+  });
+
+  it("refuses a target it doesn't know, and an inspection of a target that has none", async () => {
+    const compiler = startAppCompiler(env.LOADER, env.ASSETS);
+    // By name, as an RPC caller could send anything.
+    const refusals = await Promise.all(
+      [
+        ["build", "everything"],
+        ["check", "constructor"],
+        ["inspect", "screens"],
+        ["inspect", "toString"],
+      ].map(
+        async ([method = "", target]) =>
+          await callStub(compiler, method, [target, typicalApp]).then(
+            () => "answered",
+            // What refused it, and which method says so.
+            (error: unknown) =>
+              error instanceof Error
+                ? `${error.name}: ${error.message.split(" ")[0] ?? ""}`
+                : "thrown"
+          )
+      )
+    );
+    expect(refusals).toStrictEqual([
+      "TypeError: build",
+      "TypeError: check",
+      "TypeError: inspect",
+      "TypeError: inspect",
+    ]);
+  });
+
+  it("answers only check, build and inspect", async () => {
+    const compiler = startAppCompiler(env.LOADER, env.ASSETS);
+    const answers = await Promise.all(
+      ["buildWorkflows", "buildAppCode", "checkAppCode", "buildServer"].map(
+        async (method) =>
+          await callStub(compiler, method, [typicalApp]).then(
+            () => "answered",
+            () => "refused"
+          )
+      )
+    );
+    expect(answers).toStrictEqual(["refused", "refused", "refused", "refused"]);
   });
 });
