@@ -470,16 +470,19 @@ const recordRefusal = async (
 
 /**
  * Whether `artifact` of `app` gets the App's data now, for a push, and if
- * not, why (`revoked` or `unreviewed`): a refusal is recorded.
+ * not, why (`revoked` or `unreviewed`): a refusal is recorded. `read` is
+ * what core holds now (`standingOf`), when its caller shares one read
+ * among several checks of the same build.
  */
 export const deliveryAt = async (
   env: Env,
   by: Pick<Identity, "userId" | "staff">,
   app: AppId,
   artifact: string | undefined,
-  at: Refused
+  at: Refused,
+  read?: Promise<Standing>
 ): Promise<ScreenDelivery> => {
-  const standing = await standingOf(env, app, artifact);
+  const standing = await (read ?? standingOf(env, app, artifact));
   const delivery = deliveryOf(standing);
   if (delivery !== "open") {
     await recordRefusal(env, by, app, artifact, standing, at);
