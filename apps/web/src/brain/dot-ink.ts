@@ -150,6 +150,25 @@ export const rgb = (color: string): [number, number, number] => {
   return [r, g, b];
 };
 
+/** How light a colour is, 0 to 1, as the eye sees it. */
+export const lightness = ([r = 0, g = 0, b = 0]: readonly number[]): number =>
+  (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+
+/**
+ * Dots where they are on screen, in a layer's pixels: each one's size, ink and warmth, and the
+ * middle they gather round. The atlas hands its dots over like this when a note opens from it
+ * (atlas-canvas.tsx to note-reveal.tsx).
+ */
+export interface BrainDots {
+  count: number;
+  x: Float32Array;
+  y: Float32Array;
+  r: Float32Array;
+  alpha: Float32Array;
+  heat: Float32Array;
+  middle: { x: number; y: number };
+}
+
 const mix = (
   a: [number, number, number],
   b: [number, number, number],

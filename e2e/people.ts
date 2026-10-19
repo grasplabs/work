@@ -236,6 +236,7 @@ const cast = {
   languages: { member: "user" },
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
+  brain: { member: "user" },
   contexts: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
