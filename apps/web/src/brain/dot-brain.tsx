@@ -1,5 +1,5 @@
 import { cn } from "@grasp-os/ui/lib/utils";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef } from "react";
 
 import {
   ALPHAS,
@@ -29,6 +29,7 @@ import {
   shapeId,
 } from "./dot-shapes.ts";
 import type { DotShape, Nerve, ShapeKey } from "./dot-shapes.ts";
+import { useLessMotion } from "./less-motion.ts";
 
 // The company brain in dots, ported from the prototype (grasplabs/prototype,
 // packages/grasp: components/onboarding/dot-brain.tsx). It draws on a
@@ -1268,18 +1269,6 @@ const watch = (
 /** Grasp is not speaking. */
 const silent = () => 0;
 
-const lessMotion = "(prefers-reduced-motion: reduce)";
-
-const prefersLessMotion = () => window.matchMedia(lessMotion).matches;
-
-const onMotionChange = (listener: () => void) => {
-  const media = window.matchMedia(lessMotion);
-  media.addEventListener("change", listener);
-  return () => {
-    media.removeEventListener("change", listener);
-  };
-};
-
 /**
  * The company brain: a cloud of dots in rows, like a depth scan printed in dither, seen straight
  * on, that takes a new figure for every step: a head, the org, pages, a laptop, a crowd, two
@@ -1317,11 +1306,7 @@ export const DotBrain = ({
   voice?: () => number;
 }) => {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const reduce = useSyncExternalStore(
-    onMotionChange,
-    prefersLessMotion,
-    () => false
-  );
+  const reduce = useLessMotion();
   const live = useRef<Live>({ scene, reduce, shown: 1, apart, voice });
   // Where the pointer is over the brain; only the dots near it answer, never the figure as a whole.
   const pointer = useRef<Pointer>({ x: 0, y: 0, inside: false });
