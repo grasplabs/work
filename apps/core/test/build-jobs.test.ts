@@ -1270,9 +1270,13 @@ describe("build jobs", { timeout: 180_000 }, () => {
     await chat.stub.ask(another.id, { text: "How's that build?", model });
 
     const [result] = await codeResults(chat.stub, another.id);
-    expect(result?.text).toBe(
-      `Returned:\n${agentErrors.create("agent.job_not_found").message}`
-    );
+    // Its job ends within the test: one left building would hold the
+    // client's builds in the next test, which counts on them.
+    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
+    expect({ result: result?.text, ended: ended.status }).toStrictEqual({
+      result: `Returned:\n${agentErrors.create("agent.job_not_found").message}`,
+      ended: "completed",
+    });
   });
 
   it("queues a job while the client's builds are full, shows it queued, not failed, and builds it once a share frees", async () => {
