@@ -14,11 +14,12 @@ import { LoadingLines, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 
-// The dashboard, as the prototype's (`routes/dashboard.tsx`): what waits
-// on the person, each with its next step; under it the widget board,
-// where the workflows and engines stand, the runs this week, and what
-// could be better, from the daily signals; and, for admins, the latest of what Grasp and people
-// did. With a plan for the interviews, the heading says the programme's
+// The dashboard, as the prototype's (`routes/dashboard.tsx`, the wide
+// `Page` with its `PageHeading`): what waits on the person, each with its
+// next step; under it the widget board (widget-board.tsx), the
+// prototype's return, goals, teams and workflows, then the engines, the
+// runs this week, and what could be better, from the daily signals; and,
+// for admins, the latest of what Grasp and people did. With a plan for the interviews, the heading says the programme's
 // week and stage, and the weekly report's bar is under what waits: when
 // the next report is ready, and its export (report-dialog.tsx), made of
 // what core has; the prototype's hours and euros aren't in it. It
@@ -40,19 +41,21 @@ const DashboardPage = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Dashboard` }]} />
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-7 text-sm">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-medium tracking-tight">
-            <Trans>Dashboard</Trans>
-          </h1>
-          <p className="text-muted-foreground">
-            {line ?? (
-              <Trans>
-                What waits on you, each with its next step, and what could be
-                better.
-              </Trans>
-            )}
-          </p>
+      <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
+            <h1 className="text-2xl font-medium tracking-tight">
+              <Trans>Dashboard</Trans>
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              {line ?? (
+                <Trans>
+                  What waits on you, each with its next step, and what could be
+                  better.
+                </Trans>
+              )}
+            </p>
+          </div>
         </div>
         <ToDo identity={identity} waiting={waiting} />
         {next === undefined || line === undefined ? null : (
