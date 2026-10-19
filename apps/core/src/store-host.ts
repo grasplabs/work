@@ -184,9 +184,8 @@ import { recordReferences } from "./store-references.ts";
 // Every commit is made under a receipt (`sdk_mutation_receipts`), which
 // the attempt claims before its handler runs, and the commit writes its
 // outcome and its outbox entries in the same transaction as its records.
-// The rules of the Knowledge receipts (knowledge/receipts.ts) carry over;
-// one object's transaction is all the fencing they need here. Threat
-// model, and how each is closed:
+// One object's transaction is all the fencing they need. Threat model, and
+// how each is closed:
 //
 // - A stale attempt commits after a newer one began: every claim moves
 //   the receipt's fence on, and a commit is refused
@@ -338,7 +337,7 @@ const outcomeOf = (stored: string): Committed =>
 /** Whether a receipt's outbox owes no entry, which the sweep requires. */
 const nothingOwed = sql`NOT EXISTS (SELECT 1 FROM ${outbox} WHERE ${outbox.receiptId} = ${receipts.receiptId} AND ${outbox.settledAt} IS NULL)`;
 
-/** How long a sweep goes on taking pages, at most, as for Knowledge receipts. */
+/** How long a sweep goes on taking pages, at most. */
 const sweepBudgetMs = 20_000;
 
 /** Most records a deleted store's purge removes in one transaction. */

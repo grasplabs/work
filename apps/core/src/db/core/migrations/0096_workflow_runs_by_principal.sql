@@ -1,0 +1,1 @@
+CREATE INDEX `workflow_resource_runs_principal_idx` ON `workflow_resource_runs` (`workflow_resource_id`,`principal_id`,`created_at`,`id`);

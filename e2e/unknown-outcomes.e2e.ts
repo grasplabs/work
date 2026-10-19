@@ -45,9 +45,9 @@ export default workflow("mailer", { params: { reviewer: person({ label: "Reviewe
     { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(mail)}, retries: { limit: 0 } },
     async ({ idempotencyKey, input }) => {
       try {
-        return JSON.parse((await env.MAIL.call("mail.send", input, { idempotencyKey })).output);
+        return JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output);
       } catch (error) {
-        if (error.code === resolvedDone) {
+        if ((error as { code?: string }).code === resolvedDone) {
           return { resolved: true };
         }
         throw error;

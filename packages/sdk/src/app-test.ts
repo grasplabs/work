@@ -9,6 +9,7 @@ import type {
   Callable,
   ReferenceKind,
   ReturnOf,
+  StreamingFunction,
 } from "./references.ts";
 
 // App tests (spec 28.2), as `@grasp-os/sdk/testing` exports them.
@@ -96,7 +97,14 @@ export interface TestPrincipal {
    * outside systems aren't the tests' to touch.
    */
   action: <Reference extends PublicReference<"action">>(
-    reference: Reference,
+    // A streaming action runs only for a screen following it (spec
+    // 10.7.6), never through a call that answers once: its type is
+    // refused here, as the host refuses it (`operation.mode_mismatch`),
+    // and so is a union any member of which streams (not distributed).
+    reference: Reference &
+      ([Extract<Reference, StreamingFunction>] extends [never]
+        ? unknown
+        : never),
     args: ArgsOf<Reference>
   ) => Promise<ReturnOf<Reference>>;
   /**

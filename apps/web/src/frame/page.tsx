@@ -17,15 +17,15 @@ export const Page = ({
   <div
     className={
       wide
-        ? "pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7"
-        : "pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7"
+        ? "pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm"
+        : "pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7 text-sm"
     }
   >
     {children}
   </div>
 );
 
-/** Title, one quiet line under it, and at most one action on the right. */
+/** Title, one quiet line under it, and the page's actions on the right. */
 export const PageHeading = ({
   title,
   description,

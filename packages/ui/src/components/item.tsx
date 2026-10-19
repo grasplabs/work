@@ -6,13 +6,27 @@ import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 import * as React from "react";
 
-function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
+/*
+ * `spacing`: how close the items sit. By default as far apart as their size
+ * asks; `tight` and `snug` keep a list of small items together, as the
+ * prototype's Landscape lists a vendor's documents and an insight's evidence.
+ */
+function ItemGroup({
+  className,
+  spacing = "default",
+  ...props
+}: React.ComponentProps<"div"> & { spacing?: "default" | "tight" | "snug" }) {
   return (
     <div
       role="list"
       data-slot="item-group"
+      data-spacing={spacing}
       className={cn(
-        "group/item-group flex w-full flex-col gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2",
+        "group/item-group flex w-full flex-col",
+        spacing === "default" &&
+          "gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2",
+        spacing === "tight" && "gap-1",
+        spacing === "snug" && "gap-1.5",
         className
       )}
       {...props}

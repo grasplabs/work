@@ -239,8 +239,26 @@ const intactContent = async (
     : { contract: row.contract, version: row.version, content };
 };
 
+/**
+ * Version `version` of template `templateId` as a workflow's binding pins
+ * it (GRA-700): its content, if the version is published and its content,
+ * and the hash stored with it, are still `contentHash`; undefined
+ * otherwise. Any contract: a workflow's binding pins the version itself.
+ */
+export const pinnedTemplate = async (
+  env: Env,
+  templateId: string,
+  version: number,
+  contentHash: string
+): Promise<TemplateContent | undefined> => {
+  const row = await versionOf(env, templateId, version);
+  return row === undefined
+    ? undefined
+    : await intactContent(row, row.contract, contentHash);
+};
+
 /** What a template binding answers: the pinned version, as published. */
-interface TemplateContent {
+export interface TemplateContent {
   readonly contract: string;
   readonly version: number;
   readonly content: Json;

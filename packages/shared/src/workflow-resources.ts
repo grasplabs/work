@@ -7,7 +7,9 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "./operation-limits.ts";
+import type { WorkflowDiagram, WorkflowRunTrace } from "./workflow-diagrams.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
+import type { ActionUse } from "./workflow-modules.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
 // workflow is a resource of its own, with its own owner, members and
@@ -58,25 +60,40 @@ export const workflowShareSchema = workflowMemberSchema.extend({
  * the publisher built on (null for the first), so two publications don't
  * silently move the current version past each other.
  */
+/**
+ * The workflow's own modules, by path (`code/<file>.ts`): calculations its
+ * `grasp.compute` tasks call (workflow-modules.ts), within what a version
+ * carries.
+ */
+const workflowModulesSchema = z
+  .record(z.string(), z.string())
+  .superRefine((modules, context) => {
+    const error = workflowModulesError(modules);
+    if (error !== undefined) {
+      context.addIssue({ code: "custom", message: error });
+    }
+  });
+
 export const workflowPublishSchema = z.strictObject({
   definition: z.string(),
   basedOn: z.number().int().positive().nullable(),
+  modules: workflowModulesSchema.optional(),
   /**
-   * The workflow's own modules, by path (`code/<file>.ts`): calculations
-   * its `grasp.compute` tasks call (workflow-modules.ts).
+   * The approved npm packages its modules may import: the graph, by its
+   * hash, approved for this workflow's `computation`, whose built entries
+   * the version seals (GRA-665). Its modules import exactly those entries,
+   * by name, and nothing else of npm.
    */
-  modules: z
-    .record(z.string(), z.string())
-    .superRefine((modules, context) => {
-      const error = workflowModulesError(modules);
-      if (error !== undefined) {
-        context.addIssue({ code: "custom", message: error });
-      }
-    })
+  packages: z
+    .strictObject({ graphHash: z.string().regex(/^[0-9a-f]{64}$/u) })
     .optional(),
 });
 
 export const workflowResourceErrors = defineErrorFamily({
+  "workflow.packages_invalid":
+    "These packages can't be sealed into a version of this workflow: they need what a calculation's sandbox doesn't have, or are more than a version holds.",
+  "workflow.packages_revoked":
+    "The packages this version of the workflow uses aren't approved any more. Someone with the permission to approve dependencies can approve them again, or publish a version without them.",
   "workflow.resource_invalid": "That isn't a valid request for a workflow.",
   "workflow.resource_unavailable":
     "This workflow doesn't exist or was deleted.",
@@ -108,6 +125,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
   "workflow.run_unavailable": "This workflow has no such run.",
+  "workflow.decision_unavailable":
+    "This workflow has no such decision for you to see.",
   "workflow.run_limit":
     "The person this start acts for already has as many runs of this workflow under way as one person may. Wait for one to end, or stop one.",
   "workflow.run_ended": "This run has already ended.",
@@ -119,8 +138,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
   "workflow.start_denied":
     "You, or what starts it for you, may not start this workflow, or that changed as it started. Check again, then retry.",
-  "workflow.start_restricted":
-    "This App has read restricted data, so it can't start workflows: a run it started would carry what it read. Ask an admin to start the workflow another way.",
   "workflow.start_conflict":
     "This idempotency key already started this workflow with another version or input.",
   "workflow.trigger_unavailable":
@@ -156,15 +173,31 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's code modules don't build: fix what the diagnostics name, then publish again.",
   "workflow.compute_failed":
     "A task's calculation threw, or the sandbox stopped it, so the run failed.",
+  "workflow.draft_conflict":
+    "Someone changed this draft since you read it. Read it again, then make your change.",
+  "workflow.draft_unchecked":
+    "Only the latest draft can be published, and only once it passes the profile.",
+  "workflow.action_failed":
+    "A task's action threw, or the sandbox stopped it, so the run failed.",
+  "workflow.action_restricted":
+    "This run is restricted, so its actions can't make connector calls: connect holds those for a decision, which an action can't wait for.",
+  "workflow.action_call_limit":
+    "A task's action made as many calls as one attempt of it may, so the run failed.",
 });
 
-/** The binding kinds the host catalog serves, beside other workflows. */
+/**
+ * The binding kinds the host catalog serves, beside other workflows. A
+ * `knowledge` or `template` binding is reached only by the workflow's own
+ * actions (GRA-700): no JSON task calls one.
+ */
 export const catalogBindingKinds = [
   "operation",
   "connector",
   "model",
   "decision",
   "event",
+  "knowledge",
+  "template",
 ] as const;
 export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
 
@@ -214,6 +247,13 @@ export const catalogContractSchema = z
         z.strictObject({
           input: z.string().max(256 * 1024),
           output: z.string().max(256 * 1024),
+          /**
+           * That the operation only reads, as the admin who publishes the
+           * contract states it (GRA-718): what a version's review relies
+           * on to leave it out of the writes a model may steer. Missing,
+           * it is taken for a write.
+           */
+          readOnly: z.boolean().optional(),
         })
       )
       .optional(),
@@ -319,6 +359,22 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     deciders: z.array(deciderSchema).min(1).max(16),
   }),
   z.strictObject({ kind: z.literal("event") }),
+  // One Knowledge collection, through a permission the workflow itself
+  // holds to read it (GRA-700): its runs' actions read only that, and
+  // only what the person a run acts for may read too.
+  z.strictObject({
+    kind: z.literal("knowledge"),
+    permissionId: identifierSchema,
+  }),
+  // One published template version, pinned by its content's hash as the
+  // admin approves it (GRA-700): content that no longer hashes to it
+  // serves nothing.
+  z.strictObject({
+    kind: z.literal("template"),
+    templateId: identifierSchema,
+    version: z.int().min(1),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  }),
 ]);
 export type WorkflowBindingTarget = z.infer<typeof workflowBindingTargetSchema>;
 
@@ -559,6 +615,41 @@ export interface WorkflowVersionBinding {
 }
 
 /**
+ * One of a version's own actions a task can call (GRA-709): its binding,
+ * the module and export it is, and what its sealed contract lets it
+ * reach, each use the workflow's own binding by alias, a connector's with
+ * the exact operations it calls. The host refuses anything else (GRA-704).
+ * It names nothing outside the workflow, so every role sees it alike.
+ */
+export interface WorkflowVersionAction {
+  binding: string;
+  module: string;
+  export: string;
+  uses: ActionUse[];
+}
+
+/**
+ * A use whose writes a model's answers may steer, by its binding's alias:
+ * a connector's, with each of its operations that may write; or an
+ * operation binding's (an App's export), which may always write, as its
+ * contract states nothing about reading only.
+ */
+export type SteeredWrite =
+  | { alias: string; kind: "connector"; operations: string[] }
+  | { alias: string; kind: "operation" };
+
+/**
+ * One of a version's own actions as its review shows it (GRA-718): as
+ * sealed, and, when it asks a model, each of its uses that may write, which
+ * the model's answers may steer. Empty when it asks no model, or only
+ * reads. It covers the action's own uses only, never a workflow's own
+ * model task whose answer feeds a later task's call.
+ */
+export interface WorkflowActionReview extends WorkflowVersionAction {
+  modelSteeredWrites: SteeredWrite[];
+}
+
+/**
  * Why a deletion was refused with `workflow.resource_bound`, in its
  * details: the workflows whose current version binds it that the caller
  * may see, and how many more there are that they may not.
@@ -591,7 +682,7 @@ export interface WorkflowBinders {
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 4;
+export const openWorkflowProtocol = 6;
 
 /**
  * Something of a definition the code generator doesn't lower yet: its
@@ -627,6 +718,8 @@ export interface WorkflowResourceVersion {
   contractHash: string;
   manifestHash: string;
   bindings: WorkflowVersionBinding[];
+  /** What its own actions may do, as sealed with it, by binding. */
+  actions: WorkflowActionReview[];
   build: WorkflowVersionBuild;
   author: string;
   createdAt: string;
@@ -651,6 +744,59 @@ export interface WorkflowMember {
   addedAt: string;
 }
 
+/**
+ * An edit of a workflow's draft: its whole new text, and the revision it
+ * read (0 before the first edit), which must still be the latest.
+ */
+export const workflowDraftEditSchema = z.strictObject({
+  expectedRevision: z.int().min(0),
+  // The profile's own bound on a definition: 1 MiB of UTF-8, as stored.
+  source: z
+    .string()
+    .max(1024 * 1024)
+    .refine(
+      (text) => new TextEncoder().encode(text).byteLength <= 1024 * 1024,
+      "A draft is at most 1 MiB of UTF-8."
+    ),
+  /**
+   * Its modules, all of them: an edit says what the draft carries, so one
+   * that leaves them out drops none by mistake. Empty for none.
+   */
+  modules: workflowModulesSchema,
+});
+
+/**
+ * Publishing a draft: its revision, which must be the latest and pass the
+ * profile, and the current version it built on (`workflowPublishSchema`).
+ */
+export const workflowDraftPublishSchema = z.strictObject({
+  revision: z.int().min(1),
+  basedOn: z.number().int().positive().nullable(),
+});
+
+/**
+ * A workflow's draft, for its builders: its latest text and revision (0
+ * while nobody has edited it: then the current version's definition, or
+ * a starting one), what the profile said of it, and its latest checkpoint,
+ * the latest text that passed (the current version's definition at
+ * revision 0), which is what may be published and what its diagram shows.
+ */
+export interface WorkflowDraft {
+  revision: number;
+  source: string;
+  /** Its own modules, by path, as this revision carries them. */
+  modules: Record<string, string>;
+  problems: WorkflowDefinitionProblem[];
+  checkpoint: {
+    revision: number;
+    source: string;
+    /** Drawn from the checkpoint's own JSON, as it passed. */
+    diagram: WorkflowDiagram;
+  } | null;
+  editedBy: string | null;
+  editedAt: string | null;
+}
+
 /** A refused publication's diagnostics, as the profile reports them. */
 export interface WorkflowDefinitionProblem {
   code: string;
@@ -669,6 +815,15 @@ export interface WorkflowResourcesApi {
   get: (id: string) => Promise<WorkflowResource>;
   /** Publishes a version from a workflow.json; for its builders. */
   publish: (id: string, input: unknown) => Promise<WorkflowResourceVersion>;
+  /** Its draft, for its builders (`WorkflowDraft`). */
+  draft: (id: string) => Promise<WorkflowDraft>;
+  /** Saves an edit of its draft (`workflowDraftEditSchema`), checked. */
+  editDraft: (id: string, input: unknown) => Promise<WorkflowDraft>;
+  /** Publishes its draft's checkpoint (`workflowDraftPublishSchema`). */
+  publishDraft: (
+    id: string,
+    input: unknown
+  ) => Promise<WorkflowResourceVersion>;
   versions: (id: string) => Promise<WorkflowResourceVersion[]>;
   /** One version's definition text, exactly as published; for builders. */
   definition: (id: string, version: number) => Promise<string>;
@@ -690,6 +845,8 @@ export interface WorkflowResourcesApi {
   run: (id: string, runId: string) => Promise<WorkflowResourceRun>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
+  /** What run `runId` did, over its version's diagram, for builders. */
+  runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
   /** Its parameters' configuration, for anyone with a role. */
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */

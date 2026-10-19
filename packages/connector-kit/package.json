@@ -9,7 +9,8 @@
     "./connector": "./src/connector.ts",
     "./content": "./src/content.ts",
     "./manifest": "./src/manifest.ts",
-    "./provider": "./src/provider.ts"
+    "./provider": "./src/provider.ts",
+    "./sign-in": "./src/sign-in.ts"
   },
   "dependencies": {
     "@grasp-os/shared": "workspace:*",

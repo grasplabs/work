@@ -140,10 +140,18 @@ const lineSeparators = String.fromCodePoint(0x20_28, 0x20_29);
 
 /**
  * Core, with the compiler's isolate as it is when a build takes too long,
- * or its CPU runs out (`build`): the outside system here.
+ * or its CPU runs out (`build`): the outside system here. Each target core
+ * asks it to build goes to `targets`.
  */
-const compilerThat = (build: () => Promise<never>): Env => {
-  const compiler = { getEntrypoint: () => ({ buildOpenWorkflow: build }) };
+const compilerThat = (build: () => Promise<never>, targets: string[]): Env => {
+  const compiler = {
+    getEntrypoint: () => ({
+      build: async (target: string) => {
+        targets.push(target);
+        return await build();
+      },
+    }),
+  };
   // SAFETY: only what the compiler's start reads of a Loader.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const loader = { get: () => compiler, load: () => compiler } as never;
@@ -556,17 +564,20 @@ describe("JSON workflow builds", () => {
       ),
       basedOn: null,
     });
+    const hungTargets: string[] = [];
+    const diedTargets: string[] = [];
     const hung = compilerThat(
       async () =>
         // oxlint-disable-next-line promise/avoid-new -- a build that never answers
         await new Promise<never>(() => {
           // Never answers.
-        })
+        }),
+      hungTargets
     );
     const died = compilerThat(async () => {
       await Promise.resolve();
       throw new Error("Worker exceeded CPU time limit.");
-    });
+    }, diedTargets);
     const late = await outcome(
       publishWorkflowVersion(hung, by, workflow.id, request("1.0.0"))
     );
@@ -582,11 +593,16 @@ describe("JSON workflow builds", () => {
     expect({
       late,
       killed,
+      // Each reached the compiler, as a JSON workflow's build.
+      targets: [...new Set([...hungTargets, ...diedTargets])],
+      bothReached: hungTargets.length > 0 && diedTargets.length > 0,
       retryable: isRetryableCode("workflow.build_slow"),
       published: saved.version,
     }).toStrictEqual({
       late: "workflow.build_slow",
       killed: "workflow.build_slow",
+      targets: ["open-workflow"],
+      bothReached: true,
       retryable: true,
       published: 1,
     });

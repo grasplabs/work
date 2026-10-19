@@ -54,6 +54,18 @@ export default defineConfig({
       // (the seal strips types without checking them), and
       // builtin-blueprints.test.ts covers what they do at runtime.
       "apps/core/test/fixtures/blueprints/*/files/**",
+      // The screens of a built-in of spec 8's layout, for the same reason:
+      // they import `#grasp`, generated from the App's manifest. The screen
+      // build type-checks them and lints them against the kit, with the
+      // references the host generated (builtin-blueprints.test.ts builds
+      // them). Its server code and workflows are linted here
+      // (each built-in's own tsconfig.json).
+      "apps/core/blueprints/intake/files/screens/**",
+      "apps/core/blueprints/intake/files/components/**",
+      "apps/core/blueprints/workflow-map/files/screens/**",
+      "apps/core/blueprints/workflow-map/files/components/**",
+      "apps/core/blueprints/board-page/files/screens/**",
+      "apps/core/blueprints/board-page/files/components/**",
     ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
@@ -178,6 +190,9 @@ export default defineConfig({
           // The same for a run of an independent workflow's sealed build.
           "apps/core/src/workflows/resource-host.ts",
           "apps/core/src/workflows/resource-attempt-host.ts",
+          // An action's host, which bounds each call itself, so that a
+          // refusal of its bounds stands as any other (resource-action.ts).
+          "apps/core/src/workflows/resource-action.ts",
         ],
         rules: {
           "no-restricted-imports": [
@@ -236,6 +251,7 @@ export default defineConfig({
       "apps/console/vite.test.config.ts",
       "apps/core/vite.screens.config.ts",
       "apps/core/vite.on-prem.config.ts",
+      "apps/core/vite.brain.config.ts",
       "packages/*",
       "packages/workerflow/vite.process.config.ts",
       "packages/workerflow/vite.conformance.config.ts",
