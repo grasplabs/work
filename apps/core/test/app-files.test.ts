@@ -25,7 +25,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import type { DataStore } from "../src/data-store.ts";
-import { purgeGraceMs } from "../src/file-host.ts";
+import {
+  finishClaimMs,
+  purgeGraceMs,
+  removalRetryMs,
+  sweepPage as sweepPageSize,
+} from "../src/file-host.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
@@ -635,13 +640,65 @@ const rawChannel = (screen: Screen, app: string) => {
       ),
     status: async (file: string) =>
       await screen.fetch(`${base}/${file}`, { headers: leased }),
-    finish: async (file: string) =>
-      await screen.fetch(`${base}/${file}/finish`, {
-        method: "POST",
-        headers: leased,
-      }),
+    finish: async (file: string, coreEnv?: Env) =>
+      await screen.fetch(
+        `${base}/${file}/finish`,
+        { method: "POST", headers: leased },
+        coreEnv
+      ),
   };
 };
+
+/**
+ * R2 as core sees it, but that each read of an object counts in `reads`
+ * and waits for `open` to resolve first.
+ */
+const gatedReads = (open: Promise<null>) => {
+  const seen = { reads: 0 };
+  const reading = new Proxy(env.FILES, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      if (property === "get") {
+        return async (...args: unknown[]) => {
+          seen.reads += 1;
+          await open;
+          const read: unknown = await Reflect.apply(value, target, args);
+          return read;
+        };
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+  return { seen, reading };
+};
+
+/** The claim a finish's `publishable` took, or "" for none. */
+const claimOf = (found: unknown): string =>
+  typeof found === "object" && found !== null && "claim" in found
+    ? String(found.claim)
+    : "";
+
+/** R2 as core sees it, but that every deletion fails. */
+const failingDeletes = new Proxy(env.FILES, {
+  get: (target, property) => {
+    if (property === "delete") {
+      return async () => {
+        await Promise.resolve();
+        throw new Error("R2 is unavailable.");
+      };
+    }
+    const value: unknown = Reflect.get(target, property);
+    if (typeof value !== "function") {
+      return value;
+    }
+    const bound: unknown = value.bind(target);
+    return bound;
+  },
+});
 
 /**
  * `stub` of a store, but that the answer of `chunkStored` never arrives:
@@ -1319,6 +1376,60 @@ describe("an App's files", { timeout: 120_000 }, () => {
     ).resolves.toMatchObject({ size: bytes.length });
   });
 
+  it("sends a chunk again whose body core took too long to read, and finishes the upload", async () => {
+    const { app, release, screen } = await openedApp();
+    // The first chunk's body reaches core too slowly: it answers so.
+    const slow = { first: true };
+    const channel = fileChannel({
+      app,
+      lease: screen.lease,
+      person: screen.named,
+      fetch: async (path, init) => {
+        if (path.includes("/chunks/") && slow.first) {
+          slow.first = false;
+          return await Promise.resolve(
+            Response.json(
+              { code: "request.timeout", message: "Too slow." },
+              { status: 408 }
+            )
+          );
+        }
+        return await screen.fetch(path, init);
+      },
+    });
+    const bytes = png(100);
+    const id = await upload(channel, blobOf(bytes, "image/png"));
+    await expect(
+      screen.channel.describe("attachments", id)
+    ).resolves.toMatchObject({ size: bytes.length });
+    await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
+  });
+
+  it("answers a body that stops arriving as one that took too long, for the page to send again", async () => {
+    const { app, screen } = await openedApp();
+    // A start whose body never ends: core gives up reading it.
+    const body = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        controller.enqueue(new TextEncoder().encode("{"));
+      },
+    });
+    const response = await screen.fetch(
+      `${appFilesPath}/${app}/attachments/uploads`,
+      {
+        method: "POST",
+        headers: {
+          [screenLeaseHeader]: screen.lease,
+          "content-type": "application/json",
+        },
+        body,
+      }
+    );
+    expect({
+      status: response.status,
+      answer: await response.json(),
+    }).toMatchObject({ status: 408, answer: { code: "request.timeout" } });
+  });
+
   it("recovers an answer whose body broke partway under the same upload", async () => {
     const { app, release, screen } = await openedApp();
     // The connection drops after the headers of the first start's and the
@@ -1344,6 +1455,62 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const bytes = png(fileLimits.chunkBytes + 5);
     const id = await upload(channel, blobOf(bytes, "image/png"));
     expect(broken.size).toBe(2);
+    await expect(
+      screen.channel.describe("attachments", id)
+    ).resolves.toMatchObject({ size: bytes.length });
+    await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
+  });
+
+  it("cancels an upload that failed for good after its start, so it holds none of the person's places", async () => {
+    const { app, release, screen } = await openedApp();
+    // Every chunk is refused for good, with no answer lost to send again.
+    const channel = fileChannel({
+      app,
+      lease: screen.lease,
+      person: screen.named,
+      fetch: async (path, init) => {
+        if (path.includes("/chunks/")) {
+          return await Promise.resolve(
+            Response.json(
+              { code: "file.content_mismatch", message: "Refused." },
+              { status: 422 }
+            )
+          );
+        }
+        return await screen.fetch(path, init);
+      },
+    });
+    const failed = await codeOf(upload(channel, blobOf(png(100), "image/png")));
+    expect({
+      failed,
+      states: await fileStates(release),
+    }).toStrictEqual({
+      failed: "file.content_mismatch",
+      states: ["deleted:cancelled"],
+    });
+  });
+
+  it("answers an upload whose finish was refused after core published it with its file", async () => {
+    const { app, release, screen } = await openedApp();
+    // Core publishes the file; the screen hears a refusal instead.
+    const channel = fileChannel({
+      app,
+      lease: screen.lease,
+      person: screen.named,
+      fetch: async (path, init) => {
+        const response = await screen.fetch(path, init);
+        if (path.endsWith("/finish")) {
+          await response.body?.cancel();
+          return Response.json(
+            { code: "file.content_mismatch", message: "Refused." },
+            { status: 422 }
+          );
+        }
+        return response;
+      },
+    });
+    const bytes = png(100);
+    const id = await upload(channel, blobOf(bytes, "image/png"));
     await expect(
       screen.channel.describe("attachments", id)
     ).resolves.toMatchObject({ size: bytes.length });
@@ -2056,7 +2223,14 @@ describe("an App's files", { timeout: 120_000 }, () => {
         }).file;
       const published = (principal: string, size?: number): void => {
         const file = start(principal, size);
-        host.files.publish(storeId, principal, "attachments", file, true);
+        host.files.publish(
+          storeId,
+          principal,
+          "attachments",
+          file,
+          true,
+          crypto.randomUUID()
+        );
       };
       // As if a record held every file published so far: what the test
       // arranges, since holding is a commit's to do.
@@ -2498,6 +2672,510 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await env.FILES.put(admitted.key ?? "", bytes);
     await sweepIn(release, purgeGraceMs + 2);
     await expect(storedObjects(release)).resolves.toStrictEqual([]);
+  });
+
+  it("tries again at the alarm's next try to remove a write's object whose removal failed", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const admitted: { key: string | null } = { key: null };
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (instance: DataStore) => {
+        admitted.key = await instance.admitChunk(
+          storeId,
+          builder.userId,
+          "attachments",
+          file,
+          0,
+          bytes.length
+        );
+      }
+    );
+    // Its put lands, and its writer never records it.
+    await env.FILES.put(admitted.key ?? "", bytes);
+    const due: {
+      failed?: unknown;
+      next: number | null;
+      alarm: number | null;
+      now: number;
+    } = { next: null, alarm: null, now: 0 };
+    // The write's lifetime, and leeway for the test's own time.
+    const writeLifetime = 60 * 60_000;
+    const retrySlackMs = 5000;
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (_instance, state) => {
+        const host = new StoreHost(state, { ...env, FILES: failingDeletes });
+        try {
+          await host.files.sweep(storeId, Date.now() + purgeGraceMs + 1);
+        } catch (error) {
+          due.failed = error;
+        }
+        due.next = host.files.nextDue();
+        // The store's activity sets the alarm again (a commit, a chunk):
+        // the failed removal stays a retry's wait away all the same.
+        await state.storage.deleteAlarm();
+        await host.schedule();
+        due.alarm = await state.storage.getAlarm();
+        due.now = Date.now();
+      }
+    );
+    const kept = await storedObjects(release);
+    // Past the retry's wait, R2 working again.
+    await sweepIn(release, purgeGraceMs + removalRetryMs + 2);
+    expect({
+      failed: due.failed instanceof Error,
+      // Due again a retry's wait after it was tried: never only once the
+      // write could no longer land.
+      dueSoon: (due.next ?? Number.POSITIVE_INFINITY) < due.now + writeLifetime,
+      // Nor at every alarm the store's activity brings forward.
+      alarmWaits: (due.alarm ?? 0) - due.now >= removalRetryMs - retrySlackMs,
+      kept: kept.length,
+      after: await storedObjects(release),
+    }).toStrictEqual({
+      failed: true,
+      dueSoon: true,
+      alarmWaits: true,
+      kept: 1,
+      after: [],
+    });
+  });
+
+  it("tries a failed removal again only after the retry's wait, however often the alarm comes", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const tried = { deletes: 0 };
+    const counted = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "delete") {
+          return async () => {
+            tried.deletes += 1;
+            await Promise.resolve();
+            throw new Error("R2 is unavailable.");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const seen: number[] = [];
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (instance: DataStore, state) => {
+        await instance.admitChunk(
+          storeId,
+          builder.userId,
+          "attachments",
+          file,
+          0,
+          bytes.length
+        );
+        const host = new StoreHost(state, { ...env, FILES: counted });
+        const at = Date.now() + purgeGraceMs + 1;
+        // The first sweep tries and fails; one a second later, as a busy
+        // store's alarm comes, tries nothing; one past the wait tries again.
+        for (const offset of [0, 1000, removalRetryMs + 1]) {
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- one sweep after another
+            await host.files.sweep(storeId, at + offset);
+          } catch {
+            // Its removal failed, as arranged.
+          }
+          seen.push(tried.deletes);
+        }
+      }
+    );
+    expect(seen).toStrictEqual([1, 1, 2]);
+  });
+
+  it("tries again a failed removal behind a full page of writes removed already and kept for late puts", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const admit = async (): Promise<string> => {
+      const admitted: { key: string | null } = { key: null };
+      await runInDurableObject(
+        env.DATA_STORES.getByName(storeId),
+        async (instance: DataStore) => {
+          admitted.key = await instance.admitChunk(
+            storeId,
+            builder.userId,
+            "attachments",
+            file,
+            0,
+            bytes.length
+          );
+        }
+      );
+      return admitted.key ?? "";
+    };
+    // More writes than a page, never recorded, removed by the alarm and
+    // kept, as removed writes are, until a write could no longer land.
+    for (let write = 0; write <= sweepPageSize; write += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one write at a time
+      await admit();
+    }
+    await sweepIn(release, purgeGraceMs + 1);
+    // A later write whose object lands, and whose removal fails.
+    const late = await admit();
+    await env.FILES.put(late, bytes);
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (_instance, state) => {
+        const host = new StoreHost(state, { ...env, FILES: failingDeletes });
+        try {
+          await host.files.sweep(storeId, Date.now() + purgeGraceMs + 2);
+        } catch {
+          // Its removal failed, as arranged.
+        }
+      }
+    );
+    const kept = await storedObjects(release);
+    await sweepIn(release, purgeGraceMs + removalRetryMs + 3);
+    expect({ kept, after: await storedObjects(release) }).toStrictEqual({
+      kept: [late],
+      after: [],
+    });
+  });
+
+  it("ends only its own finish claim, never one another finish took once its own expired", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const seen: { stale?: unknown; afterOwn?: unknown } = {};
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (_instance, state) => {
+        const host = new StoreHost(state, env);
+        const first = claimOf(
+          await host.files.publishable(
+            storeId,
+            builder.userId,
+            "attachments",
+            file
+          )
+        );
+        // The first check runs past its claim: the next finish claims it.
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime(Date.now() + finishClaimMs + 1);
+          const second = claimOf(
+            await host.files.publishable(
+              storeId,
+              builder.userId,
+              "attachments",
+              file
+            )
+          );
+          const third = host.files.publishable(
+            storeId,
+            builder.userId,
+            "attachments",
+            file
+          );
+          const waiting = async () =>
+            await Promise.race([
+              third.then(() => "answered"),
+              scheduler.wait(100).then(() => "waiting"),
+            ]);
+          // The first check, late, ends its own claim: not the second's.
+          host.files.abandonFinish(file, first);
+          seen.stale = await waiting();
+          host.files.abandonFinish(file, second);
+          seen.afterOwn = await waiting();
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
+    expect(seen).toStrictEqual({ stale: "waiting", afterOwn: "answered" });
+  });
+
+  it("checks an upload's bytes once however many finishes arrive at once, answering each with the file", async () => {
+    const { app, screen } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const { promise: open, resolve: letThrough } =
+      Promise.withResolvers<null>();
+    const { seen, reading } = gatedReads(open);
+    const gated = { ...env, FILES: reading };
+    const first = raw.finish(file, gated);
+    await vi.waitFor(() => {
+      expect(seen.reads).toBe(1);
+    });
+    const second = raw.finish(file, gated);
+    // The second has reached the store, where it waits for the first.
+    await scheduler.wait(250);
+    letThrough(null);
+    const answers = await Promise.all([
+      answerOf(await first),
+      answerOf(await second),
+    ]);
+    expect({
+      reads: seen.reads,
+      answers: answers.map((answer) =>
+        typeof answer === "object" && answer !== null && "state" in answer
+          ? answer.state
+          : answer
+      ),
+    }).toStrictEqual({ reads: 1, answers: ["published", "published"] });
+  });
+
+  it("answers a finish waiting behind a check that never reported back before the page gives up", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    // A finish claims the upload for its check, then its request dies.
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (instance: DataStore) => {
+        await instance.publishable(
+          storeId,
+          builder.userId,
+          "attachments",
+          file
+        );
+      }
+    );
+    const started = Date.now();
+    const answer = await answerOf(await raw.finish(file));
+    expect({
+      answer,
+      inTime: Date.now() - started < fileLimits.chunkSendMs,
+    }).toMatchObject({ answer: { state: "published" }, inTime: true });
+  });
+
+  it("answers a finish whose check failed with that failure, though ending its claim failed too", async () => {
+    const { app, screen } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const unreadable = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "get") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("R2 is unavailable.");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    // Ending the claim fails with a refusal of its own.
+    const stores = new Proxy(env.DATA_STORES, {
+      get: (target, property) => {
+        if (property === "getByName") {
+          return (name: string) =>
+            new Proxy(target.getByName(name), {
+              get: (stub, method) => {
+                const value: unknown = Reflect.get(stub, method);
+                if (typeof value !== "function") {
+                  return value;
+                }
+                if (method === "abandonFinish") {
+                  return async () => {
+                    await Promise.resolve();
+                    throw Object.assign(new Error("Expired."), {
+                      code: "file.upload_expired",
+                    });
+                  };
+                }
+                return async (...args: unknown[]) => {
+                  const answer: unknown = await Reflect.apply(
+                    value,
+                    stub,
+                    args
+                  );
+                  return answer;
+                };
+              },
+            });
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const failed = await raw.finish(file, {
+      ...env,
+      FILES: unreadable,
+      DATA_STORES: stores,
+    });
+    expect({
+      status: failed.status,
+      answer: await failed.json(),
+    }).toMatchObject({
+      status: 500,
+      answer: { code: "internal.unexpected" },
+    });
+  });
+
+  it("answers a finish that waited for a check that rejected the bytes with the rejection", async () => {
+    const { app, screen } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    // The whole is declared as other bytes than the chunk sent.
+    const file = await begunFile(
+      await raw.begin({
+        ...declaration(),
+        size: bytes.length,
+        sha256: await sha256(utf8("other bytes than the chunk sent")),
+      })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const { promise: open, resolve: letThrough } =
+      Promise.withResolvers<null>();
+    const { seen, reading } = gatedReads(open);
+    const gated = { ...env, FILES: reading };
+    const first = raw.finish(file, gated);
+    await vi.waitFor(() => {
+      expect(seen.reads).toBe(1);
+    });
+    const second = raw.finish(file, gated);
+    await scheduler.wait(250);
+    letThrough(null);
+    const answers = await Promise.all([
+      answerOf(await first),
+      answerOf(await second),
+    ]);
+    expect(answers).toStrictEqual([
+      "file.content_mismatch",
+      "file.content_mismatch",
+    ]);
+  });
+
+  it("hands the store's audit events over though removing write objects keeps failing", async () => {
+    const { release } = await openedApp();
+    const left: { before?: number; events?: number; failed?: boolean } = {};
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeIdSchema.parse(release.store?.storeId)),
+      async (_instance, state) => {
+        const host = new StoreHost(state, { ...env, FILES: failingDeletes });
+        const storeId = storeIdSchema.parse(release.store?.storeId);
+        const principal = `person-${crypto.randomUUID()}`;
+        const { file } = host.files.begin(storeId, principal, "attachments", {
+          ...declaration(),
+          size: 64,
+        });
+        // A write never recorded, due for removal; and an audit event,
+        // of its publication.
+        host.files.admitChunk(storeId, principal, "attachments", file, 0, 64);
+        host.files.publish(
+          storeId,
+          principal,
+          "attachments",
+          file,
+          true,
+          crypto.randomUUID()
+        );
+        left.before = state.storage.sql
+          .exec<{ n: number }>("SELECT count(*) AS n FROM sdk_file_events")
+          .one().n;
+        try {
+          await host.files.sweep(storeId, Date.now() + purgeGraceMs + 1);
+          left.failed = false;
+        } catch {
+          left.failed = true;
+        }
+        left.events = state.storage.sql
+          .exec<{ n: number }>("SELECT count(*) AS n FROM sdk_file_events")
+          .one().n;
+      }
+    );
+    expect(left).toStrictEqual({ before: 1, failed: true, events: 0 });
+  });
+
+  it("lets the next finish check an upload at once when a check failed before it could say", async () => {
+    const { app, screen } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const unreadable = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "get") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("R2 is unavailable.");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const failed = await statusOf(
+      raw.finish(file, { ...env, FILES: unreadable })
+    );
+    const started = Date.now();
+    const again = await answerOf(await raw.finish(file));
+    expect({
+      failed,
+      again,
+      // Not held back until the failed check's claim ran out.
+      atOnce: Date.now() - started < finishClaimMs / 2,
+    }).toMatchObject({
+      failed: 500,
+      again: { state: "published" },
+      atOnce: true,
+    });
   });
 
   it("sets the alarm for a chunk write's cleanup once it admits one", async () => {

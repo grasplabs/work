@@ -1,7 +1,6 @@
 import { useRun } from "@grasp-os/sdk/screen";
 import type { ScreenRun } from "@grasp-os/sdk/screen";
 import { Button } from "@grasp-os/ui/components/button";
-import { useEffect, useRef } from "react";
 
 /** What a reading of notes is doing, in words. */
 const statusOf = (run: ScreenRun | null | undefined): string => {
@@ -37,31 +36,22 @@ const statusOf = (run: ScreenRun | null | undefined): string => {
 
 /**
  * One reading, followed by its run's ID (`useRun`), however many runs came
- * since. Tells the screen once it is ready (`onReady`), so the drafts it
- * lists include the one the run kept.
+ * since. The draft a finished run kept shows in the screen's live list of
+ * drafts on its own.
  */
 const Reading = ({
   id,
   title,
-  onReady,
   onReview,
   onDismiss,
 }: {
   id: string;
   title: string;
-  onReady: () => void;
   onReview: (run: string) => void;
   onDismiss: (run: string) => void;
 }) => {
   const run = useRun("extract", id);
   const ready = run?.status === "completed";
-  const told = useRef(false);
-  useEffect(() => {
-    if (ready && !told.current) {
-      told.current = true;
-      onReady();
-    }
-  }, [ready, onReady]);
   const ended =
     run === null || run?.status === "failed" || run?.status === "cancelled";
   return (
@@ -100,14 +90,11 @@ const Reading = ({
  */
 export const Extractions = ({
   started,
-  onReady,
   onReview,
   onDismiss,
 }: {
   /** The runs this screen started, newest first, with their titles. */
   started: { id: string; title: string }[];
-  /** A reading is ready: its draft is kept. */
-  onReady: () => void;
   onReview: (run: string) => void;
   onDismiss: (run: string) => void;
 }) =>
@@ -120,7 +107,6 @@ export const Extractions = ({
             key={id}
             id={id}
             title={title}
-            onReady={onReady}
             onReview={onReview}
             onDismiss={onDismiss}
           />

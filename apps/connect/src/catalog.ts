@@ -9,6 +9,7 @@ import {
 } from "@grasp-os/shared/connect";
 import type {
   Catalog,
+  CatalogAuth,
   CatalogEntry,
   CatalogTool,
   OAuthProvider,
@@ -17,8 +18,8 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
+import { nativeConnector } from "./bundled-connectors.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
-import { nativeConnector } from "./connectors.ts";
 import { providers } from "./providers.ts";
 
 // The catalog: what an admin can connect. The native providers come from
@@ -75,18 +76,20 @@ export const providerName = ({
 
 /** The native providers whose connector is in this release. */
 const nativeEntries = (): CatalogEntry[] =>
-  Object.values(providers).flatMap((provider) => {
-    const connector = nativeConnector(provider.server);
+  oauthProviderSchema.options.flatMap((id) => {
+    const connector = nativeConnector(providers[id].server);
     if (connector === undefined) {
       return [];
     }
     return [
       {
         source: "native",
-        id: provider.id,
-        ...nativeShown[provider.id],
+        id,
+        ...nativeShown[id],
         toolCount: Object.keys(connector.manifest.actions).length,
         logo: null,
+        // Connect holds the deployment's own app for each provider.
+        auth: "managed",
       },
     ];
   });
@@ -221,6 +224,8 @@ const toolkitSchema = z.object({
   name: z.string().min(1).max(256),
   /** The auth schemes Composio holds an app for: connectable without one of ours. */
   composio_managed_auth_schemes: z.array(z.string()).default([]),
+  /** Whether it takes no account at all: then there is nothing to connect. */
+  no_auth: z.boolean().nullish(),
   meta: z
     .object({
       categories: z.array(z.unknown()).default([]),
@@ -329,15 +334,27 @@ const composioList = async <Item>(
 };
 
 /**
- * Whether a toolkit is in the catalog: Composio holds an app for it
- * (managed auth), so an admin needs nothing but their consent, and it has
- * tools, so connecting it could do something.
+ * Whether a toolkit is in the catalog: it has tools, so connecting it
+ * could do something, and it takes an account, so there is something to
+ * connect. Whether Composio holds an app for it is said by its entry's
+ * `auth` (`authOf`), not by leaving it out: people see every app Grasp
+ * could reach, and which need their own sign-in app.
  */
 const isListed = ({
-  composio_managed_auth_schemes: managed,
+  no_auth: noAuth,
   meta,
 }: z.infer<typeof toolkitSchema>): boolean =>
-  managed.length > 0 && meta.tools_count > 0;
+  noAuth !== true && meta.tools_count > 0;
+
+/**
+ * Whose app connecting a toolkit takes: Composio's, where it holds one
+ * (managed auth), so an admin needs nothing but their consent; the
+ * organization's own otherwise.
+ */
+const authOf = ({
+  composio_managed_auth_schemes: managed,
+}: z.infer<typeof toolkitSchema>): CatalogAuth =>
+  managed.length > 0 ? "managed" : "own";
 
 /** Composio's toolkits in the catalog (`isListed`). */
 const composioEntries = async (key: string): Promise<ListedToolkit[]> => {
@@ -347,7 +364,8 @@ const composioEntries = async (key: string): Promise<ListedToolkit[]> => {
     toolkitSchema,
     toolkitPaging
   );
-  return toolkits.filter(isListed).map(({ slug, name, meta }) => {
+  return toolkits.filter(isListed).map((toolkit) => {
+    const { slug, name, meta } = toolkit;
     const logoSource = logoSourceOf(meta.logo);
     const categories = meta.categories.flatMap((category) => {
       const parsed = categorySchema.safeParse(category);
@@ -364,6 +382,7 @@ const composioEntries = async (key: string): Promise<ListedToolkit[]> => {
           logoSource === undefined ? null : catalogLogoUrl("composio", slug),
         description: descriptionOf(meta.description),
         group: catalogGroupOf(categories),
+        auth: authOf(toolkit),
       },
       logoSource,
     };
@@ -428,27 +447,15 @@ const toolsOf = async (
 };
 
 /**
- * A Composio toolkit's tools, only for one the catalog lists, so the two
- * never disagree on what is in it: `connect.catalog_entry_not_found` for
- * any other, and `connect.catalog_unavailable` when Composio doesn't list
- * the catalog or the tools (any failure, a 400 or 404 for a toolkit it
- * listed too).
+ * What Composio says, as `load` reads it: `connect.catalog_unavailable`
+ * when Composio doesn't list it completely (any failure, a 400 or 404 for
+ * a toolkit it listed too).
  */
-export const composioTools = async (
-  key: string,
-  toolkit: string
-): Promise<CatalogTool[]> => {
+const fromComposio = async <Value>(
+  load: () => Promise<Value>
+): Promise<Value> => {
   try {
-    const listed = await listedToolkits(key);
-    if (!listed.some(({ entry }) => entry.id === toolkit)) {
-      throw connectErrors.create("connect.catalog_entry_not_found");
-    }
-    return await cachedIn(
-      toolCache,
-      key,
-      `tools:${toolkit}`,
-      async () => await toolsOf(key, toolkit)
-    );
+    return await load();
   } catch (error) {
     if (!(error instanceof ComposioError)) {
       throw error;
@@ -456,6 +463,46 @@ export const composioTools = async (
     log.warn("catalog.composio_unavailable", errorFields(error));
     throw connectErrors.create("connect.catalog_unavailable");
   }
+};
+
+/**
+ * The catalog's entry for the Composio toolkit `toolkit`, as cached:
+ * `connect.catalog_entry_not_found` when the catalog doesn't list it, and
+ * `connect.catalog_unavailable` when Composio doesn't list the catalog.
+ */
+export const composioEntry = async (
+  key: string,
+  toolkit: string
+): Promise<CatalogEntry> =>
+  await fromComposio(async () => {
+    const listed = await listedToolkits(key);
+    const found = listed.find(({ entry }) => entry.id === toolkit);
+    if (found === undefined) {
+      throw connectErrors.create("connect.catalog_entry_not_found");
+    }
+    return found.entry;
+  });
+
+/**
+ * A Composio toolkit's tools, only for one the catalog lists, so the two
+ * never disagree on what is in it: `connect.catalog_entry_not_found` for
+ * any other, and `connect.catalog_unavailable` when Composio doesn't list
+ * the catalog or the tools.
+ */
+export const composioTools = async (
+  key: string,
+  toolkit: string
+): Promise<CatalogTool[]> => {
+  await composioEntry(key, toolkit);
+  return await fromComposio(
+    async () =>
+      await cachedIn(
+        toolCache,
+        key,
+        `tools:${toolkit}`,
+        async () => await toolsOf(key, toolkit)
+      )
+  );
 };
 
 /** One entry's tools, as `ConnectApi.catalogTools` describes them. */

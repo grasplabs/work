@@ -2,11 +2,13 @@ import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
+import { BrainRpc } from "./brain-rpc.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
+import { EmailPreferencesRpc } from "./email-preferences-rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
 import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
@@ -49,6 +51,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #check: SessionCheck;
   readonly #apps: AppsRpc;
   readonly #knowledge: KnowledgeRpc;
+  readonly #brain: BrainRpc;
   readonly #knowledgeSignals: KnowledgeSignalsRpc;
   readonly #memory: MemoryRpc;
   readonly #uploads: UploadsRpc;
@@ -72,6 +75,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
   readonly #dashboard: DashboardRpc;
+  readonly #emailPreferences: EmailPreferencesRpc;
   readonly #sessions: SessionsRpc;
   readonly #notifications: NotificationsRpc;
   readonly #onboarding: OnboardingRpc;
@@ -86,6 +90,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     const full = fullAccess(check);
     this.#apps = new AppsRpc(env, full);
     this.#knowledge = new KnowledgeRpc(env, full);
+    this.#brain = new BrainRpc(env, full);
     this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
     this.#memory = new MemoryRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
@@ -109,6 +114,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
     this.#dashboard = new DashboardRpc(env, full);
+    this.#emailPreferences = new EmailPreferencesRpc(env, full);
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#notifications = new NotificationsRpc(env, full);
     this.#onboarding = new OnboardingRpc(env, check);
@@ -144,12 +150,20 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#dashboard;
   }
 
+  get emailPreferences(): EmailPreferencesRpc {
+    return this.#emailPreferences;
+  }
+
   get apps(): AppsRpc {
     return this.#apps;
   }
 
   get knowledge(): KnowledgeRpc {
     return this.#knowledge;
+  }
+
+  get brain(): BrainRpc {
+    return this.#brain;
   }
 
   get knowledgeSignals(): KnowledgeSignalsRpc {

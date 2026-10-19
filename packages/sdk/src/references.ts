@@ -76,6 +76,19 @@ export interface OperationReference<
   readonly [progressType]?: Progress;
 }
 
+/**
+ * A streaming action (spec 10.7.6), as App code declares it (its
+ * progress schema in `stream`) or as a reference names it (`mode:
+ * "stream"`). It runs only for a screen following it (`useStream`,
+ * `client.stream`): wherever a call answers once (`client.action`,
+ * `ctx.runAction`, a workflow's `appFunctions(env).action`, a test's
+ * `action`), its type is refused, as the host refuses the call
+ * (`operation.mode_mismatch`).
+ */
+export type StreamingFunction =
+  | { readonly stream: object }
+  | { readonly mode: "stream" };
+
 /** Any generated function reference: a single answer's or a stream's. */
 export type AnyOperationReference =
   | OperationReference<unknown, unknown, ReferenceKind, ReferenceVisibility>

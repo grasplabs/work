@@ -17,7 +17,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
-import { buildAppCode, buildKey } from "./screens.ts";
+import { buildAppCode, buildKey, checkAppCode } from "./screens.ts";
 
 // Inspecting an App's code of spec 8's layout (spec 8, 16): building it
 // and reading its registration in an isolate of its own, never in core.
@@ -82,6 +82,28 @@ export const builtCode = async (
 ): Promise<Record<string, string>> => {
   const build = await buildAppCode(env, { ...files }, app, signal);
   signal?.throwIfAborted();
+  if (!build.ok) {
+    throw versionErrors.create(
+      "version.build_failed",
+      buildDetails(build.diagnostics)
+    );
+  }
+  return build.modules;
+};
+
+/**
+ * The App's code in `files`, with the host's real generated modules,
+ * built and type-checked against the SDK's server side (`checkAppCode`),
+ * as modules by flat name; `version.build_failed` with diagnostics if it
+ * doesn't build or check. What a release is sealed from.
+ */
+export const checkedCode = async (
+  env: Env,
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string
+): Promise<Record<string, string>> => {
+  const build = await checkAppCode(env, { ...files }, app);
   if (!build.ok) {
     throw versionErrors.create(
       "version.build_failed",

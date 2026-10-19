@@ -34,7 +34,6 @@ import type {
   WorkContext,
 } from "@grasp-os/shared/permissions";
 import {
-  isAdmin,
   isMemberAdmin,
   requireAdmin,
   requireBuilder,
@@ -44,7 +43,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import {
   and,
   asc,
-  desc,
   eq,
   inArray,
   getTableColumns,
@@ -82,7 +80,6 @@ import {
 import { isUniqueViolation } from "./db/d1.ts";
 import { collections } from "./db/knowledge/schema.ts";
 import { appHost, workspace } from "./durable-objects.ts";
-import { byCollection, typeClaims } from "./knowledge/record-types.ts";
 import { widenedByGrant } from "./screen-trust.ts";
 
 // Permission records and the one check every server path runs. A person
@@ -628,7 +625,10 @@ const workflowGenerationMoved = (
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
  * workflow and nothing else; a store's own code reaches connections and
- * collections alone.
+ * collections alone. Only an agent writes a collection: an App, a workflow
+ * and a store only read one (their collection stubs have no write), and
+ * keep what they write in a business store, so `write` would give them
+ * nothing an admin could see being granted.
  */
 const requireObjectFits = (
   subject: PermissionSubject,
@@ -637,6 +637,15 @@ const requireObjectFits = (
 ): void => {
   if (object.type === "platform" && subject.type !== "app") {
     refuseRequest("subject: Only an App uses what the platform offers.");
+  }
+  if (
+    object.type === "collection" &&
+    subject.type !== "agent" &&
+    actions.includes("write")
+  ) {
+    refuseRequest(
+      "actions: Only an agent writes a collection. An App, a workflow or a store reads it, and keeps what it writes in a store."
+    );
   }
   if (
     subject.type === "trigger" &&
@@ -1164,7 +1173,7 @@ const canGrantSql = (by: Identity): SQL =>
  * That a permission lets an App change things for the person using it,
  * as SQL on its row: any on a connection (core can't tell a connector's
  * writes from its reads; connect knows), or with an action other than
- * `read`, such as writing a collection, starting a workflow, or calling
+ * `read`, such as starting a workflow, inviting guests, or calling
  * another App's exports marked `write` (or one by name, whichever it is
  * marked: its App's next version may mark it `write`). Any on a store too:
  * its actions are operation paths, and a mutation may be named `read`.
@@ -1487,65 +1496,6 @@ export const revokePermission = async (
 };
 
 /**
- * `row` as the API returns it, as `by` reads it, and, for an App's request
- * to write a collection, the record types the version an admin reviews
- * declares there: those it would claim, and those another App has already
- * (`typeClaims`), named to admins only (who decide), for the rest by type
- * alone.
- */
-const withTypeClaims = async (
-  env: Env,
-  by: Pick<Identity, "role">,
-  row: Row
-): Promise<Permission> => {
-  const permission = toPermission(row);
-  if (
-    permission.status !== "requested" ||
-    permission.subject.type !== "app" ||
-    permission.object.type !== "collection" ||
-    !permission.actions.includes("write")
-  ) {
-    return permission;
-  }
-  const { appId } = permission.subject;
-  const { collectionId } = permission.object;
-  // The version an admin reviews as they grant: the current one, or the
-  // latest while none is (an App just created from a blueprint).
-  const reviewed = await drizzle(env.DB)
-    .select({ records: appVersions.records })
-    .from(appVersions)
-    .innerJoin(apps, eq(apps.id, appVersions.appId))
-    .where(
-      and(
-        eq(appVersions.appId, appId),
-        or(
-          eq(appVersions.version, apps.currentVersion),
-          isNull(apps.currentVersion)
-        )
-      )
-    )
-    .orderBy(desc(appVersions.version))
-    .limit(1)
-    .get();
-  const types = byCollection(reviewed?.records ?? {}).get(collectionId) ?? [];
-  if (types.length === 0) {
-    return permission;
-  }
-  const { claims, taken } = await typeClaims(env, appId, collectionId, types);
-  const admin = isAdmin(by.role);
-  return {
-    ...permission,
-    recordTypes: {
-      claims,
-      taken: taken.map(({ type, owner }) => ({
-        type,
-        owner: admin ? owner : null,
-      })),
-    },
-  };
-};
-
-/**
  * Every permission, or those of one App or agent, oldest first; only those
  * in `status` when given. With `openApps` (a condition on `apps`: the Apps
  * the person has a role in, as `appsFoundBy` in app-access.ts says), one that
@@ -1619,9 +1569,7 @@ export const listPermissions = async (
     // asked, are that person's alone: never listed to admins or builders.
     .where(and(ofOne, ofOpenApp, inStatus, eq(permissions.personal, false)))
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
-  return await Promise.all(
-    rows.map(async (row) => await withTypeClaims(env, by, row))
-  );
+  return rows.map((row) => toPermission(row));
 };
 
 /**
@@ -1676,7 +1624,7 @@ const permissionsIn = async (
       )
     )
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
-  return rows.map(toPermission);
+  return rows.map((row) => toPermission(row));
 };
 
 /**

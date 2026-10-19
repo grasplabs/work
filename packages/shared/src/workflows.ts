@@ -597,8 +597,8 @@ export interface RunSummary {
 /**
  * A step's or a compensation's failure as a run's history shows it. To
  * those who see the run's details (admins, and the person it acts for):
- * its code and message. To anyone else: the code only when it is the
- * platform's own (`isPlatformCode`), otherwise `workflow.step_failed`,
+ * its code and message. To anyone else: the code only when it is one the
+ * platform defines (`isExpectedCode`), otherwise `workflow.step_failed`,
  * and the code's own words, never the workflow's message.
  */
 export interface RunHistoryError {
