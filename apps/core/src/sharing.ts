@@ -62,6 +62,28 @@ export const stillMembers = (columns: MemberColumns): SQL =>
     )
   ) ?? sql`0`;
 
+/** A role in a shared resource: using it, or building it too. */
+export type SharedRole = "user" | "builder";
+
+/** The highest role `by`'s organization role lets them have in a resource. */
+export const ceilingOf = (by: Pick<Identity, "role">): SharedRole =>
+  canBuild(by.role) ? "builder" : "user";
+
+/**
+ * `by`'s role from the member rows that are theirs (their own, their
+ * teams'), given by `roles`: the highest of them, capped by their ceiling.
+ * Undefined when there are none.
+ */
+export const roleFromMembers = (
+  by: Pick<Identity, "role">,
+  roles: readonly string[]
+): SharedRole | undefined => {
+  if (roles.length === 0) {
+    return undefined;
+  }
+  return roles.includes("builder") ? ceilingOf(by) : "user";
+};
+
 /** Refuses Grasp staff: they never decide whom a client's resource reaches. */
 export const requireNotStaff = (by: Pick<Identity, "staff">): void => {
   if (by.staff) {
