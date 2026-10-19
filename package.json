@@ -20,11 +20,13 @@
     "check:secrets": "secretlint \"**/*\"",
     "test:durations": "node scripts/test-durations.ts",
     "release:build": "node scripts/release/build-release.ts",
-    "release:upload": "node scripts/release/upload-release.ts"
+    "release:upload": "node scripts/release/upload-release.ts",
+    "package:definition": "node scripts/package-definition.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "catalog:",
     "@commitlint/config-conventional": "catalog:",
+    "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@playwright/test": "catalog:",
     "@secretlint/secretlint-rule-preset-recommend": "catalog:",

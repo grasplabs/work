@@ -112,6 +112,10 @@ const typeRules: readonly {
   // as the called App records it (`app.called`): a read for an export
   // that only reads, and an action for one that writes, or one refused
   // before its access was known.
+  // An App's server code refused a use its sealed manifest doesn't allow
+  // (core's src/operations.ts): a function, resource or workflow it
+  // doesn't list, or a request its declaration doesn't allow.
+  { action: "app.use.refused", type: "permission" },
   { action: "app.call", access: "read", type: "read" },
   { action: "app.call", type: "action" },
   { action: "app.called", access: "read", type: "read" },

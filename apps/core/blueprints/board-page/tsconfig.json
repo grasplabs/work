@@ -1,0 +1,16 @@
+{
+  // The board page's server code, checked as core's is, with
+  // `#grasp/server` resolved to what the host generates for it
+  // (server-types.ts). Its screens import `#grasp`, generated from its
+  // manifest, so the screen build checks them (../tsconfig.json leaves
+  // them out).
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@xmldom/xmldom": ["../../types/xmldom.d.ts"],
+      "#grasp/server": ["./server-types.ts"]
+    }
+  },
+  "include": ["server-types.ts", "files/*.ts", "files/operations"],
+  "exclude": []
+}

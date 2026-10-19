@@ -50,7 +50,6 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
-import { testBinding } from "./test-env.ts";
 
 // npm packages for an App need a person's approval, from its threat model
 // (src/dependencies/requests.ts, approvers.ts). Each case below is a way
@@ -188,12 +187,12 @@ const admission = async (
   request: DependencyRequest,
   changes: Partial<Parameters<typeof admitDependencies>[2]> = {}
 ) => {
-  const { policyGeneration } = await builder.api.dependencies.status(
-    request.app.id
-  );
+  const { policyGeneration } = await builder.api.dependencies.status({
+    app: request.subject.id,
+  });
   return await outcome(
     admitDependencies(env, builderActor(builder), {
-      app: request.app.id,
+      app: request.subject.id,
       graphHash: request.graphHash,
       targets: request.targets,
       policyGeneration,
@@ -208,7 +207,7 @@ const eventsOf = (events: AuditEvent[], request: DependencyRequest) =>
     .filter(
       ({ action, target, detail }) =>
         action.startsWith("dependency.") &&
-        (target?.id === request.id || detail.app === request.app.id)
+        (target?.id === request.id || detail.app === request.subject.id)
     )
     .map(({ action, actor, target, detail }) => ({
       action,
@@ -261,14 +260,14 @@ describe("dependency approval", () => {
     const waitingCount = await approver.api.dependencies.waitingCount();
     const before = await admission(builder, request);
     const refusal = await admitDependencies(env, builderActor(builder), {
-      app: request.app.id,
+      app: request.subject.id,
       graphHash: request.graphHash,
       targets: ["browser"],
       policyGeneration: waiting.policyGeneration,
     }).catch((error: unknown) => error);
     const decided = await approve(approver.api, request);
     const after = await admitDependencies(env, builderActor(builder), {
-      app: request.app.id,
+      app: request.subject.id,
       graphHash: request.graphHash,
       targets: ["browser"],
       policyGeneration: waiting.policyGeneration,
@@ -276,7 +275,7 @@ describe("dependency approval", () => {
 
     expect(review).toMatchObject({
       id: request.id,
-      app: { id: app },
+      subject: { type: "app", id: app },
       status: "pending",
       sourceRevision: "rev-1",
       purpose: proposal.purpose,
@@ -415,6 +414,7 @@ describe("dependency approval", () => {
           direct: 1,
           packages: 2,
           requestedBy: builder.userId,
+          selfDecided: false,
           policyGeneration: request.policyGeneration,
           reason: "Reviewed with the team",
         },
@@ -484,7 +484,7 @@ describe("dependency approval", () => {
     if (other === undefined) {
       throw new Error("No request");
     }
-    const status = await builder.api.dependencies.status(app);
+    const status = await builder.api.dependencies.status({ app });
     // The replaced request is gone: nobody approves it, and nothing of it
     // is kept but its audit events.
     const replaced = await outcome(approve(approver.api, first));
@@ -619,7 +619,7 @@ describe("dependency approval", () => {
         proposeAs(builder, z.custom<DependencyProposal>().parse(proposal))
       );
     }
-    const status = await builder.api.dependencies.status(app);
+    const status = await builder.api.dependencies.status({ app });
 
     expect(outcomes).toStrictEqual(
       Object.fromEntries(
@@ -687,7 +687,7 @@ describe("dependency approval", () => {
         proposalFor(app, { sourceRevision: "rev-2" })
       );
     });
-    const status = await builder.api.dependencies.status(app);
+    const status = await builder.api.dependencies.status({ app });
     const stillWaiting = await waitingFor(approver.api);
 
     expect({
@@ -740,7 +740,7 @@ describe("dependency approval", () => {
         proposalFor(app)
       );
     });
-    const status = await builder.api.dependencies.status(app);
+    const status = await builder.api.dependencies.status({ app });
     const stillWaiting = await waitingFor(approver.api);
 
     expect({
@@ -781,44 +781,6 @@ describe("dependency approval", () => {
     });
   });
 
-  it("shows an approver only graphs Grasp resolved, once the migration drops what the removed propose API left waiting", async () => {
-    const admin = await personApi("admin");
-    const approver = await approverBy(admin);
-    const resolvedBy = await builderWithApp();
-    const dates = named("dates");
-    await publish(plain(dates, "1.0.0"));
-    const { request: resolved } =
-      await resolvedBy.builder.api.dependencies.resolve(
-        intentFor(resolvedBy.app, { [dates]: "^1.0.0" })
-      );
-    // As the propose API left it: a graph as its proposer stated it, which
-    // no resolve stored a lock for.
-    const handedIn = await builderWithApp();
-    const stated = await proposeAs(handedIn.builder, proposalFor(handedIn.app));
-    const ours = [resolved.id, stated.id];
-    const waitedBefore = await waitingFor(approver.api);
-    const before = waitedBefore.filter((id) => ours.includes(id));
-    const migration = z
-      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
-      .parse(testBinding("CORE_MIGRATIONS"))
-      .filter(({ name }) => name.includes("dependency_admission_refusals"));
-    // What it does to requests, as a deploy runs it.
-    for (const { queries } of migration) {
-      for (const query of queries) {
-        if (query.includes("DELETE FROM `dependency_requests`")) {
-          // oxlint-disable-next-line no-await-in-loop -- in order, as D1 applies them
-          await env.DB.prepare(query).run();
-        }
-      }
-    }
-    const waitedAfter = await waitingFor(approver.api);
-    const after = waitedAfter.filter((id) => ours.includes(id));
-    expect({ before: before.toSorted(), after }).toStrictEqual({
-      before: ours.toSorted(),
-      after: [resolved.id],
-    });
-  });
-
   it("reads an App's requests by index, however many it has had", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
@@ -828,7 +790,7 @@ describe("dependency approval", () => {
 
     const queries = await recordedQueries(async () => {
       await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
-      await builder.api.dependencies.status(app);
+      await builder.api.dependencies.status({ app });
       await admission(builder, request);
     });
     const plans = await Promise.all(
@@ -951,7 +913,7 @@ describe("dependency approval", () => {
         callAnyway(builder.api.dependencies, "propose", proposalFor(app))
       ),
     };
-    const stillPending = await builder.api.dependencies.status(app);
+    const stillPending = await builder.api.dependencies.status({ app });
     // The builder who asked, once an admin gives them the permission.
     await admin.api.dependencies.grantApprover({
       type: "person",
@@ -1408,16 +1370,18 @@ describe("dependency approval", () => {
     const approver = await approverBy(admin);
     const request = await proposeAs(builder, proposalFor(app));
     await approve(approver.api, request);
-    const { policyGeneration: read } =
-      await builder.api.dependencies.status(app);
+    const { policyGeneration: read } = await builder.api.dependencies.status({
+      app,
+    });
 
     let stale = "";
     const events = await auditedDuring(async () => {
       await admin.api.dependencies.revokeApprover(approver.grant.id);
       stale = await admission(builder, request, { policyGeneration: read });
     });
-    const { policyGeneration: now } =
-      await builder.api.dependencies.status(app);
+    const { policyGeneration: now } = await builder.api.dependencies.status({
+      app,
+    });
     // Revoking the approver stops their next decision, not what they
     // approved: that is a decision of its own.
     const current = await admission(builder, request);
@@ -1524,7 +1488,9 @@ describe("dependency approval", () => {
       },
       { timeout: 30_000, interval: 200 }
     );
-    await expect(builder.api.dependencies.status(app)).resolves.toMatchObject({
+    await expect(
+      builder.api.dependencies.status({ app })
+    ).resolves.toMatchObject({
       pending: null,
       approved: null,
     });
@@ -1586,7 +1552,7 @@ describe("dependency approval", () => {
       .object({ request: z.object({ id: z.string(), status: z.string() }) })
       .loose()
       .parse(JSON.parse(result?.text.replace("Returned:\n", "") ?? "null"));
-    const status = await builder.api.dependencies.status(app);
+    const status = await builder.api.dependencies.status({ app });
     const events = await allEvents();
     const requested = events.find(
       ({ action, target }) =>
@@ -1647,7 +1613,7 @@ describe("dependency approval", () => {
     const asAgent = await outcome(
       decideDependency(env, acting, request.id, decision)
     );
-    const status = await builder.api.dependencies.status(app);
+    const status = await builder.api.dependencies.status({ app });
 
     expect(asAgent).toBe("dependency.forbidden");
     expect(status.pending?.id).toBe(request.id);

@@ -15,7 +15,7 @@
  *
  * Whatever the call says, the isolate gets no network and an empty env:
  * this module sets both, and the sandbox host's settings, with one flag a
- * call may add: `nodejs_compat`, for core's own screen compiler. Core's
+ * call may add: `nodejs_compat`, for core's own App compiler. Core's
  * platform modules (the compiler, the package builder: JavaScript, JSON
  * and WebAssembly, far larger than a message) come as their sizes, and
  * this module reads each through a reader core passed with the call, a
@@ -78,7 +78,7 @@ interface SessionCall {
   /** Whether the isolate gets `nodejs_compat`, the one flag a call may add. */
   nodejsCompat: boolean;
   /**
-   * Core's own platform modules (the screen compiler, the package
+   * Core's own platform modules (the App compiler, the package
    * builder), too large for one message or not JavaScript, read through
    * the function capability `moduleReader` names.
    */

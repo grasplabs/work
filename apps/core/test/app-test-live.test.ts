@@ -180,7 +180,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       const theirs = await other.subscribe(api.notes.list, page);
       const createdId = await owner.mutation(api.notes.create, { title: "Mine" });
       await mine.next((p) => p.items.some((note) => note._id === createdId));
-      const seen = [];
+      const seen: string[] = [];
       await other.mutation(api.notes.create, { title: "Theirs" });
       const last = await theirs.next((p) => {
         seen.push(...p.items.map((note) => note._id));

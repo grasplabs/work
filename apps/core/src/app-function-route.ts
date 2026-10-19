@@ -192,6 +192,9 @@ export const statusOf = (code: string): number => {
   if (code === "screen.rate_limited") {
     return 429;
   }
+  if (code === "request.timeout") {
+    return 408;
+  }
   if (code.startsWith("auth.")) {
     return 401;
   }

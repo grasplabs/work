@@ -36,9 +36,11 @@ import {
   teams,
   workflowBindingApprovals,
 } from "./db/core/schema.ts";
+import { collections } from "./db/knowledge/schema.ts";
 import { gatewaySettings } from "./models.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
-import { isRestricted } from "./restricted.ts";
+import { pinnedTemplate } from "./resource-templates.ts";
+import { isRestricted, restrict } from "./restricted.ts";
 import {
   auditStoreRefusal,
   callStoreOperation,
@@ -152,6 +154,45 @@ const actionsOf = (row: { actions: string }): string[] => {
   return Array.isArray(parsed)
     ? parsed.filter((action): action is string => typeof action === "string")
     : [];
+};
+
+/**
+ * Refuses a knowledge target unless it names a permission workflow `id`
+ * itself holds, active, on a Knowledge collection, allowing `read`
+ * (GRA-700). Each call reads through it again, as the person its run acts
+ * for may read too (workflows/resource-calls.ts). A collection no delegate
+ * may ever read is refused too, as Knowledge's own `collectionsAllowed`
+ * leaves it out: one deleted, one only its owner reads (`me`), or one
+ * only admins read.
+ */
+const requireKnowledgeServes = async (
+  env: Env,
+  id: string,
+  target: Extract<WorkflowBindingTarget, { kind: "knowledge" }>
+): Promise<void> => {
+  const row = await workflowPermission(env, id, target.permissionId);
+  if (
+    row?.objectType !== "collection" ||
+    row.chatId !== null ||
+    !actionsOf(row).includes("read")
+  ) {
+    throw invalid(
+      "target.permissionId: The workflow holds no permission to read a collection."
+    );
+  }
+  const collection = await drizzle(env.KNOWLEDGE)
+    .select({ access: collections.access })
+    .from(collections)
+    .where(eq(collections.id, row.objectId))
+    .get();
+  if (collection === undefined) {
+    throw invalid("target.permissionId: That collection no longer exists.");
+  }
+  if (collection.access === "me" || collection.access === "admins") {
+    throw invalid(
+      "target.permissionId: A workflow can't read a personal or admins-only collection."
+    );
+  }
 };
 
 /**
@@ -436,12 +477,12 @@ const requireApprovalActive = async (
  * again for the call (`requireStoreOperationServes`); anything that no
  * longer serves is `resource.unavailable`, and nothing runs. The call
  * itself runs as store-operations.ts runs it, as `caller.principal`, its
- * receipts scoped to the workflow. An independent workflow keeps no
- * restricted mode of its own yet (a work context is a chat, an App or an
- * App's run), so it gets nothing from a store whose App is restricted:
- * the call is refused, and recorded, before it runs or before its answer
- * reaches the workflow. Once workflows keep the flag, this carries it as
- * an App's store resource does (resource-store.ts).
+ * receipts scoped to the workflow. A run that isn't restricted gets
+ * nothing from a store whose App is restricted: the call is refused, and
+ * recorded, before it runs or before its answer reaches the workflow. A
+ * restricted run (`restrictedRun`, its ID) restricts the store's App
+ * before its input reaches the store, as the run may carry what its
+ * start read restricted (restricted.ts).
  */
 export const callApprovedStoreOperation = async (
   env: Env,
@@ -449,7 +490,14 @@ export const callApprovedStoreOperation = async (
     id,
     version,
     approval,
-  }: { id: string; version: number; approval: WorkflowBindingApproval },
+    restrictedRun,
+  }: {
+    id: string;
+    version: number;
+    approval: WorkflowBindingApproval;
+    /** The run's ID, for a run in restricted mode; null for any other. */
+    restrictedRun: string | null;
+  },
   args: Json,
   caller: StoreOperationCaller
 ): Promise<Json> => {
@@ -486,10 +534,11 @@ export const callApprovedStoreOperation = async (
     }
     throw error;
   }
-  // An independent workflow keeps no restricted mode, so it may not hold
-  // what a restricted store App read: refused while the store's App is
-  // restricted, before the call and again before its answer, or refusal,
-  // reaches the workflow (where its connectors would carry it out).
+  // A run that isn't restricted may not hold what a restricted store App
+  // read: refused while the store's App is restricted, before the call
+  // and again before its answer, or refusal, reaches the workflow (where
+  // its connectors would carry it out). A restricted run's input may
+  // carry what its start read: the store's App is restricted first.
   const { owner, release } = resolved.served;
   const ownerAuthority: Authority = {
     subject: { type: "app", appId: owner },
@@ -498,6 +547,9 @@ export const callApprovedStoreOperation = async (
     appVersion: release.manifest.resourceVersion,
   };
   const requireUnrestricted = async (): Promise<void> => {
+    if (restrictedRun !== null) {
+      return;
+    }
     if (
       await isRestricted(env, ownerAuthority, { type: "app", appId: owner })
     ) {
@@ -512,6 +564,11 @@ export const callApprovedStoreOperation = async (
       throw operationErrors.create("resource.unavailable");
     }
   };
+  if (restrictedRun !== null) {
+    await restrict(env, ownerAuthority, { type: "app", appId: owner }, [
+      `workflow_run:${restrictedRun}`,
+    ]);
+  }
   await requireUnrestricted();
   let answer: Json;
   try {
@@ -606,6 +663,25 @@ export const requireTargetServes = async (
       // what data, and every send is checked on its own.
       break;
     }
+    case "knowledge": {
+      await requireKnowledgeServes(env, id, target);
+      return;
+    }
+    case "template": {
+      if (
+        (await pinnedTemplate(
+          env,
+          target.templateId,
+          target.version,
+          target.contentHash
+        )) === undefined
+      ) {
+        throw invalid(
+          "target.contentHash: No published template version has that content now."
+        );
+      }
+      return;
+    }
     default: {
       target satisfies never;
     }
@@ -651,6 +727,17 @@ const targetDetail = (
     }
     case "event": {
       return { targetKind: target.kind };
+    }
+    case "knowledge": {
+      return { targetKind: target.kind, permissionId: target.permissionId };
+    }
+    case "template": {
+      return {
+        targetKind: target.kind,
+        templateId: target.templateId,
+        version: target.version,
+        contentHash: target.contentHash,
+      };
     }
     default: {
       return target satisfies never;

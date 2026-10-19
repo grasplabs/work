@@ -2,6 +2,7 @@ import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
+import { BrainRpc } from "./brain-rpc.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
@@ -49,6 +50,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #check: SessionCheck;
   readonly #apps: AppsRpc;
   readonly #knowledge: KnowledgeRpc;
+  readonly #brain: BrainRpc;
   readonly #knowledgeSignals: KnowledgeSignalsRpc;
   readonly #memory: MemoryRpc;
   readonly #uploads: UploadsRpc;
@@ -86,6 +88,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     const full = fullAccess(check);
     this.#apps = new AppsRpc(env, full);
     this.#knowledge = new KnowledgeRpc(env, full);
+    this.#brain = new BrainRpc(env, full);
     this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
     this.#memory = new MemoryRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
@@ -150,6 +153,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get knowledge(): KnowledgeRpc {
     return this.#knowledge;
+  }
+
+  get brain(): BrainRpc {
+    return this.#brain;
   }
 
   get knowledgeSignals(): KnowledgeSignalsRpc {

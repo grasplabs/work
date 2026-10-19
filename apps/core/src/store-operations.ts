@@ -324,7 +324,7 @@ export const storeOperationFor = async (
  * the operation it declares so (`contractFingerprint`).
  */
 export const declaredFingerprint = async (shape: {
-  kind: "query" | "mutation";
+  kind: "query" | "mutation" | "action";
   args: OperationManifest["args"];
   returns: OperationManifest["returns"];
 }): Promise<string> =>
@@ -347,7 +347,7 @@ export const servedFingerprint = async (
   await sha256Hex(canonicalJson({ storeId, operations: { ...fingerprints } }));
 
 /** The receipt of a failed call, as the consumer's code may see it. */
-const consumerFailure = (error: AppErrorPayload): Error => {
+export const consumerFailure = (error: AppErrorPayload): Error => {
   // Whether it changed anything is unknown: never run again under a new key.
   if (error.category === "uncertain") {
     return effectErrors.create("effect.outcome_unknown");

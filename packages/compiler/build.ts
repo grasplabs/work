@@ -1,5 +1,5 @@
 /**
- * Builds the screen compiler into dist/, once per release at core's build
+ * Builds the App compiler into dist/, once per release at core's build
  * time: the kit's modules, what the compiler needs to know of the kit, and
  * the compiler that runs in its own isolate. Core imports the result
  * through `#isolate`.
@@ -49,13 +49,19 @@ import {
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
 import { platformModules } from "./src/packages/platform.ts";
-import { compilerOptions } from "./src/type-check.ts";
+import { compilerOptions, serverLibs } from "./src/type-check.ts";
 
 const root = import.meta.dirname;
 const dist = path.join(root, "dist");
 const modules = path.join(root, "node_modules");
 const ui = realpathSync(path.join(modules, "@grasp-os/ui"));
 const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
+/**
+ * The SDK's own dependency: its types name `@grasp-os/shared`'s (a
+ * workflow's `emailMessage`, a run's errors), so the kit's types hold
+ * them, or a check would read each as `any`.
+ */
+const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
 const require = createRequire(path.join(root, "package.json"));
 
 /** React as the kit's modules, App modules and packages import it. */
@@ -525,8 +531,14 @@ const declaration = /\.d\.[cm]?ts$/u;
  */
 const collectTypes = (specifiers: string[]): Record<string, string> => {
   const entry = path.join(root, "kit-types.ts");
-  // Third-party declarations can have errors that don't matter here.
-  const options = { ...compilerOptions, skipLibCheck: true };
+  // Third-party declarations can have errors that don't matter here. The
+  // worker lib too: what an App's server code is checked against
+  // (type-check.ts `serverTarget`), which no screen is.
+  const options = {
+    ...compilerOptions,
+    skipLibCheck: true,
+    lib: [...(compilerOptions.lib ?? []), ...serverLibs],
+  };
   const host = ts.createCompilerHost(options);
   const read = new Map<string, string>();
   const readFile = host.readFile.bind(host);
@@ -562,6 +574,8 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
       name = `/node_modules/@grasp-os/ui${real.slice(ui.length)}`;
     } else if (real.startsWith(`${sdk}/`)) {
       name = `/node_modules/@grasp-os/sdk${real.slice(sdk.length)}`;
+    } else if (real.startsWith(`${shared}/`)) {
+      name = `/node_modules/@grasp-os/shared${real.slice(shared.length)}`;
     } else if (inPackage === real) {
       // The compiler's own package.json, read for the entry.
       continue;
@@ -866,7 +880,7 @@ const pruneReleases = (assets: string): void => {
  * Everything it reads, it reads here, after the caller took the build's
  * lock (build-lock.ts).
  */
-const buildScreenCompiler = async (
+const buildAppCompiler = async (
   assets: string,
   versionModule: string
 ): Promise<void> => {
@@ -901,12 +915,21 @@ const buildScreenCompiler = async (
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
     // Generated workflow code and compute modules are type-checked against
-    // their SDK entries too.
+    // their SDK entries too, and an App's server code against the SDK's
+    // server side.
     types: collectTypes([
       ...imports,
       "lucide-react",
       ...openWorkflowSdkImports,
       ...computeSdkImports,
+      // An App's server code is type-checked against what it and its
+      // generated modules import (app-code.ts).
+      ...serverSdkImports,
+      "@grasp-os/sdk/database",
+      // And its tests, against the SDK's testing module (app-code.ts).
+      "@grasp-os/sdk/testing",
+      // And its workflows, against the SDK's workflow modules.
+      ...sdkImports,
     ]),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.
@@ -967,7 +990,7 @@ const buildScreenCompiler = async (
   pruneReleases(assets);
   const kitSize = Object.values(kitCode).join("").length;
   console.info(
-    `Screen compiler ${version}: ${(compiler.length / 1e6).toFixed(1)} MB and ${(kitJson.length / 1e6).toFixed(1)} MB of what it knows of the kit; kit ${kitModules.version}: ${Object.keys(kitCode).length} modules, ${(kitSize / 1e6).toFixed(1)} MB`
+    `App compiler ${version}: ${(compiler.length / 1e6).toFixed(1)} MB and ${(kitJson.length / 1e6).toFixed(1)} MB of what it knows of the kit; kit ${kitModules.version}: ${Object.keys(kitCode).length} modules, ${(kitSize / 1e6).toFixed(1)} MB`
   );
 };
 
@@ -979,5 +1002,5 @@ const buildScreenCompiler = async (
 const assets = process.argv[2] ?? path.join(dist, "assets");
 const versionModule = process.argv[3] ?? releaseVersionModule;
 await withBuildLock(assets, async () => {
-  await buildScreenCompiler(assets, versionModule);
+  await buildAppCompiler(assets, versionModule);
 });
