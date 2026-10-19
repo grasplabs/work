@@ -264,11 +264,15 @@ describe(live, () => {
     stop();
     expect({
       atRelease,
-      refusal: ended.filter((each) => each !== "let go"),
+      // The refusal stays the last word, however its refused attempt's
+      // callback is let go of: before the refusal arrives, or after.
+      last: ended.at(-1),
+      refusals: ended.filter((each) => each !== "let go"),
       tries: page.refused,
     }).toStrictEqual({
       atRelease: ["let go"],
-      refusal: ["screen.revoked"],
+      last: "screen.revoked",
+      refusals: ["screen.revoked"],
       tries: 1,
     });
   });
@@ -439,6 +443,9 @@ describe(followRuns, () => {
     await settle();
     const reads = page.reads.length;
     await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    // Told a run changed after: it reads no more.
+    await push(name);
     await settle();
     stop();
     expect({

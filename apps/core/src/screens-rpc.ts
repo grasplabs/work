@@ -733,6 +733,18 @@ const errorLog = async (
   return await appHost(env, id).errors();
 };
 
+/**
+ * Waits for `read` however it ends, for a look that no longer needs its
+ * answer (no role): so a failure of it is never left unhandled.
+ */
+const drained = async (read: Promise<unknown>): Promise<void> => {
+  try {
+    await read;
+  } catch {
+    // Nobody reads its answer.
+  }
+};
+
 /** What a frame's capability shares with its connection (`ScreensRpc`). */
 interface FrameConnection {
   readonly env: Env;
@@ -816,17 +828,25 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
         connection.queries.follow(by, id, look, lose),
       lookOpen: (by, id, build, operation) => {
         const hasRole = connection.stillOpen(id);
-        return async () =>
-          !this.#closed &&
-          (await hasRole()) &&
-          (await deliveryAt(
-            env,
-            by,
-            id,
-            build,
-            { operation, stage: "push" },
-            connection.standingNow(id, build)
-          )) === "open";
+        return async () => {
+          // Begun before anything is awaited: shared with the other looks
+          // of this revocation, and only with them (`standingNow`).
+          const read = connection.standingNow(id, build);
+          if (this.#closed || !(await hasRole())) {
+            await drained(read);
+            return false;
+          }
+          return (
+            (await deliveryAt(
+              env,
+              by,
+              id,
+              build,
+              { operation, stage: "push" },
+              read
+            )) === "open"
+          );
+        };
       },
       kept: connection.kept,
     };
@@ -1124,16 +1144,25 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     follow: (by, app, look, lose) => this.#queries.follow(by, app, look, lose),
     lookOpen: (by, app, artifact, operation) => {
       const hasRole = this.#stillOpen(app);
-      return async () =>
-        (await hasRole()) &&
-        (await deliveryAt(
-          this.#env,
-          by,
-          app,
-          artifact,
-          { operation, stage: "push" },
-          this.#standingNow(app, artifact)
-        )) === "open";
+      return async () => {
+        // Begun before anything is awaited: shared with the other looks
+        // of this revocation, and only with them (`#standingNow`).
+        const read = this.#standingNow(app, artifact);
+        if (!(await hasRole())) {
+          await drained(read);
+          return false;
+        }
+        return (
+          (await deliveryAt(
+            this.#env,
+            by,
+            app,
+            artifact,
+            { operation, stage: "push" },
+            read
+          )) === "open"
+        );
+      };
     },
     kept: this.#kept,
   };
@@ -1161,9 +1190,10 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
 
   /**
    * What core holds now for `artifact` of `app` (`standingOf`), read once
-   * for every look that asks while a read is on its way: the looks a
-   * revocation starts all ask at once, so it costs one read per build.
-   * Never kept past its answer, so a later look reads afresh.
+   * for every look that asks in the same turn: a revocation starts all
+   * its looks at once, so it costs one read per build. Shared only within
+   * that turn, never with a read begun before, which may predate the
+   * revocation a look checks.
    */
   async #standingNow(
     app: AppId,
@@ -1176,13 +1206,12 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     }
     const read = standingOf(this.#env, app, artifact);
     this.#standings.set(key, read);
-    try {
-      return await read;
-    } finally {
+    queueMicrotask(() => {
       if (this.#standings.get(key) === read) {
         this.#standings.delete(key);
       }
-    }
+    });
+    return await read;
   }
 
   /**

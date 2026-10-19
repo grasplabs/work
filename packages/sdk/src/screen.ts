@@ -152,6 +152,9 @@ const follow = (
     if (stopped) {
       return;
     }
+    // This attempt refused: its callback, let go of after, ends nothing
+    // more, so the refusal stays what the screen shows.
+    let failed = false;
     // Cap'n Web disposes a callback once nothing can call it any more: the
     // connection to core dropped, the subscription failed, or the server
     // dropped it after it rejected a value.
@@ -168,7 +171,9 @@ const follow = (
           if (stopped) {
             return;
           }
-          onEnded?.();
+          if (!failed) {
+            onEnded?.();
+          }
           if (!refused) {
             retry = setTimeout(() => {
               void again();
@@ -187,6 +192,7 @@ const follow = (
       if (stopped) {
         return;
       }
+      failed = true;
       if (refusedData(error)) {
         onEnded?.(error);
         if (finalRefusals.has(codeOf(error) ?? "")) {
@@ -557,10 +563,16 @@ export const followRuns = (
   onRefused?: (refusal: Error) => void
 ): (() => void) => {
   let stopped = false;
+  // Refused for good (`finalRefusals`): it reads no more, whatever core
+  // says next.
+  let finished = false;
   let started = 0;
   let shown = 0;
   let retry: ReturnType<typeof setTimeout> | undefined;
   const read = async (delay: number): Promise<void> => {
+    if (finished) {
+      return;
+    }
     clearTimeout(retry);
     retry = undefined;
     started += 1;
@@ -581,6 +593,7 @@ export const followRuns = (
           onRefused?.(asError(error));
         }
         if (finalRefusals.has(codeOf(error) ?? "")) {
+          finished = true;
           return;
         }
       } else {
@@ -633,6 +646,8 @@ export const followRun = (
   onRefused?: (refusal: Error) => void
 ): (() => void) => {
   let stopped = false;
+  // Refused for good, as `followRuns` is.
+  let finished = false;
   let started = 0;
   let shown = 0;
   let retry: ReturnType<typeof setTimeout> | undefined;
@@ -643,6 +658,9 @@ export const followRun = (
     }
   };
   const read = async (delay: number): Promise<void> => {
+    if (finished) {
+      return;
+    }
     clearTimeout(retry);
     retry = undefined;
     started += 1;
@@ -663,6 +681,7 @@ export const followRun = (
           onRefused?.(asError(error));
         }
         if (finalRefusals.has(codeOf(error) ?? "")) {
+          finished = true;
           return;
         }
       } else {
