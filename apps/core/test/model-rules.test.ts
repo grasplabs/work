@@ -882,7 +882,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         status: "failed",
         error: {
           message:
-            "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+            "This workflow's model budget for the month is used up, so it can make no more model calls until the budget resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
         },
       },
     ]);
@@ -1117,7 +1117,16 @@ describe("model rules", { timeout: 60_000 }, () => {
       ])
     ).resolves.toMatchObject([
       { status: "completed", output: { total: 1234 } },
-      { status: "failed", failure: { error: { code: "model.over_budget" } } },
+      {
+        status: "failed",
+        failure: {
+          error: {
+            code: "model.over_budget",
+            message:
+              "This model binding's budget for the day is used up, so the App can make no more calls through it until the budget resets at midnight (UTC). Ask your admin to raise the binding's daily budget.",
+          },
+        },
+      },
     ]);
     const refusals = await eventsOf(
       runActorOf({ runId: runs.stopped, app, workflow: "reader" })
@@ -1402,7 +1411,13 @@ ${llm("retries: { limit: 2, delay: 1 },")}`,
     }).toMatchObject({
       run: {
         status: "failed",
-        failure: { error: { code: "model.over_budget" } },
+        failure: {
+          error: {
+            code: "model.over_budget",
+            message:
+              "This model call could cost more than this model binding's cap per request has room for, so it was stopped before it went out. Send less, or ask your admin to raise the binding's budget per request.",
+          },
+        },
       },
       sent: 0,
       refused: [["model.over_budget", "binding_request"]],
