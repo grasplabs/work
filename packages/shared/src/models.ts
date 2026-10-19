@@ -11,7 +11,7 @@ export const modelErrors = defineErrorFamily({
   "model.sensitive_data":
     "This call carries sensitive data, and that model may not take it. Choose one this deployment allows for sensitive data.",
   "model.over_budget":
-    "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+    "A model budget this call counts against is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
   "model.run_limit":
     "This workflow run, with the runs it started, has reached the most model calls or model spend one run may have: spent, or held for calls whose cost isn't settled yet. No more model calls can be made in it.",
   "model.budget_busy":
@@ -64,6 +64,51 @@ export interface ModelEfforts {
  * each run lineage's (a run and the runs it starts).
  */
 export type ModelBudgetScope = "deployment" | "workflow" | "user" | "run";
+
+/**
+ * What can refuse a call as over its budget (`model.over_budget`'s
+ * `because`): one of the deployment's budgets ({@link ModelBudgetScope}),
+ * or one of a model binding's caps, for its month, its UTC day or one
+ * request.
+ */
+export type ModelBudgetCap =
+  | ModelBudgetScope
+  | "binding"
+  | "binding_day"
+  | "binding_request";
+
+/**
+ * What a `model.over_budget` refusal says, by the cap that refused it:
+ * what is used up, and when it resets, or that no wait helps.
+ */
+const overBudgetMessages: Readonly<Record<ModelBudgetCap, string>> = {
+  deployment:
+    "This deployment's model budget for the month is used up, so no more model calls can be made until it resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
+  workflow:
+    "This workflow's model budget for the month is used up, so it can make no more model calls until the budget resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
+  user: "The model budget for the month of the person this call is made for is used up, so no more model calls can be made for them until it resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
+  run: "This workflow run, with the runs it started, has used up the model budget one run may spend, so no more model calls can be made in it.",
+  binding:
+    "This model binding's budget for the month is used up, so the App can make no more calls through it until the budget resets at the start of next month (UTC). Ask your admin to raise the binding's monthly budget.",
+  binding_day:
+    "This model binding's budget for the day is used up, so the App can make no more calls through it until the budget resets at midnight (UTC). Ask your admin to raise the binding's daily budget.",
+  binding_request:
+    "This request could cost more than this model binding allows one request to cost, so it wasn't sent. Send less, or ask your admin to raise the binding's budget per request.",
+};
+
+/** Whether `value` names a {@link ModelBudgetCap}. */
+const isModelBudgetCap = (value: unknown): value is ModelBudgetCap =>
+  typeof value === "string" && Object.hasOwn(overBudgetMessages, value);
+
+/**
+ * What a `model.over_budget` refusal says when the cap that refused it,
+ * `because`, may be told: that cap's own message, or the family's, which
+ * names none.
+ */
+export const overBudgetMessage = (because: unknown): string =>
+  isModelBudgetCap(because)
+    ? overBudgetMessages[because]
+    : modelErrors.create("model.over_budget").message;
 
 /** What spent part of a budget this month, with its name where core has one. */
 export type ModelSpender =
