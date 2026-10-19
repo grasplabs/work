@@ -639,6 +639,13 @@ const requireObjectFits = (
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
   if (
+    subject.type === "trigger" &&
+    (object.type !== "workflow" ||
+      !actions.every((action) => action === "start"))
+  ) {
+    refuseRequest("object: A trigger only starts a workflow.");
+  }
+  if (
     object.type === "collection" &&
     subject.type !== "agent" &&
     actions.includes("write")
@@ -646,13 +653,6 @@ const requireObjectFits = (
     refuseRequest(
       "actions: Only an agent writes a collection. An App, a workflow or a store reads it, and keeps what it writes in a store."
     );
-  }
-  if (
-    subject.type === "trigger" &&
-    (object.type !== "workflow" ||
-      !actions.every((action) => action === "start"))
-  ) {
-    refuseRequest("object: A trigger only starts a workflow.");
   }
   if (
     subject.type === "store" &&
@@ -910,8 +910,10 @@ export const declarableOf = async (
       )
     )
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
+  // Refused, as a request would be, when one is no longer declarable (a
+  // collection to write, which no App does): never an internal error.
   return rows.map((row) =>
-    declaredPermissionSchema.parse({
+    permissionErrors.parse("permission.invalid", declaredPermissionSchema, {
       object: objectOf(row),
       actions: stringListSchema.parse(JSON.parse(row.actions)),
       binding: row.binding,
@@ -932,7 +934,18 @@ export const declaredRequests = (
   blueprint: string
 ): { rows: Row[]; entries: AuditEntry[] } => {
   const requestedAt = new Date();
-  const rows = declared.map(({ object, actions, binding }): Row => ({
+  // Checked again as each is asked for: a blueprint keeps what it declared
+  // when it was marked, and what may be declared has narrowed since (a
+  // collection only to read), so none is asked for that a request would be
+  // refused.
+  const checked = declared.map((permission) =>
+    permissionErrors.parse(
+      "permission.invalid",
+      declaredPermissionSchema,
+      permission
+    )
+  );
+  const rows = checked.map(({ object, actions, binding }): Row => ({
     id: crypto.randomUUID(),
     ...subjectColumns({ type: "app", appId: app }),
     ...objectColumns(object),
