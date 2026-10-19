@@ -932,10 +932,16 @@ export const reviewedTasksOf = async (
   }
   const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
   const text = entry === undefined ? undefined : await artifactText(env, entry);
-  const tasks =
-    text === undefined
-      ? undefined
-      : tasksFileSchema.safeParse(JSON.parse(text)).data?.tasks;
+  let tasks: readonly SealedTask[] | undefined;
+  try {
+    tasks =
+      text === undefined
+        ? undefined
+        : tasksFileSchema.safeParse(JSON.parse(text)).data?.tasks;
+  } catch {
+    // Sealed bytes that aren't JSON: corrupt, as ones of the wrong shape.
+    tasks = undefined;
+  }
   if (tasks === undefined) {
     throw corrupt(id, version, tasksArtifact);
   }
