@@ -116,6 +116,7 @@ const proposalFor = (
   targets: ["browser"],
   graph: charts(),
   findings: [],
+  findingsTotal: 0,
   refused: [],
   ...changes,
 });
@@ -240,6 +241,8 @@ describe("dependency approval", () => {
           summary: "ISC",
         },
       ],
+      // More were found than the request keeps: the count says so.
+      findingsTotal: 5,
       refused: [
         {
           package: { name: "charts", version: "3.1.0" },
@@ -282,7 +285,7 @@ describe("dependency approval", () => {
       targets: ["browser", "server"],
       // Core's own hash of the packages, never one the request states.
       graphHash: await dependencyGraphHash(graph),
-      counts: { direct: 1, packages: 2, findings: 2, refused: 1 },
+      counts: { direct: 1, packages: 2, findings: 5, refused: 1 },
       // What a list shows of it: the gravest findings first.
       summary: {
         direct: ["charts@3.1.0"],
@@ -342,7 +345,7 @@ describe("dependency approval", () => {
           targets: "browser server",
           direct: 1,
           packages: 2,
-          findings: 2,
+          findings: 5,
           refused: 1,
           requestedBy: builder.userId,
           policyGeneration: request.policyGeneration,
@@ -606,6 +609,18 @@ describe("dependency approval", () => {
             summary: "Not in the graph",
           },
         ],
+      }),
+      fewerFoundThanKept: proposalFor(app, {
+        findings: [
+          {
+            kind: "license",
+            package: { name: "d3-scale", version: "4.0.2" },
+            severity: "info",
+            id: null,
+            summary: "ISC",
+          },
+        ],
+        findingsTotal: 0,
       }),
       noTargets: proposalFor(app, { targets: [] }),
       unknownTarget: { ...proposalFor(app), targets: ["native"] },

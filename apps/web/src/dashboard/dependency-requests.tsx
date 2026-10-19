@@ -49,6 +49,7 @@ export const targetNames: Record<DependencyTarget, MessageDescriptor> = {
 const findingKinds: Record<DependencyFinding["kind"], MessageDescriptor> = {
   license: msg({ message: "Licence", context: "kind of finding" }),
   security: msg({ message: "Security", context: "kind of finding" }),
+  lookalike: msg({ message: "Lookalike name", context: "kind of finding" }),
 };
 
 const severities: Record<DependencyFinding["severity"], MessageDescriptor> = {
@@ -59,6 +60,27 @@ const severities: Record<DependencyFinding["severity"], MessageDescriptor> = {
   critical: msg({ message: "Critical", context: "severity of a finding" }),
 };
 
+/** A GitHub advisory's ID, as GitHub publishes each. */
+const githubAdvisoryId = /^GHSA(?:-[23456789cfghjmpqrvwx]{4}){3}$/u;
+
+/**
+ * What names a finding elsewhere: a GitHub advisory's ID links to it on
+ * GitHub, where it can be read in full; any other ID is shown as it is.
+ */
+const AdvisoryId = ({ id }: { id: string }) =>
+  githubAdvisoryId.test(id) ? (
+    <a
+      className="underline"
+      href={`https://github.com/advisories/${id}`}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      {id}
+    </a>
+  ) : (
+    <span className="text-muted-foreground">{id}</span>
+  );
+
 /** What was reported of a request's packages, each as text. */
 const Findings = ({ findings }: { findings: readonly DependencyFinding[] }) => {
   const { t } = useLingui();
@@ -68,12 +90,18 @@ const Findings = ({ findings }: { findings: readonly DependencyFinding[] }) => {
         const kind = i18n._(findingKinds[finding.kind]);
         const severity = i18n._(severities[finding.severity]);
         const about = packageKey(finding.package);
-        const { summary } = finding;
+        const { summary, id } = finding;
         return (
-          <li key={`${finding.kind} ${about} ${finding.id} ${summary}`}>
+          <li key={`${finding.kind} ${about} ${id} ${summary}`}>
             <Trans>
               {kind}, {severity}, {about}: {summary}
             </Trans>
+            {id === null ? null : (
+              <>
+                {" "}
+                <AdvisoryId id={id} />
+              </>
+            )}
           </li>
         );
       })}
@@ -121,6 +149,15 @@ const Packages = ({ review }: { review: DependencyReview }) => {
       {review.findings.length === 0 ? null : (
         <Findings findings={review.findings} />
       )}
+      {review.counts.findings > review.findings.length ? (
+        <p className="text-muted-foreground">
+          <Plural
+            value={review.counts.findings - review.findings.length}
+            one="# more finding not shown: only the gravest are kept."
+            other="# more findings not shown: only the gravest are kept."
+          />
+        </p>
+      ) : null}
       {review.refused.length === 0 ? null : (
         <ul
           aria-label={t`What Grasp refuses to run`}

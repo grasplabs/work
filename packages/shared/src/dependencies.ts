@@ -276,7 +276,8 @@ export type DependencyGraph = z.infer<typeof dependencyGraphSchema>;
  * graph without findings isn't shown to be safe.
  */
 const findingSchema = z.strictObject({
-  kind: z.enum(["license", "security"]),
+  /** `lookalike`: named like a popular package (GRA-699). */
+  kind: z.enum(["license", "security", "lookalike"]),
   package: packageRefSchema,
   severity: z.enum(["info", "low", "moderate", "high", "critical"]),
   /** What names it elsewhere, such as an advisory's ID. */
@@ -284,6 +285,11 @@ const findingSchema = z.strictObject({
   summary: z.string().min(1).max(300),
 });
 export type DependencyFinding = z.infer<typeof findingSchema>;
+
+/** How grave each severity is: findings are shown, and kept, gravest first. */
+export const findingGravity: Readonly<
+  Record<DependencyFinding["severity"], number>
+> = { critical: 4, high: 3, moderate: 2, low: 1, info: 0 };
 
 /** Something a package needs to run that the platform refuses, such as an install script. */
 const refusedSchema = z.strictObject({
@@ -325,11 +331,24 @@ export const dependencyProposalSchema = z
     /** Where the packages would run. */
     targets: uniqueTargets,
     graph: dependencyGraphSchema,
+    /** The gravest findings, at most `dependencyMaxFindings`. */
     findings: z.array(findingSchema).max(dependencyMaxFindings),
+    /** How many findings there were before the gravest were kept. */
+    findingsTotal: z.int().min(0),
     refused: z.array(refusedSchema).max(dependencyMaxRefused),
   })
   .superRefine(
-    ({ app, workflow, targets, graph, findings, refused }, context) => {
+    (
+      { app, workflow, targets, graph, findings, findingsTotal, refused },
+      context
+    ) => {
+      if (findingsTotal < findings.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["findingsTotal"],
+          message: "At least the findings kept",
+        });
+      }
       if ((app === undefined) === (workflow === undefined)) {
         context.addIssue({
           code: "custom",
@@ -673,6 +692,8 @@ export const dependencyErrors = defineErrorFamily({
     "Who approves dependencies, or what is approved, changed. Read the status again.",
   "dependency.retired":
     "These packages were retired for this App or workflow: what was built with them keeps working, but nothing new is built. Someone with the permission to approve dependencies can approve them again.",
+  "dependency.malware":
+    "A package is known malware, so Grasp refuses it: no approval can admit it. Remove it, and whatever brings it in.",
   "dependency.revoked":
     "These packages were revoked for this App or workflow and can't be used. Someone with the permission to approve dependencies can approve them again after a new review.",
 });

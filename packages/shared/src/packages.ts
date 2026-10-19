@@ -44,6 +44,10 @@ export const registryLimits = {
   textLength: 256,
   /** Most dependencies, peers or optional dependencies a version may list. */
   edges: 256,
+  /** The registry's answer of advisories for one graph, as sent (GRA-699). */
+  advisoryBytes: 4 * 1024 * 1024,
+  /** Most advisories connect passes on for one package. */
+  advisoriesPerPackage: 1000,
 } as const;
 
 /** A dependency as a version lists it: the range, or whatever it names. */
@@ -102,6 +106,58 @@ export const npmTarballRequestSchema = z.strictObject({
 });
 export type NpmTarballRequest = z.infer<typeof npmTarballRequestSchema>;
 
+/**
+ * What to look up advisories for (GRA-699): each package of a graph by
+ * name, with its exact versions; at most a graph's packages in all.
+ */
+export const npmAdvisoriesRequestSchema = z
+  .record(
+    packageNameSchema,
+    z.array(exactVersionSchema).min(1).max(dependencyMaxPackages)
+  )
+  .refine(
+    (asked) =>
+      Object.values(asked).reduce(
+        (all, versions) => all + versions.length,
+        0
+      ) <= dependencyMaxPackages,
+    { message: `At most ${dependencyMaxPackages} versions` }
+  );
+export type NpmAdvisoriesRequest = z.infer<typeof npmAdvisoriesRequestSchema>;
+
+/** The severities the registry's advisories carry, as findings do. */
+export const advisorySeverities = [
+  "info",
+  "low",
+  "moderate",
+  "high",
+  "critical",
+] as const;
+
+/**
+ * One advisory the registry knows for a package, as connect passes it on:
+ * which one (its GitHub advisory ID, or the registry's own number), how
+ * grave, its title, and the range of versions it affects, which core
+ * holds each version to. Nothing else of what the registry sends.
+ */
+export const npmAdvisorySchema = z.strictObject({
+  id: z.string().min(1).max(128),
+  severity: z.enum(advisorySeverities),
+  title: z.string().min(1).max(300),
+  vulnerableVersions: z.string().min(1).max(registryLimits.textLength),
+  /**
+   * Whether it reports the package as malware: classified CWE-506,
+   * Embedded Malicious Code, the closest the registry's bulk answer comes
+   * to a malware verdict (it carries no type). Core refuses a graph with
+   * a version it affects (GRA-699, Nick's decision of 2026-10-19).
+   */
+  malware: z.boolean(),
+});
+export type NpmAdvisory = z.infer<typeof npmAdvisorySchema>;
+
+/** The advisories of each package asked about, by name: only those. */
+export type NpmAdvisories = Record<string, NpmAdvisory[]>;
+
 /** The registry, as connect reaches it for core. */
 export interface PackageRegistryApi {
   /** A package's metadata, or `package.not_found`. */
@@ -111,6 +167,13 @@ export interface PackageRegistryApi {
    * `package.integrity_mismatch` when the registry sent others.
    */
   npmTarball: (request: NpmTarballRequest) => Promise<Uint8Array>;
+  /**
+   * The advisories the registry knows for the packages `request` names
+   * (GRA-699), or `package.registry_unavailable`: never an empty answer
+   * for one it couldn't read. `package.advisories_unchecked` for a request
+   * naming `constructor`, which the registry never answers.
+   */
+  npmAdvisories: (request: NpmAdvisoriesRequest) => Promise<NpmAdvisories>;
 }
 
 /** Why fetching, unpacking, resolving or building a package was refused. */
@@ -124,6 +187,8 @@ export const packageErrors = defineErrorFamily({
   "package.redirect_refused":
     "The registry sent the request somewhere other than the registry.",
   "package.too_large": "The package is larger than Grasp takes.",
+  "package.advisories_unchecked":
+    "Advisories can't be checked for constructor: the npm registry refuses to answer for a package of that name.",
   "package.integrity_mismatch":
     "The registry sent other bytes than the package's integrity hash names.",
   "package.unsupported_source":

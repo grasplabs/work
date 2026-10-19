@@ -814,3 +814,153 @@ describe("refusing metadata as busy", () => {
     });
   });
 });
+
+/** The registry's bulk advisory endpoint, as `npm audit` asks it. */
+const bulkPath = "/-/npm/v1/security/advisories/bulk";
+/** An advisory as the registry sends one. */
+const advisory = (more: Record<string, unknown> = {}) => ({
+  id: 1_096_302,
+  url: "https://github.com/advisories/GHSA-p6mc-m468-83gw",
+  title: "Prototype pollution in left-pad",
+  severity: "high",
+  vulnerable_versions: "<1.3.1",
+  cwe: ["CWE-1321"],
+  cvss: { score: 7.4 },
+  ...more,
+});
+
+describe("the registry's advisories, through connect", () => {
+  it("asks the registry's own bulk endpoint for the packages named, and passes on theirs, read for what core needs", async () => {
+    registry.advise("left-pad", advisory());
+    registry.advise(
+      "left-pad",
+      advisory({
+        id: 77,
+        url: undefined,
+        title: "x".repeat(400),
+        severity: "low",
+        // Embedded Malicious Code: malware.
+        cwe: ["CWE-912", "CWE-506"],
+      })
+    );
+    const answered = await connect.npmAdvisories({
+      "left-pad": ["1.3.0"],
+      clean: ["2.0.0"],
+    });
+    const [asked] = registry.asked;
+    const body: unknown = JSON.parse(asked?.body ?? "null");
+    // The registry never answers for a package named constructor.
+    const unchecked = await outcome(
+      connect.npmAdvisories({ constructor: ["1.0.0"], clean: ["2.0.0"] })
+    );
+    expect({
+      answered,
+      unchecked,
+      asked: {
+        method: asked?.method,
+        path: asked?.path,
+        body,
+        credentials: Object.keys(asked?.headers ?? {}).filter(
+          (header) => header === "authorization" || header === "cookie"
+        ),
+      },
+      elsewhere,
+    }).toStrictEqual({
+      answered: {
+        "left-pad": [
+          {
+            id: "GHSA-p6mc-m468-83gw",
+            severity: "high",
+            title: "Prototype pollution in left-pad",
+            vulnerableVersions: "<1.3.1",
+            malware: false,
+          },
+          {
+            id: "npm:77",
+            severity: "low",
+            title: "x".repeat(300),
+            vulnerableVersions: "<1.3.1",
+            malware: true,
+          },
+        ],
+      },
+      unchecked: "package.advisories_unchecked",
+      asked: {
+        method: "POST",
+        path: bulkPath,
+        body: { "left-pad": ["1.3.0"], clean: ["2.0.0"] },
+        credentials: [],
+      },
+      elsewhere: [],
+    });
+  });
+
+  it("keeps only the packages asked about, and fails, never answering none, on an answer it can't read", async () => {
+    registry.override(bulkPath, () =>
+      Response.json({ asked: [advisory()], unasked: [advisory()] })
+    );
+    const kept = await connect.npmAdvisories({ asked: ["1.0.0"] });
+    // A graph may hold many versions of one package: all asked at once.
+    const manyVersions = await connect.npmAdvisories({
+      asked: Array.from({ length: 65 }, (_, patch) => `1.0.${patch}`),
+    });
+    const failing = async (respond: () => Response) => {
+      registry.override(bulkPath, respond);
+      return await outcome(connect.npmAdvisories({ asked: ["1.0.0"] }));
+    };
+    expect({
+      kept: Object.keys(kept),
+      manyVersions: Object.keys(manyVersions),
+      unknownSeverity: await failing(() =>
+        Response.json({ asked: [advisory({ severity: "severe" })] })
+      ),
+      cweNotAList: await failing(() =>
+        Response.json({ asked: [advisory({ cwe: "CWE-506" })] })
+      ),
+      noRange: await failing(() =>
+        Response.json({ asked: [advisory({ vulnerable_versions: undefined })] })
+      ),
+      notJson: await failing(() => new Response("<html>")),
+      notARecord: await failing(() => Response.json([advisory()])),
+      tooMany: await failing(() =>
+        Response.json({
+          asked: Array.from(
+            { length: registryLimits.advisoriesPerPackage + 1 },
+            () => advisory()
+          ),
+        })
+      ),
+      tooLarge: await failing(() =>
+        Response.json({
+          asked: [
+            advisory({ title: "y".repeat(registryLimits.advisoryBytes) }),
+          ],
+        })
+      ),
+      failed: await failing(() => new Response("Unavailable", { status: 503 })),
+      redirected: await failing(
+        () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: `${registry.origin}${bulkPath}` },
+          })
+      ),
+      invalidName: await outcome(
+        connect.npmAdvisories({ "../etc": ["1.0.0"] })
+      ),
+    }).toStrictEqual({
+      kept: ["asked"],
+      manyVersions: ["asked"],
+      unknownSeverity: "package.registry_unavailable",
+      cweNotAList: "package.registry_unavailable",
+      noRange: "package.registry_unavailable",
+      notJson: "package.registry_unavailable",
+      notARecord: "package.registry_unavailable",
+      tooMany: "package.registry_unavailable",
+      tooLarge: "package.registry_unavailable",
+      failed: "package.registry_unavailable",
+      redirected: "package.registry_unavailable",
+      invalidName: "package.invalid",
+    });
+  });
+});

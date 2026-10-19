@@ -55,6 +55,11 @@ msgstr "{0, plural, one {# file changed in this chat, not proposed yet} other {#
 msgid "{0, plural, one {# finding reported} other {# findings reported}}"
 msgstr "{0, plural, one {# finding reported} other {# findings reported}}"
 
+#. placeholder {0}: review.counts.findings - review.findings.length
+#: src/dashboard/dependency-requests.tsx
+msgid "{0, plural, one {# more finding not shown: only the gravest are kept.} other {# more findings not shown: only the gravest are kept.}}"
+msgstr "{0, plural, one {# more finding not shown: only the gravest are kept.} other {# more findings not shown: only the gravest are kept.}}"
+
 #. placeholder {0}: request.counts.packages
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
@@ -5296,6 +5301,11 @@ msgid "London (GMT)"
 msgstr "London (GMT)"
 
 #: src/dashboard/dependency-requests.tsx
+msgctxt "kind of finding"
+msgid "Lookalike name"
+msgstr "Lookalike name"
+
+#: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Low"
@@ -10314,6 +10324,10 @@ msgstr "Was called by another domain"
 #: src/activity/audit-words.ts
 msgid "Was refused adding a member to a domain"
 msgstr "Was refused adding a member to a domain"
+
+#: src/activity/audit-words.ts
+msgid "Was refused packages known as malware"
+msgstr "Was refused packages known as malware"
 
 #: src/activity/audit-words.ts
 msgid "Was refused packages nobody approved"
