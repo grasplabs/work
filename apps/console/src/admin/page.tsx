@@ -59,16 +59,19 @@ const AdminHeader = ({ page }: { page: string | null }) => (
 );
 
 /**
- * An admin page titled `title`: the overview when `overview` (as wide as
- * the prototype's, for its table), otherwise a page under it, with
- * `children` below its title.
+ * An admin page titled `title`, with what it is for under it when there is
+ * a `description`: the overview when `overview` (as wide as the
+ * prototype's, for its table), otherwise a page under it, with `children`
+ * below its title.
  */
 export const AdminPage = ({
   title,
+  description,
   overview = false,
   children,
 }: {
   title: string;
+  description?: string;
   overview?: boolean;
   children?: ReactNode;
 }) => (
@@ -80,7 +83,12 @@ export const AdminPage = ({
         overview ? "max-w-7xl" : "max-w-5xl"
       )}
     >
-      <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
+        {description === undefined ? null : (
+          <p className="text-muted-foreground text-sm">{description}</p>
+        )}
+      </div>
       {children}
     </div>
   </>
