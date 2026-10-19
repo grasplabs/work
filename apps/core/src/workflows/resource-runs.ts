@@ -203,29 +203,6 @@ export const runOf = async (
     .where(eq(workflowResourceRuns.id, id))
     .get();
 
-/**
- * Settles run `row`'s admitted cancel receipts by how it ended: `applied`
- * when it was cancelled, `superseded` when it ended otherwise first. A run
- * that hasn't ended settles none.
- */
-const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
-  if (unended.includes(row.status)) {
-    return;
-  }
-  await drizzle(env.DB)
-    .update(workflowResourceRunControls)
-    .set({
-      state: row.status === "cancelled" ? "applied" : "superseded",
-      settledAt: new Date(),
-    })
-    .where(
-      and(
-        eq(workflowResourceRunControls.runId, row.id),
-        eq(workflowResourceRunControls.state, "admitted")
-      )
-    );
-};
-
 /** The input and frozen parameters a run reads from its receipt. */
 const receiptOf = async (env: Env, id: string) =>
   await drizzle(env.DB)
@@ -264,6 +241,66 @@ const withFailure = (
   status === "failed" && failureCode !== null
     ? { ...entry, detail: { ...entry.detail, failureCode } }
     : entry;
+
+/**
+ * Settles run `row`'s admitted cancel receipt (a screen's,
+ * screen-workflows.ts) by how it ended, `applied` when it was cancelled,
+ * `superseded` when it ended otherwise first, and audits the stop it asked
+ * for with it, once: under the App, naming the person whose screen asked
+ * (`onBehalfOf`), whichever request or repair stopped the run. A run that
+ * hasn't ended settles none.
+ */
+const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
+  if (unended.includes(row.status)) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  const receipt = await db
+    .select({
+      id: workflowResourceRunControls.id,
+      appId: workflowResourceRunControls.appId,
+      principalId: workflowResourceRunControls.principalId,
+    })
+    .from(workflowResourceRunControls)
+    .where(
+      and(
+        eq(workflowResourceRunControls.runId, row.id),
+        eq(workflowResourceRunControls.state, "admitted")
+      )
+    )
+    .get();
+  if (receipt === undefined) {
+    return;
+  }
+  const entry = runEntry(row, "workflow.run.terminated");
+  await auditedBatch(env, db, [
+    db
+      .update(workflowResourceRunControls)
+      .set({
+        state: row.status === "cancelled" ? "applied" : "superseded",
+        settledAt: new Date(),
+      })
+      .where(
+        and(
+          eq(workflowResourceRunControls.id, receipt.id),
+          eq(workflowResourceRunControls.state, "admitted")
+        )
+      ),
+    outboxedIfChanged(db, {
+      ...entry,
+      actor: {
+        type: "app",
+        appId: appIdSchema.parse(receipt.appId),
+        part: "screen",
+      },
+      detail: {
+        ...entry.detail,
+        status: row.status,
+        onBehalfOf: receipt.principalId,
+      },
+    }),
+  ]);
+};
 
 const endActions: Partial<Record<WorkflowRunStatus, string>> = {
   completed: "workflow.run.completed",
@@ -1070,7 +1107,8 @@ const terminatedEntry = (
 const cancelStarting = async (
   env: Env,
   actor: AuditActor,
-  row: RunRow
+  row: RunRow,
+  audited: boolean
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
   const now = new Date();
@@ -1085,10 +1123,17 @@ const cancelStarting = async (
         )
       )
       .returning({ id: workflowResourceRuns.id }),
-    outboxedIfChanged(db, terminatedEntry(actor, row, "cancelled")),
+    ...(audited
+      ? [outboxedIfChanged(db, terminatedEntry(actor, row, "cancelled"))]
+      : []),
     owedTermination(db, row.id, "cancelled", now),
   ]);
   if (cancelled.length > 0) {
+    // A screen's cancel of it settled, and audited, by how it ended.
+    const ended = await runOf(env, row.id);
+    if (ended !== undefined) {
+      await settleCancels(env, ended);
+    }
     await tellQueryFollowers(env, row.id);
   }
   return cancelled.length > 0;
@@ -1117,9 +1162,17 @@ const sendTermination = async (env: Env, runId: string): Promise<void> => {
 export const stopResourceRun = async (
   env: Env,
   actor: AuditActor,
-  row: RunRow
+  row: RunRow,
+  /**
+   * Whether this stop audits itself: a screen's cancel is audited once, as
+   * its receipt settles (`settleCancels`), however often it is applied.
+   */
+  audited = true
 ): Promise<void> => {
-  if (row.status === "starting" && (await cancelStarting(env, actor, row))) {
+  if (
+    row.status === "starting" &&
+    (await cancelStarting(env, actor, row, audited))
+  ) {
     try {
       await sendTermination(env, row.id);
     } catch (error) {
@@ -1154,6 +1207,9 @@ export const stopResourceRun = async (
       at: Date.now(),
     });
   }
+  if (!audited) {
+    return;
+  }
   const now = await runOf(env, row.id);
   // Whoever asked, whatever the row took: the engine tells the run's
   // projection of the termination as it happens, so the row may say
@@ -1175,12 +1231,12 @@ export const stopResourceRun = async (
 export const applyCancel = async (
   env: Env,
   actor: AuditActor,
-  receiptId: string,
   runId: string
 ): Promise<void> => {
   const before = await runOf(env, runId);
   if (before !== undefined && unended.includes(before.status)) {
-    await stopResourceRun(env, actor, before);
+    // Audited once, as its receipt settles (`settleCancels`).
+    await stopResourceRun(env, actor, before, false);
   }
   const after = await runOf(env, runId);
   // Still running (the engine took the stop, its end not yet told): left
@@ -1250,8 +1306,7 @@ const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await applyCancel(
         env,
-        { type: "app", appId: appIdSchema.parse(appId), part: "server" },
-        id,
+        { type: "app", appId: appIdSchema.parse(appId), part: "screen" },
         runId
       );
     } catch (error) {

@@ -545,6 +545,11 @@ const runSnapshot = async (
   runId: string
 ): Promise<{ value: Json; revision: number }> => {
   const pin = pinOf(resolved);
+  // Read first, before anything the snapshot says: a grant or revocation
+  // landing after this moves the generation on, so the snapshot read
+  // under the one before it is never numbered as one of the newer's, and
+  // the read again it causes is a revision of its own.
+  const generation = await generationOf(env, pin.workflowId);
   const { row, originAppVersion } = await seenRun(
     env,
     asking,
@@ -598,10 +603,7 @@ const runSnapshot = async (
   };
   return {
     value,
-    revision: revisionOf(
-      await generationOf(env, row.workflowResourceId),
-      stageOf(row, cancelling)
-    ),
+    revision: revisionOf(generation, stageOf(row, cancelling)),
   };
 };
 
@@ -731,12 +733,7 @@ const controlled = async (
   }
   if (receipt.state === "admitted") {
     try {
-      await applyCancel(
-        env,
-        delegateActorOf(authorityOf(asking)),
-        receipt.id,
-        row.id
-      );
+      await applyCancel(env, delegateActorOf(authorityOf(asking)), row.id);
       receipt = (await cancelOf(env, row.id)) ?? receipt;
     } catch (error) {
       // Admitted all the same, which is what the screen is answered: the

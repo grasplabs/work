@@ -43,7 +43,11 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
-import { failureOf } from "../src/screen-workflows.ts";
+import {
+  failureOf,
+  readWorkflowRequest,
+  readWorkflowWatch,
+} from "../src/screen-workflows.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -57,7 +61,13 @@ import { mockIdp } from "./idp.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  outcome,
+  routed,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 
 // A screen's typed `useWorkflow` through the real host (spec 10.4,
 // screen-workflows.ts; the threat model is on GRA-626): its starts and
@@ -163,6 +173,88 @@ const failingOf = (name: string): string =>
       },
     ],
   });
+
+/**
+ * A definition of `name` answering more than the App declares: its status,
+ * and a field the App's output doesn't have.
+ */
+const widerOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: {
+      schema: objectSchema({
+        status: { type: "string" },
+        secret: { type: "string" },
+      }),
+    },
+    do: [{ greet: { set: { status: "hello", secret: "42" } } }],
+  });
+
+/**
+ * Core's database for `runEnv`, `before` run once, just before the first
+ * read of a workflow's policy generation is sent: a grant or revocation
+ * landing while a snapshot is being read.
+ */
+const racingGeneration = (before: () => Promise<void>): Env => {
+  let pending: Promise<void> | undefined;
+  const raced = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (property === "bind") {
+          return (...args: unknown[]) => {
+            const bound: unknown = Reflect.apply(value, target, args);
+            // SAFETY: a prepared statement's bind answers a prepared statement.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            return raced(bound as D1PreparedStatement);
+          };
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          pending ??= before();
+          await pending;
+          const answer: unknown = await Reflect.apply(value, target, args);
+          return answer;
+        };
+      },
+    });
+  return {
+    ...env,
+    DB: new Proxy(env.DB, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "prepare" && typeof value === "function") {
+          return (query: string) => {
+            const statement: unknown = Reflect.apply(value, target, [query]);
+            // SAFETY: prepare answers a prepared statement.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            const prepared = statement as D1PreparedStatement;
+            return pending === undefined &&
+              query.includes('"policy_generation"') &&
+              query.includes('from "workflow_resources"')
+              ? raced(prepared)
+              : prepared;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    }),
+  };
+};
 
 /** Someone signed in, and as core's own calls take them. */
 const signedIn = async (role: Role) => {
@@ -856,6 +948,78 @@ describe(
       stop();
     });
 
+    it("never shows a run as cancellable under a revision read after the grant was revoked", async () => {
+      const fixture = await requestsApp("PT1H");
+      const { builder, admin, app, reference } = fixture;
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stop = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.control.canCancel
+        ).toBeTruthy();
+      }, settles);
+      const watch = readWorkflowRequest(
+        JSON.stringify({
+          workflow: wireOf(reference),
+          watch: "run",
+          runId: handle.runId,
+        })
+      );
+      if (!("watch" in watch)) {
+        throw new Error("Expected a watch");
+      }
+      // The revocation lands while a snapshot is being read.
+      const inFlight = await readWorkflowWatch(
+        racingGeneration(async () => {
+          await revokePermission(env, admin.acting, fixture.grant);
+        }),
+        builder.acting,
+        app,
+        watch
+      );
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.control.canCancel
+        ).toBeFalsy();
+      }, settles);
+      stop();
+      expect(
+        z
+          .object({ control: z.object({ canCancel: z.boolean() }) })
+          .parse(inFlight.value).control.canCancel
+      ).toBeFalsy();
+    });
+
+    it("refuses what a run returned when it is more than the App declares", async () => {
+      const { builder, app, reference } = await requestsApp(
+        undefined,
+        undefined,
+        widerOf
+      );
+      const lease = await screenOf(builder, app);
+      const handle = await workflowChannel(
+        screenClient(builder, app, lease)
+      ).start(readWorkflowReference(reference), { who: "Ada" });
+      const watched = await following(builder, app, lease, {
+        workflow: wireOf(reference),
+        watch: "run",
+        runId: handle.runId,
+      });
+      await vi.waitFor(() => {
+        expect(watched.received.at(-1)?.outcome).toBeTypeOf("string");
+      }, settles);
+      await watched.subscription.release();
+      expect({
+        shown: watched.received.at(-1)?.outcome,
+        leaks: JSON.stringify(watched.received).includes("42"),
+      }).toStrictEqual({ shown: "contract.invalid_return", leaks: false });
+    });
+
     it("gives a second subscription to a run the revision the first already has", async () => {
       const { builder, app, reference } = await requestsApp("PT1H");
       const lease = await screenOf(builder, app);
@@ -1225,20 +1389,43 @@ describe(
           Date.now() - 60_000
         )
         .run();
-      await repairResourceTerminations(env, new Date());
-      await vi.waitFor(() => {
-        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
-          "cancelled"
-        );
-      }, settles);
+      const events = await auditedDuring(async () => {
+        await repairResourceTerminations(env, new Date());
+        await vi.waitFor(() => {
+          expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+            "cancelled"
+          );
+        }, settles);
+        // A repair again, well after: nothing more is stopped or audited.
+        await repairResourceTerminations(env, new Date(Date.now() + 3_600_000));
+      });
       stop();
-      await expect(
-        env.DB.prepare(
+      expect({
+        state: await env.DB.prepare(
           "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
         )
           .bind(handle.runId)
-          .first<string>("state")
-      ).resolves.toBe("applied");
+          .first<string>("state"),
+        // The stop audited once, under the App's screen, for the person.
+        terminated: events
+          .filter(
+            ({ action, target }) =>
+              action === "workflow.run.terminated" &&
+              target?.id === handle.runId
+          )
+          .map(({ actor, detail }) => ({
+            actor,
+            onBehalfOf: detail.onBehalfOf,
+          })),
+      }).toStrictEqual({
+        state: "applied",
+        terminated: [
+          {
+            actor: { type: "app", appId: app, part: "screen" },
+            onBehalfOf: builder.userId,
+          },
+        ],
+      });
     });
 
     it("starts one run for a key sent twice at once, and keeps one cancel receipt for a run however many keys ask, never changed after", async () => {
