@@ -136,6 +136,7 @@ import {
   pendingMigrationsSchema,
   queueWork,
   sampleRows,
+  scanOf,
   scanPositionSchema,
   scanRangeIds,
 } from "./store-migrations.ts";
@@ -3710,7 +3711,7 @@ export class StoreHost {
         this.#db,
         migrated,
         pending.hash,
-        row.phase === "scan" ? { cursor } : null,
+        scanOf(migrated, row.phase, cursor),
         limit
       );
     });

@@ -240,6 +240,28 @@ export const nextScanBatch = (
 };
 
 /**
+ * Where the scan of migrated tables stands for `table`, from its cursor
+ * (null before the scan's first batch, or once it is through, `phase`
+ * `work`): `{ cursor }` to read the table from, while it still scans it,
+ * or null once its scan is past the table. Tables are scanned in table ID
+ * order (`migratedTables`), so a cursor in a later table means this one is
+ * done, and one in an earlier table that this one is still to come.
+ */
+export const scanOf = (
+  table: Pick<MigratedTable, "tableId">,
+  phase: "scan" | "work",
+  cursor: ScanPosition | null
+): { cursor: ScanPosition | null } | null => {
+  if (phase !== "scan") {
+    return null;
+  }
+  if (cursor === null || cursor.tableId < table.tableId) {
+    return { cursor: null };
+  }
+  return cursor.tableId === table.tableId ? { cursor } : null;
+};
+
+/**
  * A sample of the records of `table` its pending migration still has to
  * transform, for that migration's dry run (migration-samples.ts): while
  * it scans (`scan`), the next its scan reads from the cursor, and once
