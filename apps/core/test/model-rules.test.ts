@@ -968,12 +968,12 @@ describe("model rules", { timeout: 60_000 }, () => {
     const summarizer = (id: string) =>
       workflowFiles(
         id,
-        `  const note = await step.do("read", { description: "Read the note" }, async () => await env.HANDBOOK.getDocument("${payroll.noteId}"));
+        `  const note = await step.do("read", { description: "Read the note" }, async () => (await env.HANDBOOK.getDocument("${payroll.noteId}")) as Json);
   return await step.llm("summarize", {
     description: "Summarize the note",
     binding: "${id}",
     instructions: "Summarize the note.",
-    input: note.version.text,
+    input: (note as { version: { text: string } }).version.text,
     schema: z.object({ summary: z.string() }),
   });`,
         {

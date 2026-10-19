@@ -5,9 +5,12 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
   dependencyErrors,
   dependencyGraphHash,
+  refOfSubject,
+  subjectOfRef,
 } from "@grasp-os/shared/dependencies";
+import type { DependencySubject } from "@grasp-os/shared/dependencies";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
-import type { AppId } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -32,7 +35,6 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { z } from "zod";
 
-import { appFor } from "../apps.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
@@ -49,7 +51,8 @@ import {
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
 import type { Admitted } from "../dependencies/requests.ts";
-import { ofSubject } from "../dependencies/subjects.ts";
+import { builtSubject } from "../dependencies/subject-builders.ts";
+import { auditTargetOf, ofSubject } from "../dependencies/subjects.ts";
 import { windowedAccessEnd } from "../screen-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
@@ -63,10 +66,12 @@ import { verifiedTarball } from "./tarballs.ts";
 // the lock's tarballs, checked against their integrity, bundled with
 // esbuild-wasm in the package builder's isolate (no network, no bindings,
 // nothing of the packages run), into an artifact core checks byte for
-// byte before keeping it. Only an App's graph builds here: a workflow's
-// packages (`computation`) are approved and locked, but nothing builds
-// them for a compute module yet, so every lock and lease below is an
-// App's. What could go wrong, and what stops it:
+// byte before keeping it. An App's graph or a workflow's (its subject,
+// dependencies/subjects.ts): every lease, lock, pin and admission below
+// is the subject's own, and a workflow builds only `computation`, whose
+// artifact never leaves core: a version that imports it copies its
+// entries' modules into its own build (workflows/sealed-packages.ts).
+// What could go wrong, and what stops it:
 //
 // - Building what nobody approved, or more of it: every build asks
 //   `admitDependencies` first, for this App, graph and target under the
@@ -218,7 +223,7 @@ const samePlatform = (
  */
 export const lockOf = async (
   env: Env,
-  app: string,
+  subject: DependencySubject,
   graphHash: string
 ): Promise<{ lock: GraspLock; stored: string }> => {
   const row = await drizzle(env.DB)
@@ -226,7 +231,7 @@ export const lockOf = async (
     .from(dependencyLocks)
     .where(
       and(
-        ofSubject(dependencyLocks, { type: "app", id: app }),
+        ofSubject(dependencyLocks, subject),
         eq(dependencyLocks.graphHash, graphHash)
       )
     )
@@ -240,12 +245,15 @@ export const lockOf = async (
   }
   const lock = graspLockSchema.parse(JSON.parse(row.lock));
   if ((await dependencyGraphHash(graphOfLock(lock))) !== graphHash) {
-    log.error("packages.lock_changed", { app, graphHash });
+    log.error("packages.lock_changed", {
+      [subject.type]: subject.id,
+      graphHash,
+    });
     throw dependencyErrors.create("dependency.approval_required");
   }
   if (!samePlatform(lock.platformPeers, platformPeers)) {
     log.warn("packages.platform_changed", {
-      app,
+      [subject.type]: subject.id,
       graphHash,
       locked: canonicalJson({ ...lock.platformPeers }),
       platform: canonicalJson({ ...platformPeers }),
@@ -358,8 +366,8 @@ const stillAdmitted = ({ approval, policyGeneration }: Admitted): SQL =>
  */
 const pinEntry = (
   by: Acting,
+  subject: DependencySubject,
   pinned: {
-    app: string;
     graphHash: string;
     target: PackageArtifact["target"];
     config: string;
@@ -369,8 +377,8 @@ const pinEntry = (
 ): AuditEntry => ({
   actor: by.actor ?? actorOf(by),
   action: "dependency.built",
-  target: { type: "app", id: pinned.app },
-  detail: pinned,
+  target: auditTargetOf(subject),
+  detail: { [subject.type]: subject.id, ...pinned },
 });
 
 /**
@@ -380,12 +388,13 @@ const pinEntry = (
  */
 const droppedEntry = (
   by: Acting,
-  dropped: { app: string; graphHash: string; hash: string; pinned: string }
+  subject: DependencySubject,
+  dropped: { graphHash: string; hash: string; pinned: string }
 ): AuditEntry => ({
   actor: by.actor ?? actorOf(by),
   action: "dependency.pin_dropped",
-  target: { type: "app", id: dropped.app },
-  detail: dropped,
+  target: auditTargetOf(subject),
+  detail: { [subject.type]: subject.id, ...dropped },
 });
 
 /** How often pinning starts over when another write changed the lock first. */
@@ -410,7 +419,7 @@ interface Pinning {
 const pin = async (
   env: Env,
   by: Acting,
-  app: string,
+  subject: DependencySubject,
   graphHash: string,
   read: { lock: GraspLock; stored: string },
   pinning: Pinning,
@@ -454,8 +463,7 @@ const pin = async (
       });
     }
     const built = createAuditEvent(
-      pinEntry(by, {
-        app,
+      pinEntry(by, subject, {
         graphHash,
         target: pinning.target,
         config: pinning.config,
@@ -475,7 +483,7 @@ const pin = async (
         .set({ lock: stored })
         .where(
           and(
-            ofSubject(dependencyLocks, { type: "app", id: app }),
+            ofSubject(dependencyLocks, subject),
             eq(dependencyLocks.graphHash, graphHash),
             eq(dependencyLocks.lock, current.stored),
             stillAdmitted(admitted)
@@ -489,8 +497,7 @@ const pin = async (
       ...dropped.map((hash) =>
         outboxedWhere(
           db,
-          droppedEntry(by, {
-            app,
+          droppedEntry(by, subject, {
             graphHash,
             hash,
             pinned: pinning.hash,
@@ -501,7 +508,7 @@ const pin = async (
       db
         .insert(packageCleanups)
         .select(
-          sql`SELECT value, 'build', ${Date.now()} FROM json_each(${JSON.stringify(dropped)}) WHERE EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${ofSubject(dependencyLocks, { type: "app", id: app })} AND ${dependencyLocks.graphHash} = ${graphHash} AND ${dependencyLocks.lock} = ${stored})`
+          sql`SELECT value, 'build', ${Date.now()} FROM json_each(${JSON.stringify(dropped)}) WHERE EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${ofSubject(dependencyLocks, subject)} AND ${dependencyLocks.graphHash} = ${graphHash} AND ${dependencyLocks.lock} = ${stored})`
         )
         .onConflictDoUpdate({
           target: packageCleanups.key,
@@ -516,7 +523,7 @@ const pin = async (
     // oxlint-disable-next-line no-await-in-loop
     await admit("new");
     // oxlint-disable-next-line no-await-in-loop
-    current = await lockOf(env, app, graphHash);
+    current = await lockOf(env, subject, graphHash);
   }
   throw dependencyErrors.create("dependency.stale");
 };
@@ -533,7 +540,7 @@ const touchAfterMs = 24 * 60 * 60 * 1000;
  */
 const touchPin = async (
   env: Env,
-  app: string,
+  subject: DependencySubject,
   graphHash: string,
   read: { lock: GraspLock; stored: string },
   config: string,
@@ -562,13 +569,16 @@ const touchPin = async (
       .set({ lock: stored })
       .where(
         and(
-          ofSubject(dependencyLocks, { type: "app", id: app }),
+          ofSubject(dependencyLocks, subject),
           eq(dependencyLocks.graphHash, graphHash),
           eq(dependencyLocks.lock, read.stored)
         )
       );
   } catch (error) {
-    log.warn("packages.pin_touch_failed", { app, ...errorFields(error) });
+    log.warn("packages.pin_touch_failed", {
+      [subject.type]: subject.id,
+      ...errorFields(error),
+    });
   }
 };
 
@@ -670,22 +680,32 @@ const builtArtifact = async (
 const addressOf = async (
   env: Env,
   {
-    app,
+    subject,
     graphHash,
     target,
-  }: { app: AppId; graphHash: string; target: PackageArtifact["target"] },
+  }: {
+    subject: DependencySubject;
+    graphHash: string;
+    target: PackageArtifact["target"];
+  },
   hash: string
 ): Promise<string | null> => {
-  if (target !== "browser") {
+  // Only an App's browser build is served; a workflow builds only
+  // `computation`, whose artifact never leaves core.
+  if (target !== "browser" || subject.type !== "app") {
     return null;
   }
   const now = Date.now();
   await holdLockFor(env, {
-    subject: { type: "app", id: app },
+    subject,
     graphHash,
     until: windowedAccessEnd(now),
   });
-  return await packageArtifactAddress(env, { app, graphHash, hash }, now);
+  return await packageArtifactAddress(
+    env,
+    { app: appIdSchema.parse(subject.id), graphHash, hash },
+    now
+  );
 };
 
 /** How long a build may hold its lease before another may take it. */
@@ -698,17 +718,17 @@ const leaseMs = 5 * 60 * 1000;
 const leaseWaitMs = 60 * 1000;
 const leasePollMs = 1000;
 
-/** Which build a lease is for: one target of one App's graph. */
+/** Which build a lease is for: one target of one subject's graph. */
 interface Leased {
-  app: string;
+  subject: DependencySubject;
   graphHash: string;
   target: PackageArtifact["target"];
 }
 
 /** That `lease` is the row of `leased`. */
-const leaseRow = ({ app, graphHash, target }: Leased): SQL | undefined =>
+const leaseRow = ({ subject, graphHash, target }: Leased): SQL | undefined =>
   and(
-    ofSubject(dependencyBuildLeases, { type: "app", id: app }),
+    ofSubject(dependencyBuildLeases, subject),
     eq(dependencyBuildLeases.graphHash, graphHash),
     eq(dependencyBuildLeases.target, target)
   );
@@ -737,8 +757,8 @@ const takeLease = async (
   const taken = await drizzle(env.DB)
     .insert(dependencyBuildLeases)
     .values({
-      subjectType: "app",
-      subjectId: leased.app,
+      subjectType: leased.subject.type,
+      subjectId: leased.subject.id,
       graphHash: leased.graphHash,
       target: leased.target,
       holder,
@@ -774,7 +794,7 @@ const giveLeaseBack = async (
       .where(and(leaseRow(leased), eq(dependencyBuildLeases.holder, holder)));
   } catch (error) {
     log.error("packages.lease_release_failed", {
-      app: leased.app,
+      [leased.subject.type]: leased.subject.id,
       ...errorFields(error),
     });
   }
@@ -810,7 +830,10 @@ const leaseFor = async (
 
 /** What a build of an approved graph read before it builds. */
 interface Asked {
-  asked: z.output<typeof packageBuildRequestSchema>;
+  asked: z.output<typeof packageBuildRequestSchema> & {
+    /** Whose graph: the request's `app` or `workflow`. */
+    subject: DependencySubject;
+  };
   /** Admitted for reuse at least: a retired graph's pinned artifacts. */
   admitted: Admitted;
   /** Admits again, for reuse (`retained`) or for anything new (`new`). */
@@ -861,7 +884,7 @@ const pinnedNow = async (
       pinned: ArtifactPin | undefined;
     }
 > => {
-  const read = await lockOf(env, asked.app, asked.graphHash);
+  const read = await lockOf(env, asked.subject, asked.graphHash);
   const config = read.lock.targets[asked.target];
   if (config === undefined) {
     throw dependencyErrors.create("dependency.invalid", {
@@ -881,7 +904,7 @@ const pinnedNow = async (
     if (retained && kept) {
       await touchPin(
         env,
-        asked.app,
+        asked.subject,
         asked.graphHash,
         read,
         configHash,
@@ -901,7 +924,14 @@ const pinnedNow = async (
   }
   const kept = pinned ? await keptDescription(env, pinned.hash) : undefined;
   if (pinned && kept) {
-    await touchPin(env, asked.app, asked.graphHash, read, configHash, pinned);
+    await touchPin(
+      env,
+      asked.subject,
+      asked.graphHash,
+      read,
+      configHash,
+      pinned
+    );
     return {
       kept: {
         hash: pinned.hash,
@@ -957,7 +987,7 @@ const buildUnderLease = async (
   const hash = await artifactHash(artifact);
   if (pinned && pinned.hash !== hash) {
     log.error("packages.artifact_mismatch", {
-      app: asked.app,
+      [asked.subject.type]: asked.subject.id,
       graphHash: asked.graphHash,
       target: asked.target,
     });
@@ -1002,7 +1032,7 @@ const buildUnderLease = async (
     : await pin(
         env,
         by,
-        asked.app,
+        asked.subject,
         asked.graphHash,
         read,
         {
@@ -1026,12 +1056,12 @@ const buildUnderLease = async (
   // Pinned: its files are named by the lock, and need no cleanup, unless
   // the lock gave up its room since (and recorded them again).
   await clearBuildCleanup(env, {
-    app: asked.app,
+    subject: asked.subject,
     graphHash: asked.graphHash,
     hash,
   });
   log.info("packages.built", {
-    app: asked.app,
+    [asked.subject.type]: asked.subject.id,
     approval,
     target: asked.target,
     hash,
@@ -1073,22 +1103,24 @@ export const buildDependencies = async (
   // As in resolveDependencies (resolve.ts): only where the builder is
   // bounded (builder.ts), refused before any tarball is fetched.
   const builderOf = packageBuilder(env);
-  const asked = dependencyErrors.parse(
+  const parsed = dependencyErrors.parse(
     "dependency.invalid",
     packageBuildRequestSchema,
     input
   );
-  const builder = builderOf(`app:${asked.app}`);
+  const asked = { ...parsed, subject: subjectOfRef(parsed) };
+  const builder = builderOf(`${asked.subject.type}:${asked.subject.id}`);
   if (by.staff) {
     throw dependencyErrors.create("dependency.forbidden");
   }
-  await appFor(env, by, asked.app, "builder");
+  // Its own builders only; the schema keeps a workflow to `computation`.
+  await builtSubject(env, by, asked.subject);
   const admit = async (use: "new" | "retained"): Promise<Admitted> =>
     await admitDependencies(
       env,
       by.actor ?? actorOf(by),
       {
-        app: asked.app,
+        ...refOfSubject(asked.subject),
         graphHash: asked.graphHash,
         targets: [asked.target],
         policyGeneration: asked.policyGeneration,
@@ -1113,7 +1145,7 @@ export const buildDependencies = async (
   }
   const holder = crypto.randomUUID();
   const leased: Leased = {
-    app: asked.app,
+    subject: asked.subject,
     graphHash: asked.graphHash,
     target: asked.target,
   };

@@ -3,20 +3,27 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { requestGranted, serverBuilt } from "./apps.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
-import { mailConnection, mailWithSearch } from "./mail-connection.ts";
+import {
+  mailConnection,
+  mailForApps,
+  mailWithSearch,
+} from "./mail-connection.ts";
 import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { openRpc, outcome as codeOf, signedInWithRole } from "./sign-in.ts";
 import {
+  appCall,
   appWith,
+  bindMail,
+  bindStats,
   grantMail,
   invoiceMail,
   mailer,
+  pointsOf,
   runEvents,
   workflowFiles,
 } from "./workflow-apps.ts";
@@ -85,7 +92,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
       // input leaves for a third party: a side effect's step, with its key.
       ...workflowFiles(
         "search",
-        `  return await step.do("search", { description: "Search the mail", sideEffect: true, input: { query: "INV-7" }, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse((await env.MAIL.call("mail.search", input, { idempotencyKey })).output));`,
+        `  return await step.do("search", { description: "Search the mail", sideEffect: true, input: { query: "INV-7" }, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse(((await env.MAIL.call("mail.search", input, { idempotencyKey })) as { output: string }).output));`,
         { search: null }
       ),
     });
@@ -214,39 +221,36 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
 
   it("wait for a side effect held in their App's method, or caught by their code, and complete once confirmed, with the method's statistics points added up once, as the step completes", async () => {
     const admin = await personApi("admin");
-    const mail = await mailConnection();
+    const mail = await mailConnection([], mailForApps);
     const app = await appWith(admin, {
       ...workflowFiles(
         "via-app",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => await env.APP.call("mail", false));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mail", "action", "{}", "string")}));`,
         { send: null }
       ),
-      // Its App method records statistics points before the mail is held:
-      // the step records them again once it is confirmed.
+      // Its App function records statistics points before the mail is
+      // held: the step records them again once it is confirmed.
       ...workflowFiles(
         "counted",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => await env.APP.call("mailCounted"));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mailCounted", "action", "{}", "string")}));`,
         { send: null }
       ),
       ...workflowFiles(
         "caught",
         `  return await step.do("send", { description: "Send", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => {
     try {
-      return JSON.parse((await env.MAIL.call("mail.send", input, { idempotencyKey })).output);
+      return JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output);
     } catch (error) {
-      return { caught: error.code };
+      return { caught: (error as { code?: string }).code };
     }
   });`,
         { send: null }
       ),
     });
-    // The App's first call mustn't have to build its code in the call's
-    // deadline.
-    await serverBuilt(app, 1);
     await grantMail(idp, admin, app, mail.id);
-    const appId = appIdSchema.parse(app);
-    const viewer = { userId: admin.userId, mode: "interactive" } as const;
-    await appHost(env, appId).restrict();
+    await bindMail(idp, admin, app, mail.id, "send");
+    await bindStats(app);
+    await appHost(env, appIdSchema.parse(app)).restrict();
     const runs = [
       await admin.api.workflows.start(app, "via-app"),
       await admin.api.workflows.start(app, "counted"),
@@ -259,8 +263,8 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     const held = await admin.api.pendingActions.list();
     const before = await mail.did();
     const points = async () => ({
-      mails: await callApp(env, appId, viewer, "points", ["mails"]),
-      sent: await callApp(env, appId, viewer, "points", ["sent"]),
+      mails: await pointsOf(admin, app, "mails"),
+      sent: await pointsOf(admin, app, "sent"),
     });
     const pointsBefore = await points();
     for (const action of held) {
@@ -335,21 +339,20 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
 
   it("wait on, and complete once confirmed, when connect can't say for a moment whether a side effect still waits", async () => {
     const admin = await personApi("admin");
-    const mail = await mailConnection();
-    // Through the App (asked in the attempt) and directly (asked while the
-    // run waits): connect fails the first question each time.
+    const mail = await mailConnection([], mailForApps);
+    // Through the App's function and directly, each asked while the run
+    // waits (the function's held keys, or the step's own): connect fails
+    // the first question each time.
     const app = await appWith(admin, {
       ...workflowFiles(
         "via-app",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => await env.APP.call("mail", false));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: null, retries: { limit: 0 } }, async () => JSON.parse(await ${appCall("mail.mail", "action", "{}", "string")}));`,
         { send: null }
       ),
       ...mailer(`retries: { limit: 0 }`),
     });
-    // The App's first call mustn't have to build its code in the call's
-    // deadline.
-    await serverBuilt(app, 1);
     await grantMail(idp, admin, app, mail.id);
+    await bindMail(idp, admin, app, mail.id, "send");
     await appHost(env, appIdSchema.parse(app)).restrict();
     const { CONNECT: connect } = env;
     const statuses: string[] = [];

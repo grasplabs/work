@@ -40,7 +40,7 @@ import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
-import { runEvents } from "./workflow-apps.ts";
+import { hitsOf, runEvents, sampleApp } from "./workflow-apps.ts";
 
 // A workflow run calls a public function of its own App's sealed release
 // (`env.APP.callFunction`), and the function's `ctx.resources` resolve
@@ -82,7 +82,7 @@ const callsOf = ({ reference, input, more = [] }: CallingStep): string =>
   [{ reference, input }, ...more]
     .map(
       (call) =>
-        `    answered.push(await env.APP.callFunction(${JSON.stringify(call.reference)}, ${JSON.stringify(call.input)}));\n`
+        `    answered.push((await env.APP.callFunction(${JSON.stringify(call.reference)}, ${JSON.stringify(call.input)})) as Json);\n`
     )
     .join("");
 
@@ -97,7 +97,7 @@ const callingWorkflow = (
   steps: readonly CallingStep[],
   { between = "", options = "retries: { limit: 0 }" } = {}
 ): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { workflow, z } from "@grasp-os/sdk/workflow";
+  [`workflows/${id}.ts`]: `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) => {
   const answers = [];
@@ -105,7 +105,7 @@ ${steps
   .map(
     (calling, index) =>
       `${index === 0 ? "" : between}  answers.push(await step.do("${calling.name}", { description: "Call a function", sideEffect: true, input: null, ${options} }, async () => {
-    const answered = [];
+    const answered: Json[] = [];
 ${callsOf(calling)}    ${calling.after ?? ""}
     return answered.length === 1 ? answered[0] : answered;
   }));
@@ -471,7 +471,7 @@ export const mail = resource.connector("mail", {
   actions: ["list"],
 });
 
-const attempt = async (work) => {
+const attempt = async <T,>(work: () => Promise<T>): Promise<T | string> => {
   try {
     return await work();
   } catch (error) {
@@ -884,6 +884,29 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await endLiveRuns();
+  });
+
+  it("give each run of a step's code its own effects, two at once under the step's key too, as the run tests' counter relies on", async () => {
+    // The run tests count how often a step's code ran with the sample
+    // App's counter (workflow-apps.ts): each run names itself, and its
+    // bump, a nested mutation, takes a key derived from that input.
+    const asleep = await sleepingRun(sampleApp());
+    const step = stepOf(asleep, { holds: true });
+    const key = `step:${crypto.randomUUID()}`;
+    const hit = async () =>
+      await callRunFunction(
+        env,
+        { ...step, requestId: crypto.randomUUID() },
+        { contractId: "counter.hit", kind: "action" },
+        { name: "overlap", execution: crypto.randomUUID() },
+        key
+      );
+    const [first, second] = await Promise.all([hit(), hit()]);
+    const third = await hit();
+    expect({
+      answered: [first.ok, second.ok, third.ok],
+      hits: await hitsOf(asleep.builder, asleep.app, "overlap"),
+    }).toStrictEqual({ answered: [true, true, true], hits: 3 });
   });
 
   it("reach a model through the App's binding as the run, counted against the binding's caps and the run's budgets", async () => {
@@ -1646,7 +1669,8 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
             reference: { contractId: "assist.flaky", kind: "action" },
             input: {},
             // As the SDK says to: the answer's error, thrown as it is.
-            after: "if (!answered[0].ok) throw answered[0].error;",
+            after:
+              "const [first] = answered as { ok: boolean; error?: unknown }[]; if (!first.ok) throw first.error;",
           },
         ],
         { options: `retries: { limit: 1, delay: "1 second" }` }

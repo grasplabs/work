@@ -25,7 +25,7 @@ import type {
   Stage,
 } from "@grasp-os/workflow-expressions/evaluate";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
-import { RpcTarget } from "cloudflare:workers";
+import { RpcTarget, waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 
 import { memberRole } from "../auth/identity.ts";
@@ -61,11 +61,13 @@ import {
 } from "./host.ts";
 import type { Busy, LoadWait, RunStep } from "./host.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import { callAction } from "./resource-action.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { makeCall } from "./resource-calls.ts";
+import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
+import { requirePackagesAdmitted } from "./sealed-packages.ts";
 
 // The host a run of an independent workflow's sealed build runs against
 // (resource-runs.ts): the calls the generated code's SDK makes
@@ -270,6 +272,11 @@ export interface ResourceHostHooks {
   attemptCall?: (call: Promise<unknown>, stepDone: Promise<unknown>) => void;
   /** Hears, once, that the isolate asked for what generated code never does. */
   tampered: (error: { name: string; message: string; code?: string }) => void;
+  /**
+   * The run's own sandbox session on-prem, once open: the parent of the
+   * sessions its actions run in (resource-action.ts).
+   */
+  sessionId?: () => string | undefined;
   /** The activation's fuel for expressions: {@link activationFuel} if unset. */
   activationFuel?: number;
   /**
@@ -285,7 +292,37 @@ export interface ResourceHostHooks {
    * then, as none is known never to have started.
    */
   triedOnce?: TriedOnceMarks;
+  /**
+   * The model calls the run's actions made, across its activations
+   * (run-object.ts, `modelCallsIn`). Unset, a count of this activation's
+   * alone.
+   */
+  modelCalls?: ActionModelCalls;
 }
+
+/**
+ * The model calls a run's actions made (GRA-700), kept with the run: an
+ * action step's record holds only its answer, and a failed attempt none,
+ * so its calls can't be counted from records on a replay. Each is kept,
+ * by its call's key, before it goes out.
+ */
+export interface ActionModelCalls {
+  /** How many were kept. */
+  count: () => number;
+  /** Keeps one, with its call's key: each time it is kept, as made. */
+  keep: (key: string) => void;
+}
+
+/** A count of one activation's alone (`ResourceHostHooks.modelCalls` unset). */
+const activationModelCalls = (): ActionModelCalls => {
+  const kept: string[] = [];
+  return {
+    count: () => kept.length,
+    keep: (key) => {
+      kept.push(key);
+    },
+  };
+};
 
 /**
  * What a run keeps of the attempts of its steps tried once (`triedOnce`),
@@ -550,6 +587,8 @@ export const maxResultBytes = platformLimits.stepPayloadBytes;
 const triedOnce = new Set<SealedCall["name"]>([
   "grasp.operation",
   "grasp.model",
+  // An action's effects aren't proven idempotent as a whole: once.
+  "grasp.action",
 ]);
 
 /**
@@ -764,7 +803,8 @@ const templatesOf = (call: SealedCall): SealedTemplate[] => {
     }
     case "grasp.operation":
     case "grasp.connector":
-    case "grasp.compute": {
+    case "grasp.compute":
+    case "grasp.action": {
       return [call.arguments];
     }
     case "grasp.model": {
@@ -921,14 +961,18 @@ export class ResourceRunHost
    */
   readonly #deadlines = new Map<string, number>();
   /**
-   * The model calls the run has made: those its replayed steps recorded,
-   * as this activation reached them, and those this activation made
-   * itself, each counted as it is asked for (`#made`), before anything is
-   * awaited. Each new one is held to `maxModelCalls`.
+   * The model calls of the run's JSON model tasks: those its replayed steps
+   * recorded, as this activation reached them, and those this activation
+   * made itself, each counted as it is asked for (`#made`), before
+   * anything is awaited. Its actions' model calls are counted apart, kept
+   * with the run (`#actionModelCalls`); each new call is held to
+   * `maxModelCalls` against both (`#modelCallsUsed`).
    */
   #modelCalls = 0;
   /** The model tasks whose call this activation made, counted then. */
   readonly #modelCallsMade = new Set<string>();
+  /** The model calls of the run's actions, kept across its activations. */
+  readonly #actionModelCalls: ActionModelCalls;
   /** What the run keeps of its tried-once steps' attempts. */
   readonly #triedOnce: TriedOnceMarks;
 
@@ -945,6 +989,7 @@ export class ResourceRunHost
     this.#hooks = hooks;
     this.#activationFuel = hooks.activationFuel ?? activationFuel;
     this.#triedOnce = hooks.triedOnce ?? activationMarks();
+    this.#actionModelCalls = hooks.modelCalls ?? activationModelCalls();
     this.#readableParams = Object.fromEntries(
       run.build.params.flatMap((name) =>
         Object.hasOwn(run.params, name)
@@ -1274,6 +1319,10 @@ export class ResourceRunHost
       if (attempt === undefined) {
         call = Promise.reject(cpuLimitKill());
       } else {
+        // An action is tried once: its packages are admitted before it is
+        // told to have run, so a check that can't answer for a moment
+        // leaves it to a later attempt, never a failure kept for good.
+        await this.#actionPackagesAdmitted(run, attempt, funded);
         ran();
         call = fn(this.#attemptHostOf(attempt));
       }
@@ -2191,13 +2240,20 @@ export class ResourceRunHost
       return this.#refuse(`Task "${task.id}" makes no call.`);
     }
     if (call.name === "grasp.model") {
-      if (this.#modelCalls >= this.#run.maxModelCalls) {
+      if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
         throw workflowResourceErrors.create("workflow.model_call_limit", {
           limit: this.#run.maxModelCalls,
         });
       }
       this.#modelCalls += 1;
       this.#modelCallsMade.add(task.id);
+    }
+    if (call.name === "grasp.compute") {
+      // Its modules' approved packages admitted again first, under the
+      // policy generation now: a graph revoked since fails the run here,
+      // never retried (decision 4, GRA-665). An action's were admitted as
+      // its attempt began (`#attemptOf`).
+      await this.#packagesAdmitted();
     }
     if (call.name === "grasp.compute") {
       // A calculation of the workflow's own sealed modules: no binding of
@@ -2211,6 +2267,9 @@ export class ResourceRunHost
         await this.#built(attempt, call.arguments, passed, passed.size),
         attempt.deadline
       );
+    }
+    if (call.name === "grasp.action") {
+      return await this.#action(attempt, task, call, passed);
     }
     const built = await this.#builtCall(attempt, call, passed);
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
@@ -2228,6 +2287,171 @@ export class ResourceRunHost
     });
   }
 
+  /**
+   * Admits the approved graph the run's version seals, if it seals one,
+   * for the call about to load its modules (workflows/sealed-packages.ts):
+   * `workflow.packages_revoked` once it is revoked.
+   */
+  async #packagesAdmitted(): Promise<void> {
+    const { packages } = this.#run.build;
+    if (packages !== undefined) {
+      await requirePackagesAdmitted(
+        this.#env,
+        this.#run.workflowId,
+        packages.graphHash
+      );
+    }
+  }
+
+  /**
+   * `#packagesAdmitted` for `run`'s attempt if it is an action's, before it
+   * is told to have run: a refusal ends the run as a step's error does (never tried
+   * again, so a graph approved again meanwhile runs nothing it refused);
+   * anything else is tried again, as an attempt that never started.
+   */
+  async #actionPackagesAdmitted(
+    { step }: StepRun,
+    attempt: StepAttempt,
+    funded: boolean
+  ): Promise<void> {
+    if (
+      step.kind !== "task" ||
+      step.task?.kind !== "call" ||
+      step.task.call.name !== "grasp.action"
+    ) {
+      return;
+    }
+    try {
+      await this.#packagesAdmitted();
+    } catch (error) {
+      // Nothing of it ran: its share of the fuel goes back whole.
+      attempt.over = true;
+      if (funded) {
+        this.#activationFuel += Math.max(0, attempt.budget.fuel);
+      }
+      throw workflowResourceErrors.codeOf(error) === "workflow.packages_revoked"
+        ? toStepError(forIsolate(error))
+        : error;
+    }
+  }
+
+  /**
+   * `#made`'s work for an action task: the action run in the modules'
+   * sandbox (resource-action.ts), each of its resource calls one of the
+   * run's named calls, as a task's own: its lineage's host call first,
+   * then `makeCall`, under its step's key and its ordinal.
+   */
+  async #action(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    call: Extract<SealedCall, { name: "grasp.action" }>,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<Json> {
+    const input = await this.#built(attempt, call.arguments, frame, frame.size);
+    const stepKey = stepIdempotencyKey(this.#run.runId, `task:${task.id}`);
+    return await callAction(
+      this.#env,
+      this.#run.build.compute,
+      this.#run.build.sdk,
+      call,
+      input,
+      attempt.deadline,
+      {
+        // The workflow's actions apart from its runs, as a child of the
+        // run's own session on-prem (resource-action.ts).
+        owner: `workflow-action:${this.#run.workflowId}`,
+        parent: this.#hooks.sessionId?.(),
+        make: async (built, ordinal) => {
+          this.#requireCurrent(attempt);
+          await attempt.admission.hostCall();
+          this.#requireCurrent(attempt);
+          // Taken once the call is admitted, as a model task's, and with
+          // nothing awaited between it and the call going out: one refused
+          // at admission takes none.
+          if (built.name === "grasp.model") {
+            try {
+              this.#reserveModelCall(
+                `${stepKey}:${attempt.number}:${attempt.generation}:${ordinal}`
+              );
+            } catch (error) {
+              // Refused before it is a named call, so no receipt of
+              // `makeCall`'s: kept as the evidence an action's call
+              // refused at admission leaves, naming its declared binding.
+              // That write never rejects (it logs one it can't keep), so
+              // the refusal below always stands.
+              await auditAdmissionRefusal(this.#env, this.#run.calling, {
+                build: this.#run.build.hash,
+                task: task.id,
+                attempt: attempt.number,
+                generation: attempt.generation,
+                call: built.binding,
+                errorCode:
+                  workflowResourceErrors.codeOf(error) ?? "internal.unexpected",
+                reason: "model_call_limit",
+              });
+              throw error;
+            }
+          }
+          return await makeCall(this.#env, this.#run.calling, task.id, built, {
+            key: `${stepKey}:${ordinal}`,
+            deadline: attempt.deadline,
+            fence: {
+              run: this.#run.runId,
+              key: attempt.key,
+              number: attempt.number,
+              generation: attempt.generation,
+            },
+            requireHolds: () => {
+              this.#requireCurrent(attempt);
+            },
+            fromAction: true,
+          });
+        },
+        // The request's own work until it is written: `callAction` waits
+        // for it only until the attempt's deadline, and a write it stopped
+        // waiting for still finishes rather than ending with the call.
+        refused: async (refusal) => {
+          const writing = auditAdmissionRefusal(this.#env, this.#run.calling, {
+            build: this.#run.build.hash,
+            task: task.id,
+            attempt: attempt.number,
+            generation: attempt.generation,
+            ...refusal,
+          });
+          waitUntil(writing);
+          await writing;
+        },
+      }
+    );
+  }
+
+  /**
+   * Takes one of the run's `maxModelCalls` for an action's model call keyed
+   * `key`, synchronously, against the count the run keeps (read again
+   * now), so two at once, in this activation or another, never both take
+   * the last; kept with the run before the call goes out, so a replay of
+   * its step, or of a failed attempt, still counts it (GRA-700). Refused
+   * (`workflow.model_call_limit`) once none is left.
+   */
+  #reserveModelCall(key: string): void {
+    if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
+      throw workflowResourceErrors.create("workflow.model_call_limit", {
+        limit: this.#run.maxModelCalls,
+      });
+    }
+    this.#actionModelCalls.keep(key);
+  }
+
+  /**
+   * The model calls the run has made, read now: its JSON model tasks', and
+   * its actions' as the run keeps them, read again from that store each
+   * time, so it alone says how many there were, whichever activation
+   * made them.
+   */
+  #modelCallsUsed(): number {
+    return this.#modelCalls + this.#actionModelCalls.count();
+  }
+
   /** `call`'s parts built (`#built`), as resource-calls.ts makes it. */
   async #builtCall(
     attempt: StepAttempt,
@@ -2238,7 +2462,8 @@ export class ResourceRunHost
           | "grasp.now"
           | "grasp.random"
           | "grasp.sleepUntil"
-          | "grasp.compute";
+          | "grasp.compute"
+          | "grasp.action";
       }
     >,
     frame: { input: Json; output: Json; size: number }

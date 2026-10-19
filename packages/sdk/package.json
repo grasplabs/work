@@ -19,6 +19,7 @@
     "./workflow": "./src/workflow.ts",
     "./open-workflow": "./src/open-workflow.ts",
     "./compute": "./src/compute.ts",
+    "./action": "./src/action.ts",
     "./compute-runner": "./src/compute-runner.ts",
     "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",
