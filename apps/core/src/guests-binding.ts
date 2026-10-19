@@ -96,12 +96,8 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   ): Promise<T> {
     const { app, permissionId } = this.ctx.props;
     try {
-      // An App whose sealed release declares guests is governed by its
-      // binding alone: its v1 server invites, lists, reads and revokes
-      // nothing, so no link it sends outlives the binding.
-      if (await declaresGuests(this.env, app)) {
-        throw permissionErrors.create("permission.denied");
-      }
+      // Counted first, before anything else is read: a call past its
+      // host-call budget is refused without a database read of its own.
       const token = tokenOf(caller);
       const { authority, path, fence } = await countedCallerOf(
         this.env,
@@ -109,6 +105,12 @@ export class AppGuestsBinding extends WorkerEntrypoint<
         { token },
         use
       );
+      // An App whose sealed release declares guests is governed by its
+      // binding alone: its v1 server invites, lists, reads and revokes
+      // nothing, so no link it sends outlives the binding.
+      if (await declaresGuests(this.env, app)) {
+        throw permissionErrors.create("permission.denied");
+      }
       const person =
         authority.mode === "interactive" && path.chain.length === 1;
       if (personOnly && !person) {

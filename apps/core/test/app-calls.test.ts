@@ -1626,6 +1626,12 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       readCollection({ type: "app", appId: invoicing }, collectionId)
     );
     await grantCalls(admin, invoicing, crm, ["read"], "CRM");
+    await requestGranted(idp, admin, {
+      subject: { type: "app", appId: invoicing },
+      object: { type: "platform" },
+      actions: ["guests"],
+      binding: "GUESTS",
+    });
     const useMany = async (uses: unknown[]) =>
       await callApp(
         env,
@@ -1663,6 +1669,26 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       ]);
     });
 
+    // A guest call past the budget is refused before it reads anything of
+    // the App's: the call it ends looks the App up no more often than one
+    // that makes only the reads.
+    const lookupsOfApp = (
+      recorded: Awaited<ReturnType<typeof recordedQueries>>
+    ) =>
+      recorded.filter(
+        ({ query, values }) =>
+          query.includes('from "apps"') && values.includes(invoicing)
+      ).length;
+    const readsOnly = await recordedQueries(async () => {
+      await useMany([reads(budget)]);
+    });
+    let guestsPastBudget: unknown;
+    const guestQueries = await recordedQueries(async () => {
+      guestsPastBudget = await useMany([
+        reads(budget),
+        { binding: "GUESTS", method: "list", args: [], times: 1 },
+      ]);
+    });
     // A read-only call's points are refused, and still take from its
     // budget: the CRM's call through a read grant tries one too many.
     const refusedWrites = await via(
@@ -1678,6 +1704,8 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     expect({
       pointsThenReads,
       tooManyReads,
+      guestsPastBudget,
+      extraLookups: lookupsOfApp(guestQueries) - lookupsOfApp(readsOnly),
       refusedWrites,
       readsThenCall,
       refused: callsIn(events).map(({ detail }) => detail),
@@ -1685,6 +1713,8 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       pointsThenReads: { made: budget, refused: "operation.call_limit" },
       tooManyReads: { made: budget, refused: "operation.call_limit" },
       readsThenCall: { made: budget, refused: "operation.call_limit" },
+      guestsPastBudget: { made: budget, refused: "operation.call_limit" },
+      extraLookups: 0,
       refusedWrites: {
         ok: { "app.read_only": budget, "operation.call_limit": 1 },
       },
