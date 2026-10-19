@@ -662,6 +662,7 @@ const connectionsOf = async (env: Env, run: CallingRun): Promise<string[]> => {
 const callModel = async (
   env: Env,
   run: CallingRun,
+  task: string,
   binding: FrozenCatalogBinding,
   call: Extract<BuiltCall, { name: "grasp.model" }>,
   effect: Effect
@@ -707,6 +708,7 @@ const callModel = async (
       ),
       purpose: "workflow.step",
       trigger: { type: "system" },
+      runStep: { runId: run.runId, step: task },
       connections: await connectionsOf(env, run),
       work: { authority: runAuthority(run), context: runContext(run) },
       // Once the ledger admitted each provider request, the run's authority
@@ -894,7 +896,7 @@ export const makeCall = async (
         break;
       }
       case "grasp.model": {
-        output = await callModel(env, run, binding, call, effect);
+        output = await callModel(env, run, task, binding, call, effect);
         break;
       }
       case "grasp.knowledge": {
