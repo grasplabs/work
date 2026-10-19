@@ -67,6 +67,15 @@ export interface FrameTarget {
     request: string,
     onSnapshot: unknown
   ) => Promise<{ release: () => Promise<void> }>;
+  /** The person's drafts of the App, by key, as text (form-drafts.ts). */
+  drafts: () => Promise<Record<string, string>>;
+  /**
+   * Keeps a draft the frame sent, or drops it: checked, gathered and
+   * written by the target, which answers nothing.
+   */
+  saveDraft: (key: string, text: string | null) => void;
+  /** Drops every draft of the person and App, as `saveDraft` does. */
+  clearDrafts: () => void;
 }
 
 /** The page's theme, as the `dark` class on its root says (theme.js). */
@@ -124,6 +133,7 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
   readonly #cleanups: (() => void)[];
   #requests: TokenBucket | undefined;
   #reports: TokenBucket | undefined;
+  #draftRequests: TokenBucket | undefined;
   #themed = false;
 
   constructor(target: FrameTarget, cleanups: (() => void)[]) {
@@ -310,6 +320,51 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
       throw screenErrors.create("screen.invalid");
     }
     return await this.#target.watchQuery(request, onSnapshot);
+  }
+
+  /**
+   * The person's drafts of the App the page kept for the tab. Drafts stay
+   * in the page and never reach core, so they spend none of the frame's
+   * requests; draft requests have a budget of their own.
+   */
+  async drafts(): Promise<Record<string, string>> {
+    if (!this.#draftRequest()) {
+      return {};
+    }
+    return await this.#target.drafts();
+  }
+
+  /** Counts one draft request of the frame's: false past its budget. */
+  #draftRequest(): boolean {
+    const { taken, bucket } = takeToken(
+      this.#draftRequests,
+      screenLimits.drafts,
+      Date.now()
+    );
+    this.#draftRequests = bucket;
+    return taken;
+  }
+
+  /**
+   * Keeps a draft, or drops it (`null`); not text, and nothing happens.
+   * The target gathers what the frame sends, the newest of each draft,
+   * and writes it at most once per a short while (form-drafts.ts), so it
+   * spends no budget: every change, a drop or a fence's clear among them,
+   * reaches the page, and none can make it do more work than that.
+   */
+  saveDraft(key: unknown, draft: unknown): void {
+    if (
+      typeof key !== "string" ||
+      (draft !== null && typeof draft !== "string")
+    ) {
+      return;
+    }
+    this.#target.saveDraft(key, draft);
+  }
+
+  /** Drops every draft of the person and App, gathered as `saveDraft` is. */
+  clearDrafts(): void {
+    this.#target.clearDrafts();
   }
 
   /** Past what a screen may report, or in no valid shape: dropped here. */

@@ -66,6 +66,11 @@ interface __BaseEnv_Env {
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
   DURABLE_OBJECT_JURISDICTION?: string;
   /**
+   * Tests only: a shorter bound on one load of a workflow build, before it
+   * is taken for abandoned (src/workflow-builds.ts).
+   */
+  WORKFLOW_BUILD_READ_MS?: string;
+  /**
    * Tests only: a shorter wait between a run's checks of a held side
    * effect (src/workflows/host.ts).
    */
@@ -107,6 +112,16 @@ interface __BaseEnv_Env {
   APP_TEST_LIMITS_MS?: string;
   /** Tests only: a shorter bound on one build of a save (src/save-builds.ts). */
   BUILD_WAIT_MS?: string;
+  /**
+   * Tests only: a shorter bound on one load of a release, before it is
+   * taken for abandoned (src/app-releases.ts).
+   */
+  RELEASE_READ_MS?: string;
+  /**
+   * Tests only: lowers how many bytes of text a definition export packages
+   * (src/definition-export.ts); never raises it.
+   */
+  DEFINITION_EXPORT_MAX_BYTES?: string;
   /**
    * Tests only: lower bounds on an App's statistics points, `perCall/
    * perMinute` (src/app.ts, `claimStatistic`).

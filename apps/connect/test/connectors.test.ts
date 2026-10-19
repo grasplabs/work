@@ -282,7 +282,7 @@ describe("a native connector", () => {
       capability: await signCapability(env.CAPABILITY_SIGNING_KEY, chat, {
         ...keyed,
         origin: chatOrigin,
-        confirms: held.id,
+        decision: { kind: "confirm", pendingActionId: held.id },
       }),
     });
     const ended = await exports.default.heldOutcome({

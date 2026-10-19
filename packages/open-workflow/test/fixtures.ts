@@ -24,6 +24,8 @@ const note = v
   .nullable();
 
 /** The fixture catalog: every contract key the documents below name. */
+const jobData = text(v.object({ jobId: v.string() }));
+
 export const catalogEntries: Record<string, CatalogContract> = {
   "notes.get": {
     kind: "operation",
@@ -58,7 +60,10 @@ export const catalogEntries: Record<string, CatalogContract> = {
   },
   "job-events": {
     kind: "event",
-    eventTypes: ["grasp.job.completed", "grasp.job.timeout"],
+    events: {
+      "grasp.job.completed": { data: jobData, browser: false },
+      "grasp.job.timeout": { data: jobData, browser: false },
+    },
   },
   "grasp/summarize-note/1.0.0": {
     kind: "workflow",

@@ -5,7 +5,7 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { permissionErrors } from "@grasp-os/shared/permissions";
+import { codeSubjectId, permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -231,10 +231,7 @@ const calledEntry = (
   return {
     actor: { type: "app", appId: called, part: "server" },
     action: "app.called",
-    target: {
-      type: "app",
-      id: subject.type === "app" ? subject.appId : subject.agentId,
-    },
+    target: { type: "app", id: codeSubjectId(subject) },
     detail: {
       method,
       access,

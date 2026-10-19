@@ -21,9 +21,25 @@ const idp = mockIdp();
 const entryBudget = 1024 * 1024;
 
 const files = {
-  "app/server.ts": `import { DurableObject } from "cloudflare:workers";
+  // An App of spec 8's layout with nothing to call: what is measured is
+  // the screens, which call nothing of it.
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
-export class App extends DurableObject {}
+export default defineSchema({});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+
+import schema from "./schema.ts";
+
+export default app({
+  name: "Closure",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
 `,
   "screens/small.tsx": `import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";

@@ -222,6 +222,18 @@ describe("a side effect", () => {
     });
   });
 
+  it("of a remote server never gets a workflow run's mail stamp", async () => {
+    const connectionId = await addConnection();
+    await callAs(anna, {
+      ...send(connectionId, "run-3:send"),
+      stamp: "5a".repeat(16),
+    });
+    expect({ ran: server.ran.length, meta: server.callMeta }).toStrictEqual({
+      ran: 1,
+      meta: [undefined],
+    });
+  });
+
   it("of a remote server, its outcome unknown, doesn't hold a run for its person to resolve: its error is the step's", async () => {
     const connectionId = await addConnection();
     const call = send(connectionId, "run-2:send");

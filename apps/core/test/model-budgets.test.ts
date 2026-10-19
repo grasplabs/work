@@ -145,6 +145,15 @@ const toldBy = async (refused: Promise<unknown>) => {
     .parse(caught);
 };
 
+/** The seconds until the next UTC month begins, when a month's budget resets. */
+const untilNextMonth = (): number => {
+  const now = new Date();
+  return Math.ceil(
+    (Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now.getTime()) /
+      1000
+  );
+};
+
 /** Text in order. */
 const byText = (one: string, other: string): number => one.localeCompare(other);
 
@@ -290,12 +299,24 @@ describe("model budgets", { timeout: 60_000 }, () => {
     await expect(
       inTurn(Array.from({ length: 5 }, () => async () => await call(ada)))
     ).resolves.toStrictEqual(["ok", "ok", "ok", "ok", "model.over_budget"]);
-    // Spent, not held: no hint that asking again would help.
-    await expect(toldBy(call(ada))).resolves.toStrictEqual({
+    // Spent, not held: asking again helps only once the month is over,
+    // when its budget resets.
+    const usedUp = await toldBy(call(ada));
+    const resetIn = untilNextMonth();
+    expect({
+      ...usedUp,
+      resetsWithTheMonth:
+        Math.abs(Number(usedUp.details.retryAfterSeconds) - resetIn) <= 5,
+    }).toStrictEqual({
       code: "model.over_budget",
       message:
         "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
-      details: { model: workersAi, because: "user" },
+      details: {
+        model: workersAi,
+        because: "user",
+        retryAfterSeconds: usedUp.details.retryAfterSeconds,
+      },
+      resetsWithTheMonth: true,
     });
     await expect(outcome(call(hello()))).resolves.toBe("ok");
     const events = await eventsOf(trigger);
@@ -458,11 +479,17 @@ describe("model budgets", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       before: "ok",
       whileAnswering: {
+        // Out of room even once the calls under way end: used up until
+        // the month's budget resets.
         sonnet: {
           code: "model.over_budget",
           message:
             "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
-          details: { model: anthropic, because: "user" },
+          details: {
+            model: anthropic,
+            because: "user",
+            retryAfterSeconds: whileAnswering.sonnet.details.retryAfterSeconds,
+          },
         },
         llama: {
           code: "model.budget_busy",
@@ -527,12 +554,19 @@ describe("model budgets", { timeout: 60_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- until both are under way
       await scheduler.wait(10);
     }
+    // A cent leaves no room for Sonnet at all: Ada's budget there is used
+    // up, with nothing of hers under way.
+    const usedUp = withRules({ budgets: { user: { limit: 0.01 } } }, []);
     const told = {
       ada: await toldBy(own.call(sonnet(ada))),
       guest: await toldBy(own.call(sonnet(guest))),
       ben: await toldBy(shared.call(sonnet(newPerson()))),
     };
+    // Held by the member's calls under way, or used up: a guest is told
+    // the same, so it learns nothing of what the member has under way.
+    const guestWhenUsedUp = await toldBy(usedUp.call(sonnet(guest)));
     release.resolve(true);
+    expect(guestWhenUsedUp).toStrictEqual(told.guest);
 
     expect({ told, answered: await Promise.all(answering) }).toStrictEqual({
       told: {

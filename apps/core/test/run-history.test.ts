@@ -6,12 +6,12 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { approvalApp, week } from "./decisions.ts";
+import { approvalApp, confirmedAnswer, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, runObject } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 
 // A run's history, as Grasp's run pages read it (history.ts): projected
 // from the engine's journal, page by page. What could go wrong, tried
@@ -79,16 +79,16 @@ const flaky = workflowFiles(
     "count",
     { description: "Count", timeout: "1 second", retries: { limit: 2, delay: 1, backoff: "constant" } },
     async () => {
-      const tries = await env.APP.call("hit", "count");
+      const tries = await ${hitCall(`"count"`)};
       if (tries < 3) {
         await new Promise(() => {});
       }
-      return { input, tries };
+      return { input: input as Json, tries };
     }
   );
   await step.sleep("nap", { description: "Nap", duration: 1 });
   await step.do("check", { description: "Check", retries: { limit: 0 } }, async () => {
-    throw Object.assign(new Error("Customer " + counted.input.secret + " is blocked"), { code: "customer.blocked" });
+    throw Object.assign(new Error("Customer " + (counted.input as { secret: string }).secret + " is blocked"), { code: "customer.blocked" });
   });`,
   { count: { input: {}, tries: 3 }, check: null }
 );
@@ -295,7 +295,7 @@ describe("a run's history", { timeout: 60_000 }, () => {
       },
       { timeout: 20_000, interval: 100 }
     );
-    await admin.api.decisions.answer(decision, { approved: true });
+    await confirmedAnswer(admin, decision, { approved: true });
     await finished(run.id);
     const { entries } = await historyOf(builder, run.id);
     const waits = entries.filter((entry) => entry.kind === "wait");
@@ -328,13 +328,13 @@ describe("a run's history", { timeout: 60_000 }, () => {
       // Keyed by the customer: the key is the App's data.
       ...workflowFiles(
         "keyed",
-        `  await step.do("charge", { description: "Charge", key: String(input?.customer) }, async () => 1);`,
+        `  await step.do("charge", { description: "Charge", key: String((input as { customer?: string } | undefined)?.customer) }, async () => 1);`,
         { charge: 1 }
       ),
       // A name made of the input: the review can't read the steps.
       ...workflowFiles(
         "dynamic",
-        `  await step.do("charge-" + String(input?.customer), { description: "Charge" }, async () => 1);`,
+        `  await step.do("charge-" + String((input as { customer?: string } | undefined)?.customer), { description: "Charge" }, async () => 1);`,
         { "charge-undefined": 1 }
       ),
     });

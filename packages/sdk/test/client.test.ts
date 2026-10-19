@@ -1,9 +1,13 @@
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import type { ClientTransport } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
+import type { FileRef } from "../src/client-files.ts";
 import type { Id } from "../src/index.ts";
+import { GraspProvider, useFile } from "../src/react.ts";
 import { api } from "./notes/.grasp/references.ts";
 
 // The session client against the network and the page it reaches through:
@@ -245,6 +249,30 @@ describe("the session client and an outcome it can't tell", () => {
     expect(keys.size).toBe(1);
   });
 
+  it("recovers a long action's lost answer through a throttled resend, within the lost answer's budget", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const { client, calls } = network(async (call) => {
+      if (call === 1) {
+        // It ran 20 s, then its answer was lost.
+        const ran = Promise.withResolvers<null>();
+        setTimeout(() => {
+          ran.resolve(null);
+        }, 20_000);
+        await ran.promise;
+        throw new Error("The connection was reset.");
+      }
+      await Promise.resolve();
+      if (call === 2) {
+        throw rateLimited();
+      }
+      return answered(3);
+    });
+    const outcome = client.action(api.notes.tally);
+    await vi.advanceTimersByTimeAsync(25_000);
+    await expect(outcome).resolves.toBe(3);
+    expect(calls()).toBe(3);
+  });
+
   it("stops sending a mutation whose answers are lost after five minutes, uncertain, with its key", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const { client } = network(async () => {
@@ -322,7 +350,9 @@ describe("the session client and lost access", () => {
       }
       sent.push(request);
       if (sent.length === 1) {
-        throw new Error("The connection was reset.");
+        // An outcome the host can't tell: the action's key is left
+        // unknown (a lost answer would be sent again for its receipt).
+        return failedWith("operation.sandbox_lost", "uncertain");
       }
       return signedOut
         ? failedWith("auth.unauthenticated", "authorization")
@@ -376,7 +406,9 @@ describe("the session client and lost access", () => {
         }
         sent.push(request);
         if (sent.length === 1) {
-          throw new Error("The connection was reset.");
+          // An outcome the host can't tell: the action's key is left
+          // unknown (a lost answer would be sent again for its receipt).
+          return failedWith("operation.sandbox_lost", "uncertain");
         }
         // The resend may not have run: the outcome is as unknown as it was.
         return sent.length === 2
@@ -409,7 +441,9 @@ describe("the session client and lost access", () => {
       await Promise.resolve();
       sent.push(request);
       if (sent.length === 1) {
-        throw new Error("The connection was reset.");
+        // An outcome the host can't tell: the action's key is left
+        // unknown (a lost answer would be sent again for its receipt).
+        return failedWith("operation.sandbox_lost", "uncertain");
       }
       // Core's own answer, with its request ID: the App stopped running.
       return sent.length === 2 ? failedWith("app.not_running") : answered(3);
@@ -440,7 +474,9 @@ describe("the session client and lost access", () => {
       await Promise.resolve();
       sent.push(request);
       if (sent.length === 1) {
-        throw new Error("The connection was reset.");
+        // An outcome the host can't tell: the action's key is left
+        // unknown (a lost answer would be sent again for its receipt).
+        return failedWith("operation.sandbox_lost", "uncertain");
       }
       // The page relays core's refusal: the browser's session is someone
       // else's than the screen's now.
@@ -482,7 +518,9 @@ describe("the session client and lost access", () => {
         return answered(noteId);
       }
       tallies.push(request);
-      throw new Error("The connection was reset.");
+      // An outcome the host can't tell: the action's key is left
+      // unknown (a lost answer would be sent again for its receipt).
+      return failedWith("operation.sandbox_lost", "uncertain");
     });
     const keyed = { idempotencyKey: "weekly" };
     // X's outcome is left unknown; Y, under the same key, goes through.
@@ -522,6 +560,72 @@ describe("the session client and lost access", () => {
       code: "submission.outcome_unknown",
     });
     expect(creates).toHaveLength(1);
+  });
+
+  it("keeps a read under way when an App's own error carries a refusal among its details", async () => {
+    const { promise: held, resolve: release } = Promise.withResolvers<null>();
+    const { client } = network(async (_call, request) => {
+      if (request.includes("notes.get")) {
+        await held;
+        return answered({ title: "Kept" });
+      }
+      await Promise.resolve();
+      // The App's own failure, whose details happen to name a refusal.
+      return {
+        result: {
+          ok: false,
+          error: {
+            code: "note.locked",
+            message: "Locked.",
+            category: "domain",
+            retryable: false,
+            requestId: "r",
+            details: { refusal: "screen.revoked" },
+          },
+        },
+      };
+    });
+    const reading = client.query(api.notes.get, { id: noteId });
+    await expect(
+      failureOf(client.action(api.notes.tally))
+    ).resolves.toMatchObject({ code: "note.locked" });
+    release(null);
+    // No access was refused: the read under way still shows.
+    await expect(reading).resolves.toStrictEqual({ title: "Kept" });
+  });
+
+  it("drops a read under way when an action's answer is withheld for a revoked build, its outcome unknown", async () => {
+    const { promise: held, resolve: release } = Promise.withResolvers<null>();
+    const { client } = network(async (_call, request) => {
+      if (request.includes("notes.get")) {
+        await held;
+        return answered({ title: "Kept from before" });
+      }
+      await Promise.resolve();
+      // As core answers an action that ran, its answer withheld.
+      return {
+        result: {
+          ok: false,
+          error: {
+            code: "submission.outcome_unknown",
+            message: "Withheld.",
+            category: "uncertain",
+            retryable: false,
+            requestId: "r",
+            details: { idempotencyKey: "k", refusal: "screen.revoked" },
+          },
+        },
+      };
+    });
+    const reading = failureOf(client.query(api.notes.get, { id: noteId }));
+    await expect(
+      failureOf(client.action(api.notes.tally))
+    ).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      details: { refusal: "screen.revoked" },
+    });
+    release(null);
+    await expect(reading).resolves.toMatchObject({ code: "screen.revoked" });
   });
 });
 
@@ -867,5 +971,102 @@ describe("the session client and frames that arrive after the caller left", () =
       left: "stream.cancelled",
       heard: [],
     });
+  });
+});
+
+describe("the session client and the hooks", () => {
+  it("gives a client's hooks the same internals at every render, and another client its own", () => {
+    const transport: ClientTransport = {
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+    };
+    const client = new GraspClient(transport);
+    const other = new GraspClient(transport);
+    // A hook's effect depends on them: new ones each render would run it
+    // (and read its file) again on every render.
+    const firstRender = clientInternals(client);
+    const nextRender = clientInternals(client);
+    expect({
+      same: firstRender === nextRender,
+      shared: firstRender === clientInternals(other),
+    }).toStrictEqual({ same: true, shared: false });
+  });
+});
+
+describe("the session client's files", () => {
+  it("refuses a file reference core couldn't have minted in `useFile`, never reading it as skip", () => {
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+    });
+    const resource = {
+      kind: "files",
+      alias: "attachments",
+      operations: ["read"],
+    } as const;
+    const shown = (file: unknown): string => {
+      const Probe = (): null => {
+        // SAFETY: deliberately not a FileRef, as unchecked data may be.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        useFile(resource, file as FileRef);
+        return null;
+      };
+      try {
+        renderToString(
+          createElement(GraspProvider, { client }, createElement(Probe))
+        );
+        return "rendered";
+      } catch (error) {
+        return error instanceof GraspError ? error.code : "failed";
+      }
+    };
+    expect([
+      shown({}),
+      shown({ id: crypto.randomUUID(), extra: true }),
+      shown("skip"),
+    ]).toStrictEqual([
+      "contract.invalid_args",
+      "contract.invalid_args",
+      "rendered",
+    ]);
+  });
+
+  it("fences the client once for refusals of file requests that started before that fence", async () => {
+    const pending: ((code: string) => void)[] = [];
+    const refusedLater = async (): Promise<never> => {
+      const { promise, reject } = Promise.withResolvers<never>();
+      pending.push((code) => {
+        reject(Object.assign(new Error(code), { code }));
+      });
+      return await promise;
+    };
+    const transport: ClientTransport = {
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+      files: {
+        upload: refusedLater,
+        read: refusedLater,
+        download: refusedLater,
+        delete: refusedLater,
+      },
+    };
+    const client = new GraspClient(transport);
+    const resource = {
+      kind: "files",
+      alias: "attachments",
+      operations: ["read"],
+    } as const;
+    const first = client.files.download(resource, { id: crypto.randomUUID() });
+    const second = client.files.download(resource, { id: crypto.randomUUID() });
+    const settled = Promise.allSettled([first, second]);
+    for (const refuse of pending) {
+      refuse("auth.unauthenticated");
+    }
+    await settled;
+    // A request after the fence, refused so too, fences it again.
+    const third = client.files.download(resource, { id: crypto.randomUUID() });
+    pending.at(-1)?.("auth.unauthenticated");
+    await Promise.allSettled([third]);
+    expect(clientInternals(client).fences()).toBe(2);
   });
 });

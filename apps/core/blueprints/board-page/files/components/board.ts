@@ -42,7 +42,7 @@ export interface SignalFigure {
   value: number;
 }
 
-/** A snapshot's fields, as the Playbook reads them. */
+/** A snapshot's fields, as the page reads them (snapshot.ts `snapshotFrom`). */
 export interface SnapshotRecord {
   title?: string;
   date?: string;
@@ -60,15 +60,6 @@ export const rowsShown = 5;
 
 /** The highest maturity level. */
 export const maturityLevels = 5;
-
-/**
- * A snapshot record's fields: the server reads only documents of type
- * `snapshot`, which the Playbook checked against the page's snapshot
- * type (app/records.json) on save, and reads back with it.
- */
-export const snapshotRecordOf = (
-  record: Record<string, unknown>
-): SnapshotRecord => record;
 
 /**
  * The hours a week a workflow takes now: as it runs, once it does; as it

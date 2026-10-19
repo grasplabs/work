@@ -1,23 +1,29 @@
 import {
-  loadScreenCompiler,
+  loadAppCompiler,
   packageBuilderCode,
   platformCodeReadMs,
-  screenCompilerCode,
+  appCompilerCode,
   startPackageBuilder,
-  startScreenCompiler,
+  startAppCompiler,
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
 
 import {
   functionCapability,
+  noPlaceOf,
   runInSession,
   sandboxVerdictOf,
   sessionCallMs,
 } from "./sandbox-session.ts";
 import type { SessionArgument } from "./sandbox-session.ts";
-import { callStub, SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
+import {
+  callStub,
+  SandboxUnavailableError,
+  sandboxWaitMs,
+  sessionHost,
+} from "./sandboxed.ts";
 
-// The release's platform code (the screen compiler, the package builder,
+// The release's platform code (the App compiler, the package builder,
 // the file extractor), which reads hostile input (an App's source; npm
 // tarballs; uploads) without running it, run where it is bounded: on
 // Cloudflare in a Dynamic Worker of core's own, whose CPU and memory the
@@ -63,6 +69,21 @@ import { callStub, SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
 //   per-owner share of the pool like any App; past it, or with the pool
 //   full, the call is refused as the sandbox unavailable, before it
 //   started (`noPlaceOf`), never as the input's fault.
+// - One App's builds take the whole builder's share (many distinct
+//   screens, or builds that run to their deadline, which isn't cached),
+//   so every other App's are refused as busy. Each build names whose it
+//   is (`platformRunner`'s `whose`, the App or independent workflow, from
+//   core's own record), sent as the session's sub-owner; the supervisor
+//   holds one sub-owner to part of its owner's share, places and waiting
+//   room both (`maxPerSubOwner`, half of it, at least one), leaving the
+//   rest to other Apps. A build with no place asks again within the
+//   build wait (`askingForPlace`), so a save's three compiles wait for
+//   the App's part rather than be refused. The part is per App, not per
+//   author: an App's builders share it (accepted, GRA-563). Only core
+//   reaches the supervisor's socket, so no
+//   App names another's sub-owner. Enforced there rather than in core,
+//   where builds run in many isolates and objects, and with no queue of
+//   its own: the supervisor holds the places already.
 // - One owner's build reaches another's, or an App's code. One call per
 //   process, killed once the session ends: nothing a build leaves in
 //   memory is there for the next call, whoever's it is. The isolate gets
@@ -80,7 +101,7 @@ import { callStub, SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
 // pool (App code's too), and tie the supervisor to the release's build
 // output. Handing them over on a local socket costs milliseconds; loading
 // the compiler, about a second per build that isn't cached. Cloudflare
-// keeps the compiler warm in its Loader (`startScreenCompiler`).
+// keeps the compiler warm in its Loader (`startAppCompiler`).
 
 /** What builds run as on the sandbox host: one owner of their own. */
 export const builderOwner = "platform:builder";
@@ -197,6 +218,8 @@ export interface PlatformCall {
   readonly wallMs: number;
   /** Who it runs as: an owner of the platform's own (`builderOwner`). */
   readonly owner: string;
+  /** Whose build it is, within that owner's share (an App's ID). */
+  readonly subOwner?: string;
   /** Its process's memory, where it needs more than App code gets. */
   readonly memoryMib?: number;
 }
@@ -212,7 +235,7 @@ export interface PlatformCall {
 export const runPlatformCode = async (
   host: Fetcher,
   code: PlatformCode,
-  { method, args, wallMs, owner, memoryMib }: PlatformCall
+  { method, args, wallMs, owner, subOwner, memoryMib }: PlatformCall
 ): Promise<unknown> => {
   try {
     return await runInSession(host, {
@@ -227,6 +250,7 @@ export const runPlatformCode = async (
       wallMs,
       ...(memoryMib === undefined ? {} : { memoryMib }),
       owner,
+      ...(subOwner === undefined ? {} : { subOwner }),
     });
   } catch (error) {
     throw stopOf(error, false);
@@ -300,7 +324,7 @@ const loaderCall = async (
  * isolate, which every App's builds share, so its limits are theirs
  * together: one heavy build beside another can stop both. A stop there is
  * tried once more in a fresh isolate of the build's own
- * (`loadScreenCompiler`), whose stop is the build's alone, and only that
+ * (`loadAppCompiler`), whose stop is the build's alone, and only that
  * is answered: a build is never kept as failed for what another did. The
  * builder runs in a fresh isolate per runner, so nothing one App's
  * packages leave in memory is there for the next, and its stops are its
@@ -314,7 +338,7 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
   ): Promise<unknown> => {
     try {
       return await loaderCall(
-        startScreenCompiler(env.LOADER, env.ASSETS),
+        startAppCompiler(env.LOADER, env.ASSETS),
         method,
         args
       );
@@ -323,7 +347,7 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
         throw error;
       }
       return await loaderCall(
-        await loadScreenCompiler(env.LOADER, env.ASSETS),
+        await loadAppCompiler(env.LOADER, env.ASSETS),
         method,
         args
       );
@@ -351,7 +375,7 @@ const programCode: Record<
   PlatformProgram,
   (assets: Fetcher) => Promise<PlatformCode>
 > = {
-  compiler: screenCompilerCode,
+  compiler: appCompilerCode,
   "package-builder": packageBuilderCode,
 };
 
@@ -367,31 +391,108 @@ const sessionArgs = (args: readonly unknown[]): SessionArgument[] =>
       : { value: arg }
   );
 
-/** The runner on the sandbox host: a session for each call, as `platform:builder`. */
-const onHost = (env: PlatformEnv, host: Fetcher): PlatformRunner => {
+/**
+ * How long a build asks again for a place in the builder's share while it
+ * has none (`noPlaceOf`): as long as a caller waits for a build at most
+ * (screens.ts, `buildWaitMs`), so a compile its own App's other builds
+ * hold up waits its turn rather than fail.
+ */
+const placeWaitMs = 15_000;
+
+/**
+ * The longest one platform call waits for its place, every ask included
+ * ({@link placeWaitMs}): what a caller that asks again past it counts as
+ * one ask (app-tests.ts, a version's test build).
+ */
+export const platformPlaceWaitMs = placeWaitMs;
+
+/** The longest a build waits between asks for a place. */
+const placeRetryMs = 2000;
+
+/**
+ * The longest one ask may wait in the supervisor before it is refused: for
+ * its owner's place, then for a process.
+ */
+const placeAskMs = 2 * sandboxWaitMs;
+
+/**
+ * Runs `build`, asking again while the supervisor has no place for it
+ * (`noPlaceOf`: refused before anything ran, so nothing it was handed was
+ * read), backing off up to {@link placeRetryMs}, for up to
+ * {@link placeWaitMs}: the App's other builds (a save's other compiles,
+ * or builds in other isolates) may hold its part of the share for a
+ * moment. Holds nothing while it waits: a cancelled request's waits end
+ * with it.
+ */
+const askingForPlace = async <T>(build: () => Promise<T>): Promise<T> => {
+  const until = Date.now() + placeWaitMs;
+  for (let wait = 250; ; wait = Math.min(wait * 2, placeRetryMs)) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+      return await build();
+    } catch (error) {
+      // No ask starts that could still be waiting past the wait.
+      if (!noPlaceOf(error) || Date.now() + wait + placeAskMs > until) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- backing off between asks
+    await scheduler.wait(wait);
+  }
+};
+
+/**
+ * The runner on the sandbox host: a session for each call, as
+ * `platform:builder`, each of `whose` builds within its share, asking
+ * again for a place while it has none. Nothing is queued in core: a
+ * request workerd cancels never runs its continuations or `finally`
+ * (@grasp-os/shared/shared-runs), so a queue here would wait for a build
+ * that never ends; the supervisor's waiting room is the one queue.
+ */
+const onHost = (
+  env: PlatformEnv,
+  host: Fetcher,
+  whose: string
+): PlatformRunner => {
   const wallMs = (program: PlatformProgram): number =>
     platformWallMs(env, programWallMs[program]);
   return {
     inCore: false,
-    run: async (program, method, args) =>
-      await runPlatformCode(host, await programCode[program](env.ASSETS), {
-        method,
-        args: sessionArgs(args),
-        wallMs: wallMs(program),
-        owner: builderOwner,
-        memoryMib: builderMemoryMib,
-      }),
-    callMs: (program) => platformCodeReadMs + sessionCallMs(wallMs(program)),
+    run: async (program, method, args) => {
+      const code = await programCode[program](env.ASSETS);
+      const passed = sessionArgs(args);
+      return await askingForPlace(
+        async () =>
+          await runPlatformCode(host, code, {
+            method,
+            args: passed,
+            wallMs: wallMs(program),
+            owner: builderOwner,
+            subOwner: whose,
+            memoryMib: builderMemoryMib,
+          })
+      );
+    },
+    // Its place waited for too, beyond one call's own bounds.
+    callMs: (program) =>
+      platformCodeReadMs + placeWaitMs + sessionCallMs(wallMs(program)),
   };
 };
 
 /**
- * The runner of the release's platform code for `env`: on the sandbox host
- * where `SANDBOX_HOST` is bound, else in core's Loader where the runtime
- * bounds it (`sessionHost`). Throws `SandboxUnavailableError`, at once,
- * where nothing bounds it: before anything is read or fetched for it.
+ * The runner of the release's platform code for `env`, building for
+ * `whose` (the App, or the independent workflow, whose build it is; core's
+ * own record, never App code's word): on the sandbox host where
+ * `SANDBOX_HOST` is bound, held to that sub-owner's part of the builder's
+ * share (scripts/workerd-sandbox.ts, `maxPerSubOwner`), so one App's
+ * builds never keep every other App's out; else in core's Loader where the
+ * runtime bounds it (`sessionHost`). Throws `SandboxUnavailableError`, at
+ * once, where nothing bounds it: before anything is read or fetched for it.
  */
-export const platformRunner = (env: PlatformEnv): PlatformRunner => {
+export const platformRunner = (
+  env: PlatformEnv,
+  whose: string
+): PlatformRunner => {
   const host = sessionHost(env);
-  return host === undefined ? inCore(env) : onHost(env, host);
+  return host === undefined ? inCore(env) : onHost(env, host, whose);
 };

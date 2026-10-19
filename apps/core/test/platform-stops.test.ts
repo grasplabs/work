@@ -19,7 +19,7 @@ import { mockIdp } from "./idp.ts";
 import { failure, intentFor, named, plain, publish } from "./npm.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
-// How the release's platform code (the screen compiler, the package
+// How the release's platform code (the App compiler, the package
 // builder) is judged when the sandbox stops it (src/platform-sandbox.ts),
 // from its threat model:
 // - A stop the load caused (the shared machine's processes killed, waits
@@ -122,7 +122,7 @@ const twoBuilds = async (buildEnv: Parameters<typeof buildScreens>[0]) => {
   for (const _ of [1, 2]) {
     // One after the other: the second finds what the first kept, or not.
     // oxlint-disable-next-line no-await-in-loop
-    const built = await buildScreens(buildEnv, files);
+    const built = await buildScreens(buildEnv, files, "app-test");
     ended.push(
       built.ok ? "built" : (built.diagnostics[0]?.message.slice(0, 44) ?? "")
     );
@@ -270,7 +270,7 @@ describe("a screen the sandbox stops the compiler on", () => {
     const { files, kept } = countingFiles();
 
     await expect(
-      buildScreens(onCloudflare(loader, files), freshScreen())
+      buildScreens(onCloudflare(loader, files), freshScreen(), "app-test")
     ).rejects.toThrow("Can't read src/exceeded memory limit.ts");
     expect(kept()).toBe(0);
   });
@@ -282,7 +282,8 @@ describe("a screen the sandbox stops the compiler on", () => {
     try {
       await buildScreens(
         { ...env, SANDBOX_HOST: host, FILES: files },
-        freshScreen()
+        freshScreen(),
+        "app-test"
       );
     } catch (error) {
       refused = error;

@@ -5,7 +5,15 @@ import type { Identity } from "@grasp-os/shared/rpc";
  * Who is behind the connection, as its latest reading says (at most
  * {@link sessionRecheckMs} old); throws once the session has ended.
  */
-export type SessionCheck = () => Promise<Identity>;
+export type SessionCheck = (() => Promise<Identity>) & {
+  /**
+   * Drops the latest reading, so the next check reads who is behind the
+   * connection now: for when core learns their role or teams may have
+   * changed (query-subscriptions.ts). A check that keeps no reading has
+   * none.
+   */
+  readonly forget?: () => void;
+};
 
 /**
  * Runs `run` as the person behind the session: checks it first and hands
@@ -22,15 +30,21 @@ export const withPerson = async <T>(
  * staff scope) with `role.forbidden`: what every namespace but the
  * onboarding's checks with.
  */
-export const fullAccess =
-  (check: SessionCheck): SessionCheck =>
-  async () => {
-    const person = await check();
-    if (person.onboardingOnly === true) {
-      throw roleErrors.create("role.forbidden");
+export const fullAccess = (check: SessionCheck): SessionCheck =>
+  Object.assign(
+    async (): Promise<Identity> => {
+      const person = await check();
+      if (person.onboardingOnly === true) {
+        throw roleErrors.create("role.forbidden");
+      }
+      return person;
+    },
+    {
+      forget: (): void => {
+        check.forget?.();
+      },
     }
-    return person;
-  };
+  );
 
 /**
  * How long one reading of who is behind a connection holds. It is read
@@ -45,27 +59,34 @@ export const sessionRecheckMs = 5000;
  * `read`, run again at most every `ms` and shared by everyone who asks
  * meanwhile: so a stream of calls or pushes costs a reading every few
  * seconds, not one each. A reading that fails isn't kept: the next ask
- * reads again.
+ * reads again, and so does the next ask once `forget` dropped the latest.
  */
 export const recheckedEvery = <T>(
   ms: number,
   read: () => Promise<T>
-): (() => Promise<T>) => {
+): (() => Promise<T>) & { forget: () => void } => {
   let latest: { value: Promise<T>; until: number } | undefined;
-  return async () => {
-    const now = Date.now();
-    if (latest !== undefined && latest.until > now) {
-      return await latest.value;
-    }
-    const reading = { value: read(), until: now + ms };
-    latest = reading;
-    try {
-      return await reading.value;
-    } catch (error) {
-      if (latest === reading) {
-        latest = undefined;
+  return Object.assign(
+    async (): Promise<T> => {
+      const now = Date.now();
+      if (latest !== undefined && latest.until > now) {
+        return await latest.value;
       }
-      throw error;
+      const reading = { value: read(), until: now + ms };
+      latest = reading;
+      try {
+        return await reading.value;
+      } catch (error) {
+        if (latest === reading) {
+          latest = undefined;
+        }
+        throw error;
+      }
+    },
+    {
+      forget: (): void => {
+        latest = undefined;
+      },
     }
-  };
+  );
 };

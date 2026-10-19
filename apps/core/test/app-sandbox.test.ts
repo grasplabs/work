@@ -970,11 +970,15 @@ export default class extends WorkerEntrypoint {
     const builds = await Promise.all(
       Object.values(reachesOut).map(
         async (probe) =>
-          await buildServer(env, {
-            "app/server.ts":
-              'export * from "./probe.ts";\nexport class App {}\n',
-            "app/probe.ts": probe,
-          })
+          await buildServer(
+            env,
+            {
+              "app/server.ts":
+                'export * from "./probe.ts";\nexport class App {}\n',
+              "app/probe.ts": probe,
+            },
+            "app-test"
+          )
       )
     );
     expect(
@@ -1064,7 +1068,11 @@ export default workflowTests(definition, [{ name: "runs", mocks: { one: 1 }, exp
       (error: unknown) => error
     );
     // The same files fail the same way: from the cache, without a compiler.
-    const again = await buildServer({ ...env, LOADER: noLoader }, broken);
+    const again = await buildServer(
+      { ...env, LOADER: noLoader },
+      broken,
+      "app-test"
+    );
     const unknownApp = await outcome(
       callApp(
         env,

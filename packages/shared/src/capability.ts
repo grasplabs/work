@@ -62,10 +62,29 @@ const originSchema = z.strictObject({
    * For an App action's connector resource: the approved binding the call
    * came through, with the declaration and contract it served then. Core
    * resolves the binding again, as a live request would, before it signs
-   * the confirmation of a held call, and refuses on any difference.
+   * a decision of a call held or of unknown outcome, and refuses on any
+   * difference; connect compares the decision's with the call's.
    */
   binding: heldBindingSchema.optional(),
 });
+
+/**
+ * What a person decided of a call waiting for them, as core signs it:
+ * confirming the held action `pendingActionId`, or resolving a call of
+ * unknown outcome by `choice`, at the claim of its key they were shown
+ * (`claimedAt`; one sent again since, and lost again, is another call to
+ * decide on). One kind never stands for the other: connect compares the
+ * whole decision with the one it expects.
+ */
+export const capabilityDecisionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("confirm"), pendingActionId: z.uuid() }),
+  z.strictObject({
+    kind: z.literal("resolve"),
+    choice: z.enum(["happened", "not_happened"]),
+    claimedAt: z.int().nonnegative(),
+  }),
+]);
+export type CapabilityDecision = z.infer<typeof capabilityDecisionSchema>;
 
 /** What a capability says. Unknown fields make it invalid. */
 export const capabilityClaimsSchema = z.strictObject({
@@ -97,9 +116,17 @@ export const capabilityClaimsSchema = z.strictObject({
    */
   readOnly: z.boolean().default(false),
   /**
-   * What core checks again if connect holds the call and the person
-   * confirms it: the permission that allowed it and the context it came
-   * from.
+   * The call's input holds a value core keeps from people: a workflow's
+   * sensitive parameter, put in as a binding argument. Connect keeps none
+   * of its input under its key, so no listing of a call of unknown
+   * outcome shows it, and saying such a call didn't happen is refused, as
+   * for one whose input is no longer kept. Only the capability says it.
+   */
+  sensitive: z.boolean().default(false),
+  /**
+   * What core checks again if connect holds the call, or loses its
+   * answer, and the person decides it: the permission that allowed it and
+   * the context it came from.
    */
   origin: originSchema,
   /**
@@ -109,25 +136,13 @@ export const capabilityClaimsSchema = z.strictObject({
    */
   context: workContextSchema.optional(),
   /**
-   * Only on the capability core signs once the person confirmed a held
-   * action, from their own session: that action's ID. Connect runs a held
-   * action only with it, and takes it nowhere else.
+   * Only on the capability core signs once a person decided a call that
+   * waits for them, from their own session, after checking its permission
+   * and context again (`CapabilityDecision`). Connect decides that call
+   * only with it, only as it says, and takes it nowhere else: a call or a
+   * held call's read with one is refused.
    */
-  confirms: z.uuid().optional(),
-  /**
-   * Only on the capability core signs once the person a call acted for
-   * resolved its unknown outcome, from their own session, after checking
-   * the call's permission again: what they said of it, and of which claim
-   * of its key (`claimedAt`, the claim they were shown). Connect resolves
-   * the call's outcome only with it, only while that claim is the key's,
-   * and takes it nowhere else.
-   */
-  resolves: z
-    .strictObject({
-      choice: z.enum(["happened", "not_happened"]),
-      claimedAt: z.int().nonnegative(),
-    })
-    .optional(),
+  decision: capabilityDecisionSchema.optional(),
 });
 export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
 
@@ -151,16 +166,14 @@ export interface CapabilityScope extends CapabilityCall {
   restricted?: boolean | undefined;
   /** The caller may only read: signed, not compared. */
   readOnly?: boolean | undefined;
+  /** The call's input holds a sensitive value: signed, not compared. */
+  sensitive?: boolean | undefined;
   /** What core checks again when a held call is confirmed: signed. */
   origin: z.input<typeof originSchema>;
   /** Where the call is made, for the audit log: signed, not compared. */
   context?: z.input<typeof workContextSchema> | undefined;
-  /** The held action the person confirmed: signed, not compared. */
-  confirms?: string | undefined;
-  /** What the person said of an unknown outcome: signed, not compared. */
-  resolves?:
-    | { choice: "happened" | "not_happened"; claimedAt: number }
-    | undefined;
+  /** What a person decided of the call: signed, not compared. */
+  decision?: CapabilityDecision | undefined;
 }
 
 /** Why connect refuses a call before looking at it any further. */
@@ -217,10 +230,10 @@ export const signCapability = async (
     idempotencyKey: scope.idempotencyKey ?? null,
     restricted: scope.restricted === true,
     readOnly: scope.readOnly === true,
+    sensitive: scope.sensitive === true,
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
-    ...(scope.confirms === undefined ? {} : { confirms: scope.confirms }),
-    ...(scope.resolves === undefined ? {} : { resolves: scope.resolves }),
+    ...(scope.decision === undefined ? {} : { decision: scope.decision }),
   };
   capabilityClaimsSchema.parse(claims);
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));

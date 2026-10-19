@@ -386,7 +386,7 @@ export const replayStream = async (
   let cancelled = false;
   /** Ends the stream on a failure: to the sink, or as its error. */
   const stop = async (
-    controller: ReadableStreamDefaultController<Uint8Array>,
+    controller: ReadableByteStreamController,
     failure: { fault: unknown } | { corrupt: Error }
   ): Promise<void> => {
     await hash.abandon();
@@ -446,8 +446,15 @@ export const replayStream = async (
       return cancelled ? { cancelled } : { fault: error };
     }
   };
-  const stream = new ReadableStream<Uint8Array>(
+  // A byte stream, as Cloudflare Workflows gives: a default reader and a
+  // BYOB reader both read it. Each enqueued chunk is a fresh array, so the
+  // stream taking its buffer takes nothing anyone else holds.
+  const stream = new ReadableStream(
     {
+      type: "bytes",
+      // A default reader is given a stored chunk per read, not the
+      // runtime's default of a few KiB at a time.
+      autoAllocateChunkSize: storedChunkBytes,
       pull: async (controller) => {
         if (sink?.stopped() === true) {
           await neverSettles();

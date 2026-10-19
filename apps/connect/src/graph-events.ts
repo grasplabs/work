@@ -7,6 +7,7 @@ import {
   newSince,
   providerLink,
   readFromProvider,
+  stampOf,
 } from "./event-kinds.ts";
 import type {
   EventKind,
@@ -112,6 +113,9 @@ const message = z.object({
   conversationId: z.string().nullish(),
   internetMessageId: z.string().nullish(),
   webLink: z.string().nullish(),
+  internetMessageHeaders: z
+    .array(z.object({ name: z.string(), value: z.string() }))
+    .nullish(),
 });
 
 const messageFields = [
@@ -123,6 +127,8 @@ const messageFields = [
   "conversationId",
   "internetMessageId",
   "webLink",
+  // For the stamp a run's mail carries (`stampOf`), never the payload.
+  "internetMessageHeaders",
 ].join(",");
 
 /**
@@ -157,37 +163,43 @@ const mailReceived: EventKind = {
       source.cursor ?? start
     );
     const since = newSince(source);
-    const events = items.flatMap((item) =>
-      item["@removed"] === undefined && isSince(item.receivedDateTime, since)
-        ? [
-            {
-              id: item.id,
-              payload: {
-                mailbox:
-                  source.resource === ""
-                    ? (read.connection.accountId ?? "")
-                    : source.resource,
-                id: item.id,
-                folder: "inbox",
-                subject: item.subject ?? null,
-                from:
-                  item.from?.emailAddress === null ||
-                  item.from?.emailAddress === undefined
-                    ? null
-                    : {
-                        name: item.from.emailAddress.name ?? null,
-                        address: item.from.emailAddress.address ?? null,
-                      },
-                receivedAt: item.receivedDateTime ?? null,
-                hasAttachments: item.hasAttachments ?? false,
-                conversationId: item.conversationId ?? null,
-                internetMessageId: item.internetMessageId ?? null,
-                webLink: item.webLink ?? null,
-              },
-            },
-          ]
-        : []
-    );
+    const events = items.flatMap((item) => {
+      if (
+        item["@removed"] !== undefined ||
+        !isSince(item.receivedDateTime, since)
+      ) {
+        return [];
+      }
+      const stamp = stampOf(item.internetMessageHeaders);
+      return [
+        {
+          id: item.id,
+          ...(stamp === undefined ? {} : { stamp }),
+          payload: {
+            mailbox:
+              source.resource === ""
+                ? (read.connection.accountId ?? "")
+                : source.resource,
+            id: item.id,
+            folder: "inbox",
+            subject: item.subject ?? null,
+            from:
+              item.from?.emailAddress === null ||
+              item.from?.emailAddress === undefined
+                ? null
+                : {
+                    name: item.from.emailAddress.name ?? null,
+                    address: item.from.emailAddress.address ?? null,
+                  },
+            receivedAt: item.receivedDateTime ?? null,
+            hasAttachments: item.hasAttachments ?? false,
+            conversationId: item.conversationId ?? null,
+            internetMessageId: item.internetMessageId ?? null,
+            webLink: item.webLink ?? null,
+          },
+        },
+      ];
+    });
     return { events, cursor, more };
   },
 };

@@ -1,6 +1,7 @@
 import { kitModuleName, screenRuntime } from "@grasp-os/compiler";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
+import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -30,6 +31,7 @@ import {
 import type { Framed } from "./screen-frames.ts";
 import type { RawSettled } from "./sign-in.ts";
 import {
+  auditedDuring,
   countingSessionReads,
   openRawRpc,
   openRpc,
@@ -626,6 +628,33 @@ describe("screens", { timeout: 60_000 }, () => {
     }).toStrictEqual({ ends: 3, css: true });
   });
 
+  it("says the page's language in a frame's document, only one the page speaks, and English otherwise", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const langOf = async (lang?: string): Promise<string | undefined> => {
+      const response = await frameDocument(
+        bundle,
+        lang === undefined ? {} : { lang }
+      );
+      return /<html lang="(?<lang>[^"]*)">/u.exec(await response.text())?.groups
+        ?.lang;
+    };
+    expect({
+      german: await langOf("de"),
+      french: await langOf("fr"),
+      unknown: await langOf("ja"),
+      injected: await langOf('de"><script>'),
+      none: await langOf(),
+    }).toStrictEqual({
+      german: "de",
+      french: "fr",
+      unknown: "en",
+      injected: "en",
+      none: "en",
+    });
+  });
+
   it("deletes staged builds the cron finds past their days, and stages a build in use again before then", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
@@ -662,7 +691,8 @@ describe("screens", { timeout: 60_000 }, () => {
       env,
       sampleFiles,
       "notes",
-      1
+      1,
+      "app-test"
     );
     const listedBefore = await env.FILES.list({ prefix: "screen-modules/" });
     await stageFrame(env, artifact, code, new Date(Date.now() + 16 * day));
@@ -2067,3 +2097,105 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 });
+
+// The v1 server's calls (`callServer`) go through the same trust gate as a
+// sealed App's functions (`delivering`): kept here until GRA-645 removes
+// the v1 server, so the gate's v1 call and the check of an error after it
+// ran stay covered while the path is live.
+const nothing = async (): Promise<void> => {
+  // Nothing happens between the App's read and its failure.
+};
+
+/** What a call failed with, and whether anything in it carries the App's data. */
+const failure = async (
+  call: Promise<unknown>
+): Promise<{ code: string; carriesData: boolean }> => {
+  try {
+    await call;
+    return { code: "ok", carriesData: false };
+  } catch (error) {
+    const code: unknown =
+      typeof error === "object" && error !== null
+        ? Reflect.get(error, "code")
+        : undefined;
+    return {
+      code: typeof code === "string" ? code : String(error),
+      carriesData: JSON.stringify({
+        error,
+        message: error instanceof Error ? error.message : undefined,
+      }).includes("Acme owes"),
+    };
+  }
+};
+
+const revokedServerCode = `import { DurableObject } from "cloudflare:workers";
+
+type Caller = { userId: string };
+
+export class App extends DurableObject {
+  // Reads, tells the screen it has, then fails with what it read.
+  async failingNotes(_caller: Caller, afterRead: () => Promise<void>): Promise<never> {
+    const note = "Acme owes 4,200";
+    await afterRead();
+    throw new Error(note);
+  }
+}
+`;
+
+describe(
+  "the v1 server's calls of a revoked build",
+  { timeout: 60_000 },
+  () => {
+    it("hand a screen no error of its App's once the approval is taken back as it runs", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Notes" });
+      const { version } = await builder.api.apps.files.commit(
+        app,
+        {
+          "app/server.ts": revokedServerCode,
+          "screens/notes.tsx":
+            "export default function Notes() {\n  return null;\n}\n",
+        },
+        "First"
+      );
+      await builder.api.apps.versions.setCurrent(app, version);
+      const review = await admin.api.screenTrust.review(app);
+      await admin.api.screenTrust.approve(app, {
+        version: review.version,
+        generation: review.generation,
+        artifacts: builtArtifacts(review.screens),
+      });
+      const bundle = await builder.api.screens.open(app, "notes");
+      await builder.api.screens.present(app, bundle.lease);
+      const approved = await failure(
+        builder.api.screens.call(app, "failingNotes", [nothing])
+      );
+      let revoked: Awaited<ReturnType<typeof failure>> | undefined;
+      const events = await auditedDuring(async () => {
+        revoked = await failure(
+          builder.api.screens.call(app, "failingNotes", [
+            async () => {
+              await admin.api.screenTrust.revoke(app, bundle.artifact);
+            },
+          ])
+        );
+      });
+
+      expect({
+        approved,
+        revoked,
+        refused: events
+          .filter(({ action }) => action === "app.artifact.refused")
+          .map(
+            ({ detail }) =>
+              `${detail.operation}/${detail.stage}: ${detail.reason}`
+          ),
+      }).toStrictEqual({
+        approved: { code: "app.failed", carriesData: true },
+        revoked: { code: "screen.revoked", carriesData: false },
+        refused: ["call/delivery: revoked"],
+      });
+    });
+  }
+);

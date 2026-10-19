@@ -50,6 +50,7 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   const calls: { method: string; args: unknown[] }[] = [];
   const functionCalls: string[] = [];
   const reports: string[] = [];
+  const draftRequests: string[] = [];
   const subscriptions: Subscription[] = [];
   // The live queries' callbacks core keeps.
   const kept: Disposable[] = [];
@@ -91,6 +92,16 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
       subscriptions.push(subscription);
       return await Promise.resolve(subscription);
     },
+    drafts: async () => {
+      draftRequests.push("drafts");
+      return await Promise.resolve({});
+    },
+    saveDraft: (_key, text) => {
+      draftRequests.push(text === null ? "drop" : "save");
+    },
+    clearDrafts: () => {
+      draftRequests.push("clear");
+    },
     watchQuery: async (_request, onSnapshot) => {
       // Kept, as core keeps a live query's callback until it lets go.
       if (onSnapshot instanceof RpcStub) {
@@ -103,6 +114,7 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   };
   return {
     calls,
+    draftRequests,
     functionCalls,
     opening,
     reports,
@@ -337,6 +349,37 @@ describe("the page's bridge to a screen", () => {
       refused: 180,
       reachedInFlood: 10,
       later: ["answered", "answered", "screen.rate_limited"],
+    });
+  });
+
+  it("hands over drafts to a burst of twenty, and passes on every change and clear", async () => {
+    const frame = framed();
+    const handedOver = await Promise.all(
+      Array.from({ length: 30 }, async () => await frame.page.drafts())
+    );
+    for (let count = 0; count < 30; count += 1) {
+      void frame.page.saveDraft("draft", "text");
+    }
+    void frame.page.saveDraft("draft", null);
+    void frame.page.clearDrafts();
+    // In order on the one port: once this is answered, so are the rest.
+    await frame.page.call("notes", []);
+    frame.close();
+
+    const count = (kind: string) =>
+      frame.draftRequests.filter((request) => request === kind).length;
+    expect({
+      handedOver: handedOver.length,
+      drafts: count("drafts"),
+      kept: count("save"),
+      dropped: count("drop"),
+      cleared: count("clear"),
+    }).toStrictEqual({
+      handedOver: 30,
+      drafts: 20,
+      kept: 30,
+      dropped: 1,
+      cleared: 1,
     });
   });
 

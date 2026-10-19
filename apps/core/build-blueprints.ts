@@ -10,7 +10,7 @@
  * which never changes: renaming the folder makes another blueprint. In it:
  *
  * - `blueprint.json`: `{ "name": …, "description": … }`, as for any App,
- *   and optionally `"collections"`: the collections it keeps records in,
+ *   and optionally `"collections"`: the collections it keeps documents in,
  *   as `[{ "id": …, "name": …, "description": … }]`, which the install
  *   creates if they aren't there yet (`declaredCollectionSchema`); and
  *   `"permissions"`: what each App created from it asks for, as
@@ -25,9 +25,7 @@
  * collections, and its permissions as any request's are checked, each
  * for a collection it declares), and its
  * files as any App's write checks them (paths, no hidden files, each
- * file's size and their number), their total size as any version's, and
- * its record types (`app/records.json`) as any version's commit reads
- * them, each in a collection its copies ask to write.
+ * file's size and their number), and their total size as any version's.
  */
 import {
   existsSync,
@@ -40,21 +38,12 @@ import {
 import path from "node:path";
 
 import { appLimits } from "@grasp-os/shared/app-limits";
-import {
-  appErrors,
-  appRecordTypesPath,
-  fileChangesSchema,
-  fromBlueprintSchema,
-} from "@grasp-os/shared/apps";
-import type { AppRecordTypes } from "@grasp-os/shared/apps";
+import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
 import { declaredCollectionSchema } from "@grasp-os/shared/knowledge";
 import { declaredPermissionSchema } from "@grasp-os/shared/permissions";
-import type { DeclaredPermission } from "@grasp-os/shared/permissions";
 import { z } from "zod";
 
 import type { BuiltinBlueprint } from "#blueprints";
-
-import { recordTypesIn } from "./src/app-records.ts";
 
 /** Where the built-ins that ship with each release are. */
 export const blueprintsDir = path.join(import.meta.dirname, "blueprints");
@@ -132,65 +121,6 @@ const filesIn = (dir: string): Record<string, string> => {
   );
 };
 
-/** The issues a refusal names (`details.issues`), if it names any. */
-const issuesOf = (error: unknown): string[] => {
-  const details =
-    error instanceof Error && "details" in error ? error.details : undefined;
-  if (typeof details !== "object" || details === null) {
-    return [];
-  }
-  const issues = "issues" in details ? details.issues : undefined;
-  return Array.isArray(issues)
-    ? issues.filter((issue): issue is string => typeof issue === "string")
-    : [];
-};
-
-/**
- * The record types `files` declare, read as the commit reads them, or
- * throws naming each issue for ones it would refuse.
- */
-const recordTypesOf = (
-  where: string,
-  files: Record<string, string>
-): AppRecordTypes => {
-  try {
-    return recordTypesIn(new Map(Object.entries(files)));
-  } catch (error) {
-    if (appErrors.codeOf(error) !== "app.records_invalid") {
-      throw error;
-    }
-    throw new Error(
-      `${where}: files/${appRecordTypesPath}: ${issuesOf(error).join("; ")}`,
-      { cause: error }
-    );
-  }
-};
-
-/**
- * Throws for a record type kept in a collection the built-in's copies
- * can't write, such as a misspelt one: the install would take it, and
- * knowledge would ignore it there (knowledge/record-types.ts).
- */
-const requireWritable = (
-  where: string,
-  records: AppRecordTypes,
-  permissions: readonly DeclaredPermission[]
-) => {
-  for (const [type, { collection }] of Object.entries(records)) {
-    const writable = permissions.some(
-      ({ object, actions }) =>
-        object.type === "collection" &&
-        object.collectionId === collection &&
-        actions.includes("write")
-    );
-    if (!writable) {
-      throw new Error(
-        `${where}: files/${appRecordTypesPath}: ${type}: its collection ${collection} is none the blueprint declares and asks to write`
-      );
-    }
-  }
-};
-
 /** The built-ins in `dir`, one per folder, checked. */
 const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
   readdirSync(dir, { withFileTypes: true })
@@ -225,11 +155,6 @@ const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
           `${where}: files/ holds ${length} characters, over an App's ${appLimits.totalLength}`
         );
       }
-      requireWritable(
-        where,
-        recordTypesOf(where, files),
-        manifest.data.permissions
-      );
       return { id: name, ...manifest.data, files };
     });
 

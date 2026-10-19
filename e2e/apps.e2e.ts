@@ -3,56 +3,78 @@ import type { Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // Reaching Apps from the product: sign in, find an App in the Apps list,
-// open it, and use its screen with live data from its server; its
+// open it, and use its screen with live data from its App's functions; its
 // workflows and who opens it are a tab away. Only the people core opens
 // Apps to see them.
 
-const server = `import { DurableObject } from "cloudflare:workers";
+const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-type Watcher = ((count: number) => Promise<void>) & { dup(): Watcher };
-
-export class App extends DurableObject {
-  #watchers = new Set<Watcher>();
-
-  #count(): number {
-    return Number(this.ctx.storage.kv.get("count") ?? 0);
-  }
-
-  watchCount(_caller: unknown, onChange: Watcher): void {
-    const watcher = onChange.dup();
-    this.#watchers.add(watcher);
-    void watcher(this.#count());
-  }
-
-  addOne(): void {
-    const count = this.#count() + 1;
-    this.ctx.storage.kv.put("count", count);
-    for (const watcher of this.#watchers) {
-      void watcher(count).catch(() => this.#watchers.delete(watcher));
-    }
-  }
-}
+export default defineSchema({ clicks: defineTable({ at: v.number() }) });
 `;
 
-const screen = `import { callServer, useLive } from "@grasp-os/sdk/screen";
+const operations = `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+export const count = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => (await ctx.db.query("clicks").take(100)).length,
+});
+
+export const addOne = mutation({
+  args: {},
+  returns: v.id("clicks"),
+  handler: async (ctx) => await ctx.db.insert("clicks", { at: Date.now() }),
+});
+`;
+
+/** The counter's registration, its one screen `screen`. */
+const registration = (
+  screen: string
+): string => `import { app } from "@grasp-os/sdk";
+import { addOne, count } from "./operations/counter.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Counter",
+  schema,
+  access: { tables: { clicks: { read: "appMembers", write: "appMembers" } } },
+  operations: { counter: { count, addOne } },
+  internalOperations: {},
+  screens: [{ name: "${screen}", path: "/", source: "screens/${screen}.tsx" }],
+  uses: [],
+});
+`;
+
+const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import { api } from "#grasp";
 
 export default function Counter() {
-  const count = useLive<number>("watchCount", 0);
+  const count = useQuery(api.counter.count, {});
+  const addOne = useMutation(api.counter.addOne);
   return (
     <main className="flex flex-col gap-4 p-4">
       <h2 className="text-lg font-medium">Counter</h2>
-      <output aria-label="Count">{count}</output>
-      <Button onClick={() => void callServer("addOne")}>Add one</Button>
+      <output aria-label="Count">{count ?? 0}</output>
+      <Button onClick={() => void addOne({})}>Add one</Button>
     </main>
   );
 }
 `;
+
+/** The counter App's code: its schema, functions and one screen, `name`. */
+const counterApp = (name = "counter"): Record<string, string> => ({
+  "schema.ts": schema,
+  "operations/counter.ts": operations,
+  "app.ts": registration(name),
+  [`screens/${name}.tsx`]: screen,
+});
 
 const tally = `import { workflow, z } from "@grasp-os/sdk/workflow";
 
@@ -72,8 +94,7 @@ export default workflowTests(tally, [{ name: "counts", mocks: { count: 1 }, expe
 
 /** The counter App's files: a screen and a workflow. */
 const counterFiles = {
-  "app/server.ts": server,
-  "screens/counter.tsx": screen,
+  ...counterApp(),
   "workflows/tally.ts": tally,
   "workflows/tally.workflow-tests.ts": tallyTests,
 };
@@ -136,9 +157,9 @@ test.beforeAll(async () => {
 });
 
 test("a builder finds an engine in the list, opens it and uses its app with live data", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Domains" }).click();
@@ -220,12 +241,12 @@ test("a builder finds an engine in the list, opens it and uses its app with live
 });
 
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
-  browser,
+  pageOf,
 }) => {
   const everyone = ["Chat", "Brain", "Domains", "Workflows", "Integrations"];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
-    const page = await pageOf(browser, person);
+    const page = await pageOf(person);
     await page.goto("/");
     const links = page
       .getByRole("navigation", { name: "Main" })
@@ -275,17 +296,22 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Models",
         "AI spend",
         "Audit trail",
+        // Every person's calls of unknown outcome, read only, for admins.
+        "Unknown outcomes",
+        // What approved packages are in use, for anyone but Grasp staff:
+        // core lists it only to those who may approve packages.
+        "Packages",
         "Profile",
       ],
     },
-    builder: { nav, menu, settings: ["Profile"] },
-    user: { nav, menu, settings: ["Profile"] },
+    builder: { nav, menu, settings: ["Packages", "Profile"] },
+    user: { nav, menu, settings: ["Packages", "Profile"] },
   });
 });
 
 test("an old link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
-  browser,
   page,
+  pageOf,
 }) => {
   await page.goto(`/apps/${app}/screens/counter`);
   await expect(
@@ -294,7 +320,7 @@ test("an old link to an app, opened signed out, leads through sign-in to the app
   const returnTo = new URL(page.url()).searchParams.get("returnTo");
   expect(returnTo).toBe(`/domains/${app}/apps/counter`);
 
-  const signedIn = await pageOf(browser, builder);
+  const signedIn = await pageOf(builder);
   await signedIn.goto(
     `/sign-in?returnTo=${encodeURIComponent(returnTo ?? "")}`
   );
@@ -305,9 +331,9 @@ test("an old link to an app, opened signed out, leads through sign-in to the app
 });
 
 test("someone with the user role finds no engine to open", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   // An old link to one engine, from before they were Domains, leads to
   // that Domain.
   await page.goto("/engines/some-engine");
@@ -324,9 +350,9 @@ test("someone with the user role finds no engine to open", async ({
 });
 
 test("signing in goes back to the page asked for, and only to a page of this site", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto("/sign-in?returnTo=%2Fengines");
   await expect(page.getByRole("heading", { name: "Domains" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/domains");
@@ -348,11 +374,11 @@ test("signing in goes back to the page asked for, and only to a page of this sit
 });
 
 test("an engine whose contents can't be read, or never come, keeps its card, and the others theirs", async ({
-  browser,
+  pageOf,
 }) => {
   const brokenName = `Broken ${crypto.randomUUID()}`;
   const broken = await newApp(builder, brokenName, {});
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   // The page asks core for this engine's contents as for an App core
   // doesn't have, which core refuses.
   await page.routeWebSocket("**/rpc", (socket) => {
@@ -380,7 +406,7 @@ test("an engine whose contents can't be read, or never come, keeps its card, and
   // be reached.
   const hangingName = `Hanging ${crypto.randomUUID()}`;
   const hanging = await newApp(builder, hangingName, {});
-  const waiting = await pageOf(browser, builder);
+  const waiting = await pageOf(builder);
   const gate = await callGate(waiting, hanging);
   gate.hold();
   await waiting.goto("/domains");
@@ -398,9 +424,9 @@ test("an engine whose contents can't be read, or never come, keeps its card, and
 });
 
 test("a runs read that never comes leaves the engine usable, and says so in its tab", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const gate = await callGate(page, '["workflows","runs"]');
   gate.hold();
   // An old link to the App leads to the engine.
@@ -424,13 +450,14 @@ test("a runs read that never comes leaves the engine usable, and says so in its 
 });
 
 test("loading an app again after a new version shows that version, and the engine's first app when the one open is gone", async ({
-  browser,
+  pageOf,
 }) => {
-  const swapped = await newApp(builder, `Swap ${crypto.randomUUID()}`, {
-    "app/server.ts": server,
-    "screens/counter.tsx": screen,
-  });
-  const page = await pageOf(browser, builder);
+  const swapped = await newApp(
+    builder,
+    `Swap ${crypto.randomUUID()}`,
+    counterApp()
+  );
+  const page = await pageOf(builder);
   await page.clock.install();
   await page.goto(`/domains/${swapped}/apps/counter`);
   await counterScreen(page);
@@ -439,7 +466,7 @@ test("loading an app again after a new version shows that version, and the engin
     await release(
       api,
       swapped,
-      { "screens/counter.tsx": null, "screens/tally.tsx": screen },
+      { ...counterApp("tally"), "screens/counter.tsx": null },
       "Rename the screen"
     );
   });

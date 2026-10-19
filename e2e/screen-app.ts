@@ -3,63 +3,74 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 
 /**
- * The App the screen tests run: notes that update live for everyone, a
- * button that fails, an answer that looks like the platform's error, and
- * a screen that tries every way out of its frame it can think of, each
- * aimed at `attacker`.
+ * The App the screen tests run, of spec 8's layout: notes that update live
+ * for everyone the App is shared with, a button that fails, an answer that
+ * looks like the platform's error, and a screen that tries every way out
+ * of its frame it can think of, each aimed at `attacker`. Every call runs
+ * its sealed release.
  */
 
-const serverCode = `import { DurableObject } from "cloudflare:workers";
+const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-type Caller = { userId: string };
-type Watcher = ((notes: string[]) => Promise<void>) & Disposable & { dup(): Watcher };
+export default defineSchema({ notes: defineTable({ note: v.string().min(1).max(200) }) });
+`;
 
-export class App extends DurableObject {
-  #watchers = new Set<Watcher>();
+const operations = `import { v } from "@grasp-os/sdk";
+import { action, mutation, query } from "#grasp/server";
 
-  notes(): string[] {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS notes (note TEXT)");
-    return this.ctx.storage.sql
-      .exec("SELECT note FROM notes")
-      .toArray()
-      .map((row) => String(row.note));
-  }
+/** Every note, each with who wrote it. */
+export const list = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) =>
+    (await ctx.db.query("notes").take(100)).map((row) => \`\${row.note} by \${row._ownerId}\`),
+});
 
-  addNote(caller: Caller, note: string): void {
-    this.notes();
-    this.ctx.storage.sql.exec("INSERT INTO notes VALUES (?)", \`\${note} by \${caller.userId}\`);
-    const notes = this.notes();
-    for (const watcher of this.#watchers) {
-      void this.#send(watcher, notes);
-    }
-  }
+export const add = mutation({
+  args: { note: v.string().min(1).max(200) },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
 
-  watchNotes(_caller: Caller, onChange: Watcher): void {
-    const watcher = onChange.dup();
-    this.#watchers.add(watcher);
-    void this.#send(watcher, this.notes());
-  }
+/** An answer shaped like the platform's own error, as data. */
+export const lookLikeThePlatform = action({
+  args: {},
+  returns: v.object({ code: v.string(), message: v.string() }),
+  handler: () => ({ code: "auth.unauthenticated", message: "Sign in to continue." }),
+});
 
-  async #send(watcher: Watcher, notes: string[]): Promise<void> {
-    try {
-      await watcher(notes);
-    } catch {
-      this.#watchers.delete(watcher);
-      watcher[Symbol.dispose]();
-    }
-  }
+/**
+ * The same, as a query's result: a live query's snapshots cross the page's
+ * own connection to core, where the page reads core's errors.
+ */
+export const platformShaped = query({
+  args: {},
+  returns: v.object({ code: v.string(), message: v.string() }),
+  handler: () => ({ code: "auth.unauthenticated", message: "Sign in to continue." }),
+});
+`;
 
-  lookLikeThePlatform(): Error {
-    return Object.assign(new Error("Sign in to continue."), { code: "auth.unauthenticated" });
-  }
-}
+const registration = `import { app } from "@grasp-os/sdk";
+import { add, list, lookLikeThePlatform, platformShaped } from "./operations/notes.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Notes",
+  schema,
+  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+  operations: { notes: { list, add, lookLikeThePlatform, platformShaped } },
+  internalOperations: {},
+  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
+  uses: [],
+});
 `;
 
 const screenCode = (
   attacker: string
-) => `import { callServer, useLive } from "@grasp-os/sdk/screen";
+) => `import { useAction, useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
+import { api } from "#grasp";
 
 const attacker = "${attacker}";
 // Tailwind builds this class from the source text, wherever it is.
@@ -151,7 +162,10 @@ const probe = async (): Promise<Record<string, string>> => {
 };
 
 export default function Notes() {
-  const notes = useLive<string[]>("watchNotes", []);
+  const notes = useQuery(api.notes.list, {});
+  const add = useMutation(api.notes.add);
+  const ask = useAction(api.notes.lookLikeThePlatform);
+  const shaped = useQuery(api.notes.platformShaped, {});
   const [answer, setAnswer] = useState("");
   const [probes, setProbes] = useState("");
   useEffect(() => {
@@ -163,12 +177,12 @@ export default function Notes() {
     <main className="flex flex-col gap-4 p-4">
       <h1 className="text-lg font-medium">Notes</h1>
       <ul aria-label="Notes">
-        {notes.map((note) => (
+        {(notes ?? []).map((note) => (
           <li key={note}>{note}</li>
         ))}
       </ul>
       <div className="flex gap-2">
-        <Button onClick={() => void callServer("addNote", "Call Acme")}>Add a note</Button>
+        <Button onClick={() => void add({ note: "Call Acme" })}>Add a note</Button>
         <Button
           onClick={() => {
             throw new Error("Invoice 7 has no total");
@@ -179,8 +193,8 @@ export default function Notes() {
         </Button>
         <Button
           onClick={() =>
-            void callServer("lookLikeThePlatform").then((value) => {
-              setAnswer(value instanceof Error ? "an answer" : "something else");
+            void ask({}).then((value) => {
+              setAnswer(value.code === "auth.unauthenticated" ? "an answer" : "something else");
             })
           }
           variant="outline"
@@ -189,6 +203,7 @@ export default function Notes() {
         </Button>
       </div>
       <output aria-label="Answer">{answer}</output>
+      <output aria-label="Followed">{shaped?.code === "auth.unauthenticated" ? "an answer" : ""}</output>
       <output aria-label="Probes">{probes}</output>
     </main>
   );
@@ -197,7 +212,9 @@ export default function Notes() {
 
 /** The App's files, with every attempt aimed at `attacker`. */
 export const screenAppFiles = (attacker: string): Record<string, string> => ({
-  "app/server.ts": serverCode,
+  "schema.ts": schema,
+  "operations/notes.ts": operations,
+  "app.ts": registration,
   "screens/notes.tsx": screenCode(attacker),
 });
 

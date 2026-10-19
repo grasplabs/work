@@ -87,6 +87,20 @@ export const requests = sqliteTable(
      * before it was recorded.
      */
     policyGeneration: integer("policy_generation"),
+    /**
+     * Whose share of the requests in flight it takes: the person it counts
+     * for (model-admission.ts). Null for one admitted before shares were
+     * kept, which holds none.
+     */
+    subject: text(),
+    /** The App whose share it takes; null for a call of no App's. */
+    resource: text(),
+    /**
+     * When its lease on its shares ends at the latest, in ms since the
+     * epoch: its call's deadline, a bounded time after it was admitted at
+     * most. It holds its shares only while `dispatched` and before this.
+     */
+    leaseEndsAt: integer("lease_ends_at"),
   },
   (table) => [
     check("requests_reserved", sql`${table.reservedMicros} >= 0`),
@@ -98,6 +112,44 @@ export const requests = sqliteTable(
     index("requests_open").on(table.state, table.reconcileAt),
     // Settled requests, oldest first, for the retention sweep.
     index("requests_settled_at").on(table.settledAt),
+    // The leases held: requests in flight, by when they end.
+    index("requests_leases").on(table.state, table.leaseEndsAt),
+  ]
+);
+
+/**
+ * The model calls waiting for a share of the requests in flight
+ * (model-admission.ts), one place per call: each place lasts while its call
+ * asks again, and lapses once it stops.
+ */
+export const queue = sqliteTable(
+  "queue",
+  {
+    /** The waiting call's ID, which core makes once per call. */
+    place: text().primaryKey(),
+    subject: text().notNull(),
+    /** The call's App; empty for a call of no App's. */
+    resource: text().notNull(),
+    /** Its turn among its person's places in its App: served by turn first. */
+    turn: integer().notNull(),
+    enqueuedAt: integer("enqueued_at").notNull(),
+    /** When its call last asked: it lapses a while after. */
+    seenAt: integer("seen_at").notNull(),
+    /** Which share it waits for: `client`, `person` or `app`. */
+    waitingFor: text("waiting_for", {
+      enum: ["client", "person", "app"],
+    }).notNull(),
+    /** When it asks again at the latest. */
+    retryAt: integer("retry_at").notNull(),
+  },
+  (table) => [
+    // The places still asking, in the order they are served.
+    index("queue_order").on(table.turn, table.enqueuedAt, table.place),
+    // The places that stopped asking, to drop.
+    index("queue_seen").on(table.seenAt),
+    // A person's places in an App, and an App's: their caps and turns.
+    index("queue_subject").on(table.subject, table.resource, table.seenAt),
+    index("queue_resource").on(table.resource, table.seenAt),
   ]
 );
 

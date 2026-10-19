@@ -96,7 +96,9 @@ const buildOf = async (
   { builder, app, graphHash }: Approved,
   target: PackageBuild["artifact"]["target"] = "browser"
 ): Promise<PackageBuild> => {
-  const { policyGeneration } = await builder.api.dependencies.status(app);
+  const { policyGeneration } = await builder.api.dependencies.status({
+    app,
+  });
   return await builder.api.dependencies.build({
     app,
     graphHash,
@@ -119,7 +121,7 @@ const servedBuild = async () => {
 /** The App's lock, as core stores it. */
 const lockFor = async ({ app, graphHash }: Approved): Promise<GraspLock> => {
   const row = await env.DB.prepare(
-    "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    "SELECT lock FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
   )
     .bind(app, graphHash)
     .first<{ lock: string }>();
@@ -132,7 +134,7 @@ const storeLockFor = async (
   lock: GraspLock
 ): Promise<void> => {
   await env.DB.prepare(
-    "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+    "UPDATE dependency_locks SET lock = ? WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
   )
     .bind(JSON.stringify(lock), app, graphHash)
     .run();
@@ -422,11 +424,13 @@ describe("serving an App's built packages", () => {
     // out: none gives up its room, and the next graph is refused.
     const { builder, app } = served;
     const latest = await env.DB.prepare(
-      "SELECT graph_hash FROM dependency_locks WHERE app_id = ? AND graph_hash != ? ORDER BY created_at ASC LIMIT 1"
+      "SELECT graph_hash FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash != ? ORDER BY created_at ASC LIMIT 1"
     )
       .bind(app, served.graphHash)
       .first<{ graph_hash: string }>();
-    const { policyGeneration } = await builder.api.dependencies.status(app);
+    const { policyGeneration } = await builder.api.dependencies.status({
+      app,
+    });
     await builder.api.dependencies.build({
       app,
       graphHash: latest?.graph_hash ?? "",
@@ -438,13 +442,13 @@ describe("serving an App's built packages", () => {
     // lock gives up its room again.
     // As the hours since leave them: each lock's time to hold, gone by.
     await env.DB.prepare(
-      "UPDATE dependency_locks SET served_until = ? WHERE app_id = ? AND served_until IS NOT NULL"
+      "UPDATE dependency_locks SET served_until = ? WHERE subject_type = 'app' AND subject_id = ? AND served_until IS NOT NULL"
     )
       .bind(Date.now() - 1, app)
       .run();
     await approveAnother();
     const after = await env.DB.prepare(
-      "SELECT 1 FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+      "SELECT 1 FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
     )
       .bind(app, served.graphHash)
       .first();
@@ -488,7 +492,7 @@ describe("serving an App's built packages", () => {
     // As an older release wrote it, its pins in another shape.
     const lock = await lockFor(served);
     await env.DB.prepare(
-      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+      "UPDATE dependency_locks SET lock = ? WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
     )
       .bind(
         JSON.stringify({
@@ -515,7 +519,7 @@ describe("serving an App's built packages", () => {
     const olderHash = await dependencyGraphHash(lockGraph(older));
     await env.DB.batch([
       env.DB.prepare(
-        "UPDATE dependency_locks SET graph_hash = ?, lock = ? WHERE app_id = ? AND graph_hash = ?"
+        "UPDATE dependency_locks SET graph_hash = ?, lock = ? WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
       ).bind(olderHash, JSON.stringify(older), served.app, served.graphHash),
       env.DB.prepare(
         "UPDATE dependency_requests SET graph_hash = ? WHERE id = ?"

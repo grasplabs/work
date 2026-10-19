@@ -98,17 +98,48 @@ const inward = (value: unknown): unknown => {
   return objectCapability(target, methods);
 };
 
+/** Disposes `stub` where it is disposable: a workerd stub, say. */
+const disposeOf = (stub: object): void => {
+  const dispose: unknown = Reflect.get(stub, Symbol.dispose);
+  if (typeof dispose === "function") {
+    Reflect.apply(dispose, stub, []);
+  }
+};
+
 /**
  * What crosses from the isolate to core: a function becomes one capnweb can
  * pass by reference (it calls back into the isolate, its arguments as
  * `inward` makes them); anything else goes as it is, and core checks it as
- * it checks every argument.
+ * it checks every argument. A function core keeps past the call that
+ * passed it (a live query's callback in an App's tests) still reaches the
+ * isolate: workerd lets go of a stub it passed a call once that call
+ * returns, unless it's duplicated, so it's duplicated here, and let go of
+ * once core lets go of it (capnweb disposes what it exported then), or as
+ * the session's process ends after its one call.
  */
-export const outward = (value: unknown): unknown =>
-  typeof value === "function"
-    ? async (...args: unknown[]) =>
-        await invoke(value, undefined, args.map(inward))
-    : value;
+export const outward = (value: unknown): unknown => {
+  if (typeof value !== "function") {
+    return value;
+  }
+  const dup: unknown = Reflect.get(value, "dup");
+  const kept: unknown =
+    typeof dup === "function" ? Reflect.apply(dup, value, []) : value;
+  return Object.assign(
+    async (...args: unknown[]) =>
+      await invoke(kept, undefined, args.map(inward)),
+    {
+      [Symbol.dispose]: (): void => {
+        if (
+          kept !== value &&
+          (typeof kept === "object" || typeof kept === "function") &&
+          kept !== null
+        ) {
+          disposeOf(kept);
+        }
+      },
+    }
+  );
+};
 
 /** A workerd RpcTarget with exactly `methods`, each forwarding to `stub`. */
 export const objectCapability = (

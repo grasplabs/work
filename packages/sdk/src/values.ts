@@ -5,8 +5,10 @@ import {
 } from "@grasp-os/shared/store-limits";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
-import { descriptorVersion } from "./value-descriptor.ts";
+import type { DescriptorSchema } from "./references.ts";
+import { descriptorVersion, isPlainObject } from "./value-descriptor.ts";
 import type { SemanticKind, ValueSchema } from "./value-descriptor.ts";
+import { readDescriptor } from "./value-read.ts";
 import {
   descriptorOf,
   fieldDescriptors,
@@ -149,6 +151,35 @@ export interface ArraySchema<Input, Output> extends ValueSchema<Input, Output> {
 
 /** The fields of an object: a plain map, to share and spread as one. */
 export type ValueShape = Readonly<Record<string, AnySchema>>;
+
+/**
+ * What `v.object` takes as its fields: schemas, and the descriptor schemas
+ * a generated module holds (a decision's `valueSchema`), read back as the
+ * schemas they describe.
+ */
+export type ObjectFields = Readonly<
+  Record<string, AnySchema | DescriptorSchema>
+>;
+
+/** `Fields` with each descriptor schema as the schema it describes. */
+export type ShapeOf<Fields extends ObjectFields> = {
+  readonly [Key in keyof Fields]: Fields[Key] extends DescriptorSchema<
+    infer Input,
+    infer Output
+  >
+    ? SimpleSchema<Input, Output>
+    : Extract<Fields[Key], AnySchema>;
+};
+
+/**
+ * `field` as a schema: a descriptor schema read back from its descriptor,
+ * checked as any stored descriptor is; anything else as it is, for
+ * `fieldDescriptors` to accept or refuse.
+ */
+const fieldSchema = (field: unknown): unknown =>
+  isPlainObject(field) && field.kind === "descriptor" && !("~standard" in field)
+    ? schemaOf(readDescriptor(field.descriptor, 1, { nodes: 0 }))
+    : field;
 
 // oxlint-disable-next-line typescript/ban-types -- `& {}` makes an editor show the object's keys instead of this alias
 type Simplify<Value> = { [Key in keyof Value]: Value[Key] } & {};
@@ -314,8 +345,27 @@ export const v = Object.freeze({
   /** A finite number; `.integer()` for whole ones. */
   number: (): NumberSchema =>
     schema({ ...required, integer: false, kind: "number" }),
-  object: <const Shape extends ValueShape>(shape: Shape): ObjectSchema<Shape> =>
-    schema({ ...required, fields: fieldDescriptors(shape), kind: "object" }),
+  /**
+   * An object with exactly these fields. A field may be a generated
+   * descriptor schema, such as a decision's `valueSchema`.
+   */
+  object: <const Fields extends ObjectFields>(
+    shape: Fields
+  ): ObjectSchema<ShapeOf<Fields>> =>
+    schema({
+      ...required,
+      fields: fieldDescriptors(
+        isPlainObject(shape)
+          ? Object.fromEntries(
+              Object.entries(shape).map(([name, field]) => [
+                name,
+                fieldSchema(field),
+              ])
+            )
+          : shape
+      ),
+      kind: "object",
+    }),
   /** A person, by reference. */
   person: semantic<string>("person"),
   /** An object with any string keys, every value of one schema. */
