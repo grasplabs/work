@@ -4,35 +4,22 @@ import type {
   Connection,
   Source,
   Stakeholder,
-  Statement,
-  StatementKind,
-  Step,
   Team,
   TeamCount,
   Vision,
-  Workflow,
   Workspace,
 } from "@grasp-os/shared/brain";
 import type { CatalogSource } from "@grasp-os/shared/connect";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
-import {
-  knowledgeErrors,
-  recordPageMaxLimit,
-} from "@grasp-os/shared/knowledge";
-import type { RecordSummary } from "@grasp-os/shared/knowledge";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import { organizationId } from "./auth/auth.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
-import type { Reader } from "./knowledge/access.ts";
-import { getRecord, listRecords } from "./knowledge/records.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -48,15 +35,13 @@ import type { SessionCheck } from "./session-check.ts";
 // |                    | the roster's head count for admins                       |
 // | vision             | the kickoff (`goals`, `pain`) and the roster's teams     |
 // |                    | taking part, for admins                                  |
-// | teams              | the roster and the kickoff's teams (admins), and the     |
-// |                    | Playbook's `team` records (anyone who reads it)          |
-// | sources            | the kickoff and the roster (admins), the Playbook's      |
-// |                    | `source` records                                         |
-// | statements         | the Playbook's `statement` records                       |
-// | workflows          | the Playbook's `workflow` records (the workflow map)     |
+// | teams              | the roster and the kickoff's teams (admins)              |
+// | sources            | the kickoff and the roster (admins)                      |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
-// | goals, tools,      | nothing holds them yet: empty                            |
+// | goals, tools,      | nothing core can read holds them yet: empty              |
+// | statements,        |                                                          |
+// | workflows,         |                                                          |
 // | candidates, gaps,  |                                                          |
 // | landscape,         |                                                          |
 // | policies           |                                                          |
@@ -65,31 +50,14 @@ import type { SessionCheck } from "./session-check.ts";
 // RPC shows the roster to admins alone, and the kickoff to Grasp's staff,
 // who are admins. The kickoff is the company's sponsor speaking for the
 // company, so its reading reaches the company's admins here too, never its
-// transcript. Everyone else gets the brain without them. The Playbook is
-// read as Knowledge reads it for the person (`listRecords` with the
-// person as the reader): a collection they can't read gives nothing, and
-// every page read is in the audit log, as any read of it is. No
+// transcript. Everyone else gets the brain without them. No
 // interview's words reach the brain: the onboarding keeps them for staff
 // alone, so sources carry no transcript.
-
-/** The collection the Intake and the workflow map keep their records in. */
-const playbook = "playbook";
-
-/**
- * The most records of one type read from the Playbook, in pages of
- * `recordPageMaxLimit` (20), each one read and one audit event: at most
- * 25 reads per type. Past it the first in path order are kept and the
- * rest left out; a Playbook that large needs a brain read in parts,
- * which nothing asks for yet.
- */
-const brainRecordsMax = 500;
-
-/**
- * The most designed workflows whose drawn version is read for their
- * baseline: one read each. Past it a designed workflow comes without its
- * baseline's steps.
- */
-const baselinesMax = 50;
+//
+// The Intake's statements and sources and the workflow map's workflows
+// are in each App's own store, which only its builders reach, since
+// Knowledge stopped keeping App records (#716). Until core has a read of
+// them the brain may make for a person, they stay out.
 
 /** The kickoff, as the source the vision was set in. */
 const kickoffSourceId = "src-kickoff";
@@ -104,10 +72,6 @@ const rosterSourceId = "src-roster";
 const ids = {
   rosterTeam: (id: string) => `team-${id}`,
   kickoffTeam: (position: number) => `team.kickoff-${position}`,
-  playbookTeam: (documentId: string) => `team.playbook-${documentId}`,
-  source: (documentId: string) => `src-${documentId}`,
-  statement: (documentId: string) => `st-${documentId}`,
-  workflow: (documentId: string) => `wf-${documentId}`,
 };
 
 /** The day of an ISO 8601 moment: `YYYY-MM-DD`. */
@@ -115,103 +79,6 @@ const dayOf = (iso: string): string => iso.slice(0, 10);
 
 /** A team's name as two sources can both mean it: trimmed, any case. */
 const nameKey = (name: string): string => name.trim().toLowerCase();
-
-/**
- * The Intake's statement tags (apps/core/blueprints/intake records.json)
- * as the brain's kinds. A statement has one kind and up to six tags: its
- * first tag the brain knows is its kind. The Intake keeps tags in this
- * order whatever order they were picked in, so a goal wins over a
- * blocker, and a blocker over a rule. The brain's `wish` has no tag yet,
- * so no statement is one.
- */
-const kindOfTag: Record<string, StatementKind> = {
-  goal: "goal",
-  blocker: "blocker",
-  time_sink: "timeSink",
-  handover: "handover",
-  tool: "tool",
-  rule: "rule",
-};
-
-const sourceRecordSchema = z.object({
-  title: z.string(),
-  medium: z.enum(["interview", "chat", "document", "other"]),
-  date: z.string(),
-  from: z.string().optional(),
-  guest: z.boolean().optional(),
-});
-
-const statementRecordSchema = z.object({
-  title: z.string(),
-  source: z.string(),
-  tags: z.array(z.string()),
-});
-
-const workflowRecordSchema = z.object({
-  state: z.enum(["drawn", "designed"]),
-  team: z.string().optional(),
-  steps: z.array(z.object({ tool: z.string().optional() })).default([]),
-  drawnVersion: z.int().optional(),
-});
-
-/**
- * A Playbook source as the brain's: its medium as the kind (`other`, the
- * one the brain has no kind for, as a document), who gave it as `from`
- * says, and a guest's chat as one held by link. The Intake saves what
- * people said about their work, which is the brain's step 2.
- */
-const sourceOf = (
-  record: RecordSummary,
-  fields: z.output<typeof sourceRecordSchema>
-): Source => ({
-  id: ids.source(record.id),
-  kind: fields.medium === "other" ? "document" : fields.medium,
-  title: fields.title,
-  date: fields.date,
-  ...(fields.from === undefined ? {} : { who: fields.from }),
-  ...(fields.guest === true ? { how: "Chat link" } : {}),
-  step: 2,
-});
-
-/**
- * Every record of `type` in the Playbook `reader` may read, up to the cap.
- * The cap counts the rows read, so records that no longer fit their type
- * don't let a read go on past it.
- */
-const playbookRecords = async (
-  env: Env,
-  reader: Reader,
-  type: string
-): Promise<RecordSummary[]> => {
-  const all: RecordSummary[] = [];
-  let scanned = 0;
-  let after: string | undefined;
-  while (scanned < brainRecordsMax) {
-    let page: Awaited<ReturnType<typeof listRecords>>;
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- each page starts after the last
-      page = await listRecords(env, reader, playbook, {
-        ...(after === undefined ? {} : { after }),
-        limit: Math.min(recordPageMaxLimit, brainRecordsMax - scanned),
-        type,
-      });
-    } catch (error) {
-      // No Playbook yet (no Intake or map installed), or one this
-      // person can't read: nothing from it.
-      if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
-        return all;
-      }
-      throw error;
-    }
-    all.push(...page.records);
-    scanned += page.records.length + page.unreadable.length;
-    if (page.next === null) {
-      break;
-    }
-    after = page.next;
-  }
-  return all;
-};
 
 /** What the onboarding gives the brain, for an admin; nothing for anyone else. */
 interface OnboardingFacts {
@@ -465,145 +332,16 @@ const connectionsOf = async (
   return [...offered, ...unlisted];
 };
 
-/** A workflow record's steps as the brain reads them: the tools they use. */
-const stepsOf = (steps: { tool?: string }[]): Step[] =>
-  steps.map(({ tool }) => (tool === undefined ? {} : { tool }));
-
-/**
- * The Playbook's workflows, as the workflow map keeps them: a drawn one's
- * steps are its baseline; a designed one's are its target, and its
- * baseline the version last drawn (`drawnVersion`), read for up to
- * `baselinesMax` of them. A workflow's team is its team record, by path.
- * Nothing says yet whether one is being tested or runs: those are drawn
- * or designed here.
- */
-const workflowsOf = async (
-  env: Env,
-  reader: Reader,
-  records: RecordSummary[],
-  teamOfPath: Map<string, string>
-): Promise<Workflow[]> => {
-  let baselinesLeft = baselinesMax;
-  const workflows: Workflow[] = [];
-  for (const record of records) {
-    const fields = workflowRecordSchema.safeParse(record.record);
-    if (!fields.success) {
-      continue;
-    }
-    const { state, team, steps, drawnVersion } = fields.data;
-    const teamId = team === undefined ? undefined : teamOfPath.get(team);
-    let baseline: Step[] = state === "drawn" ? stepsOf(steps) : [];
-    if (
-      state === "designed" &&
-      drawnVersion !== undefined &&
-      baselinesLeft > 0
-    ) {
-      baselinesLeft -= 1;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- bounded by baselinesMax
-        const drawn = await getRecord(env, reader, record.id, drawnVersion);
-        const parsed = workflowRecordSchema.safeParse(drawn.record);
-        baseline = parsed.success ? stepsOf(parsed.data.steps) : [];
-      } catch (error) {
-        // A version that no longer fits its type: no baseline.
-        if (!isExpectedError(error)) {
-          throw error;
-        }
-      }
-    }
-    workflows.push({
-      id: ids.workflow(record.id),
-      name: record.title,
-      ...(teamId === undefined ? {} : { teamId }),
-      status: state,
-      baseline: { steps: baseline },
-      ...(state === "designed" ? { target: { steps: stepsOf(steps) } } : {}),
-    });
-  }
-  return workflows;
-};
-
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const reader: Reader = { type: "person", person };
-  const [
-    facts,
-    name,
-    connections,
-    sourceRecords,
-    statementRecords,
-    teamRecords,
-    workflowRecords,
-  ] = await Promise.all([
+  const [facts, name, connections] = await Promise.all([
     onboardingFacts(env, person),
     organizationName(env),
     connectionsOf(env, person),
-    playbookRecords(env, reader, "source"),
-    playbookRecords(env, reader, "statement"),
-    playbookRecords(env, reader, "team"),
-    playbookRecords(env, reader, "workflow"),
   ]);
-
-  const teams = onboardingTeams(facts);
-  // A Playbook team is the roster's or the kickoff's of its name, or a
-  // team of its own, found in no source.
-  const teamByName = new Map(teams.map((team) => [nameKey(team.name), team]));
-  const teamOfPath = new Map<string, string>();
-  for (const record of teamRecords) {
-    const known = teamByName.get(nameKey(record.title));
-    if (known === undefined) {
-      const team: Team = {
-        id: ids.playbookTeam(record.id),
-        name: record.title,
-        sourceId: "",
-        counts: [],
-        stakeholders: [],
-      };
-      teams.push(team);
-      teamByName.set(nameKey(record.title), team);
-      teamOfPath.set(record.path, team.id);
-    } else {
-      teamOfPath.set(record.path, known.id);
-    }
-  }
-
-  const sources = onboardingSources(facts);
-  const sourceOfPath = new Map<string, string>();
-  for (const record of sourceRecords) {
-    const fields = sourceRecordSchema.safeParse(record.record);
-    if (fields.success) {
-      const source = sourceOf(record, fields.data);
-      sources.push(source);
-      sourceOfPath.set(record.path, source.id);
-    }
-  }
-
-  const statements: Statement[] = [];
-  for (const record of statementRecords) {
-    const fields = statementRecordSchema.safeParse(record.record);
-    const kind = fields.success
-      ? fields.data.tags.map((tag) => kindOfTag[tag]).find(Boolean)
-      : undefined;
-    // A statement names its source by path: one that wasn't read (past
-    // the cap) leaves it out, as the brain finds a statement by its source.
-    const sourceId = fields.success
-      ? sourceOfPath.get(fields.data.source)
-      : undefined;
-    if (fields.success && kind !== undefined && sourceId !== undefined) {
-      statements.push({
-        id: ids.statement(record.id),
-        kind,
-        text: fields.data.title,
-        sourceId,
-        // The Intake ties a statement to no team or tool yet.
-        teamIds: [],
-        toolIds: [],
-      });
-    }
-  }
 
   const company: Company = {
     name,
@@ -615,13 +353,13 @@ export const readBrain = async (
     company,
     vision: visionOf(facts),
     goals: [],
-    teams,
+    teams: onboardingTeams(facts),
     tools: [],
-    sources,
-    statements,
+    sources: onboardingSources(facts),
+    statements: [],
     candidates: [],
     gaps: [],
-    workflows: await workflowsOf(env, reader, workflowRecords, teamOfPath),
+    workflows: [],
     connections,
     landscape: [],
     policies: [],
@@ -629,9 +367,8 @@ export const readBrain = async (
 };
 
 /**
- * The company brain over `/rpc`: for anyone signed in who reads
- * Knowledge, which is everyone the session's full access lets in.
- * Not audited itself: the Playbook's reads it makes are, as any are.
+ * The company brain over `/rpc`: for anyone signed in. Not audited
+ * itself: it reads nothing from Knowledge.
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
   readonly #env: Env;
