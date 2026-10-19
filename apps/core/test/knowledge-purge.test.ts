@@ -53,17 +53,38 @@ const hexOf = (text: string): string =>
     .join("")
     .toUpperCase();
 
+/** A term the words index keeps as one token: ASCII letters and digits. */
+const oneAsciiToken = /^[a-z0-9]+$/u;
+
+/**
+ * Whether the words index holds `token`, as the index reads its pages
+ * (FTS5 `MATCH` on the token itself): its pages keep a term that follows
+ * another with the same first letters as only the letters that differ, so
+ * its bytes aren't in a page in one piece, and a scan for them misses it.
+ * (D1 refuses `fts5vocab`, which would list the terms.)
+ */
+const wordsIndexHolds = async (token: string): Promise<boolean> =>
+  (await env.KNOWLEDGE.prepare(
+    "SELECT 1 AS held FROM search_words WHERE search_words MATCH ? LIMIT 1"
+  )
+    .bind(`"${token}"`)
+    .first()) !== null;
+
 /**
  * Every `table.column` of the Knowledge database that holds `term`, in any
- * case, as text or among the bytes of a row: the search index's pages
- * (`search_words_data`) keep whole words. Trigram pages keep three
- * characters at a time, so the trigram index shows only in its content.
+ * case, as text or among the bytes of a row, and the words index's pages
+ * (`search_words_data.block`) when the index finds it as a token
+ * (`wordsIndexHolds`), whatever its pages' bytes show. The page directory
+ * (`search_words_idx`) keeps its separators whole, so its bytes say it.
+ * Trigram pages keep three characters at a time, so the trigram index
+ * shows only in its content.
  */
 const holding = async (term: string): Promise<string[]> => {
   const { results: tables } = await env.KNOWLEDGE.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'"
   ).all<{ name: string }>();
-  const found: string[] = [];
+  const lower = term.toLowerCase();
+  const found = new Set<string>();
   for (const { name: table } of tables) {
     // oxlint-disable-next-line no-await-in-loop -- one table at a time
     const { results: columns } = await env.KNOWLEDGE.prepare(
@@ -78,14 +99,17 @@ const holding = async (term: string): Promise<string[]> => {
          WHERE instr(lower(CAST("${column}" AS TEXT)), ?) > 0
            OR instr(hex("${column}"), ?) > 0`
       )
-        .bind(term.toLowerCase(), hexOf(term.toLowerCase()))
+        .bind(lower, hexOf(lower))
         .first<{ n: number }>();
       if ((row?.n ?? 0) > 0) {
-        found.push(`${table}.${column}`);
+        found.add(`${table}.${column}`);
       }
     }
   }
-  return found.toSorted();
+  if (oneAsciiToken.test(lower) && (await wordsIndexHolds(lower))) {
+    found.add("search_words_data.block");
+  }
+  return [...found].toSorted();
 };
 
 /** Prepares `input` as `admin` and confirms it with the token. */
@@ -2119,6 +2143,24 @@ describe("a purge whose index cleanup fails", setUpTime, () => {
 });
 
 describe("purging", setUpTime, () => {
+  it("finds a term the index keeps after a word with the same first letters, whose bytes its pages split", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    // "renee…" right after "renee" in the index: kept as the five letters
+    // they share, then the rest.
+    const term = `renee${lettersOf(Math.floor(Math.random() * 26 ** 6), 6)}`;
+    await saveOver(
+      admin,
+      handbook.id,
+      "names.md",
+      `# Names\nRene, Renee and ${term}.`
+    );
+    await expect(holding(term)).resolves.toContain("search_words_data.block");
+  });
+
   it("is only for the client's admins, and never without the token prepared for it", async () => {
     const agent = newAgent();
     const admin = await personOf("admin");
