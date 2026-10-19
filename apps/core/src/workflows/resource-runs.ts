@@ -757,8 +757,10 @@ export const runResourceWorkflow = async (
   // The run's own sandbox session on-prem, its actions' parent.
   let sessionId: string | undefined;
   // The wakes its attempts' settles sent (share-wakes.ts): awaited once
-  // the run's code is done, never before a step's outcome.
+  // the run's code is done, never before a step's outcome; none started
+  // after that, by a settle that came too late.
   const wakes: Promise<void>[] = [];
+  const waking = { open: true };
   const host = new ResourceRunHost(env, step, run, {
     sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
@@ -780,7 +782,9 @@ export const runResourceWorkflow = async (
           attempt
         ),
         (wake) => {
-          wakes.push(wake);
+          if (waking.open) {
+            wakes.push(wake());
+          }
         }
       ),
   });
@@ -812,6 +816,7 @@ export const runResourceWorkflow = async (
       return await afterCpuKill(error, calls);
     }
   });
+  waking.open = false;
   await Promise.all(wakes);
   if (!result.ok && memory.current?.() === false) {
     throw new Error(`Run ${runId} is no longer this activation's`);

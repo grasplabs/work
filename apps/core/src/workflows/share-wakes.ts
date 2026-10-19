@@ -62,13 +62,22 @@ export const wakeQueueFronts = async (env: Env): Promise<void> => {
     }
     const fronts = await queueFronts(db, now, sharesOf(await quotaPolicy(env)));
     const engine = runEngine(env);
+    // Every send is waited for, each failure logged alone: one that
+    // fails leaves none of the others out.
     await Promise.all(
       fronts.map(async ({ runId, stepHash, deadline }) => {
-        await engine.sendEvent(
-          runId,
-          shareWakeType(stepHash),
-          `share:${runId}:${stepHash}:${String(deadline)}`
-        );
+        try {
+          await engine.sendEvent(
+            runId,
+            shareWakeType(stepHash),
+            `share:${runId}:${stepHash}:${String(deadline)}`
+          );
+        } catch (error) {
+          log.warn("workflow.share_wake_failed", {
+            runId,
+            ...errorFields(error),
+          });
+        }
       })
     );
   } catch (error) {
@@ -81,17 +90,21 @@ export const wakeQueueFronts = async (env: Env): Promise<void> => {
  * the settle, never before it returns. The step's outcome waits on its
  * settle, and a run whose load is ending (its session stopped, say) must
  * record that outcome first; the wake is no part of it. `later` takes the
- * wake's promise, which never rejects, for its caller to await once the
- * run's code is done (dispatcher.ts, resource-runs.ts).
+ * wake, to start it and await it once the run's code is done
+ * (dispatcher.ts, resource-runs.ts), or to drop it when the activation is
+ * already over: a settle that comes after (a step still out as its run
+ * ended) wakes no one, and its waiters ask at the end of their round.
  */
 export const wakingOnSettle = (
   env: Env,
   admission: AttemptAdmission,
-  later: (wake: Promise<void>) => void
+  later: (wake: () => Promise<void>) => void
 ): AttemptAdmission => ({
   ...admission,
   settle: async () => {
     await admission.settle();
-    later(wakeQueueFronts(env));
+    later(async () => {
+      await wakeQueueFronts(env);
+    });
   },
 });

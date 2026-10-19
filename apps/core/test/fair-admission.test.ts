@@ -1286,7 +1286,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         const admission = await admitAttempt(env, owner, attemptOf(step));
         const wakes: Promise<void>[] = [];
         await wakingOnSettle(counting.env, admission, (wake) => {
-          wakes.push(wake);
+          wakes.push(wake());
         }).settle();
         await Promise.all(wakes);
         return counting.policyReads();
@@ -1298,7 +1298,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       const counting = countingPolicyReads();
       const wakes: Promise<void>[] = [];
       await wakingOnSettle(counting.env, holding, (wake) => {
-        wakes.push(wake);
+        wakes.push(wake());
       }).settle();
       await Promise.all(wakes);
       return {
