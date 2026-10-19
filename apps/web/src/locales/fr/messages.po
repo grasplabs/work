@@ -10967,8 +10967,8 @@ msgid "Write your answer"
 msgstr "Écrivez votre réponse"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer cover each action's own model uses and the workflow's own model tasks, each of which is taken to reach every call the workflow makes."
-msgstr "Les écritures qu’un modèle peut orienter couvrent les usages de modèle de chaque action et les tâches de modèle du workflow ; chacune est censée atteindre chaque appel du workflow."
+msgid "Writes a model may steer cover each action's own model uses and the workflow's own model tasks. An action's model uses reach only that action; each of the workflow's model tasks is taken to reach every call the workflow makes."
+msgstr "Les écritures qu’un modèle peut orienter couvrent les usages de modèle de chaque action et les tâches de modèle du workflow. Les usages de modèle d’une action n’atteignent que cette action ; chaque tâche de modèle du workflow est censée atteindre chaque appel du workflow."
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Writes a model may steer: {target}"

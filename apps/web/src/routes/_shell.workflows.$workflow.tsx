@@ -107,8 +107,9 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
       <TableCaption>
         <Trans>
           Writes a model may steer cover each action&apos;s own model uses and
-          the workflow&apos;s own model tasks, each of which is taken to reach
-          every call the workflow makes.
+          the workflow&apos;s own model tasks. An action&apos;s model uses reach
+          only that action; each of the workflow&apos;s model tasks is taken to
+          reach every call the workflow makes.
         </Trans>
       </TableCaption>
       <TableHeader>
