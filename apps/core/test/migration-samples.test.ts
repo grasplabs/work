@@ -1,7 +1,9 @@
+import type { AppId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { loadRelease } from "../src/app-releases.ts";
 import { setCurrentVersion } from "../src/apps.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { sampleMigration } from "../src/migration-samples.ts";
@@ -184,6 +186,122 @@ const renameNote = async (
       );
     }
   );
+};
+
+/** The version current of `app`. */
+const currentOf = async (app: string): Promise<unknown> => {
+  const row = await env.DB.prepare(
+    "SELECT current_version AS current FROM apps WHERE id = ?"
+  )
+    .bind(app)
+    .first();
+  return row?.current;
+};
+
+/** Where `app`'s version 3 stands in `store`. */
+const stateOf = async (store: OpenStore, app: AppId): Promise<string> => {
+  const release = await loadRelease(env, app, 3);
+  const status = await env.DATA_STORES.getByName(store.id).schemaStatus(
+    store.id,
+    release.manifest.schemaHash,
+    { resourceId: app, resourceVersion: 3 }
+  );
+  return status.state;
+};
+
+/**
+ * Notes whose version 3 migrated three notes and is ready to take over,
+ * with what the gate tests ask of it: a failed sample kept for it, and
+ * making it current (through `db`).
+ */
+const readyMigration = async () => {
+  const { fixture, store, release } = await migrated(3, deriving);
+  // Transformed records keep their writer's schema hash: only the
+  // migration's own progress says none is left.
+  await vi.waitFor(
+    async () => {
+      await expect(stateOf(store, fixture.app)).resolves.toBe("ready");
+    },
+    { timeout: 120_000, interval: 500 }
+  );
+  const failedSample = async (): Promise<void> => {
+    await env.DB.prepare(
+      "INSERT INTO migration_samples (id, app_id, version, migration, store_id, outcome, rows, owners, reason, manifest_hash, from_schema, to_schema, sampled_by, sampled_at) VALUES (?, ?, 3, 'derive-category', ?, 'failed', 5, 1, 'threw', ?, ?, ?, ?, ?)"
+    )
+      .bind(
+        crypto.randomUUID(),
+        fixture.app,
+        store.id,
+        release.manifestHash,
+        fixture.firstSchema,
+        release.manifest.schemaHash,
+        fixture.owner.userId,
+        Date.now()
+      )
+      .run();
+  };
+  const madeCurrent = async (db = env.DB) =>
+    await refusalOf(
+      async () =>
+        await setCurrentVersion(
+          { ...env, DB: db },
+          fixture.owner,
+          fixture.app,
+          3
+        )
+    );
+  return {
+    fixture,
+    store,
+    failedSample,
+    madeCurrent,
+    asked: { app: fixture.app, version: 3, migration: "derive-category" },
+  };
+};
+
+/**
+ * The D1 database, running `first` once just before the first statement
+ * matching `reads` runs: something landing between two of the reads an
+ * activation makes.
+ */
+const racingRead = (
+  first: () => Promise<unknown>,
+  reads: RegExp
+): D1Database => {
+  let raced = false;
+  const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (property === "bind") {
+          return (...values: unknown[]) => racing(target.bind(...values));
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          if (!raced) {
+            raced = true;
+            await first();
+          }
+          return await Reflect.apply(value, target, args);
+        };
+      },
+    });
+  return new Proxy(env.DB, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string) => {
+          const statement = target.prepare(query);
+          return raced || !reads.test(query) ? statement : racing(statement);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
 };
 
 /** What `by` asking to sample `input` came to: "ok" or its refusal's code. */
@@ -565,59 +683,16 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
   });
 
   it("finds nothing to sample once its migration transformed every record", async () => {
-    const { fixture, store, release } = await migrated(3, deriving);
-    // Transformed records keep their writer's schema hash: only the
-    // migration's own progress says none is left.
-    await vi.waitFor(
-      async () => {
-        await expect(
-          env.DATA_STORES.getByName(store.id).schemaStatus(
-            store.id,
-            release.manifest.schemaHash,
-            { resourceId: fixture.app, resourceVersion: 3 }
-          )
-        ).resolves.toMatchObject({ state: "ready" });
-      },
-      { timeout: 120_000, interval: 500 }
-    );
-    // A sample that failed before the backfill got through.
-    const failedSample = async (): Promise<void> => {
-      await env.DB.prepare(
-        "INSERT INTO migration_samples (id, app_id, version, migration, store_id, outcome, rows, owners, reason, manifest_hash, from_schema, to_schema, sampled_by, sampled_at) VALUES (?, ?, 3, 'derive-category', ?, 'failed', 5, 1, 'threw', ?, ?, ?, ?, ?)"
-      )
-        .bind(
-          crypto.randomUUID(),
-          fixture.app,
-          store.id,
-          release.manifestHash,
-          fixture.firstSchema,
-          release.manifest.schemaHash,
-          fixture.owner.userId,
-          Date.now()
-        )
-        .run();
-    };
+    const { fixture, store, failedSample, madeCurrent, asked } =
+      await readyMigration();
     await failedSample();
-    const madeCurrent = async (db = env.DB) =>
-      await refusalOf(
-        async () =>
-          await setCurrentVersion(
-            { ...env, DB: db },
-            fixture.owner,
-            fixture.app,
-            3
-          )
-      );
-    const asked = {
-      app: fixture.app,
-      version: 3,
-      migration: "derive-category",
-    };
     const beforeEmpty = await madeCurrent();
     const admin = await person("admin");
     const sample = await sampleMigration(env, admin, asked);
-    // Failing again between the check and the change: refused by the
-    // change.
+    // The store switched over already, as a batch that kept failing
+    // leaves it; failing again between the check and the change: refused
+    // by the change.
+    await requireStoreSchemaActive(env, fixture.app, 3, { activate: true });
     const raced = await madeCurrent(racingDb(failedSample, /update "apps"/iu));
     await sampleMigration(env, admin, asked);
     const receipts = await receiptsOf(fixture.app);
@@ -632,6 +707,8 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       // Nothing left to transform: every record it wrote was validated,
       // so the earlier failure has nothing left to show.
       afterEmpty: afterEmpty.code,
+      current: await currentOf(fixture.app),
+      store: await stateOf(store, fixture.app),
     }).toStrictEqual({
       outcome: "empty",
       rows: 0,
@@ -640,6 +717,41 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       beforeEmpty: "version.migration_sample_failed",
       raced: "version.migration_sample_failed",
       afterEmpty: "ok",
+      current: 3,
+      store: "active",
+    });
+  });
+
+  it("decides on a failed sample as the store switches, before it and never after", async () => {
+    const { fixture, store, failedSample, madeCurrent } =
+      await readyMigration();
+    // Failing as the store switches over comes too late, as failing once
+    // the version is current would: refusing it then would only lock the
+    // version still current out of its superseded schema.
+    const raced = await madeCurrent(racingDb(failedSample, /update "apps"/iu));
+    expect({
+      raced: raced.code,
+      current: await currentOf(fixture.app),
+      store: await stateOf(store, fixture.app),
+    }).toStrictEqual({ raced: "ok", current: 3, store: "active" });
+
+    // Failing after the first look but before the switch: refused, and
+    // the store stays as it was.
+    const other = await readyMigration();
+    const early = await other.madeCurrent(
+      racingRead(
+        other.failedSample,
+        /"schema_hash" from "sdk_resource_bindings"/u
+      )
+    );
+    expect({
+      early: early.code,
+      current: await currentOf(other.fixture.app),
+      store: await stateOf(other.store, other.fixture.app),
+    }).toStrictEqual({
+      early: "version.migration_sample_failed",
+      current: null,
+      store: "ready",
     });
   });
 });

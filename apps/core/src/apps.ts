@@ -1153,8 +1153,7 @@ export const setCurrentVersion = async (
     const { noFailedSampleSql, requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
-    // And again as the version is made current: a sample that fails
-    // between here and then keeps it from being made current all the same.
+    // And again as the version is made current, below.
     sampleGate = noFailedSampleSql(appId, number);
     // Its store's contract holds its schema, or it waits; a ready explicit
     // migration passes here and takes over below, once every gate passed.
@@ -1186,7 +1185,23 @@ export const setCurrentVersion = async (
     // here if it fails, and a version found current after all is answered
     // as such. Only a batch that keeps failing leaves the store switched
     // ahead of D1, until making it current is asked again.
-    await requireStoreSchemaActive(env, appId, number, { activate: true });
+    //
+    // A failed sample of its migrations is looked for once more first:
+    // the switch is where it is decided, since a store switched over
+    // supersedes the schema the version still current writes under. One
+    // that fails as or after the store switches comes too late, as one
+    // after the version was made current would: refusing the version
+    // then would only lock the current one out of its store. Where
+    // nothing switched now (no ready migration, or a store a lost batch
+    // switched before), the change itself still refuses one (`sampleGate`).
+    const { requireMigrationEvidence } =
+      await import("./migration-evidence.ts");
+    await requireMigrationEvidence(env, appId, number);
+    if (
+      await requireStoreSchemaActive(env, appId, number, { activate: true })
+    ) {
+      sampleGate = undefined;
+    }
   }
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced, and only while what its triggers were
