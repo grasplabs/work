@@ -412,10 +412,18 @@ export declare const labels: readonly Label[];
         "screens/labels.tsx": `import { labels } from "../components/labels";
 import { more } from "../components/labels.d.ts";
 import { Ticket } from "../server";
+import { value } from "../components/value";
 
 export default function Labels() {
-  return <p>{[labels, more, Ticket].join()}</p>;
+  return <p>{[labels, more, Ticket, value].join()}</p>;
 }
+`,
+        // A folder module beside a declaration of the same name: TypeScript
+        // reads the declaration first, so the screen would run other code
+        // than it was checked against.
+        "components/value.d.ts": `export declare const value: string;
+`,
+        "components/value/index.ts": `export const value = 123;
 `,
         "components/labels.d.ts": `export declare const labels: readonly string[];
 export declare const more: readonly string[];
@@ -437,6 +445,7 @@ export declare const more: readonly string[];
       'screens/labels.tsx:1 imports: "../components/labels" is components/labels.d.ts, a declaration file: it holds only types, so import it with import type.',
       'screens/labels.tsx:2 imports: "../components/labels.d.ts" is components/labels.d.ts, a declaration file: it holds only types, so import it with import type.',
       'screens/labels.tsx:3 imports: "../server" is server.d.ts, a declaration file: it holds only types, so import it with import type.',
+      'screens/labels.tsx:4 imports: "../components/value" is components/value.d.ts, a declaration file: it holds only types, so import it with import type.',
     ]);
   });
 
