@@ -32,10 +32,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import { plural } from "@lingui/core/macro";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import {
+  CheckIcon,
   EllipsisIcon,
   LogOutIcon,
   SearchIcon,
@@ -253,6 +263,111 @@ const MemberActions = ({
   );
 };
 
+/**
+ * What each role may do in Grasp, as core allows it (`@grasp-os/shared/roles`
+ * and the calls that check it): everyone uses what is shared with them;
+ * builders build; admins decide who does what.
+ */
+const capabilities: { label: MessageDescriptor; roles: Role[] }[] = [
+  {
+    label: msg`Use the chat, Knowledge and the apps shared with them`,
+    roles: ["admin", "builder", "user"],
+  },
+  {
+    label: msg`Connect accounts of their own`,
+    roles: ["admin", "builder", "user"],
+  },
+  {
+    label: msg`Build engines, their apps and workflows, and ask for the permissions they need`,
+    roles: ["admin", "builder"],
+  },
+  {
+    label: msg`Connect shared accounts and decide what engines may do`,
+    roles: ["admin"],
+  },
+  {
+    label: msg`See the models, AI spend and the audit trail`,
+    roles: ["admin"],
+  },
+  {
+    label: msg`Change roles, sign people out and remove them`,
+    roles: ["admin"],
+  },
+];
+
+/** What each role may do, as in the prototype: a column a role where there is room for them. */
+const Roles = () => {
+  const { t, i18n } = useLingui();
+  const roles = roleSchema.options;
+  return (
+    <SettingsSection
+      description={t`What each role may do in Grasp. An admin gives each member theirs.`}
+      title={t`Roles`}
+    >
+      {/* A column a role where there is room for them; on a phone the roles that may stand under what they may. */}
+      <div className="@container border-t">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead variant="section">
+                <Trans comment="Heading of a list of what each role is allowed to do">
+                  May
+                </Trans>
+              </TableHead>
+              {roles.map((role) => (
+                <TableHead
+                  className="hidden w-20 text-center @lg:table-cell"
+                  variant="section"
+                  key={role}
+                >
+                  {roleLabel(role)}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {capabilities.map((capability) => (
+              <TableRow key={capability.label.id}>
+                <TableCell className="whitespace-normal" variant="section">
+                  <span className="flex flex-col gap-0.5">
+                    <span>{i18n._(capability.label)}</span>
+                    <span className="text-muted-foreground text-xs @lg:hidden">
+                      {capability.roles
+                        .map((role) => roleLabel(role))
+                        .join(" · ")}
+                    </span>
+                  </span>
+                </TableCell>
+                {roles.map((role) => (
+                  <TableCell
+                    className="hidden text-center @lg:table-cell"
+                    key={role}
+                    variant="section"
+                  >
+                    {capability.roles.includes(role) ? (
+                      <CheckIcon
+                        aria-label={t`Yes`}
+                        className="mx-auto size-4"
+                      />
+                    ) : (
+                      <span
+                        aria-label={t`No`}
+                        className="text-muted-foreground"
+                      >
+                        –
+                      </span>
+                    )}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </SettingsSection>
+  );
+};
+
 /** Whether `member` is what the search names: in their name or email. */
 const matches = (member: Member, search: string): boolean => {
   const words = search.trim().toLocaleLowerCase();
@@ -300,7 +415,7 @@ const MembersList = ({ members, me }: { members: Member[]; me: string }) => {
           value={people}
         />
       }
-      title={t`Members and roles`}
+      title={t`Members`}
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div className="border-t px-5 py-3">
@@ -362,14 +477,18 @@ const Members = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  if (page.state !== "ready") {
-    return (
-      <SettingsSection title={t`Members and roles`}>
-        <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
-    );
-  }
-  return <MembersList me={identity.userId} members={page.data} />;
+  return (
+    <>
+      <Roles />
+      {page.state === "ready" ? (
+        <MembersList me={identity.userId} members={page.data} />
+      ) : (
+        <SettingsSection title={t`Members`}>
+          <NotLoadedState heading="h3" page={page} />
+        </SettingsSection>
+      )}
+    </>
+  );
 };
 
 export const Route = createFileRoute("/_shell/settings/members")({
