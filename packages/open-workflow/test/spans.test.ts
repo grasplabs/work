@@ -1,3 +1,4 @@
+/* oxlint-disable unicorn/no-thenable -- `then` is Open Workflow's flow directive, not a promise */
 import { describe, expect, it } from "vite-plus/test";
 
 import { generateWorkflow, taskAtLine } from "../src/generate.ts";
@@ -43,5 +44,26 @@ describe("a generated module's lines, in the definition's terms", () => {
       inner: "inner",
       frame: undefined,
     });
+  });
+
+  it("counts a task's transition as its own code", async () => {
+    const { source, spans } = await generated([
+      {
+        outer: {
+          do: [
+            { inner: { set: { status: "two" }, then: "end" } },
+            { after: { set: { status: "three" } } },
+          ],
+        },
+      },
+    ]);
+    const lines = source.split("\n");
+    const innerStart = lines.findIndex((line) => line.includes('"inner"'));
+    // The first `break` after the inner task's statement: its `then: end`.
+    const jump =
+      lines.findIndex(
+        (line, index) => index > innerStart && line.trim().startsWith("break")
+      ) + 1;
+    expect(taskAtLine(spans, jump)?.taskId).toBe("inner");
   });
 });

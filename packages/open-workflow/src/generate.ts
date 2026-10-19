@@ -1661,9 +1661,6 @@ const lowerTask = (
       })
     );
   }
-  emitter.spans.push(
-    Object.freeze({ taskId: id, pointer, from: line, to: emitter.lines.length })
-  );
   // A switch moves on through its cases; any other task, skipped or not,
   // through its own then: "A skipped task still applies its declared
   // transition" (spec 13.5). `end` leaves the workflow at once, past the
@@ -1676,6 +1673,10 @@ const lowerTask = (
       emitter.lines.push(`${place.indent}${jump}`);
     }
   }
+  // Its transition's jump included: a diagnostic there is still its own.
+  emitter.spans.push(
+    Object.freeze({ taskId: id, pointer, from: line, to: emitter.lines.length })
+  );
 };
 
 /**
