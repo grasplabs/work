@@ -306,14 +306,18 @@ const rolesIn = async (
               rowsOf(workflowResourceMembers, by)
             )
           );
+  // Grouped once: each workflow then reads only its own rows.
+  const rowRoles = new Map<string, WorkflowRole[]>();
+  for (const row of rows) {
+    const list = rowRoles.get(row.id) ?? [];
+    list.push(row.role);
+    rowRoles.set(row.id, list);
+  }
   for (const { id, owner } of workflows) {
     const role =
       owner === by.userId
         ? ceilingOf(by)
-        : roleFromMembers(
-            by,
-            rows.filter((row) => row.id === id).map((row) => row.role)
-          );
+        : roleFromMembers(by, rowRoles.get(id) ?? []);
     if (role !== undefined) {
       roles.set(id, role);
     }
