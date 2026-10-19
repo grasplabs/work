@@ -58,8 +58,9 @@ import type { StoredPreferences } from "./store-host.ts";
 //   idempotency key keeps the key, its input's hash and its answer with
 //   the person's row; a resend of that write answers that answer, never a
 //   conflict with itself, and the same key with another input is refused
-//   (`submission.key_conflict`). Only the last write's key is kept: a
-//   resend after a later write conflicts on its revision instead.
+//   (`submission.key_conflict`), as is a resend under another release,
+//   whose answer would have another shape. Only the last write's key is
+//   kept: a resend after a later write conflicts on its revision instead.
 // - Access lost mid-call: the caller's gate (their own check, an agent's
 //   grant say; the release not revoked; the person's role read again; the
 //   deadline) runs before the store is read, and again right before it is
@@ -99,6 +100,8 @@ export interface ResolvedPreferenceOperation {
   readonly preferences: unknown;
   readonly args: unknown;
   readonly returns: unknown;
+  /** Its exact contract's fingerprint, which the reference named. */
+  readonly fingerprint: string;
 }
 
 /**
@@ -129,10 +132,11 @@ export const preferenceOperationOf = async (
   if (reference.kind !== operation.kind) {
     throw operationErrors.create("operation.kind_mismatch");
   }
+  const fingerprint = await contractFingerprint(operation);
   if (
     reference.resourceId !== release.manifest.resourceId ||
     reference.resourceVersion !== release.manifest.resourceVersion ||
-    reference.fingerprint !== (await contractFingerprint(operation))
+    reference.fingerprint !== fingerprint
   ) {
     throw versionErrors.create("version.mismatch");
   }
@@ -141,6 +145,7 @@ export const preferenceOperationOf = async (
     preferences: declared,
     args: operation.args,
     returns: operation.returns,
+    fingerprint,
   };
 };
 
@@ -280,12 +285,15 @@ const answerGet = (
   storeId: StoreId,
   stored: StoredPreferences
 ): OperationResult => {
-  const fields = effectiveOf(operation, chosenOf(stored), () =>
-    dataErrors.create("data.incompatible_record")
-  );
+  // Told first, whatever the document holds: a read refused because a
+  // stored value no longer fits still follows the person's next write, so
+  // a screen showing the refusal gets the repaired document.
   caller.observeReads?.(storeId, {
     [preferencesWatch(caller.userId)]: stored.revision,
   });
+  const fields = effectiveOf(operation, chosenOf(stored), () =>
+    dataErrors.create("data.incompatible_record")
+  );
   return { ok: true, value: answerOf(operation, fields, stored.revision) };
 };
 
@@ -335,7 +343,16 @@ export const answerPreferences = async (
           idempotencyKeySchema,
           idempotencyKey
         );
-  const inputHash = await sha256Hex(canonicalText(args));
+  // What the key was used for: these arguments, under this release and
+  // contract. A resend under another release (whose answer would have
+  // another shape) is another change.
+  const inputHash = await sha256Hex(
+    canonicalText({
+      args,
+      manifestHash: caller.release.manifestHash,
+      fingerprint: operation.fingerprint,
+    })
+  );
   // A resend of the last write, its answer lost: that answer again, not a
   // conflict with itself. The same key for another change is refused.
   if (key !== undefined && stored.lastKey === key) {

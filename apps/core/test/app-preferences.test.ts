@@ -492,6 +492,35 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     ).toStrictEqual({ compact: true, theme: "dark", _rev: 2 });
   });
 
+  it("refuse a resend under another release, whose answer would have another shape", async () => {
+    const desk = await sealedDesk();
+    const key = crypto.randomUUID();
+    await update(desk, desk.owner, 0, { compact: true }, key);
+    // A version that adds a field: the first save's answer lacks it.
+    await commitFiles(
+      env,
+      desk.owner,
+      desk.app,
+      filesWith(`v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light", "dark"]).default("light"),
+    pageSize: v.number().integer().min(10).max(100).default(25),
+  })`),
+      "Page size"
+    );
+    const second = { ...desk, release: await seal(desk, 2) };
+    await setCurrentVersion(env, desk.owner, desk.app, 2);
+    expect(
+      codeOf(await update(second, desk.owner, 0, { compact: true }, key))
+    ).toBe("submission.key_conflict");
+    expect(valueOf(await get(second, desk.owner))).toStrictEqual({
+      compact: true,
+      theme: "light",
+      pageSize: 25,
+      _rev: 1,
+    });
+  });
+
   it("give an App with preferences and no tables its store only at seal", async () => {
     const fixture = await appWith(filesWith(declared), "Desk");
     await expect(
@@ -757,6 +786,62 @@ describe(
         expect(latest()).toMatchObject({ theme: "dark", _rev: 1 });
       }, pushWait);
       expect(follower.received).toHaveLength(2);
+      await subscription.release();
+    });
+
+    it("follows a refused read to its repair: once the person replaces a value that no longer fits, the screen gets the document", async () => {
+      const admin = await signedIn("admin");
+      const builder = await signedIn("builder");
+      const desk = await sealedDesk(filesWith(declared), builder.acting);
+      await update(desk, builder.acting, 0, { theme: "dark" });
+      // Version 2 no longer allows "dark": what they stored no longer fits.
+      await commitFiles(
+        env,
+        builder.acting,
+        desk.app,
+        filesWith(`v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light"]).default("light"),
+  })`),
+        "Light only"
+      );
+      const second = { ...desk, release: await seal(desk, 2) };
+      await setCurrentVersion(env, builder.acting, desk.app, 2);
+      const review = await admin.api.screenTrust.review(desk.app);
+      await admin.api.screenTrust.approve(desk.app, {
+        version: review.version,
+        generation: review.generation,
+        artifacts: builtArtifacts(review.screens),
+      });
+      const bundle = await builder.api.screens.open(desk.app, "desk");
+      await builder.api.screens.present(desk.app, bundle.lease);
+      const follower = pageFollower();
+      const subscription = await builder.api.screens.watchQuery(
+        desk.app,
+        bundle.lease,
+        JSON.stringify({
+          reference: await referenceTo(second.release, "get"),
+          input: {},
+        }),
+        follower.callback
+      );
+      const last = () => follower.received.at(-1)?.result;
+      await vi.waitFor(() => {
+        const result = last();
+        expect(result?.ok === false ? result.error.code : "none").toBe(
+          "data.incompatible_record"
+        );
+      }, pushWait);
+      // Repaired from elsewhere: the same subscription gets the document.
+      await update(second, builder.acting, 1, { theme: "light" });
+      await vi.waitFor(() => {
+        const result = last();
+        expect(result?.ok === true ? result.value : undefined).toStrictEqual({
+          compact: false,
+          theme: "light",
+          _rev: 2,
+        });
+      }, pushWait);
       await subscription.release();
     });
 
