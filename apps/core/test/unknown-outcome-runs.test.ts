@@ -137,9 +137,9 @@ const mailer = (mailbox: string, action = "mail.send") =>
     { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify({ mailbox, subject: invoiceMail.subject, body: "Attached.", to: [invoiceMail.to] })}, retries: { limit: 0 } },
     async ({ idempotencyKey, input: mail }) => {
       try {
-        return JSON.parse((await env.MAIL.call(${JSON.stringify(action)}, mail, { idempotencyKey })).output);
+        return JSON.parse(((await env.MAIL.call(${JSON.stringify(action)}, mail, { idempotencyKey })) as { output: string }).output);
       } catch (error) {
-        if (error.code === resolvedDone) {
+        if ((error as { code?: string }).code === resolvedDone) {
           return { resolved: true };
         }
         throw error;
@@ -155,10 +155,7 @@ const withResolvedDone = (files: Record<string, string>) =>
     Object.entries(files).map(([path, source]) => [
       path,
       path.endsWith("mailer.ts")
-        ? source.replace(
-            "import { workflow, z }",
-            "import { resolvedDone, workflow, z }"
-          )
+        ? source.replace(" workflow, z }", " resolvedDone, workflow, z }")
         : source,
     ])
   );
@@ -994,7 +991,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       admin,
       workflowFiles(
         "composio",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse((await env.MAIL.call("mail.send", input, { idempotencyKey })).output));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output));`,
         { send: null }
       )
     );

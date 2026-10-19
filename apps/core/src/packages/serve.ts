@@ -159,7 +159,11 @@ const admitted = async (env: Env, ref: ArtifactRef): Promise<boolean> => {
  */
 const pinned = async (env: Env, ref: ArtifactRef): Promise<boolean> => {
   try {
-    const { lock } = await lockOf(env, ref.app, ref.graphHash);
+    const { lock } = await lockOf(
+      env,
+      { type: "app", id: ref.app },
+      ref.graphHash
+    );
     return Object.values(lock.artifacts ?? {}).some((pins) =>
       Object.values(pins).some(
         ({ target, hash }) => target === "browser" && hash === ref.hash

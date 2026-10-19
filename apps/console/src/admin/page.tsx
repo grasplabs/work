@@ -79,18 +79,20 @@ export const PageHeading = ({
 
 /**
  * An admin page titled `title`, with what it is for under it when there is
- * a `description`: the overview when `overview` (as wide as the
- * prototype's, for its table), otherwise a page under it, with `children`
- * below its title.
+ * a `description` and its `action` on the right when it has one: the
+ * overview when `overview` (as wide as the prototype's, for its table),
+ * otherwise a page under it, with `children` below its title.
  */
 export const AdminPage = ({
   title,
   description,
+  action,
   overview = false,
   children,
 }: {
   title: string;
   description?: string;
+  action?: ReactNode;
   overview?: boolean;
   children?: ReactNode;
 }) => (
@@ -102,7 +104,15 @@ export const AdminPage = ({
         overview ? "max-w-7xl" : "max-w-5xl"
       )}
     >
-      <PageHeading description={description} title={title} />
+      <div className="flex flex-wrap items-end gap-3">
+        {/* A width of its own, so an action beside it goes to the next line rather than squeezing it. */}
+        <div className="min-w-0 flex-1 basis-64">
+          <PageHeading description={description} title={title} />
+        </div>
+        {action === undefined ? null : (
+          <div className="ml-auto flex items-center gap-2">{action}</div>
+        )}
+      </div>
       {children}
     </div>
   </>

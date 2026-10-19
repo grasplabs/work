@@ -26,7 +26,8 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
-import { server } from "./workflow-apps.ts";
+import { v1Server } from "./v1-app-server.ts";
+import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
 // person in a draft of its own, and repairing what its checks report.
@@ -61,10 +62,10 @@ const fixed = restyled.replace(
 
 /** A workflow of the draft, with its tests. */
 const intake = {
-  "workflows/intake.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+  "workflows/intake.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("intake", { params: {}, input: z.unknown() }, async (step, { input }) => {
-  return await step.do("read", { description: "Read the invoice" }, async () => input);
+  return await step.do("read", { description: "Read the invoice" }, async () => input as Json);
 });
 `,
   "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
@@ -247,13 +248,13 @@ export default workflowTests(definition, [{ name: "runs", mocks: { limit: 1, boo
 /** A workflow whose first step calls a helper, the second a connection. */
 const digest = (to: string) => ({
   "workflows/lib/total.ts": "export const total = (n: number) => n + 1;\n",
-  "workflows/digest.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+  "workflows/digest.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 import { total } from "./lib/total.ts";
 
 export default workflow("digest", { params: {}, input: z.unknown() }, async (step, { env }) => {
   const sum = await step.do("sum", { description: "Sum" }, async () => total(1));
-  await step.do("mail", { description: "Mail" }, async () => await env.MAIL.call("mail.send", ${JSON.stringify(to)}));
+  await step.do("mail", { description: "Mail" }, async () => (await env.MAIL.call("mail.send", ${JSON.stringify(to)})) as Json);
   return sum;
 });
 `,
@@ -305,9 +306,9 @@ export const bindings = (): unknown => taken;
 import { bindings } from "./lib/take.ts";
 
 export default workflow("sweep", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  let app;
+  let app!: { sendAll: () => Promise<number> };
   await step.do("prepare", { description: "Prepare" }, async () => {
-    app = appServer(env);
+    app = appServer(env) as unknown as typeof app;
     return bindings() === undefined;
   });
   return await step.do("tidy-up", { description: "Tidy" }, async () => await app.sendAll());
@@ -1290,7 +1291,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
               rule: "bindings",
               severity: "error",
               message:
-                "Line 8: Call the App's bindings as `env.NAME.method(…)`, `appServer(env).method(…)` or `appExports(env.NAME).method(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
+                "Line 8: Call the App's bindings as `env.NAME.method(…)`, `appServer(env).method(…)`, `appFunctions(env).query(…)` or `appExports(env.NAME).method(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
             },
           ],
         },
@@ -1403,14 +1404,54 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
   });
 
+  it("reviews the grants a version uses, asking again for those its reviewer can't grant", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const admin = await signedInApi(idp, "admin");
+    const notify = workflowFiles(
+      "notify",
+      `  return await step.do("save", { description: "Save it" }, async () => await ${hitCall(`"notify"`)});`,
+      { save: 1 }
+    );
+    const app = await appWith(builder, notify);
+    await requestGranted(idp, builder, outlook(app));
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      {
+        "workflows/notify.ts": `// Saves it.\n${notify["workflows/notify.ts"] ?? ""}`,
+      },
+      "Noted"
+    );
+
+    const grant = {
+      subject: { type: "app", appId: app },
+      binding: "OUTLOOK",
+      status: "active",
+    };
+    // A builder can't grant it: making the version current asks again.
+    await expect(
+      builder.api.apps.versions.review(app, version)
+    ).resolves.toMatchObject({
+      grants: [{ permission: grant, askedAgain: true }],
+    });
+    // An admin can: nothing is asked for again.
+    await expect(
+      admin.api.apps.versions.review(app, version)
+    ).resolves.toMatchObject({
+      grants: [{ permission: grant, askedAgain: false }],
+    });
+  });
+
+  // The review of the v1 App server's code (`server`, `serverFiles`): it
+  // goes with the server (GRA-645). The test before it holds a sealed App
+  // to the same grants.
   it("reviews code a workflow may use, the steps that call the App, and the grants the version uses", async () => {
     const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");
     const notify = {
-      "workflows/notify.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/notify.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("notify", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  return await step.do("save", { description: "Save it" }, async () => await env.APP.call("hits", "notify"));
+  return await step.do("save", { description: "Save it" }, async () => (await env.APP.call("hits", "notify")) as Json);
 });
 `,
       "workflows/notify.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
@@ -1422,7 +1463,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     };
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await release(builder, app, {
-      "app/server.ts": server,
+      "app/server.ts": v1Server,
       "app/lib/books.ts": "export const twice = false;\n",
       ...notify,
     });

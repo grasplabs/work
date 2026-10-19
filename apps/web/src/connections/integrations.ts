@@ -1,5 +1,6 @@
 import { catalogGroups } from "@grasp-os/shared/connect";
 import type {
+  CatalogAuth,
   CatalogGroup,
   CatalogSource,
   ListedConnection,
@@ -27,6 +28,8 @@ export interface Integration {
   group: CatalogGroup;
   /** What it is for, in a sentence, where the catalog says. */
   description: string | null;
+  /** Whose sign-in app connecting it takes; unknown where the catalog doesn't list it. */
+  auth: CatalogAuth | undefined;
   /** Where core serves its logo, or `null`: its first letter stands in. */
   logo: string | null;
   /** How many tools it has; unknown where the catalog doesn't list it. */
@@ -94,6 +97,7 @@ export const integrationsOf = (
     categories: entry.categories,
     group: entry.group,
     description: entry.description,
+    auth: entry.auth,
     logo: entry.logo,
     toolCount: entry.toolCount,
     offered: entry.offered,
@@ -114,6 +118,7 @@ export const integrationsOf = (
         categories: [],
         group: "Other",
         description: null,
+        auth: undefined,
         logo: null,
         toolCount: undefined,
         offered: false,
