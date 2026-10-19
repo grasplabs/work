@@ -1,7 +1,6 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { spawnSync } from "node:child_process";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -22,6 +21,7 @@ import { canonicalText } from "@grasp-os/shared/json";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { steeringCases } from "../apps/core/test/steering-cases.ts";
 import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
 import notes from "../packages/sdk/test/notes/app.ts";
 import { packageProject, PackagingError } from "./package-definition-lib.ts";
@@ -45,6 +45,38 @@ const confirmations = `import { workflows } from "#grasp";
 export const confirmed = workflows.archiveNotes.events.confirmed;
 `;
 
+/**
+ * A workflow of the App's own that calls its server's functions, typed by
+ * its operations (`appFunctions<Tree>(env)`). It holds what the platform's
+ * check accepts though a stricter one wouldn't: an index read as present
+ * (no `noUncheckedIndexedAccess`) and a type imported without `type` (no
+ * `verbatimModuleSyntax`).
+ */
+const tally = `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
+import { FunctionResult } from "@grasp-os/sdk/workflow";
+
+import type * as notes from "../operations/notes.ts";
+
+interface Notes {
+  notes: typeof notes;
+}
+
+const firstWordLength = (text: string): number => text.split(" ")[0].length;
+
+export default workflow("tally", { input: z.object({}), params: {} }, async (step, { env }) =>
+  await step.do("tally", { description: "Count the notes" }, async () => {
+    const answered: FunctionResult<number> = await appFunctions<Notes>(env).action("notes.tally", {});
+    return answered.ok ? answered.value + firstWordLength("a note") : 0;
+  })
+);
+`;
+
+/** A screen, which has the DOM as its frame does. */
+const notesScreen = `export default function Notes() {
+  return <p>{window.location.pathname}</p>;
+}
+`;
+
 /** The Notes fixture's source, as an App version's tree holds it. */
 const notesFiles = (): Record<string, string> => ({
   ...Object.fromEntries(
@@ -54,6 +86,8 @@ const notesFiles = (): Record<string, string> => ({
     ])
   ),
   "operations/confirmations.ts": confirmations,
+  "workflows/tally.ts": tally,
+  "screens/notes.tsx": notesScreen,
 });
 
 const objectSchema = (properties: Record<string, unknown>) => ({
@@ -95,6 +129,8 @@ const greetingSource =
 const greeting = (): Record<string, string> => ({
   "workflow.json": greetingDefinition,
   ".grasp/workflow.ts": greetingSource,
+  "code/double.ts":
+    "export const double = (value: number): number => value * 2;\n",
 });
 
 /** A definition package of the Notes App binding the greeting workflow. */
@@ -219,6 +255,107 @@ const packageJsonSchema = z.object({
 
 const exact = /^\d+\.\d+\.\d+$/u;
 
+/** The TypeScript the platform checks App code with: the compiler's. */
+const platformTypescript = z
+  .object({ version: z.string() })
+  .parse(
+    JSON.parse(
+      readFileSync(
+        path.join(
+          ROOT,
+          "packages/compiler/node_modules/typescript/package.json"
+        ),
+        "utf-8"
+      )
+    )
+  ).version;
+
+/** Where the checkout installed packages, as candidates for a project's. */
+const installedIn = [
+  "packages/compiler",
+  "packages/ui",
+  "packages/sdk",
+  "packages/shared",
+  ".",
+].map((dir) => path.join(ROOT, dir, "node_modules"));
+
+const versionOf = (dir: string): string | undefined => {
+  try {
+    return z
+      .object({ version: z.string() })
+      .parse(JSON.parse(readFileSync(path.join(dir, "package.json"), "utf-8")))
+      .version;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Installs the project's dependencies as a package manager would lay them
+ * out, from the copies the checkout already holds at exactly the version
+ * pinned: nothing is fetched. Answers what it couldn't find.
+ */
+const installed = (out: string): string[] => {
+  const read = (file: string): Record<string, string> =>
+    z
+      .object({
+        dependencies: z.record(z.string(), z.string()).default({}),
+        devDependencies: z.record(z.string(), z.string()).default({}),
+      })
+      .transform(({ dependencies, devDependencies }) => ({
+        ...dependencies,
+        ...devDependencies,
+      }))
+      .parse(JSON.parse(readFileSync(path.join(out, file), "utf-8")));
+  const wanted = {
+    ...read("vendor/@grasp-os/shared/package.json"),
+    ...read("vendor/@grasp-os/sdk/package.json"),
+    ...read("vendor/@grasp-os/ui/package.json"),
+    ...read("package.json"),
+  };
+  const missing: string[] = [];
+  for (const [name, version] of Object.entries(wanted)) {
+    const target = path.join(out, "node_modules", name);
+    mkdirSync(path.dirname(target), { recursive: true });
+    const from = version.startsWith("file:")
+      ? path.join(out, version.slice("file:".length))
+      : installedIn
+          .map((dir) => path.join(dir, name))
+          .find((candidate) => versionOf(candidate) === version);
+    if (from === undefined) {
+      missing.push(`${name}@${version}`);
+    } else {
+      symlinkSync(realpathSync(from), target);
+    }
+  }
+  return missing;
+};
+
+const problemLine = /^(?<file>[^(:]+)(?:\(\d+,\d+\))?: error (?<code>\S+):/u;
+
+/**
+ * The project's own check (`npm run typecheck`), as a developer runs it:
+ * its status, and the codes of what it reported, by file.
+ */
+const projectCheck = (
+  out: string
+): { status: number | null; problems: Record<string, string[]> } => {
+  const checked = spawnSync(process.execPath, ["grasp/check.ts"], {
+    cwd: out,
+    encoding: "utf-8",
+  });
+  const problems: Record<string, string[]> = {};
+  for (const line of checked.stderr.split("\n")) {
+    const groups = problemLine.exec(line)?.groups;
+    if (groups?.file !== undefined && groups.code !== undefined) {
+      problems[groups.file] = [...(problems[groups.file] ?? []), groups.code];
+    } else if (line.trim() !== "") {
+      problems["(output)"] = [...(problems["(output)"] ?? []), line];
+    }
+  }
+  return { status: checked.status, problems };
+};
+
 describe(
   "packaging a definition as a standalone project",
   { timeout: 60_000 },
@@ -286,9 +423,17 @@ describe(
           "app/operations/confirmations.ts",
           "app/operations/notes.ts",
           "app/schema.ts",
+          "app/screens/notes.tsx",
+          "app/tsconfig.screens.json",
+          "app/tsconfig.server.json",
+          "app/tsconfig.workflows.json",
+          "app/workflows/tally.ts",
         ],
         workflow: [
           "workflows/greet/1.0.0/.grasp/workflow.ts",
+          "workflows/greet/1.0.0/code/double.ts",
+          "workflows/greet/1.0.0/tsconfig.generated.json",
+          "workflows/greet/1.0.0/tsconfig.json",
           "workflows/greet/1.0.0/workflow.json",
         ],
         vendorTests: [],
@@ -303,62 +448,96 @@ describe(
       });
     });
 
-    it("type-checks as written, with its dependencies installed from what the checkout has and no network", async () => {
+    it("type-checks as the platform does: what it accepts passes, with the platform's TypeScript, and what it refuses fails", async () => {
       const { out } = scratch();
       await packaged(definitionOf(), out);
-      // Installed as a package manager would lay them out, from the copies
-      // the checkout already holds: nothing is fetched.
-      const read = (file: string): Record<string, string> =>
-        z
-          .object({
-            dependencies: z.record(z.string(), z.string()).default({}),
-            devDependencies: z.record(z.string(), z.string()).default({}),
-          })
-          .transform(({ dependencies, devDependencies }) => ({
-            ...dependencies,
-            ...devDependencies,
-          }))
-          .parse(JSON.parse(readFileSync(path.join(out, file), "utf-8")));
-      const wanted = {
-        ...read("vendor/@grasp-os/shared/package.json"),
-        ...read("vendor/@grasp-os/sdk/package.json"),
-        ...read("vendor/@grasp-os/ui/package.json"),
-        ...read("package.json"),
-      };
-      const installedIn = [
-        "packages/ui",
-        "packages/sdk",
-        "packages/shared",
-        ".",
-      ].map((dir) => path.join(ROOT, dir, "node_modules"));
-      const missing: string[] = [];
-      for (const [name, version] of Object.entries(wanted)) {
-        const target = path.join(out, "node_modules", name);
-        mkdirSync(path.dirname(target), { recursive: true });
-        const from = version.startsWith("file:")
-          ? path.join(out, version.slice("file:".length))
-          : installedIn
-              .map((dir) => path.join(dir, name))
-              .find((candidate) => existsSync(candidate));
-        if (from === undefined) {
-          missing.push(name);
-        } else {
-          symlinkSync(realpathSync(from), target);
-        }
-      }
-      const checked = spawnSync(
-        path.join(ROOT, "node_modules/.bin/tsc"),
-        ["--noEmit", "-p", "."],
-        { cwd: out, encoding: "utf-8" }
+      const missing = installed(out);
+      const project = packageJsonSchema.parse(
+        JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
       );
+      const accepted = projectCheck(out);
+
+      // What the platform's check refuses, each in a file of its own: a
+      // type error in a screen and in a compute module; a workflow and
+      // server code reaching the DOM, which their isolate lacks; and a
+      // workflow importing what its kind may not.
+      const mistyped: Record<string, string> = {
+        "app/screens/typo.tsx": 'export const count: number = "none";\n',
+        // A declaration among the workflows, which their check leaves out,
+        // as the platform's does: a workflow can't import it.
+        "app/workflows/lib/types.d.ts": "export type Value = number;\n",
+        "app/workflows/lib/typed.ts":
+          'import type { Value } from "./types";\n\nexport const one: Value = 1;\n',
+        "workflows/greet/1.0.0/code/typo.ts":
+          "export const half = (value: number): string => value / 2;\n",
+        "app/workflows/lib/window.ts":
+          "export const here = (): string => window.location.href;\n",
+        "app/operations/document.ts":
+          "export const title = (): string => document.title;\n",
+        "app/workflows/lib/kit.ts":
+          'import { Button } from "@grasp-os/ui/components/button";\n\nexport const button = Button;\n',
+      };
+      // And what its build refuses before any check: every way a file
+      // could steer the check, in a workflow, server code and a compute
+      // module alike.
+      const steering: Record<string, string> = {
+        "app/operations/ambient.ts":
+          "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
+        "workflows/greet/1.0.0/code/dom.ts":
+          '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
+        ...Object.fromEntries(
+          steeringCases("@grasp-os/sdk/workflow").map(([, source], index) => [
+            `app/workflows/lib/steering-${index}.ts`,
+            source,
+          ])
+        ),
+      };
+      const write = (files: Record<string, string>): void => {
+        for (const [file, source] of Object.entries(files)) {
+          mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
+          writeFileSync(path.join(out, file), source);
+        }
+      };
+      write(mistyped);
+      const failedCheck = projectCheck(out);
+      for (const file of Object.keys(mistyped)) {
+        rmSync(path.join(out, file));
+      }
+      write(steering);
+      const failedBuild = projectCheck(out);
+
       expect({
         missing,
-        status: checked.status,
-        errors: checked.stdout,
+        typescript: project.devDependencies.typescript,
+        accepted,
+        failedCheck,
+        failedBuild: {
+          status: failedBuild.status,
+          files: Object.keys(failedBuild.problems).toSorted(),
+          notSteering: Object.values(failedBuild.problems)
+            .flat()
+            .filter((code) => code !== "steering"),
+        },
       }).toStrictEqual({
         missing: [],
-        status: 0,
-        errors: "",
+        typescript: platformTypescript,
+        accepted: { status: 0, problems: {} },
+        failedCheck: {
+          status: 1,
+          problems: {
+            "app/operations/document.ts": ["TS2584"],
+            "app/workflows/lib/kit.ts": ["TS2307"],
+            "app/workflows/lib/window.ts": ["TS2304"],
+            "app/screens/typo.tsx": ["TS2322"],
+            "app/workflows/lib/typed.ts": ["TS2307"],
+            "workflows/greet/1.0.0/code/typo.ts": ["TS2322"],
+          },
+        },
+        failedBuild: {
+          status: 1,
+          files: Object.keys(steering).toSorted(),
+          notSteering: [],
+        },
       });
     });
 
@@ -498,6 +677,7 @@ describe(
           "LICENSES",
           "THIRD-PARTY-NOTICES.md",
           "app",
+          "grasp",
           "grasp-project.json",
           "package.json",
           "tsconfig.json",
