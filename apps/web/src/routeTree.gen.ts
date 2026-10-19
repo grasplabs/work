@@ -19,6 +19,7 @@ import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellActivityRouteImport } from './routes/_shell.activity'
 import { Route as ShellConnectionsRouteImport } from './routes/_shell.connections'
 import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
+import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
 import { Route as ShellMembersRouteImport } from './routes/_shell.members'
 import { Route as ShellModelsRouteImport } from './routes/_shell.models'
 import { Route as ShellNotificationsRouteImport } from './routes/_shell.notifications'
@@ -48,6 +49,7 @@ import { Route as ShellSettingsApprovalsRouteImport } from './routes/_shell.sett
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
+import { Route as ShellSettingsNotificationsRouteImport } from './routes/_shell.settings.notifications'
 import { Route as ShellSettingsOutcomesRouteImport } from './routes/_shell.settings.outcomes'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
@@ -123,6 +125,11 @@ const ShellConnectionsRoute = ShellConnectionsRouteImport.update({
 const ShellDashboardRoute = ShellDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellInboxRoute = ShellInboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellMembersRoute = ShellMembersRouteImport.update({
@@ -273,6 +280,12 @@ const ShellSettingsModelsRoute = ShellSettingsModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsNotificationsRoute =
+  ShellSettingsNotificationsRouteImport.update({
+    id: '/notifications',
+    path: '/notifications',
+    getParentRoute: () => ShellSettingsRoute,
+  } as any)
 const ShellSettingsOutcomesRoute = ShellSettingsOutcomesRouteImport.update({
   id: '/outcomes',
   path: '/outcomes',
@@ -435,6 +448,7 @@ export interface FileRoutesByFullPath {
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
+  '/inbox': typeof ShellInboxRoute
   '/members': typeof ShellMembersRoute
   '/models': typeof ShellModelsRoute
   '/notifications': typeof ShellNotificationsRoute
@@ -455,6 +469,7 @@ export interface FileRoutesByFullPath {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
@@ -501,6 +516,7 @@ export interface FileRoutesByTo {
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
+  '/inbox': typeof ShellInboxRoute
   '/members': typeof ShellMembersRoute
   '/models': typeof ShellModelsRoute
   '/notifications': typeof ShellNotificationsRoute
@@ -519,6 +535,7 @@ export interface FileRoutesByTo {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
@@ -567,6 +584,7 @@ export interface FileRoutesById {
   '/_shell/activity': typeof ShellActivityRoute
   '/_shell/connections': typeof ShellConnectionsRoute
   '/_shell/dashboard': typeof ShellDashboardRoute
+  '/_shell/inbox': typeof ShellInboxRoute
   '/_shell/members': typeof ShellMembersRoute
   '/_shell/models': typeof ShellModelsRoute
   '/_shell/notifications': typeof ShellNotificationsRoute
@@ -588,6 +606,7 @@ export interface FileRoutesById {
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
+  '/_shell/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/_shell/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/settings/spend': typeof ShellSettingsSpendRoute
@@ -637,6 +656,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/connections'
     | '/dashboard'
+    | '/inbox'
     | '/members'
     | '/models'
     | '/notifications'
@@ -657,6 +677,7 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/members'
     | '/settings/models'
+    | '/settings/notifications'
     | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/spend'
@@ -703,6 +724,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/connections'
     | '/dashboard'
+    | '/inbox'
     | '/members'
     | '/models'
     | '/notifications'
@@ -721,6 +743,7 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/members'
     | '/settings/models'
+    | '/settings/notifications'
     | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/spend'
@@ -768,6 +791,7 @@ export interface FileRouteTypes {
     | '/_shell/activity'
     | '/_shell/connections'
     | '/_shell/dashboard'
+    | '/_shell/inbox'
     | '/_shell/members'
     | '/_shell/models'
     | '/_shell/notifications'
@@ -789,6 +813,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/audit'
     | '/_shell/settings/members'
     | '/_shell/settings/models'
+    | '/_shell/settings/notifications'
     | '/_shell/settings/outcomes'
     | '/_shell/settings/profile'
     | '/_shell/settings/spend'
@@ -911,6 +936,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof ShellDashboardRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/inbox': {
+      id: '/_shell/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof ShellInboxRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/members': {
@@ -1114,6 +1146,13 @@ declare module '@tanstack/react-router' {
       path: '/models'
       fullPath: '/settings/models'
       preLoaderRoute: typeof ShellSettingsModelsRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/notifications': {
+      id: '/_shell/settings/notifications'
+      path: '/notifications'
+      fullPath: '/settings/notifications'
+      preLoaderRoute: typeof ShellSettingsNotificationsRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
     '/_shell/settings/outcomes': {
@@ -1337,6 +1376,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
+  ShellSettingsNotificationsRoute: typeof ShellSettingsNotificationsRoute
   ShellSettingsOutcomesRoute: typeof ShellSettingsOutcomesRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
   ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
@@ -1350,6 +1390,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsModelsRoute: ShellSettingsModelsRoute,
+  ShellSettingsNotificationsRoute: ShellSettingsNotificationsRoute,
   ShellSettingsOutcomesRoute: ShellSettingsOutcomesRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
   ShellSettingsSpendRoute: ShellSettingsSpendRoute,
@@ -1391,6 +1432,7 @@ interface ShellRouteChildren {
   ShellActivityRoute: typeof ShellActivityRoute
   ShellConnectionsRoute: typeof ShellConnectionsRoute
   ShellDashboardRoute: typeof ShellDashboardRoute
+  ShellInboxRoute: typeof ShellInboxRoute
   ShellMembersRoute: typeof ShellMembersRoute
   ShellModelsRoute: typeof ShellModelsRoute
   ShellNotificationsRoute: typeof ShellNotificationsRoute
@@ -1425,6 +1467,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellActivityRoute: ShellActivityRoute,
   ShellConnectionsRoute: ShellConnectionsRoute,
   ShellDashboardRoute: ShellDashboardRoute,
+  ShellInboxRoute: ShellInboxRoute,
   ShellMembersRoute: ShellMembersRoute,
   ShellModelsRoute: ShellModelsRoute,
   ShellNotificationsRoute: ShellNotificationsRoute,
