@@ -297,12 +297,15 @@ interface Following {
   early: boolean;
 }
 
-/** What the connection's access check says, before each push of data. */
+/**
+ * What the connection's access check says, before each push of data: open,
+ * no role in the App, or the build refused (`revoked`, `unreviewed`).
+ */
 export type AccessCheck<By = Identity> = (
   by: By,
   app: AppId,
   artifact: string | undefined
-) => Promise<"open" | "role" | "build">;
+) => Promise<"open" | "role" | "revoked" | "unreviewed">;
 
 /** Whoever a connection's live queries are read for, by `userId`. */
 export interface Reader {
@@ -957,9 +960,11 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // of the App disclosed.
     return {
       refusal: refusalResult(
-        access === "build"
-          ? screenErrors.create("screen.revoked")
-          : appErrors.create("app.not_found")
+        access === "role"
+          ? appErrors.create("app.not_found")
+          : screenErrors.create(
+              access === "revoked" ? "screen.revoked" : "screen.unreviewed"
+            )
       ),
     };
   }

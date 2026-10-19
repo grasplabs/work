@@ -9,9 +9,11 @@ import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { revocationsOf, tellKept } from "./access-revocations.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  apps,
   sdkArtifactCandidates,
   sdkArtifactDeletions,
   sdkReleaseArtifacts,
@@ -352,7 +354,9 @@ export const releaseHold = async (
  * Revokes release `key`, as an admin of the organization: it runs no
  * more, from the next load and the next authorization of a call already
  * running (`version.revoked`), and it is kept, bytes and all. Audited
- * once, with its manifest hash and why.
+ * once, with its manifest hash and why. Its App's open screens are told
+ * to look again (access-revocations.ts), so a live query of a build of it
+ * ends now, not at the App's next change.
  */
 export const revokeRelease = async (
   env: Env,
@@ -363,7 +367,7 @@ export const revokeRelease = async (
   requireMemberAdmin(by);
   const hash = await sealedHash(env, key);
   const db = drizzle(env.DB);
-  const [revoked] = await auditedBatch(env, db, [
+  const [revoked, , kept] = await auditedBatch(env, db, [
     db
       .update(sdkReleaseManifests)
       .set({ revokedAt: new Date() })
@@ -382,7 +386,10 @@ export const revokeRelease = async (
         reason: reason.slice(0, 500),
       })
     ),
+    // Only when it was recorded, so only when it landed.
+    revocationsOf(db, eq(apps.id, key.app), null, sql`changes() > 0`),
   ]);
+  await tellKept(env, kept);
   if (revoked.length === 0) {
     // Revoked already, or `by` is no longer an admin: only that refuses.
     await requireStillAdmin(env, by);
