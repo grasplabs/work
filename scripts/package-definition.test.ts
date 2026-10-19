@@ -463,6 +463,11 @@ describe(
       // workflow importing what its kind may not.
       const mistyped: Record<string, string> = {
         "app/screens/typo.tsx": 'export const count: number = "none";\n',
+        // A declaration among the workflows, which their check leaves out,
+        // as the platform's does: a workflow can't import it.
+        "app/workflows/lib/types.d.ts": "export type Value = number;\n",
+        "app/workflows/lib/typed.ts":
+          'import type { Value } from "./types";\n\nexport const one: Value = 1;\n',
         "workflows/greet/1.0.0/code/typo.ts":
           "export const half = (value: number): string => value / 2;\n",
         "app/workflows/lib/window.ts":
@@ -524,6 +529,7 @@ describe(
             "app/workflows/lib/kit.ts": ["TS2307"],
             "app/workflows/lib/window.ts": ["TS2304"],
             "app/screens/typo.tsx": ["TS2322"],
+            "app/workflows/lib/typed.ts": ["TS2307"],
             "workflows/greet/1.0.0/code/typo.ts": ["TS2322"],
           },
         },

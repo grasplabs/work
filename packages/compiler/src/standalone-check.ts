@@ -348,15 +348,20 @@ const checkKind = (config: string): Problem[] => {
         cache,
         redirectedReference
       );
-      if (
-        allowed === undefined ||
-        resolvedModule === undefined ||
-        !isWithin(dir, containingFile)
-      ) {
+      if (resolvedModule === undefined || !isWithin(dir, containingFile)) {
         return { resolvedModule };
       }
-      const toApp = isWithin(dir, resolvedModule.resolvedFileName);
-      const within = toApp
+      const resolved = path.resolve(resolvedModule.resolvedFileName);
+      // A file beside the App's that this check leaves out (a workflow's
+      // `.d.ts`, a server file a screen names) isn't one the platform
+      // gives this kind of code: it doesn't exist there.
+      if (isWithin(dir, resolved) && !app.has(resolved)) {
+        return { resolvedModule: undefined };
+      }
+      if (allowed === undefined) {
+        return { resolvedModule };
+      }
+      const within = app.has(resolved)
         ? text.startsWith("./") || text.startsWith("../") || mapped.has(text)
         : allowed.has(text);
       return { resolvedModule: within ? resolvedModule : undefined };
