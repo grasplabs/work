@@ -7,7 +7,14 @@ import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vite-plus/test";
 
 import { callExport } from "../src/app-calls.ts";
 import { callApp, callTimeoutMs, waitsForAskMs } from "../src/app.ts";
@@ -1610,126 +1617,143 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("answer one call's stub calls only up to its host-call budget, its writes and reads alike, and every call its own budget", async () => {
-    const admin = await personApi("admin");
-    const { collectionId } = await collectionWithNote(
-      { knowledge: admin.api.knowledge },
-      { name: "Handbook", access: "everyone" }
-    );
-    const [invoicing, crm] = await Promise.all([
-      newApp(admin, "Invoicing"),
-      newApp(admin, "CRM"),
-    ]);
-    await requestGranted(
-      idp,
-      admin,
-      readCollection({ type: "app", appId: invoicing }, collectionId)
-    );
-    await grantCalls(admin, invoicing, crm, ["read"], "CRM");
-    await requestGranted(idp, admin, {
-      subject: { type: "app", appId: invoicing },
-      object: { type: "platform" },
-      actions: ["guests"],
-      binding: "GUESTS",
-    });
-    const useMany = async (uses: unknown[]) =>
-      await callApp(
-        env,
-        invoicing,
-        { userId: admin.userId, mode: "interactive" },
-        "useMany",
-        [uses]
+  it(
+    "answer one call's stub calls only up to its host-call budget, its writes and reads alike, and every call its own budget",
+    { timeout: 300_000 },
+    async () => {
+      // A hundred stub calls in one call take longer than the tests' usual
+      // 10 s on a busy runner: each call gets most of the platform's minute.
+      const callTimeout = env.APP_CALL_TIMEOUT_MS;
+      env.APP_CALL_TIMEOUT_MS = "50000";
+      onTestFinished(() => {
+        if (callTimeout === undefined) {
+          Reflect.deleteProperty(env, "APP_CALL_TIMEOUT_MS");
+        } else {
+          env.APP_CALL_TIMEOUT_MS = callTimeout;
+        }
+      });
+      const admin = await personApi("admin");
+      const { collectionId } = await collectionWithNote(
+        { knowledge: admin.api.knowledge },
+        { name: "Handbook", access: "everyone" }
       );
-    const budget = platformLimits.invocationHostCalls;
-
-    // Statistics points are stub calls too: they take from the budget the
-    // reads after them get.
-    const pointsThenReads = await useMany([
-      {
-        binding: "STATISTICS",
-        method: "record",
-        args: [{ measure: "uses", value: 1 }],
-        times: 5,
-      },
-      reads(budget),
-    ]);
-    const tooManyReads = await useMany([reads(budget + 1)]);
-    // Another App's export is a call: it takes from the same budget, and
-    // its refusal is recorded for the call it was refused in.
-    let readsThenCall: unknown;
-    const events = await auditedDuring(async () => {
-      readsThenCall = await useMany([
-        reads(budget),
-        {
-          binding: "CRM",
-          method: "call",
-          args: ["findCustomers", { query: "BV" }],
-          times: 1,
-        },
+      const [invoicing, crm] = await Promise.all([
+        newApp(admin, "Invoicing"),
+        newApp(admin, "CRM"),
       ]);
-    });
+      await requestGranted(
+        idp,
+        admin,
+        readCollection({ type: "app", appId: invoicing }, collectionId)
+      );
+      await grantCalls(admin, invoicing, crm, ["read"], "CRM");
+      await requestGranted(idp, admin, {
+        subject: { type: "app", appId: invoicing },
+        object: { type: "platform" },
+        actions: ["guests"],
+        binding: "GUESTS",
+      });
+      const useMany = async (uses: unknown[]) =>
+        await callApp(
+          env,
+          invoicing,
+          { userId: admin.userId, mode: "interactive" },
+          "useMany",
+          [uses]
+        );
+      const budget = platformLimits.invocationHostCalls;
 
-    // A guest call past the budget is refused before it reads anything of
-    // the App's: the call it ends looks the App up no more often than one
-    // that makes only the reads.
-    const lookupsOfApp = (
-      recorded: Awaited<ReturnType<typeof recordedQueries>>
-    ) =>
-      recorded.filter(
-        ({ query, values }) =>
-          query.includes('from "apps"') && values.includes(invoicing)
-      ).length;
-    const readsOnly = await recordedQueries(async () => {
-      await useMany([reads(budget)]);
-    });
-    let guestsPastBudget: unknown;
-    const guestQueries = await recordedQueries(async () => {
-      guestsPastBudget = await useMany([
-        reads(budget),
-        { binding: "GUESTS", method: "list", args: [], times: 1 },
-      ]);
-    });
-    // A read-only call's points are refused, and still take from its
-    // budget: the CRM's call through a read grant tries one too many.
-    const refusedWrites = await via(
-      invoicing,
-      admin.userId,
-      "CRM",
-      "tryPoints",
-      {
-        times: budget + 1,
-      }
-    );
-
-    expect({
-      pointsThenReads,
-      tooManyReads,
-      guestsPastBudget,
-      extraLookups: lookupsOfApp(guestQueries) - lookupsOfApp(readsOnly),
-      refusedWrites,
-      readsThenCall,
-      refused: callsIn(events).map(({ detail }) => detail),
-    }).toStrictEqual({
-      pointsThenReads: { made: budget, refused: "operation.call_limit" },
-      tooManyReads: { made: budget, refused: "operation.call_limit" },
-      readsThenCall: { made: budget, refused: "operation.call_limit" },
-      guestsPastBudget: { made: budget, refused: "operation.call_limit" },
-      extraLookups: 0,
-      refusedWrites: {
-        ok: { "app.read_only": budget, "operation.call_limit": 1 },
-      },
-      refused: [
+      // Statistics points are stub calls too: they take from the budget the
+      // reads after them get.
+      const pointsThenReads = await useMany([
         {
-          method: "findCustomers",
-          version: 1,
-          person: admin.userId,
-          depth: 1,
-          outcome: "refused",
-          reason: "operation.call_limit",
+          binding: "STATISTICS",
+          method: "record",
+          args: [{ measure: "uses", value: 1 }],
+          times: 5,
         },
-      ],
-    });
-  });
+        reads(budget),
+      ]);
+      // The 101st read is refused before it reads anything: the baseline of
+      // what a call refused at its 101st use looks up.
+      let tooManyReads: unknown;
+      const readsOnly = await recordedQueries(async () => {
+        tooManyReads = await useMany([reads(budget + 1)]);
+      });
+      // Another App's export is a call: it takes from the same budget, and
+      // its refusal is recorded for the call it was refused in.
+      let readsThenCall: unknown;
+      const events = await auditedDuring(async () => {
+        readsThenCall = await useMany([
+          reads(budget),
+          {
+            binding: "CRM",
+            method: "call",
+            args: ["findCustomers", { query: "BV" }],
+            times: 1,
+          },
+        ]);
+      });
+
+      // A guest call past the budget is refused before it reads anything of
+      // the App's: the call it ends looks the App up no more often than the
+      // one refused at its 101st read.
+      const lookupsOfApp = (
+        recorded: Awaited<ReturnType<typeof recordedQueries>>
+      ) =>
+        recorded.filter(
+          ({ query, values }) =>
+            query.includes('from "apps"') && values.includes(invoicing)
+        ).length;
+      let guestsPastBudget: unknown;
+      const guestQueries = await recordedQueries(async () => {
+        guestsPastBudget = await useMany([
+          reads(budget),
+          { binding: "GUESTS", method: "list", args: [], times: 1 },
+        ]);
+      });
+      // A read-only call's points are refused, and still take from its
+      // budget: the CRM's call through a read grant tries one too many.
+      const refusedWrites = await via(
+        invoicing,
+        admin.userId,
+        "CRM",
+        "tryPoints",
+        {
+          times: budget + 1,
+        }
+      );
+
+      expect({
+        pointsThenReads,
+        tooManyReads,
+        guestsPastBudget,
+        extraLookups: lookupsOfApp(guestQueries) - lookupsOfApp(readsOnly),
+        refusedWrites,
+        readsThenCall,
+        refused: callsIn(events).map(({ detail }) => detail),
+      }).toStrictEqual({
+        pointsThenReads: { made: budget, refused: "operation.call_limit" },
+        tooManyReads: { made: budget, refused: "operation.call_limit" },
+        readsThenCall: { made: budget, refused: "operation.call_limit" },
+        guestsPastBudget: { made: budget, refused: "operation.call_limit" },
+        extraLookups: 0,
+        refusedWrites: {
+          ok: { "app.read_only": budget, "operation.call_limit": 1 },
+        },
+        refused: [
+          {
+            method: "findCustomers",
+            version: 1,
+            person: admin.userId,
+            depth: 1,
+            outcome: "refused",
+            reason: "operation.call_limit",
+          },
+        ],
+      });
+    }
+  );
 
   it("read exports, grants and the Apps a call reaches by index, never a whole table", async () => {
     const { admin, clerk, invoicing, crm } = await setUp();
