@@ -1,3 +1,4 @@
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import {
@@ -30,6 +31,7 @@ import {
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
+  RocketIcon,
   SettingsIcon,
   SunIcon,
 } from "lucide-react";
@@ -52,8 +54,8 @@ import type { Theme } from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar, as in the prototype
 // (`components/nav-user.tsx`): a menu with Settings, where their profile
-// and, for admins, the workspace's settings are, the language, the theme
-// and signing out.
+// and, for admins, the workspace's settings are, their onboarding, the
+// language, the theme and signing out.
 
 /** Up to two letters of `name`, for the avatar. */
 export const initials = (name: string): string =>
@@ -184,6 +186,13 @@ export const PersonMenu = ({
                 <SettingsIcon />
                 {t`Settings`}
               </DropdownMenuItem>
+              {/* The company's own onboarding, which only its admins go through. */}
+              {isAdmin(identity.role) && identity.onboardingOnly !== true ? (
+                <DropdownMenuItem render={<Link to="/setup" />}>
+                  <RocketIcon />
+                  {t`Your onboarding`}
+                </DropdownMenuItem>
+              ) : null}
               <LanguageMenu />
               <ThemeMenu userId={identity.userId} />
               <DropdownMenuItem
