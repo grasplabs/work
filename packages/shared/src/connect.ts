@@ -393,7 +393,8 @@ export interface ConnectionsApi {
   /**
    * Starts connecting a Composio toolkit, for an admin who consented: the
    * Composio URL to send their browser to. Composio sends it back to the
-   * same callback as a provider's OAuth flow.
+   * same callback as a provider's OAuth flow. A toolkit whose `auth` is
+   * `own` is refused (`connection.own_auth_required`), and recorded.
    */
   connectToolkit: (request: {
     toolkit: string;
@@ -451,7 +452,19 @@ export interface CatalogEntry {
   description: string | null;
   /** Which of Grasp's kinds of app it is ({@link catalogGroupOf}). */
   group: CatalogGroup;
+  /** Whose sign-in app connecting it takes ({@link CatalogAuth}). */
+  auth: CatalogAuth;
 }
+
+/**
+ * Whose sign-in app connecting an entry takes. `managed`: one Grasp or
+ * Composio holds, so connecting needs nothing but consent; every native
+ * provider is. `own`: a Composio toolkit Composio holds no app for, which
+ * the organization connects only with a sign-in app of its own (its own
+ * OAuth client or API key). Grasp can't take one yet, so connecting such a
+ * toolkit is refused (`connection.own_auth_required`).
+ */
+export type CatalogAuth = "managed" | "own";
 
 /**
  * Grasp's kinds of app, in the order the Integrations page lists them. Each
@@ -614,7 +627,8 @@ export type CatalogLogoType = (typeof catalogLogoTypes)[number];
  * The catalog, native entries first. `composio` says whether Composio's
  * toolkits are in it: `listed`, `off` (connect has no Composio key), or `unavailable` (Composio didn't answer,
  * or not completely: the native entries are listed all the same). Listed
- * are the toolkits Composio holds an app for that have tools.
+ * are the toolkits that have tools and take an account, whether Composio
+ * holds an app for them or not (`auth`).
  */
 export interface Catalog {
   entries: CatalogEntry[];
@@ -1270,7 +1284,9 @@ export interface ConnectApi extends PackageRegistryApi {
    * Starts connecting a Composio toolkit for an admin who consented, and
    * records their consent: the Composio URL to send their browser to.
    * `finishConnection` finishes it, as it does an OAuth flow, once
-   * Composio sends the browser back.
+   * Composio sends the browser back. One whose `auth` is `own` is refused
+   * and recorded before anything is made at Composio
+   * (`connection.own_auth_required`).
    */
   startToolkitConnection: (
     request: StartToolkitConnection
@@ -1278,8 +1294,8 @@ export interface ConnectApi extends PackageRegistryApi {
   /**
    * One catalog entry's tools, or `connect.catalog_entry_not_found` for
    * anything `catalog` doesn't list. Composio's toolkits are listed only if
-   * `composio` and connect has a Composio key, and only those Composio
-   * holds an app for that have tools. `connect.catalog_unavailable` when
+   * `composio` and connect has a Composio key, and only those that have
+   * tools and take an account. `connect.catalog_unavailable` when
    * Composio doesn't list the catalog or the toolkit's tools completely.
    */
   catalogTools: (request: CatalogToolsRequest) => Promise<CatalogTool[]>;
@@ -1462,6 +1478,8 @@ export const connectionErrors = defineErrorFamily({
     "Grasp staff can't connect accounts in a client's deployment.",
   "connection.not_offered":
     "Your organization doesn't offer this connection. An admin can offer it.",
+  "connection.own_auth_required":
+    "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
 });
 
 /** Which App's held actions of which binding to drop. */
