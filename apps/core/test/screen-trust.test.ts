@@ -18,6 +18,7 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import { findApp } from "../src/apps.ts";
 import { callMaxNested } from "../src/call-limits.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import {
   approveScreens,
   classifyOutput,
@@ -25,7 +26,7 @@ import {
 } from "../src/screen-trust-rpc.ts";
 import { mockIdp } from "./idp.ts";
 import { appModulesOf, kitModulesOf, loadFrame } from "./screen-frames.ts";
-import { calledAs } from "./sealed-apps.ts";
+import { calledAs, person as actingAs } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -405,6 +406,25 @@ const liveRefusal = /^watchQuery\/(?:admission|push): revoked$/u;
 
 /** How long a push may take to arrive, and how often to look. */
 const pushWait = { timeout: 20_000, interval: 50 };
+
+/**
+ * A live query of the App's notes, from a frame `person` opened, once its
+ * first read was pushed: what it is pushed afterwards, and the build.
+ */
+const following = async (person: Person, app: string) => {
+  const bundle = await openFrame(person, app);
+  const live = follower();
+  await person.api.screens.watchQuery(
+    app,
+    bundle.lease,
+    await requestFor(app, "notes.live", {}),
+    live.callback
+  );
+  await vi.waitFor(() => {
+    expect(live.values).toStrictEqual([[secret]]);
+  }, pushWait);
+  return { ...live, artifact: bundle.artifact };
+};
 
 /** Whether the App's steps include `step`, read past any screen's trust. */
 const tookStep = async (
@@ -957,6 +977,106 @@ describe("screen trust", { timeout: 60_000 }, () => {
         expect.stringMatching(liveRefusal),
         "watchRuns/admission: revoked",
       ],
+    });
+  });
+
+  it("ends a build's live query when its approval is taken back, with nothing written after", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    await approveCurrent(admin, app);
+    const live = await following(builder, app);
+    const events = await auditedDuring(async () => {
+      await admin.api.screenTrust.revoke(app, live.artifact);
+      // No write of the App's data: the revocation alone ends it.
+      await vi.waitFor(() => {
+        expect(live.refused).toStrictEqual(["screen.revoked"]);
+      }, pushWait);
+    });
+    expect({ pushed: live.values, refused: refusals(events) }).toStrictEqual({
+      pushed: [[secret]],
+      refused: ["watchQuery/push: revoked"],
+    });
+  });
+
+  it("ends a live query of a build nobody approved when its App's data is sensitive again, with nothing written after", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    await classifyAs(admin, app, "ordinary");
+    const live = await following(builder, app);
+    const events = await auditedDuring(async () => {
+      await classifyAs(admin, app, "sensitive");
+      await vi.waitFor(() => {
+        expect(live.refused).toStrictEqual(["screen.unreviewed"]);
+      }, pushWait);
+    });
+    expect({ pushed: live.values, refused: refusals(events) }).toStrictEqual({
+      pushed: [[secret]],
+      refused: ["watchQuery/push: unreviewed"],
+    });
+  });
+
+  it("ends a live query of an App a grant to another makes sensitive again, with nothing written after", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    // Near reaches Granted's exports: more for Granted is more for Near.
+    const [granted, near] = await Promise.all([
+      sampleApp(builder),
+      sampleApp(builder),
+    ]);
+    const { id: reach } = await builder.api.permissions.request({
+      subject: { type: "app", appId: near },
+      object: { type: "app", appId: granted },
+      actions: ["read"],
+      binding: "GRANTED",
+    });
+    await admin.api.permissions.grant(reach, { version: 1 });
+    await classifyAs(admin, near, "ordinary");
+    const live = await following(builder, near);
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Ledger ${crypto.randomUUID()}`,
+      access: "everyone",
+    });
+    const { id: more } = await builder.api.permissions.request({
+      subject: { type: "app", appId: granted },
+      object: { type: "collection", collectionId },
+      actions: ["read"],
+      binding: "LEDGER",
+    });
+    const events = await auditedDuring(async () => {
+      await admin.api.permissions.grant(more, { version: 1 });
+      await vi.waitFor(() => {
+        expect(live.refused).toStrictEqual(["screen.unreviewed"]);
+      }, pushWait);
+    });
+    expect({ pushed: live.values, refused: refusals(events) }).toStrictEqual({
+      pushed: [[secret]],
+      refused: ["watchQuery/push: unreviewed"],
+    });
+  });
+
+  it("ends a build's live query when the release it runs is revoked, with nothing written after", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    await approveCurrent(admin, app);
+    const live = await following(builder, app);
+    const revoker = await actingAs("admin");
+    const events = await auditedDuring(async () => {
+      await revokeRelease(
+        env,
+        revoker,
+        { app: appIdSchema.parse(app), version: 1 },
+        "Leaks data"
+      );
+      await vi.waitFor(() => {
+        expect(live.refused).toStrictEqual(["screen.revoked"]);
+      }, pushWait);
+    });
+    expect({ pushed: live.values, refused: refusals(events) }).toStrictEqual({
+      pushed: [[secret]],
+      refused: ["watchQuery/push: revoked"],
     });
   });
 

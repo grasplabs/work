@@ -56,6 +56,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { tellKept } from "./access-revocations.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
@@ -80,7 +81,8 @@ import {
 import { isUniqueViolation } from "./db/d1.ts";
 import { collections } from "./db/knowledge/schema.ts";
 import { appHost, workspace } from "./durable-objects.ts";
-import { widenedByGrant } from "./screen-trust.ts";
+import { madeSensitiveByGrant, widenedByGrant } from "./screen-trust.ts";
+import type { Grantee } from "./screen-trust.ts";
 
 // Permission records and the one check every server path runs. A person
 // asks for a permission (it allows nothing yet), an admin grants it, their
@@ -1067,7 +1069,13 @@ export const grantPermission = async (
   const stillReviewed = isApp
     ? sql`(SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${found.subjectId}) IS ${version}`
     : undefined;
-  const [[granted]] = await auditedBatch(env, db, [
+  let widened: Grantee | undefined;
+  if (isApp) {
+    widened = { type: "app", appId: appIdSchema.parse(found.subjectId) };
+  } else if (found.subjectType === "workflow") {
+    widened = { type: "workflow", workflowId: found.subjectId };
+  }
+  const [[granted], , madeSensitive] = await auditedBatch(env, db, [
     db
       .update(permissions)
       .set({ status: "active", grantedBy: by.userId, grantedAt: new Date() })
@@ -1082,6 +1090,9 @@ export const grantPermission = async (
       )
       .returning(),
     outboxedEventWhere(db, event, sql`changes() > 0`),
+    // The Apps whose data it makes sensitive again, read before that
+    // happens below: their open screens are told to look again.
+    madeSensitiveByGrant(db, widened, storedEvent(event.id)),
     // An admin granting an App's permission approves the version they
     // reviewed (`madeCurrent`), as they would by making it current.
     db
@@ -1135,6 +1146,7 @@ export const grantPermission = async (
     }
     throw permissionErrors.create("permission.not_requested");
   }
+  await tellKept(env, madeSensitive);
   const permission = toPermission(granted);
   await restartApp(env, permission.subject);
   await tellChat(env, permission, "granted");

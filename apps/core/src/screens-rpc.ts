@@ -54,6 +54,7 @@ import { frameAccess, stageFrame } from "./screen-frame.ts";
 import { withScreenReferences } from "./screen-references.ts";
 import {
   deliveryOf,
+  deliveryAt,
   deliveryOpen,
   delivering,
   leasedArtifact,
@@ -982,11 +983,10 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
         if (!(await hasRoleNow(env, by, app))) {
           return "role";
         }
-        const open = await deliveryOpen(env, by, app, artifact, {
+        return await deliveryAt(env, by, app, artifact, {
           operation: "watchQuery",
           stage: "push",
         });
-        return open ? "open" : "build";
       })
     );
   }

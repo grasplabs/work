@@ -19,6 +19,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import { revocationsOf } from "./access-revocations.ts";
 import {
   apps,
   auditOutbox,
@@ -327,6 +328,32 @@ export const widenedByGrant = (
   ];
 };
 
+/**
+ * The statement, for a grant's batch, that keeps a revocation for everyone
+ * of each App whose data the grant to `grantee` (none, for an agent's)
+ * makes `sensitive` again (`widenedByGrant`), when `condition` holds:
+ * their open screens of builds nobody approved are told to look again
+ * (access-revocations.ts), so a live query of one ends now. Put it before
+ * `widenedByGrant`'s statements, which take away the `ordinary` that
+ * finds them. Returns the rows kept, for `tellKept`.
+ */
+export const madeSensitiveByGrant = (
+  db: DrizzleD1Database,
+  grantee: Grantee | undefined,
+  condition: SQL
+) =>
+  revocationsOf(
+    db,
+    grantee === undefined
+      ? undefined
+      : sql`${apps.id} IN (WITH RECURSIVE ${reachingSql(grantee)}
+          SELECT app_id FROM reaching WHERE app_id IN (
+            SELECT ${screenPolicies.appId} FROM ${screenPolicies}
+            WHERE ${screenPolicies.output} = 'ordinary'))`,
+    null,
+    grantee === undefined ? sql`0` : condition
+  );
+
 /** What core holds for one build of an App's screen, read in one statement. */
 export interface Standing {
   output: OutputClass;
@@ -442,6 +469,25 @@ const recordRefusal = async (
 };
 
 /**
+ * Whether `artifact` of `app` gets the App's data now, for a push, and if
+ * not, why (`revoked` or `unreviewed`): a refusal is recorded.
+ */
+export const deliveryAt = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "staff">,
+  app: AppId,
+  artifact: string | undefined,
+  at: Refused
+): Promise<ScreenDelivery> => {
+  const standing = await standingOf(env, app, artifact);
+  const delivery = deliveryOf(standing);
+  if (delivery !== "open") {
+    await recordRefusal(env, by, app, artifact, standing, at);
+  }
+  return delivery;
+};
+
+/**
  * Whether `artifact` of `app` gets the App's data now, for a push: a
  * refusal is recorded, and answers false.
  */
@@ -451,14 +497,8 @@ export const deliveryOpen = async (
   app: AppId,
   artifact: string | undefined,
   at: Refused
-): Promise<boolean> => {
-  const standing = await standingOf(env, app, artifact);
-  if (deliveryOf(standing) === "open") {
-    return true;
-  }
-  await recordRefusal(env, by, app, artifact, standing, at);
-  return false;
-};
+): Promise<boolean> =>
+  (await deliveryAt(env, by, app, artifact, at)) === "open";
 
 /**
  * Refuses, with `screen.unreviewed` or `screen.revoked`, unless `artifact`

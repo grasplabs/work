@@ -31,7 +31,7 @@ import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { serveRpc } from "./rpc.ts";
 import type { RunSubscription } from "./run-subscription.ts";
-import { deliveryOpen, requireDelivery } from "./screen-trust.ts";
+import { deliveryAt, requireDelivery } from "./screen-trust.ts";
 import { admitted, stillHasRole } from "./screens-rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -218,11 +218,10 @@ export class PortableQueriesRpc
         if (!(await hasRole())) {
           return "role";
         }
-        const open = await deliveryOpen(env, by, id, artifact, {
+        return await deliveryAt(env, by, id, artifact, {
           operation: "portable.watchQuery",
           stage: "push",
         });
-        return open ? "open" : "build";
       })
     );
     const end = (): void => {
