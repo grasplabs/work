@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { exactVersionSchema } from "./dependencies.ts";
+import { exactVersionPattern } from "./dependencies.ts";
 import {
   catalogBindingKinds,
   workflowNameSchema,
@@ -46,7 +46,9 @@ export const workflowKeyParts = (
     groups.name === undefined ||
     groups.version === undefined ||
     !workflowNameSchema.safeParse(groups.name).success ||
-    !exactVersionSchema.safeParse(groups.version).success
+    // A workflow's version as its publication allows it, of any length the
+    // key holds: never the npm length cap `exactVersionSchema` adds.
+    !exactVersionPattern.test(groups.version)
   ) {
     return undefined;
   }

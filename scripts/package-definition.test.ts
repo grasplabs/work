@@ -687,6 +687,28 @@ describe(
       });
     });
 
+    it("writes a workflow whose version is longer than a package's version may be, as its publication allows", async () => {
+      const { out } = scratch();
+      const definition = definitionOf();
+      const version = `1.0.0+${"b".repeat(123)}`;
+      const key = `workspace/greet/${version}`;
+      const greet = definition.workflows["workspace/greet/1.0.0"];
+      await packaged(
+        {
+          ...definition,
+          app: {
+            ...definition.app,
+            workflows: { archiveNotes: key, summarizeNote: key },
+          },
+          workflows: { [key]: greet },
+        },
+        out
+      );
+      expect(readdirSync(path.join(out, "workflows/greet"))).toStrictEqual([
+        version,
+      ]);
+    });
+
     it("refuses a directory that isn't empty, a package for another protocol, a key that isn't a workflow's, and dependencies with no lock", async () => {
       const used = scratch();
       writeFileSync(path.join(used.dir, "kept.txt"), "kept");
