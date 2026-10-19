@@ -355,6 +355,8 @@ const entries = [
     logo: null,
     description: null,
     group: "Email and calendar" as const,
+    // Every native provider's sign-in app is Grasp's.
+    auth: "managed" as const,
     offered: true,
   },
   {
@@ -366,6 +368,8 @@ const entries = [
     logo: null,
     description: null,
     group: "Email and calendar" as const,
+    // Every native provider's sign-in app is Grasp's.
+    auth: "managed" as const,
     offered: true,
   },
 ];
