@@ -9,7 +9,7 @@
 import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
 import type { Interviewer } from "@grasp-os/shared/admin/interviewer";
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
-import type { Phase } from "@grasp-os/shared/admin/interviews";
+import type { Phase, WorkflowState } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
   listenDays,
@@ -139,6 +139,15 @@ export const stageWords: Record<Stage, string> = {
   open: "Grasp opens",
 };
 
+/** How far a piece of work is known. */
+export const workflowWords: Record<WorkflowState, string> = {
+  mapping: "Still mapping",
+  saturating: "Nearly there",
+  complete: "Complete",
+  variants: "Complete, in more than one way",
+  blocked: "Waits on an answer",
+};
+
 /** The phases the list of organizations is cut into. */
 export const phaseWords: Record<AdminPhase, string> = {
   start: "Starting",
@@ -183,6 +192,11 @@ const conversationLine = (view: OrgView): string => {
   }
   if (conversation === "in") {
     return "Brought in, not read yet";
+  }
+  // What it brought, field by field, stays in the company's own Grasp: with
+  // none of it here, nothing can be said to be missing or not.
+  if (view.vision === null) {
+    return "Read";
   }
   const missing = missingOf(view);
   return missing > 0
