@@ -90,9 +90,10 @@ export const migratedFiles = (
   fromSchema: string,
   toSchema: string,
   handler: string,
-  fixtures = passingFixtures
+  fixtures = passingFixtures,
+  schema = v2Schema
 ): Record<string, string> => ({
-  "schema.ts": v2Schema,
+  "schema.ts": schema,
   "migrations/derive-category.ts": migrationFile(
     fromSchema,
     toSchema,
@@ -160,16 +161,22 @@ export const migrated = async (
     firstCurrent = false,
     fixtures = passingFixtures,
     owner,
+    start = v1Schema,
+    next = v2Schema,
   }: {
     extra?: Record<string, string>;
     firstCurrent?: boolean;
     fixtures?: string;
     /** Who creates the App and writes its notes: a new builder unless given. */
     owner?: Identity;
+    /** The schema the notes start under: `v1Schema` unless given. */
+    start?: string;
+    /** The schema the migration migrates to: `v2Schema` unless given. */
+    next?: string;
   } = {}
 ) => {
   const fixture: Fixture = await appWith(
-    { "schema.ts": v1Schema, "app.ts": appFile(false) },
+    { "schema.ts": start, "app.ts": appFile(false) },
     "Notes",
     owner
   );
@@ -202,7 +209,10 @@ export const migrated = async (
     env,
     fixture.owner,
     fixture.app,
-    { ...migratedFiles(fromSchema, placeholder, handler, fixtures), ...extra },
+    {
+      ...migratedFiles(fromSchema, placeholder, handler, fixtures, next),
+      ...extra,
+    },
     "Migrate"
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
@@ -211,7 +221,10 @@ export const migrated = async (
     env,
     fixture.owner,
     fixture.app,
-    { ...migratedFiles(fromSchema, toSchema, handler, fixtures), ...extra },
+    {
+      ...migratedFiles(fromSchema, toSchema, handler, fixtures, next),
+      ...extra,
+    },
     "Migrate to the sealed schema"
   );
   const release = await seal(fixture, 3);

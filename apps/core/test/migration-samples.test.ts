@@ -10,6 +10,7 @@ import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { allEvents } from "./audit-events.ts";
 import { deriving, migrated, notesOf, refusalOf } from "./migrated-apps.ts";
 import { person } from "./sealed-apps.ts";
+import { newRecordId } from "./store-schemas.ts";
 
 // An explicit migration's dry run on a sample of real records (GRA-545,
 // migration-samples.ts), from its threat model: someone other than an
@@ -24,6 +25,18 @@ const failingOnNote4 = `(ctx, row) => {
   if (row.title === "Note 4") throw new Error("No category for " + row.title);
   return { ...row, category: "general" };
 }`;
+
+/** Notes that may refer to another note: the schema `referencing` migrates to. */
+const referencingSchema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export const noteFields = {
+  title: v.string().min(1).max(200),
+  category: v.enum(["launch", "general"]),
+  parent: v.id("notes").optional(),
+};
+
+export default defineSchema({ notes: defineTable(noteFields) });
+`;
 
 /** The value only the admin's answer may carry. */
 const marker = "Note 4";
@@ -427,6 +440,43 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       abandoned: "migration.abandoned",
       receipts: ["failed"],
       held: 0,
+    });
+  });
+
+  it("fails a sample whose output the backfill would refuse, as it would", async () => {
+    // The target lets a note refer to another; the transform points every
+    // note at one, which the backfill refuses: a migration doesn't change
+    // a field that refers to records.
+    const pointed = newRecordId();
+    const { fixture } = await migrated(
+      2,
+      `(ctx, row) => ({ ...row, category: "general", parent: ${JSON.stringify(pointed)} as never })`,
+      {
+        fixtures: '[{ row: { title: "Note" } }]',
+        start: referencingSchema.replace(
+          '  category: v.enum(["launch", "general"]),\n',
+          ""
+        ),
+        next: referencingSchema,
+      }
+    );
+    const admin = await person("admin");
+    const sample = await sampleMigration(env, admin, {
+      app: fixture.app,
+      version: 3,
+      migration: "derive-category",
+    });
+    const receipts = await receiptsOf(fixture.app);
+    expect({
+      outcome: sample.outcome,
+      reason: sample.failure?.reason,
+      record: typeof sample.failure?.record,
+      receipts: receipts.map(({ outcome, reason }) => [outcome, reason]),
+    }).toStrictEqual({
+      outcome: "failed",
+      reason: "reference_changed",
+      record: "string",
+      receipts: [["failed", "reference_changed"]],
     });
   });
 

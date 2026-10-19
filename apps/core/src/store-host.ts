@@ -913,6 +913,23 @@ const migrationSampleSchema = z.strictObject({
   limit: z.number().int().min(1).max(transformBatchMaxRows),
 });
 
+/**
+ * A migration's dry-run outputs, as core asks the store to check them
+ * (`checkSampleOutputs`): each sampled record's ID and its transform's
+ * output.
+ */
+const sampleOutputsSchema = z.strictObject({
+  table: tableNameSchema,
+  migration: z.string().min(1).max(128),
+  consumer: z.strictObject({
+    resourceId: z.string().min(1),
+    resourceVersion: z.number().int().min(1),
+  }),
+  outputs: z
+    .array(z.strictObject({ id: recordIdSchema, fields: storedFieldsSchema }))
+    .max(transformBatchMaxRows),
+});
+
 /** One batch of a backfill, as its run asks for it (`fillMissing`). */
 const backfillStepSchema = z.strictObject({
   target: backfillTargetSchema,
@@ -3691,6 +3708,80 @@ export class StoreHost {
         scanOf(migrated, row.phase, cursor),
         limit
       );
+    });
+  }
+
+  /**
+   * Why the backfill of `consumer`'s pending migration would refuse one
+   * of a dry run's `outputs` (migration-samples.ts), as it refuses a
+   * batch's (`#checkedWrites`): an output that doesn't fit the target or
+   * the contract in force, changes a field that refers to records, or is
+   * too large; null when it would write them all. Read in a transaction
+   * that writes nothing. A record gone since it was sampled is skipped,
+   * as a batch drops it.
+   */
+  checkSampleOutputs(
+    storeId: StoreId,
+    sample: unknown
+  ): (Pick<MigrationFailure, "reason" | "issues"> & { id: string }) | null {
+    const { table, migration, consumer, outputs } = dataErrors.parse(
+      "data.invalid",
+      sampleOutputsSchema,
+      sample
+    );
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const pending = this.#pendingTarget();
+      const [resourceId, resourceVersion] = pending?.migrations?.consumer ?? [];
+      if (
+        pending === null ||
+        resourceId !== consumer.resourceId ||
+        resourceVersion !== consumer.resourceVersion
+      ) {
+        throw migrationErrors.create("migration.not_pending");
+      }
+      const migrated = this.#migratedTables(pending).find(
+        (found) => found.table === table && found.migration === migration
+      );
+      const contract = this.#contractNow();
+      if (migrated === undefined || contract === undefined) {
+        throw migrationErrors.create("migration.metadata_corrupt");
+      }
+      const targetFields = tableFieldsOf(pending.manifest, table);
+      const contractFields = tableFieldsOf(contract, table);
+      for (const output of outputs) {
+        const record = this.#db
+          .select()
+          .from(records)
+          .where(
+            and(
+              eq(records.tableId, migrated.tableId),
+              eq(records.recordId, output.id)
+            )
+          )
+          .get();
+        if (record === undefined) {
+          continue;
+        }
+        const refusal =
+          outputRefusal(
+            targetFields,
+            contractFields,
+            fieldsOf(record),
+            output.fields
+          ) ??
+          (encoder.encode(storedText(output.fields)).byteLength >
+          documentMaxBytes
+            ? {
+                reason: "too_large" as const,
+                issues: [`A record holds at most ${documentMaxBytes} bytes`],
+              }
+            : undefined);
+        if (refusal !== undefined) {
+          return { id: output.id, ...refusal };
+        }
+      }
+      return null;
     });
   }
 

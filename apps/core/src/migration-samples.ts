@@ -20,7 +20,10 @@ import type { Member } from "./auth/identity.ts";
 import { migrationSampleLeases, migrationSamples } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { transformBatch } from "./migration-transform.ts";
-import type { TransformFailure } from "./migration-transform.ts";
+import type {
+  TransformFailure,
+  TransformOutcome,
+} from "./migration-transform.ts";
 import { requireNotStaff } from "./sharing.ts";
 
 // An explicit migration's dry run on a sample of the real records it
@@ -53,6 +56,10 @@ import { requireNotStaff } from "./sharing.ts";
 //   message can carry its record's values verbatim, so on a table read or
 //   written by owner the admin gets the issues only for a record they own,
 //   and the reason alone otherwise.
+// - A sample passes where the backfill would fail: the transform's output
+//   goes through the store's own checks of a batch's output, read-only
+//   (store-host.ts, `checkSampleOutputs`): the target, the contract in
+//   force, fields that refer to records, and size.
 // - A sample of the wrong records vouches for a release: only records the
 //   release's pending migration still has to transform, from where its
 //   backfill stands in the store that version binds (a transformed record
@@ -99,6 +106,48 @@ interface SampledMigration {
   readonly version: number;
   readonly migration: string;
 }
+
+/** Why a sample failed: its transform, or what the backfill would refuse. */
+type SampleFailure =
+  | TransformFailure
+  | {
+      readonly id: string;
+      readonly reason: string;
+      readonly issues: readonly string[];
+    };
+
+/**
+ * Why `transformed`, the sample of `sampled` transformed, failed: its
+ * transform's failure, or what the backfill would refuse of its output,
+ * as it refuses a batch's (only the store knows the contract in force
+ * and what each record held); null when it would write it all, or when
+ * nothing was sampled.
+ */
+const failureOf = async (
+  env: Env,
+  store: StoreId,
+  sampled: SampledMigration & { readonly table: string },
+  transformed: TransformOutcome | undefined
+): Promise<SampleFailure | null> => {
+  if (transformed === undefined) {
+    return null;
+  }
+  if (!transformed.ok) {
+    return transformed.failure;
+  }
+  return await storeObject(env, store).checkSampleOutputs(
+    store,
+    JSON.stringify({
+      table: sampled.table,
+      migration: sampled.migration,
+      consumer: {
+        resourceId: sampled.app,
+        resourceVersion: sampled.version,
+      },
+      outputs: transformed.rows.map(({ id, fields }) => ({ id, fields })),
+    })
+  );
+};
 
 /**
  * Takes a lease on `sampled` for a new dry run, answering its token;
@@ -165,7 +214,7 @@ const releaseLease = async (env: Env, token: string): Promise<void> => {
  */
 const failureFor = (
   by: Member,
-  failure: TransformFailure | null,
+  failure: SampleFailure | null,
   owned: boolean,
   rows: readonly { id: string; owner: string }[]
 ): MigrationSample["failure"] => {
@@ -263,8 +312,12 @@ export const sampleMigration = async (
             name,
             rows.map(({ id, owner, fields }) => ({ id, owner, fields }))
           );
-    const failure =
-      transformed === undefined || transformed.ok ? null : transformed.failure;
+    const failure = await failureOf(
+      env,
+      store,
+      { app, version, migration: name, table: declared.table },
+      transformed
+    );
     let outcome: MigrationSample["outcome"] = "passed";
     if (transformed === undefined) {
       outcome = "empty";
