@@ -1,6 +1,6 @@
 import { workflowIdOf } from "@grasp-os/compiler";
 import type { AnyResource } from "@grasp-os/sdk";
-import { readOutline } from "@grasp-os/sdk/describe";
+import { aiStepCalls } from "@grasp-os/sdk/describe";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
@@ -33,7 +33,6 @@ import type {
 } from "@grasp-os/shared/resource-bindings";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { outlineSteps } from "@grasp-os/shared/workflows";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -1008,47 +1007,59 @@ export interface WorkflowAiStep {
   /** The workflow's file, `workflows/<id>.ts`. */
   readonly file: string;
   readonly workflow: string;
-  readonly step: string;
-  /** Its `binding`, a literal its outline records. */
-  readonly binding: string;
+  /** Its name, null when not written as a literal. */
+  readonly step: string | null;
+  /** Its `binding`, null when it can't be read as a literal. */
+  readonly binding: string | null;
   readonly line: number;
 }
 
 /**
- * The AI steps of the workflows in `files`, by the model resource each
- * goes through (`step.llm`'s `binding`, a literal its outline records). A
- * workflow whose steps can't be read gives none: it doesn't build.
+ * The AI steps the workflows in `files` may take, by the model resource
+ * each goes through (`step.llm`'s `binding`), read from their code
+ * whether or not their outlines can be (`aiStepCalls`): a step in a `try`
+ * runs all the same. A workflow whose context can't be read gives none:
+ * it doesn't build.
  */
 export const workflowAiSteps = (
   files: Readonly<Record<string, string>>
 ): WorkflowAiStep[] =>
   Object.entries(files).flatMap(([file, source]) => {
     const workflow = workflowIdOf(file);
-    const outline = workflow === undefined ? null : readOutline(source);
-    return outlineSteps(outline?.steps ?? []).flatMap((step) => {
-      const { binding } = step.options;
-      return workflow !== undefined &&
-        step.kind === "ai" &&
-        typeof binding === "string"
-        ? [{ file, workflow, step: step.name, binding, line: step.line }]
-        : [];
-    });
+    if (workflow === undefined) {
+      return [];
+    }
+    return (aiStepCalls(source) ?? []).map(({ name, binding, line }) => ({
+      file,
+      workflow,
+      step: name,
+      binding,
+      line,
+    }));
   });
 
 /**
  * Why `step` can't go through `resources`: the release's declarations,
  * none for an App without one. Only a model resource without a structured
  * output serves an AI step (`stepModelBinding`), as the step brings its own
- * schema. Undefined when it can.
+ * schema, and only a `binding` written as a literal can be checked.
+ * Undefined when it can.
  */
 export const aiStepProblem = (
   resources: Readonly<Record<string, AnyResource>>,
   { workflow, step, binding }: WorkflowAiStep
 ): string | undefined => {
+  const which =
+    step === null
+      ? `An AI step of workflow "${workflow}"`
+      : `AI step "${step}" of workflow "${workflow}"`;
+  if (binding === null) {
+    return `${which} goes through a model that can't be read: call it as \`step.llm("name", { binding: "ALIAS", … })\`, with \`step\` used only as \`step.method(…)\`.`;
+  }
   const declared = Object.hasOwn(resources, binding)
     ? resources[binding]
     : undefined;
-  const named = `AI step "${step}" of workflow "${workflow}" goes through "${binding}"`;
+  const named = `${which} goes through "${binding}"`;
   if (declared === undefined) {
     return `${named}, which this version declares no resource as: declare it with \`resource.model("${binding}", …)\` in app.ts, or name a text model resource it declares.`;
   }
@@ -1064,7 +1075,8 @@ export const aiStepProblem = (
 /**
  * The AI steps of `app`'s workflows at `version`, as `workflow:<id>/<step>`,
  * by the model resource each goes through (`workflowAiSteps`): what a
- * review shows using a resource besides actions.
+ * review shows using a resource besides actions. A step whose binding or
+ * name can't be read names none.
  */
 const workflowUsers = async (
   env: Env,
@@ -1075,10 +1087,12 @@ const workflowUsers = async (
   for (const { workflow, step, binding } of workflowAiSteps(
     await versionFiles(env, app, version)
   )) {
-    users.set(binding, [
-      ...(users.get(binding) ?? []),
-      `workflow:${workflow}/${step}`,
-    ]);
+    if (binding !== null && step !== null) {
+      users.set(binding, [
+        ...(users.get(binding) ?? []),
+        `workflow:${workflow}/${step}`,
+      ]);
+    }
   }
   return users;
 };

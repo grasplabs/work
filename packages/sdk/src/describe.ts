@@ -1407,6 +1407,106 @@ export const readOutline = (source: string): WorkflowOutline | null => {
 };
 
 /**
+ * A workflow's AI step call (`step.llm`), wherever it sits: its name and
+ * `binding` when written as literals, null otherwise.
+ */
+export interface AiStepCall {
+  readonly name: string | null;
+  readonly binding: string | null;
+  readonly line: number;
+}
+
+/** A step call's `binding` option, when written as a string literal. */
+const bindingOption = (options: Node | undefined): string | null => {
+  if (options?.type !== "ObjectExpression") {
+    return null;
+  }
+  for (const property of options.properties) {
+    if (
+      property.type === "ObjectProperty" &&
+      !property.computed &&
+      nameOf(property.key) === "binding"
+    ) {
+      const value = literalOf(property.value);
+      return typeof value === "string" ? value : null;
+    }
+  }
+  return null;
+};
+
+/**
+ * The AI step a use of `step` (`node`, under `ancestors`) may take, or
+ * undefined for a call of another method (`aiStepCalls`).
+ */
+const aiStepCallOf = (
+  node: Node,
+  ancestors: Ancestor[]
+): AiStepCall | undefined => {
+  const line = node.loc?.start.line ?? 0;
+  const member = ancestors.at(-1);
+  const call = ancestors.at(-2)?.node;
+  const method =
+    member?.node.type === "MemberExpression" &&
+    member.key === "object" &&
+    !member.node.computed
+      ? nameOf(member.node.property)
+      : undefined;
+  const calledNode =
+    call?.type === "CallExpression" && call.callee === member?.node
+      ? call
+      : undefined;
+  if (method === undefined || calledNode === undefined) {
+    return { name: null, binding: null, line };
+  }
+  if (method !== "llm") {
+    return undefined;
+  }
+  const [named, options] = calledNode.arguments;
+  const name = named === undefined ? undefined : literalOf(named);
+  return {
+    name: typeof name === "string" ? name : null,
+    binding: bindingOption(options),
+    line,
+  };
+};
+
+/**
+ * Every AI step the workflow in `source` may take, read from its code
+ * whether or not its outline can be (`readOutline`): a step in a `try`
+ * runs all the same. Any use of `step` that isn't `step.method(…)` (kept
+ * in a variable, passed on, a computed method) may take one too, through
+ * a model no one can read: it counts as an AI step with no `binding`.
+ * Null when not even the workflow's context can be read, which its build
+ * refuses (`checkWorkflowBindings`).
+ */
+export const aiStepCalls = (source: string): AiStepCall[] | null => {
+  let context: ReturnType<typeof readContext>;
+  try {
+    context = readContext(source);
+  } catch (error) {
+    if (error instanceof WorkflowError) {
+      return null;
+    }
+    throw error;
+  }
+  const { run, bindings } = context;
+  const calls: AiStepCall[] = [];
+  visit(run.body, (node, ancestors) => {
+    if (
+      node.type === "Identifier" &&
+      node.name === bindings.step &&
+      !isNamePosition(ancestors)
+    ) {
+      const call = aiStepCallOf(node, ancestors);
+      if (call !== undefined) {
+        calls.push(call);
+      }
+    }
+  });
+  return calls;
+};
+
+/**
  * The App's bindings the workflow in `source` calls, as a review shows
  * them and its runs are held to: by step, as its outline names them, and
  * all together. A workflow whose steps can't be read (a step in a `try`,

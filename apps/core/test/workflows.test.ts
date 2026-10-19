@@ -557,33 +557,79 @@ ${mailStep("after")}`,
     const undeclared = await activating({ ...own, ...reading("missing") });
     const connector = await activating({ ...own, ...reading("send") });
     const structured = await activating({ ...own, ...reading("shaped") });
+    // A step its outline can't read (in a \`try\`) runs all the same, and
+    // one taken through \`step\` passed on goes through a model no one can
+    // read.
+    const tried = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  try {
+    return await step.llm("extract", {
+      description: "Read the total",
+      binding: "missing",
+      instructions: "Read the total in cents.",
+      input: "Total 12.34 EUR",
+      schema: z.object({ total: z.int() }),
+    });
+  } catch {
+    return null;
+  }`,
+        { extract: { total: 1234 } }
+      ),
+    });
+    const passed = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  const ask = step;
+  return await ask.do("extract", { description: "Read the total" }, async () => 1);`,
+        { extract: 1 }
+      ),
+    });
     const fits = await activating({ ...own, ...reading("extractor") });
     // An App of the earlier layout declares no resources at all.
     const { id: earlier } = await builder.api.apps.create({ name: "Earlier" });
     const unsealed = await activating(reading("extractor"), earlier);
     const step =
       'workflows/reader.ts:4 AI step "extract" of workflow "reader" goes through';
-    expect({ undeclared, connector, structured, fits, unsealed }).toStrictEqual(
-      {
-        undeclared: {
-          code: "workflow.model_undeclared",
-          steps: [`${step} "missing"`],
-        },
-        connector: {
-          code: "workflow.model_undeclared",
-          steps: [`${step} "send"`],
-        },
-        structured: {
-          code: "workflow.model_undeclared",
-          steps: [`${step} "shaped"`],
-        },
-        fits: { code: "ok", steps: [] },
-        unsealed: {
-          code: "workflow.model_undeclared",
-          steps: [`${step} "extractor"`],
-        },
-      }
-    );
+    expect({
+      undeclared,
+      connector,
+      structured,
+      tried,
+      passed,
+      fits,
+      unsealed,
+    }).toStrictEqual({
+      undeclared: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "missing"`],
+      },
+      connector: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "send"`],
+      },
+      structured: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "shaped"`],
+      },
+      tried: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "missing"`.replace(":4 ", ":5 ")],
+      },
+      passed: {
+        code: "workflow.model_undeclared",
+        steps: [
+          'workflows/reader.ts:4 An AI step of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
+        ],
+      },
+      fits: { code: "ok", steps: [] },
+      unsealed: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "extractor"`],
+      },
+    });
   });
 
   it("check a model's answer against the step's schema, formats included", async () => {
