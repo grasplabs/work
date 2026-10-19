@@ -110,6 +110,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.version_not_found": "This workflow has no such version.",
   "workflow.resource_bound":
     "The current version of another workflow calls this one, or a trigger starts it, so it can't be deleted.",
+  "workflow.resource_busy":
+    "Something changed this workflow while it was being deleted. Try again.",
   "workflow.resource_limit":
     "You have created as many workflows as one person may, deleted ones included.",
   "workflow.version_corrupt":
