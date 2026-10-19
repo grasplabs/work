@@ -724,6 +724,10 @@ msgstr "{one} und {other} nennen beide dieselbe Übergabe, jeweils von ihrer Sei
 msgid "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
 msgstr "{oneTeam} und {otherTeam} nennen dieselbe Übergabe, jeweils aus ihrer Sicht."
 
+#: src/brain/region-marks.tsx
+msgid "{open, plural, one {# open question} other {# open questions}}"
+msgstr "{open, plural, one {# offene Frage} other {# offene Fragen}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{open} still open"
 msgstr "{open} noch offen"
@@ -1608,6 +1612,7 @@ msgstr "Admins warnen bei, in Prozent der Tages- oder Monatsobergrenze"
 msgid "Alert at"
 msgstr "Warnen bei"
 
+#: src/brain/atlas-overlays.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "Alle"
@@ -2128,9 +2133,14 @@ msgstr "Verfügbar, direkt"
 msgid "Available, via Composio"
 msgstr "Verfügbar, über Composio"
 
+#: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
 msgid "Back"
 msgstr "Zurück"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Back to {destination}"
+msgstr "Zurück zu {destination}"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -2254,6 +2264,7 @@ msgstr "Gebunden an"
 
 #: src/brain/brain-nav.tsx
 #: src/frame/app-sidebar.tsx
+#: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
 msgstr "Gehirn"
@@ -3936,6 +3947,10 @@ msgstr "Beenden"
 msgid "First seen"
 msgstr "Erstmals erkannt"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Fit and center"
+msgstr "Einpassen und zentrieren"
+
 #: src/workflows/fix-in-chat.tsx
 msgid "Fix in chat"
 msgstr "Im Chat beheben"
@@ -4785,6 +4800,10 @@ msgstr "Art der Aussage"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Knowledge"
 msgstr "Wissen"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Known"
+msgstr "Bekannt"
 
 #: src/onboarding/staff-words.ts
 msgid "Known: {known}% of the {threshold}% to open"
@@ -6385,6 +6404,10 @@ msgstr "Offen: {open}"
 msgid "Opening the chat…"
 msgstr "Chat wird geöffnet…"
 
+#: src/brain/note-reveal.tsx
+msgid "Opening the note"
+msgstr "Notiz wird geöffnet"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Opens at {threshold}%"
 msgstr "Öffnet bei {threshold} %"
@@ -7765,6 +7788,10 @@ msgstr "Gemeinsamer Code geändert"
 msgid "Shared with"
 msgstr "Geteilt mit"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Show"
+msgstr "Anzeigen"
+
 #: src/landscape/audit-trail.tsx
 msgid "Show {more} more"
 msgstr "{more} weitere anzeigen"
@@ -8170,6 +8197,7 @@ msgid "Still deciding"
 msgstr "Entscheidet noch"
 
 #: src/brain/atlas-map.ts
+#: src/brain/atlas-overlays.tsx
 #: src/brain/brain.ts
 msgid "Still open"
 msgstr "Noch offen"
@@ -8181,6 +8209,10 @@ msgstr "Noch offen: {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "Noch offen: {question} {who} kann sie beantworten."
+
+#: src/brain/atlas-overlays.tsx
+msgid "Still waiting"
+msgstr "Wartet noch"
 
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
@@ -10084,6 +10116,10 @@ msgstr "Wo Daten laut Anbieter gespeichert und verarbeitet werden, und etwaige �
 msgid "Where this app comes up"
 msgstr "Wo diese App vorkommt"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Where you are in the brain"
+msgstr "Wo du im Brain bist"
+
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Where your data lives, and the time Grasp uses."
 msgstr "Wo Ihre Daten liegen und welche Zeit Grasp verwendet."
@@ -10507,3 +10543,11 @@ msgstr "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an, um fortzufahren.
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Ihr Arbeitsbereich, wer darin was tun darf, und Ihr eigenes Konto."
+
+#: src/brain/atlas-overlays.tsx
+msgid "Zoom in"
+msgstr "Vergrößern"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Zoom out"
+msgstr "Verkleinern"
