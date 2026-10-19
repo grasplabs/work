@@ -1,10 +1,10 @@
 import {
-  loadScreenCompiler,
+  loadAppCompiler,
   packageBuilderCode,
   platformCodeReadMs,
-  screenCompilerCode,
+  appCompilerCode,
   startPackageBuilder,
-  startScreenCompiler,
+  startAppCompiler,
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
 
@@ -23,7 +23,7 @@ import {
   sessionHost,
 } from "./sandboxed.ts";
 
-// The release's platform code (the screen compiler, the package builder,
+// The release's platform code (the App compiler, the package builder,
 // the file extractor), which reads hostile input (an App's source; npm
 // tarballs; uploads) without running it, run where it is bounded: on
 // Cloudflare in a Dynamic Worker of core's own, whose CPU and memory the
@@ -101,7 +101,7 @@ import {
 // pool (App code's too), and tie the supervisor to the release's build
 // output. Handing them over on a local socket costs milliseconds; loading
 // the compiler, about a second per build that isn't cached. Cloudflare
-// keeps the compiler warm in its Loader (`startScreenCompiler`).
+// keeps the compiler warm in its Loader (`startAppCompiler`).
 
 /** What builds run as on the sandbox host: one owner of their own. */
 export const builderOwner = "platform:builder";
@@ -324,7 +324,7 @@ const loaderCall = async (
  * isolate, which every App's builds share, so its limits are theirs
  * together: one heavy build beside another can stop both. A stop there is
  * tried once more in a fresh isolate of the build's own
- * (`loadScreenCompiler`), whose stop is the build's alone, and only that
+ * (`loadAppCompiler`), whose stop is the build's alone, and only that
  * is answered: a build is never kept as failed for what another did. The
  * builder runs in a fresh isolate per runner, so nothing one App's
  * packages leave in memory is there for the next, and its stops are its
@@ -338,7 +338,7 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
   ): Promise<unknown> => {
     try {
       return await loaderCall(
-        startScreenCompiler(env.LOADER, env.ASSETS),
+        startAppCompiler(env.LOADER, env.ASSETS),
         method,
         args
       );
@@ -347,7 +347,7 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
         throw error;
       }
       return await loaderCall(
-        await loadScreenCompiler(env.LOADER, env.ASSETS),
+        await loadAppCompiler(env.LOADER, env.ASSETS),
         method,
         args
       );
@@ -375,7 +375,7 @@ const programCode: Record<
   PlatformProgram,
   (assets: Fetcher) => Promise<PlatformCode>
 > = {
-  compiler: screenCompilerCode,
+  compiler: appCompilerCode,
   "package-builder": packageBuilderCode,
 };
 

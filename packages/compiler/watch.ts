@@ -75,7 +75,7 @@ const rebuild = (): void => {
     building = false;
     if (code !== 0) {
       console.error(
-        "The screen compiler didn't build: screens keep the kit as it was."
+        "The App compiler didn't build: screens keep the kit as it was."
       );
     }
     if (changedSince) {

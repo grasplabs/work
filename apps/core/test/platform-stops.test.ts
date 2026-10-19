@@ -19,7 +19,7 @@ import { mockIdp } from "./idp.ts";
 import { failure, intentFor, named, plain, publish } from "./npm.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
-// How the release's platform code (the screen compiler, the package
+// How the release's platform code (the App compiler, the package
 // builder) is judged when the sandbox stops it (src/platform-sandbox.ts),
 // from its threat model:
 // - A stop the load caused (the shared machine's processes killed, waits

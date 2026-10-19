@@ -45,6 +45,7 @@ import { z } from "zod";
 
 import {
   builtCode,
+  checkedCode,
   filesManifest,
   inspected,
   readManifest,
@@ -1042,7 +1043,9 @@ const inspectForSeal = async (
     { resourceId: key.app, resourceVersion: key.version },
     await boundWorkflowsOf(env, key.app, manifest)
   );
-  const final = await builtCode(env, { ...files, ...generated }, key.app);
+  // Type-checked with them, against the SDK's server side: nothing is
+  // sealed that doesn't check.
+  const final = await checkedCode(env, { ...files, ...generated }, key.app);
   const secondText = await inspected(env, final, sdk.modules);
   const reread = readManifest(secondText);
   if (canonicalText(reread) !== canonicalText(manifest)) {

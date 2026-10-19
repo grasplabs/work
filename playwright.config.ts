@@ -4,8 +4,6 @@ import { localSignIn } from "./apps/core/test/sign-in-config.ts";
 import { testAuthSecret, testCapabilityKey } from "./e2e/people.ts";
 import { corePort, idpOrigin, idpPort, origin, stateDir } from "./e2e/stack.ts";
 
-/** The end-to-end tests of the Playbook's built-ins (their own project). */
-const playbookTests = /(?:board-page|intake|workflow-map)\.e2e\.ts$/u;
 /**
  * What the browser's own sandbox and policy hold, run in every browser
  * engine: a screen's attacks on its frame, and the product page's refusal
@@ -63,21 +61,12 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: [playbookTests, onboardingTests, packageApprovalTests],
+      testIgnore: [onboardingTests, packageApprovalTests],
     },
     {
       name: "package-approvals",
       use: { ...devices["Desktop Chrome"] },
       testMatch: packageApprovalTests,
-      workers: 1,
-    },
-    // The Playbook's built-ins: one copy of each has the Playbook's record
-    // types (core's knowledge/record-types.ts), so their tests hand it from
-    // copy to copy (e2e/playbook.ts), one test at a time.
-    {
-      name: "playbook",
-      use: { ...devices["Desktop Chrome"] },
-      testMatch: playbookTests,
       workers: 1,
     },
     // A screen's frame and the product page are held by the browser's own
@@ -98,13 +87,7 @@ export default defineConfig({
       // Never tried again (below), so a trace is kept of the run that failed.
       use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
       testMatch: onboardingTests,
-      dependencies: [
-        "chromium",
-        "playbook",
-        "package-approvals",
-        "firefox",
-        "webkit",
-      ],
+      dependencies: ["chromium", "package-approvals", "firefox", "webkit"],
       workers: 1,
       // Not tried again: once a link is out the team is told, and nothing
       // undoes that (the agreements stay as they were), so a second try

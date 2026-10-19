@@ -1,8 +1,4 @@
-import type {
-  AgentProposer,
-  AppExports,
-  AppRecordTypes,
-} from "@grasp-os/shared/apps";
+import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
@@ -645,15 +641,6 @@ export const appVersions = sqliteTable(
      * previous release writes gets none.
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
-    /**
-     * The version's record types (JSON, `AppRecordTypes`), read from its
-     * `app/records.json` when it is committed (app-records.ts): so a save
-     * to Knowledge reads no files to find the types it is checked against.
-     */
-    records: text({ mode: "json" })
-      .$type<AppRecordTypes>()
-      .notNull()
-      .default(sql`'{}'`),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
@@ -815,6 +802,8 @@ export const sdkResourceBindings = sqliteTable(
         "model",
         "decision",
         "event",
+        "knowledge",
+        "template",
       ],
     }).notNull(),
     targetId: text("target_id").notNull(),
@@ -997,25 +986,6 @@ export const appResourceBindings = sqliteTable(
       .on(table.appId, table.alias)
       .where(sql`${table.status} = 'active'`),
   ]
-);
-
-/**
- * Which App a record type in a collection (a Knowledge collection, by ID)
- * belongs to: the first whose declaration took effect there
- * (knowledge/record-types.ts). Claimed when an App's write permission on
- * the collection is granted or its version is made current, and kept
- * while that App may write there with a version that declares the type;
- * another App claims it only once it no longer does.
- */
-export const recordTypeOwners = sqliteTable(
-  "record_type_owners",
-  {
-    collectionId: text("collection_id").notNull(),
-    type: text().notNull(),
-    appId: text("app_id").notNull(),
-    claimedAt: timestamp("claimed_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.collectionId, table.type] })]
 );
 
 /**
@@ -2898,7 +2868,15 @@ export const workflowCatalogContracts = sqliteTable(
   {
     key: text().primaryKey(),
     kind: text({
-      enum: ["operation", "connector", "model", "decision", "event"],
+      enum: [
+        "operation",
+        "connector",
+        "model",
+        "decision",
+        "event",
+        "knowledge",
+        "template",
+      ],
     }).notNull(),
     contract: text().notNull(),
     fingerprint: text().notNull(),
@@ -2926,7 +2904,15 @@ export const workflowBindingApprovals = sqliteTable(
       .references(() => workflowResources.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["operation", "connector", "model", "decision", "event"],
+      enum: [
+        "operation",
+        "connector",
+        "model",
+        "decision",
+        "event",
+        "knowledge",
+        "template",
+      ],
     }).notNull(),
     contractId: text("contract_id").notNull(),
     fingerprint: text().notNull(),
@@ -2967,6 +2953,80 @@ export const workflowResourceParams = sqliteTable(
     setBy: text("set_by").notNull(),
     setAt: timestamp("set_at").notNull(),
     valuesRemovedAt: timestamp("values_removed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * The draft of each independent workflow's next definition, as its
+ * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
+ * `revision` counting them from 1. An edit names the revision it read and
+ * inserts the next one, so of two concurrent edits the second is refused
+ * and the first stays. `source` is the text as edited, JSON or not;
+ * `problems` the profile's diagnostics of it (empty for one that passes),
+ * so a row with `checked` set is a checkpoint: a definition that passed,
+ * which the editor's diagram shows and which may be published. Only the
+ * latest row and the latest checkpoint are kept.
+ */
+export const workflowResourceDrafts = sqliteTable(
+  "workflow_resource_drafts",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    source: text().notNull(),
+    checked: integer({ mode: "boolean" }).notNull(),
+    problems: text().notNull(),
+    editedBy: text("edited_by").notNull(),
+    editedAt: timestamp("edited_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * The modules each draft revision carries (src/workflow-drafts.ts), one
+ * row per module: inserted with their revision, never changed, and kept
+ * and removed with it. A row each keeps every row within what D1 holds,
+ * however a revision's definition and modules add up.
+ */
+export const workflowResourceDraftModules = sqliteTable(
+  "workflow_resource_draft_modules",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    path: text().notNull(),
+    source: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.workflowResourceId, table.revision, table.path],
+    }),
+  ]
+);
+
+/**
+ * What the sandbox's inspection of a draft revision's modules answered
+ * (src/workflow-drafts.ts): kept with the revision, so a later edit that
+ * carries exactly the same modules (`modules_hash`) checks its definition
+ * against these contracts instead of running the modules again. Only an
+ * inspection that succeeded is kept; a publication always inspects anew.
+ */
+export const workflowResourceDraftInspections = sqliteTable(
+  "workflow_resource_draft_inspections",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    modulesHash: text("modules_hash").notNull(),
+    manifest: text().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.revision] }),
