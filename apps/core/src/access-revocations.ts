@@ -6,6 +6,7 @@ import {
   asc,
   eq,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -47,11 +48,14 @@ import { appHost } from "./durable-objects.ts";
 // one row however many Apps there are, within D1's limits (GRA-650). It is
 // expanded, a page of Apps at a time in ID order, into one row per App,
 // each page with the cursor that moves past it in one batch, and the
-// every-App row goes once the last page is out; each page's rows are told
-// at once and kept like any other until their host takes them. None of
-// this grants anything: what the person may do is decided by the role the
-// change already wrote, which every push checks; the rows only bring the
-// clearing of their open screens forward.
+// every-App row goes once no App is left above the cursor; each page's
+// rows are told at once and kept like any other until their host takes
+// them. Right after the change, and every minute after, as many pages are
+// expanded and told as `expansionBudget` allows. None of this grants
+// anything: what the person may do is decided by the role the change
+// already wrote, which a connection checks again within its session
+// recheck (seconds) before anything more is pushed; the rows only clear
+// what their open screens show sooner than that, an idle one included.
 //
 // The event says only "look again", never who lost what: the connection's
 // own check, read now, decides. So an event that names too many people,
@@ -211,19 +215,43 @@ export const revocationsOf = (
 const expandedAtOnce = 200;
 
 /**
+ * How much one call expands and tells of the every-App revocations it is
+ * given, at most: about this many Apps, or this long, whichever comes
+ * first; the cron trigger expands the rest a minute later.
+ */
+const expansionBudget = { apps: 2000, ms: 5000 } as const;
+
+/**
+ * How many hosts of an expanded page are told at once: more than a change
+ * tells (`toldAtOnce`), since a page's hosts are mostly asleep and each
+ * takes a moment to wake.
+ */
+const expandedToldAtOnce = 64;
+
+/** What expanding one page came to. */
+interface ExpandedPage {
+  /** The rows written, one per App. */
+  readonly rows: KeptRevocation[];
+  /** The cursor the row is at now. */
+  readonly cursor: string | null;
+  /** Whether nothing more of the row is this call's to expand. */
+  readonly done: boolean;
+}
+
+/**
  * Expands the next page of every-App revocation `row`: one row per App
- * after its cursor, up to `expandedAtOnce` in App ID order, written in one
+ * above its cursor `after`, up to `expandedAtOnce` in App ID order, written in one
  * batch with the cursor moved past them, or with the row dropped once no
- * App is left after them. Only while the row is still at the cursor read:
- * a page another run expanded meanwhile writes nothing again. Returns the
- * rows written, for `tellKept`.
+ * App is left above them. Only while the row is still at the cursor read:
+ * a page another expansion wrote meanwhile writes nothing again, and this
+ * call then leaves the row to it.
  */
 const expandPage = async (
   env: Env,
-  row: KeptRevocation
-): Promise<KeptRevocation[]> => {
+  row: KeptRevocation,
+  after: string | null
+): Promise<ExpandedPage> => {
   const db = drizzle(env.DB);
-  const after = row.afterAppId;
   const stillAt = and(
     eq(accessRevocations.id, row.id),
     isNull(accessRevocations.appId),
@@ -243,9 +271,9 @@ const expandPage = async (
     last === undefined || ids.length < expandedAtOnce
       ? db.delete(accessRevocations).where(stillAt)
       : db.update(accessRevocations).set({ afterAppId: last }).where(stillAt);
-  if (ids.length === 0) {
+  if (last === undefined) {
     await moved;
-    return [];
+    return { rows: [], cursor: after, done: true };
   }
   const people = row.userIds === null ? null : JSON.stringify(row.userIds);
   const [expanded] = await db.batch([
@@ -257,7 +285,12 @@ const expandPage = async (
       .returning(),
     moved,
   ]);
-  return expanded;
+  return {
+    rows: expanded,
+    cursor: last,
+    // Nothing written: another expansion moved the row on first.
+    done: expanded.length === 0 || ids.length < expandedAtOnce,
+  };
 };
 
 /**
@@ -292,35 +325,95 @@ const tellKeptOne = async (env: Env, row: KeptRevocation): Promise<void> => {
   }
 };
 
+/** Tells the hosts of `rows`, each one App's, `atOnce` at a time. */
+const tellEach = async (
+  env: Env,
+  rows: readonly KeptRevocation[],
+  atOnce = toldAtOnce
+): Promise<void> => {
+  for (let at = 0; at < rows.length; at += atOnce) {
+    // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
+    await Promise.all(
+      rows.slice(at, at + atOnce).map(async (row) => {
+        await tellKeptOne(env, row);
+      })
+    );
+  }
+};
+
+/** Every-App revocations that fail to expand this often are dropped, logged. */
+const maxExpansionFailures = 10;
+
+/** Counts a failed expansion of every-App revocation `id`, if it can. */
+const expansionFailed = async (env: Env, id: string): Promise<void> => {
+  try {
+    await drizzle(env.DB)
+      .update(accessRevocations)
+      .set({ attempts: sql`${accessRevocations.attempts} + 1` })
+      .where(eq(accessRevocations.id, id));
+  } catch (error) {
+    log.warn("app.access_revocation_keep_failed", errorFields(error));
+  }
+};
+
+/**
+ * Expands the every-App revocations `everyApp`, in order, a page after
+ * the other, telling each page's hosts as it is written, within
+ * `expansionBudget`: what is left is the cron trigger's.
+ */
+const expandWithin = async (
+  env: Env,
+  everyApp: readonly KeptRevocation[]
+): Promise<void> => {
+  const started = Date.now();
+  let told = 0;
+  const spent = () =>
+    told >= expansionBudget.apps || Date.now() - started >= expansionBudget.ms;
+  for (const row of everyApp) {
+    let cursor = row.afterAppId;
+    while (!spent()) {
+      let page: ExpandedPage;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a page after the other
+        page = await expandPage(env, row, cursor);
+      } catch (error) {
+        log.warn("app.access_revocation_expand_failed", errorFields(error));
+        // oxlint-disable-next-line no-await-in-loop -- once, then the next row
+        await expansionFailed(env, row.id);
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- told before the next page
+      await tellEach(env, page.rows, expandedToldAtOnce);
+      told += page.rows.length;
+      if (page.done) {
+        break;
+      }
+      ({ cursor } = page);
+    }
+  }
+};
+
 /**
  * Tells the hosts of the revocations a change kept in its batch
- * (`revocationsOf`), a few at a time, from the rows themselves: no read
- * of the database, which may be away. Never throws: the change has
- * committed, and whatever isn't told now the cron trigger tells.
+ * (`revocationsOf`), a few at a time, from the rows themselves; an
+ * every-App revocation is expanded and told within `expansionBudget`,
+ * which reads the Apps. Never throws: the change has committed, and
+ * whatever isn't told now the cron trigger tells.
  */
 export const tellKept = async (
   env: Env,
   kept: readonly KeptRevocation[]
 ): Promise<void> => {
-  const ofApps = kept.filter(({ appId }) => appId !== null);
-  // Each every-App revocation's first page, told now; the cron trigger
-  // expands the rest (`retryAccessRevocations`).
-  for (const row of kept.filter(({ appId }) => appId === null)) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one row's page after the other
-      ofApps.push(...(await expandPage(env, row)));
-    } catch (error) {
-      log.warn("app.access_revocation_expand_failed", errorFields(error));
-    }
-  }
-  for (let at = 0; at < ofApps.length; at += toldAtOnce) {
-    // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
-    await Promise.all(
-      ofApps.slice(at, at + toldAtOnce).map(async (row) => {
-        await tellKeptOne(env, row);
-      })
-    );
-  }
+  await tellEach(
+    env,
+    kept.filter(({ appId }) => appId !== null)
+  );
+  // Each every-App revocation, as far as the budget goes; the cron
+  // trigger expands the rest (`retryAccessRevocations`).
+  await expandWithin(
+    env,
+    kept.filter(({ appId }) => appId === null)
+  );
 };
 
 /** Most kept revocations one run of the cron trigger tells. */
@@ -359,43 +452,65 @@ const retryOne = async (
 };
 
 /**
+ * How long an every-App revocation is kept unexpanded at most: a week. It
+ * moves on by up to `expansionBudget` a run, so one still there then has
+ * failed for days.
+ */
+const everyAppKeptForMs = 7 * keptForMs;
+
+/**
  * Drops, logged, every kept revocation of one App a day old, whether or
  * not a run would reach it: one behind many others, or behind a steady
  * stream of new ones, is never kept longer. An every-App revocation is
- * kept until it is expanded: each run moves it on by a page, and each
- * App's row it writes is then kept a day of its own.
+ * kept while it is expanded, each App's row it writes then kept a day of
+ * its own, unless it is a week old or failed to expand
+ * `maxExpansionFailures` times: then it too is dropped, logged.
  */
 const dropExpired = async (env: Env): Promise<void> => {
+  const now = Date.now();
   const lost = await drizzle(env.DB)
     .delete(accessRevocations)
     .where(
-      and(
-        isNotNull(accessRevocations.appId),
-        lt(accessRevocations.createdAt, new Date(Date.now() - keptForMs))
+      or(
+        and(
+          isNotNull(accessRevocations.appId),
+          lt(accessRevocations.createdAt, new Date(now - keptForMs))
+        ),
+        and(
+          isNull(accessRevocations.appId),
+          or(
+            lt(accessRevocations.createdAt, new Date(now - everyAppKeptForMs)),
+            gte(accessRevocations.attempts, maxExpansionFailures)
+          )
+        )
       )
     )
-    .returning({ appId: accessRevocations.appId });
-  for (const { appId } of lost) {
-    log.error("app.access_revocation_lost", { appId: appId ?? undefined });
+    .returning({ id: accessRevocations.id, appId: accessRevocations.appId });
+  for (const { id, appId } of lost) {
+    log.error(
+      "app.access_revocation_lost",
+      appId === null ? { revocationId: id, scope: "every_app" } : { appId }
+    );
   }
 };
 
-/** Most every-App revocations one run of the cron trigger expands a page of. */
+/** Most every-App revocations one run of the cron trigger expands. */
 const expandedRowsAtOnce = 5;
 
 /**
- * Expands a page of each every-App revocation still kept, oldest first,
- * and tells the hosts of the rows written (`tellKept`): what isn't told
- * now is kept, and told by a later run.
+ * Expands the every-App revocations still kept within `expansionBudget`,
+ * least failed first and oldest first among them, so one that keeps
+ * failing never holds the others back, telling the hosts of the rows
+ * written: what isn't told now is kept, and told by a later run.
  */
 const expandKept = async (env: Env): Promise<void> => {
   const everyApp = await drizzle(env.DB)
     .select()
     .from(accessRevocations)
     .where(isNull(accessRevocations.appId))
-    .orderBy(asc(accessRevocations.createdAt))
+    .orderBy(asc(accessRevocations.attempts), asc(accessRevocations.createdAt))
     .limit(expandedRowsAtOnce);
-  await tellKept(env, everyApp);
+  await expandWithin(env, everyApp);
 };
 
 /**

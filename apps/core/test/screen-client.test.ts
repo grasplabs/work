@@ -2473,13 +2473,19 @@ const unreachableRevocations = (namespace: Env["APPS"]): Env["APPS"] =>
   });
 
 /**
- * Adds `count` Apps owned by `ownerId`, with nothing in them, at once;
- * once the test finishes, removes them and every revocation for every App,
- * so no later test's cron runs expand them.
+ * Adds `count` Apps owned by `ownerId`, with nothing in them, at once, each
+ * ID after `prefix`; once the test finishes, removes them, with their rows,
+ * and the every-App revocations of `people`, so no later test's cron runs
+ * expand them, and nothing of any other test's.
  */
-const manyApps = async (ownerId: string, count: number): Promise<void> => {
+const manyApps = async (
+  ownerId: string,
+  count: number,
+  people: readonly string[],
+  prefix = ""
+): Promise<void> => {
   const ids = JSON.stringify(
-    Array.from({ length: count }, () => crypto.randomUUID())
+    Array.from({ length: count }, () => `${prefix}${crypto.randomUUID()}`)
   );
   await env.DB.prepare(
     "insert into apps (id, name, description, owner_id, created_at) select value, 'Many', '', ?, ? from json_each(?)"
@@ -2491,7 +2497,9 @@ const manyApps = async (ownerId: string, count: number): Promise<void> => {
       env.DB.prepare(
         "delete from apps where id in (select value from json_each(?))"
       ).bind(ids),
-      env.DB.prepare("delete from access_revocations where app_id is null"),
+      env.DB.prepare(
+        "delete from access_revocations where app_id is null and user_ids in (select value from json_each(?))"
+      ).bind(JSON.stringify(people.map((userId) => JSON.stringify([userId])))),
     ]);
   });
 };
@@ -2505,6 +2513,14 @@ const keptForPerson = async (userId: string) => {
     .all();
   return results;
 };
+
+/** How many every-App and per-App revocations are kept for `userId` alone. */
+const everyAppKeptFor = async (userId: string) =>
+  await env.DB.prepare(
+    "select count(*) - count(app_id) as everyApp, count(app_id) as apps from access_revocations where user_ids = ?"
+  )
+    .bind(JSON.stringify([userId]))
+    .first<{ everyApp: number; apps: number }>();
 
 /** `userId`'s role in the organization, if they are a member. */
 const organizationRoleOf = async (userId: string) =>
@@ -3294,7 +3310,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const admin = await personApi("admin");
     const removed = await personApi("admin");
     const demoted = await personApi("admin");
-    await manyApps(admin.userId, 5000);
+    await manyApps(admin.userId, 5000, [removed.userId, demoted.userId]);
     // Connections on which nothing after the change's batch reaches the
     // database: what the batch kept is all there is.
     const changing = async () => {
@@ -3342,7 +3358,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
   it("expands a revocation for every App a page at a time from the cron trigger, until each App has its own", async () => {
     const admin = await personApi("admin");
     const removed = await personApi("admin");
-    await manyApps(admin.userId, 450);
+    await manyApps(admin.userId, 450, [removed.userId]);
     const { core } = await openRpc(admin.session, {
       coreEnv: {
         ...env,
@@ -3373,17 +3389,134 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       runs.push(await kept());
     }
 
+    // Each run expands whole pages of 200 Apps, as many as its budget
+    // allows, and the row goes with the last one.
+    const between = runs.slice(1, -1);
     expect({
       first: runs[0],
-      second: runs[1],
+      between: between.every(
+        ({ apps, everyApp }) => everyApp === 1 && apps > 0 && apps % 200 === 0
+      ),
+      growing: runs.every(
+        (run, index) => index === 0 || run.apps > (runs[index - 1]?.apps ?? 0)
+      ),
       last: runs.at(-1),
-      runs: runs.length - 1,
     }).toStrictEqual({
       first: { apps: 0, everyApp: 1 },
-      second: { apps: 200, everyApp: 1 },
+      between: true,
+      growing: true,
       last: { apps: allApps, everyApp: 0 },
-      runs: Math.ceil(((allApps ?? 0) + 1) / 200),
     });
+  });
+
+  it("expands a revocation for every App once, whichever expansions reach the same page together", async () => {
+    const admin = await personApi("admin");
+    const removed = await personApi("admin");
+    await manyApps(admin.userId, 450, [removed.userId]);
+    const { core } = await openRpc(admin.session, {
+      coreEnv: {
+        ...env,
+        DB: awayAfterTheChange(),
+        APPS: unreachableRevocations(env.APPS),
+      },
+    });
+    await outcome(core.authenticate().members.remove(removed.userId));
+    const unreachable = { APPS: unreachableRevocations(env.APPS) };
+    const everyAppLeft = async () =>
+      await env.DB.prepare(
+        "select count(*) as left from access_revocations where app_id is null and user_ids = ?"
+      )
+        .bind(JSON.stringify([removed.userId]))
+        .first<number>("left");
+    let left = await everyAppLeft();
+    for (let runs = 0; runs < 10 && left !== 0; runs += 1) {
+      // Two runs at once, each reading the same cursor.
+      // oxlint-disable-next-line no-await-in-loop -- a pair after the other
+      await Promise.all([runCron(unreachable), runCron(unreachable)]);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      left = await everyAppLeft();
+    }
+
+    const counted = await env.DB.prepare(
+      "select count(*) as rows, count(distinct app_id) as apps from access_revocations where app_id is not null and user_ids = ?"
+    )
+      .bind(JSON.stringify([removed.userId]))
+      .first<{ rows: number; apps: number }>();
+    const allApps = await env.DB.prepare(
+      "select count(*) as apps from apps"
+    ).first<number>("apps");
+    expect({ left, counted }).toStrictEqual({
+      left: 0,
+      counted: { rows: allApps, apps: allApps },
+    });
+  });
+
+  it("keeps expanding a revocation for every App past a day, and drops it, logged, past a week or ten failed expansions", async () => {
+    const admin = await personApi("admin");
+    const [dayOld, weekOld, failing] = await Promise.all([
+      personApi("admin"),
+      personApi("admin"),
+      personApi("admin"),
+    ]);
+    await manyApps(admin.userId, 450, [
+      dayOld.userId,
+      weekOld.userId,
+      failing.userId,
+    ]);
+    for (const person of [dayOld, weekOld, failing]) {
+      // oxlint-disable-next-line no-await-in-loop -- one removal after the other
+      const { core } = await openRpc(admin.session, {
+        coreEnv: {
+          ...env,
+          DB: awayAfterTheChange(),
+          APPS: unreachableRevocations(env.APPS),
+        },
+      });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await outcome(core.authenticate().members.remove(person.userId));
+    }
+    const hourMs = 60 * 60 * 1000;
+    const age = env.DB.prepare(
+      "update access_revocations set created_at = ?, attempts = ? where app_id is null and user_ids = ?"
+    );
+    await env.DB.batch([
+      age.bind(Date.now() - 25 * hourMs, 0, JSON.stringify([dayOld.userId])),
+      age.bind(
+        Date.now() - 8 * 24 * hourMs,
+        0,
+        JSON.stringify([weekOld.userId])
+      ),
+      age.bind(Date.now(), 10, JSON.stringify([failing.userId])),
+    ]);
+
+    await runCron({ APPS: unreachableRevocations(env.APPS) });
+
+    const dayOldKept = await everyAppKeptFor(dayOld.userId);
+    expect({
+      // Expanded on, however far the run's budget went.
+      dayOld: (dayOldKept?.apps ?? 0) >= 200,
+      weekOld: await everyAppKeptFor(weekOld.userId),
+      failing: await everyAppKeptFor(failing.userId),
+    }).toStrictEqual({
+      dayOld: true,
+      weekOld: { everyApp: 0, apps: 0 },
+      failing: { everyApp: 0, apps: 0 },
+    });
+  });
+
+  it("clears the screen of an admin demoted out of an App past the first page of Apps, at once", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const demoted = await personApi("admin");
+    // Before it in ID order: it is on the second page.
+    await manyApps(admin.userId, 250, [demoted.userId], "!");
+    const { lease } = await demoted.api.screens.open(opened.app, "notes");
+    await demoted.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, demoted.api.screens, lease);
+
+    await admin.api.members.setRole(demoted.userId, "user");
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
   it("clears the screen of an admin removed from the organization, from the cron trigger when the database goes away right after", async () => {
