@@ -203,6 +203,29 @@ export const runOf = async (
     .where(eq(workflowResourceRuns.id, id))
     .get();
 
+/**
+ * Settles run `row`'s admitted cancel receipts by how it ended: `applied`
+ * when it was cancelled, `superseded` when it ended otherwise first. A run
+ * that hasn't ended settles none.
+ */
+const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
+  if (unended.includes(row.status)) {
+    return;
+  }
+  await drizzle(env.DB)
+    .update(workflowResourceRunControls)
+    .set({
+      state: row.status === "cancelled" ? "applied" : "superseded",
+      settledAt: new Date(),
+    })
+    .where(
+      and(
+        eq(workflowResourceRunControls.runId, row.id),
+        eq(workflowResourceRunControls.state, "admitted")
+      )
+    );
+};
+
 /** The input and frozen parameters a run reads from its receipt. */
 const receiptOf = async (env: Env, id: string) =>
   await drizzle(env.DB)
@@ -312,6 +335,13 @@ export const projectResourceRun = async (
         ]
       : []),
   ]);
+  if (ended) {
+    // A screen's cancel of it, settled by how it ended.
+    const now = await runOf(env, id);
+    if (now !== undefined) {
+      await settleCancels(env, now);
+    }
+  }
   if (status !== row.status) {
     await tellQueryFollowers(env, id);
   }
@@ -1137,9 +1167,10 @@ export const stopResourceRun = async (
 /**
  * Asks the engine to stop run `runId` for cancel receipt `receiptId` (a
  * screen's, screen-workflows.ts), as `actor`, unless it ended already,
- * then settles the receipt by where the run is: `applied`, or `superseded`
- * when it ended other than cancelled. Stopping is idempotent, so a cancel
- * whose answer was lost, or whose stop failed, is applied again.
+ * then settles the receipt once the run has ended (`settleCancels`); one
+ * whose end isn't told yet stays admitted until it is. Stopping is
+ * idempotent, so a cancel whose answer was lost, or whose stop failed, is
+ * applied again.
  */
 export const applyCancel = async (
   env: Env,
@@ -1152,21 +1183,12 @@ export const applyCancel = async (
     await stopResourceRun(env, actor, before);
   }
   const after = await runOf(env, runId);
-  const state =
-    after !== undefined &&
-    !unended.includes(after.status) &&
-    after.status !== "cancelled"
-      ? "superseded"
-      : "applied";
-  await drizzle(env.DB)
-    .update(workflowResourceRunControls)
-    .set({ state, settledAt: new Date() })
-    .where(
-      and(
-        eq(workflowResourceRunControls.id, receiptId),
-        eq(workflowResourceRunControls.state, "admitted")
-      )
-    );
+  // Still running (the engine took the stop, its end not yet told): left
+  // admitted, settled as the run's end is projected (`settleCancels`).
+  if (after === undefined || unended.includes(after.status)) {
+    return;
+  }
+  await settleCancels(env, after);
 };
 
 /**
