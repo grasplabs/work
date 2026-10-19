@@ -573,11 +573,15 @@ const NoteToolbar = ({
         </span>
       </div>
       <div className="flex items-center gap-1.5">
-        {/* Back to the brain. In the prototype it opens the atlas where this note sits; the atlas
-            comes in a later change. */}
+        {/* Back to where this note sits in the brain; the company is the whole brain. */}
         <Button
           nativeButton={false}
-          render={<Link to="/brain" />}
+          render={
+            <Link
+              search={note.kind === "company" ? {} : { note: note.id }}
+              to="/brain"
+            />
+          }
           size="sm"
           variant="outline"
         >

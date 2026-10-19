@@ -14,6 +14,8 @@ import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
 import type { ReactNode } from "react";
 
+import type { RegionId } from "../brain/brain-atlas.ts";
+
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
   | { label: string }
@@ -28,6 +30,11 @@ export type Crumb =
         | "/integrations"
         | "/landscape"
         | "/policies";
+    }
+  | {
+      label: string;
+      to: "/brain";
+      search: { region?: RegionId; group?: string; note?: string };
     }
   | { label: string; to: "/brain/$noteId"; params: { noteId: string } }
   | {
@@ -59,6 +66,10 @@ export type Crumb =
 
 /** Where a crumb leads, as a link. */
 const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
+  // A place on the brain's atlas: a region, a folder in it, a note there.
+  if ("search" in crumb) {
+    return <Link search={crumb.search} to="/brain" />;
+  }
   if (!("params" in crumb)) {
     return <Link to={crumb.to} />;
   }
