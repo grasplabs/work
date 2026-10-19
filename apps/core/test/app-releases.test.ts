@@ -1,7 +1,10 @@
 import { serverSdkModules } from "@grasp-os/compiler";
 import { schemaHash } from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
-import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
+import {
+  releaseFormatVersion,
+  sdkProtocolVersion,
+} from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -202,7 +205,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
     const { tree } = await findVersion(env, fixture.app, 1);
     const schema = await schemaHash(release.app.schema);
     expect(release.manifest).toMatchObject({
-      formatVersion: 1,
+      formatVersion: releaseFormatVersion,
       resourceId: fixture.app,
       resourceVersion: 1,
       sourceTreeHash: tree,
@@ -571,6 +574,19 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     await expect(
       failure(async () => await loadRelease(env, fixture.app, 1))
     ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it("is refused as sealed in another format, to seal again, not as tampering", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    await rewrite(fixture.app, release, {
+      manifest: (manifest) => {
+        manifest.formatVersion = releaseFormatVersion - 1;
+      },
+    });
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.format_unsupported");
   });
 
   it("is refused as another platform's when sealed for another protocol, not as tampering", async () => {

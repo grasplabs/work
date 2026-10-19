@@ -401,8 +401,9 @@ const verifiedRelease = async (
 
 /**
  * The manifest in `text`, the release of `key`'s: canonical, of the known
- * shape, and naming that release; `version.protocol_unsupported` for one
- * sealed for another protocol, `version.manifest_corrupt` otherwise.
+ * shape, and naming that release; `version.format_unsupported` for one
+ * sealed in another release format, `version.protocol_unsupported` for
+ * one sealed for another protocol, `version.manifest_corrupt` otherwise.
  */
 const manifestOf = (
   text: string,
@@ -416,10 +417,15 @@ const manifestOf = (
   }
   // Its hash checked already: a protocol this platform doesn't run is a
   // release of another platform version, not tampering.
-  const protocol: unknown =
+  const field = (name: string): unknown =>
     typeof parsed === "object" && parsed !== null
-      ? Reflect.get(parsed, "sdkProtocolVersion")
+      ? Reflect.get(parsed, name)
       : undefined;
+  const format = field("formatVersion");
+  if (typeof format === "number" && format !== releaseFormatVersion) {
+    throw versionErrors.create("version.format_unsupported");
+  }
+  const protocol = field("sdkProtocolVersion");
   if (typeof protocol === "number" && protocol !== sdkProtocolVersion) {
     throw versionErrors.create("version.protocol_unsupported");
   }

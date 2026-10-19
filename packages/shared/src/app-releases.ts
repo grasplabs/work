@@ -14,8 +14,13 @@ import { defineErrorFamily } from "./errors.ts";
 // a field its source can set: a sealed manifest always says `unreviewed`,
 // and approval or revocation is the host's own record of its hash.
 
-/** The format of `ReleaseManifest`. */
-export const releaseFormatVersion = 1;
+/**
+ * The format of `ReleaseManifest` and of the check evidence it names:
+ * version 2 records the evidence (`checkEvidenceSchema`) every load
+ * verifies. A release sealed in another format is refused as such
+ * (`version.format_unsupported`) and sealed again: none is read as this.
+ */
+export const releaseFormatVersion = 2;
 
 /**
  * The version of the protocol between the host and an App's isolate. The
@@ -221,6 +226,8 @@ export const versionErrors = defineErrorFamily({
     "This App and the workflow versions it binds are more than one export holds.",
   "version.export_secret_found":
     "A file of this App or of a workflow it binds holds what looks like a secret, so it can't be exported. Remove it from that file, publish or seal again, then export.",
+  "version.format_unsupported":
+    "This version was sealed in a release format this platform doesn't read. Seal it again.",
   "version.protocol_unsupported":
     "This version was sealed for a protocol between the platform and App code that this platform doesn't run. Seal it again.",
   "version.manifest_corrupt":
