@@ -65,20 +65,22 @@ export const paramValueOf = (
 
 /**
  * What a field of kind `kind` holds: `checked` for a switch, else `text`
- * read as a value; undefined when nothing is typed in the field of a
- * sensitive parameter, whose value is never shown, or when the text can't
- * be read as one.
+ * read as a value; undefined while a sensitive parameter's field is as it
+ * started (its value is never shown, so an untouched field is nothing
+ * typed, a switch left as it is included), or when the text can't be read
+ * as one.
  */
 export const fieldValueOf = (
   kind: ParamKind,
   {
     text,
     checked,
+    toggled,
     sensitive,
-  }: { text: string; checked: boolean; sensitive: boolean }
+  }: { text: string; checked: boolean; toggled: boolean; sensitive: boolean }
 ): { value: unknown } | undefined => {
   if (kind === "boolean") {
-    return { value: checked };
+    return sensitive && !toggled ? undefined : { value: checked };
   }
   if (sensitive && text === "") {
     return undefined;

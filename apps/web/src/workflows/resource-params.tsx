@@ -126,11 +126,13 @@ const ParamField = ({
     shownValue ? paramText(kind, param.value) : ""
   );
   const [checked, setChecked] = useState(param.value === true);
+  const [toggled, setToggled] = useState(false);
   const [saved, setSaved] = useState(false);
   const id = `param-${param.name}`;
   const read = fieldValueOf(kind, {
     text,
     checked,
+    toggled,
     sensitive: param.sensitive,
   });
   const invalid = read === undefined && text.trim() !== "";
@@ -151,6 +153,10 @@ const ParamField = ({
     // A sensitive value goes once saved: it is never shown again.
     if ("reset" in change || param.sensitive) {
       setText("");
+    }
+    if (param.sensitive) {
+      setChecked(false);
+      setToggled(false);
     }
   };
   return (
@@ -187,6 +193,7 @@ const ParamField = ({
         kind={kind}
         onChecked={(next) => {
           setChecked(next);
+          setToggled(true);
           setSaved(false);
         }}
         onText={(next) => {

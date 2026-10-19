@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { paramKindOf, paramText, paramValueOf } from "./param-values.ts";
+import {
+  fieldValueOf,
+  paramKindOf,
+  paramText,
+  paramValueOf,
+} from "./param-values.ts";
 import type { ParamKind } from "./param-values.ts";
 
 describe("a workflow parameter's field", () => {
@@ -33,6 +38,39 @@ describe("a workflow parameter's field", () => {
         paramText("json", "hello"),
         paramText("json", "null"),
       ],
+      // A sensitive field as it started is nothing typed, a switch too.
+      sensitive: [
+        fieldValueOf("boolean", {
+          text: "",
+          checked: false,
+          toggled: false,
+          sensitive: true,
+        }),
+        fieldValueOf("boolean", {
+          text: "",
+          checked: false,
+          toggled: true,
+          sensitive: true,
+        }),
+        fieldValueOf("boolean", {
+          text: "",
+          checked: false,
+          toggled: false,
+          sensitive: false,
+        }),
+        fieldValueOf("string", {
+          text: "",
+          checked: false,
+          toggled: false,
+          sensitive: true,
+        }),
+        fieldValueOf("string", {
+          text: "",
+          checked: false,
+          toggled: false,
+          sensitive: false,
+        }),
+      ],
       // What each field shows reads back as the same value.
       roundTrips: (
         [
@@ -62,6 +100,13 @@ describe("a workflow parameter's field", () => {
         undefined,
       ],
       shown: ["plain", "4", '{"a":[1]}', '"hello"', '"null"'],
+      sensitive: [
+        undefined,
+        { value: false },
+        { value: false },
+        undefined,
+        { value: "" },
+      ],
       roundTrips: [
         { value: "plain" },
         { value: 4 },
