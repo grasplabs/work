@@ -3013,6 +3013,13 @@ const namedBySql = (id: string) => sql`SELECT
         AND pinned.status = 'active') AS app_bindings,
     ${liveRunsSql(id)} AS live_runs`;
 
+/**
+ * How many times a release is tried in all when each miss finds nothing
+ * pinning the workflow any more (a pin removed in between): after that,
+ * it is refused.
+ */
+const releaseTries = 3;
+
 /** What `namedBySql` counts, as a row. */
 const namedBySchema = z.object({
   binders: z.number(),
@@ -3081,51 +3088,67 @@ export const releaseWorkflowName = async (
   if (holder.deletedAt === null) {
     throw workflowResourceErrors.create("workflow.name_unreleasable");
   }
-  const releasedAt = new Date();
-  const [released] = await auditedBatch(env, db, [
-    db
-      .update(workflowResources)
-      .set({ nameReleasedAt: releasedAt, nameReleasedBy: by.userId })
-      .where(
-        and(
-          eq(workflowResources.id, holder.id),
-          isNotNull(workflowResources.deletedAt),
-          isNull(workflowResources.nameReleasedAt),
-          // Read as the release lands: a pin made since the check above
-          // keeps the name.
-          sql`(SELECT binders + triggers + app_bindings + live_runs
-            FROM (${namedBySql(holder.id)})) = 0`
+  // The release lands in one statement, only while nothing names the
+  // workflow. One that lands nothing is asked why: released meanwhile by
+  // another admin (a release), a pin that went in between (tried again,
+  // a few times), or a pin (refused).
+  for (let tries = 1; ; tries += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- tried again only after a miss
+    const [released] = await auditedBatch(env, db, [
+      db
+        .update(workflowResources)
+        .set({ nameReleasedAt: new Date(), nameReleasedBy: by.userId })
+        .where(
+          and(
+            eq(workflowResources.id, holder.id),
+            isNotNull(workflowResources.deletedAt),
+            isNull(workflowResources.nameReleasedAt),
+            // Read as the release lands: a pin made since the check above
+            // keeps the name.
+            sql`(SELECT binders + triggers + app_bindings + live_runs
+              FROM (${namedBySql(holder.id)})) = 0`
+          )
         )
-      )
-      .returning({ id: workflowResources.id }),
-    outboxedIfChanged(
-      db,
-      entry(by, "workflow.name.released", holder.id, { name: parsed.data })
-    ),
-  ]);
-  if (released.length > 0) {
-    return;
+        .returning({ id: workflowResources.id }),
+      outboxedIfChanged(
+        db,
+        entry(by, "workflow.name.released", holder.id, { name: parsed.data })
+      ),
+    ]);
+    if (released.length > 0) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const now = await db
+      .select({ releasedAt: workflowResources.nameReleasedAt })
+      .from(workflowResources)
+      .where(eq(workflowResources.id, holder.id))
+      .get();
+    if (now?.releasedAt !== null && now?.releasedAt !== undefined) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const counts = namedBySchema.parse(await db.get(namedBySql(holder.id)));
+    const pinned = {
+      binders: counts.binders,
+      triggers: counts.triggers,
+      appBindings: counts.app_bindings,
+      liveRuns: counts.live_runs,
+    };
+    const free = Object.values(pinned).every((count) => count === 0);
+    if (!free || tries >= releaseTries) {
+      // oxlint-disable-next-line no-await-in-loop -- once, as the loop ends
+      await auditedBatch(env, db, [
+        outboxed(
+          db,
+          entry(by, "workflow.name_release_refused", holder.id, {
+            name: parsed.data,
+            reason: "workflow.name_pinned",
+            ...pinned,
+          })
+        ),
+      ]);
+      throw workflowResourceErrors.create("workflow.name_pinned", pinned);
+    }
   }
-  const counts = namedBySchema.parse(await db.get(namedBySql(holder.id)));
-  const pinned = {
-    binders: counts.binders,
-    triggers: counts.triggers,
-    appBindings: counts.app_bindings,
-    liveRuns: counts.live_runs,
-  };
-  if (Object.values(pinned).every((count) => count === 0)) {
-    // Released meanwhile by another admin.
-    return;
-  }
-  await auditedBatch(env, db, [
-    outboxed(
-      db,
-      entry(by, "workflow.name_release_refused", holder.id, {
-        name: parsed.data,
-        reason: "workflow.name_pinned",
-        ...pinned,
-      })
-    ),
-  ]);
-  throw workflowResourceErrors.create("workflow.name_pinned", pinned);
 };
