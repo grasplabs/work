@@ -1354,18 +1354,27 @@ const buildDeclaration = `/**
  * Screens are \`screens/<name>.tsx\` on @grasp-os/ui components with their
  * variants and sizes and the theme's tokens: no raw colours, arbitrary
  * values or restyled components (the lint names what to use instead).
- * Server methods are in \`app/server.ts\`. A workflow is
+ * The server is \`app.ts\`, which registers the App, \`schema.ts\`, and
+ * its public functions (\`query\`, \`mutation\`, \`action\`) in
+ * operations files, \`operations/<group>.ts\`. A workflow is
  * \`workflows/<id>.ts\` with its tests in \`workflows/<id>.workflow-tests.ts\`:
  * \`export default workflow(id, config, async (step, { input, params, env }) => …)\`,
- * calling the App's bindings only in a step's own function (not between
- * steps, nor in a function inside it: loop with \`for...of\`), each call
+ * calling the App's bindings only in a step's own function (\`step.do\`'s,
+ * or an option such as a decision's \`ask\`; not between steps, nor in a
+ * function inside it: loop with \`for...of\`), each call
  * written out as \`env.NAME.method(…)\`, \`appServer(env).method(…)\`,
- * \`appFunctions(env).query(…)\` (or \`mutation\`, \`action\`: the App's
- * public functions, typed by its definitions) or
+ * \`appFunctions<Tree>(env).query("notes.list", …)\` (or \`mutation\`,
+ * \`action\`: the App's public functions, by \`group.name\`) or
  * \`appExports(env.NAME).method(…)\`, so its review names what each step
- * calls. A check refuses any other use of \`env\`, and \`globalThis\`,
- * \`self\`, \`Proxy\`, \`Reflect\`, \`Function\`, \`eval\` or a change to a
- * global or an import anywhere under \`workflows/\`.
+ * calls. Type those calls by the operations they reach:
+ * \`import type * as notes from "../operations/notes.ts"\`, then
+ * \`interface Tree { notes: typeof notes }\`. Workflows are type-checked:
+ * what a binding answers is \`unknown\`, so narrow it (with \`z\`) before
+ * using it; \`@ts-ignore\` and the other suppressions, \`declare module\`,
+ * \`declare global\` and triple-slash directives are refused. A check
+ * refuses any other use of \`env\`, and \`globalThis\`, \`self\`,
+ * \`Proxy\`, \`Reflect\`, \`Function\`, \`eval\` or a change to a global or
+ * an import anywhere under \`workflows/\`.
  */
 build: {
   /** Creates an App owned by the person, with no files yet: at most ${maxCreatesPerTurn} a question. */
@@ -1543,7 +1552,9 @@ build: {
   /**
    * Asks for a permission the App needs, as its builders do: an admin
    * grants it or not, and it allows nothing until then. \`binding\` is the
-   * name the App's code reaches it by, such as \`MAIL\`.
+   * name the App's code reaches it by, such as \`MAIL\`. On a collection,
+   * an App asks only to \`read\`: it never writes one (what it writes goes
+   * to a business store).
    */
   requestPermission(app: string, request: {
     object:
