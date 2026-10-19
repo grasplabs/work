@@ -272,7 +272,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     const sections = page
       .getByRole("navigation", { name: "Settings" })
       .getByRole("link");
-    await expect(sections.last()).toHaveText("Profile");
+    await expect(sections.last()).toHaveText("Notifications");
     return {
       // Without how many wait.
       nav: texts.map((text) => text.replace(/\d+ things? waiting$/u, "")),
@@ -302,10 +302,11 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         // core lists it only to those who may approve packages.
         "Packages",
         "Profile",
+        "Notifications",
       ],
     },
-    builder: { nav, menu, settings: ["Packages", "Profile"] },
-    user: { nav, menu, settings: ["Packages", "Profile"] },
+    builder: { nav, menu, settings: ["Packages", "Profile", "Notifications"] },
+    user: { nav, menu, settings: ["Packages", "Profile", "Notifications"] },
   });
 });
 

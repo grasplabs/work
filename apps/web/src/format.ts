@@ -20,6 +20,10 @@ export const formatDate = (value: string | number | Date): string =>
     new Date(value)
   );
 
+/** Alternatives as the page's language joins them: "a, b or c", "a, b oder c". */
+export const formatOrList = (items: readonly string[]): string =>
+  new Intl.ListFormat(i18n.locale, { type: "disjunction" }).format(items);
+
 /**
  * A calendar day kept as an ISO date ("2026-10-03"), as the page's language
  * writes it: the same day wherever the reader is, since the day carries no
@@ -48,6 +52,23 @@ export const formatNumber = (value: number): string =>
   new Intl.NumberFormat(i18n.locale, { maximumFractionDigits: 0 }).format(
     value
   );
+
+/** 0.42 as "42%", or "42 %" where a language puts a space before it. */
+export const formatPercent = (fraction: number): string =>
+  new Intl.NumberFormat(i18n.locale, {
+    style: "percent",
+    maximumFractionDigits: 0,
+  }).format(fraction);
+
+/** The month of an ISO date or time, "2026-09", as "Sep 2026": in UTC, as recorded. */
+export const formatMonth = (iso: string): string => {
+  const [year = 1970, month = 1] = iso.slice(0, 7).split("-").map(Number);
+  return new Intl.DateTimeFormat(i18n.locale, {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(Date.UTC(year, month - 1, 1));
+};
 
 /** A day and month as the page's language writes it, such as "3 Oct": for what is recent. */
 export const formatDayMonth = (value: string | number | Date): string =>
