@@ -797,9 +797,12 @@ const claimStore = async (
   }
 };
 
-/** The App's schema has tables, so it needs a store. */
-const hasTables = (app: AppManifest): boolean =>
-  Object.keys(app.schema.tables).length > 0;
+/**
+ * The App needs a store: its schema has tables, or it declares
+ * preferences, which its store keeps (app-preferences.ts).
+ */
+const needsStore = (app: AppManifest): boolean =>
+  Object.keys(app.schema.tables).length > 0 || app.preferences !== null;
 
 /** The SHA-256 of the canonical text of the App's functions. */
 const operationManifestHash = async (app: AppManifest): Promise<string> =>
@@ -905,8 +908,8 @@ export const sealedEvidence = async (
 /**
  * The store release `request` binds, with the App's schema (`schema`, its
  * hash) applied to it for this version, and what that did to the store's
- * contract; or null for an App without tables; `version.store_unbound`
- * for one with tables and no store. The store applies the schema only
+ * contract; or null for an App without tables or preferences;
+ * `version.store_unbound` for one with either and no store. The store applies the schema only
  * when the change to its contract is safe (store-host.ts,
  * `defineTables`), and refuses one that needs a migration
  * (`migration.required`), so no release is sealed on a store whose data
@@ -922,7 +925,7 @@ const boundStore = async (
   manifest: AppManifest,
   schema: string
 ): Promise<{ binding: DataStoreBinding; contract: AppliedContract } | null> => {
-  if (!hasTables(manifest)) {
+  if (!needsStore(manifest)) {
     return null;
   }
   if (request.store === undefined) {

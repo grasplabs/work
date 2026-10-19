@@ -59,6 +59,14 @@ export const store = sqliteTable(
      */
     contractHash: text("contract_hash"),
     contractManifest: text("contract_manifest"),
+    /**
+     * How many writes have changed anyone's preferences (`sdk_preferences`):
+     * what a live read of them depends on, as a table's generation is for
+     * its records (store-host.ts, `preferencesTable`).
+     */
+    preferencesGeneration: integer("preferences_generation")
+      .notNull()
+      .default(0),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );
@@ -720,3 +728,19 @@ export const fileRefs = sqliteTable(
     index("sdk_file_refs_file").on(table.fileId),
   ]
 );
+
+/**
+ * The preferences of the App that owns the store (spec 10.7.7), one row
+ * per person who ever changed one: host-owned, outside `sdk_tables`, so no
+ * query, export or migration of the App's ever reads or writes them; only
+ * core does, for the signed-in person (app-preferences.ts). `value_json`
+ * holds only the fields the person chose, never a default, checked by the
+ * App's preferences when written; `revision` counts the writes, from 1. A
+ * person with no row has the App's defaults, at revision 0.
+ */
+export const preferences = sqliteTable("sdk_preferences", {
+  personId: text("person_id").primaryKey(),
+  revision: integer().notNull(),
+  valueJson: text("value_json").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});

@@ -224,6 +224,29 @@ export class DataStore extends DurableObject<Env> {
     return this.#live().generations(storeId, names);
   }
 
+  /** `StoreHost.readPreferences`. */
+  readPreferences(
+    storeId: StoreId,
+    personId: string
+  ): { valueJson: string | null; revision: number; generation: number } {
+    return this.#live().readPreferences(storeId, personId);
+  }
+
+  /** `StoreHost.writePreferences`. */
+  writePreferences(
+    storeId: StoreId,
+    personId: string,
+    expectedRevision: number,
+    valueJson: string
+  ): { revision: number } | { conflict: true } {
+    return this.#live().writePreferences(
+      storeId,
+      personId,
+      expectedRevision,
+      valueJson
+    );
+  }
+
   /**
    * `StoreHost.claim`, as the JSON text of its `Claimed`: an outcome
    * carries what its mutation returned, JSON, which RPC types can't carry

@@ -92,6 +92,7 @@ import {
   files,
   migrationWork,
   outbox,
+  preferences,
   receipts,
   recordRefs,
   records,
@@ -343,6 +344,16 @@ const sweepBudgetMs = 20_000;
 /** Most records a deleted store's purge removes in one transaction. */
 const purgePage = 1000;
 
+/**
+ * The name a live read of preferences watches, as if a table's: its
+ * generation is `sdk_store.preferences_generation`. `~` starts no table
+ * name an author can give (`tableNameSchema`), so it never names one.
+ */
+export const preferencesTable = "~preferences";
+
+/** Whose preferences: a person's ID as core's sessions name them. */
+const personIdOf = z.string().min(1).max(256);
+
 /** How long one alarm goes on purging before the next one continues. */
 const purgeBudgetMs = 10_000;
 
@@ -367,6 +378,7 @@ const purgedTables = [
   "sdk_change_outbox",
   "sdk_commit_writers",
   "sdk_mutation_receipts",
+  "sdk_preferences",
   "sdk_tables",
 ] as const;
 
@@ -2312,10 +2324,13 @@ export class StoreHost {
     storeId: StoreId,
     names: readonly string[]
   ): Record<string, number> {
+    // The preferences' generation answers as a table's would
+    // (`preferencesTable`); every other name is a table's.
+    const withPreferences = names.includes(preferencesTable);
     const parsed = dataErrors.parse(
       "data.invalid",
       z.array(tableNameSchema).max(storeMaxTables),
-      names
+      names.filter((name) => name !== preferencesTable)
     );
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
@@ -2324,10 +2339,126 @@ export class StoreHost {
         .from(tables)
         .where(inArray(tables.name, parsed))
         .all();
-      return Object.fromEntries(
+      const answer: Record<string, number> = Object.fromEntries(
         rows.map(({ name, generation }) => [name, generation])
       );
+      if (withPreferences) {
+        answer[preferencesTable] = this.#preferencesGeneration();
+      }
+      return answer;
     });
+  }
+
+  /** How many writes have changed anyone's preferences, now. */
+  #preferencesGeneration(): number {
+    return (
+      this.#db
+        .select({ generation: store.preferencesGeneration })
+        .from(store)
+        .get()?.generation ?? 0
+    );
+  }
+
+  /**
+   * The preferences `personId` last wrote, as written, and their revision;
+   * null and 0 for a person who never wrote any. With the preferences'
+   * generation at the moment it read them, which a live read watches as a
+   * table's (`preferencesTable`). Only core calls it, for the signed-in
+   * person (app-preferences.ts): this object never chooses whose.
+   */
+  readPreferences(
+    storeId: StoreId,
+    personId: string
+  ): { valueJson: string | null; revision: number; generation: number } {
+    const person = dataErrors.parse("data.invalid", personIdOf, personId);
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const row = this.#db
+        .select({
+          valueJson: preferences.valueJson,
+          revision: preferences.revision,
+        })
+        .from(preferences)
+        .where(eq(preferences.personId, person))
+        .get();
+      return {
+        valueJson: row?.valueJson ?? null,
+        revision: row?.revision ?? 0,
+        generation: this.#preferencesGeneration(),
+      };
+    });
+  }
+
+  /**
+   * Writes `valueJson` as `personId`'s preferences, if their revision is
+   * still `expectedRevision`, in one transaction: so of two writes from
+   * the same revision, one commits. The first creates revision 1.
+   * Answers the new revision, or that the revision had moved on
+   * (`conflict`), which is an answer, not a failure. Moves the
+   * preferences' generation on, and tells the live reads watching it
+   * once the write is over. Core checked the value against the App's
+   * preferences; this checks only its size.
+   */
+  writePreferences(
+    storeId: StoreId,
+    personId: string,
+    expectedRevision: number,
+    valueJson: string
+  ): { revision: number } | { conflict: true } {
+    const person = dataErrors.parse("data.invalid", personIdOf, personId);
+    const expected = dataErrors.parse(
+      "data.invalid",
+      z.int().min(0),
+      expectedRevision
+    );
+    if (
+      typeof valueJson !== "string" ||
+      new TextEncoder().encode(valueJson).byteLength > documentMaxBytes
+    ) {
+      throw dataErrors.create("data.invalid");
+    }
+    const written = this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const current =
+        this.#db
+          .select({ revision: preferences.revision })
+          .from(preferences)
+          .where(eq(preferences.personId, person))
+          .get()?.revision ?? 0;
+      if (current !== expected) {
+        return null;
+      }
+      const revision = current + 1;
+      const updatedAt = Date.now();
+      this.#db
+        .insert(preferences)
+        .values({ personId: person, revision, valueJson, updatedAt })
+        .onConflictDoUpdate({
+          target: preferences.personId,
+          set: { revision, valueJson, updatedAt },
+        })
+        .run();
+      this.#db
+        .update(store)
+        .set({
+          preferencesGeneration: sql`${store.preferencesGeneration} + 1`,
+        })
+        .run();
+      return { revision, generation: this.#preferencesGeneration() };
+    });
+    if (written === null) {
+      return { conflict: true };
+    }
+    // Told once the transaction is over, as a table's move is
+    // (`#tellMoved`): a watch is told only of a generation past its own.
+    queueMicrotask(() => {
+      try {
+        this.onTablesMoved?.({ [preferencesTable]: written.generation });
+      } catch (error) {
+        log.error("store.tell_failed", errorFields(error));
+      }
+    });
+    return { revision: written.revision };
   }
 
   /** The generations of tables `names` of the pinned schema, now. */
