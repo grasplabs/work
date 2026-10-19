@@ -1323,7 +1323,19 @@ describe("a purge of content", setUpTime, () => {
       `# ${secret}\nWrite to ${secret} for leave.`
     );
     const folded = `renee${secret.slice(5)}`;
-    const heldBefore = await holding(folded);
+    /**
+     * Whether the words index finds the folded token: asked of the index,
+     * since its pages keep a term after another that shares its first
+     * letters as only the letters that differ, which a scan of their
+     * bytes can't see once a merge put such a term before it.
+     */
+    const indexed = async (): Promise<boolean> =>
+      (await env.KNOWLEDGE.prepare(
+        "SELECT 1 FROM search_words WHERE search_words MATCH ? LIMIT 1"
+      )
+        .bind(`"${folded}"`)
+        .first()) !== null;
+    const indexedBefore = await indexed();
     await purged(admin, {
       type: "content",
       documentIds: [document.id],
@@ -1331,11 +1343,13 @@ describe("a purge of content", setUpTime, () => {
       reason: "other",
     });
     expect({
-      heldBefore: heldBefore.length > 0,
+      indexedBefore,
+      indexedAfter: await indexed(),
       heldAfter: await holding(folded),
       heldAfterAsWritten: await holding(secret),
     }).toStrictEqual({
-      heldBefore: true,
+      indexedBefore: true,
+      indexedAfter: false,
       heldAfter: [],
       heldAfterAsWritten: [],
     });
