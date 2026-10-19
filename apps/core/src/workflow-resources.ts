@@ -915,10 +915,14 @@ const versionTaken = async (
   return taken !== undefined;
 };
 
-/** A semantic version's major number, or 0 for one that names none. */
-const majorOf = (version: string): number => {
-  const major = Number(version.split(".", 1)[0]);
-  return Number.isSafeInteger(major) && major >= 0 ? major : 0;
+/**
+ * A semantic version's major number, exactly, however large (a definition
+ * may name one past `Number`'s safe integers), or 0 for one that names
+ * none.
+ */
+const majorOf = (version: string): bigint => {
+  const major = version.split(".", 1)[0] ?? "";
+  return /^\d+$/u.test(major) ? BigInt(major) : 0n;
 };
 
 /**
@@ -943,8 +947,14 @@ export const firstFreeVersion = async (
         isNotNull(workflowResources.nameReleasedAt)
       )
     );
-  const highest = Math.max(0, ...rows.map(({ version }) => majorOf(version)));
-  return `${highest + 1}.0.0`;
+  let highest = 0n;
+  for (const { version } of rows) {
+    const major = majorOf(version);
+    if (major > highest) {
+      highest = major;
+    }
+  }
+  return `${highest + 1n}.0.0`;
 };
 
 /**

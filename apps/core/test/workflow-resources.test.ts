@@ -1797,4 +1797,19 @@ describe("releasing a deleted workflow's name", () => {
       fresh: "ok",
     });
   });
+
+  it("starts a new holder's draft past an earlier major version too large for a number", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Past Number.MAX_SAFE_INTEGER, where a float would round it down.
+    const old = await deletedWorkflow(ada, ["9007199254740993.0.0"]);
+    await releaseWorkflowName(env, admin, old.name);
+    const taken = await createWorkflowResource(env, ada, old.name);
+    const starter = await workflowDraft(env, ada, taken.id);
+    expect(
+      z
+        .object({ document: z.object({ version: z.string() }) })
+        .parse(JSON.parse(starter.source)).document.version
+    ).toBe("9007199254740994.0.0");
+  });
 });
