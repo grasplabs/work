@@ -1,3 +1,9 @@
+import {
+  contractFingerprint,
+  declaredWorkflows,
+  workflowQueries,
+} from "@grasp-os/sdk/host";
+import type { WorkflowQueryName } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -54,9 +60,11 @@ export interface Fixture {
 /** A builder's App `name` with `files` as its first version, and a store for it. */
 export const appWith = async (
   files: Record<string, string>,
-  name = "Notes"
+  name = "Notes",
+  /** Who creates it: a new builder unless given. */
+  by?: Identity
 ): Promise<Fixture> => {
-  const owner = await person("builder");
+  const owner = by ?? (await person("builder"));
   const { id } = await createApp(env, owner, { name });
   await commitFiles(env, owner, id, files, "First version");
   return { owner, app: id, store: await createStore(env, owner) };
@@ -178,4 +186,30 @@ export const sweptAway = async (app: AppId, version: number): Promise<void> => {
     );
   }
   throw new Error(`Retention kept version ${version} of App ${app}`);
+};
+
+/**
+ * The reference to query `name` of the workflow the App declares as
+ * `alias`, as `#grasp` generates it from `release`.
+ */
+export const queryReference = async (
+  release: Release,
+  alias: string,
+  name: WorkflowQueryName
+) => {
+  const bound = declaredWorkflows(release.app, release.workflows).find(
+    (workflow) => workflow.alias === alias
+  );
+  const operation =
+    bound === undefined ? undefined : workflowQueries(bound)[name];
+  if (operation === undefined) {
+    throw new Error(`No query ${name} of ${alias}`);
+  }
+  return {
+    resourceId: release.manifest.resourceId,
+    resourceVersion: release.manifest.resourceVersion,
+    contractId: operation.path,
+    fingerprint: await contractFingerprint(operation),
+    kind: "query" as const,
+  };
 };

@@ -13,6 +13,8 @@ import {
   dependencyImpactListed,
   dependencyMaxBytes,
   dependencyProposalSchema,
+  dependencySubjectsListed,
+  subjectOfRef,
   dependencySummaryDirect,
   dependencySummaryFindings,
   dependencyTargetSchema,
@@ -30,16 +32,23 @@ import type {
   DependencyRequest,
   DependencyReview,
   DependencyStatus,
+  DependencySubject,
+  DependencySubjectsInForce,
   DependencyTarget,
+  NamedDependencySubject,
 } from "@grasp-os/shared/dependencies";
-import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  identifierSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageLimits } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   and,
   count,
@@ -55,7 +64,6 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { appFor } from "../apps.ts";
 import {
   auditedBatch,
   outboxed,
@@ -65,13 +73,13 @@ import {
 } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import {
-  apps,
   auditOutbox,
   dependencyAdmissionRefusals,
   dependencyLocks,
   dependencyPolicy,
   dependencyRequests,
   users,
+  workflowResources,
 } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import {
@@ -82,14 +90,28 @@ import {
 } from "../packages/locks.ts";
 import { holdsApprove, holdsApproveSql } from "./approvers.ts";
 import { peerIssues } from "./peers.ts";
+import { dropPending } from "./pending.ts";
 import {
   advancePolicy,
   policyGeneration,
   policyGenerationSql,
 } from "./policy.ts";
+import { builtSubject } from "./subject-builders.ts";
+import {
+  auditTargetOf,
+  ofSubject,
+  subjectKey,
+  subjectNames,
+  subjectOfInput,
+  subjectOfRow,
+} from "./subjects.ts";
 
-// npm packages proposed for an App, a person's decision on them, and the
-// one check that says whether a graph may be used. Nothing here fetches,
+// npm packages proposed for an App or a workflow (its subject,
+// subjects.ts), a person's decision on them, and the one check that says
+// whether a graph may be used. Everything below holds per subject: what
+// it says of an App holds of a workflow too, whose packages are only
+// ever for its compute modules (`computation`), and an approval is its
+// subject's alone. Nothing here fetches,
 // unpacks or runs a package: a graph is data handed in, and an approval is
 // a row. What could go wrong, and what stops it:
 //
@@ -201,6 +223,7 @@ const notFound = () => dependencyErrors.create("dependency.not_found");
 type DependencyAction =
   | "requested"
   | "superseded"
+  | "withdrawn"
   | "approved"
   | "denied"
   | "retired"
@@ -214,7 +237,8 @@ const requestEntry = (
   row: Pick<
     Row,
     | "id"
-    | "appId"
+    | "subjectType"
+    | "subjectId"
     | "sourceRevision"
     | "graphHash"
     | "targets"
@@ -227,7 +251,7 @@ const requestEntry = (
   action: `dependency.${action}`,
   target: { type: "dependency_request", id: row.id },
   detail: {
-    app: row.appId,
+    [row.subjectType]: row.subjectId,
     sourceRevision: row.sourceRevision,
     graphHash: row.graphHash,
     targets: targetsOf(row).join(" "),
@@ -237,7 +261,7 @@ const requestEntry = (
   },
 });
 
-/** `rows` as the API returns them, with the App's and the people's names. */
+/** `rows` as the API returns them, with their subjects' and the people's names. */
 const toRequests = async (
   env: Env,
   rows: readonly Listed[],
@@ -256,19 +280,16 @@ const toRequests = async (
   ];
   const read = async () =>
     await Promise.all([
-      db
-        .select({ id: apps.id, name: apps.name })
-        .from(apps)
-        .where(inArray(apps.id, [...new Set(rows.map(({ appId }) => appId))])),
+      subjectNames(db, rows.map(subjectOfRow)),
       db
         .select({ id: users.id, name: users.name })
         .from(users)
         .where(inArray(users.id, people)),
     ]);
-  let appNames: { id: string; name: string }[] = [];
+  let subjectName = new Map<string, string>();
   let personNames: { id: string; name: string }[] = [];
   try {
-    [appNames, personNames] = await read();
+    [subjectName, personNames] = await read();
   } catch (error) {
     // After a change landed, its answer goes without the names rather
     // than fail as if it hadn't.
@@ -277,7 +298,6 @@ const toRequests = async (
     }
     log.warn("dependencies.names_unread", errorFields(error));
   }
-  const appName = new Map(appNames.map(({ id, name }) => [id, name]));
   const personName = new Map(personNames.map(({ id, name }) => [id, name]));
   const person = (userId: string) => ({
     userId,
@@ -285,9 +305,9 @@ const toRequests = async (
   });
   return rows.map((row) => ({
     id: row.id,
-    app: {
-      id: appIdSchema.parse(row.appId),
-      name: appName.get(row.appId) ?? "",
+    subject: {
+      ...subjectOfRow(row),
+      name: subjectName.get(subjectKey(subjectOfRow(row))) ?? "",
     },
     status: row.status,
     sourceRevision: row.sourceRevision,
@@ -342,13 +362,13 @@ const toRequest = async (env: Env, row: Listed): Promise<DependencyRequest> => {
 };
 
 /**
- * An App's approvals of the graph `graphHash`, in no order, without the
- * graph: one for each set of targets it was approved for, so a handful at
- * most, however many graphs the App has had approved.
+ * A subject's approvals of the graph `graphHash`, in no order, without
+ * the graph: one for each set of targets it was approved for, so a
+ * handful at most, however many graphs the subject has had approved.
  */
 const approvalsOf = async (
   env: Env,
-  app: AppId,
+  subject: DependencySubject,
   graphHash: string
 ): Promise<Listed[]> =>
   await drizzle(env.DB)
@@ -356,23 +376,23 @@ const approvalsOf = async (
     .from(dependencyRequests)
     .where(
       and(
-        eq(dependencyRequests.appId, app),
+        ofSubject(dependencyRequests, subject),
         eq(dependencyRequests.graphHash, graphHash),
         eq(dependencyRequests.status, "approved")
       )
     );
 
-/** The approval an App got last, if any, without its graph. */
+/** The approval a subject got last, if any, without its graph. */
 const latestApproval = async (
   env: Env,
-  app: AppId
+  subject: DependencySubject
 ): Promise<Listed | undefined> =>
   await drizzle(env.DB)
     .select(listed)
     .from(dependencyRequests)
     .where(
       and(
-        eq(dependencyRequests.appId, app),
+        ofSubject(dependencyRequests, subject),
         eq(dependencyRequests.status, "approved")
       )
     )
@@ -380,66 +400,21 @@ const latestApproval = async (
     .limit(1)
     .get();
 
-/** The one request waiting for an App, if any, without its graph. */
-const pendingFor = async (env: Env, app: AppId): Promise<Listed | undefined> =>
+/** The one request waiting for a subject, if any, without its graph. */
+const pendingFor = async (
+  env: Env,
+  subject: DependencySubject
+): Promise<Listed | undefined> =>
   await drizzle(env.DB)
     .select(listed)
     .from(dependencyRequests)
     .where(
       and(
-        eq(dependencyRequests.appId, app),
+        ofSubject(dependencyRequests, subject),
         eq(dependencyRequests.status, "pending")
       )
     )
     .get();
-
-/**
- * The statements that drop whatever request waits for `app` as their batch
- * runs, replaced by `by`, with its audit event by `actor`: the event
- * first, written from the very row the delete then removes (one waits per
- * App at most), so it names what was removed whatever was read before,
- * and nothing is recorded when nothing waits. What `requestEntry` records
- * of a superseded request, as SQL.
- */
-const dropPending = (
-  db: DrizzleD1Database,
-  actor: AuditActor,
-  app: AppId,
-  by: string
-) => {
-  const waits = and(
-    eq(dependencyRequests.appId, app),
-    eq(dependencyRequests.status, "pending")
-  );
-  const eventId = crypto.randomUUID();
-  const now = new Date();
-  const event = sql`json_object(
-    'id', ${eventId},
-    'at', ${now.toISOString()},
-    'source', 'core',
-    'actor', json(${JSON.stringify(actor)}),
-    'action', 'dependency.superseded',
-    'target', json_object('type', 'dependency_request', 'id', ${dependencyRequests.id}),
-    'provenance', json('[]'),
-    'detail', json_object(
-      'app', ${dependencyRequests.appId},
-      'sourceRevision', ${dependencyRequests.sourceRevision},
-      'graphHash', ${dependencyRequests.graphHash},
-      'targets', (SELECT group_concat(value, ' ') FROM json_each(${dependencyRequests.targets})),
-      'direct', ${dependencyRequests.direct},
-      'packages', ${dependencyRequests.packages},
-      'by', ${by}
-    )
-  )`;
-  return [
-    db
-      .insert(auditOutbox)
-      .select(
-        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${dependencyRequests} WHERE ${waits}`
-      ),
-    db.delete(dependencyRequests).where(waits),
-  ] as const;
-};
 
 /** How grave each severity is, for which findings a list shows first. */
 const gravity: Record<DependencyFinding["severity"], number> = {
@@ -478,6 +453,7 @@ const sameReview = async (
 /** What a proposal is, once checked, as each attempt goes by it. */
 interface Checked {
   proposal: z.output<typeof dependencyProposalSchema>;
+  subject: DependencySubject;
   graph: DependencyGraph;
   graphHash: string;
   targets: string;
@@ -486,13 +462,14 @@ interface Checked {
 
 /** A new pending request's row for `checked`. */
 const newRequest = (
-  { proposal, graph, graphHash, targets, snapshot }: Checked,
+  { proposal, subject, graph, graphHash, targets, snapshot }: Checked,
   by: Acting,
   previous: string | null,
   generation: number
 ): Row => ({
   id: crypto.randomUUID(),
-  appId: proposal.app,
+  subjectType: subject.type,
+  subjectId: subject.id,
   sourceRevision: proposal.sourceRevision,
   graphHash,
   targets,
@@ -524,6 +501,29 @@ const newRequest = (
   endedReason: null,
 });
 
+/**
+ * The statement that fails a proposal's batch (`failUnless`) unless its
+ * subject is still there as it runs: a workflow deleted after `propose`
+ * checked it gets no request or lock, which its deletion's batch
+ * (`withdrawnWithWorkflow`, pending.ts) would have withdrawn had it come
+ * first. An App's rows go with the App.
+ */
+const stillThere = (
+  db: DrizzleD1Database,
+  subject: DependencySubject,
+  graphHash: string
+) =>
+  subject.type === "workflow"
+    ? [
+        failUnless(
+          db,
+          subject,
+          graphHash,
+          sql`EXISTS (SELECT 1 FROM ${workflowResources} WHERE ${workflowResources.id} = ${subject.id} AND ${workflowResources.deletedAt} IS NULL)`
+        ),
+      ]
+    : [];
+
 /** One attempt's outcome: the request it answers with, and its batch. */
 interface Attempt {
   request: Listed;
@@ -541,23 +541,24 @@ const attempt = async (
   checked: Checked,
   resolved: ResolvedLock | undefined
 ): Promise<Attempt> => {
-  const { proposal, graphHash, targets, snapshot } = checked;
+  const { proposal, subject, graphHash, targets, snapshot } = checked;
   const actor = by.actor ?? actorOf(by);
   const db = drizzle(env.DB);
   const [approvals, latest, waiting, generation, written] = await Promise.all([
-    approvalsOf(env, proposal.app, graphHash),
-    latestApproval(env, proposal.app),
-    pendingFor(env, proposal.app),
+    approvalsOf(env, subject, graphHash),
+    latestApproval(env, subject),
+    pendingFor(env, subject),
     policyGeneration(db),
     resolved === undefined
       ? undefined
       : lockStatements(db, by, {
-          app: proposal.app,
+          subject,
           graphHash,
           fresh: resolved.lock,
           limits: resolved.limits,
         }),
   ]);
+  const live = stillThere(db, subject, graphHash);
   const lockFirst = written?.statements ?? [];
   const lock = written?.lock;
   const standing = approvals.find((row) => covers(row, proposal.targets));
@@ -576,15 +577,19 @@ const attempt = async (
       request: standing,
       lock,
       statements: [
+        ...live,
         failUnless(
           db,
-          proposal.app,
+          subject,
           graphHash,
           sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${standing.id} AND ${dependencyRequests.status} = 'approved')`
         ),
-        ...dropPending(db, actor, proposal.app, standing.id),
+        ...dropPending(db, actor, subject, {
+          action: "superseded",
+          by: standing.id,
+        }),
         ...lockFirst,
-        ...unusedLockStatements(db, proposal.app),
+        ...unusedLockStatements(db, subject),
       ],
     };
   }
@@ -595,7 +600,11 @@ const attempt = async (
     waiting.targets === targets &&
     (await sameReview(db, waiting.id, snapshot))
   ) {
-    return { request: waiting, lock, statements: lockFirst };
+    return {
+      request: waiting,
+      lock,
+      statements: lockFirst.length === 0 ? [] : [...live, ...lockFirst],
+    };
   }
   const row = newRequest(checked, by, latest?.id ?? null, generation);
   const superseded = waiting
@@ -620,6 +629,7 @@ const attempt = async (
     // The request it replaces goes first, so its lock gives up its room to
     // this one's (`lockStatements`).
     statements: [
+      ...live,
       ...superseded,
       ...lockFirst,
       db.insert(dependencyRequests).values(row),
@@ -632,7 +642,7 @@ const attempt = async (
           policyGeneration: generation,
         })
       ),
-      ...unusedLockStatements(db, proposal.app),
+      ...unusedLockStatements(db, subject),
     ],
   };
 };
@@ -675,7 +685,9 @@ const propose = async (
   if (peers.length > 0) {
     throw dependencyErrors.create("dependency.invalid", { issues: peers });
   }
-  await appFor(env, by, proposal.app, "builder");
+  // Its own builders only; a workflow's targets are checked by the schema
+  // (`computation` alone).
+  const subject = await builtSubject(env, by, subjectOfRef(proposal));
   const graph = canonicalGraph(proposal.graph);
   const snapshot = canonicalJson({
     graph,
@@ -690,6 +702,7 @@ const propose = async (
   }
   const checked: Checked = {
     proposal,
+    subject: { type: subject.type, id: subject.id },
     graph,
     graphHash: await dependencyGraphHash(graph),
     targets: JSON.stringify(proposal.targets.toSorted()),
@@ -720,6 +733,9 @@ const propose = async (
       if (!(isUniqueViolation(error) || lockGuardFailed(error))) {
         throw error;
       }
+      // Or the subject went as it ran (`stillThere`): refused as gone.
+      // oxlint-disable-next-line no-await-in-loop
+      await builtSubject(env, by, subject);
     }
   }
   throw dependencyErrors.create("dependency.stale");
@@ -755,17 +771,18 @@ export const proposeResolved = async (
   return { request, lock: lock ?? resolved.lock };
 };
 
-/** How an App's dependencies stand, for its builders. */
+/** How an App's or a workflow's dependencies stand, for its builders. */
 export const dependencyStatus = async (
   env: Env,
   by: Acting,
-  app: unknown
+  input: unknown
 ): Promise<DependencyStatus> => {
-  const { id } = await appFor(env, by, app, "builder");
+  const { type, id } = await builtSubject(env, by, subjectOfInput(input));
+  const subject: DependencySubject = { type, id };
   const [generation, pending, approved] = await Promise.all([
     policyGeneration(drizzle(env.DB)),
-    pendingFor(env, id),
-    latestApproval(env, id),
+    pendingFor(env, subject),
+    latestApproval(env, subject),
   ]);
   return {
     policyGeneration: generation,
@@ -778,8 +795,8 @@ export const dependencyStatus = async (
  * The requests waiting on `by`: every pending one, oldest first, if they
  * hold `dependencies.approve` now; none otherwise, whatever their role.
  * The permission is the deployment's, so a holder sees the request of
- * every App, shared with them or not: its package metadata, never its
- * source.
+ * every App and workflow, shared with them or not, in one queue: its
+ * package metadata, never its source.
  */
 export const waitingDependencies = async (
   env: Env,
@@ -870,8 +887,8 @@ const changesFrom = (
 
 /**
  * One request in full, for whoever may decide it (they hold
- * `dependencies.approve` now) or builds its App; `dependency.not_found`
- * for anyone else, as for one that isn't there.
+ * `dependencies.approve` now) or builds its App or workflow;
+ * `dependency.not_found` for anyone else, as for one that isn't there.
  */
 export const dependencyReview = async (
   env: Env,
@@ -881,11 +898,13 @@ export const dependencyReview = async (
   const row = await findRow(env, input);
   if (!(await holdsApprove(env, by))) {
     try {
-      await appFor(env, by, row.appId, "builder");
+      await builtSubject(env, by, subjectOfRow(row));
     } catch (error) {
       // Not theirs to read: as if it weren't there. Anything else failed.
       if (
         appErrors.codeOf(error) === "app.not_found" ||
+        workflowResourceErrors.codeOf(error) ===
+          "workflow.resource_unavailable" ||
         roleErrors.codeOf(error) === "role.forbidden"
       ) {
         throw notFound();
@@ -914,7 +933,8 @@ export const dependencyReview = async (
  * and `by` holds `dependencies.approve`, all read as it runs, in the
  * batch that records it. No role decides, nor Grasp staff, nor an agent
  * acting for the person. The person who asked may decide, if they hold
- * the permission themselves.
+ * the permission themselves: the audit event then says so
+ * (`selfDecided`), so a review of the log finds every such decision.
  */
 export const decideDependency = async (
   env: Env,
@@ -972,12 +992,13 @@ export const decideDependency = async (
       db,
       requestEntry(actorOf(by), status, found, {
         requestedBy: found.requestedBy,
+        selfDecided: found.requestedBy === by.userId,
         policyGeneration: reviewed.policyGeneration,
         ...(reason === undefined ? {} : { reason }),
       })
     ),
     // A denied graph's lock goes, unless another request still names it.
-    ...unusedLockStatements(db, found.appId),
+    ...unusedLockStatements(db, subjectOfRow(found)),
   ]);
   if (!decided) {
     // Who holds the permission can have changed since it was checked above.
@@ -990,14 +1011,28 @@ export const decideDependency = async (
   return await toRequest(env, decided);
 };
 
-const admissionSchema = z.strictObject({
-  app: appIdSchema,
-  graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
-  targets: z.array(dependencyTargetSchema).min(1),
-  policyGeneration: z.int().nonnegative(),
-});
+const admissionSchema = z
+  .strictObject({
+    /** Whose graph: an App's or a workflow's, exactly one. */
+    app: appIdSchema.optional(),
+    workflow: workflowResourceIdSchema.optional(),
+    graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
+    targets: z.array(dependencyTargetSchema).min(1),
+    policyGeneration: z.int().nonnegative(),
+  })
+  .refine(
+    ({ app, workflow }) => (app === undefined) !== (workflow === undefined),
+    {
+      message: "Either an App or a workflow, not both",
+      path: ["app"],
+    }
+  )
+  .transform(({ app, workflow, ...rest }) => ({
+    ...rest,
+    subject: subjectOfRef({ app, workflow }),
+  }));
 
-/** What a build asks to use: one graph, for one App and targets. */
+/** What a use asks for: one graph, for one App or workflow, and targets. */
 export type DependencyAdmission = z.input<typeof admissionSchema>;
 
 /**
@@ -1061,7 +1096,7 @@ export const admissionOf = async (
       .from(dependencyRequests)
       .where(
         and(
-          eq(dependencyRequests.appId, asked.app),
+          ofSubject(dependencyRequests, asked.subject),
           eq(dependencyRequests.graphHash, asked.graphHash)
         )
       ),
@@ -1153,7 +1188,7 @@ export const admitDependencies = async (
 ): Promise<Admitted> => {
   const asked = admissionSchema.parse(input);
   const db = drizzle(env.DB);
-  const decided = await admissionOf(db, asked);
+  const decided = await admissionOf(db, input);
   if (
     decided.admitted &&
     (decided.scope === "approved" || use === "retained")
@@ -1184,7 +1219,8 @@ export const admitDependencies = async (
       db
         .insert(dependencyAdmissionRefusals)
         .values({
-          appId: asked.app,
+          subjectType: asked.subject.type,
+          subjectId: asked.subject.id,
           graphHash: asked.graphHash,
           targets,
           policyGeneration: generation,
@@ -1195,9 +1231,9 @@ export const admitDependencies = async (
       outboxedIfChanged(db, {
         actor,
         action: "dependency.admission_refused",
-        target: { type: "app", id: asked.app },
+        target: auditTargetOf(asked.subject),
         detail: {
-          app: asked.app,
+          [asked.subject.type]: asked.subject.id,
           graphHash: asked.graphHash,
           targets,
           policyGeneration: asked.policyGeneration,
@@ -1208,7 +1244,7 @@ export const admitDependencies = async (
     ]);
   } else {
     log.warn("dependencies.admission_refused", {
-      app: asked.app,
+      [asked.subject.type]: asked.subject.id,
       graphHash: asked.graphHash,
       targets,
       reason,
@@ -1231,35 +1267,40 @@ const endings = {
 
 type Ending = keyof typeof endings;
 
-/** That a row of `app`'s graph `graphHash` is one `ending` ends, as SQL. */
-const endable = (app: string, graphHash: string, ending: Ending): SQL =>
+/** That a row of `subject`'s graph `graphHash` is one `ending` ends, as SQL. */
+const endable = (
+  subject: DependencySubject,
+  graphHash: string,
+  ending: Ending
+): SQL =>
   and(
-    eq(dependencyRequests.appId, app),
+    ofSubject(dependencyRequests, subject),
     eq(dependencyRequests.graphHash, graphHash),
     inArray(dependencyRequests.status, [...endings[ending]])
   ) ?? sql`0`;
 
 /**
- * Every approval of `app`'s graph `graphHash` that `ending` would end:
- * its ID and status only, however many there are.
+ * Every approval of `subject`'s graph `graphHash` that `ending` would
+ * end: its ID and status only, however many there are.
  */
 const endableIds = async (
   db: DrizzleD1Database,
-  app: string,
+  subject: DependencySubject,
   graphHash: string,
   ending: Ending
 ): Promise<{ id: string; status: Row["status"] }[]> =>
   await db
     .select({ id: dependencyRequests.id, status: dependencyRequests.status })
     .from(dependencyRequests)
-    .where(endable(app, graphHash, ending));
+    .where(endable(subject, graphHash, ending));
 
 /**
- * App `input`'s approvals in force (approved or retired), the newest
- * decision first, at most {@link dependencyApprovalsListed}: for one of
- * its builders, or someone who holds `dependencies.approve` now, who may
- * end them. `app.not_found` for anyone else, as for an App that isn't
- * there. Never their graphs: a list selects what it shows.
+ * The approvals in force (approved or retired) of the App or workflow
+ * `input` names, the newest decision first, at most
+ * {@link dependencyApprovalsListed}: for one of its builders, or someone
+ * who holds `dependencies.approve` now, who may end them. `app.not_found`
+ * or `workflow.resource_unavailable` for anyone else, as for one that
+ * isn't there. Never their graphs: a list selects what it shows.
  */
 export const dependencyApprovals = async (
   env: Env,
@@ -1268,18 +1309,15 @@ export const dependencyApprovals = async (
 ): Promise<DependencyApprovals> => {
   const db = drizzle(env.DB);
   const decides = await holdsApprove(env, by);
-  const parsed = appIdSchema.safeParse(input);
-  // Who may approve packages reads any App's, with its name, and nothing
-  // else of it: not its versions, screens, data or members.
-  const known =
-    decides && parsed.success
-      ? await db
-          .select({ id: apps.id, name: apps.name })
-          .from(apps)
-          .where(eq(apps.id, parsed.data))
-          .get()
-      : undefined;
-  const { id: app, name } = known ?? (await appFor(env, by, input, "builder"));
+  const asked = subjectOfInput(input);
+  // Who may approve packages reads any App's or workflow's, with its name,
+  // and nothing else of it: not its versions, screens, data or members.
+  const names = decides ? await subjectNames(db, [asked]) : undefined;
+  const knownName = names?.get(subjectKey(asked));
+  const subject: NamedDependencySubject =
+    knownName === undefined
+      ? await builtSubject(env, by, asked)
+      : { ...asked, name: knownName };
   const [generation, rows] = await Promise.all([
     policyGeneration(db),
     db
@@ -1287,7 +1325,7 @@ export const dependencyApprovals = async (
       .from(dependencyRequests)
       .where(
         and(
-          eq(dependencyRequests.appId, app),
+          ofSubject(dependencyRequests, subject),
           inArray(dependencyRequests.status, ["approved", "retired"])
         )
       )
@@ -1297,8 +1335,95 @@ export const dependencyApprovals = async (
   return {
     policyGeneration: generation,
     decides,
-    app: { id: appIdSchema.parse(app), name },
+    subject,
     approvals: await toRequests(env, rows),
+  };
+};
+
+/** Where a page of the approvers' list goes on from: the last subject it showed. */
+const inForceCursorSchema = z
+  .string()
+  .max(400)
+  .transform((text, context) => {
+    const match = /^(?<type>app|workflow):(?<id>.{1,200})$/u.exec(text);
+    if (match?.groups === undefined) {
+      context.addIssue({ code: "custom", message: "Not a page of this list" });
+      return z.NEVER;
+    }
+    const { type, id = "" } = match.groups;
+    return {
+      subjectType: type === "workflow" ? "workflow" : "app",
+      subjectId: id,
+    } as const;
+  });
+
+/**
+ * Every App and workflow holding approvals in force (approved or
+ * retired), each by its name now, how many it holds and when the newest
+ * was decided: {@link dependencySubjectsListed} a page, by subject, the
+ * next page after `cursor` (the `next` a page answers with), however many
+ * there are. For someone who holds `dependencies.approve` now, who may end
+ * them; nothing for anyone else. Where an approver finds a workflow's
+ * approvals, which have no page of their workflow's to be on.
+ *
+ * A page reads only its own subjects' rows: in the subject index's order
+ * (`dependency_requests_subject_idx`), from the cursor on, stopping once
+ * the page is full, so a later page costs what the first does however
+ * long the history grows.
+ */
+export const dependencySubjectsInForce = async (
+  env: Env,
+  by: Identity,
+  cursor?: unknown
+): Promise<DependencySubjectsInForce> => {
+  if (!(await holdsApprove(env, by))) {
+    return { decides: false, subjects: [], next: null };
+  }
+  const after =
+    cursor === undefined || cursor === null
+      ? undefined
+      : dependencyErrors.parse(
+          "dependency.invalid",
+          inForceCursorSchema,
+          cursor
+        );
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({
+      subjectType: dependencyRequests.subjectType,
+      subjectId: dependencyRequests.subjectId,
+      approvals: count(),
+      decidedAt: sql<number>`MAX(${dependencyRequests.decidedAt})`,
+    })
+    .from(dependencyRequests)
+    .where(
+      and(
+        inArray(dependencyRequests.status, ["approved", "retired"]),
+        after === undefined
+          ? undefined
+          : sql`(${dependencyRequests.subjectType}, ${dependencyRequests.subjectId}) > (${after.subjectType}, ${after.subjectId})`
+      )
+    )
+    .groupBy(dependencyRequests.subjectType, dependencyRequests.subjectId)
+    .orderBy(dependencyRequests.subjectType, dependencyRequests.subjectId)
+    .limit(dependencySubjectsListed + 1);
+  const page = rows.slice(0, dependencySubjectsListed);
+  const last = page.at(-1);
+  const names = await subjectNames(db, page.map(subjectOfRow));
+  return {
+    decides: true,
+    subjects: page.map((row) => {
+      const subject = subjectOfRow(row);
+      return {
+        subject: { ...subject, name: names.get(subjectKey(subject)) ?? "" },
+        approvals: row.approvals,
+        decidedAt: new Date(row.decidedAt).toISOString(),
+      };
+    }),
+    next:
+      rows.length > dependencySubjectsListed && last !== undefined
+        ? `${last.subjectType}:${last.subjectId}`
+        : null,
   };
 };
 
@@ -1337,10 +1462,10 @@ const approvalRow = async (
   return row;
 };
 
-/** The artifacts `app`'s lock of `graphHash` pins, newest first. */
+/** The artifacts `subject`'s lock of `graphHash` pins, newest first. */
 const pinnedArtifacts = async (
   db: DrizzleD1Database,
-  app: string,
+  subject: DependencySubject,
   graphHash: string
 ): Promise<DependencyImpactArtifact[]> => {
   const row = await db
@@ -1348,7 +1473,7 @@ const pinnedArtifacts = async (
     .from(dependencyLocks)
     .where(
       and(
-        eq(dependencyLocks.appId, app),
+        ofSubject(dependencyLocks, subject),
         eq(dependencyLocks.graphHash, graphHash)
       )
     )
@@ -1385,16 +1510,17 @@ export const dependencyImpact = async (
   }
   const db = drizzle(env.DB);
   const row = await approvalRow(db, input);
+  const subject = subjectOfRow(row);
   const [generation, inForce, listedRows, artifacts] = await Promise.all([
     policyGeneration(db),
-    endableIds(db, row.appId, row.graphHash, "revoked"),
+    endableIds(db, subject, row.graphHash, "revoked"),
     db
       .select(listed)
       .from(dependencyRequests)
-      .where(endable(row.appId, row.graphHash, "revoked"))
+      .where(endable(subject, row.graphHash, "revoked"))
       .orderBy(desc(dependencyRequests.decidedAt), dependencyRequests.id)
       .limit(dependencyImpactListed),
-    pinnedArtifacts(db, row.appId, row.graphHash),
+    pinnedArtifacts(db, subject, row.graphHash),
   ]);
   const approved = inForce
     .filter(({ status }) => status === "approved")
@@ -1403,7 +1529,7 @@ export const dependencyImpact = async (
   const requests = await toRequests(env, listedRows);
   return {
     policyGeneration: generation,
-    app: requests[0]?.app ?? { id: appIdSchema.parse(row.appId), name: "" },
+    subject: requests[0]?.subject ?? { ...subject, name: "" },
     graphHash: row.graphHash,
     approvals: requests,
     endings: {
@@ -1422,8 +1548,8 @@ export const dependencyImpact = async (
 
 /**
  * The statements, for a batch that revokes `named`'s graph and stores
- * event `revocation`, that deny the request waiting for that same App and
- * graph, if one does, as `by`'s decision under `generation`: its audit
+ * event `revocation`, that deny the request waiting for that same subject
+ * and graph, if one does, as `by`'s decision under `generation`: its audit
  * event first (`dependency.denied`, naming the revocation), written from
  * the very row the update then changes, and both only if the revocation
  * landed.
@@ -1437,7 +1563,7 @@ const denyWaiting = (
   reason: string
 ) => {
   const waits = and(
-    eq(dependencyRequests.appId, named.appId),
+    ofSubject(dependencyRequests, subjectOfRow(named)),
     eq(dependencyRequests.graphHash, named.graphHash),
     eq(dependencyRequests.status, "pending"),
     storedEvent(revocation)
@@ -1453,13 +1579,14 @@ const denyWaiting = (
     'target', json_object('type', 'dependency_request', 'id', ${dependencyRequests.id}),
     'provenance', json('[]'),
     'detail', json_object(
-      'app', ${dependencyRequests.appId},
+      ${dependencyRequests.subjectType}, ${dependencyRequests.subjectId},
       'sourceRevision', ${dependencyRequests.sourceRevision},
       'graphHash', ${dependencyRequests.graphHash},
       'targets', (SELECT group_concat(value, ' ') FROM json_each(${dependencyRequests.targets})),
       'direct', ${dependencyRequests.direct},
       'packages', ${dependencyRequests.packages},
       'requestedBy', ${dependencyRequests.requestedBy},
+      'selfDecided', json(CASE WHEN ${dependencyRequests.requestedBy} = ${by.userId} THEN 'true' ELSE 'false' END),
       'policyGeneration', ${generation},
       'reason', ${reason},
       'revocation', ${revocation}
@@ -1485,7 +1612,8 @@ const denyWaiting = (
 };
 
 /**
- * Retires or revokes the graph of approval `input` for its App, for `by`:
+ * Retires or revokes the graph of approval `input` for its App or
+ * workflow, for `by`:
  * the approvals of the graph the person reviewed, in one batch that
  * lands only while those are exactly the ones `ending` would end now
  * (`endings`), the
@@ -1524,7 +1652,8 @@ export const endDependency = async (
   // approvals in force now must be the very set the impact showed them
   // (by digest, however many), and the batch then lands only while they
   // still are.
-  const inForceNow = await endableIds(db, named.appId, named.graphHash, ending);
+  const subject = subjectOfRow(named);
+  const inForceNow = await endableIds(db, subject, named.graphHash, ending);
   const ids = inForceNow.map(({ id }) => id);
   if (
     !ids.includes(named.id) ||
@@ -1539,7 +1668,7 @@ export const endDependency = async (
       action: `dependency.${ending}`,
       target: { type: "dependency_request", id: named.id },
       detail: {
-        app: named.appId,
+        [subject.type]: subject.id,
         graphHash: named.graphHash,
         // How many, and which by digest: the rows themselves record that
         // they ended, with this generation (`ended_generation`).
@@ -1553,7 +1682,7 @@ export const endDependency = async (
   );
   // The approvals in force as the batch runs are exactly the ones
   // reviewed: as many, and each of them, whatever order rows come in.
-  const inForce = endable(named.appId, named.graphHash, ending);
+  const inForce = endable(subject, named.graphHash, ending);
   // The IDs as one JSON parameter, however many there are.
   const reviewedIds = sql`(SELECT value FROM json_each(${JSON.stringify(ids)}))`;
   const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${dependencyRequests.id} IN ${reviewedIds}) = ${ids.length} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${holdsApproveSql(by.userId)}`;
@@ -1584,7 +1713,7 @@ export const endDependency = async (
       : []),
     // A revoked graph's lock goes, now that nothing waiting names it; a
     // retired one is in use (packages/locks.ts).
-    ...unusedLockStatements(db, named.appId),
+    ...unusedLockStatements(db, subject),
   ]);
   if (ended.length !== ids.length) {
     // Who holds the permission can have changed since it was checked.

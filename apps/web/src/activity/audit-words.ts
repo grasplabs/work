@@ -150,6 +150,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Replaced a request for packages`,
   },
   {
+    action: "dependency.withdrawn",
+    text: msg`Withdrew a request for packages`,
+  },
+  {
     action: "dependency.admission_refused",
     text: msg`Was refused packages nobody approved`,
   },

@@ -1,3 +1,4 @@
+import type { Id } from "@grasp-os/sdk";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -15,8 +16,8 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 
-import { recordOf } from "./playbook";
-import type { Team, Workflow } from "./playbook";
+import { recordOf } from "./store";
+import type { Team, Workflow } from "./store";
 import { formatHours, totalsOf } from "./totals";
 
 /** The workflows of one team, or of none, in title order. */
@@ -28,19 +29,20 @@ interface Group {
 
 const noTeam = "No team";
 
-const titleOf = (workflow: Workflow): string =>
-  recordOf(workflow).title ?? workflow.path;
+const titleOf = (workflow: Workflow): string => recordOf(workflow).title;
 
 /** The workflows by team: each team in title order, then those without one. */
 const groupsOf = (workflows: Workflow[], teams: Team[]): Group[] => {
-  const titles = new Map(teams.map(({ path, title }) => [path, title]));
+  const titles = new Map<string, string>(
+    teams.map(({ id, title }) => [id, title])
+  );
   const groups = new Map<string, Group>();
   for (const workflow of workflows) {
     const { team } = recordOf(workflow);
     const key = team ?? "";
     const group = groups.get(key) ?? {
       key,
-      title: team === undefined ? noTeam : (titles.get(team) ?? team),
+      title: team === undefined ? noTeam : (titles.get(team) ?? "A team"),
       workflows: [],
     };
     group.workflows.push(workflow);
@@ -66,7 +68,7 @@ const WorkflowRow = ({
   onOpen,
 }: {
   workflow: Workflow;
-  onOpen: (id: string) => void;
+  onOpen: (id: Id<"workflows">) => void;
 }) => {
   const record = recordOf(workflow);
   const totals = totalsOf(record.steps);
@@ -109,7 +111,7 @@ export const WorkflowList = ({
   teams: Team[];
   /** Whether the person may draw one: only then are they asked to. */
   writable: boolean;
-  onOpen: (id: string) => void;
+  onOpen: (id: Id<"workflows">) => void;
 }) => {
   if (workflows.length === 0) {
     return (

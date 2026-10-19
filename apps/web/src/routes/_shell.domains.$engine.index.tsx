@@ -381,7 +381,7 @@ const Packages = ({
   packages: Deferred<DependencyApprovals>;
 }) => (
   <Later promise={packages}>
-    {(listed) => <PackageApprovals key={listed.app.id} listed={listed} />}
+    {(listed) => <PackageApprovals key={listed.subject.id} listed={listed} />}
   </Later>
 );
 
@@ -462,7 +462,8 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             setPackagesRead(
               loadFromCore(
                 core,
-                async (session) => await session.dependencies.approvals(app.id)
+                async (session) =>
+                  await session.dependencies.approvals({ app: app.id })
               )
             );
           }
@@ -558,13 +559,13 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
       <SiteHeader
         crumbs={[
           { label: t`Domains`, to: "/domains" },
-          { label: listed.app.name },
+          { label: listed.subject.name },
         ]}
       />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
         <div className="flex flex-col gap-0.5">
           <h1 className="text-2xl font-medium tracking-tight">
-            {listed.app.name}
+            {listed.subject.name}
           </h1>
           <p className="text-muted-foreground">
             <Trans>
@@ -580,7 +581,7 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
           <h2 className="text-base font-medium" id="engine-packages">
             <Trans>Packages</Trans>
           </h2>
-          <PackageApprovals key={listed.app.id} listed={listed} />
+          <PackageApprovals key={listed.subject.id} listed={listed} />
         </section>
       </div>
     </>

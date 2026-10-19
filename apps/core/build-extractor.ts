@@ -1,7 +1,7 @@
 /**
  * Builds the extractor (src/knowledge/extractor/worker.ts) into one ES
  * module among core's static assets, once per release at core's build
- * time, as the screen compiler is. Core reads it from there for each
+ * time, as the App compiler is. Core reads it from there for each
  * extraction and runs it in a Dynamic Worker of its own
  * (src/knowledge/extract.ts); its libraries (pdf.js above all) never load
  * in core's own isolate.
