@@ -1416,22 +1416,46 @@ export interface AiStepCall {
   readonly line: number;
 }
 
-/** A step call's `binding` option, when written as a string literal. */
+/**
+ * The scopes under `body` (itself included) that declare `name`: a
+ * variable, function or class in a block, a parameter of a nested
+ * function, a catch binding. A `var` counts in the block it is written in.
+ */
+const scopesDeclaring = (body: Node, name: string): Set<Node> => {
+  const scopes = new Set<Node>();
+  visit(body, (node, ancestors) => {
+    if (declaredWithin(node).includes(name)) {
+      scopes.add(node);
+    }
+    if (declaredAround(node).includes(name)) {
+      const scope =
+        ancestors.findLast(({ node: above }) => isScope(above))?.node ?? body;
+      scopes.add(scope);
+    }
+  });
+  return scopes;
+};
+
+/**
+ * A step call's `binding` option, when written as a string literal that
+ * nothing after it can replace: null when the options are no object
+ * literal, spread anything in, or name a key by a computation.
+ */
 const bindingOption = (options: Node | undefined): string | null => {
   if (options?.type !== "ObjectExpression") {
     return null;
   }
+  let binding: string | null = null;
   for (const property of options.properties) {
-    if (
-      property.type === "ObjectProperty" &&
-      !property.computed &&
-      nameOf(property.key) === "binding"
-    ) {
+    if (property.type !== "ObjectProperty" || property.computed) {
+      return null;
+    }
+    if (nameOf(property.key) === "binding") {
       const value = literalOf(property.value);
-      return typeof value === "string" ? value : null;
+      binding = typeof value === "string" ? value : null;
     }
   }
-  return null;
+  return binding;
 };
 
 /**
@@ -1490,17 +1514,35 @@ export const aiStepCalls = (source: string): AiStepCall[] | null => {
     throw error;
   }
   const { run, bindings } = context;
+  const { step } = bindings;
+  if (step === undefined) {
+    return [];
+  }
+  const shadowing = scopesDeclaring(run.body, step);
   const calls: AiStepCall[] = [];
   visit(run.body, (node, ancestors) => {
     if (
-      node.type === "Identifier" &&
-      node.name === bindings.step &&
-      !isNamePosition(ancestors)
+      node.type !== "Identifier" ||
+      node.name !== step ||
+      isNamePosition(ancestors)
     ) {
-      const call = aiStepCallOf(node, ancestors);
-      if (call !== undefined) {
-        calls.push(call);
-      }
+      return;
+    }
+    // The nearest scope around it that declares the name decides what it
+    // is: one inside the workflow function is another variable; the
+    // function's own body declaring it again is one no one can read.
+    const scope = ancestors.findLast(({ node: above }) =>
+      shadowing.has(above)
+    )?.node;
+    if (scope !== undefined && scope !== run.body) {
+      return;
+    }
+    const call =
+      scope === run.body
+        ? { name: null, binding: null, line: node.loc?.start.line ?? 0 }
+        : aiStepCallOf(node, ancestors);
+    if (call !== undefined) {
+      calls.push(call);
     }
   });
   return calls;

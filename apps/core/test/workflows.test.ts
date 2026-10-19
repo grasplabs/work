@@ -587,6 +587,49 @@ ${mailStep("after")}`,
         { extract: 1 }
       ),
     });
+    // Options that may replace the binding can't be read either, and a
+    // workflow whose context can't be read (\`env\` kept outside a step)
+    // has steps no one can read.
+    const spread = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    binding: "extractor",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    ...{ binding: "missing" },
+  });`,
+        { extract: { total: 1234 } }
+      ),
+    });
+    const unreadable = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  const kept = env.MAIL;
+  return await step.llm("extract", {
+    description: "Read the total",
+    binding: "extractor",
+    instructions: String(kept),
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+  });`,
+        { extract: { total: 1234 } }
+      ),
+    });
+    // Another variable named \`step\` is just that.
+    const shadowed = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  const labels = ["a"].map((step) => step.length);
+  return await step.do("extract", { description: "Count", input: { labels } }, async () => 1);`,
+        { extract: 1 }
+      ),
+    });
     const fits = await activating({ ...own, ...reading("extractor") });
     // An App of the earlier layout declares no resources at all.
     const { id: earlier } = await builder.api.apps.create({ name: "Earlier" });
@@ -599,6 +642,9 @@ ${mailStep("after")}`,
       structured,
       tried,
       passed,
+      spread,
+      unreadable,
+      shadowed,
       fits,
       unsealed,
     }).toStrictEqual({
@@ -624,6 +670,19 @@ ${mailStep("after")}`,
           'workflows/reader.ts:4 An AI step of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
         ],
       },
+      spread: {
+        code: "workflow.model_undeclared",
+        steps: [
+          'workflows/reader.ts:4 AI step "extract" of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
+        ],
+      },
+      unreadable: {
+        code: "workflow.model_undeclared",
+        steps: [
+          'workflows/reader.ts:1 An AI step of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
+        ],
+      },
+      shadowed: { code: "ok", steps: [] },
       fits: { code: "ok", steps: [] },
       unsealed: {
         code: "workflow.model_undeclared",

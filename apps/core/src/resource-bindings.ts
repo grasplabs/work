@@ -1014,12 +1014,17 @@ export interface WorkflowAiStep {
   readonly line: number;
 }
 
+/** Code that names an AI step, however it is written. */
+const mentionsAiStep = /\bllm\b/u;
+
 /**
  * The AI steps the workflows in `files` may take, by the model resource
  * each goes through (`step.llm`'s `binding`), read from their code
  * whether or not their outlines can be (`aiStepCalls`): a step in a `try`
- * runs all the same. A workflow whose context can't be read gives none:
- * it doesn't build.
+ * runs all the same. A workflow whose context can't be read at all
+ * (`env` used outside a step, say), though its code names an AI step,
+ * counts as one whose model can't be read. One that hides even the name
+ * is still refused on each attempt (`stepModelBinding`).
  */
 export const workflowAiSteps = (
   files: Readonly<Record<string, string>>
@@ -1029,7 +1034,12 @@ export const workflowAiSteps = (
     if (workflow === undefined) {
       return [];
     }
-    return (aiStepCalls(source) ?? []).map(({ name, binding, line }) => ({
+    const calls =
+      aiStepCalls(source) ??
+      (mentionsAiStep.test(source)
+        ? [{ name: null, binding: null, line: 1 }]
+        : []);
+    return calls.map(({ name, binding, line }) => ({
       file,
       workflow,
       step: name,
