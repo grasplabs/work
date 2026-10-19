@@ -31,6 +31,11 @@ msgstr "«{text}»"
 msgid "(company)"
 msgstr "(empresa)"
 
+#: src/brain/brain-source-contents.tsx
+msgctxt "a number that changed: what it was before"
+msgid "(was {before})"
+msgstr "(antes: {before})"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "(yours)"
 msgstr "(tuya)"
@@ -465,7 +470,9 @@ msgstr "{fixtures, plural, one {Superó su # registro de prueba cuando se selló
 msgid "{fixtures, plural, one {It runs on its # fixture when the version is sealed, before any record} other {It runs on its # fixtures when the version is sealed, before any record}}"
 msgstr "{fixtures, plural, one {Se ejecuta sobre su # registro de prueba cuando se sella la versión, antes que sobre cualquier registro} other {Se ejecuta sobre sus # registros de prueba cuando se sella la versión, antes que sobre cualquier registro}}"
 
+#. Earlier events on a timeline, folded away
 #: src/knowledge/timeline.tsx
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# anterior} other {# anteriores}}"
 
@@ -488,6 +495,11 @@ msgstr "{goals, plural, one {# objetivo} other {# objetivos}}"
 #: src/onboarding/send-plan-form.tsx
 msgid "{going} of {count}"
 msgstr "{going} de {count}"
+
+#: src/brain/brain-chips.tsx
+#: src/brain/brain-source-contents.tsx
+msgid "{hidden, plural, one {Show # more} other {Show # more}}"
+msgstr "{hidden, plural, one {Mostrar # más} other {Mostrar # más}}"
 
 #: src/connections/connection-list.tsx
 msgid "{holder}: {actions} on {resource}"
@@ -597,6 +609,10 @@ msgstr "{live} de {count} activos"
 #: src/dashboard/standard-widgets.tsx
 msgid "{mapped} mapped"
 msgstr "{mapped} mapeados"
+
+#: src/brain/brain-transcript.tsx
+msgid "{match} of {matches}"
+msgstr "{match} de {matches}"
 
 #: src/landscape/audit-trail.tsx
 msgid "{matching, plural, one {End of the audit trail · # event} other {End of the audit trail · # events}}"
@@ -932,6 +948,10 @@ msgstr "{spent} de {limit}"
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
 msgstr "{statements, plural, one {# afirmación: {breakdown}} other {# afirmaciones: {breakdown}}}"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "{statements, plural, one {# statement} other {# statements}}"
+msgstr "{statements, plural, one {# afirmación} other {# afirmaciones}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{statements, plural, one {They brought # statement, each one tagged and kept with its source.} other {They brought # statements, each one tagged and kept with its source.}}"
 msgstr "{statements, plural, one {Aportaron # afirmación, etiquetada y guardada con su fuente.} other {Aportaron # afirmaciones, cada una etiquetada y guardada con su fuente.}}"
@@ -1129,6 +1149,10 @@ msgstr "{who} no se podrá conceder más tarde: tendrá que volver a pedirse."
 #: src/connections/connection-list.tsx
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} dio su consentimiento antes de conectarlo:"
+
+#: src/brain/brain-article/kern.tsx
+msgid "{who}, interviewed {day}"
+msgstr "{who}, entrevistado el {day}"
 
 #: src/inbox/items.ts
 msgid "{workflow} in {appName} failed"
@@ -1487,6 +1511,7 @@ msgid "Added"
 msgstr "Añadido"
 
 #: src/brain/brain.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Aporta"
@@ -1604,6 +1629,7 @@ msgid "Agreements"
 msgstr "Acuerdos"
 
 #: src/brain/brain.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "AI"
 msgstr "IA"
 
@@ -1796,6 +1822,10 @@ msgstr "Una aplicación solo se ejecuta cuando un administrador ha aprobado su c
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Un formato antiguo: guárdalo como PDF o en un archivo más reciente"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "and {more} more"
+msgstr "y {more} más"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "Another day"
 msgstr "Otro día"
@@ -1912,6 +1942,7 @@ msgstr "Aplicación no encontrada"
 msgid "App profile"
 msgstr "Perfil de la aplicación"
 
+#: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/landscape/filter-menu.tsx
 msgid "Application"
@@ -1920,6 +1951,14 @@ msgstr "Aplicación"
 #: src/brain/brain.ts
 msgid "Applications"
 msgstr "Aplicaciones"
+
+#: src/brain/brain-source-contents.tsx
+msgid "Applications in use on devices"
+msgstr "Aplicaciones en uso en los dispositivos"
+
+#: src/brain/brain-source-contents.tsx
+msgid "Applications signed in to"
+msgstr "Aplicaciones con inicio de sesión"
 
 #: src/engines/screen-approval.tsx
 msgid "Approval"
@@ -2196,6 +2235,10 @@ msgstr "Disponible, acceso directo"
 msgid "Available, via Composio"
 msgstr "Disponible, a través de Composio"
 
+#: src/brain/back-button.tsx
+msgid "Back"
+msgstr "Atrás"
+
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
 msgstr "Volver a como empezó"
@@ -2324,6 +2367,12 @@ msgstr "Vinculado"
 msgid "Bound to"
 msgstr "Vinculado a"
 
+#: src/brain/brain-nav.tsx
+#: src/frame/app-sidebar.tsx
+#: src/routes/_shell.brain.tsx
+msgid "Brain"
+msgstr "Cerebro"
+
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
 msgid "Brain"
@@ -2388,6 +2437,11 @@ msgctxt "column of the audit trail export: who recorded the event"
 msgid "By"
 msgstr "Autor"
 
+#. Column value: a team named this application
+#: src/brain/brain-source-contents.tsx
+msgid "By a team"
+msgstr "Por un equipo"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "By hand now"
 msgstr "A mano ahora"
@@ -2395,6 +2449,11 @@ msgstr "A mano ahora"
 #: src/dashboard/standard-widgets.tsx
 msgid "by hand, a month"
 msgstr "a mano, al mes"
+
+#. Column value: no team named this application
+#: src/brain/brain-source-contents.tsx
+msgid "By nobody"
+msgstr "Por nadie"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "By person"
@@ -2735,6 +2794,7 @@ msgstr "Elige tu lista de personal"
 msgid "Clear"
 msgstr "Borrar"
 
+#: src/brain/brain-transcript.tsx
 #: src/landscape/faceted-filter.tsx
 #: src/landscape/filter-menu.tsx
 #: src/settings/filter-menu.tsx
@@ -2761,6 +2821,7 @@ msgstr "Haz clic para abrir Uso"
 msgid "Close"
 msgstr "Cerrar"
 
+#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Close {name}"
 msgstr "Cerrar {name}"
@@ -3071,6 +3132,11 @@ msgstr "Dar consentimiento e iniciar sesión"
 msgid "Content, as JSON"
 msgstr "Contenido, en JSON"
 
+#: src/brain/brain-transcript.tsx
+msgctxt "heading: the headings of a document, as a table of contents"
+msgid "Contents"
+msgstr "Contenido"
+
 #: src/inbox/item-detail.tsx
 msgctxt "inbox item section"
 msgid "Context"
@@ -3367,6 +3433,7 @@ msgstr "Diseñado"
 #: src/activity/audit-log.tsx
 #: src/knowledge/document.tsx
 #: src/landscape/landscape-audit.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Details"
 msgstr "Detalles"
 
@@ -3680,6 +3747,10 @@ msgstr "Correo y calendario"
 msgid "Embedded AI"
 msgstr "IA integrada"
 
+#: src/brain/brain-article/kern.tsx
+msgid "Employee"
+msgstr "Empleado"
+
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Employee email domains"
 msgstr "Dominios de correo de los empleados"
@@ -3783,6 +3854,10 @@ msgstr "Todos los eventos de acceso y permisos registrados, del más reciente al
 msgid "Every source adds its own share, and only once it is in."
 msgstr "Cada fuente suma su propia parte, y solo cuando ya está."
 
+#: src/brain/brain-sections.ts
+msgid "Every team Grasp spoke to: who they are, how they work and what slows them down."
+msgstr "Cada equipo con el que habló Grasp: quiénes son, cómo trabajan y qué los frena."
+
 #: src/onboarding/staff-words.ts
 msgid "Every team has its lead"
 msgstr "Cada equipo tiene su responsable"
@@ -3843,6 +3918,7 @@ msgstr "Desplegar los chats"
 msgid "Expand the filters"
 msgstr "Desplegar los filtros"
 
+#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Expand the navigation"
 msgstr "Desplegar la navegación"
@@ -3986,6 +4062,7 @@ msgctxt "inbox: filter button"
 msgid "Filter"
 msgstr "Filtrar"
 
+#: src/brain/brain-transcript.tsx
 #: src/landscape/filter-menu.tsx
 msgctxt "open the filters"
 msgid "Filter"
@@ -4084,6 +4161,7 @@ msgstr "Plegar los chats"
 msgid "Fold the filters"
 msgstr "Plegar los filtros"
 
+#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Fold the navigation"
 msgstr "Plegar la navegación"
@@ -4601,6 +4679,10 @@ msgstr "En el Brain"
 msgid "In the proposer's words"
 msgstr "En palabras de quien lo propone"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "In this conversation"
+msgstr "En esta conversación"
+
 #: src/policies/policies-table.tsx
 msgctxt "status of an uploaded policy whose rules are published"
 msgid "In use"
@@ -4950,8 +5032,11 @@ msgstr "Arranque"
 msgid "Kind"
 msgstr "Tipo"
 
+#: src/brain/brain-transcript.tsx
+msgid "Kind of statement"
+msgstr "Tipo de afirmación"
+
 #: src/engines/resource-bindings.tsx
-#: src/frame/app-sidebar.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -5002,6 +5087,10 @@ msgstr "Últimos 7 días"
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "Last decided"
 msgstr "Última decisión"
+
+#: src/brain/brain-article/kern.tsx
+msgid "Last heard {day}"
+msgstr "Última vez escuchado {day}"
 
 #: src/dashboard/failed-workflows.tsx
 msgid "Last on {date}"
@@ -5441,6 +5530,11 @@ msgstr "Nombre"
 msgid "Name of a new workflow"
 msgstr "Nombre de un nuevo flujo de trabajo"
 
+#: src/brain/brain-source-contents.tsx
+msgctxt "column: whether a team named the application in a conversation"
+msgid "Named"
+msgstr "Mencionada"
+
 #: src/brain/brain.ts
 msgid "Named by"
 msgstr "Mencionada por"
@@ -5458,8 +5552,13 @@ msgid "Named in {source}"
 msgstr "Se mencionó en {source}"
 
 #: src/brain/brain-markdown.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Named, not linked"
 msgstr "Mencionadas, sin enlazar"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Names {title} under {under}"
+msgstr "Nombra a {title} en {under}"
 
 #: src/connections/source-badge.tsx
 #: src/landscape/landscape.ts
@@ -5559,6 +5658,10 @@ msgstr "Siguiente"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Next invoice"
 msgstr "Próxima factura"
+
+#: src/brain/brain-transcript.tsx
+msgid "Next match"
+msgstr "Siguiente coincidencia"
 
 #: src/workflows/triggers.tsx
 msgid "Next run: {next}"
@@ -5738,6 +5841,10 @@ msgstr "Ya no se ejecuta {how}"
 #: src/dashboard/dependency-requests.tsx
 msgid "No longer used: {removed}"
 msgstr "Ya no se usa: {removed}"
+
+#: src/brain/brain-transcript.tsx
+msgid "No matches"
+msgstr "Sin coincidencias"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "No memory files are written yet."
@@ -6099,6 +6206,10 @@ msgstr "Aún sin dominio"
 msgid "Not known"
 msgstr "Desconocido"
 
+#: src/brain/brain-source-contents.tsx
+msgid "Not listed"
+msgstr "No indicados"
+
 #: src/policies/policy.ts
 msgid "Not made by {vendors}"
 msgstr "No desarrollada por {vendors}"
@@ -6172,6 +6283,10 @@ msgctxt "severity of a finding"
 msgid "Note"
 msgstr "Nota"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Note not found"
+msgstr "Nota no encontrada"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "Notes"
 msgstr "Notas"
@@ -6206,6 +6321,10 @@ msgstr "Aún no ha pasado nada."
 #: src/workflows/runs.tsx
 msgid "Nothing has run yet."
 msgstr "Todavía no se ha ejecutado nada."
+
+#: src/brain/brain-transcript.tsx
+msgid "Nothing here matches the filter."
+msgstr "Nada aquí coincide con el filtro."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
@@ -6429,6 +6548,10 @@ msgstr "En línea"
 msgid "Only admins can read the audit trail"
 msgstr "Solo los administradores pueden leer el registro de auditoría"
 
+#: src/brain/brain-transcript.tsx
+msgid "Only highlighted turns"
+msgstr "Solo intervenciones destacadas"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Solo si se cumple su condición"
@@ -6494,6 +6617,7 @@ msgid "Open"
 msgstr "Abrir"
 
 #: src/brain/brain-markdown.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgctxt "on a timeline: not happened yet"
 msgid "Open"
 msgstr "Pendiente"
@@ -6508,6 +6632,7 @@ msgctxt "open an app"
 msgid "Open"
 msgstr "Abrir"
 
+#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -6559,6 +6684,10 @@ msgstr "Pregunta abierta"
 msgctxt "inbox item kind"
 msgid "Open question"
 msgstr "Pregunta abierta"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Open questions"
+msgstr "Preguntas abiertas"
 
 #: src/brain/brain.ts
 msgid "Open since {date}. Until it is answered, this stays unknown, never zero."
@@ -6726,6 +6855,10 @@ msgctxt "tab of a workflow"
 msgid "Parameters"
 msgstr "Parámetros"
 
+#: src/routes/_shell.brain.sections.$sectionId.tsx
+msgid "Part of the brain not found"
+msgstr "Parte del brain no encontrada"
+
 #: src/dashboard/outcome-card.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
 msgstr "Parte de lo que se envió aparece recortado arriba. Muéstralo todo, o exactamente lo que se envió, antes de decir que no ocurrió."
@@ -6799,6 +6932,11 @@ msgstr "Pendiente"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "activity filter: what people did"
+msgid "People"
+msgstr "Personas"
+
+#: src/brain/brain-source-contents.tsx
+msgctxt "column: how many people"
 msgid "People"
 msgstr "Personas"
 
@@ -6887,6 +7025,11 @@ msgid "Permission to invite guests"
 msgstr "Permiso para invitar a invitados"
 
 #: src/landscape/data-tab.tsx
+msgid "Permissions"
+msgstr "Permisos"
+
+#: src/brain/brain-source-contents.tsx
+msgctxt "column: the OAuth permissions granted to an application"
 msgid "Permissions"
 msgstr "Permisos"
 
@@ -6995,6 +7138,10 @@ msgstr "Vista previa: no cambia nada ni lee datos reales"
 msgctxt "page"
 msgid "Previous"
 msgstr "Anterior"
+
+#: src/brain/brain-transcript.tsx
+msgid "Previous match"
+msgstr "Coincidencia anterior"
 
 #: src/landscape/overview-tab.tsx
 msgid "Privacy policy"
@@ -7598,6 +7745,7 @@ msgstr "Rol"
 msgid "Role of {who}"
 msgstr "Rol de {who}"
 
+#: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.members.tsx
 msgid "Roles"
@@ -7893,6 +8041,10 @@ msgstr "Buscar personas y dispositivos"
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La búsqueda lee todas las colecciones que puedes leer. Prueba con otras palabras, o con menos."
 
+#: src/brain/brain-transcript.tsx
+msgid "Search the transcript"
+msgstr "Buscar en la transcripción"
+
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "Buscó en el conocimiento"
@@ -8045,6 +8197,14 @@ msgstr "Mostrar exactamente lo que se envió"
 #: src/chat/held-writes.tsx
 msgid "Show exactly what will be sent"
 msgstr "Mostrar exactamente lo que se enviará"
+
+#: src/brain/brain-chips.tsx
+msgid "Show fewer"
+msgstr "Mostrar menos"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Show in the brain"
+msgstr "Mostrar en el cerebro"
 
 #: src/chat/held-writes.tsx
 msgid "Show less"
@@ -8273,6 +8433,7 @@ msgstr "Fuente"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Fuentes"
 
@@ -8283,6 +8444,10 @@ msgstr "El acceso del personal a esta organización no está abierto."
 #: src/routes/_shell.onboarding.index.tsx
 msgid "Stages"
 msgstr "Etapas"
+
+#: src/brain/brain-article/kern.tsx
+msgid "Stakeholder"
+msgstr "Responsable"
 
 #: src/brain/brain.ts
 msgid "Stakeholder changed to the {role}"
@@ -8345,6 +8510,7 @@ msgstr "Situación"
 msgid "Statement"
 msgstr "Afirmación"
 
+#: src/brain/brain-transcript.tsx
 #: src/brain/brain.ts
 msgid "Statements"
 msgstr "Afirmaciones"
@@ -8481,6 +8647,11 @@ msgstr "Stripe aún no está vinculado"
 msgid "Structured, at most {tokens} tokens"
 msgstr "Estructurada, como máximo {tokens} tokens"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgctxt "tab: an interview written up short"
+msgid "Summary"
+msgstr "Resumen"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Support"
@@ -8542,6 +8713,7 @@ msgstr "Diseño objetivo acordado"
 msgid "Target ID"
 msgstr "ID del objetivo"
 
+#: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/dashboard/standard-widgets.tsx
 #: src/settings/pulse-people.tsx
@@ -8574,6 +8746,10 @@ msgstr "Tamaño del equipo desconocido."
 #: src/routes/_shell.settings.profile.tsx
 msgid "Teams"
 msgstr "Equipos"
+
+#: src/brain/brain-source-contents.tsx
+msgid "Teams and roles"
+msgstr "Equipos y roles"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Teams named"
@@ -8781,6 +8957,10 @@ msgstr "Se retiró la aprobación del código de esta aplicación y la aplicaci�
 msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
 msgstr "Las apps y flujos de trabajo que pueden usar paquetes npm aprobados. Abre uno para dar de baja o revocar lo que se le aprobó."
 
+#: src/brain/brain-sections.ts
+msgid "The apps teams named, and the ones seen in use that nobody mentioned."
+msgstr "Las apps que nombraron los equipos, y las que se usan pero nadie mencionó."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Las aplicaciones en las que pueden trabajar tus flujos de trabajo. Grasp solo hace lo que permites en cada una."
@@ -8796,6 +8976,10 @@ msgstr "La dirección confirmó la visión."
 #: src/brain/brain-atlas.ts
 msgid "The board has not confirmed the vision yet."
 msgstr "La dirección aún no ha confirmado la visión."
+
+#: src/brain/brain-nav.tsx
+msgid "The brain"
+msgstr "El Brain"
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
@@ -9035,6 +9219,10 @@ msgstr "El enlace funciona hasta el {until}."
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "The list is full: remove a line to add another."
 msgstr "La lista está llena: quita una línea para añadir otra."
+
+#: src/brain/brain-home.tsx
+msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
+msgstr "Los archivos de memoria, las skills y los archivos subidos que leen tus agentes están en <0>Conocimiento</0>."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
@@ -9295,6 +9483,7 @@ msgid "They show here once Grasp reads your identity provider's grants."
 msgstr "Aparecen aquí cuando Grasp lee las concesiones de tu proveedor de identidad."
 
 #: src/brain/brain.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "They told us"
 msgstr "Nos contaron"
 
@@ -9495,6 +9684,10 @@ msgstr "Pérdidas de tiempo"
 msgid "Time zone"
 msgstr "Zona horaria"
 
+#: src/brain/brain-sections.ts
+msgid "Time-consuming work that could be automated, and what was said about each."
+msgstr "Trabajo que lleva mucho tiempo y podría automatizarse, y lo que se dijo de cada uno."
+
 #: src/dashboard/runs-widget.tsx
 msgid "Timed out"
 msgstr "Caducado"
@@ -9504,6 +9697,7 @@ msgid "Timed out: {timedOut}"
 msgstr "Caducadas: {timedOut}"
 
 #: src/brain/brain-markdown.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Timeline"
 msgstr "Cronología"
 
@@ -9603,6 +9797,10 @@ msgstr "Herramientas que permitir"
 msgid "Tools, products and the company's own words, so he hears them right."
 msgstr "Herramientas, productos y las palabras propias de la empresa, para que las entienda bien."
 
+#: src/brain/brain-transcript.tsx
+msgid "Topics"
+msgstr "Temas"
+
 #: src/policies/policy.ts
 msgid "Touches {kinds}"
 msgstr "Maneja {kinds}"
@@ -9620,6 +9818,11 @@ msgid "Trains unless you opt out"
 msgstr "Entrena salvo que te excluyas"
 
 #: src/brain/brain-markdown.ts
+msgid "Transcript"
+msgstr "Transcripción"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcripción"
 
@@ -9723,6 +9926,11 @@ msgstr "Desconocido"
 msgctxt "how Grasp knows an app is used"
 msgid "Unknown"
 msgstr "Desconocida"
+
+#: src/brain/brain-source-contents.tsx
+msgctxt "number of people"
+msgid "Unknown"
+msgstr "Desconocido"
 
 #: src/landscape/app-cells.tsx
 #: src/landscape/data-tab.tsx
@@ -10177,6 +10385,10 @@ msgstr "Lo que Grasp y sus agentes hacen por su cuenta está en Actividad."
 msgid "What Grasp cannot check yet"
 msgstr "Lo que Grasp aún no puede comprobar"
 
+#: src/brain/brain-sections.ts
+msgid "What Grasp does not know yet, and who can answer it."
+msgstr "Lo que Grasp aún no sabe, y quién puede responderlo."
+
 #: src/connections/connect-dialog.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What Grasp may do"
@@ -10285,6 +10497,10 @@ msgstr "Lo que Stephen lleva a cada entrevista. Lo que la conversación dejó ab
 msgid "What Stripe emails to the billing email."
 msgstr "Lo que Stripe envía al correo de facturación."
 
+#: src/brain/brain-sections.ts
+msgid "What the board wants from the sprint: its goals and the rules of the road."
+msgstr "Lo que la dirección quiere del sprint: sus objetivos y las reglas del juego."
+
 #: src/brain/brain.ts
 msgid "What the client shares, and our own desk research. Adds policies, procedures and process examples."
 msgstr "Lo que comparte el cliente y nuestra propia investigación documental. Añade políticas, procedimientos y ejemplos de procesos."
@@ -10313,6 +10529,10 @@ msgstr "Lo que el proveedor publica sobre sus certificados."
 msgid "What the workspace pays for Grasp."
 msgstr "Lo que el espacio de trabajo paga por Grasp."
 
+#: src/brain/brain-article/statements-by-kind.tsx
+msgid "What they told us"
+msgstr "Lo que nos contaron"
+
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
 msgstr "Qué corregir"
@@ -10330,6 +10550,7 @@ msgid "What was heard, written and connected"
 msgstr "Lo que se oyó, se escribió y se conectó"
 
 #: src/brain/brain.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "What was said"
 msgstr "Lo que se dijo"
 
@@ -10377,6 +10598,10 @@ msgstr "Cuando ocurre el evento {event}"
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
 msgstr "¿Dónde queda escrito el trabajo?"
+
+#: src/brain/brain-sections.ts
+msgid "Where everything came from: conversations, documents, Pulse and connections."
+msgstr "De dónde viene todo: conversaciones, documentos, Pulse y conexiones."
 
 #: src/routes/_shell.onboarding.open.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx

@@ -445,13 +445,13 @@ test("never sends what it gave up on while core was out of reach, once core is b
   });
   await page.goto("/settings/members");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: "Knowledge" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Brain" })).toBeVisible();
 
   // Core goes out of reach: the page's connection drops, and none gets in.
   refusing = true;
   recording = true;
   await open?.close();
-  await nav.getByRole("link", { name: "Knowledge" }).click();
+  await nav.getByRole("link", { name: "Brain" }).click();
   await expect(
     page.getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: reconnectMs });
@@ -460,9 +460,9 @@ test("never sends what it gave up on while core was out of reach, once core is b
   // only status read sent, not the one the page gave up on as well.
   refusing = false;
   await page.getByRole("button", { name: "Try again" }).click();
-  await expect(page.getByRole("heading", { name: "Knowledge" })).toBeVisible({
-    timeout: reconnectMs,
-  });
+  await expect(
+    page.getByRole("complementary", { name: "The brain" })
+  ).toBeVisible({ timeout: reconnectMs });
   const pings = sent.filter((message) => message.includes('["ping"]'));
   expect(pings).toHaveLength(1);
 });
