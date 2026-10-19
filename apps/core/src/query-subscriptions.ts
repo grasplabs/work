@@ -961,7 +961,10 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // A build refused is refused as such; anyone else (no role, or none
     // read by the time the access was) as a read refuses them: nothing of
     // the App disclosed.
-    if (access === "revoked" || access === "unreviewed") {
+    if (
+      read.value !== undefined &&
+      (access === "revoked" || access === "unreviewed")
+    ) {
       return {
         refusal: refusalResult(screenErrors.create(`screen.${access}`)),
       };

@@ -1,5 +1,5 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -10,7 +10,12 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
-import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxedEventWhere,
+  outboxedIfChanged,
+  storedEvent,
+} from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
   apps,
@@ -367,6 +372,13 @@ export const revokeRelease = async (
   requireMemberAdmin(by);
   const hash = await sealedHash(env, key);
   const db = drizzle(env.DB);
+  const event = createAuditEvent(
+    releaseEntry(by, "app.release.revoked", key, {
+      manifestHash: hash,
+      reason: reason.slice(0, 500),
+    }),
+    "core"
+  );
   const [revoked, , kept] = await auditedBatch(env, db, [
     db
       .update(sdkReleaseManifests)
@@ -379,15 +391,9 @@ export const revokeRelease = async (
         )
       )
       .returning({ hash: sdkReleaseManifests.manifestHash }),
-    outboxedIfChanged(
-      db,
-      releaseEntry(by, "app.release.revoked", key, {
-        manifestHash: hash,
-        reason: reason.slice(0, 500),
-      })
-    ),
+    outboxedEventWhere(db, event, sql`changes() > 0`),
     // Only when it was recorded, so only when it landed.
-    revocationsOf(db, eq(apps.id, key.app), null, sql`changes() > 0`),
+    revocationsOf(db, eq(apps.id, key.app), null, storedEvent(event.id)),
   ]);
   await tellKept(env, kept);
   if (revoked.length === 0) {
