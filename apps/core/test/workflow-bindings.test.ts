@@ -726,6 +726,54 @@ describe("event contracts", () => {
       approved: "ok",
     });
   });
+
+  // Which contract a client's workflow binds is the client's decision:
+  // staff may publish only the current version's bindings exactly, never
+  // the same alias on another contract or of another kind.
+  it("never lets Grasp staff bind another contract, or another kind, under the same alias", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const staff = await person("admin", true);
+    const [first, second, events] = await Promise.all([
+      modelContract(admin),
+      modelContract(admin),
+      eventContract(admin),
+    ]);
+    const swapped = await workflowOf(ada, first);
+    const kinds = await createWorkflowResource(env, ada, `greet-${unique()}`);
+    await publishWorkflowVersion(env, ada, kinds.id, {
+      definition: definitionOf({ name: kinds.name, events }),
+      basedOn: null,
+    });
+    const asStaff = async (id: string, definition: string) =>
+      await outcome(
+        publishWorkflowVersion(env, staff, id, { definition, basedOn: 1 })
+      );
+
+    expect({
+      contract: await asStaff(
+        swapped.id,
+        definitionOf({ name: swapped.name, version: "2.0.0", model: second })
+      ),
+      // The same alias, now a model's.
+      kind: await asStaff(
+        kinds.id,
+        definitionOf({
+          name: kinds.name,
+          version: "2.0.0",
+          model: first,
+        }).replaceAll('"summary"', '"jobEvents"')
+      ),
+      same: await asStaff(
+        swapped.id,
+        definitionOf({ name: swapped.name, version: "2.0.0", model: first })
+      ),
+    }).toStrictEqual({
+      contract: "role.forbidden",
+      kind: "role.forbidden",
+      same: "ok",
+    });
+  });
 });
 
 describe("approving a workflow's binding", () => {
