@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
@@ -748,32 +749,79 @@ describe("a call past its deadline", { timeout: 120_000 }, () => {
   });
 });
 
+/** The text of the stored artifact with SHA-256 `sha256`, as a load decodes it. */
+const storedText = async (sha256: string): Promise<string> => {
+  const stored = await env.FILES.get(artifactKey(sha256));
+  const bytes = (await stored?.arrayBuffer()) ?? new ArrayBuffer(0);
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+    bytes
+  );
+};
+
+/** Where a release's check evidence is among its artifacts. */
+const evidencePath = ".grasp/verification.json";
+
 /**
  * Rewrites the fixture's sealed SDK module at `path` as `change` makes
- * it, every hash rewritten to match: a release as another SDK sealed it.
+ * it, every hash rewritten to match, the check's evidence of the SDK
+ * included: a release as another SDK sealed it.
  */
 const rewriteSdk = async (
   notes: Sealed,
   path: string,
   change: (text: string) => string
 ): Promise<void> => {
-  const entry = notes.release.manifest.artifacts.find(
-    (artifact) => artifact.path === path
+  const { manifest: sealed } = notes.release;
+  const entry = sealed.artifacts.find((artifact) => artifact.path === path);
+  const evidenceEntry = sealed.artifacts.find(
+    (artifact) => artifact.path === evidencePath
   );
-  if (entry === undefined) {
-    throw new Error(`No ${path} in the release`);
+  if (entry === undefined || evidenceEntry === undefined) {
+    throw new Error(`No ${path} or evidence in the release`);
   }
-  const stored = await env.FILES.get(artifactKey(entry.sha256));
-  const text = change((await stored?.text()) ?? "");
+  const text = change(await storedText(entry.sha256));
   const sha256 = await sha256Hex(text);
   await env.FILES.put(artifactKey(sha256), text);
+  const artifacts = sealed.artifacts.map((artifact) =>
+    artifact.path === path
+      ? { path, sha256, bytes: new TextEncoder().encode(text).byteLength }
+      : artifact
+  );
+
+  const sdk: Record<string, string> = {};
+  for (const artifact of artifacts) {
+    if (artifact.path.startsWith("sdk/")) {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      sdk[artifact.path.slice("sdk/".length)] = await storedText(
+        artifact.sha256
+      );
+    }
+  }
+  const evidence = z
+    .looseObject({ observed: z.record(z.string(), z.string()) })
+    .parse(JSON.parse(await storedText(evidenceEntry.sha256)));
+  const evidenceText = canonicalJson({
+    ...evidence,
+    observed: {
+      ...evidence.observed,
+      sdkModules: await sha256Hex(canonicalJson(sdk)),
+    },
+  });
+  const evidenceHash = await sha256Hex(evidenceText);
+  await env.FILES.put(artifactKey(evidenceHash), evidenceText);
+
   const manifest = canonicalJson({
-    ...notes.release.manifest,
-    artifacts: notes.release.manifest.artifacts.map((artifact) =>
-      artifact.path === path
-        ? { path, sha256, bytes: new TextEncoder().encode(text).byteLength }
+    ...sealed,
+    artifacts: artifacts.map((artifact) =>
+      artifact.path === evidencePath
+        ? {
+            path: evidencePath,
+            sha256: evidenceHash,
+            bytes: new TextEncoder().encode(evidenceText).byteLength,
+          }
         : artifact
     ),
+    verificationReportHash: evidenceHash,
   });
   const hash = await sha256Hex(manifest);
   await drizzle(env.DB)

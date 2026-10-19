@@ -3,6 +3,7 @@ import { schemaHash } from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { sha256OfBytes } from "@grasp-os/shared/release";
@@ -12,6 +13,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { inspected } from "../src/app-inspection.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
@@ -364,8 +366,17 @@ const jsonRecord = (text: string): Record<string, Json> => {
   return parsed as Record<string, Json>;
 };
 
+/** Where a release's check evidence is among its artifacts. */
+const evidencePath = ".grasp/verification.json";
+
 /** What a consistent rewrite of a sealed release changes. */
 interface Rewrite {
+  /** Changes the check's evidence, recorded again for the rewritten release first. */
+  readonly evidence?: (evidence: Record<string, Json>) => void;
+  /** The evidence's text, when not canonical. */
+  readonly evidenceText?: (evidence: Record<string, Json>) => string;
+  /** Changes the manifest once its evidence is recorded again. */
+  readonly last?: (manifest: Record<string, Json>) => void;
   /** Changes `contracts.json`, stored again under its new hash. */
   readonly contracts?: (contracts: Record<string, Json>) => void;
   /** Changes the manifest. */
@@ -373,6 +384,91 @@ interface Rewrite {
   /** The manifest's text, when not canonical. */
   readonly text?: (manifest: Record<string, Json>) => string;
 }
+
+/** The text of the stored artifact `entry` names, as a load decodes it. */
+const storedText = async (entry: Json): Promise<[string, string]> => {
+  const { path, sha256 } = z
+    .object({ path: z.string(), sha256: z.string() })
+    .parse(entry);
+  const stored = await env.FILES.get(artifactKey(sha256));
+  const bytes = (await stored?.arrayBuffer()) ?? new ArrayBuffer(0);
+  return [
+    path,
+    new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
+  ];
+};
+
+/** The modules among `manifest`'s artifacts under `dir`, by name. */
+const modulesUnder = async (
+  manifest: Record<string, Json>,
+  dir: string
+): Promise<Record<string, string>> => {
+  const entries = Array.isArray(manifest.artifacts) ? manifest.artifacts : [];
+  const texts = await Promise.all(entries.map(storedText));
+  return Object.fromEntries(
+    texts
+      .filter(([path]) => path.startsWith(dir))
+      .map(([path, text]) => [path.slice(dir.length), text])
+  );
+};
+
+/**
+ * Records the check's evidence of `release` again for `manifest`, its
+ * rewrite, as someone with write access to storage could: its identities
+ * the rewritten manifest's and the hashes of its modules, SDK and
+ * migration evidence recomputed, then `change.evidence` applied, stored
+ * under its new hash and named by the manifest.
+ */
+const recordEvidence = async (
+  release: Release,
+  manifest: Record<string, Json>,
+  change: Rewrite
+): Promise<void> => {
+  const entry = artifactAt(release, evidencePath);
+  const stored = await env.FILES.get(artifactKey(entry.sha256));
+  const evidence = jsonRecord((await stored?.text()) ?? "{}");
+  const observed = jsonRecord(JSON.stringify(evidence.observed));
+  evidence.source = {
+    resourceId: manifest.resourceId ?? null,
+    sourceTreeHash: manifest.sourceTreeHash ?? null,
+  };
+  evidence.candidate = {
+    resourceVersion: manifest.resourceVersion ?? null,
+    contractHash: manifest.contractHash ?? null,
+    schemaHash: manifest.schemaHash ?? null,
+  };
+  evidence.profile = {
+    target: manifest.target ?? null,
+    compilerVersion: manifest.compilerVersion ?? null,
+    sdkVersion: manifest.sdkVersion ?? null,
+    sdkProtocolVersion: manifest.sdkProtocolVersion ?? null,
+    uiVersion: manifest.uiVersion ?? null,
+  };
+  observed.checkedModules = await sha256Hex(
+    canonicalJson(await modulesUnder(manifest, "modules/"))
+  );
+  observed.sdkModules = await sha256Hex(
+    canonicalJson(await modulesUnder(manifest, "sdk/"))
+  );
+  observed.migrations = await sha256Hex(
+    canonicalJson(manifest.migrationEvidence ?? null)
+  );
+  evidence.observed = observed;
+  change.evidence?.(evidence);
+  const text = change.evidenceText?.(evidence) ?? canonicalJson(evidence);
+  const bytes = new TextEncoder().encode(text);
+  const sha256 = await sha256Hex(text);
+  await env.FILES.put(artifactKey(sha256), bytes);
+  const artifacts: readonly Json[] = Array.isArray(manifest.artifacts)
+    ? manifest.artifacts
+    : [];
+  manifest.artifacts = artifacts.map((artifact) =>
+    z.object({ path: z.string() }).parse(artifact).path === evidencePath
+      ? { path: evidencePath, sha256, bytes: bytes.byteLength }
+      : artifact
+  );
+  manifest.verificationReportHash = sha256;
+};
 
 /**
  * Rewrites the stored release of `app`'s version 1 as someone with write
@@ -403,6 +499,8 @@ const rewrite = async (
     manifest.contractHash = sha256;
   }
   change.manifest?.(manifest);
+  await recordEvidence(release, manifest, change);
+  change.last?.(manifest);
   const text = change.text?.(manifest) ?? canonicalJson(manifest);
   const hash = await sha256Hex(text);
   await drizzle(env.DB)
@@ -733,6 +831,267 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     ).resolves.toBe("version.not_sealed");
   });
 });
+
+/** What loading `app`'s version 1 was refused with: its code, and the artifact it names. */
+const refusedLoad = async (app: AppId): Promise<string> => {
+  try {
+    await loadRelease(env, app, 1);
+  } catch (error) {
+    const refused = z
+      .object({
+        code: z.string(),
+        details: z.object({ path: z.string() }).partial().optional(),
+      })
+      .safeParse(error);
+    return refused.success
+      ? `${refused.data.code} at ${refused.data.details?.path ?? "none"}`
+      : String(error);
+  }
+  return "loaded";
+};
+
+/** `record`'s object member `key`, as a mutable record. */
+const member = (record: Record<string, Json>, key: string) =>
+  jsonRecord(JSON.stringify(record[key] ?? null));
+
+/** `change` made to `evidence`'s section `key`. */
+const inSection =
+  (key: string, change: (section: Record<string, Json>) => void) =>
+  (evidence: Record<string, Json>): void => {
+    const section = member(evidence, key);
+    change(section);
+    evidence[key] = section;
+  };
+
+const otherHash = "1".repeat(64);
+
+describe(
+  "the evidence a seal records of its checks",
+  { timeout: 120_000 },
+  () => {
+    it("names the release it checked and what it checked, by hash", async () => {
+      const fixture = await appWith(notesFiles());
+      const release = await seal(fixture);
+      const entry = artifactAt(release, evidencePath);
+      const stored = await env.FILES.get(artifactKey(entry.sha256));
+      const evidence = jsonRecord((await stored?.text()) ?? "{}");
+      const { manifest } = release;
+      const { tree } = await findVersion(env, fixture.app, 1);
+      expect({
+        reportHash: manifest.verificationReportHash,
+        source: evidence.source,
+        candidate: evidence.candidate,
+        profile: evidence.profile,
+        manifest: member(evidence, "observed").manifest,
+        checkedModules: member(evidence, "observed").checkedModules,
+        sdkModules: member(evidence, "observed").sdkModules,
+        finalInspection: member(evidence, "observed").finalInspection,
+      }).toStrictEqual({
+        reportHash: entry.sha256,
+        source: {
+          resourceId: fixture.app,
+          sourceTreeHash: tree,
+        },
+        candidate: {
+          resourceVersion: 1,
+          contractHash: manifest.contractHash,
+          schemaHash: await schemaHash(release.app.schema),
+        },
+        profile: {
+          target: "app",
+          compilerVersion: manifest.compilerVersion,
+          sdkVersion: manifest.sdkVersion,
+          sdkProtocolVersion,
+          uiVersion: manifest.uiVersion,
+        },
+        manifest: await sha256Hex(
+          canonicalJson(jsonRecord(JSON.stringify(release.app)))
+        ),
+        checkedModules: await sha256Hex(canonicalJson(release.modules)),
+        sdkModules: await sha256Hex(canonicalJson(release.sdk)),
+        // The same code and SDK register the same: what inspecting the
+        // sealed release answers now is what the seal's inspection did.
+        finalInspection: await sha256Hex(
+          await inspected(env, release.modules, release.sdk)
+        ),
+      });
+    });
+
+    it("loads when recorded again consistently, every hash rewritten", async () => {
+      const fixture = await appWith(notesFiles());
+      const release = await seal(fixture);
+      await rewrite(fixture.app, release, {});
+      await expect(refusedLoad(fixture.app)).resolves.toBe("loaded");
+    });
+
+    it.each([
+      [
+        "another App",
+        inSection("source", (s) => {
+          s.resourceId = "app_other";
+        }),
+      ],
+      [
+        "another source tree",
+        inSection("source", (s) => {
+          s.sourceTreeHash = otherHash;
+        }),
+      ],
+      [
+        "another version",
+        inSection("candidate", (s) => {
+          s.resourceVersion = 2;
+        }),
+      ],
+      [
+        "other contracts",
+        inSection("candidate", (s) => {
+          s.contractHash = otherHash;
+        }),
+      ],
+      [
+        "another schema",
+        inSection("candidate", (s) => {
+          s.schemaHash = otherHash;
+        }),
+      ],
+      [
+        "another kind of release",
+        inSection("profile", (s) => {
+          s.target = "workflow";
+        }),
+      ],
+      [
+        "another compiler",
+        inSection("profile", (s) => {
+          s.compilerVersion = "0.0.0-other";
+        }),
+      ],
+      [
+        "another SDK",
+        inSection("profile", (s) => {
+          s.sdkVersion = "0.0.0-other";
+        }),
+      ],
+      [
+        "another UI kit",
+        inSection("profile", (s) => {
+          s.uiVersion = "0.0.0-other";
+        }),
+      ],
+      [
+        "code it didn't check",
+        inSection("observed", (s) => {
+          s.checkedModules = otherHash;
+        }),
+      ],
+      [
+        "another SDK's modules",
+        inSection("observed", (s) => {
+          s.sdkModules = otherHash;
+        }),
+      ],
+      [
+        "another registration",
+        inSection("observed", (s) => {
+          s.manifest = otherHash;
+        }),
+      ],
+      [
+        "other migration evidence",
+        inSection("observed", (s) => {
+          s.migrations = otherHash;
+        }),
+      ],
+      [
+        "a trust of its own",
+        (evidence: Record<string, Json>) => {
+          evidence.artifactTrust = "approved";
+        },
+      ],
+    ])(
+      "refuses the release when its evidence names %s, every hash rewritten",
+      async (_case, change) => {
+        const fixture = await appWith(notesFiles());
+        const release = await seal(fixture);
+        await rewrite(fixture.app, release, { evidence: change });
+        await expect(refusedLoad(fixture.app)).resolves.toBe(
+          `version.artifact_corrupt at ${evidencePath}`
+        );
+      }
+    );
+
+    it.each([
+      [
+        "another source tree",
+        (manifest: Record<string, Json>) => {
+          manifest.sourceTreeHash = otherHash;
+        },
+      ],
+      [
+        "another compiler",
+        (manifest: Record<string, Json>) => {
+          manifest.compilerVersion = "0.0.0-other";
+        },
+      ],
+      [
+        "no evidence",
+        (manifest: Record<string, Json>) => {
+          const artifacts = Array.isArray(manifest.artifacts)
+            ? manifest.artifacts
+            : [];
+          manifest.artifacts = artifacts.filter(
+            (artifact) =>
+              z.object({ path: z.string() }).parse(artifact).path !==
+              evidencePath
+          );
+        },
+      ],
+    ])(
+      "refuses the release when its manifest names %s than its evidence, every hash rewritten",
+      async (_case, change) => {
+        const fixture = await appWith(notesFiles());
+        const release = await seal(fixture);
+        await rewrite(fixture.app, release, { last: change });
+        await expect(refusedLoad(fixture.app)).resolves.toBe(
+          `version.artifact_corrupt at ${evidencePath}`
+        );
+      }
+    );
+
+    it("refuses the release when its report hash names another artifact, every hash rewritten", async () => {
+      const fixture = await appWith(notesFiles());
+      const release = await seal(fixture);
+      const contracts = artifactAt(release, ".grasp/contracts.json");
+      await rewrite(fixture.app, release, {
+        last: (manifest) => {
+          manifest.verificationReportHash = contracts.sha256;
+        },
+      });
+      await expect(refusedLoad(fixture.app)).resolves.toBe(
+        `version.artifact_corrupt at ${evidencePath}`
+      );
+    });
+
+    it.each([
+      [
+        "isn't canonical",
+        (evidence: Record<string, Json>) => JSON.stringify(evidence, null, 2),
+      ],
+      ["isn't JSON", () => "checked: yes"],
+    ])(
+      "refuses the release when its evidence %s, every hash rewritten",
+      async (_case, text) => {
+        const fixture = await appWith(notesFiles());
+        const release = await seal(fixture);
+        await rewrite(fixture.app, release, { evidenceText: text });
+        await expect(refusedLoad(fixture.app)).resolves.toBe(
+          `version.artifact_corrupt at ${evidencePath}`
+        );
+      }
+    );
+  }
+);
 
 /** What a seal of `files` was refused with: its code, and the files its diagnostics name. */
 const refusedSeal = async (

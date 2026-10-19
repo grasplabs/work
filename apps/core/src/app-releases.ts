@@ -19,6 +19,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
 import {
+  checkEvidencePath,
   releaseFormatVersion,
   releaseManifestSchema,
   sdkProtocolVersion,
@@ -54,6 +55,7 @@ import { appFor, findVersion, versionFiles, versionTree } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
+import { checkEvidenceText, evidenceMatches } from "./check-evidence.ts";
 import { openStore, requireStoreManager } from "./data-stores.ts";
 import {
   appDefaultStores,
@@ -98,7 +100,9 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   SHA-256 of its bytes, the SDK modules it was inspected with among
 //   them, so it runs the SDK it was sealed with whatever SDK the host
 //   serves later. Loading reads it all back and checks every hash,
-//   the manifest's, each artifact's and the contracts' (`loadRelease`).
+//   the manifest's, each artifact's and the contracts' (`loadRelease`),
+//   and the evidence of the seal's checks against the identities and
+//   artifacts it names (check-evidence.ts).
 //   A new version is a new manifest; a sealed one never changes.
 // - A release reaches a store it shouldn't: no App code, request or
 //   manifest field names a store. The host that seals binds one, and
@@ -360,6 +364,27 @@ const verifiedRelease = async (
     } else if (path.startsWith(sdkArtifactDir)) {
       sdk[path.slice(sdkArtifactDir.length)] = text;
     }
+  }
+  // The check's evidence, under the hash the manifest names, recorded
+  // against this release and what it seals (check-evidence.ts).
+  const evidenceEntry = manifest.artifacts.find(
+    ({ path }) => path === checkEvidencePath
+  );
+  if (
+    evidenceEntry?.sha256 !== manifest.verificationReportHash ||
+    !(await evidenceMatches(
+      manifest,
+      { manifest: app, modules, sdk },
+      texts.get(checkEvidencePath) ?? ""
+    ))
+  ) {
+    log.error("release.evidence_corrupt", {
+      app: manifest.resourceId,
+      version: manifest.resourceVersion,
+    });
+    throw versionErrors.create("version.artifact_corrupt", {
+      path: checkEvidencePath,
+    });
   }
   // Shared by every load of the release in this isolate: frozen, so no
   // caller changes what another runs.
@@ -1001,6 +1026,8 @@ interface InspectedRelease {
   };
   readonly schema: string;
   readonly evidence: ReleaseManifest["migrationEvidence"];
+  /** What each inspection answered, recorded in the check's evidence. */
+  readonly inspections: { readonly symbolic: string; readonly final: string };
 }
 
 /**
@@ -1063,7 +1090,15 @@ const inspectForSeal = async (
     modules: final,
     sdk: sdk.modules,
   });
-  return { manifest, generated, final, sdk, schema, evidence };
+  return {
+    manifest,
+    generated,
+    final,
+    sdk,
+    schema,
+    evidence,
+    inspections: { symbolic: firstText, final: secondText },
+  };
 };
 
 /** A release as sealed: its artifacts, and its canonical manifest and hash. */
@@ -1087,37 +1122,13 @@ const packaged = async (
   built: InspectedRelease,
   { tree, store }: { tree: string; store: DataStoreBinding | null }
 ): Promise<PackagedRelease> => {
-  const { manifest, generated, final, sdk, schema, evidence } = built;
+  const { manifest, generated, final, sdk, schema, evidence, inspections } =
+    built;
   const contracts = generated[generatedPaths.contracts] ?? "";
-  const report = canonicalText({
-    formatVersion: releaseFormatVersion,
-    compilerVersion,
-    inspections: {
-      symbolic: await sha256Hex(canonicalText(manifest)),
-      final: await sha256Hex(canonicalText(manifest)),
-    },
-    equal: true,
-    modules: Object.keys(final).length,
-  });
-  const artifacts = await Promise.all([
-    ...Object.entries(final).map(
-      async ([name, code]) => await artifactOf(`modules/${name}`, code)
-    ),
-    ...Object.entries(generated).map(
-      async ([path, text]) => await artifactOf(path, text)
-    ),
-    ...Object.entries(sdk.modules).map(
-      async ([name, code]) => await artifactOf(`${sdkArtifactDir}${name}`, code)
-    ),
-    artifactOf(".grasp/verification.json", report),
-  ]);
-  artifacts.sort((a, b) => (a.entry.path < b.entry.path ? -1 : 1));
-  const reportEntry = artifacts.find(
-    ({ entry }) => entry.path === ".grasp/verification.json"
-  );
-
   const kit = await kitModules(env.ASSETS);
-  const releaseManifest: ReleaseManifest = releaseManifestSchema.parse({
+  // What the release is, before what it seals: the check's evidence is
+  // recorded against these, and the manifest names its hash.
+  const identity = {
     formatVersion: releaseFormatVersion,
     resourceId: key.app,
     resourceVersion: key.version,
@@ -1131,11 +1142,36 @@ const packaged = async (
     dependencyLockHash: await sha256Hex(emptyLock),
     target: "app",
     dataStoreBindings: store === null ? [] : [store],
-    artifacts: artifacts.map(({ entry }) => entry),
     bindings: [],
-    verificationReportHash: reportEntry?.entry.sha256,
     migrationEvidence: evidence,
     artifactTrust: "unreviewed",
+  } as const;
+  const report = await checkEvidenceText(
+    identity,
+    { manifest, modules: final, sdk: sdk.modules },
+    inspections
+  );
+  const artifacts = await Promise.all([
+    ...Object.entries(final).map(
+      async ([name, code]) => await artifactOf(`modules/${name}`, code)
+    ),
+    ...Object.entries(generated).map(
+      async ([path, text]) => await artifactOf(path, text)
+    ),
+    ...Object.entries(sdk.modules).map(
+      async ([name, code]) => await artifactOf(`${sdkArtifactDir}${name}`, code)
+    ),
+    artifactOf(checkEvidencePath, report),
+  ]);
+  artifacts.sort((a, b) => (a.entry.path < b.entry.path ? -1 : 1));
+  const reportEntry = artifacts.find(
+    ({ entry }) => entry.path === checkEvidencePath
+  );
+
+  const releaseManifest: ReleaseManifest = releaseManifestSchema.parse({
+    ...identity,
+    artifacts: artifacts.map(({ entry }) => entry),
+    verificationReportHash: reportEntry?.entry.sha256,
   });
   const text = canonicalText(releaseManifest);
   return { artifacts, releaseManifest, text, hash: await sha256Hex(text) };

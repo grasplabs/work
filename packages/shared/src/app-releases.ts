@@ -141,6 +141,59 @@ export const releaseManifestSchema = z.strictObject({
 });
 
 export type ReleaseManifest = z.infer<typeof releaseManifestSchema>;
+
+/** Where a release's check evidence is among its artifacts. */
+export const checkEvidencePath = ".grasp/verification.json";
+
+/**
+ * What the host observed checking a release as it sealed it: never a
+ * claim of the compiler's or of App code, and never a verdict on its own,
+ * only hashes of what the checks read and made, against the identities
+ * they were made for. Sealed as an artifact (`checkEvidencePath`) whose
+ * hash the manifest names (`verificationReportHash`); loading recomputes
+ * every hash it can from the sealed artifacts and refuses the release
+ * unless each, and each identity, is the manifest's
+ * (apps/core/src/check-evidence.ts). Strict: no field a report adds, such
+ * as a trust it claims, is ever read.
+ */
+export const checkEvidenceSchema = z.strictObject({
+  formatVersion: z.literal(releaseFormatVersion),
+  /** The source checked. */
+  source: z.strictObject({
+    resourceId: z.string().min(1).max(128),
+    sourceTreeHash: sha256Schema,
+  }),
+  /** The release it was checked as. */
+  candidate: z.strictObject({
+    resourceVersion: z.int().min(1),
+    contractHash: sha256Schema,
+    schemaHash: sha256Schema,
+  }),
+  /** What it was checked with. */
+  profile: z.strictObject({
+    target: z.enum(["app", "workflow", "store"]),
+    compilerVersion: z.string().min(1).max(128),
+    sdkVersion: z.string().min(1).max(128),
+    sdkProtocolVersion: z.literal(sdkProtocolVersion),
+    uiVersion: z.string().min(1).max(128),
+  }),
+  /** SHA-256 of what the checks read and made, each canonical JSON but the texts. */
+  observed: z.strictObject({
+    /** Each inspection's text as the sandbox answered it: not sealed, so not recomputed. */
+    symbolicInspection: sha256Schema,
+    finalInspection: sha256Schema,
+    /** The registration both inspections read. */
+    manifest: sha256Schema,
+    /** The modules the type check passed, by flat name. */
+    checkedModules: sha256Schema,
+    /** The SDK modules both inspections ran with, by name. */
+    sdkModules: sha256Schema,
+    /** What running the explicit migrations on their fixtures found. */
+    migrations: sha256Schema,
+  }),
+});
+
+export type CheckEvidence = z.infer<typeof checkEvidenceSchema>;
 export type ReleaseArtifact = z.infer<typeof releaseArtifactSchema>;
 export type DataStoreBinding = z.infer<typeof dataStoreBindingSchema>;
 
