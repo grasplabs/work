@@ -36,6 +36,7 @@ import type { RunStep } from "../src/workflows/host.ts";
 import { admitAttempt, quotaPolicy } from "../src/workflows/quotas.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import {
+  listResourceRuns,
   repairResourceStarts,
   repairResourceTerminations,
   resourceRunFor,
@@ -789,6 +790,54 @@ describe("the bounds on runs of JSON workflows", () => {
       own: "ok",
       builder: "ok",
       other: "workflow.run_unavailable",
+    });
+  });
+
+  it("lists a workflow's runs newest first: every run to its builders, a user's own to them, none to anyone without a role, and never what one returned", async () => {
+    const ada = await builder();
+    const reader = await builder("user");
+    const other = await builder("user");
+    const outsider = await builder("user");
+    const workflow = await published(ada, (name) =>
+      definitionOf(name, [{ finish: { set: { status: "done" } } }])
+    );
+    for (const person of [reader, other]) {
+      // oxlint-disable-next-line no-await-in-loop -- one share after another
+      await shareWorkflowResource(env, ada, workflow.id, {
+        type: "person",
+        id: person.userId,
+        role: "user",
+      });
+    }
+    const first = await start(reader, workflow.id);
+    const second = await start(ada, workflow.id);
+    const third = await start(reader, workflow.id);
+    // Ended with an output, which the list never carries.
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, reader, workflow.id, third.runId);
+        expect(run.output).toStrictEqual({ status: "done" });
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const idsOf = async (by: Acting) => {
+      const runs = await listResourceRuns(env, by, workflow.id);
+      return runs.map(({ id }) => id);
+    };
+    const listed = await listResourceRuns(env, ada, workflow.id);
+
+    expect({
+      builder: listed.map(({ id }) => id),
+      reader: await idsOf(reader),
+      other: await idsOf(other),
+      outsider: await outcome(listResourceRuns(env, outsider, workflow.id)),
+      details: listed.some((run) => "output" in run || "error" in run),
+    }).toStrictEqual({
+      builder: [third.runId, second.runId, first.runId],
+      reader: [third.runId, first.runId],
+      other: [],
+      outsider: "workflow.resource_unavailable",
+      details: false,
     });
   });
 
