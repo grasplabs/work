@@ -91,7 +91,7 @@ export const formatList = (items: string[]): string =>
   );
 
 /** One for one, many for the rest: `${count} ${plural(count, "thing", "things")}`. */
-const plural = (count: number, one: string, other: string): string =>
+export const plural = (count: number, one: string, other: string): string =>
   count === 1 ? one : other;
 
 /** The steps of an onboarding. */
@@ -334,4 +334,17 @@ export const needLine = (need: Need, view: OrgView): string => {
       return need satisfies never;
     }
   }
+};
+
+/** What each source of what Grasp knows about a company is (the prototype's `knowledge-words.ts`). */
+export const knowledgeSourceWords: Record<KnowledgeSource, string> = {
+  vision: "The first conversation and the research",
+  directory: "Who works where, from the sign-in",
+  sources: "Where the documents live, connected",
+  documents: "Documents dropped in",
+  pulse: "Pulse",
+  leadsKnown: "Team leads, from the HR platform",
+  leadsHeard: "Team leads interviewed",
+  everyoneHeard: "Everyone else interviewed",
+  review: "Workflows known",
 };
