@@ -112,6 +112,15 @@ export default app({
 `,
 };
 
+/**
+ * `emptyFiles` over a version of `notesFiles`: its operations replaced,
+ * the notes' file gone with the tables it reads.
+ */
+const withoutNotes: Record<string, string | null> = {
+  ...emptyFiles,
+  "operations/notes.ts": null,
+};
+
 type Caller = Awaited<ReturnType<typeof person>>;
 
 /** A builder's App with `files` as its first version. */
@@ -455,7 +464,7 @@ describe(
       const { owner, app } = await appWith(notesFiles());
       await activateVersion(env, owner, app, 1);
       const [deleted] = await defaultStores(app);
-      await commitFiles(env, owner, app, emptyFiles, "No tables");
+      await commitFiles(env, owner, app, withoutNotes, "No tables");
       await activateVersion(env, owner, app, 2);
       // Version 1 kept binds its store; once retention lets it go, the
       // store can be deleted.
@@ -484,7 +493,7 @@ describe(
       const { owner, app } = await appWith(notesFiles());
       await activateVersion(env, owner, app, 1);
       const [store] = await defaultStores(app);
-      await commitFiles(env, owner, app, emptyFiles, "No tables");
+      await commitFiles(env, owner, app, withoutNotes, "No tables");
       await activateVersion(env, owner, app, 2);
       // Its store gone as the statement runs (deletion itself is refused
       // while version 1 is kept: this is the guard behind that).
@@ -716,7 +725,7 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
     const afterRollback = await active();
     // A version without a schema binds no store: the store serves no
     // definition while it is current.
-    await commitFiles(env, owner, app, emptyFiles, "No tables");
+    await commitFiles(env, owner, app, withoutNotes, "No tables");
     await activateVersion(env, owner, app, 4);
     const unbound = await active();
     const [first, third] = await Promise.all([

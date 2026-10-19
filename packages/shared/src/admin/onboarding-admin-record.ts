@@ -333,7 +333,15 @@ export const stephenOf = (view: OrgView): StephenStats => {
     Phase,
     number
   >;
-  const halfway = view.interviews.filter((interview) => !interview.approved);
+  // Someone talking now has stopped nowhere yet: theirs counts as started, not as stopped.
+  const talking = new Set(
+    view.people
+      .filter((each) => each.state === "progress")
+      .map((each) => each.person.id)
+  );
+  const halfway = view.interviews.filter(
+    (interview) => !interview.approved && !talking.has(interview.id)
+  );
   for (const interview of halfway) {
     if (interview.stoppedAt) {
       stops[interview.stoppedAt] += 1;
@@ -474,17 +482,23 @@ export const personLog = (view: OrgView, id: string): PersonEvent[] => {
   );
 };
 
-/** One team as the company's own admin sees it: numbers, and only for a team of five or more. */
+/** One team as the company's own admin sees it: numbers, and only for a team where five or more are asked. */
 export interface CompanyTeam {
   team: OrgTeam;
   people: number;
-  /** Big enough to show: a smaller team shows no numbers, so nobody in it can be picked out. */
+  /** Big enough to show: where fewer are asked to talk, the team shows no numbers, so nobody in it can be picked out. */
   shown: boolean;
   completed: number;
   stopped: number;
 }
 
-/** What the company's own admin sees of the interviews: numbers per team and for everyone, never a name or anyone's words. */
+/**
+ * What the company's own admin sees of the interviews: numbers per team, and for everyone the
+ * teams that show theirs, never a name or anyone's words. A team shows its numbers once enough of
+ * it is asked to talk, as core shows the company its progress (core's `progressOf`): someone away
+ * is not asked, and a team too small to show adds nothing to everyone's numbers, which would give
+ * its own away.
+ */
 export const companySees = (
   view: OrgView
 ): {
@@ -499,15 +513,18 @@ export const companySees = (
     .map((team): CompanyTeam => ({
       team: team.team,
       people: team.people.length,
-      shown: team.people.length >= MIN_GROUP,
+      shown: team.asked >= MIN_GROUP,
       completed: team.counts.completed,
       stopped: team.counts.incomplete,
     }));
+  const shown = teams.filter((team) => team.shown);
+  const sum = (of: (team: CompanyTeam) => number): number =>
+    shown.reduce((total, team) => total + of(team), 0);
   return {
     teams,
-    people: view.asked,
-    completed: view.counts.completed,
-    stopped: view.counts.incomplete,
+    people: sum((team) => team.people),
+    completed: sum((team) => team.completed),
+    stopped: sum((team) => team.stopped),
   };
 };
 
@@ -523,14 +540,19 @@ export interface Kept {
   deletable: number;
 }
 
-export const keptOf = (view: OrgView): Kept => {
+/**
+ * What is kept of the interviews on `asOf`, the day the view is counted up
+ * to (`asOf` in admin-usage.ts): once the two weeks close, the view's day
+ * stops, but the days a person has to ask for a deletion don't.
+ */
+export const keptOf = (view: OrgView, asOf: string): Kept => {
   const agreed = view.interviews.filter((interview) => interview.approved);
   return {
     agreed: agreed.length,
     halfway: view.interviews.length - agreed.length,
     deleted: view.state.deleted.length,
     deletable: agreed.filter(
-      (interview) => view.day - interview.day <= DELETE_DAYS
+      (interview) => dateOn(view.org, interview.day + DELETE_DAYS) >= asOf
     ).length,
   };
 };

@@ -65,8 +65,9 @@ import type { AnySchema } from "./value-schema.ts";
 // - screens (spec 8) are a list of named routes, each a screen file and
 //   the route input its parameters are validated with, and `preferences`
 //   (spec 10.7.7), when declared, is a strict object; the top-level path
-//   segment `preferences` is the platform's, so no function registers
-//   under it and declaring preferences later never collides with one;
+//   segments `preferences` and `workflows` are the platform's, so no
+//   function registers under them and declaring preferences or workflows
+//   later never collides with one;
 // - migrations (spec 17.2, migration.ts) are `migration` declarations,
 //   each named once, one a table, of a table the schema has, whose
 //   `output` declares exactly that table's fields.
@@ -270,11 +271,17 @@ const appKeys: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The top-level path segment the platform keeps for an App's preferences
- * (spec 10.7.7): no function registers under it, whether or not the App
- * declares preferences now.
+ * The top-level path segments the platform keeps, with what each is for:
+ * `preferences` for an App's preferences (spec 10.7.7) and `workflows` for
+ * its generated workflow references (`workflows.<alias>.queries.*`), which
+ * the host answers itself. No function registers under either, whether or
+ * not the App declares preferences or workflows now, so declaring one
+ * later never shadows or is shadowed by a function.
  */
-export const reservedSegment = "preferences";
+export const reservedSegments: ReadonlyMap<string, string> = new Map([
+  ["preferences", "the App's preferences"],
+  ["workflows", "the App's workflow references"],
+]);
 
 /**
  * Path segments no function registers at, at any depth: the names a
@@ -330,9 +337,11 @@ const walk = (
         `\`${path}\` can't be registered: \`${name}\` is a name a reference itself answers, never a path segment.`
       );
     }
-    if (prefix.length === 0 && name === reservedSegment) {
+    const reservedFor =
+      prefix.length === 0 ? reservedSegments.get(name) : undefined;
+    if (reservedFor !== undefined) {
       refuse(
-        `\`${what}\` can't register \`${reservedSegment}\`: that path is the platform's, for the App's preferences.`
+        `\`${what}\` can't register \`${name}\`: that path is the platform's, for ${reservedFor}.`
       );
     }
     const property = Object.getOwnPropertyDescriptor(tree, name);

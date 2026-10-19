@@ -151,6 +151,7 @@ const clientMethods = {
   model: "generate",
   template: "read",
   store: "call",
+  app: "call",
 } as const;
 
 /** The client of each resource `fn` uses, over `channel`. */

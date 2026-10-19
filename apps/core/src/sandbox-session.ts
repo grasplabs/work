@@ -63,7 +63,7 @@ export type SessionArgument =
   | { readonly capability: SessionCapability };
 
 /**
- * A module of the release's own platform code (the screen compiler, the
+ * A module of the release's own platform code (the App compiler, the
  * package builder, and what they load), as its bytes: JavaScript, a JSON
  * module or a WebAssembly module, which the sandbox host reads a chunk at
  * a time (`platformModules`).

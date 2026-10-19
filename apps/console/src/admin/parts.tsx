@@ -11,6 +11,7 @@ import type {
   StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { Progress } from "@grasp-os/ui/components/progress";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 import { Fragment } from "react";
@@ -107,7 +108,12 @@ export const Done = ({ children }: { children: ReactNode }) => (
   </span>
 );
 
-/** A card of its own on a section: a title, one line on what it is for, what can be done beside them, then its rows. */
+/**
+ * A titled panel of a section: its title, what it shows under it, and
+ * beside them what can be done there (`action`); where there is no room
+ * beside them, that goes under the title, so the line under it keeps its
+ * width. Ported from the prototype's `SettingsSection`.
+ */
 export const Panel = ({
   title,
   description,
@@ -119,7 +125,7 @@ export const Panel = ({
   action?: ReactNode;
   children?: ReactNode;
 }) => (
-  <section className="bg-card overflow-hidden rounded-xl border">
+  <section className="bg-card overflow-hidden rounded-xl border text-sm">
     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-5 py-4">
       <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
         <h2 className="font-medium">{title}</h2>
@@ -154,26 +160,31 @@ export const PanelRow = ({
   </div>
 );
 
-/** So much of a whole, 0 to 1: nothing of nothing is nothing. */
-const shareOf = (value: number, of: number): number =>
-  of > 0 ? Math.min(Math.max(value / of, 0), 1) : 0;
-
-/** A circle 100 around, so its dark part is the percentage itself. */
-const ringRadius = 15.9155;
-
-/** So much of a whole as a small ring, dark on grey: for a number that is a share of something. */
-export const Ring = ({ value, of }: { value: number; of: number }) => {
-  const share = shareOf(value, of);
+/**
+ * So much of a whole as a small ring, dark on grey: for a number that is
+ * a share of something. The circle is 100 around, so the dark part is the
+ * percentage itself.
+ */
+export const Ring = ({
+  value,
+  of,
+  label,
+}: {
+  value: number;
+  of: number;
+  label: string;
+}) => {
+  const share = of > 0 ? Math.min(Math.max(value / of, 0), 1) : 0;
   return (
     <span className="flex-none">
-      <span className="sr-only">{`${Math.round(share * 100)}%`}</span>
+      <span className="sr-only">{label}</span>
       <svg aria-hidden className="size-5 -rotate-90" viewBox="0 0 36 36">
         <circle
           className="stroke-border"
           cx="18"
           cy="18"
           fill="none"
-          r={ringRadius}
+          r="15.9155"
           strokeWidth="4"
         />
         {share > 0 ? (
@@ -182,7 +193,7 @@ export const Ring = ({ value, of }: { value: number; of: number }) => {
             cx="18"
             cy="18"
             fill="none"
-            r={ringRadius}
+            r="15.9155"
             strokeDasharray={`${share * 100} 100`}
             strokeLinecap="round"
             strokeWidth="4"
@@ -195,8 +206,9 @@ export const Ring = ({ value, of }: { value: number; of: number }) => {
 
 /**
  * One number with what it counts, a line under it, and a ring where the
- * number is a share of something, beside the label so the number has the
- * whole tile.
+ * number is a share of something. The ring stands beside the label, so
+ * the number has the whole tile, however narrow. Tiles in one row start
+ * at the same height, so their labels and numbers line up.
  */
 export const Figure = ({
   label,
@@ -204,21 +216,33 @@ export const Figure = ({
   sub,
   ring,
   attention = false,
+  className,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   ring?: { value: number; of: number };
   attention?: boolean;
+  /** Where it stands in its grid. */
+  className?: string;
 }) => (
-  <div className="bg-card grid grid-cols-[minmax(0,1fr)_auto] content-start gap-x-2 gap-y-0.5 px-4 py-4 sm:px-5">
+  <div
+    className={cn(
+      "bg-card grid grid-cols-[minmax(0,1fr)_auto] content-start gap-x-2 gap-y-0.5 px-4 py-4 sm:px-5",
+      className
+    )}
+  >
     <span className="text-muted-foreground flex min-h-5 items-center text-xs">
       {label}
     </span>
-    {ring !== undefined && ring.of > 0 ? (
-      <Ring of={ring.of} value={ring.value} />
+    {ring && ring.of > 0 ? (
+      <Ring
+        label={`${Math.round(Math.min(Math.max(ring.value / ring.of, 0), 1) * 100)}%`}
+        of={ring.of}
+        value={ring.value}
+      />
     ) : null}
-    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium tabular-nums">
+    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium text-balance wrap-break-word hyphens-auto tabular-nums">
       {value}
     </span>
     {sub === undefined ? null : (
@@ -322,3 +346,38 @@ export const DotLegend = () => (
     ))}
   </ul>
 );
+
+/**
+ * A few things counted, as rows: what each is, a bar as long as its share
+ * of the most, and the number. The words take the room they need and the
+ * bars start in one line; where the room is short the words are cut,
+ * never the bars.
+ */
+export const BarList = ({
+  rows,
+  label,
+}: {
+  rows: { id: string; label: ReactNode; value: number; shown?: string }[];
+  label: string;
+}) => {
+  const most = Math.max(1, ...rows.map((row) => row.value));
+  return (
+    <ul
+      aria-label={label}
+      className="grid grid-cols-[minmax(0,max-content)_minmax(5rem,1fr)_minmax(1.5rem,auto)] gap-x-3 gap-y-2.5"
+    >
+      {rows.map((row) => (
+        <li
+          className="col-span-3 grid grid-cols-subgrid items-center"
+          key={row.id}
+        >
+          <span className="text-muted-foreground truncate">{row.label}</span>
+          <Progress aria-hidden value={(row.value / most) * 100} />
+          <span className="text-right tabular-nums">
+            {row.shown ?? row.value}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+};

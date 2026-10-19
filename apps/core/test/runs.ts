@@ -57,13 +57,16 @@ export const resumed = async (run: string): Promise<void> => {
 
 const endedStatuses = new Set(["complete", "errored", "terminated"]);
 
-/** Once the run has ended, however it ended. */
-export const finished = async (run: string): Promise<void> => {
+/** Once the run has ended, however it ended, waiting up to `timeout` ms. */
+export const finished = async (
+  run: string,
+  timeout = 20_000
+): Promise<void> => {
   await vi.waitFor(
     async () => {
       expect(endedStatuses).toContain(await liveStatus(run));
     },
-    { timeout: 20_000, interval: 200 }
+    { timeout, interval: 200 }
   );
 };
 

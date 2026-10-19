@@ -22,6 +22,9 @@ export const noChoice = (choices: BindingChoices): boolean => {
   if (choices.kind === "template") {
     return choices.versions.length === 0;
   }
+  if (choices.kind === "app") {
+    return choices.apps.length === 0;
+  }
   // Statistics of the App's own measures only: nothing to choose, the
   // approval is the grant.
   if (choices.kind === "statistics" && !choices.platform) {
@@ -45,6 +48,9 @@ export const firstChoice = (choices: BindingChoices): string => {
   if (choices.kind === "template") {
     const [newest] = choices.versions;
     return newest === undefined ? "" : templateKey(newest);
+  }
+  if (choices.kind === "app") {
+    return choices.apps[0]?.appId ?? "";
   }
   return choices.permissions[0]?.permissionId ?? "";
 };
@@ -100,6 +106,11 @@ export const targetOf = (
       ? { kind: choices.kind, permissionId: picked }
       : undefined;
   }
+  if (choices.kind === "app") {
+    return choices.apps.some(({ appId }) => appId === picked)
+      ? { kind: "app", appId: picked }
+      : undefined;
+  }
   if (choices.kind === "statistics") {
     if (!choices.platform) {
       return { kind: "statistics" };
@@ -140,6 +151,9 @@ const choiceIds = (choices: BindingChoices | null): string[] => {
   }
   if (choices.kind === "template") {
     return choices.versions.map(templateKey);
+  }
+  if (choices.kind === "app") {
+    return choices.apps.map(({ appId }) => appId);
   }
   return choices.permissions.map(({ permissionId }) => permissionId);
 };

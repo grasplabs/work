@@ -63,7 +63,7 @@ export interface AdminView extends OrgView {
  * go to give, then what holds people up, then the first conversation
  * that Stephen prepares from, then what can wait a day.
  */
-const NEED_ORDER: Need["kind"][] = [
+export const NEED_ORDER: readonly Need["kind"][] = [
   "paused",
   "go",
   "short",
@@ -84,7 +84,7 @@ const NEED_ORDER: Need["kind"][] = [
   "read",
 ];
 
-const byUrgency = (a: Need, b: Need) =>
+export const byUrgency = (a: Need, b: Need): number =>
   NEED_ORDER.indexOf(a.kind) - NEED_ORDER.indexOf(b.kind);
 
 export const adminViewOf = (

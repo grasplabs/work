@@ -3,44 +3,77 @@
  * start it, read whom it asked, and wait on its decisions.
  */
 import type { DecisionAnswerInput } from "@grasp-os/shared/decisions";
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
-import { release, serverBuilt } from "./apps.ts";
+import { release } from "./apps.ts";
 import { finished } from "./runs.ts";
 import type { signedInApi } from "./sign-in.ts";
+import { sampleCall } from "./workflow-apps.ts";
 
 /** Someone signed in, with their API. */
 export type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
- * The App's server: it keeps whom each ask went to, with their links, as
- * a workflow that mails them would.
+ * The approval App, of spec 8's layout: it keeps whom each ask went to,
+ * with their links, as a workflow that mails them would
+ * (`approvals.remember`, once per ask: the first and the reminder are
+ * calls of their own), and answers them (`approvals.asks`).
  */
-export const server = `import { DurableObject } from "cloudflare:workers";
+export const approvalFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export class App extends DurableObject {
-  #table() {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS asks (n INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL)");
-  }
+export default defineSchema({ asks: defineTable({ body: v.string() }) });
+`,
+  "operations/approvals.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
 
-  remember(_caller, recipients, reminder) {
-    this.#table();
-    this.ctx.storage.sql.exec("INSERT INTO asks (body) VALUES (?)", JSON.stringify({ recipients, reminder }));
-  }
+const recipient = v.object({ userId: v.string(), name: v.string(), email: v.string(), link: v.string() });
 
-  asks(_caller) {
-    this.#table();
-    return this.ctx.storage.sql.exec("SELECT body FROM asks ORDER BY n").toArray().map((row) => JSON.parse(row.body));
-  }
-}
-`;
+export const remember = mutation({
+  args: { recipients: v.array(recipient), reminder: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("asks", { body: JSON.stringify(args) });
+    return null;
+  },
+});
+
+export const asks = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("asks").take(100)).map(({ body }) => body),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+
+import { asks, remember } from "./operations/approvals.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Approvals",
+  schema,
+  access: { tables: { asks: { read: "appMembers", write: "appMembers" } } },
+  operations: { approvals: { remember, asks } },
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
+};
+
+/**
+ * An ask's code that keeps its recipients and whether it is the reminder
+ * in the approval App (`approvals.remember`), failing as it refuses.
+ */
+export const remember = `        const remembered = (await env.APP.callFunction({ contractId: "approvals.remember", kind: "mutation" }, { recipients: recipients.map(({ userId, name, email, link }) => ({ userId, name, email, link })), reminder })) as { ok: true } | { ok: false; error: { message: string; code: string } };
+        if (!remembered.ok) {
+          throw Object.assign(new Error(remembered.error.message), { code: remembered.error.code });
+        }`;
 
 /** A workflow that waits for one decision and returns how it ended. */
-export const approval = `import { workflow, z } from "@grasp-os/sdk/workflow";
+export const approval = `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "approval",
@@ -51,9 +84,9 @@ export default workflow(
   async (step, { input, env }) =>
     await step.decision("review", {
       description: "Approve the invoice",
-      from: input.from,
+      from: input.from as Person,
       ask: async ({ recipients, reminder }) => {
-        await env.APP.call("remember", recipients, reminder);
+${remember}
       },
       timeout: input.timeout,
       ...(input.remindAfter === undefined ? {} : { remindAfter: input.remindAfter }),
@@ -86,22 +119,29 @@ export const week = 7 * 86_400_000;
  */
 export const reminding = { timeout: 10_000, remindAfter: 5000 };
 
+/** Who released each approval App (`approvalApp`), who reads its asks. */
+const builders = new Map<string, Person>();
+
 /**
- * A new App with the approval workflow, released by `builder`, its server
- * built ahead (`serverBuilt`): the first ask calls it once the decision
- * is open, and a build there would take from the time left before the
- * reminder is due and the deadline.
+ * A new approval App with `workflows`, released by `builder`, whose asks
+ * `asksOf` reads.
  */
-export const approvalApp = async (builder: Person): Promise<string> => {
+export const approvalAppWith = async (
+  builder: Person,
+  workflows: Record<string, string>
+): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Approvals" });
-  const version = await release(builder, id, {
-    "app/server.ts": server,
+  await release(builder, id, { ...approvalFiles, ...workflows });
+  builders.set(id, builder);
+  return id;
+};
+
+/** A new App with the approval workflow, released by `builder`. */
+export const approvalApp = async (builder: Person): Promise<string> =>
+  await approvalAppWith(builder, {
     "workflows/approval.ts": approval,
     "workflows/approval.workflow-tests.ts": approvalTests,
   });
-  await serverBuilt(id, version);
-  return id;
-};
 
 export const askSchema = z.array(
   z.object({
@@ -118,18 +158,32 @@ export const askSchema = z.array(
 );
 export type Ask = z.infer<typeof askSchema>[number];
 
-/** The asks the App's server kept, once there are `count` of them. */
-export const asksOf = async (app: string, count = 1): Promise<Ask[]> =>
-  await vi.waitFor(
+/**
+ * The asks the approval App kept, as the builder who released it reads
+ * them, once there are `count` of them.
+ */
+export const asksOf = async (app: string, count = 1): Promise<Ask[]> => {
+  const builder = builders.get(app);
+  if (builder === undefined) {
+    throw new Error("Not an approval App of these tests");
+  }
+  return await vi.waitFor(
     async () => {
+      const kept = await sampleCall(
+        builder,
+        app,
+        "approvals.asks",
+        "query",
+        {}
+      );
+      if (!Array.isArray(kept)) {
+        throw new TypeError(`The asks didn't read: ${String(kept)}`);
+      }
       const asks = askSchema.parse(
-        await callApp(
-          env,
-          appIdSchema.parse(app),
-          { userId: "test", mode: "interactive" },
-          "asks",
-          []
-        )
+        kept.map((body: unknown): unknown => {
+          const parsed: unknown = JSON.parse(String(body));
+          return parsed;
+        })
       );
       if (asks.length < count) {
         throw new Error(`${asks.length} of ${count} asks so far`);
@@ -138,6 +192,7 @@ export const asksOf = async (app: string, count = 1): Promise<Ask[]> =>
     },
     { timeout: 20_000, interval: 100 }
   );
+};
 
 /** The link the ask sent to `userId`, and the decision it leads to. */
 export const linkOf = (ask: Ask | undefined, userId: string) => {

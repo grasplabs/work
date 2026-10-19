@@ -1,5 +1,5 @@
 /**
- * The demo company's engines (core's Apps), each with workflows that run
+ * The demo company's domains (core's Apps), each with workflows that run
  * on the local stack as they would anywhere: real code against
  * `@grasp-os/sdk`, with tests, that calls nothing outside Grasp, so a run
  * needs no connection. Inputs stand in for what a connection would bring
@@ -37,6 +37,8 @@ export interface Draw {
 
 export interface WorkflowSeed {
   id: string;
+  /** Who owns it, as in the prototype, when not its domain's owner. */
+  owner?: PersonKey;
   /** The workflow's code and its tests. */
   code: string;
   tests: string;
@@ -70,7 +72,7 @@ export interface EngineSeed {
 /** Euros in cents, as money parameters and amounts hold them. */
 const euros = (amount: number): number => Math.round(amount * 100);
 
-// Client onboarding
+// Opportunity-to-Cash
 
 const clients = [
   "Fam. Willems",
@@ -106,13 +108,13 @@ const requiredDocuments = [
   "bank statements",
 ] as const;
 
-const applicationIntake = `import { workflow, z } from "@grasp-os/sdk/workflow";
+const clientOnboarding = `import { workflow, z } from "@grasp-os/sdk/workflow";
 
 /** What every application needs before it becomes a client file. */
 const required = ${JSON.stringify(requiredDocuments)};
 
 export default workflow(
-  "application-intake",
+  "client-onboarding",
   {
     params: {},
     input: z.object({
@@ -146,9 +148,9 @@ export default workflow(
 );
 `;
 
-const applicationIntakeTests = `import { workflowTests } from "@grasp-os/sdk/testing";
+const clientOnboardingTests = `import { workflowTests } from "@grasp-os/sdk/testing";
 
-import intake from "./application-intake.ts";
+import intake from "./client-onboarding.ts";
 
 export default workflowTests(intake, [
   {
@@ -176,10 +178,10 @@ export default workflowTests(intake, [
 ]);
 `;
 
-const fileHandover = `import { person, workflow, z } from "@grasp-os/sdk/workflow";
+const mortgageFiles = `import { person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
-  "file-handover",
+  "mortgage-files",
   {
     params: {
       advisers: person({ label: "Who takes files over", default: "role:admin" }),
@@ -212,9 +214,9 @@ export default workflow(
 );
 `;
 
-const fileHandoverTests = `import { workflowTests } from "@grasp-os/sdk/testing";
+const mortgageFilesTests = `import { workflowTests } from "@grasp-os/sdk/testing";
 
-import handover from "./file-handover.ts";
+import handover from "./mortgage-files.ts";
 
 export default workflowTests(handover, [
   {
@@ -237,29 +239,31 @@ export default workflowTests(handover, [
 ]);
 `;
 
-const onboarding: EngineSeed = {
-  name: "Client onboarding",
+const opportunityToCash: EngineSeed = {
+  name: "Opportunity-to-Cash",
   description:
-    "Turns an application into a complete client file and hands it to mortgage advice.",
+    "Everything from a first client conversation until the money is in the bank.",
   owner: "nina",
   teams: [
     { team: "Client onboarding", role: "builder" },
-    { team: "Mortgage advice", role: "user" },
+    { team: "Mortgage advice", role: "builder" },
   ],
-  agents: `# Client onboarding
+  agents: `# Opportunity-to-Cash
 
-Turns a mortgage application into a complete client file, then hands the file to an adviser.
+From a mortgage application to a complete client file in an adviser's hands.
 
-- \`application-intake\` checks the application for the four documents every file needs (identity, payslip, employer statement, bank statements) and opens the file with what is still to chase.
-- \`file-handover\` hands a complete file to mortgage advice: an adviser takes it over, or it stays with onboarding.
+- \`client-onboarding\` checks the application for the four documents every file needs (identity, payslip, employer statement, bank statements) and opens the file with what is still to chase.
+- \`mortgage-files\` hands a complete file to mortgage advice: an adviser takes it over, or it stays with onboarding.
 `,
   workflows: [
     {
-      id: "application-intake",
-      code: applicationIntake,
-      tests: applicationIntakeTests,
+      id: "client-onboarding",
+      owner: "nina",
+      code: clientOnboarding,
+      tests: clientOnboardingTests,
       runs: (draw) =>
-        Array.from({ length: 34 }, (_, index) => {
+        // The prototype's 42 a week, on working days.
+        Array.from({ length: 180 }, (_, index) => {
           const missing = draw.next() < 0.45;
           const documents = missing
             ? requiredDocuments.filter(() => draw.next() < 0.6)
@@ -267,21 +271,22 @@ Turns a mortgage application into a complete client file, then hands the file to
           // Now and then an application comes in from the web form empty.
           const client = index % 13 === 7 ? "" : draw.pick(clients);
           return {
-            by: draw.pick(["nina", "tom", "tom"] as const),
+            by: "nina" as const,
             input: { client, town: draw.pick(towns), documents },
           };
         }),
     },
     {
-      id: "file-handover",
-      code: fileHandover,
-      tests: fileHandoverTests,
+      id: "mortgage-files",
+      owner: "mark",
+      code: mortgageFiles,
+      tests: mortgageFilesTests,
       deciders: { advisers: "Mortgage advice" },
       runs: (draw) =>
         Array.from({ length: 16 }, (_, index) => {
           const lacking = index % 9 === 4;
           return {
-            by: draw.pick(["nina", "tom"] as const),
+            by: "nina" as const,
             input: {
               client: draw.pick(clients),
               loan: euros(draw.between(180, 520) * 1000),
@@ -294,7 +299,7 @@ Turns a mortgage application into a complete client file, then hands the file to
                     index >= 13
                       ? "open"
                       : {
-                          by: draw.pick(["mark", "fatima"] as const),
+                          by: "mark" as const,
                           approved: index % 6 !== 2,
                           ...(index % 6 === 2
                             ? {
@@ -310,7 +315,7 @@ Turns a mortgage application into a complete client file, then hands the file to
   ],
 };
 
-// Service desk
+// Issue-to-Resolution
 
 const subjects = [
   {
@@ -398,10 +403,10 @@ export default workflowTests(triage, [
 ]);
 `;
 
-const complaintAcknowledgement = `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
+const complaints = `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
-  "complaint-acknowledgement",
+  "complaints",
   {
     params: {
       limit: money({ label: "Compliance approves compensation above", currency: "EUR", default: 25000 }),
@@ -450,9 +455,9 @@ export default workflow(
 );
 `;
 
-const complaintAcknowledgementTests = `import { workflowTests } from "@grasp-os/sdk/testing";
+const complaintsTests = `import { workflowTests } from "@grasp-os/sdk/testing";
 
-import complaint from "./complaint-acknowledgement.ts";
+import complaint from "./complaints.ts";
 
 export default workflowTests(complaint, [
   {
@@ -480,21 +485,21 @@ export default workflowTests(complaint, [
 ]);
 `;
 
-const serviceDesk: EngineSeed = {
-  name: "Service desk",
+const issueToResolution: EngineSeed = {
+  name: "Issue-to-Resolution",
   description:
-    "Sorts the shared inbox and handles complaints within the two working days the procedure promises.",
+    "Every client question or complaint, from the first message until it is solved.",
   owner: "lisa",
   teams: [
     { team: "Customer service", role: "builder" },
     { team: "Compliance", role: "user" },
   ],
-  agents: `# Service desk
+  agents: `# Issue-to-Resolution
 
 Every question and complaint that reaches customer service.
 
 - \`email-triage\` puts each email from the shared inbox in the queue that answers it: file status, documents, payments, complaints, or general.
-- \`complaint-acknowledgement\` registers a complaint with its acknowledgement deadline, and asks compliance before offering compensation above the limit.
+- \`complaints\` registers a complaint with its acknowledgement deadline, and asks compliance before offering compensation above the limit.
 `,
   workflows: [
     {
@@ -505,7 +510,7 @@ Every question and complaint that reaches customer service.
         Array.from({ length: 46 }, (_, index) => {
           const mail = draw.pick(subjects);
           return {
-            by: draw.pick(["lisa", "bram", "bram", "anouk"] as const),
+            by: "lisa" as const,
             input: {
               from: draw.pick(clients),
               subject: mail.subject,
@@ -516,16 +521,17 @@ Every question and complaint that reaches customer service.
         }),
     },
     {
-      id: "complaint-acknowledgement",
-      code: complaintAcknowledgement,
-      tests: complaintAcknowledgementTests,
+      id: "complaints",
+      owner: "joost",
+      code: complaints,
+      tests: complaintsTests,
       dateInput: "received",
       deciders: { compliance: "Compliance" },
       runs: (draw) =>
         Array.from({ length: 11 }, (_, index) => {
           const large = index % 3 !== 1;
           return {
-            by: draw.pick(["lisa", "bram"] as const),
+            by: "lisa" as const,
             input: {
               client: draw.pick(clients),
               about: draw.pick([
@@ -544,7 +550,7 @@ Every question and complaint that reaches customer service.
                     index === 9
                       ? "open"
                       : {
-                          by: draw.pick(["joost", "anouk"] as const),
+                          by: "joost" as const,
                           approved: index !== 5,
                         },
                 }
@@ -555,7 +561,7 @@ Every question and complaint that reaches customer service.
   ],
 };
 
-// Finance
+// Purchase-to-Pay and Record-to-Report
 
 const suppliers = [
   { supplier: "Kantoorhuis Utrecht", what: "Office rent", amount: 4180 },
@@ -705,18 +711,20 @@ export default workflowTests(report, [
 ]);
 `;
 
-const finance: EngineSeed = {
-  name: "Finance",
+const purchaseToPay: EngineSeed = {
+  name: "Purchase-to-Pay",
   description:
-    "Codes and approves supplier invoices, and plans the board pack before the Monday meeting.",
+    "Everything from ordering from a supplier until their invoice is paid.",
   owner: "eva",
-  teams: [{ team: "Finance", role: "builder" }],
-  agents: `# Finance
+  teams: [
+    { team: "Finance", role: "builder" },
+    { team: "Operations", role: "user" },
+  ],
+  agents: `# Purchase-to-Pay
 
-Finance's own engine.
+Supplier invoices, from the inbox to the books.
 
 - \`supplier-invoices\` checks each supplier invoice for a VAT number, codes it to a ledger account, and asks finance to approve it when it is above the limit.
-- \`weekly-report\` plans the board pack every Monday at 7:00, before the 10:00 meeting.
 `,
   workflows: [
     {
@@ -758,6 +766,22 @@ Finance's own engine.
           };
         }),
     },
+  ],
+};
+
+const recordToReport: EngineSeed = {
+  name: "Record-to-Report",
+  description:
+    "Closing the books and producing the numbers leadership looks at.",
+  owner: "eva",
+  teams: [{ team: "Finance", role: "builder" }],
+  agents: `# Record-to-Report
+
+The numbers the board reads.
+
+- \`weekly-report\` plans the board pack every Monday at 7:00, before the 10:00 meeting.
+`,
+  workflows: [
     {
       id: "weekly-report",
       code: weeklyReport,
@@ -770,7 +794,7 @@ Finance's own engine.
   ],
 };
 
-// Compliance
+// Risk-to-Compliance
 
 const countries = ["NL", "NL", "NL", "BE", "DE", "GB"] as const;
 
@@ -840,16 +864,16 @@ export default workflowTests(review, [
 ]);
 `;
 
-const compliance: EngineSeed = {
-  name: "Compliance",
+const riskToCompliance: EngineSeed = {
+  name: "Risk-to-Compliance",
   description:
-    "Screens every new client before advice starts, and asks an officer to clear the high-risk ones.",
+    "The checks, reviews and records the regulator expects from you.",
   owner: "pieter",
   teams: [
     { team: "Compliance", role: "builder" },
     { team: "Client onboarding", role: "user" },
   ],
-  agents: `# Compliance
+  agents: `# Risk-to-Compliance
 
 Know-your-customer checks for every new client.
 
@@ -858,6 +882,7 @@ Know-your-customer checks for every new client.
   workflows: [
     {
       id: "kyc-review",
+      owner: "joost",
       code: kycReview,
       tests: kycReviewTests,
       deciders: { officers: "Compliance" },
@@ -866,7 +891,7 @@ Know-your-customer checks for every new client.
           const exposed = index % 5 === 2;
           const noIdentity = index % 10 === 6;
           return {
-            by: draw.pick(["nina", "tom"] as const),
+            by: "nina" as const,
             input: {
               client: draw.pick(clients),
               country: draw.pick(countries),
@@ -881,7 +906,7 @@ Know-your-customer checks for every new client.
                     index === 17
                       ? "open"
                       : {
-                          by: draw.pick(["joost", "anouk"] as const),
+                          by: "joost" as const,
                           approved: true,
                         },
                 }
@@ -892,9 +917,31 @@ Know-your-customer checks for every new client.
   ],
 };
 
+/**
+ * A domain with nothing in it yet, as the prototype has one: core holds
+ * it, with no workflows and no apps.
+ */
+const hireToRetire: EngineSeed = {
+  name: "Hire-to-Retire",
+  description: "Everything around employees, from hiring to leaving.",
+  owner: "sanne",
+  teams: [],
+  agents: `# Hire-to-Retire
+
+Everything around employees, from hiring to leaving. Nothing runs here yet.
+`,
+  workflows: [],
+};
+
+/**
+ * The prototype's domains (`lib/processes.ts`), each one of core's Apps,
+ * with the workflows of the prototype's that core can run.
+ */
 export const engines: EngineSeed[] = [
-  onboarding,
-  serviceDesk,
-  finance,
-  compliance,
+  opportunityToCash,
+  issueToResolution,
+  purchaseToPay,
+  riskToCompliance,
+  recordToReport,
+  hireToRetire,
 ];

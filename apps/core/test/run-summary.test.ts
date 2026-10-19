@@ -9,7 +9,7 @@ import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appWith, hitsCall, workflowFiles } from "./workflow-apps.ts";
 
 // A run's summary, as an App's screens read it (summary.ts): one read, of
 // one revision of the run, whose every change takes the next revision in
@@ -273,7 +273,7 @@ export default workflowTests(definition, [
       ...workflowFiles(
         "gated",
         `  await step.do("first", { description: "First" }, async () => {
-    while ((await env.APP.call("hits", "gate")) === 0) {
+    while ((await ${hitsCall(`"gate"`)}) === 0) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     return null;

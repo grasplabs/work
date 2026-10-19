@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { SectionToCome } from "../../../../admin/organization.tsx";
+import { OrgData } from "../../../../admin/org-data.tsx";
+import { useOrganization } from "../../../../admin/organization.tsx";
 
-/** An organization's Data: its title and where it comes from, until its content is ported. */
+const Data = () => <OrgData view={useOrganization().view} />;
+
+/** An organization's Data: what Grasp keeps of its interviews, and what the company sees (src/admin/org-data.tsx). */
 export const Route = createFileRoute("/admin/organizations/$clientId/data")({
-  component: SectionToCome,
+  component: Data,
 });

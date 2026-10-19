@@ -298,7 +298,7 @@ export const seedHostileArtifact = async (
       },
     };
     await execute(
-      `INSERT INTO dependency_locks (app_id, graph_hash, lock, created_at) VALUES (${quoted(app)}, ${quoted(request.graphHash)}, ${quoted(canonicalJson(pinned))}, ${Date.now()})`,
+      `INSERT INTO dependency_locks (subject_type, subject_id, graph_hash, lock, created_at) VALUES ('app', ${quoted(app)}, ${quoted(request.graphHash)}, ${quoted(canonicalJson(pinned))}, ${Date.now()})`,
       "core"
     );
     for (const [file, { text, type }] of Object.entries(files)) {
@@ -311,7 +311,7 @@ export const seedHostileArtifact = async (
       "application/json"
     );
 
-    const { policyGeneration } = await api.dependencies.status(app);
+    const { policyGeneration } = await api.dependencies.status({ app });
     const built = await api.dependencies.build({
       app,
       graphHash: request.graphHash,
