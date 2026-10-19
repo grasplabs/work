@@ -1,5 +1,5 @@
 import { ValueDefinitionError } from "./value-descriptor.ts";
-import type { ValueSchema } from "./value-descriptor.ts";
+import type { ValueDescriptor, ValueSchema } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
 
@@ -83,6 +83,21 @@ const refuse: (message: string) => never = (message) => {
   throw new ValueDefinitionError("definition.invalid_descriptor", message);
 };
 
+/** The descriptor `text` holds, its structure checked (`readDescriptor`). */
+const descriptorRead = (text: string): ValueDescriptor => {
+  if (typeof text !== "string") {
+    return refuse("A descriptor is read from its JSON text.");
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // What the parser said quotes the text; the refusal doesn't.
+    return refuse("The descriptor isn't JSON.");
+  }
+  return readDescriptor(data, 1, { nodes: 0 });
+};
+
 /**
  * The schema a descriptor describes, read from its JSON text, e.g. as a
  * manifest stores it or a browser sent it.
@@ -99,18 +114,18 @@ const refuse: (message: string) => never = (message) => {
  */
 export const schemaFromDescriptor = (
   text: string
-): ValueSchema<unknown, unknown> => {
-  if (typeof text !== "string") {
-    return refuse("A descriptor is read from its JSON text.");
-  }
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    // What the parser said quotes the text; the refusal doesn't.
-    return refuse("The descriptor isn't JSON.");
-  }
-  return schemaOf(readDescriptor(data, 1, { nodes: 0 }));
+): ValueSchema<unknown, unknown> => schemaOf(descriptorRead(text));
+
+/**
+ * The descriptor in `text`, checked exactly as {@link schemaFromDescriptor}
+ * checks it, as data: what a host hands the reference generator from
+ * descriptors it holds as text (a catalog contract's, as a bound
+ * workflow's decision).
+ */
+export const descriptorFromText = (text: string): ValueDescriptor => {
+  const descriptor = descriptorRead(text);
+  schemaOf(descriptor);
+  return descriptor;
 };
 
 // An App's manifest as the host reads it back from what inspection or a
@@ -122,13 +137,29 @@ export {
   contractFingerprint,
   contractFingerprints,
   contractsFormatVersion,
+  declaredWorkflows,
+  decisionFingerprint,
+  eventFingerprint,
   generatedPaths,
   generateModules,
+  readSealedWorkflows,
   serverModuleSource,
   symbolicModules,
+  workflowFingerprint,
 } from "./generate.ts";
-export type { CatalogAction, ReleaseIdentity } from "./generate.ts";
+export type {
+  BoundWorkflow,
+  BoundWorkflowDecision,
+  BoundWorkflowEvent,
+  WorkflowBindingExtras,
+  WorkflowPin,
+  CatalogAction,
+  ReleaseIdentity,
+} from "./generate.ts";
 export type { ScreenManifest } from "./app.ts";
+export { workflowReferenceLimits } from "./references.ts";
+export { workflowQueries } from "./workflow-queries.ts";
+export type { WorkflowQueryName } from "./workflow-queries.ts";
 
 // A descriptor as JSON Schema, for what reads only JSON Schema (a model
 // told its answer's shape); values are still checked by the descriptor.
@@ -142,3 +173,13 @@ export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";
 // of it: a component's reading of a query, as `useQuery` subscribes.
 export { clientInternals, GraspClient } from "./client-core.ts";
 export type { ClientTransport, StreamLink } from "./client-core.ts";
+export type { FileTransport, TransferProgress } from "./client-files.ts";
+
+// The page's side of core's file channel (spec 10.7.5): what moves a
+// screen's files' bytes, which never travel in a JSON call.
+export { fileChannel } from "./file-channel.ts";
+export type {
+  CoreFetch,
+  FileChannel,
+  FileChannelOptions,
+} from "./file-channel.ts";

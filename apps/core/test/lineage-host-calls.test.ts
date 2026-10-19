@@ -3,20 +3,18 @@ import {
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { admitAttempt, quotaPolicy } from "../src/workflows/quotas.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
-import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { lastGeneration, nextPolicy, withQuotas } from "./quota-policies.ts";
 import { racingDb } from "./racing-db.ts";
 import { finished, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appWith, hitCall, hitsOf, workflowFiles } from "./workflow-apps.ts";
 
 // A run lineage's host calls: every call its steps' attempts make through
 // their hosts, counted durably on the lineage, held to the deployment's
@@ -26,42 +24,6 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 // engine, the dispatcher and core's database are real.
 
 const idp = mockIdp();
-
-/** The policy generation of the next test's limits: each higher than before. */
-let generations = 10_000;
-
-/** A policy setting `limits`, under a generation of its own. */
-const nextPolicy = (limits: Record<string, number>) => {
-  generations += 1;
-  return { generation: generations, limits };
-};
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/**
- * What `run` returns, with the operator's quota policy `limits` in force;
- * the deployment's own limits again after it, under a newer generation.
- */
-const withQuotas = async <Result>(
-  limits: Record<string, number>,
-  run: () => Promise<Result>
-): Promise<Result> => {
-  const retryDelay = env.WORKFLOW_RETRY_DELAY_MS;
-  env.QUOTA_LIMITS = nextPolicy(limits);
-  // A step's retries come at once.
-  env.WORKFLOW_RETRY_DELAY_MS = "0";
-  try {
-    return await run();
-  } finally {
-    env.QUOTA_LIMITS = nextPolicy(configuredLimits);
-    if (retryDelay === undefined) {
-      Reflect.deleteProperty(env, "WORKFLOW_RETRY_DELAY_MS");
-    } else {
-      env.WORKFLOW_RETRY_DELAY_MS = retryDelay;
-    }
-  }
-};
 
 /** Starts a run of `workflow` under `parent`, as core starts a child run. */
 const startChild = async (
@@ -104,20 +66,10 @@ const refusedCalls = async (run: string): Promise<unknown[]> => {
     .map(({ detail }) => detail.step);
 };
 
-/** How many times the App's server counted `name` (its `hits`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
-
 /** A step `name` that calls the App's `hit` of its name `calls` times. */
 const calling = (name: string, calls: number) =>
   `  await step.do("${name}", { description: "Call" }, async () => {
-${Array.from({ length: calls }, () => `    await env.APP.call("hit", "${name}");`).join("\n")}
+${Array.from({ length: calls }, () => `    await ${hitCall(`"${name}"`)};`).join("\n")}
     return 1;
   });`;
 
@@ -127,6 +79,9 @@ ${Array.from({ length: calls }, () => `    await env.APP.call("hit", "${name}");
  * admitted for, as its next one: an attempt of a generation the engine
  * has fenced is admitted no more (quotas.ts, `sharesReleased`).
  */
+/** How long an attempt meant to run out of time is given to start with. */
+const attemptMs = 2000;
+
 const attemptOf = (key: string, ms = 60_000) => ({
   key,
   step: key,
@@ -246,7 +201,7 @@ describe("run lineage host calls", { timeout: 90_000 }, () => {
         "calls",
         `  try {
     await step.do("flaky", { description: "Flaky", timeout: "1 second", retries: { limit: 2, delay: 1, backoff: "constant" } }, async () => {
-      await env.APP.call("hit", "flaky");
+      await ${hitCall(`"flaky"`)};
       await new Promise(() => {});
     });
   } catch {}
@@ -255,7 +210,7 @@ ${calling("more", 2)}
   await step.do("last", { description: "Call" }, async () => {
     for (const _ of [1, 2, 3]) {
       try {
-        await env.APP.call("hit", "last");
+        await ${hitCall(`"last"`)};
       } catch {}
     }
     return 1;
@@ -268,7 +223,6 @@ ${calling("over", 1)}
         child: 1,
       }),
     });
-    await serverBuilt(app, 1);
 
     const result = await withQuotas({ lineageHostCalls: 6 }, async () => {
       const root = await builder.api.workflows.start(app, "calls");
@@ -285,8 +239,7 @@ ${calling("over", 1)}
     const hits = Object.fromEntries(
       await Promise.all(
         ["flaky", "more", "last", "over", "child"].map(
-          async (name) =>
-            [name, await hitsOf(app, builder.userId, name)] as const
+          async (name) => [name, await hitsOf(builder, app, name)] as const
         )
       )
     );
@@ -363,7 +316,7 @@ ${calling("over", 1)}
         details: {
           limit: "hostCalls",
           max: 50,
-          generation: generations - 1,
+          generation: lastGeneration() - 1,
         },
       },
     });
@@ -404,7 +357,7 @@ ${calling("over", 1)}
         details: {
           limit: "hostCalls",
           max: 2,
-          generation: generations - 1,
+          generation: lastGeneration() - 1,
         },
       },
     });
@@ -442,7 +395,11 @@ ${calling("over", 1)}
       first: "ok",
       second: {
         code: "workflow.lineage_limit",
-        details: { limit: "hostCalls", max: 1, generation: generations - 1 },
+        details: {
+          limit: "hostCalls",
+          max: 1,
+          generation: lastGeneration() - 1,
+        },
       },
       lowered: true,
     });
@@ -452,10 +409,13 @@ ${calling("over", 1)}
     const lineage = await lineageOf();
 
     const result = await withQuotas({ lineageHostCalls: 50 }, async () => {
-      // Its 200 ms pass, and the next admission settles it as used up.
-      const died = await admitAttempt(env, lineage, attemptOf("died", 200));
+      // Its deadline passes, and the next admission settles it as used up.
+      // Long enough to be admitted on a loaded runner: an attempt already
+      // past its deadline is refused at admission (quotas.ts).
+      const attempt = attemptOf("died", attemptMs);
+      const died = await admitAttempt(env, lineage, attempt);
       const before = await outcome(died.hostCall());
-      await scheduler.wait(300);
+      await scheduler.wait(Math.max(0, attempt.deadline - Date.now()) + 50);
       await admitAttempt(env, lineage, attemptOf("next"));
       const after = await outcome(died.hostCall());
       return { before, after };

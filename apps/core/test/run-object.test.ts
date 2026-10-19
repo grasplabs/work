@@ -1,15 +1,13 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { cancelRun } from "../src/workflows/controls.ts";
 import { markRunCancelled } from "../src/workflows/engine.ts";
-import { busyRefusalsIn } from "../src/workflows/run-object.ts";
+import { busyRefusalsIn, triedOnceIn } from "../src/workflows/run-object.ts";
 import { allEvents } from "./audit-events.ts";
-import { asking } from "./decisions.ts";
+import { asking, confirmedAnswer } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import {
   aroundEngine,
@@ -20,7 +18,13 @@ import {
   sleeping,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import {
+  appWith,
+  hitCall,
+  hitsCall,
+  hitsOf,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // What core keeps in a run's object beside the engine's journal goes when
 // the engine removes the run: a step's last busy-budget refusal outlives
@@ -43,8 +47,8 @@ const napper = workflowFiles(
 const looping = workflowFiles(
   "looping",
   `  await step.do("loop", { description: "Loop" }, async () => {
-    while ((await env.APP.call("hits", "gate")) === 0) {
-      await env.APP.call("hit", "round");
+    while ((await ${hitsCall(`"gate"`)}) === 0) {
+      await ${hitCall(`"round"`)};
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     return null;
@@ -108,7 +112,7 @@ const refusedLoop = workflowFiles(
   "refused",
   `  await step.do("loop", { description: "Loop", retries: { limit: 0 } }, async () => {
     for (;;) {
-      await env.APP.call("hit", "round");
+      await ${hitCall(`"round"`)};
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   });
@@ -186,19 +190,72 @@ describe("a run's object", { timeout: 60_000 }, () => {
     });
   });
 
+  it("keeps which tried-once attempts never ran and what one that ran failed with, and drops them with the run's purge", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, napper);
+    const { id: run } = await builder.api.workflows.start(app, "napper");
+    await sleeping(run, "go");
+
+    const kept = await runInDurableObject(runObject(run), (_object, state) => {
+      const marks = triedOnceIn(state.storage.sql);
+      marks.markUnstarted("key:greet", 1);
+      marks.keepFailure("key:greet", 2, {
+        name: "Error",
+        message: "The provider refused it.",
+        code: "model.unavailable",
+      });
+      // A mark and a failure of one attempt both stay.
+      marks.markUnstarted("key:greet", 3);
+      marks.keepFailure("key:greet", 3, { name: "Error", message: "Late" });
+      return {
+        unstarted: [1, 2, 3, 4].map((attempt) =>
+          marks.unstarted("key:greet", attempt)
+        ),
+        failures: [1, 2, 3].map((attempt) =>
+          marks.failureOf("key:greet", attempt)
+        ),
+        otherStep: marks.unstarted("key:other", 1),
+      };
+    });
+    await builder.api.workflows.cancel(run);
+    await finished(run);
+    await runInDurableObject(runObject(run), (_object, state) => {
+      state.storage.sql.exec("UPDATE run SET purge_at = ?", Date.now() - 1);
+    });
+    await runDurableObjectAlarm(runObject(run));
+    // Once the run is gone, nothing is kept any more.
+    const afterPurge = await runInDurableObject(
+      runObject(run),
+      (_object, state) => {
+        const marks = triedOnceIn(state.storage.sql);
+        marks.markUnstarted("key:greet", 1);
+        return marks.unstarted("key:greet", 1);
+      }
+    );
+
+    expect({ kept, afterPurge, left: await leftIn(run) }).toStrictEqual({
+      kept: {
+        unstarted: [true, false, true, false],
+        failures: [
+          undefined,
+          {
+            name: "Error",
+            message: "The provider refused it.",
+            code: "model.unavailable",
+          },
+          { name: "Error", message: "Late" },
+        ],
+        otherStep: false,
+      },
+      afterPurge: false,
+      left: { tables: ["tombstones"], kv: 0 },
+    });
+  });
+
   it("refuses every call of a cancelled run's attempt from the cancel on, even when the engine fails to terminate it", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(builder, looping);
-    const rounds = async () =>
-      Number(
-        await callApp(
-          env,
-          appIdSchema.parse(app),
-          { userId: builder.userId, mode: "interactive" },
-          "hits",
-          ["round"]
-        )
-      );
+    const rounds = async () => await hitsOf(builder, app, "round");
     const { id: run } = await builder.api.workflows.start(app, "looping");
     await vi.waitFor(
       async () => {
@@ -360,15 +417,7 @@ describe("a run's object", { timeout: 60_000 }, () => {
     const { id: run } = await builder.api.workflows.start(app, "refused");
     await vi.waitFor(
       async () => {
-        const rounds = Number(
-          await callApp(
-            env,
-            appIdSchema.parse(app),
-            { userId: builder.userId, mode: "interactive" },
-            "hits",
-            ["round"]
-          )
-        );
+        const rounds = await hitsOf(builder, app, "round");
         expect(rounds).toBeGreaterThan(0);
       },
       { timeout: 20_000, interval: 100 }
@@ -397,7 +446,7 @@ describe("a run's object", { timeout: 60_000 }, () => {
     // The answer wakes the run: its activation finishes the cancel, well
     // before the object's repair would.
     const answered = await outcome(
-      decider.api.decisions.answer(decision, { approved: true })
+      confirmedAnswer(decider, decision, { approved: true })
     );
     await rowEnded(run.id, 2500);
 

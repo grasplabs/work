@@ -1,5 +1,7 @@
-import { expect, test as base } from "@playwright/test";
+import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
+
+import { test as base } from "./contexts.ts";
 
 declare global {
   interface Window {
@@ -33,7 +35,10 @@ export const recordCspViolations = async (page: Page): Promise<string[]> => {
   return violations;
 };
 
-/** Playwright's `test`, failing any test that violates the app's CSP. */
+/**
+ * The tests' `test` (contexts.ts), failing any test that violates the
+ * app's CSP.
+ */
 export const test = base.extend<{ cspViolations: string[] }>({
   cspViolations: [
     async ({ page }, use) => {

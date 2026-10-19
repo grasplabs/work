@@ -150,7 +150,7 @@ describe("a Composio tool the admin marked as a read", () => {
         action: held.action,
         idempotencyKey: held.idempotencyKey,
         ...signed,
-        confirms: held.id,
+        decision: { kind: "confirm", pendingActionId: held.id },
       }),
     });
     // The step tries again under the same key: it gets the answer, and
@@ -204,7 +204,7 @@ describe("a Composio tool the admin marked as a read", () => {
           action: held.action,
           idempotencyKey: held.idempotencyKey,
           ...signed,
-          confirms: held.id,
+          decision: { kind: "confirm", pendingActionId: held.id },
         }),
       })
     );

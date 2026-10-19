@@ -1,4 +1,4 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { isRetryableCode } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { Acting } from "../src/auth/identity.ts";
 import { sweepReleases } from "../src/release-retention.ts";
 import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
+import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -139,10 +140,18 @@ const lineSeparators = String.fromCodePoint(0x20_28, 0x20_29);
 
 /**
  * Core, with the compiler's isolate as it is when a build takes too long,
- * or its CPU runs out (`build`): the outside system here.
+ * or its CPU runs out (`build`): the outside system here. Each target core
+ * asks it to build goes to `targets`.
  */
-const compilerThat = (build: () => Promise<never>): Env => {
-  const compiler = { getEntrypoint: () => ({ buildOpenWorkflow: build }) };
+const compilerThat = (build: () => Promise<never>, targets: string[]): Env => {
+  const compiler = {
+    getEntrypoint: () => ({
+      build: async (target: string) => {
+        targets.push(target);
+        return await build();
+      },
+    }),
+  };
   // SAFETY: only what the compiler's start reads of a Loader.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const loader = { get: () => compiler, load: () => compiler } as never;
@@ -168,9 +177,9 @@ describe("JSON workflow builds", () => {
     // Real statements, one per task, in order: not the definition handed
     // to an interpreter.
     const places = [
-      'flow.task("greet"',
+      'flow.set("greet"',
       'flow.wait("pause", 3600000)',
-      'flow.task("finish"',
+      'flow.set("finish"',
     ].map((statement) => source.indexOf(statement));
     expect({
       definition: files["workflow.json"],
@@ -284,15 +293,18 @@ describe("JSON workflow builds", () => {
 
   it("publishes what the generator doesn't lower without a build, naming each construct", async () => {
     const by = await builder();
-    // A transition, as the profile writes it.
-    const check: unknown = JSON.parse(
-      '{"check":{"set":{"status":"checking"},"then":"finish"}}'
-    );
     const { workflow, version } = await published(by, (name) =>
       definitionOf(
         name,
         [
-          check,
+          {
+            // A nested list's timeout would bound more than one attempt.
+            check: {
+              do: [{ inner: { set: { status: "checking" } } }],
+              timeout: { after: { seconds: 5 } },
+              then: "finish",
+            },
+          },
           {
             stop: {
               raise: {
@@ -306,22 +318,19 @@ describe("JSON workflow builds", () => {
           },
           { finish: { set: { status: "done" } } },
         ],
-        {
-          more: {
-            output: {
-              schema: objectSchema({ status: { type: "string" } }),
-              as: "${ . }",
-            },
-          },
-        }
+        { more: { timeout: { after: { minutes: 5 } } } }
       )
     );
     expect(version.build.executable).toBeFalsy();
     expect(
       version.build.executable ? [] : version.build.unsupported
     ).toStrictEqual([
-      { pointer: "/output/as", taskId: null, feature: "output.as" },
-      { pointer: "/do/0/check/then", taskId: "check", feature: "then" },
+      { pointer: "/timeout", taskId: null, feature: "timeout" },
+      {
+        pointer: "/do/0/check/timeout",
+        taskId: "check",
+        feature: "timeout:do",
+      },
       { pointer: "/do/1/stop", taskId: "stop", feature: "raise" },
     ]);
     // Nothing generated, nothing sealed: the export is the definition alone.
@@ -346,6 +355,84 @@ describe("JSON workflow builds", () => {
     ).resolves.toBe("workflow.version_corrupt");
   });
 
+  it("answers the next load of a build whose first load was cancelled mid-read", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [{ finish: { set: { status: "done" } } }])
+    );
+    // R2 that never answers a read: as the first load's request was
+    // cancelled while it read, which workerd never settles.
+    const reading = Promise.withResolvers<boolean>();
+    const stuck = new Proxy(env.FILES, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "get") {
+          return async (): Promise<never> => {
+            reading.resolve(true);
+            return await Promise.withResolvers<never>().promise;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const bounded = { ...env, WORKFLOW_BUILD_READ_MS: "50" };
+    // Never awaited: it never answers.
+    const cancelled = loadWorkflowBuild(
+      { ...bounded, FILES: stuck },
+      workflow.id,
+      1
+    );
+    await reading.promise;
+
+    const next = await Promise.race([
+      loadWorkflowBuild(bounded, workflow.id, 1),
+      scheduler.wait(5000).then(() => "still waiting" as const),
+    ]);
+
+    const artifacts = await sealedArtifacts(workflow.id, 1);
+    const generated = artifacts.find(({ path }) => path === generatedPath);
+    const sealed = await env.FILES.get(artifactKey(generated?.sha256 ?? ""));
+    expect(next === "still waiting" ? next : next.source).toBe(
+      await sealed?.text()
+    );
+    await expect(
+      Promise.race([cancelled, Promise.resolve("never answers")])
+    ).resolves.toBe("never answers");
+  });
+
+  it("verifies a build anew after a load of it failed, keeping no failure", async () => {
+    const by = await builder();
+    const { workflow, version } = await published(by, (name) =>
+      definitionOf(name, [{ finish: { set: { status: "done" } } }])
+    );
+    const artifacts = await sealedArtifacts(workflow.id, 1);
+    const generated = artifacts.find(({ path }) => path === generatedPath);
+    const key = artifactKey(generated?.sha256 ?? "");
+    const stored = await env.FILES.get(key);
+    const text = (await stored?.text()) ?? "";
+    await env.FILES.delete(key);
+    const failed = await outcome(loadWorkflowBuild(env, workflow.id, 1));
+    await env.FILES.put(key, text);
+
+    const loaded = await loadWorkflowBuild(env, workflow.id, 1);
+
+    expect({
+      failed,
+      hash: loaded.hash,
+      source: loaded.source,
+      modules: Object.keys(loaded.modules).length > 0,
+      tasks: loaded.tasks.length,
+    }).toStrictEqual({
+      failed: "workflow.version_corrupt",
+      hash: identityOf(version),
+      source: text,
+      modules: true,
+      tasks: 1,
+    });
+  });
+
   it("keeps a version's build through the release retention sweep", async () => {
     const by = await builder();
     const { workflow } = await published(by, (name) =>
@@ -363,7 +450,7 @@ describe("JSON workflow builds", () => {
     );
     expect(heads.every((head) => head !== null)).toBeTruthy();
     const { files } = await workflowSource(env, by, workflow.id, 1);
-    expect(files[generatedPath]).toContain('flow.task("finish"');
+    expect(files[generatedPath]).toContain('flow.set("finish"');
   });
 
   it("doesn't lower a task with more expressions than core evaluates in one", async () => {
@@ -477,17 +564,20 @@ describe("JSON workflow builds", () => {
       ),
       basedOn: null,
     });
+    const hungTargets: string[] = [];
+    const diedTargets: string[] = [];
     const hung = compilerThat(
       async () =>
         // oxlint-disable-next-line promise/avoid-new -- a build that never answers
         await new Promise<never>(() => {
           // Never answers.
-        })
+        }),
+      hungTargets
     );
     const died = compilerThat(async () => {
       await Promise.resolve();
       throw new Error("Worker exceeded CPU time limit.");
-    });
+    }, diedTargets);
     const late = await outcome(
       publishWorkflowVersion(hung, by, workflow.id, request("1.0.0"))
     );
@@ -503,11 +593,16 @@ describe("JSON workflow builds", () => {
     expect({
       late,
       killed,
+      // Each reached the compiler, as a JSON workflow's build.
+      targets: [...new Set([...hungTargets, ...diedTargets])],
+      bothReached: hungTargets.length > 0 && diedTargets.length > 0,
       retryable: isRetryableCode("workflow.build_slow"),
       published: saved.version,
     }).toStrictEqual({
       late: "workflow.build_slow",
       killed: "workflow.build_slow",
+      targets: ["open-workflow"],
+      bothReached: true,
       retryable: true,
       published: 1,
     });

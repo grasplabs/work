@@ -60,11 +60,12 @@ jobs:
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
 
   # `vp test` in shards, a runner each: unsharded, one passing run reached
-  # 16 minutes at about 5,300 tests (October 2026). Vitest gives each shard
-  # its part of the test files, split by a hash of each file's path, so the
-  # shards together run every file once. Add a shard by adding to `shard`:
-  # `--shard` takes the count from the matrix. Part of the required `check`
-  # (below).
+  # 16 minutes at about 5,300 tests (October 2026). Each shard gets its part
+  # of the test files, split by how long each takes
+  # (scripts/test-sequencer.ts, with the times in
+  # scripts/test-durations.json), so the shards end together and together
+  # run every file once. Add a shard by adding to `shard`: `--shard` takes
+  # the count from the matrix. Part of the required `check` (below).
   test:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.event_name != 'push'
@@ -76,7 +77,7 @@ jobs:
       # it.
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,12 +100,14 @@ jobs:
         run: |
           command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb)
           sudo sysctl -w kernel.yama.ptrace_scope=0
-      # Unsharded, the step took about 9.5 minutes at about 5,350 tests
-      # (October 2026), and up to 16 on a slow runner. Split in two, it
-      # took 6.5 and 9 minutes: the split is by file, not by time, and
-      # core's heaviest files can land together, while each shard still
-      # starts its own workerd for every project. 16 minutes leaves room
-      # for a slow runner on the heavier shard.
+      # Two shards split by a hash of each file's path took 10 to 14
+      # minutes each (October 2026), and a slow runner ran one into this
+      # step's timeout: core's heaviest files could land together, and a
+      # shard runs its project groups (core and the rest, then core's
+      # screens, then on-prem) one after another. Five shards split by
+      # duration took 4 to 7 minutes each, leaving room for a runner twice
+      # as slow; four left the heaviest at about 9. Refresh the durations from the shards' test-progress
+      # artifacts when the split drifts (scripts/test-durations.ts).
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.
       # Vitest times a test out from inside its worker, so a worker that is
@@ -143,7 +146,9 @@ jobs:
           # stack and sockets: at most 20 s and 300 KB, so the log shows
           # where it is stuck.
           GRASP_STALL_DUMP_STACKS: gdb
-      - if: failure()
+      # Kept for passing runs too: the durations the shards are split by
+      # come from it (scripts/test-durations.ts).
+      - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # One per shard: a run's artifact names are unique.

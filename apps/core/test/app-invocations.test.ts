@@ -1,9 +1,5 @@
 import { appErrorDetailsBytes } from "@grasp-os/shared/apps";
-import {
-  appIdSchema,
-  collectionIdSchema,
-  permissionIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { runInDurableObject } from "cloudflare:test";
@@ -15,7 +11,6 @@ import { callApp, waitingCallsLimit } from "../src/app.ts";
 import type { ExportCall } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { AppGuestsBinding } from "../src/guests-binding.ts";
-import { AppCollectionBinding } from "../src/knowledge/app-binding.ts";
 import { ordinaryData, release, requestGranted, serverBuilt } from "./apps.ts";
 import { reached } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
@@ -136,15 +131,6 @@ export class App extends DurableObject {
       send: await tried(() =>
         this.stub("MAIL").call(who, "mail.send", { to: "ben@acme.test", subject: "Hello" }, { idempotencyKey: crypto.randomUUID() })
       ),
-      canWrite: await tried(() => this.stub("TASKS").canWrite(who)),
-      save: await tried(() =>
-        this.stub("TASKS").saveRecord(who, {
-          path: "tasks/" + crypto.randomUUID() + ".md",
-          ifVersion: 0,
-          record: { type: "task", status: "open" },
-          body: "Do it.",
-        })
-      ),
       point: await tried(() => this.stub("STATISTICS").record(who, { measure: "ticks", value: 1 })),
       write: await tried(() => this.stub("SELF").call(who, "change", {})),
     };
@@ -256,20 +242,6 @@ const exported = {
   searchThenPoint: { access: "write", input: { type: "object" }, output: {} },
 };
 
-/** A `task` record type for `collection`. */
-const taskType = (collection: string) =>
-  JSON.stringify({
-    task: {
-      collection,
-      description: "Something to do",
-      schema: {
-        type: "object",
-        properties: { status: { enum: ["open", "done"] } },
-        required: ["status"],
-      },
-    },
-  });
-
 /** A new App of `owner`'s running `server`, released and built. */
 const newApp = async (
   owner: Person,
@@ -307,8 +279,8 @@ const heldMail = async (plan: MailAnswer[]) => {
 
 /**
  * The desk, granted something of every kind to read and change: Outlook
- * to read (it reaches connect), mail to send, a collection to write
- * records to, and its own exports (`SELF`, to call one marked `write`);
+ * to read (it reaches connect), mail to send, statistics to record, and
+ * its own exports (`SELF`, to call one marked `write`);
  * and the front desk, granted the desk's exports, whose screens call it.
  */
 const setUp = async (
@@ -316,20 +288,13 @@ const setUp = async (
   frontFiles: Record<string, string> = {}
 ) => {
   const admin = await personApi("admin");
-  const { id: collectionId } = await admin.api.knowledge.createCollection({
-    name: `Tasks ${unique()}`,
-    access: "everyone",
-  });
-  const desk = await newApp(admin, {
-    "app/records.json": taskType(collectionId),
-  });
+  const desk = await newApp(admin);
   const front = await newApp(admin, frontFiles);
   const mail = await heldMail(plan);
   const grant = async (
     subject: AppId,
     object:
       | { type: "connection"; connectionId: string }
-      | { type: "collection"; collectionId: string }
       | { type: "app"; appId: string },
     actions: string[],
     binding: string
@@ -351,12 +316,6 @@ const setUp = async (
     { type: "connection", connectionId: mail.id },
     ["mail.send", "mail.search"],
     "MAIL"
-  );
-  await grant(
-    desk,
-    { type: "collection", collectionId },
-    ["read", "write"],
-    "TASKS"
   );
   const calls = await grant(
     front,
@@ -533,9 +492,6 @@ const grantOutlook = async (admin: Person, app: AppId) =>
 /** A person using an App, as a call names them. */
 const as = (userId: string) => ({ userId, mode: "interactive" }) as const;
 
-/** A read of the documents table, as a save reads before it writes. */
-const readsDocuments = /from "documents"/iu;
-
 /** A read of permissions, as a stub call's permission check makes it. */
 const readsPermissions = /from "permissions"/iu;
 
@@ -675,8 +631,6 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       read: {
         list: reached,
         send: "connect.read_only",
-        canWrite: false,
-        save: "app.read_only",
         point: "app.read_only",
         write: "permission.denied",
       },
@@ -684,8 +638,6 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
         list: reached,
         // Held for the person, as a side effect from a screen is.
         send: "ok",
-        canWrite: true,
-        save: "ok",
         point: "ok",
         write: "ok",
       },
@@ -716,8 +668,6 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     expect(dressedUp).toStrictEqual({
       list: reached,
       send: "connect.read_only",
-      canWrite: false,
-      save: "app.read_only",
       point: "app.read_only",
       write: "permission.denied",
     });
@@ -953,7 +903,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const relay = workflowFiles(
       "relay",
       `  return await step.do("ask", { description: "Ask the desk" }, async () =>
-    await appExports<{ sendThenList: (input: object) => unknown }>(env.DESK).sendThenList({})
+    await appExports<{ sendThenList: (input: object) => { sent: string; listed: string } }>(env.DESK).sendThenList({})
   );`,
       { ask: { sent: "ok", listed: "ok" } }
     );
@@ -962,10 +912,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       Object.fromEntries(
         Object.entries(relay).map(([path, text]) => [
           path,
-          text.replace(
-            "import { workflow, z }",
-            "import { appExports, workflow, z }"
-          ),
+          text.replace(" workflow, z }", " appExports, workflow, z }"),
         ])
       )
     );
@@ -1078,90 +1025,6 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     expect({ stays, leaves }).toStrictEqual({
       stays: "ok",
       leaves: "app.not_found",
-    });
-  });
-
-  it("writes no record once what let its call in is gone, however late in the save that happens", async () => {
-    const admin = await personApi("admin");
-    const clerk = await personApi("user");
-    const team = await newTeam(admin, [clerk]);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Tasks ${unique()}`,
-      access: "teams",
-      teams: [team],
-    });
-    const desk = await newApp(admin, {
-      "app/records.json": taskType(collectionId),
-    });
-    await admin.api.apps.members.add(desk, {
-      type: "team",
-      id: team,
-      role: "user",
-    });
-    const permissionId = permissionIdSchema.parse(
-      await requestGranted(idp, admin, {
-        subject: { type: "app", appId: desk },
-        object: { type: "collection", collectionId },
-        actions: ["read", "write"],
-        binding: "TASKS",
-      })
-    );
-    await ordinaryData(desk);
-    // A screen call of the clerk's, held, whose caller the screen gets:
-    // the save below is the desk's record stub's, for that call.
-    const held = gate();
-    const call = outcome(
-      clerk.api.screens.call(desk, "holdCaller", [held.wait])
-    );
-    const caller = await entered(held, call);
-    const save = async (path: string, leave: boolean): Promise<string> => {
-      // The clerk leaves the team once the save has checked everything it
-      // checks first, and before its write.
-      const racing = beforeRead(env.KNOWLEDGE, readsDocuments, async () => {
-        if (leave) {
-          await callAuth("/organization/remove-team-member", admin.session, {
-            teamId: team,
-            userId: clerk.userId,
-          });
-        }
-      });
-      return await outcome(
-        stubOn(
-          AppCollectionBinding,
-          {
-            app: desk,
-            context: { type: "app", appId: desk },
-            permissionId,
-            collectionId: collectionIdSchema.parse(collectionId),
-          },
-          { ...env, KNOWLEDGE: racing }
-        ).saveRecord(caller, {
-          path,
-          ifVersion: 0,
-          record: { type: "task", status: "open" },
-          body: "",
-        })
-      );
-    };
-    const stays = `tasks/${unique()}.md`;
-    const leaves = `tasks/${unique()}.md`;
-    const results = {
-      stays: await save(stays, false),
-      leaves: await save(leaves, true),
-    };
-    held.release();
-    await call;
-    const written = await env.KNOWLEDGE.prepare(
-      "SELECT path FROM documents WHERE collection_id = ? ORDER BY path"
-    )
-      .bind(collectionId)
-      .all<{ path: string }>();
-    expect({
-      results,
-      written: written.results.map(({ path }) => path),
-    }).toStrictEqual({
-      results: { stays: "ok", leaves: "app.not_found" },
-      written: [stays],
     });
   });
 

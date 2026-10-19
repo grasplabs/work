@@ -16,6 +16,8 @@ import { runBuildJob } from "../build-jobs.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
 import { stepModelBinding } from "../resource-bindings.ts";
 import type { WorkContext } from "../restricted.ts";
+import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
+import type { AttemptCall } from "./attempt-calls.ts";
 import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { runParamsSchema } from "./engine.ts";
@@ -23,7 +25,6 @@ import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
 import {
   countedStep,
   fromIsolate,
-  isCpuLimitKill,
   RunHost,
   settle,
   stepLimitOf,
@@ -38,6 +39,8 @@ import type {
 } from "./host.ts";
 import { paramValues } from "./param-values.ts";
 import { admitAttempt } from "./quotas.ts";
+import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
+import { runResourceWorkflow } from "./resource-runs.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
 
@@ -149,68 +152,6 @@ const settledRun = async (
   return outer.ok ? fromIsolate(outer.value) : outer;
 };
 
-/** An attempt's call into the run's isolate, as it started (`attemptCall`). */
-interface AttemptCall {
-  call: Promise<unknown>;
-  /** Settles once the attempt's step ends in this activation. */
-  stepDone: Promise<unknown>;
-  /**
-   * Whether its step has ended (`stepDone` settled): an attempt that timed
-   * out may still be out in the isolate after its step failed, and the
-   * workflow caught that and went on.
-   */
-  ended: boolean;
-}
-
-/**
- * What an activation does once the Loader stopped the run's isolate past
- * its CPU time (`thrown`, by the run's call into it): fails the run, as for
- * any error of its isolate, unless an attempt was cut off with it. The
- * host failed each such attempt as a retryable timeout (host.ts,
- * `isCpuLimitKill`), and fails any later one of this activation so too,
- * so the engine parks its step for its retry and the activation
- * suspends until then, as for a wait: the next one replays in a fresh
- * isolate, with a fresh limit, rather than the run fail for CPU earlier
- * steps spent. Should such a step end in this activation instead (its
- * last attempt, or every retry due at once), the run fails with its
- * failure. Code spending the time outside any attempt fails the run.
- */
-const afterCpuKill = async (
-  thrown: unknown,
-  calls: readonly AttemptCall[]
-): Promise<never> => {
-  if (!isCpuLimitKill(thrown)) {
-    throw thrown;
-  }
-  // Each attempt's call ends with the isolate; waited for, as the run's
-  // own call may end first.
-  const attempts: Promise<unknown>[] = [];
-  for (const { call } of calls) {
-    attempts.push(call);
-  }
-  const outcomes = await Promise.allSettled(attempts);
-  // Only attempts whose steps are still under way: one whose step ended
-  // before (it timed out, and the workflow went on) is no step to retry.
-  const cutOff = calls.filter((attempt, index) => {
-    const outcome = outcomes[index];
-    return (
-      !attempt.ended &&
-      outcome?.status === "rejected" &&
-      isCpuLimitKill(outcome.reason)
-    );
-  });
-  if (cutOff.length > 0) {
-    const steps: Promise<unknown>[] = [];
-    for (const { stepDone } of cutOff) {
-      steps.push(stepDone);
-    }
-    // Never settles while each such step is parked: the engine suspends
-    // the run, and the next activation replays it.
-    await Promise.race(steps);
-  }
-  throw thrown;
-};
-
 /** The run's App, as a context for its restricted mode. */
 const contextOf = (app: AppId, runId: RunId): WorkContext => ({
   type: "run",
@@ -247,6 +188,9 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
     sleep: async (name, duration) => {
       await step.sleep(name, duration);
     },
+    sleepUntil: async (name, timestamp) => {
+      await step.sleepUntil(name, timestamp);
+    },
     waitForEvent: async (name, options) =>
       await step.waitForEvent(name, options),
   };
@@ -259,6 +203,10 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
  */
 export interface RunMemory {
   busyRefusals: BusyRefusals;
+  /** What it keeps of its JSON workflow's tried-once attempts (resource-host.ts). */
+  triedOnce?: TriedOnceMarks;
+  /** The model calls its JSON workflow's actions made (resource-host.ts). */
+  modelCalls?: ActionModelCalls;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
   aiCalls: AiCalls;
   leaseOf: HostHooks["leaseOf"];
@@ -336,6 +284,10 @@ const runWorkflow = async (
         ? {}
         : { rootRunId: runIdSchema.parse(row.rootRunId) }),
       authority,
+      // Its lineage, its person and its App from its row and its root's,
+      // never from its input: whose shares its attempts and model requests
+      // take.
+      shareSubject: await admissionSubjectOf(env, row),
       collections: bindings,
       connections,
       apps,
@@ -360,16 +312,7 @@ const runWorkflow = async (
     const calls: AttemptCall[] = [];
     const host = new RunHost(env, step, run, {
       stepFailed,
-      attemptCall: (call, stepDone) => {
-        // Observed, never left to reject unhandled: the host awaits it.
-        call.catch(() => null);
-        const attempt: AttemptCall = { call, stepDone, ended: false };
-        // It never rejects (host.ts, `do`).
-        void stepDone.finally(() => {
-          attempt.ended = true;
-        });
-        calls.push(attempt);
-      },
+      attemptCall: trackAttemptCalls(calls),
       busyRefusals: memory.busyRefusals,
       aiCalls: memory.aiCalls,
       leaseOf: memory.leaseOf,
@@ -386,15 +329,13 @@ const runWorkflow = async (
         await callRunFunction(env, caller, reference, input, idempotencyKey),
       modelBinding: async (alias) =>
         await stepModelBinding(env, run.app, run.version, alias),
-      // Its lineage, its person and its App from its row and its root's,
-      // never from its input: whose shares its attempts take.
       admitAttempt: async (attempt) =>
         await admitAttempt(
           env,
           {
             run: runId,
             root: row.rootRunId ?? runId,
-            subject: await admissionSubjectOf(env, row),
+            subject: run.shareSubject,
             resource: run.app,
           },
           attempt
@@ -460,6 +401,10 @@ export const runPinned = async (
   if (pin.type === "internal") {
     await internalRuns[pin.workflow](env, input, step);
     return null;
+  }
+  if (pin.type === "resource") {
+    // An independent workflow's sealed build: its input is its receipt's.
+    return await runResourceWorkflow(env, pin, event.instanceId, step, memory);
   }
   const { app, workflow, version } = pin;
   return await runWorkflow(

@@ -1,5 +1,6 @@
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarInset, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+import { Toaster } from "@grasp-os/ui/components/toast";
 import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -30,21 +31,25 @@ export const AppFrame = ({
   // Folded as the person left it in this browser.
   const [open, setOpen] = useState(() => readFolded("sidebar") !== true);
   return (
-    <TooltipProvider>
-      <SidebarProvider
-        className="h-svh"
-        onOpenChange={(next) => {
-          setOpen(next);
-          void keepFolded("sidebar", !next);
-        }}
-        open={open}
-      >
-        <AppSidebar core={core} identity={identity} />
-        <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
-          <InFrame value>{children}</InFrame>
-        </SidebarInset>
-        {aside}
-      </SidebarProvider>
-    </TooltipProvider>
+    // What the frame says of an action outside any page, such as a
+    // sign-out from the person menu that core didn't carry out.
+    <Toaster>
+      <TooltipProvider>
+        <SidebarProvider
+          className="h-svh"
+          onOpenChange={(next) => {
+            setOpen(next);
+            void keepFolded("sidebar", !next);
+          }}
+          open={open}
+        >
+          <AppSidebar core={core} identity={identity} />
+          <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
+            <InFrame value>{children}</InFrame>
+          </SidebarInset>
+          {aside}
+        </SidebarProvider>
+      </TooltipProvider>
+    </Toaster>
   );
 };

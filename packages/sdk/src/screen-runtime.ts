@@ -24,6 +24,8 @@ import { createRoot } from "react-dom/client";
 import { clientInternals, GraspClient } from "./client-core.ts";
 import type { ClientTransport } from "./client-core.ts";
 import { GraspError } from "./client-error.ts";
+import { portFileTransport } from "./file-port.ts";
+import type { DraftPersistence } from "./form-drafts.ts";
 import { GraspProvider } from "./react.ts";
 
 export type Theme = "light" | "dark";
@@ -100,6 +102,15 @@ export interface ScreenBridge {
     request: string,
     onSnapshot: (snapshot: unknown) => void
   ) => Promise<{ release: () => Promise<void> }>;
+  /**
+   * The person's unsaved record-form drafts of this App the page kept for
+   * the tab, by key, as text (`@grasp-os/sdk`'s form-drafts.ts).
+   */
+  drafts: () => Promise<Record<string, string>>;
+  /** Keeps `text` as the draft `key`, or drops it (`null`). */
+  saveDraft: (key: string, text: string | null) => void;
+  /** Drops every draft of this person and App: access was lost. */
+  clearDrafts: () => void;
 }
 
 let connected: RpcStub<ScreenBridge> | undefined;
@@ -203,6 +214,183 @@ export const bridgeTransport = (
   },
   cancelStream: async (request) => await page().cancelStream(request),
 });
+
+/** Runs `call` on the page, never failing the screen if the page can't. */
+const quietly = async (call: () => Promise<unknown>): Promise<void> => {
+  try {
+    await call();
+  } catch {
+    // A draft not kept by the page stays in the frame's memory.
+  }
+};
+
+/**
+ * How long the frame waits for the page to hand over its drafts before
+ * the screen first renders: past it (the page's connection to core lost,
+ * say), the screen starts without them, rather than the page giving up on
+ * the whole screen as one that never started.
+ */
+export const draftLookupMs = 1500;
+
+/** What `work` answers within `ms`, or undefined after; its later failure unheard. */
+const within = async <T>(
+  work: Promise<T>,
+  ms: number
+): Promise<T | undefined> => {
+  void quietly(async () => await work);
+  const late: unique symbol = Symbol("late");
+  const { promise, resolve } = Promise.withResolvers<typeof late>();
+  const timer = setTimeout(() => {
+    resolve(late);
+  }, ms);
+  try {
+    const answer = await Promise.race([work, promise]);
+    return answer === late ? undefined : answer;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/** What of the page's bridge keeps a frame's drafts. */
+export interface DraftPage {
+  readonly drafts: () => Promise<unknown>;
+  readonly saveDraft: (key: string, text: string | null) => Promise<unknown>;
+  readonly clearDrafts: () => Promise<unknown>;
+}
+
+/** Most changes a frame holds while the page hasn't handed its drafts over. */
+const draftsWaitingMost = 2 * screenLimits.drafts.perApp;
+
+/** How many times in a row the page is asked again for its drafts. */
+const draftAsksMost = 5;
+
+/**
+ * Where the session client keeps drafts: the page, which hands over the
+ * App's drafts it kept for the person, or none if it can't within
+ * `draftLookupMs`. An answer that comes later is never applied, as a
+ * draft restored into a form the person has started on could overwrite
+ * it; the changes made meanwhile are written once it comes.
+ */
+export const pageDrafts = async (
+  page: DraftPage
+): Promise<DraftPersistence> => {
+  let initial: Record<string, string> = {};
+  // Whether the page said what it keeps. Until it has, this frame's
+  // changes wait here, the newest of each draft, so none it couldn't hand
+  // over is replaced by an edit made without it before it answered; once
+  // it answers, they are written, the person's edits and drops being
+  // newer than what it kept.
+  let handedOver = false;
+  const waiting = new Map<string, string | null>();
+  /** The page asked again, after a lookup that failed: how often, and when next. */
+  let asks = 0;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  const send = (key: string, text: string | null): void => {
+    void quietly(async () => {
+      await page.saveDraft(key, text);
+    });
+  };
+  // Once the page answers, what waits is written: the person's edits of a
+  // record, made in this frame, replace what the page kept of it that the
+  // frame never showed (its answer came too late), and their saves and
+  // discards drop it. A draft of a record they didn't touch stays, for
+  // the next load. Their edits are kept as long as they type, never held
+  // back for a draft they can't see.
+  const answered = (): void => {
+    if (handedOver) {
+      return;
+    }
+    handedOver = true;
+    for (const [key, text] of waiting) {
+      send(key, text);
+    }
+    waiting.clear();
+  };
+  /** Asks the page for its drafts: a provider that throws at once rejects. */
+  const ask = async (): Promise<unknown> => await page.drafts();
+  /**
+   * Asks the page again, a while after, while changes wait for it: a few
+   * times at most, each a lookup's time apart, and again at the next
+   * change once those are spent.
+   */
+  const askAgain = (): void => {
+    if (handedOver || retry !== undefined || asks >= draftAsksMost) {
+      return;
+    }
+    asks += 1;
+    retry = setTimeout(() => {
+      // Its answer, whenever it comes, writes what waits; the next ask
+      // comes a lookup's time later, answered or not.
+      const asked = ask();
+      void quietly(async () => {
+        await asked;
+        answered();
+      });
+      retry = setTimeout(() => {
+        retry = undefined;
+        if (!handedOver && waiting.size > 0) {
+          askAgain();
+        }
+      }, draftLookupMs);
+    }, draftLookupMs);
+  };
+  const lookup = ask();
+  try {
+    const kept: unknown = await within(lookup, draftLookupMs);
+    // Late (`within` answers nothing): not handed over yet.
+    if (typeof kept === "object" && kept !== null) {
+      initial = Object.fromEntries(
+        Object.entries(kept).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string"
+        )
+      );
+      handedOver = true;
+    } else {
+      // Its answer, when it comes, is never applied: only what waits is
+      // written then.
+      void quietly(async () => {
+        await lookup;
+        answered();
+      });
+    }
+  } catch {
+    // The page can't say now: asked again as drafts change.
+  }
+  return {
+    initial,
+    write: (key, text) => {
+      if (handedOver) {
+        send(key, text);
+        return;
+      }
+      waiting.delete(key);
+      waiting.set(key, text);
+      // Bounded however long the page can't answer: past twice an App's
+      // count of drafts, the oldest change waiting is sent now rather than
+      // let go of, so no drop of a draft the page keeps is lost. The page
+      // writes it as it would once it answers: the person's change is
+      // newer than anything it kept.
+      if (waiting.size > draftsWaitingMost) {
+        const [oldest] = waiting;
+        if (oldest !== undefined) {
+          waiting.delete(oldest[0]);
+          send(...oldest);
+        }
+      }
+      // A change after the asks were spent asks again.
+      if (retry === undefined && asks >= draftAsksMost) {
+        asks = 0;
+      }
+      askAgain();
+    },
+    clear: () => {
+      waiting.clear();
+      void quietly(async () => {
+        await page.clearDrafts();
+      });
+    },
+  };
+};
 
 /**
  * Connects the frame to the page's bridge over `port`, each message as
@@ -379,13 +567,15 @@ const isScreenModule = (value: unknown): value is { default: ComponentType } =>
 
 /**
  * Runs the screen whose module is `screen` (a name in the frame's import
- * map), connected to the page through `port`, and tells the page once it
- * has rendered for the first time, as the `start` the page named.
+ * map), connected to the page through `port`, its files through
+ * `filePort` (file-port.ts), and tells the page once it has rendered for
+ * the first time, as the `start` the page named.
  */
 export const runScreen = async (
   port: MessagePort,
   screen: string,
-  start: ScreenStart
+  start: ScreenStart,
+  filePort: MessagePort
 ): Promise<void> => {
   const page = connectBridge(port);
   reportProblems();
@@ -402,7 +592,11 @@ export const runScreen = async (
     // One client for the App session this frame runs, over the page's
     // bridge: every screen in it reads through the same queries and
     // submissions, and none makes its own (spec 10.7.1).
-    const client = new GraspClient(bridgeTransport(bridge));
+    const client = new GraspClient({
+      ...bridgeTransport(bridge),
+      drafts: await pageDrafts(page),
+      files: portFileTransport(filePort),
+    });
     createRoot(root, {
       onUncaughtError: (error) => {
         report({ kind: "error", ...describe(error) });

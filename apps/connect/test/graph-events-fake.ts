@@ -39,16 +39,29 @@ export const graphEventsFake = () => {
     const asked = size === undefined ? 10 : Number(size);
     return Math.min(asked, shortPages ?? asked);
   };
-  /** An item as Graph shows it: by its immutable ID when asked for one. */
+  /**
+   * An item as Graph shows it: by its immutable ID when asked for one, and
+   * with its `internetMessageHeaders` only when `$select` names them, as
+   * Graph returns them.
+   */
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
   const shown = (
     request: Request,
-    { immutableId, ...item }: Record<string, unknown>
-  ): Record<string, unknown> =>
-    immutableId !== undefined &&
-    (request.headers.get("prefer") ?? "").includes('IdType="ImmutableId"')
-      ? { ...item, id: immutableId }
-      : item;
+    { immutableId, internetMessageHeaders, ...item }: Record<string, unknown>
+  ): Record<string, unknown> => {
+    const selected = (
+      new URL(request.url).searchParams.get("$select") ?? ""
+    ).split(",");
+    const withHeaders =
+      internetMessageHeaders !== undefined &&
+      selected.includes("internetMessageHeaders")
+        ? { ...item, internetMessageHeaders }
+        : item;
+    return immutableId !== undefined &&
+      (request.headers.get("prefer") ?? "").includes('IdType="ImmutableId"')
+      ? { ...withHeaders, id: immutableId }
+      : withHeaders;
+  };
   /** One page of `list` from `from`, and the link to go on from. */
   const page = (
     request: Request,
@@ -109,13 +122,17 @@ export const graphEventsFake = () => {
       const mailbox = mailPath.exec(path)?.groups?.mailbox;
       if (request.method === "GET" && mailbox !== undefined) {
         const list = listOf(inboxes, mailbox.toLowerCase());
+        // A link Graph hands back keeps the first read's selection.
+        const select = url.searchParams.get("$select");
+        const selected =
+          select === null ? "" : `&$select=${encodeURIComponent(select)}`;
         return page(
           request,
           `${graph}/$metadata#Collection(message)`,
           list,
           positionOf(url) ?? firstSince(list, url),
           (query) =>
-            `${graph}/users/${encodeURIComponent(mailbox)}/mailFolders('inbox')/messages/delta?${query}`
+            `${graph}/users/${encodeURIComponent(mailbox)}/mailFolders('inbox')/messages/delta?${query}${selected}`
         );
       }
       const { user, drive } = drivePath.exec(path)?.groups ?? {};

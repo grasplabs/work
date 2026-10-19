@@ -4,6 +4,7 @@
  * on what it is sent.
  */
 import { appLimits, appManifestMaxBytes } from "@grasp-os/shared/app-limits";
+import { workflowModulesError } from "@grasp-os/shared/workflow-modules";
 
 import type { Diagnostic } from "./diagnostic.ts";
 import { screenReferences } from "./kit.ts";
@@ -122,6 +123,22 @@ export const openWorkflowErrors = (
         },
       ]
     : [];
+};
+
+/**
+ * Why `files` aren't a JSON workflow's compute modules within their bounds
+ * (`code/<file>.ts`, workflow-modules.ts), if they aren't.
+ */
+export const computeModuleErrors = (
+  files: Record<string, string>
+): Diagnostic[] => {
+  const error =
+    Object.keys(files).length === 0
+      ? "A build of compute modules has at least one module."
+      : workflowModulesError(files);
+  return error === undefined
+    ? []
+    : [{ rule: "limits", severity: "error", message: error }];
 };
 
 /**

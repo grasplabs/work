@@ -1,7 +1,8 @@
+import { canonicalText } from "@grasp-os/shared/json";
 import { describe, expect, test } from "vite-plus/test";
 
 import { databaseWriter } from "../src/database.ts";
-import { inspectApp } from "../src/host.ts";
+import { inspectApp, readAppManifest } from "../src/host.ts";
 import { AppError, app, resource } from "../src/index.ts";
 import type { AppDefinition } from "../src/index.ts";
 import { readResourceDeclaration } from "../src/resources.ts";
@@ -100,6 +101,10 @@ const connectorOf = (contract: string) =>
     contract,
     actions: ["send"],
   });
+
+/** A store declaration of `operations`, read back as the host reads a manifest's. */
+const declare = (operations: unknown) => () =>
+  readResourceDeclaration({ "~resource": "store", alias: "crm", operations });
 
 const refusal = (register: () => unknown): string => {
   try {
@@ -272,6 +277,126 @@ describe("resources", () => {
       connector.actions,
       model.structuredOutput?.kind,
     ]).toStrictEqual([["search"], ["send"], "object"]);
+  });
+
+  test("a store declaration reads back as code declared it, and calls only a store's queries and mutations", () => {
+    const store = resource.store("crm", {
+      operations: {
+        "contacts.list": {
+          kind: "query",
+          args: { limit: v.number().optional() },
+          returns: v.array(v.string()),
+        },
+        "contacts.add": {
+          kind: "mutation",
+          args: { name: v.string() },
+          returns: v.null(),
+        },
+      },
+    });
+    // As a manifest holds it: data, read back through the same checks.
+    const read = readResourceDeclaration(structuredClone(store));
+    const shape = {
+      kind: "query",
+      args: store.operations["contacts.list"]?.args,
+      returns: store.operations["contacts.list"]?.returns,
+    };
+    expect({
+      read: JSON.stringify(read) === JSON.stringify(store),
+      frozen: Reflect.set(store.operations, "contacts.remove", shape),
+    }).toStrictEqual({ read: true, frozen: false });
+    expect(
+      [
+        refusal(declare({ "contacts.ping": { ...shape, kind: "action" } })),
+        refusal(declare({ "contacts..list": shape })),
+        refusal(declare({ "a.b.c.d.e": shape })),
+        refusal(declare({})),
+        refusal(
+          declare({ "contacts.list": { ...shape, args: shape.returns } })
+        ),
+        refusal(declare({ "contacts.list": { ...shape, extra: true } })),
+      ].map((message) => message.length > 0)
+    ).toStrictEqual([true, true, true, true, true, true]);
+    expect(
+      refusal(declare({ "contacts.ping": { ...shape, kind: "action" } }))
+    ).toContain("never its actions");
+  });
+});
+
+/** Declares statistics with `config`, one the types may refuse. */
+const statistics = (config: unknown) => () =>
+  // SAFETY: a config the types refuse, checked at run time.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  resource.statistics("stats", config as { operations: ["read"] });
+
+describe("a statistics declaration", () => {
+  test("reads back as code declared it, and reads only the platform's measures it lists, with `read`", () => {
+    const own = resource.statistics("stats", { operations: ["record"] });
+    const platform = resource.statistics("platform", {
+      operations: ["read"],
+      platform: ["platform.workflow_runs"],
+    });
+    expect({
+      own: JSON.stringify(readResourceDeclaration(structuredClone(own))),
+      platform: JSON.stringify(
+        readResourceDeclaration(structuredClone(platform))
+      ),
+      frozen: Reflect.set(platform.platform, 1, "platform.improvement_signals"),
+      ownPlatform: own.platform,
+    }).toStrictEqual({
+      own: JSON.stringify(own),
+      platform: JSON.stringify(platform),
+      frozen: false,
+      ownPlatform: [],
+    });
+    expect(
+      [
+        statistics({
+          operations: ["record"],
+          platform: ["platform.workflow_runs"],
+        }),
+        statistics({ operations: ["read"], platform: ["platform.everything"] }),
+        statistics({ operations: ["read"], platform: [] }),
+        statistics({
+          operations: ["read"],
+          platform: ["platform.workflow_runs", "platform.workflow_runs"],
+        }),
+        statistics({ operations: ["write"] }),
+        statistics({ operations: ["read"], measures: [] }),
+      ].map((declaration) => refusal(declaration).length > 0)
+    ).toStrictEqual([true, true, true, true, true, true]);
+  });
+});
+
+/** Reads an app declaration of `functions` back, as a manifest holds it. */
+const declareApp = (functions: unknown) => () =>
+  readResourceDeclaration({ "~resource": "app", alias: "crm", functions });
+
+describe("an app declaration", () => {
+  test("reads back as code declared it, and calls another App's queries, mutations and actions only", () => {
+    const crm = resource.app("crm", {
+      functions: {
+        "contacts.find": {
+          kind: "query",
+          args: { name: v.string() },
+          returns: v.array(v.string()),
+        },
+        "contacts.mail": { kind: "action", args: {}, returns: v.null() },
+      },
+    });
+    const shape = structuredClone(crm.functions["contacts.find"]);
+    expect({
+      read: JSON.stringify(readResourceDeclaration(structuredClone(crm))),
+      frozen: Reflect.set(crm.functions, "contacts.drop", shape),
+    }).toStrictEqual({ read: JSON.stringify(crm), frozen: false });
+    expect(
+      [
+        declareApp({ "contacts.find": { ...shape, kind: "stream" } }),
+        declareApp({ "contacts..find": shape }),
+        declareApp({}),
+        declareApp({ "contacts.find": { ...shape, extra: true } }),
+      ].map((declaration) => refusal(declaration).length > 0)
+    ).toStrictEqual([true, true, true, true]);
   });
 });
 
@@ -490,6 +615,165 @@ describe("uses", () => {
     expect(refusal(() => notes({ operations: { caller } }))).toContain(
       "doesn't register"
     );
+  });
+
+  test("a workflow is started by an action or staged by a mutation, only one the App lists, and reads back as declared", () => {
+    const followUp = resource.workflow("followUp", {
+      input: v.object({ title: v.string().trim() }),
+      output: v.object({ done: v.boolean() }),
+    });
+    const start = server.action({
+      args: {},
+      returns: v.null(),
+      uses: [followUp],
+      handler: () => null,
+    });
+    const stage = server.mutation({
+      args: {},
+      returns: v.null(),
+      uses: [list, followUp],
+      handler: () => null,
+    });
+    const registered = notes({
+      operations: { notes: { list, start, stage } },
+      uses: [followUp],
+    });
+    const { manifest } = inspectApp(registered);
+    const lookalike = resource.workflow("followUp", {
+      input: v.object({ title: v.string().trim() }),
+      output: v.object({ done: v.boolean() }),
+    });
+    expect({
+      start: manifest.operations["notes.start"]?.uses,
+      stage: manifest.operations["notes.stage"]?.uses,
+      declared: manifest.workflows.followUp?.input,
+      declaredOutput: manifest.workflows.followUp?.output,
+      // A workflow is neither an action's resource nor a screen's.
+      resources: Object.keys(manifest.resources),
+      readBack:
+        canonicalText(readAppManifest(JSON.stringify(manifest))) ===
+        canonicalText(manifest),
+      unlisted: refusal(() =>
+        notes({ operations: { notes: { list, start } } })
+      ).includes("doesn't list"),
+      // The same alias declared again is another requirement, not this one.
+      lookalike: refusal(() =>
+        notes({ operations: { notes: { list, start } }, uses: [lookalike] })
+      ).includes("doesn't list"),
+      sameAlias: refusal(() =>
+        notes({
+          operations: { notes: { list } },
+          uses: [followUp, resource.template("followUp", { contract: "a@1" })],
+        })
+      ).includes("alias `followUp`"),
+    }).toStrictEqual({
+      start: [{ type: "workflow", alias: "followUp" }],
+      stage: [
+        { type: "function", path: "notes.list", kind: "query" },
+        { type: "workflow", alias: "followUp" },
+      ],
+      declared: v.object({ title: v.string().trim() }).descriptor,
+      declaredOutput: v.object({ done: v.boolean() }).descriptor,
+      resources: [],
+      readBack: true,
+      unlisted: true,
+      lookalike: true,
+      sameAlias: true,
+    });
+  });
+
+  test("a workflow's input is there, or its default, when a start leaves it out", () => {
+    const optional = refusal(() =>
+      resource.workflow("followUp", {
+        input: v.string().optional(),
+        output: v.null(),
+      })
+    );
+    const defaulted = resource.workflow("followUp", {
+      input: v.string().default("Today"),
+      output: v.null(),
+    });
+    // Declared without the output a run gives, it is refused, whatever
+    // the types let through.
+    const noOutput = refusal(() =>
+      Reflect.apply(resource.workflow, resource, [
+        "followUp",
+        { input: v.object({}) },
+      ])
+    );
+    expect({
+      optional: optional.includes("never only optional"),
+      defaulted: defaulted.input.presence,
+      noOutput: noOutput.length > 0,
+    }).toStrictEqual({ optional: true, defaulted: "default", noOutput: true });
+  });
+
+  test("a manifest can't make a workflow out of something else", () => {
+    const followUp = resource.workflow("followUp", {
+      input: v.object({}),
+      output: v.null(),
+    });
+    const start = server.action({
+      args: {},
+      returns: v.null(),
+      uses: [followUp],
+      handler: () => null,
+    });
+    const { manifest } = inspectApp(
+      notes({ operations: { notes: { list, start } }, uses: [followUp] })
+    );
+    // A mutable copy, as JSON: what a manifest read back is.
+    const operations: Record<string, { uses: unknown[] }> = {};
+    for (const [path, operation] of Object.entries(manifest.operations)) {
+      operations[path] = { ...operation, uses: [...operation.uses] };
+    }
+    const data: {
+      operations: Record<string, { uses: unknown[] }>;
+      workflows: Record<string, unknown>;
+      resources: Record<string, unknown>;
+    } = {
+      ...manifest,
+      operations,
+      workflows: { ...manifest.workflows },
+      resources: { ...manifest.resources },
+    };
+    const altered = (change: (copy: typeof data) => void): string => {
+      const copy = structuredClone(data);
+      change(copy);
+      return refusal(() => readAppManifest(JSON.stringify(copy)));
+    };
+    expect({
+      // A use of a workflow the manifest doesn't declare.
+      undeclared: altered((copy) => {
+        copy.workflows = {};
+      }).includes("doesn't declare"),
+      // A workflow filed among an action's resources.
+      asResource: altered((copy) => {
+        copy.resources = copy.workflows;
+        copy.workflows = {};
+      }).includes("isn't an action's resource"),
+      // A query that starts one.
+      byQuery: altered((copy) => {
+        copy.operations["notes.list"]?.uses.push({
+          type: "workflow",
+          alias: "followUp",
+        });
+      }).includes("A query uses nothing"),
+      // A workflow without the output a run gives.
+      noOutput:
+        altered((copy) => {
+          const declared = manifest.workflows.followUp;
+          if (declared !== undefined) {
+            const { output: _output, ...withoutOutput } = declared;
+            copy.workflows = { followUp: withoutOutput };
+          }
+        }).length > 0,
+    }).toStrictEqual({
+      undeclared: true,
+      asResource: true,
+      byQuery: true,
+      noOutput: true,
+    });
   });
 
   test("uses lists declarations, never names or IDs", () => {

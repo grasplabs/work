@@ -23,8 +23,10 @@ import {
   issueDetails,
   settlesSubmission,
 } from "./client-error.ts";
+import { writeDraft } from "./form-drafts.ts";
+import type { DraftStore, FormDraft } from "./form-drafts.ts";
 import type { ArgsOf, ReturnOf } from "./references.ts";
-import { isPlainObject } from "./value-descriptor.ts";
+import { isPlainObject, unsafeKeys, valueLimits } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 
@@ -74,6 +76,26 @@ import { validateValue } from "./value-interpreter.ts";
 // - A callback's failure passes for a failed save: `onSuccess` runs once,
 //   after the confirmed outcome, for a still-mounted form; what it throws
 //   is reported apart, and never resubmits or unlocks.
+// - A draft is lost to an unmount, a conflict or a refresh: while a record
+//   form's values differ from its baseline, the draft, its baseline's
+//   identity and revision and the rest of the save's arguments are kept by
+//   the session client (form-drafts.ts), and restored into the next editor
+//   of the same record, the baseline's old revision with them, so a save
+//   still meets an honest `data.conflict`.
+// - A draft is overwritten by an editor that no longer owns it: a form
+//   writes its draft only while it holds the key's claim in the client's
+//   store, which it takes when it mounts (commits, never in render) and
+//   lets go when it unmounts, a newer editor of the record takes over,
+//   and every fence (access ended, someone else signed in) clears. A late answer to a closed editor's
+//   save, or a save refused for access, writes nothing.
+// - A restored value is lost or wrong: it is kept when its shape is one
+//   the save's field takes (a nullable field's null, a string still being
+//   typed), even if it couldn't be submitted yet; the save checks it.
+// - The person can't tell what changed, or must retype to keep their
+//   edits: `changes()` compares the draft, its baseline and the latest
+//   record field by field, and `reapply()`, a deliberate step, puts the
+//   fields the person changed on top of the latest record as a new draft,
+//   to review and save. Nothing is merged or saved on its own.
 
 /** A form-level validator as TanStack Form runs it. */
 type Validate<Values> = FormValidateFn<Values>;
@@ -175,6 +197,37 @@ export interface RecordForm<Values, Result> extends GraspForm<Values, Result> {
    * conflict: a deliberate step, after the person confirmed losing edits.
    */
   readonly reload: () => void;
+  /**
+   * Puts the fields the person changed on top of the latest record
+   * supplied, which becomes the baseline, clearing a conflict: a
+   * deliberate step, once the person saw what changed. Nothing is saved;
+   * the next save carries the latest record's revision. Does nothing
+   * until a newer record than the baseline has arrived.
+   */
+  readonly reapply: () => void;
+}
+
+/** One editable field, as the draft, its baseline and the latest record hold it. */
+export interface FieldChange {
+  readonly field: string;
+  /** As the draft started from. */
+  readonly base: unknown;
+  /** As the person has it now. */
+  readonly draft: unknown;
+  /** As the latest record supplied has it. */
+  readonly latest: unknown;
+  /** Whether the person changed it. */
+  readonly mine: boolean;
+  /** Whether the latest record changed it since the baseline. */
+  readonly theirs: boolean;
+}
+
+/** What changed since a record form's draft started. */
+export interface RecordChanges {
+  /** Whether a newer record than the baseline has arrived. */
+  readonly latestKnown: boolean;
+  /** The fields the person or the latest record changed, in the form's order. */
+  readonly fields: readonly FieldChange[];
 }
 
 /** An operation-bound form's options (spec 10.2.1). */
@@ -287,8 +340,233 @@ const pick = (
   );
 
 /** Whether two plain values are the same, as JSON reads them, whatever their keys' order. */
-const same = (a: unknown, b: unknown): boolean =>
-  canonicalText(a) === canonicalText(b);
+const same = (a: unknown, b: unknown): boolean => {
+  // No value and `null` are two edits, which JSON's text would merge, at
+  // any depth: so lists and objects are compared item by item.
+  if (a === undefined || b === undefined) {
+    return a === b;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item: unknown, index) => same(item, b[index]))
+    );
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    return [...keys].every((key) => same(a[key], b[key]));
+  }
+  return canonicalText(a) === canonicalText(b);
+};
+
+/**
+ * What a value still being edited may fail and keep its shape: a bound or
+ * format the save checks, never its type. `""` in a field that needs a
+ * character is an edit in progress, not another kind of value.
+ */
+const unfinishedCodes: ReadonlySet<string> = new Set([
+  "value.too_small",
+  "value.too_large",
+  "value.too_short",
+  "value.too_long",
+  "value.not_integer",
+  "value.invalid_email",
+  "value.invalid_id",
+  "value.invalid_reference",
+  "value.invalid_timestamp",
+  "value.invalid_duration",
+  "value.invalid_currency",
+  "value.invalid_cron",
+  "value.invalid_time_zone",
+]);
+
+/** Kinds whose value is text, or a number, whatever format it must have. */
+const textKinds: ReadonlySet<string> = new Set([
+  "string",
+  "id",
+  "enum",
+  "person",
+  "model",
+  "template",
+]);
+const numberKinds: ReadonlySet<string> = new Set([
+  "number",
+  "timestamp",
+  "duration",
+]);
+const objectKinds: ReadonlySet<string> = new Set(["file", "money", "schedule"]);
+
+/**
+ * Whether `value` is of the JavaScript kind `descriptor`, a value with no
+ * values of its own to look at, takes: what a bound or a format it fails
+ * can't tell (an ID's format check refuses a number too).
+ */
+const hasKindOf = (descriptor: ValueDescriptor, value: unknown): boolean => {
+  if (textKinds.has(descriptor.kind)) {
+    return typeof value === "string";
+  }
+  if (numberKinds.has(descriptor.kind)) {
+    return typeof value === "number";
+  }
+  return objectKinds.has(descriptor.kind) && isPlainObject(value);
+};
+
+/**
+ * Whether `value` fits `descriptor` but for what an edit in progress may
+ * fail. An object's, an array's or a dictionary's values are each looked
+ * at on their own, as a union is for each member: what is reported of the
+ * whole says too little (no member fit; a length before the items).
+ */
+const fitsUnfinished = (
+  descriptor: ValueDescriptor,
+  value: unknown
+): boolean => {
+  // A value the person cleared, here or nested, is an edit in progress
+  // too, however its schema requires one: the save checks that.
+  if (value === undefined) {
+    return true;
+  }
+  const { issues } = validateValue(descriptor, value);
+  if (issues === undefined) {
+    return true;
+  }
+  if (descriptor.kind === "union") {
+    return descriptor.members.some((member) => fitsUnfinished(member, value));
+  }
+  if (descriptor.kind === "object") {
+    const { fields } = descriptor;
+    return (
+      isPlainObject(value) &&
+      Object.keys(value).every((key) => Object.hasOwn(fields, key)) &&
+      Object.entries(fields).every(([key, field]) =>
+        fitsUnfinished(field, value[key])
+      )
+    );
+  }
+  if (descriptor.kind === "array") {
+    return (
+      Array.isArray(value) &&
+      value.every((item: unknown) => fitsUnfinished(descriptor.item, item))
+    );
+  }
+  if (descriptor.kind === "record") {
+    return (
+      isPlainObject(value) &&
+      Object.entries(value).every(
+        ([key, entry]) =>
+          key.length <= valueLimits.nameLength &&
+          !unsafeKeys.has(key) &&
+          fitsUnfinished(descriptor.value, entry)
+      )
+    );
+  }
+  // A money, schedule or file value: its members are checked by the
+  // value's own kind, so one the person cleared is reported as required
+  // (the value itself never is: it has one), any other kind as its type.
+  const memberCleared = objectKinds.has(descriptor.kind);
+  return (
+    issues.every(
+      ({ code }) =>
+        unfinishedCodes.has(code) ||
+        (memberCleared && code === "value.required")
+    ) && hasKindOf(descriptor, value)
+  );
+};
+
+/**
+ * Whether `value` has a shape the save's argument `field` takes (`args`
+ * is the save's argument descriptor): what a restored field must have, by
+ * the field's own schema, not the record's runtime kind (a nullable
+ * field's `null`), and not yet ready to submit (the save checks that).
+ */
+const takes = (
+  args: ValueDescriptor,
+  field: string,
+  value: unknown
+): boolean => {
+  const descriptor =
+    args.kind === "object" && Object.hasOwn(args.fields, field)
+      ? args.fields[field]
+      : undefined;
+  // A field the person cleared (no value) is an edit in progress too,
+  // however its schema requires one: the save checks that.
+  return descriptor !== undefined && fitsUnfinished(descriptor, value);
+};
+
+/** Where a record form keeps its draft: the client's store, under its key. */
+export interface DraftSlot {
+  readonly store: DraftStore;
+  readonly key: string;
+  /** The exact contract of the save the form binds. */
+  readonly fingerprint: string;
+  /** The store's `epoch` when the form was made: a later one is refused. */
+  readonly epoch?: number;
+}
+
+/** Whether `fields` are exactly the keys of `base`, in any order. */
+const sameFields = (
+  base: Readonly<Record<string, unknown>>,
+  fields: readonly string[]
+): boolean => {
+  const kept = Object.keys(base);
+  return (
+    kept.length === new Set(fields).size &&
+    kept.every((field) => fields.includes(field))
+  );
+};
+
+/**
+ * The draft of `slot` restored over `record`: its values, its baseline (its
+ * identity, revision and editable fields) and the rest of its arguments,
+ * when it is of the same record and the form's fields. A field whose
+ * kept value the save's field doesn't take starts from the record instead.
+ */
+const restored = (
+  slot: DraftSlot | undefined,
+  record: unknown,
+  target: { readonly args: ValueDescriptor; readonly fields: readonly string[] }
+):
+  | {
+      readonly draft: FormDraft;
+      readonly values: Record<string, unknown>;
+      readonly baseline: Record<string, unknown>;
+    }
+  | undefined => {
+  const draft = slot?.store.get(slot.key);
+  const identity = identityOf(record);
+  if (
+    draft === undefined ||
+    identity === undefined ||
+    !same(draft.id, identity.id) ||
+    // Made under another contract of the save: its kept arguments (`rest`)
+    // may no longer be what this one takes, so the form starts from the
+    // record rather than send them.
+    draft.fingerprint !== slot?.fingerprint ||
+    // Made by a form that edited other fields: what it kept beside them
+    // (`rest`) may lack one this form no longer edits.
+    !sameFields(draft.base, target.fields)
+  ) {
+    return undefined;
+  }
+  const values: Record<string, unknown> = {};
+  const base: Record<string, unknown> = {};
+  for (const field of target.fields) {
+    const current = isPlainObject(record) ? record[field] : undefined;
+    const kept =
+      Object.hasOwn(draft.values, field) &&
+      Object.hasOwn(draft.base, field) &&
+      takes(target.args, field, draft.values[field]);
+    values[field] = kept ? draft.values[field] : current;
+    base[field] = kept ? draft.base[field] : current;
+  }
+  return {
+    draft,
+    values,
+    baseline: { ...base, _id: draft.id, _rev: draft.rev },
+  };
+};
 
 /**
  * An issue's path as TanStack names the field: `items[0].name`, array
@@ -388,6 +666,16 @@ type Checked =
  * What a form holds beside TanStack's state: its status, the record's
  * baseline and the submission in flight. One per mounted form.
  */
+/** Whether two drafts hold the same edits, whenever each was written. */
+const sameDraft = (one: FormDraft, other: FormDraft): boolean => {
+  try {
+    return writeDraft({ ...one, at: 0 }) === writeDraft({ ...other, at: 0 });
+  } catch {
+    // Can't be written as text: taken for a new one.
+    return false;
+  }
+};
+
 export class FormBinding {
   readonly #target: Target;
   readonly #listeners = new Set<() => void>();
@@ -402,7 +690,19 @@ export class FormBinding {
   /** The record the draft started from, and the latest supplied. */
   #baseline: unknown;
   #latest: unknown;
+  /**
+   * A restored draft's rest of the arguments, as `args` mapped its
+   * baseline then: the baseline restored holds only the editable fields.
+   */
+  #rest: { readonly value: unknown } | undefined;
+  readonly #draft: DraftSlot | undefined;
+  /** This editor, as the draft store knows who may write a key's draft. */
+  readonly #owner = {};
+  /** The draft this editor last kept in the store (`#keepDraft`). */
+  #written: FormDraft | undefined;
   #mounted = true;
+  /** The draft it was made from, if any: one newer at mount is taken up. */
+  #restoredFrom: FormDraft | undefined;
   /** The last values checked, and what the check said: one check a submit. */
   #checked:
     | { readonly values: Record<string, unknown>; readonly checked: Checked }
@@ -413,13 +713,30 @@ export class FormBinding {
   constructor(
     target: Target,
     initialValues: Record<string, unknown>,
-    options: FormOptionsInput
+    options: FormOptionsInput,
+    draft?: DraftSlot
   ) {
     this.#target = target;
-    this.initialValues = initialValues;
     this.#options = options;
     this.#baseline = options.record;
     this.#latest = options.record;
+    this.#draft = target.kind === "record" ? draft : undefined;
+    const kept =
+      target.kind === "record"
+        ? restored(this.#draft, options.record, target)
+        : undefined;
+    this.initialValues = kept?.values ?? initialValues;
+    this.#restoredFrom = kept?.draft;
+    if (kept !== undefined) {
+      this.#baseline = kept.baseline;
+      this.#rest = { value: kept.draft.rest };
+      const latest = identityOf(options.record);
+      this.#status = {
+        ...initialStatus,
+        conflict: kept.draft.conflict,
+        newer: latest !== undefined && latest.rev > kept.draft.rev,
+      };
+    }
   }
 
   /** Connects the binding to its TanStack form, once. */
@@ -445,17 +762,149 @@ export class FormBinding {
     this.#options = options;
   }
 
-  /** The form mounted, or unmounted: callbacks run only while mounted. */
+  /**
+   * The form mounted (committed), or unmounted: callbacks run only while
+   * mounted, and only a mounted editor writes its draft (form-drafts.ts,
+   * `#claims`). Never claimed while rendering: a render React abandons
+   * (a suspended transition) never mounts, so never holds the claim.
+   */
   setMounted(mounted: boolean): void {
     this.#mounted = mounted;
+    const slot = this.#draft;
+    if (slot !== undefined) {
+      if (mounted) {
+        // Made before every draft was cleared: it neither writes one nor
+        // takes one up, which would be someone else's now.
+        if (slot.store.claim(slot.key, this.#owner, slot.epoch)) {
+          this.#takeUpNewerDraft(slot);
+        }
+      } else {
+        slot.store.release(slot.key, this.#owner);
+      }
+    }
+  }
+
+  /**
+   * Another editor of the record wrote the draft after this one was made
+   * from it (rendered, then committed later): the newer one is shown, so
+   * this editor's next write never puts older edits over it.
+   */
+  #takeUpNewerDraft(slot: DraftSlot): void {
+    const target = this.#target;
+    const current = slot.store.get(slot.key);
+    if (
+      current === this.#restoredFrom ||
+      target.kind !== "record" ||
+      this.#form === undefined
+    ) {
+      return;
+    }
+    const kept =
+      current === undefined ? undefined : restored(slot, this.#latest, target);
+    if (kept === undefined) {
+      // The draft it was made from is gone (saved, discarded): it shows
+      // the record as it is, never the draft again.
+      this.#restoredFrom = undefined;
+      this.#baseline = this.#latest;
+      this.#rest = undefined;
+      this.#form.reset(pick(this.#latest, target.fields), {
+        keepDefaultValues: true,
+      });
+      this.#status = { ...this.#status, conflict: false, newer: false };
+      this.#tellStatus();
+      return;
+    }
+    this.#restoredFrom = kept.draft;
+    this.#baseline = kept.baseline;
+    this.#rest = { value: kept.draft.rest };
+    this.#form.reset(kept.values, { keepDefaultValues: true });
+    const latest = identityOf(this.#latest);
+    this.#status = {
+      ...this.#status,
+      conflict: kept.draft.conflict,
+      newer: latest !== undefined && latest.rev > kept.draft.rev,
+    };
+    this.#tellStatus();
+  }
+
+  /** Tells every listener of a new status. */
+  #tellStatus(): void {
+    for (const listener of this.#listeners) {
+      listener();
+    }
   }
 
   #set(change: Partial<Omit<FormStatus, "locked">>): void {
     const next = { ...this.#status, ...change };
     this.#status = { ...next, locked: next.phase !== "idle" };
+    this.#keepDraft();
     for (const listener of this.#listeners) {
       listener();
     }
+  }
+
+  /** The rest of the save's arguments: `args` of the baseline, or as restored. */
+  #restArgs(): unknown {
+    return this.#rest === undefined
+      ? this.#options.args?.(this.#baseline)
+      : this.#rest.value;
+  }
+
+  /**
+   * Keeps the draft in the client's store while the values differ from
+   * the baseline, and drops it once they don't (spec 10.3, GRA-254).
+   */
+  #keepDraft(): void {
+    const slot = this.#draft;
+    const target = this.#target;
+    const baseline = identityOf(this.#baseline);
+    if (
+      slot === undefined ||
+      target.kind !== "record" ||
+      this.#form === undefined ||
+      baseline === undefined
+    ) {
+      return;
+    }
+    if (!this.#dirty()) {
+      slot.store.dropFor(slot.key, this.#owner);
+      return;
+    }
+    let rest: unknown;
+    try {
+      rest = this.#restArgs();
+    } catch {
+      // The App's mapper failed: the draft stays in this form only, and
+      // an older one kept goes, so reopening never restores older edits.
+      slot.store.dropFor(slot.key, this.#owner);
+      return;
+    }
+    const draft: FormDraft = {
+      fingerprint: slot.fingerprint,
+      id: baseline.id,
+      rev: baseline.rev,
+      rest: rest ?? null,
+      base: pick(this.#baseline, target.fields),
+      values: pick(this.#form.state.values, target.fields),
+      conflict: this.#status.conflict,
+      at: Date.now(),
+    };
+    if (!slot.store.holds(slot.key, this.#owner)) {
+      return;
+    }
+    // The same draft as this editor kept last (a status changed, not the
+    // edits): kept as it is, so a save of it still knows it for the one
+    // it sent (`#dropSaved`).
+    const kept = slot.store.get(slot.key);
+    if (
+      kept !== undefined &&
+      kept === this.#written &&
+      sameDraft(kept, draft)
+    ) {
+      return;
+    }
+    slot.store.putFor(slot.key, this.#owner, draft);
+    this.#written = draft;
   }
 
   /** Whether `field` is one the person edits. */
@@ -479,7 +928,7 @@ export class FormBinding {
     if (this.#target.kind !== "record") {
       return values;
     }
-    const rest = this.#options.args?.(this.#baseline);
+    const rest = this.#restArgs();
     return { ...(isPlainObject(rest) ? rest : {}), ...values };
   }
 
@@ -513,7 +962,7 @@ export class FormBinding {
       : errorsOf(checked.issues, (field) => this.#editable(field));
   };
 
-  /** A field changed: its server issue is out of date. */
+  /** A field changed: its server issue is out of date, and the draft too. */
   readonly fieldChanged = (name: unknown): void => {
     if (
       typeof name === "string" &&
@@ -521,7 +970,9 @@ export class FormBinding {
     ) {
       const { [name]: _gone, ...rest } = this.#status.fieldIssues;
       this.#set({ fieldIssues: rest });
+      return;
     }
+    this.#keepDraft();
   };
 
   #formOf(): FormApiOf<Record<string, unknown>> {
@@ -550,6 +1001,7 @@ export class FormBinding {
       return;
     }
     this.#baseline = record;
+    this.#rest = undefined;
     this.#remember(record);
     this.#formOf().reset(pick(record, target.fields), {
       keepDefaultValues: true,
@@ -654,7 +1106,80 @@ export class FormBinding {
     ) {
       return;
     }
+    // Discarded: no draft of the record is kept, here or in the page.
+    this.#draft?.store.discardFor(this.#draft.key, this.#owner);
     this.#adopt(this.#latest);
+  }
+
+  /** Whether a newer record of the baseline's than the baseline was supplied. */
+  #latestIsNewer(): boolean {
+    const latest = identityOf(this.#latest);
+    const baseline = identityOf(this.#baseline);
+    return (
+      latest !== undefined &&
+      baseline !== undefined &&
+      same(latest.id, baseline.id) &&
+      latest.rev > baseline.rev
+    );
+  }
+
+  /** See `RecordChanges`: empty for a form that edits no record. */
+  changes(): RecordChanges {
+    const target = this.#target;
+    if (target.kind !== "record" || this.#form === undefined) {
+      return { latestKnown: false, fields: [] };
+    }
+    const latestKnown = this.#latestIsNewer();
+    const base = pick(this.#baseline, target.fields);
+    const draft = pick(this.#form.state.values, target.fields);
+    const latest = latestKnown ? pick(this.#latest, target.fields) : base;
+    const fields = target.fields.flatMap((field) => {
+      const mine = !same(draft[field], base[field]);
+      const theirs = !same(latest[field], base[field]);
+      return mine || theirs
+        ? [
+            {
+              field,
+              base: base[field],
+              draft: draft[field],
+              latest: latest[field],
+              mine,
+              theirs,
+            },
+          ]
+        : [];
+    });
+    return { latestKnown, fields };
+  }
+
+  /** See `RecordForm.reapply`. */
+  reapply(): void {
+    const target = this.#target;
+    if (
+      target.kind !== "record" ||
+      this.#status.phase !== "idle" ||
+      !this.#latestIsNewer()
+    ) {
+      return;
+    }
+    const { fields } = this.changes();
+    const latest = this.#latest;
+    const values = pick(latest, target.fields);
+    for (const change of fields) {
+      if (change.mine) {
+        values[change.field] = change.draft;
+      }
+    }
+    this.#baseline = latest;
+    this.#rest = undefined;
+    this.#formOf().reset(values, { keepDefaultValues: true });
+    this.#set({
+      conflict: false,
+      newer: false,
+      failure: undefined,
+      fieldIssues: {},
+      attempted: false,
+    });
   }
 
   /** See `GraspForm.submit`. */
@@ -720,6 +1245,13 @@ export class FormBinding {
       fieldIssues: {},
       applicationError: undefined,
     });
+    // The draft of what is sent, dropped should the save commit after the
+    // editor closed and nothing was written of it since (`#succeeded`).
+    // Only a draft this editor wrote itself: one a newer editor of the
+    // record wrote is theirs, which this save never sent.
+    const kept = this.#draft?.store.get(this.#draft.key);
+    const sentDraft =
+      kept !== undefined && kept === this.#written ? kept : undefined;
     let result: unknown;
     try {
       result = await this.#send(submission);
@@ -727,7 +1259,7 @@ export class FormBinding {
       throw this.#failed(error, submission);
     }
     this.#uncertain = undefined;
-    const refused = this.#succeeded(result);
+    const refused = this.#succeeded(result, sentDraft);
     if (refused !== undefined) {
       throw refused;
     }
@@ -817,7 +1349,7 @@ export class FormBinding {
   }
 
   /** A submission committed: the new baseline, the reset and the callback. */
-  #succeeded(result: unknown): GraspError | undefined {
+  #succeeded(result: unknown, sentDraft?: FormDraft): GraspError | undefined {
     const target = this.#target;
     if (target.kind === "record") {
       const committed = identityOf(result);
@@ -825,8 +1357,11 @@ export class FormBinding {
       const latest = identityOf(this.#latest);
       if (result === null) {
         // A delete-style save (`Doc | null`): the record is gone, so
-        // there is nothing to adopt, and no later revision of it.
+        // there is nothing to adopt, and no later revision of it, nor any
+        // editor to restore a draft into.
         this.#set({ phase: "idle" });
+        this.#draft?.store.discardFor(this.#draft.key, this.#owner);
+        this.#dropSaved(sentDraft);
       } else if (
         committed === undefined ||
         baseline === undefined ||
@@ -840,6 +1375,8 @@ export class FormBinding {
         return refused;
       } else {
         this.#set({ phase: "idle" });
+        // Saved: no draft of the record is kept, here or in the page.
+        this.#draft?.store.discardFor(this.#draft.key, this.#owner);
         // A newer record supplied while the save was in flight wins: the
         // form is pristine now, and never goes back a revision.
         this.#adopt(
@@ -847,6 +1384,7 @@ export class FormBinding {
             ? this.#latest
             : result
         );
+        this.#dropSaved(sentDraft);
       }
     } else {
       this.#set({ phase: "idle", attempted: false });
@@ -856,6 +1394,21 @@ export class FormBinding {
     }
     void this.#notify(result, this.#started);
     return undefined;
+  }
+
+  /**
+   * A closed editor's save committed: the draft it sent goes, unless it
+   * was written since or another editor holds it. A mounted editor's
+   * draft already went with the adopted record (`#keepDraft`).
+   */
+  #dropSaved(sentDraft: FormDraft | undefined): void {
+    if (
+      !this.#mounted &&
+      sentDraft !== undefined &&
+      this.#draft !== undefined
+    ) {
+      this.#draft.store.dropSaved(this.#draft.key, sentDraft);
+    }
   }
 
   /**
@@ -952,6 +1505,36 @@ const initialValuesOf = (
 };
 
 /**
+ * Where a record form over `options.record` keeps its draft: the session
+ * client's store, under the save's registered path (which a compatible
+ * revision keeps) and the record's identity.
+ */
+const draftSlotOf = (
+  client: GraspClient,
+  reference: unknown,
+  target: Target,
+  options: FormOptionsInput
+): DraftSlot | undefined => {
+  const identity = identityOf(options.record);
+  if (target.kind !== "record" || identity === undefined) {
+    return undefined;
+  }
+  const internals = clientInternals(client);
+  const { resourceId, contractId, fingerprint } = internals.readReference(
+    reference,
+    "mutation"
+  );
+  // Named by the App too, as the client's queries are: a portable client
+  // reaches several Apps, whose paths may be the same.
+  return {
+    store: internals.drafts,
+    epoch: internals.drafts.epoch,
+    key: `record:${canonicalText([resourceId, contractId, identity.id])}`,
+    fingerprint,
+  };
+};
+
+/**
  * The binding of a form of `target` with `options`, submitting through
  * `client`: what `useGraspForm` holds, before its TanStack form is
  * attached.
@@ -962,7 +1545,12 @@ export const bindForm = (
   options: FormOptionsInput
 ): FormBinding => {
   const read = targetOf(client, target, options);
-  return new FormBinding(read, initialValuesOf(read, options), options);
+  return new FormBinding(
+    read,
+    initialValuesOf(read, options),
+    options,
+    draftSlotOf(client, target, read, options)
+  );
 };
 
 /**
@@ -1006,6 +1594,9 @@ export const useGraspForm = (
       },
       reload: () => {
         binding.reload();
+      },
+      reapply: () => {
+        binding.reapply();
       },
     };
     bindings.set(made, binding);

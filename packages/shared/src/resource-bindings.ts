@@ -35,7 +35,23 @@ const modelNameSchema = z
  *   call, through connect;
  * - `knowledge`: one of the App's collection permissions for each
  *   collection the declaration names, read as a delegate on every call;
- * - `template`: one immutable version of a published template.
+ * - `template`: one immutable version of a published template;
+ * - `store`: one of the App's store permissions: another business store's
+ *   public operations, run by the App that owns the store, checked on
+ *   every call (core's store-operations.ts);
+ * - `statistics`: the platform's statistics, for the App's own measures,
+ *   with no permission: the admin's approval is what grants them. For a
+ *   declaration that reads the platform's measures, one of the App's
+ *   `{ type: "platform" }` permissions to read them (`statistics`),
+ *   checked on every read; a declaration of its own measures only takes
+ *   none;
+ * - `guests`: one of the App's `{ type: "platform" }` permissions to invite
+ *   guests (`guests`), checked on every call, and by every guest's link of
+ *   a chat invited through it, which the binding's revocation stops too.
+ * - `app`: another App, whose current release serves each declared public
+ *   function exactly as declared: each call runs as the person the
+ *   calling App's call acts for, under that App's own roles (core's
+ *   resource-apps.ts). The admin's approval is the grant.
  */
 export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("model"), model: modelNameSchema }),
@@ -60,6 +76,19 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
     templateId: identifierSchema,
     version: z.int().min(1),
   }),
+  z.strictObject({
+    kind: z.literal("store"),
+    permissionId: permissionIdSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("statistics"),
+    permissionId: permissionIdSchema.optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("guests"),
+    permissionId: permissionIdSchema,
+  }),
+  z.strictObject({ kind: z.literal("app"), appId: appIdSchema }),
 ]);
 export type BindingTarget = z.infer<typeof bindingTargetSchema>;
 export type BindingTargetInput = z.input<typeof bindingTargetSchema>;
@@ -167,7 +196,9 @@ export interface ResourceBinding {
  *   the same one changed, since it was approved;
  * - `grant_lost`: its binding's target can't be bound any more: the
  *   permission it names was revoked, the deployment no longer allows its
- *   model, or its template version can't be served;
+ *   model, its template version can't be served, or a statistics binding
+ *   names a permission its declaration doesn't read with, or none for
+ *   one that does;
  * - `unchecked`: the review couldn't ask connect about its binding within
  *   its limit, so it is never reported served; the next request checks it
  *   live;
@@ -202,6 +233,27 @@ export interface CollectionChoice {
   name: string | null;
 }
 
+/** One of the App's store permissions, as a store resource's choice. */
+export interface StoreChoice {
+  permissionId: string;
+  storeId: string;
+}
+
+/**
+ * One of the App's `{ type: "platform" }` permissions, as a statistics or
+ * guests resource's choice: to read the platform's statistics, or to
+ * invite guests.
+ */
+export interface PlatformChoice {
+  permissionId: string;
+}
+
+/** Another App, as an app resource's choice. */
+export interface AppChoice {
+  appId: string;
+  name: string;
+}
+
 /**
  * What an admin may bind a declared resource to now, by its kind:
  *
@@ -210,7 +262,15 @@ export interface CollectionChoice {
  *   the declared contract and allow the tool of every declared action;
  * - `knowledge`: the App's own active permissions to read a collection,
  *   one for each declared collection;
- * - `template`: the published versions of the declared contract.
+ * - `template`: the published versions of the declared contract;
+ * - `store`: the App's own active store permissions whose store serves
+ *   every declared operation, of exactly the declared shape, and allows it;
+ * - `statistics`: for a declaration that reads the platform's measures
+ *   (`platform`), the App's own active permissions to read them, one of
+ *   which it needs; none, and nothing to choose, for its own measures;
+ * - `guests`: the App's own active permissions to invite guests.
+ * - `app`: other Apps the admin may see whose current release serves every
+ *   declared function, public and exactly as declared.
  *
  * Approving checks the choice again: one that stopped serving since is
  * refused (`resource.target_invalid`). `truncated` says some were left
@@ -222,6 +282,10 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "connector"; permissions: ConnectorChoice[] }
   | { kind: "knowledge"; permissions: CollectionChoice[] }
   | { kind: "template"; versions: PublishedTemplate[] }
+  | { kind: "store"; permissions: StoreChoice[] }
+  | { kind: "statistics"; platform: boolean; permissions: PlatformChoice[] }
+  | { kind: "guests"; permissions: PlatformChoice[] }
+  | { kind: "app"; apps: AppChoice[] }
 );
 
 /**
@@ -249,8 +313,13 @@ export interface DeclaredResource {
   contract: string | null;
   /** A connector's declared actions; empty for the other kinds. */
   actions: string[];
-  /** Knowledge's declared operations; empty for the other kinds. */
+  /**
+   * Knowledge's declared operations, a store's or an App's functions, by
+   * path, or statistics'; empty for the other kinds.
+   */
   operations: string[];
+  /** The platform's measures a statistics resource reads; empty otherwise. */
+  measures: string[];
   /** Knowledge's declared collections, by the names App code uses. */
   collections: string[];
   /** A model's output token ceiling; null for the other kinds. */

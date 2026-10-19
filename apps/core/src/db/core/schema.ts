@@ -1,8 +1,4 @@
-import type {
-  AgentProposer,
-  AppExports,
-  AppRecordTypes,
-} from "@grasp-os/shared/apps";
+import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
@@ -330,7 +326,14 @@ export const permissions = sqliteTable(
     }).notNull(),
     subjectId: text("subject_id").notNull(),
     objectType: text("object_type", {
-      enum: ["connection", "collection", "workflow", "app", "platform"],
+      enum: [
+        "connection",
+        "collection",
+        "workflow",
+        "app",
+        "store",
+        "platform",
+      ],
     }).notNull(),
     objectId: text("object_id").notNull(),
     resource: text(),
@@ -413,6 +416,31 @@ export const apps = sqliteTable("apps", {
   pendingVersion: integer("pending_version"),
   createdAt: timestamp("created_at").notNull(),
 });
+
+/**
+ * Revocations an App's host couldn't be told of (src/access-revocations.ts):
+ * told again by the cron trigger until it takes them, so a host away for
+ * longer than its retries still clears the screens of whoever lost a
+ * role. `user_ids` is null for everyone the host knows of.
+ */
+export const accessRevocations = sqliteTable(
+  "access_revocations",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
+    attempts: integer().notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  // The cron trigger tells the least tried first, oldest first among them,
+  // once it dropped those a day old.
+  (table) => [
+    index("access_revocations_due").on(table.attempts, table.createdAt),
+    index("access_revocations_age").on(table.createdAt),
+  ]
+);
 
 /**
  * Whom each App is shared with (src/app-access.ts): a person
@@ -613,15 +641,6 @@ export const appVersions = sqliteTable(
      * previous release writes gets none.
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
-    /**
-     * The version's record types (JSON, `AppRecordTypes`), read from its
-     * `app/records.json` when it is committed (app-records.ts): so a save
-     * to Knowledge reads no files to find the types it is checked against.
-     */
-    records: text({ mode: "json" })
-      .$type<AppRecordTypes>()
-      .notNull()
-      .default(sql`'{}'`),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
@@ -782,6 +801,9 @@ export const sdkResourceBindings = sqliteTable(
         "connector",
         "model",
         "decision",
+        "event",
+        "knowledge",
+        "template",
       ],
     }).notNull(),
     targetId: text("target_id").notNull(),
@@ -877,6 +899,21 @@ export const appTestFixtures = sqliteTable(
 );
 
 /**
+ * The fixture stores chats' previews of their drafts run on
+ * (sealed-previews.ts), each recorded before its object is first touched
+ * and deleted once the object is discarded. Kept apart from App tests'
+ * (`app_test_fixtures`), whose sweep discards a store an hour after it
+ * was made: a preview's lives as long as its draft's revision, and the
+ * chat's Workspace object, which also records it, discards it. A fixture
+ * store is never in the store inventory (`business_stores`).
+ */
+export const previewFixtureStores = sqliteTable("preview_fixture_stores", {
+  storeId: text("store_id").primaryKey(),
+  appId: text("app_id").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * Published templates (resource-bindings.ts): each version's content,
  * written once by an admin and never changed, so a binding to a version
  * always reads exactly what was approved (spec 32.3). A template keeps the
@@ -917,7 +954,16 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "knowledge", "template"],
+      enum: [
+        "model",
+        "connector",
+        "knowledge",
+        "template",
+        "store",
+        "statistics",
+        "guests",
+        "app",
+      ],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),
@@ -940,25 +986,6 @@ export const appResourceBindings = sqliteTable(
       .on(table.appId, table.alias)
       .where(sql`${table.status} = 'active'`),
   ]
-);
-
-/**
- * Which App a record type in a collection (a Knowledge collection, by ID)
- * belongs to: the first whose declaration took effect there
- * (knowledge/record-types.ts). Claimed when an App's write permission on
- * the collection is granted or its version is made current, and kept
- * while that App may write there with a version that declares the type;
- * another App claims it only once it no longer does.
- */
-export const recordTypeOwners = sqliteTable(
-  "record_type_owners",
-  {
-    collectionId: text("collection_id").notNull(),
-    type: text().notNull(),
-    appId: text("app_id").notNull(),
-    claimedAt: timestamp("claimed_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.collectionId, table.type] })]
 );
 
 /**
@@ -1149,9 +1176,12 @@ export const workflowRuns = sqliteTable(
  *   attempt settles, only those it made.
  */
 export const runLineages = sqliteTable("run_lineages", {
-  rootRunId: text("root_run_id")
-    .primaryKey()
-    .references(() => workflowRuns.id),
+  /**
+   * The root run's ID: an App's run (`workflow_runs`) or an independent
+   * workflow's (`workflow_resource_runs`). No foreign key can name both,
+   * so a trigger refuses a root neither has (migration 0093).
+   */
+  rootRunId: text("root_run_id").primaryKey(),
   createdAt: timestamp("created_at").notNull(),
   descendants: integer().notNull().default(0),
   activeUsedMs: integer("active_used_ms").notNull().default(0),
@@ -1176,9 +1206,11 @@ export const runLineages = sqliteTable("run_lineages", {
 export const runLineageAttempts = sqliteTable(
   "run_lineage_attempts",
   {
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id),
+    /**
+     * The attempt's run, of either table, as `run_lineages.root_run_id`:
+     * a trigger refuses one neither has (migration 0093).
+     */
+    runId: text("run_id").notNull(),
     stepKey: text("step_key").notNull(),
     attempt: integer().notNull(),
     generation: integer().notNull(),
@@ -1301,6 +1333,139 @@ export const workflowAdmissionQueue = sqliteTable(
 );
 
 /**
+ * The build jobs building now, a lease each (src/build-admission.ts): the
+ * client's share of build jobs at once, and each App's, held to the quota
+ * policy (`tenantBuildJobs`, `keyBuildJobs`). A lease counts while it is
+ * unsettled, up to `admitted_at + reserved_ms` at most, whatever becomes
+ * of the step that took it. One row per lease a job's step took, in the
+ * order of the job's own sequence (`seq`): its step, the round it waited
+ * and the engine's attempt.
+ */
+export const buildLeases = sqliteTable(
+  "build_leases",
+  {
+    jobId: text("job_id").notNull(),
+    seq: integer().notNull(),
+    /** The person the job's chat is: whose turn among an App's places it takes. */
+    subject: text().notNull(),
+    /** The job's App: its key, of which one job builds at once. */
+    resource: text().notNull(),
+    admittedAt: timestamp("admitted_at").notNull(),
+    reservedMs: integer("reserved_ms").notNull(),
+    settledAt: timestamp("settled_at"),
+    policyGeneration: integer("policy_generation").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.jobId, table.seq] }),
+    // By when they were taken: what admission counts (those unsettled),
+    // what a lease checks it still holds by (any taken since it ended),
+    // and what retention drops.
+    index("build_leases_admitted_idx").on(table.admittedAt),
+    index("build_leases_resource_idx")
+      .on(table.resource, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+  ]
+);
+
+/**
+ * A build job's commit, fenced by its lease (src/build-admission.ts): a
+ * row written first in the commit's own transaction, and removed last.
+ * The database refuses the row, and so the whole commit, unless the lease
+ * named still holds as the transaction runs (the trigger in migration
+ * 0091): a commit whose step stalled past its lease never lands beside
+ * another job of its App.
+ */
+export const buildCommitFences = sqliteTable(
+  "build_commit_fences",
+  {
+    jobId: text("job_id").notNull(),
+    seq: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.jobId, table.seq] })]
+);
+
+/**
+ * The build jobs waiting for a lease (src/build-admission.ts), one place
+ * per job, served as workflow attempts' places are (src/workflows/
+ * admission.ts): by turn, then first come, first served, never behind an
+ * App whose own share is full. A place lasts while its job asks again.
+ */
+export const buildAdmissionQueue = sqliteTable(
+  "build_admission_queue",
+  {
+    jobId: text("job_id").primaryKey(),
+    subject: text().notNull(),
+    resource: text().notNull(),
+    enqueuedAt: timestamp("enqueued_at").notNull(),
+    seenAt: timestamp("seen_at").notNull(),
+    /** Which share it waits for: the client's, its person's, or its App's (`key`). */
+    waitingFor: text("waiting_for", {
+      enum: ["client", "person", "key"],
+    }).notNull(),
+    /** When it asks again at the latest: the job's view shows it. */
+    retryAt: timestamp("retry_at").notNull(),
+    turn: integer().notNull(),
+    /**
+     * The job's sequence as it last wrote the place: an older step or
+     * attempt of the job neither writes nor gives up a place a newer one
+     * wrote.
+     */
+    ownerSeq: integer("owner_seq").notNull(),
+  },
+  (table) => [
+    index("build_admission_queue_order_idx").on(
+      table.seenAt,
+      table.turn,
+      table.enqueuedAt
+    ),
+    index("build_admission_queue_subject_idx").on(
+      table.subject,
+      table.resource,
+      table.seenAt
+    ),
+    index("build_admission_queue_resource_idx").on(
+      table.resource,
+      table.seenAt
+    ),
+  ]
+);
+
+/**
+ * The steps of workflow runs whose model call waits in the model ledger's
+ * queue for a share of the model requests in flight (model-admission.ts),
+ * so the run's summary shows it queued (src/workflows/model-waits.ts): one
+ * row per step while its call waits, refreshed each time it asks again,
+ * gone once it stops. One whose call stopped asking (its isolate died)
+ * lapses as a workflow step's place does, and is pruned.
+ */
+export const workflowModelWaits = sqliteTable(
+  "workflow_model_waits",
+  {
+    runId: text("run_id").notNull(),
+    stepHash: text("step_hash").notNull(),
+    /** The call of the step that wrote it: only it clears it (model-waits.ts). */
+    owner: text().notNull(),
+    /**
+     * Which share its call waits for: `client`, `person` or `app`; null
+     * once the call that owns the row stopped waiting (a tombstone, so an
+     * older call's late note can't bring the wait back: model-waits.ts).
+     */
+    waitingFor: text("waiting_for", {
+      enum: ["client", "person", "app"],
+    }),
+    /** When its call asks again at the latest. */
+    retryAt: timestamp("retry_at").notNull(),
+    /** When its call last asked: it lapses a while after. */
+    seenAt: timestamp("seen_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.stepHash] }),
+    // The waits still asking, and those to prune.
+    index("workflow_model_waits_seen_idx").on(table.seenAt),
+  ]
+);
+
+/**
  * The token core put on each address of the deployment's mail domain that
  * a workflow run's step mailed through a native mail connector
  * (src/workflows/mail-stamps.ts): `local+<token>@domain`. Mail back to
@@ -1333,11 +1498,17 @@ export const runMailStamps = sqliteTable(
 /**
  * What each mail call of a workflow run's step was sent with
  * (src/workflows/mail-stamps.ts): its recipients that carry a token, as
- * they were and as they went, none for a call that stamped nothing. Keyed
- * by the SHA-256 of the step's key, the connection, the action and the
- * call's input, so the same call made again under its key sends what it
- * sent the first time, whatever core learned since. Removed with its
- * run's details (src/workflows/retention.ts).
+ * they were and as they went, none for a call that stamped nothing; and,
+ * for a native mail connector's call, the call's stamp, which its message
+ * carries as a header, with every recipient the call named and who sent
+ * it (the mailbox it names, its connection's account and that account's
+ * email address). A copy of the message that reaches a watched mailbox
+ * starts its runs under the run only when the mailbox is one of
+ * `recipients` and its From one of `senders`. Keyed by the SHA-256 of the
+ * step's key, the connection, the action and the call's input, so the
+ * same call made again under its key sends what it sent the first time,
+ * whatever core learned since. Removed with its run's details
+ * (src/workflows/retention.ts).
  */
 export const runMailCalls = sqliteTable(
   "run_mail_calls",
@@ -1348,8 +1519,54 @@ export const runMailCalls = sqliteTable(
       .references(() => workflowRuns.id),
     replaced: text({ mode: "json" }).$type<Record<string, string>>().notNull(),
     createdAt: timestamp("created_at").notNull(),
+    stamp: text(),
+    recipients: text({ mode: "json" }).$type<string[]>(),
+    senders: text({ mode: "json" }).$type<string[]>(),
   },
-  (table) => [index("run_mail_calls_run_idx").on(table.runId)]
+  (table) => [
+    index("run_mail_calls_run_idx").on(table.runId),
+    uniqueIndex("run_mail_calls_stamp_idx").on(table.stamp),
+  ]
+);
+
+/**
+ * The messages that claimed each stamp at each source of connector events
+ * (src/workflows/mail-stamps.ts): a source is a connection and the
+ * mailbox it reads (`[connection, resource]`), and a message is what an
+ * event there that names the stamp is about (`eventKey`, the SHA-256 of
+ * its connection and ID). At most a few per stamp and source
+ * (`maxClaimsPerSource`): each starts runs under the stamp's run there,
+ * the same event delivered again included, and any message past them is
+ * a root. Removed with its run's details (src/workflows/retention.ts).
+ */
+export const runMailStampClaims = sqliteTable(
+  "run_mail_stamp_claims",
+  {
+    stamp: text().notNull(),
+    source: text().notNull(),
+    eventKey: text("event_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.stamp, table.source, table.eventKey] }),
+  ]
+);
+
+/**
+ * Each run a stamp's run lineage refused to start
+ * (src/workflows/connector-events.ts), by the trigger key it would have
+ * had, with the stamp that made it the lineage's: its refusal is audited
+ * once, however often its event is delivered again. Removed with the
+ * stamp's run's details (src/workflows/retention.ts).
+ */
+export const runMailStampRefusals = sqliteTable(
+  "run_mail_stamp_refusals",
+  {
+    triggerKey: text("trigger_key").primaryKey(),
+    stamp: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("run_mail_stamp_refusals_stamp_idx").on(table.stamp)]
 );
 
 /**
@@ -1436,6 +1653,48 @@ export const workflowRunControls = sqliteTable(
     index("workflow_run_controls_admitted_idx")
       .on(table.retryAt, table.id)
       .where(sql`state = 'admitted'`),
+  ]
+);
+
+/**
+ * Wakes core owes waiting runs (src/workflows/wakes.ts): one row per
+ * outstanding wake, written in the same batch as what it wakes the run
+ * for (a decision's answer), or before it (a held side effect's
+ * decision, which connect keeps), and deleted once the engine took the
+ * event. `id` is the delivery's key, which the engine takes once, and
+ * `type` the event type the run's wait waits for.
+ */
+export const workflowRunWakes = sqliteTable(
+  "workflow_run_wakes",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    type: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the repair next sends it, moved on further each time it does,
+     * so a wake the engine keeps refusing doesn't keep newer ones waiting.
+     */
+    retryAt: timestamp("retry_at").notNull(),
+    /** How often the repair sent it. */
+    retries: integer().notNull().default(0),
+    /**
+     * Set on a wake owed before what it is for is known to have happened
+     * (a held side effect's decision, still with connect): sent again by
+     * the repair, each time as a new delivery, until then, and dropped
+     * after. None on a wake the engine settles by taking it once.
+     */
+    resendUntil: timestamp("resend_until"),
+  },
+  (table) => [
+    // The repair (src/workflows/wakes.ts): next due first.
+    index("workflow_run_wakes_due_idx").on(table.retryAt, table.id),
+    // The repair's drop of wakes sent again for as long as they may be.
+    index("workflow_run_wakes_resend_idx")
+      .on(table.resendUntil)
+      .where(sql`resend_until IS NOT NULL`),
   ]
 );
 
@@ -1529,6 +1788,39 @@ export const workflowDecisions = sqliteTable(
 );
 
 /**
+ * One-use confirmations of a person's answer to a decision
+ * (src/decisions/confirmations.ts), minted by the trusted host decision UI
+ * once the person confirmed exactly what they answer, and taken by the
+ * answer that uses it, in the same batch. Only the token's SHA-256 is
+ * kept. Each binds the person, the decision, the review context they saw
+ * (`context_fingerprint`) and the normalized response they confirmed
+ * (`response_fingerprint`), until `expires_at`.
+ */
+export const workflowDecisionConfirmations = sqliteTable(
+  "workflow_decision_confirmations",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    decisionId: text("decision_id")
+      .notNull()
+      .references(() => workflowDecisions.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    contextFingerprint: text("context_fingerprint").notNull(),
+    responseFingerprint: text("response_fingerprint").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    // Minting again replaces the person's earlier one for the decision.
+    index("workflow_decision_confirmations_decision_user_idx").on(
+      table.decisionId,
+      table.userId
+    ),
+    // Minting drops the expired ones.
+    index("workflow_decision_confirmations_expires_idx").on(table.expiresAt),
+  ]
+);
+
+/**
  * npm packages proposed for an App (src/dependencies/requests.ts), one row
  * per request. What was asked never changes: the App, where the packages
  * would run (`targets`, a sorted JSON array), the graph's hash, the whole
@@ -1547,9 +1839,13 @@ export const dependencyRequests = sqliteTable(
   "dependency_requests",
   {
     id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     sourceRevision: text("source_revision").notNull(),
     graphHash: text("graph_hash").notNull(),
     targets: text().notNull(),
@@ -1590,20 +1886,22 @@ export const dependencyRequests = sqliteTable(
     endedReason: text("ended_reason"),
   },
   (table) => [
-    // One request waits per App: a second pending row is refused.
+    // One request waits per subject: a second pending row is refused.
     uniqueIndex("dependency_requests_pending_idx")
-      .on(table.appId)
+      .on(table.subjectType, table.subjectId)
       .where(sql`status = 'pending'`),
-    // The approval an App got last (its status, and what a new request
+    // The approval a subject got last (its status, and what a new request
     // is compared with).
-    index("dependency_requests_app_idx").on(
-      table.appId,
+    index("dependency_requests_subject_idx").on(
+      table.subjectType,
+      table.subjectId,
       table.status,
       table.decidedAt
     ),
-    // Whether a graph is approved for an App: a proposal, and admission.
+    // Whether a graph is approved for a subject: a proposal, and admission.
     index("dependency_requests_graph_idx").on(
-      table.appId,
+      table.subjectType,
+      table.subjectId,
       table.graphHash,
       table.status
     ),
@@ -1684,9 +1982,13 @@ export const dependencyApprovers = sqliteTable(
 export const dependencyLocks = sqliteTable(
   "dependency_locks",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     lock: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
@@ -1698,7 +2000,11 @@ export const dependencyLocks = sqliteTable(
      */
     servedUntil: timestamp("served_until"),
   },
-  (table) => [primaryKey({ columns: [table.appId, table.graphHash] })]
+  (table) => [
+    primaryKey({
+      columns: [table.subjectType, table.subjectId, table.graphHash],
+    }),
+  ]
 );
 
 /**
@@ -1735,16 +2041,27 @@ export const packageCleanups = sqliteTable(
 export const dependencyBuildLeases = sqliteTable(
   "dependency_build_leases",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     target: text().notNull(),
     holder: text().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.appId, table.graphHash, table.target] }),
+    primaryKey({
+      columns: [
+        table.subjectType,
+        table.subjectId,
+        table.graphHash,
+        table.target,
+      ],
+    }),
     // The cron's sweep of leases that lapsed.
     index("dependency_build_leases_expires_at_idx").on(table.expiresAt),
   ]
@@ -1761,9 +2078,13 @@ export const dependencyBuildLeases = sqliteTable(
 export const dependencyAdmissionRefusals = sqliteTable(
   "dependency_admission_refusals",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     targets: text().notNull(),
     policyGeneration: integer("policy_generation").notNull(),
@@ -1773,7 +2094,8 @@ export const dependencyAdmissionRefusals = sqliteTable(
   (table) => [
     primaryKey({
       columns: [
-        table.appId,
+        table.subjectType,
+        table.subjectId,
         table.graphHash,
         table.targets,
         table.policyGeneration,
@@ -2083,6 +2405,13 @@ export const guestChats = sqliteTable(
     /** When the guest finished it, or it was revoked. */
     endedAt: timestamp("ended_at"),
     ended: text({ enum: ["finished", "revoked"] }),
+    /**
+     * The alias of the guests binding a sealed function invited it through
+     * (resource-guests.ts): its link works only while an active binding of
+     * that alias still names its permission. Null for one an App's v1
+     * server invited, under its permission alone.
+     */
+    bindingAlias: text("binding_alias"),
   },
   (table) => [
     uniqueIndex("guest_chats_token_idx").on(table.tokenHash),
@@ -2395,6 +2724,12 @@ export const workflowStartReceipts = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
     /** When retention removed its input and parameter values. */
     detailsRemovedAt: timestamp("details_removed_at"),
+    /**
+     * Whether the start was decided in restricted mode (restricted.ts): an
+     * App's start while the App, or the chat of the agent whose call made
+     * it, had read restricted data. Its run is restricted for good.
+     */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -2415,6 +2750,113 @@ export const workflowStartReceipts = sqliteTable(
 );
 
 /**
+ * Each run of an independent workflow (src/workflows/resource-runs.ts):
+ * the run a start's receipt admitted, under the receipt's own ID, written
+ * in the receipt's statement for a version with an executable build. It
+ * pins the exact version, its manifest and its build's executable
+ * identity, and the person it acts for; the engine runs it (engine.ts,
+ * pinned to the same) and is the only authority on where it is, which
+ * `status` follows by the engine's notifications, each applied only if
+ * newer than the last (`engine_sequence`). A run that hasn't ended keeps
+ * its workflow from being deleted (workflow-resources.ts). It holds no
+ * details: its input and parameters are the receipt's, its output and
+ * failure the engine's, both under run retention.
+ *
+ * Not a `workflow_runs` row: those are an App's runs (`app_id` is
+ * required), and making it optional would rebuild that table, which D1
+ * can't do under the tables that reference it.
+ */
+export const workflowResourceRuns = sqliteTable(
+  "workflow_resource_runs",
+  {
+    id: text()
+      .primaryKey()
+      .references(() => workflowStartReceipts.id),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    principalId: text("principal_id").notNull(),
+    status: text({
+      enum: ["starting", "running", "completed", "failed", "cancelled"],
+    }).notNull(),
+    engineSequence: integer("engine_sequence").notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    endedAt: timestamp("ended_at"),
+    /**
+     * How often the repair sent its start (workflows/resource-runs.ts), and
+     * when it may next: each run backs off on its own, and ends failed
+     * past a bound, so runs that can't start never crowd out newer ones.
+     */
+    startAttempts: integer("start_attempts").notNull().default(0),
+    nextStartAt: timestamp("next_start_at"),
+    /**
+     * Why core ended a run the engine never had (its start abandoned), as
+     * an error code with nothing of the run in it: the engine, which
+     * holds every other run's error, has nothing to say of it.
+     */
+    failureCode: text("failure_code"),
+    /**
+     * The newest activation generation whose step attempts the engine has
+     * fenced (workflows/quotas.ts, `sharesReleased`): an attempt of it, or
+     * an older one, whose admission lands later takes no share. An ended
+     * run takes none whatever this says, so it moves only while the run
+     * hasn't ended.
+     */
+    sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
+    /**
+     * Its start's `restricted`, pinned with it: every call of the run reads
+     * it here (restricted.ts), so no step, retry or replay runs without it.
+     */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    // A workflow's runs that haven't ended, for its deletion check.
+    index("workflow_resource_runs_workflow_idx").on(
+      table.workflowResourceId,
+      table.status
+    ),
+    // Starts the engine is still to confirm, for the repair.
+    index("workflow_resource_runs_starting_idx")
+      .on(table.createdAt)
+      .where(sql`${table.status} = 'starting'`),
+    // One person's runs of a workflow, newest first, for an App's
+    // `workflows.<wf>.queries.runs` (workflow-reference-queries.ts).
+    index("workflow_resource_runs_principal_idx").on(
+      table.workflowResourceId,
+      table.principalId,
+      table.createdAt,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * Terminations core owes the engine for runs it ended while they were
+ * still starting, cancelled or abandoned (workflows/resource-runs.ts):
+ * the run's row ends at once and never changes again, so what is still
+ * to tell the engine is kept here, written with that end, until the
+ * engine confirms. The repair
+ * sends each again, backing off, so an instance the engine made before
+ * that end never keeps its lease or alarm.
+ */
+export const workflowResourceRunTerminations = sqliteTable(
+  "workflow_resource_run_terminations",
+  {
+    runId: text("run_id")
+      .primaryKey()
+      .references(() => workflowResourceRuns.id),
+    attempts: integer().notNull().default(0),
+    nextAt: timestamp("next_at").notNull(),
+  },
+  (table) => [
+    index("workflow_resource_run_terminations_next_idx").on(table.nextAt),
+  ]
+);
+
+/**
  * The host catalog of contracts independent workflows bind besides each
  * other (spec 13.2; src/workflow-catalog.ts): operation, connector, model
  * and decision contracts, each published once by an admin and never
@@ -2426,7 +2868,15 @@ export const workflowCatalogContracts = sqliteTable(
   {
     key: text().primaryKey(),
     kind: text({
-      enum: ["operation", "connector", "model", "decision"],
+      enum: [
+        "operation",
+        "connector",
+        "model",
+        "decision",
+        "event",
+        "knowledge",
+        "template",
+      ],
     }).notNull(),
     contract: text().notNull(),
     fingerprint: text().notNull(),
@@ -2454,7 +2904,15 @@ export const workflowBindingApprovals = sqliteTable(
       .references(() => workflowResources.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["operation", "connector", "model", "decision"],
+      enum: [
+        "operation",
+        "connector",
+        "model",
+        "decision",
+        "event",
+        "knowledge",
+        "template",
+      ],
     }).notNull(),
     contractId: text("contract_id").notNull(),
     fingerprint: text().notNull(),
@@ -2495,6 +2953,80 @@ export const workflowResourceParams = sqliteTable(
     setBy: text("set_by").notNull(),
     setAt: timestamp("set_at").notNull(),
     valuesRemovedAt: timestamp("values_removed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * The draft of each independent workflow's next definition, as its
+ * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
+ * `revision` counting them from 1. An edit names the revision it read and
+ * inserts the next one, so of two concurrent edits the second is refused
+ * and the first stays. `source` is the text as edited, JSON or not;
+ * `problems` the profile's diagnostics of it (empty for one that passes),
+ * so a row with `checked` set is a checkpoint: a definition that passed,
+ * which the editor's diagram shows and which may be published. Only the
+ * latest row and the latest checkpoint are kept.
+ */
+export const workflowResourceDrafts = sqliteTable(
+  "workflow_resource_drafts",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    source: text().notNull(),
+    checked: integer({ mode: "boolean" }).notNull(),
+    problems: text().notNull(),
+    editedBy: text("edited_by").notNull(),
+    editedAt: timestamp("edited_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * The modules each draft revision carries (src/workflow-drafts.ts), one
+ * row per module: inserted with their revision, never changed, and kept
+ * and removed with it. A row each keeps every row within what D1 holds,
+ * however a revision's definition and modules add up.
+ */
+export const workflowResourceDraftModules = sqliteTable(
+  "workflow_resource_draft_modules",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    path: text().notNull(),
+    source: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.workflowResourceId, table.revision, table.path],
+    }),
+  ]
+);
+
+/**
+ * What the sandbox's inspection of a draft revision's modules answered
+ * (src/workflow-drafts.ts): kept with the revision, so a later edit that
+ * carries exactly the same modules (`modules_hash`) checks its definition
+ * against these contracts instead of running the modules again. Only an
+ * inspection that succeeded is kept; a publication always inspects anew.
+ */
+export const workflowResourceDraftInspections = sqliteTable(
+  "workflow_resource_draft_inspections",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    modulesHash: text("modules_hash").notNull(),
+    manifest: text().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.revision] }),

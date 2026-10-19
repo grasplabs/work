@@ -92,6 +92,27 @@
       "when": 1791907383064,
       "tag": "0012_custom_migrations",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792088476007,
+      "tag": "0013_commit_writers",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792138653495,
+      "tag": "0014_app_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792242120809,
+      "tag": "0015_file_write_removals",
+      "breakpoints": true
     }
   ]
 }

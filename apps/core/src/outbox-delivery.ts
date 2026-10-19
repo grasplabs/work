@@ -5,8 +5,7 @@ import type {
 } from "@grasp-os/shared/submissions";
 
 // Handing a committed submission's intents over to whoever takes them,
-// the same for every outbox that holds them: the Knowledge outbox of
-// record saves (knowledge/outbox.ts) and each business store's
+// the same for every outbox that holds them: each business store's
 // (data-store.ts). Each outbox leases, settles and retries its own
 // entries; what an entry is, who takes it, how long a hand-over may take
 // and how failures back off is here, once.
@@ -54,9 +53,6 @@ export const consumerFor = (
   const consumer = Object.hasOwn(consumers, kind) ? consumers[kind] : undefined;
   return typeof consumer === "function" ? consumer : undefined;
 };
-
-/** The consumers of this deployment's outbox: none yet. */
-export const outboxConsumers: OutboxConsumers = {};
 
 /** How a drain goes. */
 export interface DrainOptions {

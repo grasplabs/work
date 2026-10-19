@@ -16,6 +16,10 @@ export const modelErrors = defineErrorFamily({
     "This workflow run, with the runs it started, has reached the most model calls or model spend one run may have: spent, or held for calls whose cost isn't settled yet. No more model calls can be made in it.",
   "model.budget_busy":
     "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+  "model.queued":
+    "Other model calls running now fill this share of the model requests that may run at once, so this one waits its turn. Try again after the wait it names: it isn't a fault, and it goes on once a share comes free.",
+  "model.rate_limited":
+    "The model's provider is taking no more requests from this deployment for now, so this call wasn't answered. Try again after the wait it names.",
   "model.unpriced":
     "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
   "model.answer_too_long":

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
+import { waitKeyOf } from "../src/workflows/host.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -17,7 +18,7 @@ import {
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
-import { endLiveRuns, finished, liveStatus } from "./runs.ts";
+import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   openRpc,
@@ -136,9 +137,9 @@ const mailer = (mailbox: string, action = "mail.send") =>
     { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify({ mailbox, subject: invoiceMail.subject, body: "Attached.", to: [invoiceMail.to] })}, retries: { limit: 0 } },
     async ({ idempotencyKey, input: mail }) => {
       try {
-        return JSON.parse((await env.MAIL.call(${JSON.stringify(action)}, mail, { idempotencyKey })).output);
+        return JSON.parse(((await env.MAIL.call(${JSON.stringify(action)}, mail, { idempotencyKey })) as { output: string }).output);
       } catch (error) {
-        if (error.code === resolvedDone) {
+        if ((error as { code?: string }).code === resolvedDone) {
           return { resolved: true };
         }
         throw error;
@@ -154,10 +155,7 @@ const withResolvedDone = (files: Record<string, string>) =>
     Object.entries(files).map(([path, source]) => [
       path,
       path.endsWith("mailer.ts")
-        ? source.replace(
-            "import { workflow, z }",
-            "import { resolvedDone, workflow, z }"
-          )
+        ? source.replace(" workflow, z }", " resolvedDone, workflow, z }")
         : source,
     ])
   );
@@ -239,6 +237,67 @@ const elapse = async (ms: number): Promise<void> => {
 describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
 
+  it("wakes the waiting step as soon as its person says what became of it, not at its next check", async () => {
+    const admin = await personApi("admin");
+    const { run } = await lostRun(admin);
+    const unknownWait = `$grasp:wait:${await waitKeyOf("send")}:unknown:`;
+    using events = await runInstance(run.id).subscribe({
+      filter: ["wait_started", "wait_completed", "wait_timed_out"],
+    });
+    const report = async () => {
+      const { done, value } = await events.next();
+      if (done === true) {
+        throw new Error(`Run ${run.id} ended while it waited`);
+      }
+      return value;
+    };
+    // Its checks come further apart each time (from 250 ms in tests): the
+    // fourth waits two seconds, which only a wake ends early.
+    let waits = 0;
+    await vi.waitFor(
+      async () => {
+        const value = await report();
+        if (
+          value.type === "wait_started" &&
+          value.stepName.startsWith(unknownWait)
+        ) {
+          waits += 1;
+        }
+        expect(waits).toBeGreaterThanOrEqual(4);
+      },
+      { timeout: 20_000, interval: 0 }
+    );
+    const [unknown] = await admin.api.unknownOutcomes.list();
+    if (unknown === undefined) {
+      throw new Error("Expected a call of unknown outcome");
+    }
+    await admin.api.unknownOutcomes.resolve(
+      unknown.key,
+      "happened",
+      unknown.claim
+    );
+    let ended: string | undefined;
+    while (ended === undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one report at a time
+      const value = await report();
+      if (
+        (value.type === "wait_completed" || value.type === "wait_timed_out") &&
+        value.stepName.startsWith(unknownWait)
+      ) {
+        ended = value.type;
+      }
+    }
+    await finished(run.id);
+
+    expect({
+      ended,
+      run: await admin.api.workflows.status(run.id),
+    }).toMatchObject({
+      ended: "wait_completed",
+      run: { status: "completed", output: { resolved: true } },
+    });
+  });
+
   it("holds the run, retries unspent, until its person says it happened: then the step completes without sending it again", async () => {
     const admin = await personApi("admin");
     const { mailbox, connectionId, app, run, unknown } =
@@ -292,7 +351,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       audited: [
         "workflow.run.completed",
         "workflow.run.started",
-        "workflow.run.waiting held",
+        "workflow.run.waiting outcome_unknown",
         "workflow.step.completed $params",
         "workflow.step.completed send",
       ],
@@ -325,7 +384,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     });
   });
 
-  it("can't be resolved once the App's permission is revoked, nor by anyone else, and keeps the run waiting", async () => {
+  it("can't be resolved once the App's permission is revoked, nor by anyone else, nor as a send it wasn't shown, and keeps the run waiting", async () => {
     const admin = await personApi("admin");
     const { mailbox, connectionId, permission, run, unknown } =
       await waitingRun(admin);
@@ -335,6 +394,14 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         unknown.key,
         "not_happened",
         unknown.claim
+      )
+    );
+    // A claim of its key other than the one it was shown.
+    const otherClaim = await codeOf(
+      admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "not_happened",
+        unknown.claim + 1
       )
     );
     await admin.api.permissions.revoke(permission);
@@ -347,7 +414,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     );
     expect({
       stranger,
+      otherClaim,
       revoked,
+      badCursor: await codeOf(admin.api.unknownOutcomes.list("not-a-cursor")),
       othersList: await other.api.unknownOutcomes.list(),
       stillListed: await listedFor(admin),
       live: await liveStatus(run.id),
@@ -355,7 +424,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       resolutions: await resolutions(connectionId),
     }).toStrictEqual({
       stranger: "connect.outcome_not_found",
+      otherClaim: "connect.outcome_not_found",
       revoked: "permission.denied",
+      badCursor: "connect.invalid",
       othersList: [],
       stillListed: 1,
       live: "waiting",
@@ -371,10 +442,196 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
           action: "connection.call.resolve_refused",
           actor: "person",
           choice: "not_happened",
+          reason: "connect.outcome_not_found",
+        },
+        {
+          action: "connection.call.resolve_refused",
+          actor: "person",
+          choice: "not_happened",
           reason: "permission.denied",
         },
       ],
     });
+  });
+
+  it("can't be said not to have happened once what it sent is no longer kept, only that it happened", async () => {
+    const admin = await personApi("admin");
+    const { mailbox, connectionId, run, unknown } = await waitingRun(admin);
+    // Past connect's retention, its input goes; the obligation stays.
+    await connectDb()
+      .prepare(
+        "UPDATE idempotent_calls SET input = NULL WHERE connection_id = ?1"
+      )
+      .bind(connectionId)
+      .run();
+    const [removed] = await admin.api.unknownOutcomes.list();
+    const notHappened = await codeOf(
+      admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "not_happened",
+        unknown.claim
+      )
+    );
+    const live = await liveStatus(run.id);
+    await admin.api.unknownOutcomes.resolve(
+      unknown.key,
+      "happened",
+      unknown.claim
+    );
+    await finished(run.id);
+    expect({
+      input: removed?.input,
+      notHappened,
+      live,
+      run: await admin.api.workflows.status(run.id),
+      sent: await sentFrom(mailbox),
+      resolutions: await resolutions(connectionId),
+    }).toMatchObject({
+      input: null,
+      notHappened: "connect.outcome_not_kept",
+      live: "waiting",
+      run: { status: "completed", output: { resolved: true } },
+      sent: 1,
+      resolutions: [
+        {
+          action: "connection.call.resolve_refused",
+          actor: "person",
+          choice: "not_happened",
+          reason: "connect.outcome_not_kept",
+        },
+        {
+          action: "connection.call.resolved",
+          actor: "person",
+          choice: "happened",
+          reason: undefined,
+        },
+      ],
+    });
+  });
+
+  it("is listed for the organization's other admins, read only and without what was sent, who can't resolve it; refused to anyone else", async () => {
+    const admin = await personApi("admin");
+    const { mailbox, connectionId, app, run, unknown } =
+      await waitingRun(admin);
+    const other = await personApi("admin");
+    const member = await personApi("builder");
+    const listed = await other.api.unknownOutcomes.listAll();
+    const theirs = listed.filter(
+      ({ onBehalfOf }) => onBehalfOf === admin.userId
+    );
+    const { items } = await admin.api.workflows.history(run.id, {
+      pageSize: 100,
+    });
+    // Who read everyone's, and how many: recorded as a read.
+    const events = await allEvents();
+    const reads = events
+      .filter(
+        ({ action, actor }) =>
+          action === "connection.call.unknown_listed" &&
+          "userId" in actor &&
+          actor.userId === other.userId
+      )
+      .map(({ actor, detail }) => ({ actor: actor.type, count: detail.count }));
+    expect({
+      theirs,
+      reads,
+      shown: theirs.map((listing) => Object.keys(listing).toSorted()),
+      // Even with its key and claim, as its person was shown them.
+      resolved: await codeOf(
+        other.api.unknownOutcomes.resolve(
+          unknown.key,
+          "happened",
+          unknown.claim
+        )
+      ),
+      memberAll: await codeOf(member.api.unknownOutcomes.listAll()),
+      memberOwn: await member.api.unknownOutcomes.list(),
+      stillListed: await listedFor(admin),
+      live: await liveStatus(run.id),
+      sent: await sentFrom(mailbox),
+      waitsOnOutcome: items.some(
+        (entry) =>
+          entry.kind === "wait" &&
+          entry.waitKind === "outcome_unknown" &&
+          entry.state === "opened"
+      ),
+    }).toMatchObject({
+      theirs: [
+        {
+          onBehalfOf: admin.userId,
+          subject: { type: "app", appId: app },
+          connectionId,
+          action: "mail.send",
+          title: "Send an email",
+          resource: null,
+        },
+      ],
+      // Never the input, its description, its key, its claim or its origin.
+      shown: [
+        [
+          "action",
+          "connectionId",
+          "connectionName",
+          "cursor",
+          "id",
+          "onBehalfOf",
+          "resource",
+          "sentAt",
+          "subject",
+          "title",
+        ],
+      ],
+      reads: [{ actor: "person", count: listed.length }],
+      resolved: "connect.outcome_not_found",
+      memberAll: "role.forbidden",
+      memberOwn: [],
+      stillListed: 1,
+      live: "waiting",
+      sent: 1,
+      // The run's page says why it waits.
+      waitsOnOutcome: true,
+    });
+  });
+
+  it("wakes the waiting run once its person resolves it, rather than leaving it to its next check", async () => {
+    const admin = await personApi("admin");
+    const wait = env.WORKFLOW_OFF_WAIT_MS;
+    // Its first wait alone outlasts how long the run is given to finish.
+    env.WORKFLOW_OFF_WAIT_MS = "50000";
+    try {
+      const { mailbox, run } = await lostRun(admin);
+      const unknown = await vi.waitFor(
+        async () => {
+          const [listed] = await admin.api.unknownOutcomes.list();
+          if (listed === undefined) {
+            throw new Error("Not listed yet");
+          }
+          return listed;
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      await vi.waitFor(
+        async () => {
+          await expect(liveStatus(run.id)).resolves.toBe("waiting");
+        },
+        { timeout: 10_000, interval: 100 }
+      );
+      await admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "happened",
+        unknown.claim
+      );
+      await finished(run.id);
+      expect({
+        run: await admin.api.workflows.status(run.id),
+        sent: await sentFrom(mailbox),
+      }).toMatchObject({
+        run: { status: "completed", output: { resolved: true } },
+        sent: 1,
+      });
+    } finally {
+      env.WORKFLOW_OFF_WAIT_MS = wait;
+    }
   });
 
   it("stays an obligation of its person when the run is cancelled: only the run's wait goes, and nothing says it was undone", async () => {
@@ -734,7 +991,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       admin,
       workflowFiles(
         "composio",
-        `  return await step.do("send", { description: "Send", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse((await env.MAIL.call("mail.send", input, { idempotencyKey })).output));`,
+        `  return await step.do("send", { description: "Send", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output));`,
         { send: null }
       )
     );

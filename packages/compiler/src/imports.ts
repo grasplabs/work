@@ -1,8 +1,13 @@
-import { appCodeImport, screenImportError } from "./app-code.ts";
+import {
+  appCodeImport,
+  screenImportError,
+  typeImportError,
+} from "./app-code.ts";
 import {
   appModuleName,
   kitModuleName,
   ownEntry,
+  packageModuleName,
   screenReferences,
   screenRootNames,
   sdkRoot,
@@ -16,6 +21,18 @@ export interface ImportSite {
   line: number | undefined;
   /** The names it imports, or undefined for a default or namespace import. */
   names: string[] | undefined;
+  /**
+   * Whether it brings in types alone (`import type`, `export type … from`,
+   * `typeof import()`), which compiling erases: held only to what the file
+   * must never reach (`typeImportError`).
+   */
+  typeOnly?: true;
+  /**
+   * Whether it is an ambient module (`declare module "…" { }`), which
+   * declares a module by name rather than importing one: what it holds
+   * names modules too, and it shadows any module of that name.
+   */
+  ambient?: true;
 }
 
 /** The parts of Babel's AST the import scan and rewrite read and write. */
@@ -40,6 +57,8 @@ interface Statement {
   type: string;
   loc?: { start: { line: number } } | null;
   source?: StringLiteral | null;
+  /** `import X = require("…")`'s module (`TSExternalModuleReference`). */
+  moduleReference?: { type: string; expression?: StringLiteral };
   specifiers?: Specifier[];
   importKind?: string | null;
   exportKind?: string | null;
@@ -128,10 +147,25 @@ const stringArgument = (call: Call): string | undefined => {
     : undefined;
 };
 
+/** A `declare module`, `declare global` or `namespace`: named by a string, or an identifier. */
+interface ModuleDeclaration {
+  id: { type: string; value?: unknown; name?: string };
+  loc?: Call["loc"];
+  /** Set on `declare global { … }`. */
+  global?: boolean;
+}
+
+/** A type's `import("…")` (`typeof import()`, `import("…").Name`). */
+interface ImportType {
+  argument: { type: string; value?: unknown };
+  loc?: Call["loc"];
+}
+
 /**
  * A Babel plugin that lists a file's imports into `imports`, as written:
  * it reads the top-level statements before anything else runs. Type-only
- * imports are skipped; they are erased.
+ * imports are listed as such (`typeOnly`): erased by the compile, they
+ * still name modules, and some no file may name.
  */
 export const collectImports = (imports: ImportSite[]) => () => {
   const collect = (call: Call): void => {
@@ -143,16 +177,91 @@ export const collectImports = (imports: ImportSite[]) => () => {
       });
     }
   };
+  const collectImportType = ({ argument, loc }: ImportType): void => {
+    imports.push({
+      specifier:
+        argument.type === "StringLiteral" && typeof argument.value === "string"
+          ? argument.value
+          : undefined,
+      line: loc?.start.line,
+      names: undefined,
+      typeOnly: true,
+    });
+  };
   return {
     visitor: {
-      Program: (path: { node: { body: Statement[] } }) => {
+      Program: (path: {
+        node: { body: Statement[] };
+        traverse: (visitor: {
+          TSImportType: (inner: { node: ImportType }) => void;
+          TSModuleDeclaration: (inner: { node: ModuleDeclaration }) => void;
+        }) => void;
+      }) => {
+        // A type's `import("…")` sits in types the TypeScript transform
+        // removes as it goes, and so does an ambient module: read them all
+        // now, before it runs.
+        path.traverse({
+          TSImportType: (inner) => {
+            collectImportType(inner.node);
+          },
+          TSModuleDeclaration: ({ node: { id, loc, global } }) => {
+            // `declare global { … }`: what it declares, every file sees.
+            if (
+              global === true ||
+              (id.type === "Identifier" && id.name === "global")
+            ) {
+              imports.push({
+                specifier: undefined,
+                line: loc?.start.line,
+                names: undefined,
+                typeOnly: true,
+                ambient: true,
+              });
+            } else if (
+              id.type === "StringLiteral" &&
+              typeof id.value === "string"
+            ) {
+              imports.push({
+                specifier: id.value,
+                line: loc?.start.line,
+                names: undefined,
+                typeOnly: true,
+                ambient: true,
+              });
+            }
+          },
+        });
         for (const statement of path.node.body) {
-          if (isModuleStatement(statement) && !isTypeOnly(statement)) {
+          const { moduleReference } = statement;
+          if (
+            statement.type === "TSImportEqualsDeclaration" &&
+            moduleReference?.type === "TSExternalModuleReference"
+          ) {
+            // `import X = require("…")`: a value, or with `type` a type.
             imports.push({
-              specifier: statement.source?.value,
+              specifier: moduleReference.expression?.value,
               line: statement.loc?.start.line,
-              names: namesOf(statement),
+              names: undefined,
+              ...(statement.importKind === "type"
+                ? { typeOnly: true as const }
+                : {}),
             });
+          }
+          if (isModuleStatement(statement)) {
+            imports.push(
+              isTypeOnly(statement)
+                ? {
+                    specifier: statement.source?.value,
+                    line: statement.loc?.start.line,
+                    names: undefined,
+                    typeOnly: true,
+                  }
+                : {
+                    specifier: statement.source?.value,
+                    line: statement.loc?.start.line,
+                    names: namesOf(statement),
+                  }
+            );
           }
         }
       },
@@ -165,6 +274,94 @@ export const collectImports = (imports: ImportSite[]) => () => {
     },
   };
 };
+
+/** A comment as Babel keeps it: its text, without its delimiters. */
+interface Comment {
+  type: string;
+  value: string;
+  loc?: { start: { line: number } } | null;
+}
+
+/** A comment TypeScript reads as a directive to the type check. */
+export interface DirectiveSite {
+  /** What it says, e.g. `/// <reference lib="dom" />` or `@ts-ignore`. */
+  directive: string;
+  line: number | undefined;
+}
+
+/**
+ * A triple-slash directive TypeScript obeys: `/// <reference …/>`,
+ * `/// <amd-module …/>` or `/// <amd-dependency …/>`. Any other tag in a
+ * `///` comment (`/// <summary>`) is a comment to it.
+ */
+const tripleSlash = /^\/\s*<(?:reference|amd-module|amd-dependency)\b/iu;
+
+/**
+ * A comment that switches the type check off for the whole file: a
+ * `@ts-nocheck` pragma, which TypeScript reads in any case
+ * (`@ts-NoCheck`). Refused wherever a comment holds it, stricter than
+ * TypeScript, which reads it only where a pragma goes.
+ */
+const fileSuppression = /@ts-nocheck\b/iu;
+
+/**
+ * A comment line that switches the type check off for the next line: one
+ * that starts, after any `/` or `*` and space, with `@ts-ignore` or
+ * `@ts-expect-error`, where TypeScript reads them (in a line comment, or
+ * on any line of a block comment). A comment that only mentions one
+ * (`// Do not use @ts-ignore here.`) is prose to it, and to the build.
+ */
+// No word boundary after it, as TypeScript has none: it reads
+// `// @ts-ignoreX` as `@ts-ignore`.
+const lineSuppression = /^[\s/*]*@ts-(?:ignore|expect-error)/iu;
+
+/**
+ * Where TypeScript ends a line: `\r\n`, `\r`, `\n`, U+2028 and U+2029.
+ * A block comment's suppression is read from its lines as TypeScript
+ * splits them (`/* x\r @ts-ignore *\/` suppresses), never only on `\n`.
+ */
+const lineTerminator = /\r\n?|\n|\u2028|\u2029/u;
+
+/** The suppression `comment` holds where TypeScript would obey it, if any. */
+const suppressionIn = (comment: string): string | undefined =>
+  fileSuppression.exec(comment)?.[0] ??
+  comment
+    .split(lineTerminator)
+    .map((line) =>
+      lineSuppression
+        .exec(line)?.[0]
+        .trim()
+        .replace(/^[\s/*]*/u, "")
+    )
+    .find((found) => found !== undefined);
+
+/**
+ * A Babel plugin that lists into `directives` every comment of a file
+ * TypeScript would obey as a directive to its type check rather than
+ * read as a comment: a triple-slash directive (`/// <reference lib>`,
+ * `types`, `path`, which reach the whole program, not only the file), or
+ * a suppression (`@ts-nocheck`, `@ts-ignore`, `@ts-expect-error`).
+ */
+export const collectDirectives = (directives: DirectiveSite[]) => () => ({
+  visitor: {
+    Program: (
+      _path: unknown,
+      state: { file: { ast: { comments?: Comment[] | null } } }
+    ) => {
+      for (const { type, value, loc } of state.file.ast.comments ?? []) {
+        const line = loc?.start.line;
+        if (type === "CommentLine" && tripleSlash.test(value)) {
+          directives.push({ directive: `//${value}`.trim(), line });
+        } else {
+          const directive = suppressionIn(value);
+          if (directive !== undefined) {
+            directives.push({ directive, line });
+          }
+        }
+      }
+    },
+  },
+});
 
 /** How an import may name an App file: as written, or without its extension. */
 const importSuffixes = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"];
@@ -221,13 +418,101 @@ const iconError = (
     : `${unknown.map((name) => `"${name}"`).join(", ")} is not a lucide-react icon.`;
 };
 
-/** Why an import isn't allowed, or undefined when it is. */
-export const importError = (
-  { specifier, names }: ImportSite,
+/**
+ * How a type import may name an App file, as TypeScript resolves one:
+ * as written, by its extension (declarations included), or as a folder's
+ * index.
+ */
+const typeSuffixes = [
+  "",
+  ".ts",
+  ".tsx",
+  ".d.ts",
+  "/index.ts",
+  "/index.tsx",
+  "/index.d.ts",
+];
+
+const scriptExtension = /\.(?:js|jsx)$/u;
+
+/**
+ * The App file a screen's type import names, if there is one: resolved
+ * as TypeScript would (`./types` for `types.d.ts` or `types/index.d.ts`,
+ * `./x.js` for `x.ts`), but only ever among `files`, the build's own, so
+ * no path, folder or extension reaches anything else.
+ */
+const resolveTypeFile = (
+  file: string,
+  specifier: string,
+  files: ReadonlySet<string>
+): string | undefined => {
+  const parts = file.split("/").slice(0, -1);
+  for (const part of specifier.replace(scriptExtension, "").split("/")) {
+    if (part === "..") {
+      if (parts.pop() === undefined) {
+        return undefined;
+      }
+    } else if (part !== ".") {
+      parts.push(part);
+    }
+  }
+  const path = parts.join("/");
+  return typeSuffixes
+    .map((suffix) => `${path}${suffix}`)
+    .find((candidate) => files.has(candidate));
+};
+
+/**
+ * Why a type-only import in a screen, component or declaration file isn't
+ * allowed, or undefined when it is: held to what its values may import,
+ * but for the names they may take (a type of the SDK root's beyond
+ * `{ v }`, any lucide-react name). An allowlist, so no path reaches what
+ * the kit doesn't list: nothing under node_modules, nothing absolute,
+ * only the build's own files and the kit's modules by name.
+ */
+export const screenTypeImportError = (
+  { specifier, ambient }: Pick<ImportSite, "specifier" | "ambient">,
   file: string,
   files: ReadonlySet<string>,
   kit: Kit
 ): string | undefined => {
+  if (ambient) {
+    return specifier === undefined
+      ? "declare global is never in a screen's files: it would declare globals the page doesn't give the App."
+      : `declare module "${specifier}" is never in a screen's files: it would declare, or shadow, a module the kit doesn't give the App. Import what the kit has instead.`;
+  }
+  if (specifier === undefined) {
+    return "import() must name a module in quotes.";
+  }
+  const server = typeImportError(file, specifier, true);
+  if (server !== undefined) {
+    return server;
+  }
+  if (isRelative(specifier)) {
+    return resolveTypeFile(file, specifier, files) === undefined
+      ? `"${specifier}" is not a file of this App's screens.`
+      : undefined;
+  }
+  if (specifier === screenReferences.specifier) {
+    return files.has(screenReferences.path)
+      ? undefined
+      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, operations/), which this App doesn't have yet.`;
+  }
+  return specifier === "lucide-react" || kit.imports.includes(specifier)
+    ? undefined
+    : `"${specifier}" is outside the kit. Screens can import the App's own files and ${packagesOf(kit)}.`;
+};
+
+/** Why a screen's import isn't allowed, or undefined when it is. */
+export const importError = (
+  { specifier, names, typeOnly, ambient }: ImportSite,
+  file: string,
+  files: ReadonlySet<string>,
+  kit: Kit
+): string | undefined => {
+  if (typeOnly) {
+    return screenTypeImportError({ specifier, ambient }, file, files, kit);
+  }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
   }
@@ -403,6 +688,11 @@ export interface CodeKind {
   folder: string;
   /** The modules it may import besides its own files, and their flat names. */
   imports: ReadonlyMap<string, string>;
+  /**
+   * Whether its types are checked (`buildWorkflows`): then nothing in it
+   * may steer the check, no directive, suppression or ambient module.
+   */
+  typeChecked?: boolean;
 }
 
 /** Server code imports its own files and the Workers runtime. */
@@ -428,6 +718,7 @@ export const workflowCode: CodeKind = {
   imports: new Map(
     sdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
   ),
+  typeChecked: true,
 };
 
 /**
@@ -448,6 +739,55 @@ export const generatedWorkflowCode: CodeKind = {
     ])
   ),
 };
+
+/**
+ * The SDK modules a JSON workflow's own modules (`code/`) import: its
+ * calculations' (`@grasp-os/sdk/compute`) and actions'
+ * (`@grasp-os/sdk/action`), and nothing else of the platform: no Workers
+ * runtime, no workflow engine, no server or database constructors, and
+ * no packages but the approved ones a version seals (`computeCodeWith`).
+ * A calculation gets only the value it is called with; an action, its
+ * arguments and the bindings it declares.
+ */
+export const computeSdkImports = [
+  "@grasp-os/sdk/compute",
+  "@grasp-os/sdk/action",
+] as const;
+
+/** What core's compute call loads besides them (never importable). */
+export const computeRunnerImports = ["@grasp-os/sdk/compute-runner"] as const;
+
+/**
+ * Compute modules import their own files and `computeSdkImports`, and are
+ * type-checked (`buildComputeModules`): nothing in them may steer it.
+ */
+export const computeCode: CodeKind = {
+  name: "Compute module",
+  folder: "code/",
+  imports: new Map(
+    computeSdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
+  ),
+  typeChecked: true,
+};
+
+/**
+ * Compute modules that may also import `packages`, the entries of the
+ * approved graph their version seals (GRA-665), each by its own name and
+ * loaded under its own flat name (`packageModuleName`). Nothing else.
+ */
+export const computeCodeWith = (packages: readonly string[]): CodeKind =>
+  packages.length === 0
+    ? computeCode
+    : {
+        ...computeCode,
+        imports: new Map([
+          ...computeCode.imports,
+          ...packages.map((entry): [string, string] => [
+            entry,
+            packageModuleName(entry),
+          ]),
+        ]),
+      };
 
 const javascriptExtension = /\.js$/u;
 
@@ -473,10 +813,30 @@ const resolveCodeFile = (
 /** Why an import in `kind` code isn't allowed, or undefined when it is. */
 export const codeImportError = (
   kind: CodeKind,
-  specifier: string | undefined,
+  {
+    specifier,
+    typeOnly,
+    ambient,
+  }: Pick<ImportSite, "specifier" | "typeOnly" | "ambient">,
   file: string,
   files: ReadonlySet<string>
 ): string | undefined => {
+  // An ambient module would declare, or shadow, a module by name in the
+  // type check, or `declare global` give every file globals its isolate
+  // doesn't have: code of a `typeChecked` kind (App workflows, compute
+  // modules) declares none. The v1 server's types are stripped, and
+  // generated workflow code is the host's own, so there it reaches nothing.
+  if (ambient) {
+    if (kind.typeChecked !== true) {
+      return undefined;
+    }
+    return specifier === undefined
+      ? `declare global is never in ${kind.name.toLowerCase()} code: it would declare globals its isolate doesn't have, for every file.`
+      : `declare module "${specifier}" is never in ${kind.name.toLowerCase()} code: it would declare, or shadow, a module the SDK doesn't give it.`;
+  }
+  if (typeOnly) {
+    return typeImportError(file, specifier, false);
+  }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
   }
@@ -546,7 +906,7 @@ export const rewriteCodeImports = (
   files: ReadonlySet<string>
 ) =>
   rewriteWith((specifier) => {
-    const error = codeImportError(kind, specifier, file, files);
+    const error = codeImportError(kind, { specifier }, file, files);
     if (error !== undefined || specifier === undefined) {
       throw new Error(error);
     }

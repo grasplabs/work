@@ -49,6 +49,27 @@ export const connections = sqliteTable(
     tenant: text(),
     accountId: text("account_id"),
     accountName: text("account_name"),
+    /**
+     * The account's own email address, as the provider's ID token said
+     * (`email`): for Microsoft 365 the primary address it sends from,
+     * which may differ from its sign-in name. Core records it with the
+     * mail a workflow run sends through the connection.
+     */
+    accountEmail: text("account_email"),
+    /**
+     * The other addresses the account's mailbox receives mail at (its
+     * primary address and SMTP aliases), as its provider said when it was
+     * connected (account-addresses.ts); null when never read.
+     */
+    accountAddresses: text("account_addresses", { mode: "json" }).$type<
+      string[]
+    >(),
+    /**
+     * The addresses the account may send as, besides those it receives
+     * at (Google's verified send-as addresses), as its provider said when
+     * it was connected (account-addresses.ts); null when never read.
+     */
+    accountSenders: text("account_senders", { mode: "json" }).$type<string[]>(),
     connectedBy: text("connected_by"),
     /**
      * For a Composio connection: the MCP server and the auth config
@@ -92,16 +113,21 @@ export const connections = sqliteTable(
  * can't be reused for a different call. `state` is `running` while the call
  * is out, `done` once its result is stored, `failed` once the tool's error
  * is stored (a tool may have acted before it failed, so that is final too),
- * `unknown` when the call failed after it may have reached the server, and
+ * `unknown` when the call failed after it may have reached the server,
  * `declined` when a workflow run's held side effect was declined or
- * dropped (`output` says why): its step's retry fails, never asks again.
+ * dropped (`output` says why): its step's retry fails, never asks again;
+ * and, for a call of unknown outcome its person resolved, `resolved` when
+ * they said it happened (never sent again) and `freed` when they said it
+ * didn't (one more send of the same input takes the key, `running` again).
  * Rows are never deleted, so no key is ever used twice: past retention, or
  * when too large, an answer's output is dropped and a repeat is refused.
  */
 export const idempotentCalls = sqliteTable(
   "idempotent_calls",
   {
-    subjectType: text("subject_type", { enum: ["app", "agent"] }).notNull(),
+    subjectType: text("subject_type", {
+      enum: ["app", "agent", "workflow"],
+    }).notNull(),
     subjectId: text("subject_id").notNull(),
     onBehalfOf: text("on_behalf_of").notNull(),
     connectionId: text("connection_id").notNull(),
@@ -157,10 +183,24 @@ export const idempotentCalls = sqliteTable(
     input: text(),
     /**
      * Where the call came from, as its capability said (mode, App version,
-     * permission and context), as JSON, kept as long as `input`: what core
-     * checks again before it signs a resolution of it.
+     * permission, context and the App's resource binding, if any), as
+     * JSON, kept as long as `input`: what core checks again before it signs
+     * a resolution of it, and connect compares the resolution with. Its
+     * `restricted` says a recovery of the call needs its person: its
+     * context had read restricted data, or a recovery was refused since for
+     * needing their confirmation (`requireConfirmation`).
      */
     origin: text(),
+    /**
+     * A random ID, set at the first claim: where a list of calls of unknown
+     * outcome goes on after this one, with `created_at` (its cursor). Never
+     * a row number, which would tell how many calls anyone made in between,
+     * and which the database may renumber. Empty only on a declined row,
+     * which no list shows. Not backfilled: nothing with this table is
+     * released (a hard cut), so no deployment holds rows from before it
+     * that a list would show.
+     */
+    listId: text("list_id").notNull().default(""),
   },
   (table) => [
     primaryKey({
@@ -176,6 +216,22 @@ export const idempotentCalls = sqliteTable(
     index("idempotent_calls_created_idx").on(table.createdAt),
     // How a held action ended, found by the key connect made for it.
     index("idempotent_calls_key_idx").on(table.idempotencyKey),
+    // A person's calls of unknown outcome, listed and waited on.
+    index("idempotent_calls_person_state_idx").on(
+      table.onBehalfOf,
+      table.state
+    ),
+    // A person's list, page by page, in the order it goes.
+    index("idempotent_calls_person_list_idx").on(
+      table.onBehalfOf,
+      table.createdAt,
+      table.listId
+    ),
+    // The inputs past retention, swept on every claim: only the rows that
+    // still keep one, never every old row.
+    index("idempotent_calls_kept_input_idx")
+      .on(table.createdAt)
+      .where(sql`${table.input} IS NOT NULL`),
   ]
 );
 
@@ -199,7 +255,9 @@ export const pendingActions = sqliteTable(
   "pending_actions",
   {
     id: text().primaryKey(),
-    subjectType: text("subject_type", { enum: ["app", "agent"] }).notNull(),
+    subjectType: text("subject_type", {
+      enum: ["app", "agent", "workflow"],
+    }).notNull(),
     subjectId: text("subject_id").notNull(),
     onBehalfOf: text("on_behalf_of").notNull(),
     /** Asked for with the person there (`interactive`), or by a run. */
@@ -223,6 +281,12 @@ export const pendingActions = sqliteTable(
      * any other call.
      */
     binding: text(),
+    /**
+     * The stamp core recorded for a workflow run's mail (`ConnectCall`'s
+     * `stamp`), sent with the call once its person confirms it. Null for
+     * any other call.
+     */
+    stamp: text(),
   },
   (table) => [
     uniqueIndex("pending_actions_call_idx").on(
@@ -237,6 +301,8 @@ export const pendingActions = sqliteTable(
     index("pending_actions_person_idx").on(table.onBehalfOf),
     // Dropping a disconnected connection's.
     index("pending_actions_connection_idx").on(table.connectionId),
+    // Dropping an ended run's, by the range of its steps' keys.
+    index("pending_actions_key_idx").on(table.idempotencyKey),
   ]
 );
 

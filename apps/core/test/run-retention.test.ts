@@ -5,7 +5,6 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import {
   batchesPerSweep,
@@ -13,13 +12,14 @@ import {
   sweptPerBatch,
 } from "../src/workflows/retention.ts";
 import { startRun } from "../src/workflows/runs.ts";
-import { release, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import {
   approvalTests,
   asksOf,
-  server as approvalServer,
+  confirmedAnswer,
+  approvalAppWith,
+  remember,
 } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
@@ -35,7 +35,13 @@ import {
   woken,
 } from "./runs.ts";
 import { openRpc, signedInApi } from "./sign-in.ts";
-import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
+import {
+  appWith,
+  hitCall,
+  hitsOf,
+  runEvents,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // Retention of workflow runs, from its threat model (src/workflows/
 // retention.ts): once a run has ended for the deployment's retention, the
@@ -78,7 +84,7 @@ const keeps = workflowFiles(
   "keeps",
   `  const { notes = "" } = (input ?? {}) as { notes?: string };
   const read = await step.do("read", { description: "Read", input: { notes } }, async ({ input: given }) => given.notes);
-  await step.do("done", { description: "Count", sideEffect: true, input: { counter: "done" } }, async ({ input: given }) => await env.APP.call("hit", given.counter));
+  await step.do("done", { description: "Count", sideEffect: true, input: { counter: "done" } }, async ({ input: given }) => await ${hitCall(`given.counter`)});
   return { read };`,
   { read: "notes", done: 1 }
 );
@@ -118,7 +124,7 @@ const waits = workflowFiles(
   "waits",
   `  const { notes = "" } = (input ?? {}) as { notes?: string };
   const read = await step.do("work", { description: "Work" }, async () => {
-    await env.APP.call("hit", "work");
+    await ${hitCall(`"work"`)};
     return notes;
   });
   await step.sleep("go", { description: "Wait", duration: "1 day" });
@@ -130,7 +136,7 @@ const waits = workflowFiles(
  * A workflow that waits for one decision, keyed by a note it read, which
  * its description quotes too, and returns how it ended.
  */
-const keyedApproval = `import { workflow, z } from "@grasp-os/sdk/workflow";
+const keyedApproval = `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "approval",
@@ -142,24 +148,14 @@ export default workflow(
     await step.decision("review", {
       key: input.note ?? "none",
       description: "Approve: " + (input.note ?? "nothing"),
-      from: input.from,
+      from: input.from as Person,
       ask: async ({ recipients, reminder }) => {
-        await env.APP.call("remember", recipients, reminder);
+${remember}
       },
       timeout: input.timeout,
     })
 );
 `;
-
-/** How often the App counted `name` (its server's `hit`). */
-const hitsOf = async (app: string, person: Person, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId: person.userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
 
 /** A run's row, as the database has it. */
 const rowOf = async (run: string) =>
@@ -645,7 +641,7 @@ describe("run retention", { timeout: 60_000 }, () => {
         output: ended.output,
         removed: ended.detailsRemoved,
       },
-      worked: await hitsOf(app, builder, "work"),
+      worked: await hitsOf(builder, app, "work"),
     }).toStrictEqual({
       waiting: null,
       whileStopped: { removed: null, status: "paused", engine: true },
@@ -661,13 +657,10 @@ describe("run retention", { timeout: 60_000 }, () => {
   it("leaves a decision a run still waits for as it was asked, and removes it with the run once that has ended, its key too", async () => {
     const builder = await personApi("builder");
     const decider = await personApi("user");
-    const { id: app } = await builder.api.apps.create({ name: "Approvals" });
-    const version = await release(builder, app, {
-      "app/server.ts": approvalServer,
+    const app = await approvalAppWith(builder, {
       "workflows/approval.ts": keyedApproval,
       "workflows/approval.workflow-tests.ts": approvalTests,
     });
-    await serverBuilt(app, version);
     const run = await builder.api.workflows.start(app, "approval", {
       from: `person:${decider.userId}`,
       timeout: 7 * day,
@@ -686,7 +679,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     const asked = await decisionRow();
     const decision = asked?.id ?? "";
     const open = await decider.api.decisions.get(decision);
-    await decider.api.decisions.answer(decision, {
+    await confirmedAnswer(decider, decision, {
       approved: true,
       payload: { comment: transcript },
     });
@@ -799,7 +792,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       instance: await runEngine(env).status(run.id),
       status: await builder.api.workflows.status(run.id),
       cancelled: await builder.api.workflows.cancel(run.id),
-      done: await hitsOf(app, builder, "done"),
+      done: await hitsOf(builder, app, "done"),
       completed: events.filter(
         ({ action, target }) =>
           action === "workflow.run.completed" && target?.id === run.id

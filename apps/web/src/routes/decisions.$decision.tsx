@@ -17,6 +17,11 @@ import type { ReactNode } from "react";
 import { loadCoreStatus, readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { CoreTimeoutError } from "../core.ts";
+import {
+  confirmAndAnswer,
+  DecisionConfirmDialog,
+} from "../decision-confirmation.tsx";
+import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
@@ -106,115 +111,168 @@ const outcomeOf = (decision: DecisionView): string => {
 const DecisionCard = ({ decision }: { decision: DecisionView }) => {
   const [current, setCurrent] = useState(decision);
   const [comment, setComment] = useState("");
+  const [pending, setPending] = useState<PendingConfirmation>();
   const { busy, failure, run } = useCoreAction();
   const open = current.status === "open";
+  // Core shows the answer as it would record it, and Grasp's own dialog
+  // asks the person to confirm exactly that (decision-confirmation.tsx).
+  // An answer already recorded, as after a lost reply, asks nothing more.
   const answer = async (approved: boolean): Promise<void> => {
     const note = comment.trim();
-    const answered = await run(
+    const review = await run(
       async (session) =>
-        await session.decisions.answer(
+        await session.decisions.review(
           current.id,
           note === "" ? { approved } : { approved, payload: { comment: note } }
         )
     );
+    if (review?.state === "recorded") {
+      setCurrent(review.decision);
+    } else if (review !== undefined) {
+      setPending(review);
+    }
+  };
+  const confirm = async (confirmed: PendingConfirmation): Promise<void> => {
+    setPending(undefined);
+    const answered = await run(async (session) => {
+      try {
+        return await confirmAndAnswer(
+          session,
+          confirmed,
+          async (confirmation) =>
+            await session.decisions.answer(
+              confirmed.decision.id,
+              confirmed.response,
+              confirmation
+            )
+        );
+      } catch (error) {
+        // Refused: what is asked may have changed since it was reviewed
+        // (`decision.conflict`), so the card shows the decision as it is
+        // now, with why, and keeps the comment for a deliberate answer.
+        try {
+          setCurrent(await session.decisions.get(current.id));
+        } catch {
+          // Shown as it was.
+        }
+        throw error;
+      }
+    });
     if (answered !== undefined) {
       setCurrent(answered);
     }
   };
   return (
-    <Card className="w-full max-w-xl" size="sm">
-      <CardContent>
-        <div className="flex items-start gap-4">
-          <div className="bg-muted grid size-8 flex-none place-items-center rounded-md">
-            <CircleDotIcon aria-hidden="true" className="size-4" />
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-3">
-            <div className="flex flex-col gap-1">
-              <h1 className="font-medium">{current.description}</h1>
-              <p className="text-muted-foreground">
-                {open ? (
-                  <Trans>A run of a workflow waits for this answer.</Trans>
-                ) : (
-                  <Trans>A run of a workflow asked for this answer.</Trans>
-                )}
-              </p>
+    <>
+      <DecisionConfirmDialog
+        onCancel={() => {
+          setPending(undefined);
+        }}
+        source="page"
+        onConfirm={(confirmed) => {
+          void confirm(confirmed);
+        }}
+        pending={pending}
+      />
+      <Card className="w-full max-w-xl" size="sm">
+        <CardContent>
+          <div className="flex items-start gap-4">
+            <div className="bg-muted grid size-8 flex-none place-items-center rounded-md">
+              <CircleDotIcon aria-hidden="true" className="size-4" />
             </div>
-            <dl className="flex flex-col gap-1">
-              <div className="flex gap-4">
-                <dt className="text-muted-foreground w-24 flex-none">
-                  <Trans context="where a decision comes from">From</Trans>
-                </dt>
-                <dd className="min-w-0 truncate">
-                  {current.app.name} · {current.workflow}
-                </dd>
+            <div className="flex min-w-0 flex-1 flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <h1 className="font-medium">{current.description}</h1>
+                <p className="text-muted-foreground">
+                  {open ? (
+                    <Trans>A run of a workflow waits for this answer.</Trans>
+                  ) : (
+                    <Trans>A run of a workflow asked for this answer.</Trans>
+                  )}
+                </p>
               </div>
-              <div className="flex gap-4">
-                <dt className="text-muted-foreground w-24 flex-none">
-                  <Trans context="the run of a workflow a decision is for">
-                    Run
-                  </Trans>
-                </dt>
-                <dd className="min-w-0 truncate font-mono text-xs leading-5">
-                  {current.run}
-                </dd>
-              </div>
-              {open ? (
+              <dl className="flex flex-col gap-1">
                 <div className="flex gap-4">
                   <dt className="text-muted-foreground w-24 flex-none">
-                    <Trans context="until when a decision can be answered">
-                      Open until
+                    <Trans context="where a decision comes from">From</Trans>
+                  </dt>
+                  <dd className="min-w-0 truncate">
+                    {current.app.name} · {current.workflow}
+                  </dd>
+                </div>
+                <div className="flex gap-4">
+                  <dt className="text-muted-foreground w-24 flex-none">
+                    <Trans context="the run of a workflow a decision is for">
+                      Run
                     </Trans>
                   </dt>
-                  <dd>{formatDateTime(current.expiresAt)}</dd>
+                  <dd className="min-w-0 truncate font-mono text-xs leading-5">
+                    {current.run}
+                  </dd>
                 </div>
-              ) : null}
-            </dl>
-            {open ? (
-              <div className="flex flex-col gap-3">
+                {open ? (
+                  <div className="flex gap-4">
+                    <dt className="text-muted-foreground w-24 flex-none">
+                      <Trans context="until when a decision can be answered">
+                        Open until
+                      </Trans>
+                    </dt>
+                    <dd>{formatDateTime(current.expiresAt)}</dd>
+                  </div>
+                ) : null}
+              </dl>
+              {open ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="decision-comment">
+                      <Trans>Comment (optional)</Trans>
+                    </Label>
+                    <Textarea
+                      disabled={busy}
+                      id="decision-comment"
+                      maxLength={2000}
+                      onChange={(event) => {
+                        setComment(event.target.value);
+                      }}
+                      value={comment}
+                    />
+                  </div>
+                  <ErrorText>{failure}</ErrorText>
+                  <div className="flex gap-2">
+                    <Button
+                      disabled={busy}
+                      onClick={() => {
+                        void answer(true);
+                      }}
+                      size="sm"
+                    >
+                      <Trans>Approve</Trans>
+                    </Button>
+                    <Button
+                      disabled={busy}
+                      onClick={() => {
+                        void answer(false);
+                      }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Trans>Reject</Trans>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="decision-comment">
-                    <Trans>Comment (optional)</Trans>
-                  </Label>
-                  <Textarea
-                    disabled={busy}
-                    id="decision-comment"
-                    maxLength={2000}
-                    onChange={(event) => {
-                      setComment(event.target.value);
-                    }}
-                    value={comment}
-                  />
+                  {/* Why a confirmed answer wasn't taken, when the decision
+                      closed meanwhile. */}
+                  <ErrorText>{failure}</ErrorText>
+                  <output>{outcomeOf(current)}</output>
                 </div>
-                <ErrorText>{failure}</ErrorText>
-                <div className="flex gap-2">
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      void answer(true);
-                    }}
-                    size="sm"
-                  >
-                    <Trans>Approve</Trans>
-                  </Button>
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      void answer(false);
-                    }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <Trans>Reject</Trans>
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <output>{outcomeOf(current)}</output>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </>
   );
 };
 

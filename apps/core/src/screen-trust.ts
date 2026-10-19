@@ -1,6 +1,8 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
+import { authErrors } from "@grasp-os/shared/errors";
+import type { CodedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -10,7 +12,7 @@ import type {
   OutputClass,
   ScreenDelivery,
 } from "@grasp-os/shared/screen-trust";
-import { screenErrors } from "@grasp-os/shared/screens";
+import { screenErrors, screenPersonHeader } from "@grasp-os/shared/screens";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -120,6 +122,30 @@ export const leaseFor = async (
 
 /** The longest a lease is: a hash, a dot and a MAC. */
 const leaseMaxLength = 128;
+
+/**
+ * Why a screen's request, through its page, is refused for whom it names
+ * (`screenPersonHeader`), the person its frame was opened for; undefined
+ * when that is `userId`, the person signed in. Someone else is
+ * `auth.principal_changed` (the browser's cookie changed hands, in another
+ * tab, while the frame stayed), so what the frame sends again never runs
+ * as them; nobody named is a page older than the header, out of date
+ * (`screen.reload_required`). A lease is signed for one person too, but
+ * a screen of ordinary data runs without a valid one, so it alone doesn't
+ * hold this. Checked before a request is counted or read.
+ */
+export const personRefusal = (
+  headers: Headers,
+  userId: string
+): CodedError | undefined => {
+  const named = headers.get(screenPersonHeader);
+  if (named === userId) {
+    return undefined;
+  }
+  return named === null
+    ? screenErrors.create("screen.reload_required")
+    : authErrors.create("auth.principal_changed");
+};
 
 /**
  * The build `lease` says core handed `userId` for `app`, or `undefined`

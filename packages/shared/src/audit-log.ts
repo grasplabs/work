@@ -50,6 +50,9 @@ const typeRules: readonly {
   // refused that): their word, never a send.
   { action: "connection.call.resolved", type: "decision" },
   { action: "connection.call.resolve_refused", type: "decision" },
+  // An admin reading every person's calls of unknown outcome, without what
+  // was sent: who looked at whose activity.
+  { action: "connection.call.unknown_listed", type: "read" },
   // A connector call that changed something at the provider, or only read.
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },
@@ -109,6 +112,10 @@ const typeRules: readonly {
   // as the called App records it (`app.called`): a read for an export
   // that only reads, and an action for one that writes, or one refused
   // before its access was known.
+  // An App's server code refused a use its sealed manifest doesn't allow
+  // (core's src/operations.ts): a function, resource or workflow it
+  // doesn't list, or a request its declaration doesn't allow.
+  { action: "app.use.refused", type: "permission" },
   { action: "app.call", access: "read", type: "read" },
   { action: "app.call", type: "action" },
   { action: "app.called", access: "read", type: "read" },
@@ -162,6 +169,11 @@ const typeRules: readonly {
   // the version its binding pins, and an admin publishing a version.
   { action: "resource.template.read", type: "read" },
   { action: "resource.template", type: "config" },
+  // A business store's public operations called by another App or a
+  // workflow (core's src/store-operations.ts): each mutation it calls,
+  // and each call refused.
+  { action: "store.operation.called", type: "action" },
+  { action: "store.operation.refused", type: "permission" },
   // Guest chats (core's src/guests.ts): an App inviting someone, revoking
   // the link, and reading back what they wrote; the guest opening the
   // chat, sending a message and finishing it.

@@ -5,13 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createFromBlueprint } from "../src/app-blueprints.ts";
-import {
-  ordinaryData,
-  outlook,
-  release,
-  requestGranted,
-  serverBuilt,
-} from "./apps.ts";
+import { outlook, release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   collectionWithNote,
@@ -20,6 +14,7 @@ import {
 } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { racingDb } from "./racing-db.ts";
+import { calledAs } from "./sealed-apps.ts";
 import {
   auditedDuring,
   openRpc,
@@ -48,29 +43,67 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-const serverCode = `import { DurableObject } from "cloudflare:workers";
+/**
+ * The App's notes, sealed when a version becomes current: each a row of
+ * its store, which any member reads, so a note that came along to a copy
+ * would show to whoever has a role in it.
+ */
+const notesCode = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export class App extends DurableObject {
-  notes(): string[] {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS notes (note TEXT)");
-    return this.ctx.storage.sql
-      .exec("SELECT note FROM notes")
-      .toArray()
-      .map((row) => String(row.note));
-  }
+export default defineSchema({
+  notes: defineTable({ text: v.string().min(1).max(200) }),
+});
+`,
+  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
 
-  addNote(_caller: unknown, note: string): string[] {
-    this.notes();
-    this.ctx.storage.sql.exec("INSERT INTO notes VALUES (?)", note);
-    return this.notes();
-  }
-}
-`;
+export const add = mutation({
+  args: { text: v.string().min(1).max(200) },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+export const list = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.text),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { add, list } from "./operations/notes.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Notes",
+  schema,
+  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+  operations: { notes: { add, list } },
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
+};
+
+/** The App's notes, as `person` reads them through its sealed query. */
+const notesOf = async (person: Person, app: string): Promise<unknown> =>
+  await calledAs(await person.api.whoami(), app, {
+    contractId: "notes.list",
+    kind: "query",
+  });
 
 /** A copy has every file of it but AGENTS.md, which starts as a stub. */
 const v1 = {
-  "app/server.ts": serverCode,
-  "screens/notes.tsx": "export default () => <p>Notes</p>;\n",
+  ...notesCode,
+  "screens/notes.tsx": `import { useQuery } from "@grasp-os/sdk/react";
+import { api } from "#grasp";
+
+export default function Notes() {
+  const notes = useQuery(api.notes.list, {});
+  return <p>{notes?.join(", ")}</p>;
+}
+`,
   "AGENTS.md": "# Notes\n",
 };
 
@@ -115,15 +148,11 @@ const mailboxOf = async (owner: Person): Promise<string> => {
   return id;
 };
 
-// The test of the same code builds the server code of two Apps, the source and the
-// copy, one after the other (the build cache keys builds by App, so the
-// copy's can't reuse the source's), and calls each once. That is the
-// point of it: the copy runs the same code with none of the data. On its
-// own it takes about 1.5 seconds, but on a loaded runner the two builds
-// pushed it past the default five. Nothing polls or sleeps: the only
-// deadlines are the two calls' ten seconds each (`APP_CALL_TIMEOUT_MS`),
-// which end a call that hangs. Sixty seconds is room for a slow runner,
-// as the other tests that release Apps give theirs.
+// The test of the same code seals two Apps' releases, the source's and the
+// copy's, one after the other, and calls each. That is the point of it:
+// the copy runs the same code with none of the data. Nothing polls or
+// sleeps; sixty seconds is room for a slow runner, as the other tests
+// that release Apps give theirs.
 describe("blueprints", { timeout: 60_000 }, () => {
   it("ask only for what the blueprint declares as it is marked: never a grant, a connection, or another App", async () => {
     const [owner, maker] = await Promise.all([
@@ -259,8 +288,12 @@ describe("blueprints", { timeout: 60_000 }, () => {
     await owner.api.permissions.request(
       readCollection({ type: "app", appId: source }, collectionId)
     );
-    await serverBuilt(source, 1);
-    await owner.api.screens.call(source, "addNote", ["Only the source's"]);
+    await calledAs(
+      await owner.api.whoami(),
+      source,
+      { contractId: "notes.add", kind: "mutation" },
+      { text: "Only the source's" }
+    );
     await share(owner, source, maker, "user");
     const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
 
@@ -303,13 +336,14 @@ describe("blueprints", { timeout: 60_000 }, () => {
     // shared with nobody.
     const theirs = await maker.api.apps.list();
     await maker.api.apps.versions.setCurrent(app.id, 1);
-    await ordinaryData(app.id);
-    await serverBuilt(app.id, 1);
     const { name: sourceName } = await owner.api.apps.get(source);
     expect({
       listed: theirs.some(({ id }) => id === app.id),
       files: await maker.api.apps.files.read(app.id, 1),
-      notes: await maker.api.screens.call(app.id, "notes", []),
+      // The maker has a role in the source, so its notes would show to
+      // them had any come along.
+      sourceNotes: await notesOf(maker, source),
+      notes: await notesOf(maker, app.id),
       members: await maker.api.apps.members.list(app.id),
       forOwner: await outcome(owner.api.apps.get(app.id)),
     }).toStrictEqual({
@@ -320,7 +354,8 @@ describe("blueprints", { timeout: 60_000 }, () => {
         ...v1,
         "AGENTS.md": `Created from the blueprint ${sourceName}. Write what this App does here.\n`,
       },
-      notes: [],
+      sourceNotes: { ok: true, value: ["Only the source's"] },
+      notes: { ok: true, value: [] },
       members: [],
       forOwner: "app.not_found",
     });

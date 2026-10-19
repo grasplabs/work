@@ -99,6 +99,18 @@ export const operationPathMaxSegments = 4;
 /** The most code units of one registered path, dots included. */
 export const operationPathMaxLength = 200;
 
+/**
+ * A path a store permission or a store resource names, one of a store's
+ * public operations: one to four segments (`operationSegmentPattern`),
+ * dotted. A permission's action is at most 64 code units, so a store
+ * operation shared with other consumers is too.
+ */
+export const storeOperationPathPattern =
+  /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*){0,3}$/u;
+
+/** The most code units of a store operation's path, as a permission names it. */
+export const storeOperationPathMaxLength = 64;
+
 /** The most functions one App registers, public and internal together. */
 export const appMaxOperations = 256;
 

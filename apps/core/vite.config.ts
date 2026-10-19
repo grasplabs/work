@@ -63,7 +63,7 @@ const testStepLimit = 60;
 const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
 
 /**
- * The tests that run the compiler on whole Apps: the screen compiler's,
+ * The tests that run the compiler on whole Apps: the App compiler's,
  * and the App sandbox's, which builds each App's server code. They run as
  * their own project (vite.screens.config.ts), after the others, so their
  * long compiles don't starve the light tests of CPU.
@@ -79,10 +79,16 @@ export const screenTests = [
   "test/release-retention.test.ts",
   "test/app-activation.test.ts",
   "test/app-tests.test.ts",
+  "test/app-test-live.test.ts",
   "test/app-function-route.test.ts",
   "test/portable-client.test.ts",
+  "test/app-files.test.ts",
   "test/resource-bindings.test.ts",
   "test/resource-connectors.test.ts",
+  "test/store-operations.test.ts",
+  "test/sealed-workflow-starts.test.ts",
+  "test/definition-export.test.ts",
+  "test/workflow-query-subscriptions.test.ts",
   "test/run-functions.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
@@ -94,8 +100,10 @@ export const screenTests = [
   "test/workflow-chaos.test.ts",
   "test/reviewed-calls.test.ts",
   "test/held-runs.test.ts",
+  "test/held-wakes.test.ts",
   "test/unknown-outcome-runs.test.ts",
   "test/decisions.test.ts",
+  "test/decision-confirmations.test.ts",
   "test/decision-deadlines.test.ts",
   "test/workflow-params.test.ts",
   "test/build-on-save.test.ts",
@@ -110,6 +118,10 @@ export const screenTests = [
   "test/run-summary.test.ts",
   "test/run-history.test.ts",
   "test/rpc-targets.test.ts",
+  "test/statistics.test.ts",
+  "test/guests.test.ts",
+  "test/app-function-calls.test.ts",
+  "test/workflow-type-check.test.ts",
 ];
 
 /** Core's Worker test setup, shared by each of core's test projects. */
@@ -117,6 +129,7 @@ export const coreProject = (
   test: UserWorkspaceConfig["test"],
   {
     sandboxSocket,
+    bindings = {},
   }: {
     /**
      * For the on-prem project: the sandbox supervisor's socket, read when
@@ -124,6 +137,8 @@ export const coreProject = (
      * binds it, instead of running App code unbounded.
      */
     sandboxSocket?: () => string;
+    /** Bindings a project adds to the tests' env, such as a run's size. */
+    bindings?: Record<string, unknown>;
   } = {}
 ) =>
   defineProject({
@@ -199,6 +214,7 @@ export const coreProject = (
               graphExtractedBytes: 2 * 1024 * 1024,
               artifactBytes: 256 * 1024,
               appLocks: 3,
+              workflowPackageChars: 64 * 1024,
             },
             // The gateway runs call the model through; tests fake the AI binding.
             MODEL_GATEWAY: {
@@ -231,6 +247,7 @@ export const coreProject = (
             CORE_MIGRATIONS: coreMigrations,
             KNOWLEDGE_MIGRATIONS: knowledgeMigrations,
             CONNECT_MIGRATIONS: connectMigrations,
+            ...bindings,
           },
           // Connect's database, as CONNECT_DB, so the setup can migrate it.
           d1Databases: { CONNECT_DB: "grasp-os-connect" },
@@ -246,7 +263,7 @@ export const coreProject = (
                   },
                 }),
           },
-          // A stand-in frontend and the screen compiler, written by the
+          // A stand-in frontend and the App compiler, written by the
           // global setup.
           assets: { directory: "./dist/test-assets" },
           // The real connect Worker behind the CONNECT service binding,
@@ -297,6 +314,11 @@ export default coreProject({
     ...screenTests,
     // With the sandbox supervisor bound: vite.on-prem.config.ts.
     "test/on-prem/**",
+    // The Brain baseline's larger scale sizes, on request only:
+    // vite.brain-scale.config.ts.
+    "test/brain-scale-sizes.test.ts",
+    // The Brain baseline, in a group of its own: vite.brain.config.ts.
+    "test/brain-baseline.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

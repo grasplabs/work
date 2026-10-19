@@ -32,13 +32,13 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { appsFoundBy, requireAppRole } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
 import { exportsIn } from "./app-exports.ts";
-import { recordTypesIn } from "./app-records.ts";
 import {
   auditedBatch,
   outboxed,
@@ -57,7 +57,6 @@ import {
 } from "./db/core/schema.ts";
 import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
-import { requireOwnTypes } from "./knowledge/record-types.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
@@ -698,9 +697,6 @@ export const commitFiles = async (
   }
   const exported = exportsIn(files);
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
-  const records = recordTypesIn(files);
-  // None another App already has where this one may write.
-  await requireOwnTypes(env, appId, records);
   await storeTree(env, appId, { tree, json });
 
   const row: VersionRow = {
@@ -717,7 +713,6 @@ export const commitFiles = async (
     workflowCalls,
     exports: exported,
     proposedBy: null,
-    records,
   };
   const db = drizzle(env.DB);
   try {
@@ -855,7 +850,13 @@ export const proposeDraft = async (
   { parent, files }: DraftOverLatest,
   message: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /**
+   * Statements the write's own transaction opens and closes with: one the
+   * database refuses fails the whole write (a build job's lease, build-
+   * admission.ts).
+   */
+  fence?: { open: BatchItem<"sqlite">; close: BatchItem<"sqlite"> }
 ): Promise<AppVersion> => {
   const { id: appId } = await appFor(env, by, app, "builder");
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
@@ -867,9 +868,6 @@ export const proposeDraft = async (
   }
   const exported = exportsIn(files);
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
-  const records = recordTypesIn(files);
-  // None another App already has where this one may write.
-  await requireOwnTypes(env, appId, records);
   await storeTree(env, appId, { tree, json });
   const row: VersionRow = {
     appId,
@@ -885,13 +883,12 @@ export const proposeDraft = async (
     workflowCalls,
     exports: exported,
     proposedBy: by.via ?? null,
-    records,
   };
   const db = drizzle(env.DB);
   try {
     // Admitted last, with nothing slow left before the write.
     await admit?.();
-    await auditedBatch(env, db, [
+    const write = [
       db.insert(appVersions).values(row),
       outboxed(
         db,
@@ -912,7 +909,10 @@ export const proposeDraft = async (
           version: row.version,
         })
       ),
-    ]);
+    ] as const;
+    await (fence === undefined
+      ? auditedBatch(env, db, write)
+      : auditedBatch(env, db, [fence.open, ...write, fence.close]));
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appErrors.create("app.conflict");
@@ -1279,9 +1279,20 @@ export const setCurrentVersion = async (
     throw appErrors.create("app.conflict");
   }
   // What its screens build to with this release's kit, which may not be
-  // the one it was committed under (screen-builds.ts): in the background,
-  // never something making it current waits on. Bounded by the build
-  // wait; what doesn't get recorded now is when it is opened or reviewed.
-  waitUntil(recordVersionBuilds(env, appId, number, files));
+  // the one it was committed under, and with the references they import,
+  // read back from its release, checked above (screen-builds.ts): in the
+  // background, never something making it current waits on. Bounded by
+  // the build wait; what doesn't get recorded now is when it is opened or
+  // reviewed.
+  waitUntil(
+    recordVersionBuilds(env, appId, number, files, {
+      // Imported here, not at the top: the references reach releases,
+      // which reach back into this module for App lookups.
+      withReferences: async (built) => {
+        const { withScreenReferences } = await import("./screen-references.ts");
+        return await withScreenReferences(env, appId, number, built);
+      },
+    })
+  );
   return toApp(changed);
 };

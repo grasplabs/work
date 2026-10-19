@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 
 import { seededConnections } from "./connections-seed.ts";
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // The Landscape and Policies, as ported from the prototype: the apps Grasp
 // knows from its integrations, each with its page and tabs, and the policy
@@ -11,7 +11,7 @@ import { apiOf, pageOf, peopleIn } from "./people.ts";
 // which everyone sees.
 
 test("an admin finds a connected app in the landscape, with the engine that uses it, and opens its page", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("landscape");
   const { mailbox } = seededConnections();
@@ -33,7 +33,7 @@ test("an admin finds a connected app in the landscape, with the engine that uses
     core[Symbol.dispose]();
   }
 
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   await page.goto("/landscape");
   await expect(
     page.getByRole("heading", { level: 1, name: "Landscape" })
@@ -104,10 +104,10 @@ test("an admin finds a connected app in the landscape, with the engine that uses
 });
 
 test("a member sees the landscape but not an app's audit trail, and the policy manager's empty states", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("landscape");
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   await page.goto("/landscape/native:microsoft/audit");
   await expect(
     page.getByText("Only admins can read the audit trail")

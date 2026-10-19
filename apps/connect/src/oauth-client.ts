@@ -56,7 +56,7 @@ export interface TokenSet {
 }
 
 /** The first `maxResponseBytes` of the body; more than that is refused. */
-const readCapped = async (response: Response): Promise<string> => {
+export const readCapped = async (response: Response): Promise<string> => {
   const reader = response.body?.getReader();
   const decoder = new TextDecoder();
   const parts: string[] = [];

@@ -164,6 +164,10 @@ export const versionErrors = defineErrorFamily({
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",
+  "version.export_too_large":
+    "This App and the workflow versions it binds are more than one export holds.",
+  "version.export_secret_found":
+    "A file of this App or of a workflow it binds holds what looks like a secret, so it can't be exported. Remove it from that file, publish or seal again, then export.",
   "version.protocol_unsupported":
     "This version was sealed for a protocol between the platform and App code that this platform doesn't run. Seal it again.",
   "version.manifest_corrupt":
@@ -176,7 +180,7 @@ export const versionErrors = defineErrorFamily({
   "version.tests_failed":
     "This version's App tests fail, so it can't be made current.",
   "version.tests_unavailable":
-    "This version has App tests, which run only where a sandbox bounds them: on this deployment they need the sandbox host, which doesn't run them yet. Until it does, a version with App tests can't be made current here.",
+    "This version has App tests, which run only where a sandbox bounds them: on this deployment they need the sandbox host (SANDBOX_HOST bound to the sandbox supervisor). Until it's bound, a version with App tests can't be made current here.",
   "version.invalid_migration":
     "One of this version's migrations doesn't transform records to this version's schema: set its toSchema to the schema hash these details name.",
   "version.migration_fixtures_failed":

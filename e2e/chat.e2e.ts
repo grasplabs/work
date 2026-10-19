@@ -3,7 +3,7 @@ import type { WebSocketRoute } from "@playwright/test";
 
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
-import { pageOf, peopleIn } from "./people.ts";
+import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // The Chat page: a person asks in a new chat and follows the answer as it
@@ -91,10 +91,10 @@ const connectMail = async (
 };
 
 test("a person asks in a new chat, follows the answer, renames it, and reads and decides the writes it holds", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("chat");
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   // Unique to the attempt, so each finds its own chat in the list.
   const tag = crypto.randomUUID().slice(0, 8);
   const question = `Send Ben invoice ${tag}.`;
@@ -245,10 +245,10 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
 });
 
 test("a followed chat says core can't be reached when it stays out of reach", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("chat");
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   let refusing = false;
   let open: WebSocketRoute | undefined;
   await page.routeWebSocket("**/rpc", async (socket) => {
@@ -290,10 +290,10 @@ test("a followed chat says core can't be reached when it stays out of reach", as
 });
 
 test("one control picks the model and how hard it thinks, sends both with the question, and is remembered", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("chat");
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   // What the page sends core, to see the question go out with its effort.
   const sent: string[] = [];
   await page.routeWebSocket("**/rpc", (socket) => {
@@ -371,10 +371,10 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 });
 
 test("the side panel opens in a sheet over the chat on a narrow screen, and beside it on a wide one", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("chat");
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   const tag = crypto.randomUUID().slice(0, 8);
   await page.goto("/");
   await page.getByLabel("Your question").fill(`Panel ${tag}.`);
@@ -406,17 +406,24 @@ test("the side panel opens in a sheet over the chat on a narrow screen, and besi
 });
 
 test("the chat dock on every other page carries on the open chat, which is the same chat in Chat", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("chatDock");
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   const tag = crypto.randomUUID().slice(0, 8);
   const question = `From the dock ${tag}?`;
 
   // Asked from another page, it opens around the box and streams there.
   await page.goto("/domains");
   const box = page.getByRole("textbox", { name: "Ask Grasp" });
+  // The box takes a question once the dock has read the models core
+  // offers, as its Send shows: Enter before then sends nothing.
+  const send = page
+    .locator("form")
+    .filter({ has: box })
+    .getByRole("button", { name: "Send" });
   await box.fill(question);
+  await expect(send).toBeEnabled();
   await box.press("Enter");
   const dock = page.getByRole("region", { name: "Ask Grasp" });
   const messages = dock.getByRole("list", { name: "Messages" });
@@ -458,6 +465,8 @@ test("the chat dock on every other page carries on the open chat, which is the s
   await expect(dock).toContainText("Ask anything, or describe a process");
   const second = `Another from the dock ${tag}?`;
   await box.fill(second);
+  // A page load reads the models again.
+  await expect(send).toBeEnabled();
   await box.press("Enter");
   await expect(messages.getByRole("listitem").first()).toHaveText(second);
 

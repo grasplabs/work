@@ -13,13 +13,18 @@ import { deadline, whenAborted } from "./deadline.ts";
 // other waiter, and whoever asks next, then shares: one replacement, not
 // one per waiter. The abandoned entry keeps a link to its replacement, so
 // a waiter whose time runs out after the replacement already finished
-// still shares it rather than starting another.
+// still shares it rather than starting another. An abandoned entry no one
+// asks for again would stay for the isolate's life, so every call first
+// drops the entries long past their own time (`pruneAbandoned`): the map
+// holds no more than the work that may still be running or waited on.
 
 /** One request's work, as the others see it. */
 export interface SharedRun<T> {
   readonly promise: Promise<T>;
   /** When it started, by `Date.now()`. */
   readonly started: number;
+  /** How long it may take, from its start, before it is taken for abandoned. */
+  readonly abandonAfterMs: number;
   /** The work that took its place once it was taken for abandoned. */
   replacedBy?: SharedRun<T>;
 }
@@ -53,19 +58,55 @@ const settledWithin = async <T>(
 };
 
 /**
+ * How many times its own time an entry is kept: past its time it is
+ * abandoned, and its waiters leave it when theirs runs out, which is then
+ * too, to follow its link to the replacement. Kept a while longer, so a
+ * waiter whose timer fired but hasn't run yet still finds the link rather
+ * than an empty slot, and starts no second replacement. A waiter's count
+ * couldn't say when they all left: one whose request was cancelled never
+ * leaves.
+ */
+const keptForTimes = 2;
+
+/**
+ * Drops from `runs` every entry long past its own time
+ * ({@link keptForTimes}), other than `key`'s, which the caller handles
+ * itself. Each is abandoned and no longer waited on. Its own `finally`,
+ * should it ever run, deletes only an entry that is still its own.
+ */
+const pruneAbandoned = <T>(
+  runs: Map<string, SharedRun<T>>,
+  key: string,
+  now: number
+): void => {
+  for (const [other, run] of runs) {
+    if (
+      other !== key &&
+      run.started + keptForTimes * run.abandonAfterMs <= now
+    ) {
+      runs.delete(other);
+    }
+  }
+};
+
+/**
  * What `start` answers, or what the same work already running for `key`
  * in `runs` answers once it does: within `abandonAfterMs` of its start,
  * else the work that took its place, started by `start` here if no other
  * waiter started it first. The entry goes once its work settled; one
- * whose request was cancelled stays until the next request finds it
- * abandoned.
+ * whose request was cancelled goes once a later call, for any key, finds
+ * it long abandoned. Given up on (`signal`) by the time it would start its own,
+ * it starts none, and takes no one's place: whoever waits besides it
+ * starts the replacement.
  */
 export const sharedRun = async <T>(
   runs: Map<string, SharedRun<T>>,
   key: string,
   abandonAfterMs: number,
-  start: () => Promise<T>
+  start: () => Promise<T>,
+  signal?: AbortSignal
 ): Promise<T> => {
+  pruneAbandoned(runs, key, Date.now());
   let running = runs.get(key);
   let replaced: SharedRun<T> | undefined;
   while (running !== undefined) {
@@ -85,7 +126,14 @@ export const sharedRun = async <T>(
     // Another waiter replaced it already, finished or not: share that.
     running = running.replacedBy;
   }
-  const run: SharedRun<T> = { promise: start(), started: Date.now() };
+  // Given up on while it waited: it starts nothing, and leaves the
+  // abandoned work for another waiter to replace.
+  signal?.throwIfAborted();
+  const run: SharedRun<T> = {
+    promise: start(),
+    started: Date.now(),
+    abandonAfterMs,
+  };
   if (replaced !== undefined) {
     replaced.replacedBy = run;
   }

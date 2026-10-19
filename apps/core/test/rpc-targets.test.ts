@@ -1,11 +1,15 @@
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { RpcTarget } from "capnweb";
 import { RpcStub } from "capnweb";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { workspace } from "../src/durable-objects.ts";
 import { CoreRpcTarget } from "../src/rpc-target.ts";
 import { browserApi } from "../src/rpc.ts";
 import type { CoreRpc } from "../src/rpc.ts";
+import { openTestRun } from "./agent-chat.ts";
 import { approvalApp } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -175,6 +179,8 @@ type Owner<T, Path extends string> = Path extends `${infer Head}.${infer Rest}`
 interface Fixture {
   /** An App with the approval workflow, if the person built it. */
   app: string;
+  /** The person signed in, if anyone is. */
+  userId: string;
   /** What a call handed out that holds something, to let go of after. */
   held: Disposable[];
 }
@@ -215,6 +221,76 @@ const calls = {
     await page.pushed;
     return subscription;
   },
+  "authenticate.chats.previewStream": async (chats, { app, userId, held }) => {
+    const { id } = await chats.create("Streamed");
+    const chatId = chatIdSchema.parse(id);
+    const chatsOf = workspace(env, personalWorkspaceId(userId));
+    await chatsOf.saveDraft(
+      chatId,
+      app,
+      1,
+      { "notes.md": "drafted" },
+      [],
+      0,
+      await openTestRun(chatsOf, chatId)
+    );
+    const pushed = Promise.withResolvers<true>();
+    const frames = new RpcStub(async () => {
+      pushed.resolve(true);
+      return await Promise.resolve(null);
+    });
+    // A draft that seals no release: the stream's refused result, pushed
+    // at once, ends it, and the hold is let go of after that.
+    const subscription = holding(
+      held,
+      await chats.previewStream(
+        id,
+        app,
+        1,
+        "stream",
+        JSON.stringify({
+          reference: {
+            resourceId: app,
+            resourceVersion: 1,
+            contractId: "notes.run",
+            fingerprint: "0".repeat(64),
+            kind: "action",
+          },
+          input: {},
+          idempotencyKey: crypto.randomUUID(),
+        }),
+        frames
+      )
+    );
+    await pushed.promise;
+    return subscription;
+  },
+  "authenticate.chats.previewWatchQuery": async (
+    chats,
+    { app, userId, held }
+  ) => {
+    const { id } = await chats.create("Previewed");
+    const chatId = chatIdSchema.parse(id);
+    const chatsOf = workspace(env, personalWorkspaceId(userId));
+    await chatsOf.saveDraft(
+      chatId,
+      app,
+      1,
+      { "notes.md": "drafted" },
+      [],
+      0,
+      await openTestRun(chatsOf, chatId)
+    );
+    const page = pageStub();
+    // A draft that seals no release: its refusal, pushed at once, ends the
+    // subscription, which is let go of after that, as a page does.
+    const subscription = holding(
+      held,
+      await chats.previewWatchQuery(id, app, 1, "{}", page.stub)
+    );
+    await page.pushed;
+    return subscription;
+  },
   "authenticate.screens.watchRuns": async (screens, { app, held }) =>
     holding(held, await screens.watchRuns(app, "approval", pageStub().stub)),
   "authenticate.screens.watchQuery": async (screens, { app, held }) => {
@@ -225,6 +301,18 @@ const calls = {
       held,
       await screens.watchQuery(app, "", "{}", page.stub)
     );
+    await page.pushed;
+    return subscription;
+  },
+  // A frame's own way to the App, with no lease of core's: decided as a
+  // build nobody approved, which the App's data allows here.
+  "authenticate.screens.frame": async (screens, { app, held }) =>
+    holding(held, await screens.frame(app, "")),
+  "authenticate.screens.frame.watchRuns": async (frame, { held }) =>
+    holding(held, await frame.watchRuns("approval", pageStub().stub)),
+  "authenticate.screens.frame.watchQuery": async (frame, { held }) => {
+    const page = pageStub();
+    const subscription = holding(held, await frame.watchQuery("{}", page.stub));
     await page.pushed;
     return subscription;
   },
@@ -405,11 +493,15 @@ const walk = async (root: CoreRpc, fixture: Fixture): Promise<Walked> => {
  * Builds what a browser's connection reaches with `cookie`, as rpc.ts
  * builds it, walks it, and lets go of the connection.
  */
-const walkConnection = async (cookie?: string, app = ""): Promise<Walked> => {
+const walkConnection = async (
+  cookie?: string,
+  app = "",
+  userId = ""
+): Promise<Walked> => {
   const { 0: client, 1: server } = new WebSocketPair();
   client.accept();
   server.accept();
-  const fixture: Fixture = { app, held: [] };
+  const fixture: Fixture = { app, userId, held: [] };
   try {
     const headers = new Headers(cookie === undefined ? {} : { cookie });
     return await walk(await browserApi(env, headers, server), fixture);
@@ -435,7 +527,7 @@ describe("what a browser reaches over core's connection", () => {
     const builder = await signedInApi(idp, "builder");
     const app = await approvalApp(builder);
 
-    const walked = await walkConnection(builder.session, app);
+    const walked = await walkConnection(builder.session, app, builder.userId);
 
     expect(walked.unbounded).toStrictEqual([]);
     expect(walked.refused).toStrictEqual([]);
@@ -451,6 +543,8 @@ describe("what a browser reaches over core's connection", () => {
         "authenticate.workflows.params: WorkflowParamsRpc",
         "authenticate.chats.watch: RunSubscription",
         "authenticate.screens.watchRuns: RunSubscription",
+        "authenticate.chats.previewWatchQuery: RunSubscription",
+        "authenticate.chats.previewStream: RunSubscription",
       ])
     );
   });

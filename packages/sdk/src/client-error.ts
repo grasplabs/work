@@ -67,6 +67,16 @@ const clientErrors = {
       "The save went through, but answered something other than the record it saved, so the form can't show the record as it is now.",
     category: "contract",
   },
+  "contract.not_paginated": {
+    message:
+      "That query doesn't take a pagination argument and answer pages, so it can't be read as a paginated list.",
+    category: "contract",
+  },
+  "query.window_limit": {
+    message:
+      "This list can't load more: it holds as many records as one live list may. Narrow it with the query's arguments instead.",
+    category: "operational",
+  },
   "contract.invalid_request": {
     message:
       "That isn't a public reference of this kind: use one from the App's generated api.",
@@ -119,6 +129,10 @@ const clientErrors = {
     message: "The App's server couldn't be reached. Try again.",
     category: "operational",
   },
+  "auth.unauthenticated": {
+    message: "Sign in to continue.",
+    category: "authorization",
+  },
   "auth.principal_changed": {
     message:
       "Someone else signed in, so what was shown for the person before was cleared.",
@@ -126,6 +140,43 @@ const clientErrors = {
   },
   "form.failed": {
     message: "This couldn't be submitted.",
+    category: "operational",
+  },
+  "contract.invalid_snapshot": {
+    message:
+      "The platform sent a run that doesn't fit its workflow's contract, so it isn't shown.",
+    category: "contract",
+  },
+  "contract.mismatch": {
+    message:
+      "This run belongs to another version of the workflow's contract than this screen was built for.",
+    category: "contract",
+  },
+  "workflow.not_attached": {
+    message:
+      "No run is shown yet: start one, or wait for the selected run to load, before you control it.",
+    category: "contract",
+  },
+  "workflow.unavailable": {
+    message: "Workflow runs can't be followed here.",
+    category: "operational",
+  },
+  "file.operation_undeclared": {
+    message:
+      "This App doesn't declare that use of these files: add it to the resource's operations.",
+    category: "contract",
+  },
+  "file.upload_active": {
+    message:
+      "An upload is already running here: wait for it, or cancel it first.",
+    category: "contract",
+  },
+  "file.channel_unavailable": {
+    message: "Files can't be moved here.",
+    category: "operational",
+  },
+  "file.cancelled": {
+    message: "The upload was cancelled.",
     category: "operational",
   },
 } as const satisfies Record<
@@ -323,10 +374,28 @@ export const hidesOutcome = (code: string): boolean =>
   code === "operation.access_changed" ||
   code === "submission.expired";
 
+/** The category of each refusal of core's file channel that isn't operational. */
+const fileCategories: Readonly<Record<string, ErrorCategory>> = {
+  "file.not_found": "authorization",
+  "file.operation_denied": "authorization",
+  "file.invalid": "contract",
+  "file.too_large": "contract",
+  "file.type_unsupported": "contract",
+  "file.content_mismatch": "contract",
+  "file.referenced": "domain",
+  "submission.key_conflict": "contract",
+};
+
 /** The category of a refusal the page or core sent before any call ran. */
 const refusalCategory = (code: string): ErrorCategory => {
   if (fencingCodes.has(code) || code.startsWith("auth.")) {
     return "authorization";
+  }
+  const file = Object.hasOwn(fileCategories, code)
+    ? fileCategories[code]
+    : undefined;
+  if (file !== undefined) {
+    return file;
   }
   if (code.startsWith("request.") || code.startsWith("contract.")) {
     return "contract";
@@ -395,6 +464,44 @@ export const readAnswer = (answer: unknown): Settled => {
 };
 
 /**
+ * How long a refusal's `details` say to wait before asking again, in
+ * milliseconds, if they say.
+ */
+export const retryAfterOf = (details: unknown): number | undefined => {
+  const said = isPlainObject(details) ? details.retryAfterMs : undefined;
+  return typeof said === "number" && Number.isFinite(said) ? said : undefined;
+};
+
+/**
+ * A refusal coded `code`, as the page or core said it before any call ran
+ * (a transport's rejection, or core's refusal on a portable host's route):
+ * of its details, only how long to wait before asking again is kept.
+ * `internal.unexpected` is the page's word for a request that may or may
+ * not have arrived: a lost response.
+ */
+export const readRefusal = (
+  code: string,
+  message: string,
+  details?: unknown
+): Settled => {
+  if (code === "internal.unexpected") {
+    return { kind: "lost" };
+  }
+  const retryAfterMs = retryAfterOf(details);
+  return {
+    kind: "failed",
+    error: new GraspError({
+      code,
+      message,
+      category: refusalCategory(code),
+      retryable: nothingRanCodes.has(code),
+      requestId: null,
+      ...(retryAfterMs === undefined ? {} : { details: { retryAfterMs } }),
+    }),
+  };
+};
+
+/**
  * A transport's rejection: a coded refusal of the page or core, or a lost
  * response, when it has no code or `internal.unexpected` (the page's word
  * for a request that may or may not have arrived).
@@ -404,28 +511,14 @@ export const readRejection = (error: unknown): Settled => {
     typeof error === "object" && error !== null && "code" in error
       ? error.code
       : undefined;
-  if (typeof code !== "string" || code === "internal.unexpected") {
+  if (typeof code !== "string") {
     return { kind: "lost" };
   }
-  // Of a refusal's details, only how long to wait before asking again.
-  const details =
+  return readRefusal(
+    code,
+    error instanceof Error ? error.message : "The call was refused.",
     typeof error === "object" && error !== null && "details" in error
       ? error.details
-      : undefined;
-  const retryAfterMs = isPlainObject(details)
-    ? details.retryAfterMs
-    : undefined;
-  return {
-    kind: "failed",
-    error: new GraspError({
-      code,
-      message: error instanceof Error ? error.message : "The call was refused.",
-      category: refusalCategory(code),
-      retryable: nothingRanCodes.has(code),
-      requestId: null,
-      ...(typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)
-        ? { details: { retryAfterMs } }
-        : {}),
-    }),
-  };
+      : undefined
+  );
 };

@@ -22,7 +22,6 @@ import {
   screenErrors,
   screenLeaseHeader,
   screenLimits,
-  screenPersonHeader,
   streamCallActions,
 } from "@grasp-os/shared/screens";
 import type { StreamCallAction } from "@grasp-os/shared/screens";
@@ -34,10 +33,9 @@ import {
   invocationName,
 } from "./action-invocation.ts";
 import {
-  callAppFunction,
+  callScreenFunction,
   readFunctionRequest,
   refusalOf,
-  requireNotRevoked,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
@@ -45,9 +43,15 @@ import type { TokenCheck } from "./auth/app-tokens.ts";
 import { identify } from "./auth/identity.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
+import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedArtifact, requireDelivery } from "./screen-trust.ts";
-import { admitted } from "./screens-rpc.ts";
+import {
+  delivering,
+  leasedArtifact,
+  personRefusal,
+  requireDelivery,
+} from "./screen-trust.ts";
+import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the request as the body, the frame's
@@ -64,24 +68,23 @@ import { admitted } from "./screens-rpc.ts";
 //   another site can send without a preflight core never answers.
 // - Someone without a role in the App, or who lost it: the session is read
 //   on every request, the role checked by the call itself
-//   (`callAppFunction`), and the App named only by the path.
+//   (`callScreenFunction`), and the App named only by the path. A
+//   paginated list's window is read as the person too (query-windows.ts).
 // - The page's frame was opened for one person and the browser's cookie
 //   is now someone else's (they signed in in another tab): the page names
 //   the person its frame is for (`screenPersonHeader`), and a call whose
-//   session is anyone else's is refused (`auth.principal_changed`) before
-//   it is counted or read, so what the frame sends again, such as a save
+//   session is anyone else's is refused before it is counted or read
+//   (`personRefusal`), so what the frame sends again, such as a save
 //   under an idempotency key whose answer was lost, never runs as them.
-//   A call that names nobody comes from a page older than the header (a
-//   tab left open across a deploy): refused alike, as out of date
-//   (`screen.reload_required`), not as someone else signing in.
-//   A lease is signed for one person too, but a screen of ordinary data
-//   runs without a valid one, so the lease alone doesn't hold this.
 // - Code nobody approved gets the App's data: the frame's lease, signed
 //   by core for exactly this person and App, says which build calls; the
 //   call runs only inside `delivering`, which checks that build's trust
 //   before the call and again before its answer. No lease is unreviewed.
 // - A flood: each request counts against the person's requests of the
-//   App's screens (`admitted`), before its body is read.
+//   App's screens (`admitted`), before its body is read; a paginated
+//   list's window counts one more for every page past its first
+//   (`admitWindow`), and every page past what it paid for is charged as
+//   it is read (`windowCharger`).
 // - An answer larger than a frame takes: refused here
 //   (`screen.answer_too_large`), as a call of the App's server is.
 //
@@ -189,6 +192,9 @@ export const statusOf = (code: string): number => {
   if (code === "screen.rate_limited") {
     return 429;
   }
+  if (code === "request.timeout") {
+    return 408;
+  }
   if (code.startsWith("auth.")) {
     return 401;
   }
@@ -246,7 +252,7 @@ const tokenLog = { window: 0, written: 0, dropped: 0 };
  * minute per isolate, the rest counted in one line when the next window
  * starts, so someone holding a token can't flood the logs with it.
  */
-const logRefusedToken = (fields: LogFields): void => {
+export const logRefusedToken = (fields: LogFields): void => {
   const window = Math.floor(Date.now() / tokenLogWindowMs);
   if (window !== tokenLog.window) {
     if (tokenLog.dropped > 0) {
@@ -267,7 +273,7 @@ const logRefusedToken = (fields: LogFields): void => {
  * session its token came from: once a window per person, session and App
  * (the App host's `auditOnce`), not a row a call.
  */
-const recordPortableUse = async (
+export const recordPortableUse = async (
   env: Env,
   person: Identity,
   app: AppId,
@@ -319,7 +325,11 @@ const keyedAction = (
     return undefined;
   }
   const key = idempotencyKeySchema.safeParse(call.idempotencyKey);
-  return call.reference.kind === "action" && key.success
+  // One with a window is a query's or nothing: the plain call refuses it
+  // before anything runs.
+  return call.reference.kind === "action" &&
+    key.success &&
+    call.window === undefined
     ? { call, key: key.data }
     : undefined;
 };
@@ -545,11 +555,13 @@ const boundedCall = async (
     if (portableSession !== undefined) {
       await recordPortableUse(env, person, id, portableSession);
     }
+    const text = new TextDecoder().decode(body);
+    // A window counts as the pages it reads (query-windows.ts).
+    await admitWindow(env, person, id, text);
     const artifact =
       lease === undefined
         ? undefined
         : await leasedArtifact(env, person.userId, id, lease);
-    const text = new TextDecoder().decode(body);
     const keyed = keyedAction(text);
     if (keyed !== undefined) {
       // Checks delivery itself, before the run and again before its answer.
@@ -565,12 +577,13 @@ const boundedCall = async (
       operation,
       async () =>
         withinFrame(
-          await callAppFunction(
+          await callScreenFunction(
             env,
             person,
             id,
             text,
-            Date.now() + screenCallMs
+            Date.now() + screenCallMs,
+            windowCharger(env, person, id)
           )
         )
     );
@@ -585,20 +598,16 @@ const boundedCall = async (
  * the person signed in (`screenPersonHeader`, see the header), or none:
  * a streaming action's calls as much as a plain call.
  */
-const personRefusal = (
+const personRefused = (
   request: Request,
   person: Identity,
   app: string,
   requestId: string
 ): Response | undefined => {
-  const named = request.headers.get(screenPersonHeader);
-  if (named === person.userId) {
+  const refusal = personRefusal(request.headers, person.userId);
+  if (refusal === undefined) {
     return undefined;
   }
-  const refusal =
-    named === null
-      ? screenErrors.create("screen.reload_required")
-      : authErrors.create("auth.principal_changed");
   // Who was named and who is signed in stay out of the log: only why,
   // and for which App.
   log.info("app_function.person_refused", {
@@ -643,7 +652,7 @@ export const appFunctionResponse = async (
       requestId
     );
   }
-  const misnamed = personRefusal(request, person, app, requestId);
+  const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
   }
@@ -821,7 +830,7 @@ const admitCall = async (
       requestId
     );
   }
-  const misnamed = personRefusal(request, person, app, requestId);
+  const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
   }

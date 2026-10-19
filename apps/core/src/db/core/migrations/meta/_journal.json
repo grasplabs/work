@@ -596,6 +596,125 @@
       "when": 1792069424192,
       "tag": "0084_shares_fenced_through",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "6",
+      "when": 1792073484774,
+      "tag": "0085_workflow_run_wakes",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1792075940314,
+      "tag": "0086_workflow_model_waits",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1792086150823,
+      "tag": "0087_workflow_decision_confirmations",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1792138331810,
+      "tag": "0088_access_revocations",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1792140027121,
+      "tag": "0089_independent_workflow_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "6",
+      "when": 1792147099474,
+      "tag": "0090_run_mail_call_stamps",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "6",
+      "when": 1792157988632,
+      "tag": "0091_build_admission",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1792161065264,
+      "tag": "0092_guest_chat_binding_alias",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "6",
+      "when": 1792168517998,
+      "tag": "0093_independent_run_lineages",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "6",
+      "when": 1792211825311,
+      "tag": "0094_preview_fixture_stores",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1792242626311,
+      "tag": "0095_restricted_workflow_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1792254840041,
+      "tag": "0096_workflow_runs_by_principal",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "6",
+      "when": 1792254841041,
+      "tag": "0097_dependency_subjects",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "6",
+      "when": 1792271950011,
+      "tag": "0098_workflow_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "6",
+      "when": 1792320044672,
+      "tag": "0099_workflow_draft_modules",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "6",
+      "when": 1792332912349,
+      "tag": "0100_drop_record_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1792338548131,
+      "tag": "0101_immutable_insert_triggers",
+      "breakpoints": true
     }
   ]
 }
