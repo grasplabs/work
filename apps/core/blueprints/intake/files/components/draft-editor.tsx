@@ -1,3 +1,4 @@
+import { useMutation } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
@@ -16,13 +17,15 @@ import {
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { useState } from "react";
 
+import { api } from "#grasp";
+
 import {
-  ask,
   draftProblem,
   emptyDraft,
   mediumLabels,
   notesMax,
   refusal,
+  settle,
   shortTextMax,
   sourceMedia,
 } from "./intake";
@@ -30,7 +33,7 @@ import type {
   Draft,
   DraftSource,
   OpenedDraft,
-  Saved,
+  Outcome,
   SourceMedium,
 } from "./intake";
 import { whilePending } from "./pending";
@@ -117,19 +120,25 @@ export const SourceFields = ({
   </div>
 );
 
+/** What a save answers: the source saved, and how many statements. */
+export interface Saved {
+  source: string;
+  statements: number;
+}
+
 /** What an action ends in, for the screen that holds the editor. */
 export type EditorResult =
-  /** Kept, and opened again; `problem` when saving it then failed. */
+  /** Kept, at its new revision; `problem` when saving it then failed. */
   | { kind: "kept"; opened: OpenedDraft; problem?: string }
   | { kind: "saved"; saved: Saved }
-  /** Discarded; `saving` when its save had started, and wrote some. */
-  | { kind: "discarded"; saving: boolean };
+  | { kind: "discarded" };
 
 /**
  * A draft, reviewed and edited before it is saved: a new one (`opened`
- * null) or one kept earlier. Saving writes it to the Playbook; keeping
- * stores the edits for later; discarding drops it. A draft whose save
- * started (`saving`) can only be finished, as it was. Nothing can be
+ * null) or one kept earlier. Saving writes its source and statements and
+ * drops the draft, in one commit; keeping stores the edits for later;
+ * discarding drops it. Each sends the revision it was opened at, so
+ * nobody's edits are written over (`data.conflict`). Nothing can be
  * edited while an action is on its way, so none is lost when it ends.
  */
 export const DraftEditor = ({
@@ -147,12 +156,15 @@ export const DraftEditor = ({
   const [draft, setDraft] = useState<Draft>(opened?.draft ?? emptyDraft());
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState(shownFirst);
-  const saving = opened?.status === "saving";
+  const create = useMutation(api.drafts.create);
+  const keepDraft = useMutation(api.drafts.keep);
+  const saveDraft = useMutation(api.drafts.save);
+  const discardDraft = useMutation(api.drafts.discard);
   const invalid = draftProblem(draft);
 
   /** Runs `act`, showing why it was refused, if it was. */
   const run = async <T,>(
-    act: () => Promise<{ ok: T } | { error: string }>,
+    act: () => Promise<Outcome<T>>,
     then: (value: T) => Promise<void> | void
   ): Promise<void> => {
     const answer = await whilePending(setBusy, act);
@@ -164,68 +176,72 @@ export const DraftEditor = ({
     await then(answer.ok);
   };
 
-  /**
-   * The draft as the server has it now, after it was kept, opened in the
-   * editor; saying `why` a save of it then failed, if it did.
-   */
-  const reopen = async (id: string, why?: string): Promise<void> => {
-    await run(
-      async () => await ask<OpenedDraft>("draft", id),
-      (reopened) => {
-        onResult({ kind: "kept", opened: reopened, problem: why });
-      }
-    );
-  };
-
   const keep = async (): Promise<void> => {
     if (opened === null) {
       await run(
-        async () => await ask<{ id: string }>("create", draft),
-        async ({ id }) => {
-          await reopen(id);
+        async () => await settle(async () => await create(draft)),
+        (id) => {
+          onResult({
+            kind: "kept",
+            opened: { id, revision: 1, origin: "manual", draft },
+          });
         }
       );
       return;
     }
     await run(
       async () =>
-        await ask<{ version: number }>("keep", {
-          id: opened.id,
-          ifVersion: opened.version,
-          draft,
-        }),
-      async () => {
-        await reopen(opened.id);
-      }
-    );
-  };
-
-  const saveOf = async (id: string, version: number): Promise<void> => {
-    await run(
-      async () => await ask<Saved>("save", { id, ifVersion: version, draft }),
-      (saved) => {
-        onResult({ kind: "saved", saved });
+        await settle(
+          async () =>
+            await keepDraft({
+              id: opened.id,
+              expectedRevision: opened.revision,
+              ...draft,
+            })
+        ),
+      (revision) => {
+        onResult({ kind: "kept", opened: { ...opened, revision, draft } });
       }
     );
   };
 
   const save = async (): Promise<void> => {
     if (opened !== null) {
-      await saveOf(opened.id, opened.version);
+      await run(
+        async () =>
+          await settle(
+            async () =>
+              await saveDraft({
+                id: opened.id,
+                expectedRevision: opened.revision,
+                ...draft,
+              })
+          ),
+        (saved) => {
+          onResult({ kind: "saved", saved });
+        }
+      );
       return;
     }
     // A new draft is kept first. Should saving it fail, it is open as
     // kept, saying why, so saving again saves that one, never another.
     await run(
-      async () => await ask<{ id: string; version: number }>("create", draft),
-      async ({ id, version }) => {
+      async () => await settle(async () => await create(draft)),
+      async (id) => {
+        const kept: OpenedDraft = { id, revision: 1, origin: "manual", draft };
         const answer = await whilePending(
           setBusy,
           async () =>
-            await ask<Saved>("save", { id, ifVersion: version, draft })
+            await settle(
+              async () => await saveDraft({ id, expectedRevision: 1, ...draft })
+            )
         );
         if ("error" in answer) {
-          await reopen(id, refusal(answer.error));
+          onResult({
+            kind: "kept",
+            opened: kept,
+            problem: refusal(answer.error),
+          });
           return;
         }
         onResult({ kind: "saved", saved: answer.ok });
@@ -240,17 +256,19 @@ export const DraftEditor = ({
     }
     await run(
       async () =>
-        await ask<{ saving: boolean }>("discard", {
-          id: opened.id,
-          ifVersion: opened.version,
-        }),
-      (answer) => {
-        onResult({ kind: "discarded", saving: answer.saving });
+        await settle(
+          async () =>
+            await discardDraft({
+              id: opened.id,
+              expectedRevision: opened.revision,
+            })
+        ),
+      () => {
+        onResult({ kind: "discarded" });
       }
     );
   };
 
-  const locked = busy || saving;
   return (
     <Card>
       <CardHeader>
@@ -268,23 +286,16 @@ export const DraftEditor = ({
               kept: they are saved as the source&apos;s text.
             </p>
           ) : null}
-          {saving ? (
-            <p className="text-sm">
-              Saving this draft started and didn&apos;t finish. Finish saving it
-              as it was, or discard it: what was saved already stays in the
-              Playbook.
-            </p>
-          ) : null}
           <SourceFields
             source={draft.source}
-            disabled={locked}
+            disabled={busy}
             onChange={(source) => {
               setDraft({ ...draft, source });
             }}
           />
           <StatementsEditor
             statements={draft.statements}
-            disabled={locked}
+            disabled={busy}
             onChange={(statements) => {
               setDraft({ ...draft, statements });
             }}
@@ -294,33 +305,29 @@ export const DraftEditor = ({
               {problem}
             </p>
           )}
-          {invalid === undefined || saving ? null : (
+          {invalid === undefined ? null : (
             <p className="text-muted-foreground text-sm">{invalid}</p>
           )}
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={
-                busy ||
-                (!saving &&
-                  (invalid !== undefined || draft.statements.length === 0))
+                busy || invalid !== undefined || draft.statements.length === 0
               }
               onClick={() => {
                 void save();
               }}
             >
-              {saving ? "Finish saving" : "Save to the Playbook"}
+              Save
             </Button>
-            {saving ? null : (
-              <Button
-                variant="outline"
-                disabled={busy || invalid !== undefined}
-                onClick={() => {
-                  void keep();
-                }}
-              >
-                Keep as a draft
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              disabled={busy || invalid !== undefined}
+              onClick={() => {
+                void keep();
+              }}
+            >
+              Keep as a draft
+            </Button>
             <Button
               variant="outline"
               disabled={busy}

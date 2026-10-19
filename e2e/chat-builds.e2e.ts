@@ -28,6 +28,42 @@ export default workflowTests(definition, [{ name: "runs", mocks: { book: "booked
 `,
 };
 
+/**
+ * The desk's data and functions, of spec 8's layout: an invoices table,
+ * and a mutation that books one, which changes the App's data.
+ */
+const invoices = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  invoices: defineTable({ total: v.number() }),
+});
+`,
+  "operations/invoices.ts": `import { v } from "@grasp-os/sdk";
+import { mutation } from "#grasp/server";
+
+export const book = mutation({
+  args: { total: v.number() },
+  returns: v.id("invoices"),
+  handler: async (ctx, args) => await ctx.db.insert("invoices", args),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { book } from "./operations/invoices.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Invoice desk",
+  schema,
+  access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
+  operations: { invoices: { book } },
+  internalOperations: {},
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+  uses: [],
+});
+`,
+};
+
 const screen = `import { Button } from "@grasp-os/ui/components/button";
 
 export default function Desk() {
@@ -53,18 +89,7 @@ test("the side panel shows an App being built, and a builder makes its version c
       {
         "screens/desk.tsx": screen,
         ...weekly,
-        // Server code the server build reads, though not app/server.ts.
-        "app/lib/format.ts":
-          "export const format = (total: number) => String(total);\n",
-        // A method other Apps may call, which changes the App's data.
-        "app/exports.json": JSON.stringify({
-          book: {
-            access: "write",
-            description: "Book an invoice",
-            input: { type: "object" },
-            output: { type: "object" },
-          },
-        }),
+        ...invoices,
       },
       "An invoice desk for invoices@"
     );
@@ -72,20 +97,6 @@ test("the side panel shows an App being built, and a builder makes its version c
     const chat = await api.chats.create(`Build ${tag}`);
 
     const page = await pageOf(builder);
-    // The server code's first read goes to an API this stack has switched
-    // off (improvement signals), which core refuses: as a read that fails.
-    let failServerCode = true;
-    await page.routeWebSocket("**/rpc", (socket) => {
-      const toCore = socket.connectToServer();
-      socket.onMessage((message) => {
-        const text = String(message);
-        toCore.send(
-          failServerCode
-            ? text.replaceAll('["apps","files","read"]', '["signals","list"]')
-            : text
-        );
-      });
-    });
     await page.goto(`/?chat=${chat.id}`);
     await page.getByRole("button", { name: "Side panel" }).click();
     const built = page
@@ -115,34 +126,13 @@ test("the side panel shows an App being built, and a builder makes its version c
       "Now runs on a schedule (its parameter every)"
     );
     await expect(workflows).toContainText("May change something outside Grasp");
-    // What other Apps may now call, flagged when it changes the App's data.
-    const exported = built.getByRole("region", { name: "Exports" });
-    await expect(exported).toContainText(
-      "Other domains may now call book, which changes the domain's data"
-    );
-    await expect(exported).toContainText("Changes the domain's data");
-    // All of its server code is flagged. Until it loads, nothing is made
-    // current; once its read failed, it can be read again.
-    const serverCode = built.getByRole("region", { name: "Server code" });
-    await expect(serverCode).toContainText(
-      "Added: it acts for whoever uses the domain"
+    // The App's functions its workflow may use are flagged as changed.
+    await expect(workflows).toContainText(
+      "Code it may use changed: app.ts, operations/invoices.ts, and schema.ts"
     );
     const makeCurrent = built.getByRole("button", {
       name: `Make version ${version} current`,
     });
-    const again = serverCode.getByRole("button", {
-      name: "Load the server code again",
-    });
-    await expect(again).toBeVisible();
-    await expect(makeCurrent).toBeDisabled();
-    failServerCode = false;
-    await again.click();
-    await serverCode.getByText("app/lib/format.ts, as it would run").click();
-    await expect(
-      serverCode
-        .getByRole("figure")
-        .filter({ hasText: "Would run after approval" })
-    ).toContainText("export const format");
     await expect(makeCurrent).toBeEnabled();
 
     await makeCurrent.click();

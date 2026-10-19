@@ -114,6 +114,19 @@ export const phaseWords: Record<AdminPhase, string> = {
   open: "Open",
 };
 
+/** What each source of what Grasp knows about a company is (`knowledge-words.ts`). */
+export const knowledgeWords: Record<KnowledgeSource, string> = {
+  vision: "The first conversation and the research",
+  directory: "Who works where, from the sign-in",
+  sources: "Where the documents live, connected",
+  documents: "Documents dropped in",
+  pulse: "Pulse",
+  leadsKnown: "Team leads, from the HR platform",
+  leadsHeard: "Team leads interviewed",
+  everyoneHeard: "Everyone else interviewed",
+  review: "Workflows known",
+};
+
 /** Where a contract stands. */
 export const contractWords: Record<ContractState, string> = {
   draft: "Being written",

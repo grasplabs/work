@@ -1,5 +1,4 @@
 import type { DependencyApprovals } from "@grasp-os/shared/dependencies";
-import { appIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
 import { loadEnginePage } from "./engine-page.ts";
@@ -13,7 +12,7 @@ import type { EngineReaders } from "./engine-page.ts";
 const listed: DependencyApprovals = {
   policyGeneration: 1,
   decides: true,
-  app: { id: appIdSchema.parse("billing"), name: "Billing" },
+  subject: { type: "app", id: "billing", name: "Billing" },
   approvals: [],
 };
 

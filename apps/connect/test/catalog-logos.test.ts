@@ -40,8 +40,8 @@ const toolkits: FakeToolkit[] = [
     logo: withLogin.href,
   },
   { slug: "no_logo", name: "No logo", tools: [tool], logo: null },
-  // Listed by Composio, but not in the catalog.
-  { slug: "unmanaged", name: "Unmanaged", managed: false, tools: [tool] },
+  // Listed by Composio, but not in the catalog: it has no tools.
+  { slug: "toolless", name: "Toolless", tools: [] },
 ];
 
 const { state: composio } = fakeComposioApi(toolkits);
@@ -209,7 +209,7 @@ describe("a catalog entry's logo", () => {
       { source: "composio", id: "plain_http" },
       { source: "composio", id: "with_login" },
       { source: "composio", id: "no_logo" },
-      { source: "composio", id: "unmanaged" },
+      { source: "composio", id: "toolless" },
       { source: "composio", id: "nobody" },
       { source: "composio", id: "../toolkits" },
       { source: "native", id: "microsoft" },

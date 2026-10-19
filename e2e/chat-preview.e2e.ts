@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, ordinaryData, peopleIn } from "./people.ts";
@@ -7,8 +8,10 @@ import { origin } from "./stack.ts";
 // A chat builds an App in a studio: the chat alone until its agent writes
 // a draft, then the chat on the left and the draft's preview on the
 // right, under the App's own top row with the way to the App. The preview
-// is the draft's screen, calling the draft's server code in a preview of
-// its own, which changes none of the App's data. The local stack reaches no model,
+// is the draft's screen, an App of spec 8's layout: its queries, live
+// queries and mutations run on the draft's sealed release, on a store of
+// the preview's own, so it reads none of the App's data and changes none
+// (the threat model on GRA-662). The local stack reaches no model,
 // so the draft is written straight into the chat's Workspace object, as
 // the agent's `env.build.write` leaves it, through the local dev server's
 // own tools (as connections-seed.ts writes into connect's database). The
@@ -90,42 +93,83 @@ const writeDraft = async (
   }
 };
 
-/** Server code that counts, in its storage, what was added. */
-const server = (
-  label: string
-) => `import { DurableObject } from "cloudflare:workers";
+/**
+ * A tally of spec 8's layout: a table, a query and a mutation, and a
+ * screen on the React SDK that reads the count live through the host's
+ * references (`#grasp`). `label` says whose count it is: the App's, or
+ * the draft's preview.
+ */
+const tallyFiles = (label: string): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export class App extends DurableObject {
-  add(): string {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS tally (n INTEGER)");
-    this.ctx.storage.sql.exec("INSERT INTO tally VALUES (1)");
-    return this.count();
-  }
+export default defineSchema({
+  tally: defineTable({ added: v.boolean() }),
+});
+`,
+  "operations/tally.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
 
-  count(): string {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS tally (n INTEGER)");
-    const [row] = this.ctx.storage.sql.exec("SELECT count(*) AS n FROM tally").toArray();
-    return \`\${String(row?.n ?? 0)} ${label}\`;
-  }
-}
-`;
+export const count = query({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => \`\${String((await ctx.db.query("tally").take(100)).length)} ${label}\`,
+});
 
-const screen = `import { callServer } from "@grasp-os/sdk/screen";
+export const add = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    await ctx.db.insert("tally", { added: true });
+    return null;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { add, count } from "./operations/tally.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Tally",
+  schema,
+  access: { tables: { tally: { read: "appMembers", write: "appMembers" } } },
+  operations: { tally: { add, count } },
+  internalOperations: {},
+  screens: [{ name: "tally", path: "/", source: "screens/tally.tsx" }],
+  uses: [],
+});
+`,
+  "screens/tally.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
-import { useState } from "react";
+import { api } from "#grasp";
 
 export default function Tally() {
-  const [tally, setTally] = useState("none yet");
+  const count = useQuery(api.tally.count, {});
+  const add = useMutation(api.tally.add);
   return (
     <main className="flex flex-col gap-4 p-6">
-      <Button onClick={() => { void callServer<string>("add").then(setTally); }} variant="outline">
+      <Button onClick={() => { void add({}); }} variant="outline">
         Add one
       </Button>
-      <output>{tally}</output>
+      <output>{count ?? "Loading"}</output>
     </main>
   );
 }
-`;
+`,
+});
+
+/**
+ * The App's own tally screen, released and current, once it shows its
+ * count. Its first open builds it, which on a loaded machine takes longer
+ * than the default 5 seconds.
+ */
+const openTally = async (page: Page, app: string): Promise<FrameLocator> => {
+  await page.goto(`/engines/${app}/apps/tally/full`);
+  const screen = page.frameLocator('iframe[title="tally app"]');
+  await expect(screen.getByRole("status")).toContainText("in the App", {
+    timeout: 20_000,
+  });
+  return screen;
+};
 
 test("a chat builds an App in a studio, the chat on the left and a preview that changes none of the App's data on the right", async ({
   pageOf,
@@ -138,15 +182,20 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     const app = await api.apps.create({ name });
     const { version } = await api.apps.files.commit(
       app.id,
-      { "screens/tally.tsx": screen, "app/server.ts": server("in the App") },
+      tallyFiles("in the App"),
       "A tally"
     );
     await api.apps.versions.setCurrent(app.id, version);
     await ordinaryData(app.id);
     const chat = await api.chats.create(`Build ${tag}`);
+    const page = await pageOf(builder);
+
+    // The App has data of its own: one added through its own screen.
+    const own = await openTally(page, app.id);
+    await own.getByRole("button", { name: "Add one" }).click();
+    await expect(own.getByRole("status")).toHaveText("1 in the App");
 
     // Nothing built yet: the chat alone, the chats' sidebar open beside it.
-    const page = await pageOf(builder);
     // While `failDrafts` holds, reading the chat's drafts goes to an API
     // this stack has switched off (improvement signals), which core
     // refuses: as a read that fails.
@@ -177,7 +226,8 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // Its agent writes a draft: the App stands on the right, the chat
     // moves to its left, and the sidebar folds to give it the room.
     await writeDraft(builder.userId, chat.id, app.id, version, {
-      "app/server.ts": server("in the preview"),
+      "operations/tally.ts":
+        tallyFiles("in the preview")["operations/tally.ts"] ?? "",
     });
     // A read of it that fails says so beside the chat, and is tried again
     // from there.
@@ -212,15 +262,16 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await expect(preview).toContainText(
       "Preview: changes nothing, reads no real data"
     );
+    // Its own store: none of the App's tally, then only what it added,
+    // its live query following each mutation.
     const frame = preview.frameLocator("iframe");
+    await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
+      timeout: 20_000,
+    });
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("1 in the preview");
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("2 in the preview");
-
-    // The App's own storage has none of it.
-    const counted = await api.screens.call(app.id, "count", []);
-    expect(counted).toBe("0 in the App");
 
     // A phone: the chat and the App take turns, the App first. The
     // preview keeps what it shows through the turns: it isn't loaded anew.
@@ -259,6 +310,10 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await expect(
       page.getByRole("heading", { level: 1, name, exact: true })
     ).toBeVisible();
+
+    // The App's own data is as it was: none of the preview's three.
+    const after = await openTally(page, app.id);
+    await expect(after.getByRole("status")).toHaveText("1 in the App");
   } finally {
     core[Symbol.dispose]();
   }

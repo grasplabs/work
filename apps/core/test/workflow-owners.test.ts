@@ -17,7 +17,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appCall, appWith, workflowFiles } from "./workflow-apps.ts";
 
 // A workflow's owner: who answers for it, shown on its line and told when
 // a run a trigger started fails. What could go wrong: someone without the
@@ -56,11 +56,11 @@ const failing = (id: string) =>
     { check: null }
   );
 
-/** A workflow that returns whom the App's server sees it call for. */
+/** A workflow that returns whom the App's function sees it call for. */
 const whoAmI = (id: string) =>
   workflowFiles(
     id,
-    `  return await step.do("who", { description: "Book" }, async () => await env.APP.call("book", { invoice: "INV-1", total: 1 }, "key"));`,
+    `  return await step.do("who", { description: "Book" }, async () => await ${appCall("ledger.book", "mutation", '{ invoice: "INV-1", total: 1 }')});`,
     { who: "ledger" }
   );
 

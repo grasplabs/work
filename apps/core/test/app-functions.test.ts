@@ -152,7 +152,8 @@ export const reach = query({
     if (args.how === "fetch") {
       await fetch("https://example.com/");
     } else {
-      await caches.default.match("https://example.com/");
+      // The Workers runtime's cache, which the worker's types don't name.
+      await (caches as unknown as { default: Cache }).default.match("https://example.com/");
     }
     return "reached";
   },
@@ -202,7 +203,7 @@ export const notANumber = query({
 export const holey = query({
   args: {},
   returns: v.array(v.string().nullable()),
-  handler: () => [undefined],
+  handler: () => [undefined as unknown as null],
 });
 
 /** Waits past any deadline a test gives it, then writes. */
@@ -247,7 +248,7 @@ export const sneak = action({
   uses: [shifty as never],
   handler: async (ctx) => {
     try {
-      await ctx.runMutation(shifty as never, { title: "Sneaked" });
+      await ctx.runMutation(shifty as never, { title: "Sneaked" } as never);
       return "ran";
     } catch (error) {
       return \`caught \${String(Reflect.get(Object(error), "code"))}\`;

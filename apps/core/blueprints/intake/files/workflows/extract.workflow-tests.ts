@@ -26,7 +26,7 @@ export default workflowTests(extract, [
   {
     name: "keeps what the model found in the notes as a draft for review",
     input,
-    mocks: { extract: found, propose: { ok: { id: "draft-1" } } },
+    mocks: { "may-review": null, extract: found, propose: "draft-1" },
     expect: {
       output: { draft: "draft-1", statements: 1 },
       sideEffects: [
@@ -45,15 +45,14 @@ export default workflowTests(extract, [
     name: "reads a stakeholder's chat as notes, and keeps a guest's draft",
     input: { chat: "chat-1" },
     mocks: {
+      "may-review": null,
       "read-chat": {
-        ok: {
-          source: input.source,
-          notes: input.notes,
-          lines: [{ role: "guest", text: input.notes }],
-        },
+        source: input.source,
+        notes: input.notes,
+        lines: [{ role: "guest", text: input.notes }],
       },
       extract: found,
-      propose: { ok: { id: "draft-2" } },
+      propose: "draft-2",
     },
     expect: {
       output: { draft: "draft-2", statements: 1 },
@@ -68,17 +67,5 @@ export default workflowTests(extract, [
         },
       ],
     },
-  },
-  {
-    name: "fails when the chat isn't read",
-    input: { chat: "chat-1" },
-    mocks: { "read-chat": { error: "intake.empty_chat" } },
-    expect: { error: "The chat wasn't read: intake.empty_chat" },
-  },
-  {
-    name: "fails when the draft isn't kept",
-    input,
-    mocks: { extract: found, propose: { error: "knowledge.forbidden" } },
-    expect: { error: "The draft wasn't kept: knowledge.forbidden" },
   },
 ]);

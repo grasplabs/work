@@ -83,7 +83,7 @@ export default workflow(
   },
   async (step, { input, params, env }) => {
     await step.do("receive", { description: "Mark the invoice received", input: input.invoice }, async ({ input: invoice }) => {
-      const answered = await env.APP.callFunction(setStatus, { invoice, status: "received" });
+      const answered = (await env.APP.callFunction(setStatus, { invoice, status: "received" })) as { ok: true } | { ok: false; error: unknown };
       if (!answered.ok) {
         throw answered.error;
       }
@@ -99,7 +99,7 @@ export default workflow(
       "book",
       { description: "Book the invoice", sideEffect: true, input: { invoice: input.invoice, status } },
       async ({ input: booking }) => {
-        const answered = await env.APP.callFunction(setStatus, booking);
+        const answered = (await env.APP.callFunction(setStatus, booking)) as { ok: true } | { ok: false; error: unknown };
         if (!answered.ok) {
           throw answered.error;
         }

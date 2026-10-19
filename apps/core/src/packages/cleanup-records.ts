@@ -1,3 +1,4 @@
+import type { DependencySubject } from "@grasp-os/shared/dependencies";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -28,21 +29,25 @@ export const recordCleanup = async (
 };
 
 /**
- * Clears the record of artifact `hash` once `app`'s lock of `graphHash`
+ * Clears the record of artifact `hash` once `subject`'s lock of `graphHash`
  * pins it, and only while it does, in one statement: a resolve that takes
  * the lock's room records the artifact again as it deletes the lock
  * (locks.ts), and that record must stand, before or after this runs.
  */
 export const clearBuildCleanup = async (
   env: Env,
-  { app, graphHash, hash }: { app: string; graphHash: string; hash: string }
+  {
+    subject,
+    graphHash,
+    hash,
+  }: { subject: DependencySubject; graphHash: string; hash: string }
 ): Promise<void> => {
   await drizzle(env.DB)
     .delete(packageCleanups)
     .where(
       and(
         eq(packageCleanups.key, hash),
-        sql`EXISTS (SELECT 1 FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE l.app_id = ${app} AND l.graph_hash = ${graphHash} AND json_extract(pin.value, '$.hash') = ${hash})`
+        sql`EXISTS (SELECT 1 FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE l.subject_type = ${subject.type} AND l.subject_id = ${subject.id} AND l.graph_hash = ${graphHash} AND json_extract(pin.value, '$.hash') = ${hash})`
       )
     );
 };

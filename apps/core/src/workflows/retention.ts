@@ -17,6 +17,7 @@ import {
   workflowDecisions,
   workflowRuns,
 } from "../db/core/schema.ts";
+import { chunks } from "../db/d1.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
 
 // Retention of workflow runs. A run reads what its person may read (a
@@ -56,9 +57,10 @@ import { runEngine, runRetentionDays } from "./engine.ts";
 // lineage's row stays, as an App run's does), and
 // the values of a parameter revision once another replaced it that long
 // ago, or its workflow was deleted. The database lets nothing else of
-// either change (migration 0080): their IDs, hashes, revisions and who
-// did what stay, so a start sent again is still known by its key and
-// input's hash, and the revision in force is never touched.
+// either change, nor be written over by an insert by key or rowid
+// (migrations 0080, 0095 and 0101): their IDs, hashes, revisions and who did what stay, so a start
+// sent again is still known by its key and input's hash, and the revision
+// in force is never touched.
 //
 // Kept, each by rules of its own, not this retention's:
 // - The audit log: it has its own retention (audit-log.ts), and its
@@ -359,10 +361,17 @@ export const sweepWorkflowStartDetails = async (
   const db = drizzle(env.DB);
   const receipts = workflowStartReceipts;
   const params = workflowResourceParams;
-  // The starts due, as each statement reads them before the last marks
-  // them: by when they were admitted and their IDs, the same ones.
-  const due = db
-    .select({ id: receipts.id })
+  // The starts due, read once, so what connect is asked to drop and what
+  // is marked are the same starts, whatever another sweep marks between
+  // the two: by when they were admitted and their IDs, with whether each
+  // admitted a run.
+  const dueRows = await db
+    .select({
+      id: receipts.id,
+      workflowId: receipts.workflowResourceId,
+      ran: sql<number>`EXISTS (SELECT 1 FROM workflow_resource_runs AS run
+        WHERE run.id = ${receipts.id})`,
+    })
     .from(receipts)
     .where(
       and(
@@ -379,13 +388,34 @@ export const sweepWorkflowStartDetails = async (
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
     .limit(startDetailsPerSweep);
+  // As one bound value, within D1's bound parameters however many.
+  const due = sql`(SELECT value FROM json_each(${JSON.stringify(
+    dueRows.map(({ id }) => id)
+  )}))`;
+  // What connect still holds of their runs goes first, as an App run's
+  // does (`removedElsewhere`): a run that ended while a side effect of it
+  // was held leaves the action, with its exact input, until its person
+  // confirms it, which they may never do. A restricted run's own are held,
+  // under the workflow, and so may be those of any App its calls reached,
+  // an unrestricted run's included (an App entering restricted mode as an
+  // export of it runs), keyed by its steps as its own are: connect drops
+  // them all by the run (`dropForEndedRuns`). A sweep that fails here
+  // marks nothing, and the next does it again.
+  const heldOf = dueRows.flatMap(({ id, workflowId, ran }) =>
+    ran === 1 ? [{ runId: id, workflowId }] : []
+  );
+  for (const runs of chunks(heldOf, sweptPerBatch)) {
+    // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+    await env.CONNECT.dropForEndedRuns({ runs });
+  }
   await db.batch([
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
     db
       .update(receipts)
       .set({ input: null, params: null, detailsRemovedAt: now })
-      .where(inArray(receipts.id, due)),
+      // Another sweep may have marked some meanwhile: marked once.
+      .where(and(inArray(receipts.id, due), isNull(receipts.detailsRemovedAt))),
     db
       .update(params)
       .set({ values: null, valuesRemovedAt: now })
