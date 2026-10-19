@@ -16,6 +16,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
+import { waitUntil } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -756,26 +757,22 @@ export type AdmissionReason =
   | "call_limit"
   | "model_call_limit";
 
-/**
- * Keeps the evidence of an action's call refused at its host's own
- * admission, as `workflow.call.refused`, the event App runs' refused calls
- * leave (workflows/host.ts): what the host knows of the run, its build,
- * task and attempt, never what the isolate sent. `call` is a declared
- * alias, or null: an undeclared one is the isolate's text. An event that
- * can't be kept is logged; the refusal stands either way.
- */
-export const auditAdmissionRefusal = async (
+/** An action's call refused at admission, as its evidence names it. */
+interface AdmissionRefusal {
+  readonly build: string;
+  readonly task: string;
+  readonly attempt: number;
+  readonly generation: number;
+  readonly call: string | null;
+  readonly errorCode: string;
+  readonly reason: AdmissionReason;
+}
+
+/** Writes `refusal`'s evidence; logs, never throws, one it can't keep. */
+const writeAdmissionRefusal = async (
   env: Env,
   run: CallingRun,
-  refusal: {
-    readonly build: string;
-    readonly task: string;
-    readonly attempt: number;
-    readonly generation: number;
-    readonly call: string | null;
-    readonly errorCode: string;
-    readonly reason: AdmissionReason;
-  }
+  refusal: AdmissionRefusal
 ): Promise<void> => {
   try {
     await audited(env, {
@@ -797,6 +794,29 @@ export const auditAdmissionRefusal = async (
       ...errorFields(error),
     });
   }
+};
+
+/**
+ * Keeps the evidence of an action's call refused at its host's own
+ * admission, as `workflow.call.refused`, the event App runs' refused calls
+ * leave (workflows/host.ts): what the host knows of the run, its build,
+ * task and attempt, never what the isolate sent. `call` is a declared
+ * alias, or null: an undeclared one is the isolate's text. An event that
+ * can't be kept is logged; the refusal stands either way.
+ *
+ * The write is the request's own work until it is done (`waitUntil`):
+ * `callAction` waits for an action no longer than its attempt's deadline,
+ * and a write it stopped waiting for still finishes rather than ending
+ * with the call. Every refusal path goes through here, so none can skip it.
+ */
+export const auditAdmissionRefusal = async (
+  env: Env,
+  run: CallingRun,
+  refusal: AdmissionRefusal
+): Promise<void> => {
+  const writing = writeAdmissionRefusal(env, run, refusal);
+  waitUntil(writing);
+  await writing;
 };
 
 /**
