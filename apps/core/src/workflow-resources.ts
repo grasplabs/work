@@ -150,8 +150,10 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   as one that doesn't exist, so publishing can't probe for another
 //   workflow's contract. A binding is a requirement, never a grant: who
 //   may start the target is decided when it starts. A version's bindings
-//   name their target (ID, version, contract key) only to its builders;
-//   anyone else sees the alias and the contract's fingerprint.
+//   name the target resource (its ID and internal version) only to its
+//   builders; anyone else sees the alias, the contract key and the
+//   contract's fingerprint. The key isn't masked: the definition text,
+//   which everyone who may read the version reads, names it.
 // - A stored version altered behind the registry's back. A definition is
 //   hashed as canonical JSON at publication and checked again before it
 //   is served; a contract is checked against its hash before a binding
@@ -1108,8 +1110,8 @@ const asksModel = (action: WorkflowVersionAction): boolean =>
 /** What a review reads of a version's binding: which contract it pinned. */
 type PinnedContract = Pick<
   WorkflowVersionBinding,
-  "alias" | "kind" | "contractId" | "fingerprint"
->;
+  "alias" | "kind" | "fingerprint"
+> & { contractId: string | null };
 
 /** Where a version's manifest seals what its bindings pinned (`writeVersion`). */
 const manifestBindingsSchema = z.object({
@@ -1328,10 +1330,10 @@ export const bindingsOf = async (
 };
 
 /**
- * `bindings` as `by` may see them: which workflow each binds (its ID,
- * version and contract key, which names it) only where `by` builds that
- * workflow; elsewhere only the alias and the contract's fingerprint. Each
- * target's role is read once.
+ * `bindings` as `by` may see them: which workflow resource each binds (its
+ * ID and internal version) only where `by` builds that workflow; elsewhere
+ * the alias, the contract key (which the definition text names anyway)
+ * and the contract's fingerprint. Each target's role is read once.
  */
 const visibleTo = async (
   env: Env,
@@ -1359,7 +1361,7 @@ const visibleTo = async (
             kind: binding.kind,
             resourceId: null,
             resourceVersion: null,
-            contractId: null,
+            contractId: binding.contractId,
             fingerprint: binding.fingerprint,
           },
     ])
@@ -1740,8 +1742,9 @@ const bindingKey = (binding: PinnedBinding): string =>
  * Refuses Grasp staff (`role.forbidden`) a publication whose bindings
  * aren't exactly those of the current version: which workflows a client's
  * workflow runs is the client's decision, as which stores an App binds is
- * (data-stores.ts). Staff may still publish a version that binds the same,
- * or nothing.
+ * (data-stores.ts). Staff may still publish a version that binds the same.
+ * Binding nothing is a change too, when the current version binds
+ * something: dropping what a client chose is theirs to decide as well.
  */
 const requireStaffKeepsBindings = async (
   env: Env,
@@ -1749,7 +1752,7 @@ const requireStaffKeepsBindings = async (
   workflow: Live,
   bindings: readonly PinnedBinding[]
 ): Promise<void> => {
-  if (!by.staff || bindings.length === 0) {
+  if (!by.staff) {
     return;
   }
   const versions = await bindingsOf(env, workflow.id);

@@ -597,9 +597,10 @@ export interface WorkflowResource {
 
 /**
  * A binding a version resolved, by the host: exact IDs and fingerprints.
- * Which workflow it binds (its ID, version and contract key, which names
- * it) only for a builder of that workflow: anyone else gets null there,
- * and only the alias and the contract's fingerprint. A catalog binding
+ * Which workflow resource it binds (its ID and internal version) only for
+ * a builder of that workflow: anyone else gets null there. The contract
+ * key is everyone's: it is in the definition text whoever may read the
+ * version reads anyway. A catalog binding
  * (an operation, connector, model or decision contract) names its
  * contract key and fingerprint; what serves it is an approval's.
  */
@@ -609,7 +610,7 @@ export interface WorkflowVersionBinding {
   resourceId: string | null;
   resourceVersion: number | null;
   /** The contract key the definition named. */
-  contractId: string | null;
+  contractId: string;
   /** The target version's contract hash. */
   fingerprint: string;
 }
