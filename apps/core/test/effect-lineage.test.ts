@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import worker from "../src/index.ts";
-import { requestGranted } from "./apps.ts";
+import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -14,7 +14,8 @@ import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
-import { appWith, server } from "./workflow-apps.ts";
+import { v1AppWith, v1Server } from "./v1-app-server.ts";
+import { appWith, hitCall } from "./workflow-apps.ts";
 
 // The runs a run's own mail starts, as its descendants: mail it sends
 // through a native mail connector to its App's own address starts its
@@ -62,28 +63,28 @@ const sharedMailbox = (local: string) => `shared-${local}@acme.test`;
 const sends = (local: string) =>
   ({
     // Through the run's own connection.
-    direct: `return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);`,
+    direct: `return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);`,
     // Twice under its key, as a retry would: connect answers the second
     // only when it is the same call.
     twice: `await env.MAIL.call("mail.send", mail, { idempotencyKey });
-      return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);`,
+      return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);`,
     // Through its App's server code, with its caller's key.
-    app: `return await env.APP.call("relay", mail);`,
+    app: `return (await env.APP.call("relay", mail)) as Json;`,
     // Sends from its account, and drafts the same from a shared mailbox.
     draft: `await env.MAIL.call("mail.send", mail, { idempotencyKey });
-      return JSON.parse((await env.MAIL.call("mail.createDraft", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })).output);`,
+      return JSON.parse(((await env.MAIL.call("mail.createDraft", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })) as { output: string }).output);`,
     // The same mail as the same shared mailbox, through two connections.
     both: `await env.MAIL.call("mail.send", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey });
-      return JSON.parse((await env.MAIL2.call("mail.send", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })).output);`,
+      return JSON.parse(((await env.MAIL2.call("mail.send", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })) as { output: string }).output);`,
     // Lists mail naming another address of the domain, then sends.
     list: `try {
         await env.MAIL.call("mail.list", { mailbox: mail.mailbox, to: ["other-${local}@grasp.test"] }, { idempotencyKey });
       } catch {
         // The connector refuses the field; the call was made.
       }
-      return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);`,
+      return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);`,
     // To 26 addresses of the domain at once.
-    many: `return JSON.parse((await env.MAIL.call("mail.send", { ...mail, to: Array.from({ length: 26 }, (_, index) => "${local}-" + index + "@grasp.test") }, { idempotencyKey })).output);`,
+    many: `return JSON.parse(((await env.MAIL.call("mail.send", { ...mail, to: Array.from({ length: 26 }, (_, index) => "${local}-" + index + "@grasp.test") }, { idempotencyKey })) as { output: string }).output);`,
   }) as const;
 
 type Sends = keyof ReturnType<typeof sends>;
@@ -108,8 +109,12 @@ export default workflowTests(definition, [{ name: "runs", input, mocks: { read: 
 `,
 });
 
-/** The App's server: the sample's, and `relay`, which sends `mail`. */
-const relayServer = server.replace(
+/**
+ * The v1 App server of `loop`'s `app` sends: the v1 sample's, and `relay`,
+ * which sends `mail` with its caller's key. Only the v1 server's own test
+ * uses it (GRA-645); a connector resource's sends have theirs below.
+ */
+const relayServer = v1Server.replace(
   "export class App extends DurableObject {",
   `export class App extends DurableObject {
   async relay(caller: Caller, mail: unknown): Promise<unknown> {
@@ -129,7 +134,7 @@ const loop = (
   mailbox: string,
   send: Sends
 ): Record<string, string> => ({
-  "workflows/loop.ts": `import { emailMessage, workflow } from "@grasp-os/sdk/workflow";
+  "workflows/loop.ts": `import { emailMessage, type Json, workflow } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "loop",
@@ -152,12 +157,15 @@ const input = { id: "m", stored: null, from: { name: "", address: "a@b.test" }, 
 
 export default workflowTests(definition, [{ name: "runs", input, mocks: { send: { sent: true } }, expect: {} }]);
 `,
-  "app/server.ts": relayServer,
 });
 
-/** A shared Microsoft 365 account `admin` connects: its ID and mailbox. */
-const connectShared = async (admin: Person) => {
-  const subject = `team-${crypto.randomUUID()}`;
+/**
+ * A shared Microsoft 365 account `admin` connects: its ID, its mailbox as
+ * its sign-in name, and the address it sends from. An `aliased` account's
+ * sign-in name (a UPN) isn't that address.
+ */
+const connectShared = async (admin: Person, aliased = false) => {
+  const subject = `${aliased ? "alias" : "team"}-${crypto.randomUUID()}`;
   const { url } = await admin.api.connections.start({
     provider: "microsoft",
     scope: "shared",
@@ -170,13 +178,14 @@ const connectShared = async (admin: Person) => {
   await routed(`/api/connections/callback?${query.toString()}`, {
     headers: { cookie: admin.session },
   });
-  const mailbox = `${subject}@acme.test`;
+  const sender = `${subject}@acme.test`;
+  const mailbox = aliased ? `${subject}@acme.onmicrosoft.test` : sender;
   const listed = await admin.api.connections.list();
   const connection = listed.find(({ accountName }) => accountName === mailbox);
   if (connection === undefined) {
     throw new Error("Expected the shared connection");
   }
-  return { id: connection.id, mailbox };
+  return { id: connection.id, mailbox, sender };
 };
 
 /**
@@ -191,16 +200,21 @@ const loopApp = async (
   {
     actions = ["mail.send"],
     listening = false,
+    aliased = false,
     files = (_local: string, _mailbox: string): Record<string, string> => ({}),
   } = {}
 ) => {
   const local = `loop-${crypto.randomUUID().slice(0, 8)}`;
-  const connection = await connectShared(admin);
-  const app = await appWith(admin, {
+  const connection = await connectShared(admin, aliased);
+  const workflows = {
     ...loop(local, connection.mailbox, send),
     ...(listening ? listen(local) : {}),
     ...files(local, connection.mailbox),
-  });
+  };
+  const app =
+    send === "app"
+      ? await v1AppWith(admin, { ...workflows, "app/server.ts": relayServer })
+      : await appWith(admin, workflows);
   await requestGranted(idp, admin, {
     subject: { type: "app", appId: app },
     object: { type: "connection", connectionId: connection.id },
@@ -220,6 +234,7 @@ const loopApp = async (
     app,
     local,
     mailbox: connection.mailbox,
+    sender: connection.sender,
     address: `${local}@grasp.test`,
   };
 };
@@ -384,7 +399,7 @@ const tokenedAt = (local: string) =>
  */
 const followHops = async (
   admin: Person,
-  { app, address, mailbox }: Awaited<ReturnType<typeof loopApp>>,
+  { app, address, sender }: Awaited<ReturnType<typeof loopApp>>,
   subject: string,
   hops: number
 ): Promise<(string | undefined)[]> => {
@@ -401,7 +416,7 @@ const followHops = async (
     const to = await sentTo(subject, hop - 1);
     rejected.push(
       // oxlint-disable-next-line no-await-in-loop -- one hop after another
-      await deliver(to, message(to, { from: mailbox, subject }), mailbox)
+      await deliver(to, message(to, { from: sender, subject }), sender)
     );
   }
   return rejected;
@@ -457,14 +472,14 @@ export default app({
   uses: [mail],
 });
 `,
-  "workflows/loop.ts": `import { emailMessage, workflow } from "@grasp-os/sdk/workflow";
+  "workflows/loop.ts": `import { emailMessage, type Json, workflow } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "loop",
   { params: {}, input: emailMessage, triggers: [{ type: "email", address: "${local}" }] },
   async (step, { env, input }) =>
     await step.do("send", { description: "Mail the address again", sideEffect: true, retries: { limit: 0 }, input: null }, async () =>
-      await env.APP.callFunction({ contractId: "mail.relay", kind: "action" }, { to: input.to[0]?.address ?? "", subject: input.subject })
+      (await env.APP.callFunction({ contractId: "mail.relay", kind: "action" }, { to: input.to[0]?.address ?? "", subject: input.subject })) as Json
     )
 );
 `,
@@ -536,7 +551,7 @@ export default workflow("fresh", { params: {}, input: z.unknown() }, async (step
     { description: "Mail a new domain", sideEffect: true, timeout: "1 second", retries: { limit: 1, delay: "5 seconds" }, input: { mailbox: "${mailbox}", subject: "${subject}", body: "Hi.", to: ["${to}"] } },
     async ({ idempotencyKey, input: mail }) => {
       await env.MAIL.call("mail.send", mail, { idempotencyKey });
-      if ((await env.APP.call("hit", "${subject}")) === 1) {
+      if ((await ${hitCall(`"${subject}"`)}) === 1) {
         // Runs out of time, so the step is tried again.
         await new Promise((resolve) => setTimeout(resolve, 3000));
       }
@@ -590,6 +605,30 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
     );
   });
 
+  it("join its lineage from an account whose sign-in name isn't the address it sends from", async () => {
+    const admin = await personApi("admin");
+    // Its mailbox named by its UPN, as Graph allows; Graph sends from its
+    // primary address, the envelope sender its mail arrives from.
+    const looping = await loopApp(admin, "direct", { aliased: true });
+    const subject = `Ping ${crypto.randomUUID()}`;
+
+    const rejected = await followHops(admin, looping, subject, 1);
+    await runsEnded(admin, looping.app, 2);
+
+    expect({
+      senders: [looping.mailbox, looping.sender],
+      rejected,
+      places: await placesOf(looping.app),
+    }).toStrictEqual({
+      senders: [
+        looping.sender.replace("@acme.test", "@acme.onmicrosoft.test"),
+        looping.sender,
+      ],
+      rejected: [undefined, undefined],
+      places: ["root", "child"],
+    });
+  });
+
   it("stop at its nesting limit", async () => {
     await withQuotas(
       { ...configuredLimits, workflowNestingLevels: 2 },
@@ -635,6 +674,8 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
     }).toStrictEqual({ status: "completed", sent: [[true]] });
   });
 
+  // The v1 App server's: it goes with the server (GRA-645); the
+  // connector resource's sends below are the sealed functions'.
   it("join its lineage when it sends through its App's server code", async () => {
     const admin = await personApi("admin");
     const looping = await loopApp(admin, "app");
@@ -724,7 +765,7 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
 
 export default workflow("mailer", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("send", { description: "Send", sideEffect: true, input: { to: "${looping.address}", subject: "Hi" } }, async ({ idempotencyKey, input }) =>
-    JSON.parse((await env.MAIL.call("mail.send", input, { idempotencyKey })).output)
+    JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output)
   )
 );
 `,
@@ -908,7 +949,8 @@ export default workflowTests(definition, [{ name: "runs", mocks: { send: null },
     const admin = await personApi("admin");
     const local = `relay-${crypto.randomUUID().slice(0, 8)}`;
     const connection = await connectShared(admin);
-    const app = await appWith(admin, relayFiles(local, connection.mailbox));
+    const { id: app } = await admin.api.apps.create({ name: "Relay" });
+    await release(admin, app, relayFiles(local, connection.mailbox));
     const permissionId = await requestGranted(idp, admin, {
       subject: { type: "app", appId: app },
       object: { type: "connection", connectionId: connection.id },
@@ -929,6 +971,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { send: null },
         app,
         local,
         mailbox: connection.mailbox,
+        sender: connection.sender,
         address: `${local}@grasp.test`,
       },
       subject,

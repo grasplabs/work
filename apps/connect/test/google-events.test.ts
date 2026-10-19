@@ -122,6 +122,18 @@ const emptyOutbox = async () => {
   ).run();
 };
 
+/** Invoice `n`, received now, with `headers` added to its own. */
+const withHeaders = (n: number, headers: { name: string; value: string }[]) => {
+  const message = gmailInvoice(n, Date.now());
+  return {
+    ...message,
+    payload: {
+      ...message.payload,
+      headers: [...message.payload.headers, ...headers],
+    },
+  };
+};
+
 describe("Google Workspace connector events", () => {
   beforeEach(async () => {
     google = googleEventsFake();
@@ -200,6 +212,29 @@ describe("Google Workspace connector events", () => {
     ).toStrictEqual([
       ["connection.events.started", []],
       ["connection.events.read", [gmailId(4)]],
+    ]);
+  });
+
+  it("carry the stamp a message's header names, and no header that isn't one", async () => {
+    const gmail = await connected();
+    await sync([listener(gmail)]);
+    later();
+    const stamp = "c3".repeat(16);
+    google.receive(
+      gmail.address,
+      withHeaders(1, [{ name: "X-Grasp-Stamp", value: stamp }]),
+      withHeaders(2, [{ name: "x-grasp-stamp", value: `${stamp}\r\nBcc: x` }]),
+      withHeaders(3, [])
+    );
+    await sync([listener(gmail)]);
+    const outboxedEvents = await outboxed();
+
+    expect(
+      outboxedEvents.map((event) => [event.id, event.stamp ?? null])
+    ).toStrictEqual([
+      [gmailId(1), stamp],
+      [gmailId(2), null],
+      [gmailId(3), null],
     ]);
   });
 

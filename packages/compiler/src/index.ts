@@ -1,5 +1,5 @@
 /**
- * Screen compiler: builds an App's screens into ES modules and CSS, in a
+ * App compiler: builds an App's screens into ES modules and CSS, in a
  * Dynamic Worker of its own. The modules import each other and the kit's
  * modules by flat name (see kit.ts); a page maps those names to the code
  * with an import map.
@@ -18,16 +18,21 @@ import { version } from "#version";
 import { compilerAssets, kitModule } from "./kit.ts";
 import type { KitModules } from "./kit.ts";
 import type PackageBuilder from "./packages/worker.ts";
-import type ScreenCompiler from "./worker.ts";
+import type AppCompiler from "./worker.ts";
 
 export type { Diagnostic } from "./diagnostic.ts";
 export type { KitModules } from "./kit.ts";
 export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type {
   AppCodeBuild,
+  CompileTarget,
+  ComputeModulesBuild,
+  InspectTarget,
   OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
+  TargetBuilds,
+  TargetInspections,
   WorkflowBuild,
 } from "./worker.ts";
 export {
@@ -40,10 +45,12 @@ export {
   isUnderAppTests,
   strayTestFileMessage,
   strayTestFiles,
+  workflowBuildFiles,
 } from "./app-code.ts";
 export {
   appCodeLimitErrors,
   buildFiles,
+  computeModuleErrors,
   limitErrors,
   openWorkflowEntry,
   openWorkflowErrors,
@@ -52,7 +59,13 @@ export {
   workflowIdOf,
   workflowPaths,
 } from "./inputs.ts";
-export { appModuleName, kitModuleName, screenRuntime } from "./kit.ts";
+export {
+  appModuleName,
+  computePackagesFile,
+  kitModuleName,
+  packageModuleName,
+  screenRuntime,
+} from "./kit.ts";
 export { platformPeers, platformScope } from "./packages/platform.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";
@@ -72,7 +85,7 @@ const readCompilerFile = async (
   const contentType = response.headers.get("content-type") ?? "";
   if (!(response.ok && contentType.includes(type))) {
     throw new Error(
-      `The screen compiler's ${file} is not among the static assets: build the compiler into them (packages/compiler/build.ts).`
+      `The App compiler's ${file} is not among the static assets: build the compiler into them (packages/compiler/build.ts).`
     );
   }
   return await response.text();
@@ -89,7 +102,7 @@ const readCompilerBytes = async (
   const contentType = response.headers.get("content-type") ?? "";
   if (!(response.ok && contentType.includes(type))) {
     throw new Error(
-      `The screen compiler's ${file} is not among the static assets: build the compiler into them (packages/compiler/build.ts).`
+      `The App compiler's ${file} is not among the static assets: build the compiler into them (packages/compiler/build.ts).`
     );
   }
   return await response.arrayBuffer();
@@ -202,29 +215,29 @@ const compilerWorker = async (
  * as long as the process runs, so a name per build would keep one
  * compiler for every build ever made. Being shared, its limits are every
  * build's together: a stop at them may be another build's doing
- * (`loadScreenCompiler`).
+ * (`loadAppCompiler`).
  */
-export const startScreenCompiler = (
+export const startAppCompiler = (
   loader: WorkerLoader,
   assets: Fetcher
-): Service<ScreenCompiler> =>
+): Service<AppCompiler> =>
   loader
     .get(`compiler:${version}`, async () => await compilerWorker(assets))
-    .getEntrypoint<ScreenCompiler>();
+    .getEntrypoint<AppCompiler>();
 
 /**
  * The compiler in a fresh isolate of its own, for one build: what a stop
  * at its limits says is that build's alone, as it is in the shared one
  * only when nothing else compiled beside it.
  */
-export const loadScreenCompiler = async (
+export const loadAppCompiler = async (
   loader: WorkerLoader,
   assets: Fetcher
-): Promise<Service<ScreenCompiler>> =>
-  loader.load(await compilerWorker(assets)).getEntrypoint<ScreenCompiler>();
+): Promise<Service<AppCompiler>> =>
+  loader.load(await compilerWorker(assets)).getEntrypoint<AppCompiler>();
 
 /**
- * The screen compiler's or the package builder's code as bytes, for the
+ * The App compiler's or the package builder's code as bytes, for the
  * on-prem sandbox host, which loads it in a process of its own
  * (apps/core/src/platform-sandbox.ts): its modules, whether it needs
  * `nodejs_compat`, and the CPU time a call may use, as `isolateSettings`
@@ -279,14 +292,12 @@ const memoisedCode = async (
 };
 
 /**
- * The screen compiler's code, read from core's static assets once per
+ * The App compiler's code, read from core's static assets once per
  * isolate (`memoisedCode`): the sandbox host runs one call per process,
  * so nothing there stays warm. The kit goes as its JSON text, which core
  * never parses.
  */
-export const screenCompilerCode = async (
-  assets: Fetcher
-): Promise<PlatformCode> =>
+export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
   await memoisedCode(assets, `compiler:${version}`, async () => {
     const [source, kit] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
@@ -345,7 +356,7 @@ export const startPackageBuilder = async (
 
 /**
  * The package builder's code, for the on-prem sandbox host as
- * `screenCompilerCode` gives the compiler's: esbuild's WebAssembly goes
+ * `appCompilerCode` gives the compiler's: esbuild's WebAssembly goes
  * as its bytes, which the sandbox host compiles as it loads the isolate.
  */
 export const packageBuilderCode = async (

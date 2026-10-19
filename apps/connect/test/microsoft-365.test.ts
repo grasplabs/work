@@ -163,6 +163,16 @@ describe("the Microsoft 365 connector's scoping", () => {
   });
 });
 
+/** The `internetMessageHeaders` a sent mail or draft carried, or null. */
+const headersOf = (body: unknown): unknown => {
+  const message = z
+    .object({ message: z.record(z.string(), z.unknown()) })
+    .transform(({ message: sent }) => sent)
+    .or(z.record(z.string(), z.unknown()))
+    .parse(body);
+  return message.internetMessageHeaders ?? null;
+};
+
 describe("the Microsoft 365 connector's mail tools", () => {
   it("list a mailbox's messages, newest first, with the IDs they came from", async () => {
     const connection = await connected();
@@ -487,6 +497,41 @@ describe("the Microsoft 365 connector's mail tools", () => {
           saveToSentItems: true,
         },
       },
+    ]);
+  });
+
+  it("send and draft a workflow run's mail with its stamp as a header, which no call without one carries", async () => {
+    const connection = await connected();
+    const stamp = "5a".repeat(16);
+    const mail = {
+      mailbox: invoices,
+      subject: "Payment of invoice 2026-0041",
+      body: "Paid today.",
+      to: ["billing@northwind.example.org"],
+    };
+    await call(connection, "mail.send", mail, {
+      resource: invoices,
+      idempotencyKey: "run-7:send-stamped",
+      stamp,
+    });
+    await call(connection, "mail.createDraft", mail, {
+      resource: invoices,
+      idempotencyKey: "run-7:draft-stamped",
+      stamp,
+    });
+    await call(connection, "mail.send", mail, {
+      resource: invoices,
+      idempotencyKey: "run-7:send-plain",
+    });
+
+    expect(
+      requests()
+        .filter(({ method }) => method === "POST")
+        .map(({ body }) => headersOf(body))
+    ).toStrictEqual([
+      [{ name: "X-Grasp-Stamp", value: stamp }],
+      [{ name: "X-Grasp-Stamp", value: stamp }],
+      null,
     ]);
   });
 

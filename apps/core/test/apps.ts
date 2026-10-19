@@ -81,7 +81,11 @@ export const serverBuilt = async (
   version: number
 ): Promise<void> => {
   const id = appIdSchema.parse(app);
-  const build = await buildServer(env, await versionFiles(env, id, version));
+  const build = await buildServer(
+    env,
+    await versionFiles(env, id, version),
+    "app-test"
+  );
   if (!build.ok) {
     throw new Error(`Version ${version} of the App doesn't build`);
   }
@@ -120,38 +124,6 @@ export const reviewedOf = async (
   return { version: app?.currentVersion ?? null };
 };
 
-/**
- * Revokes, as `api`'s admin, the collection permissions of every other App
- * created from the built-in `blueprint` but `keep`: a collection's record
- * types are one App's (knowledge/record-types.ts), so a test that creates
- * a new copy of a built-in hands them to it, as an admin would, choosing
- * the one copy they want.
- */
-export const revokeOtherCopies = async (
-  api: Api,
-  blueprint: string,
-  keep: string
-): Promise<void> => {
-  const listed = await api.apps.list();
-  const others = new Set(
-    listed
-      .filter(({ id, blueprint: from }) => id !== keep && from === blueprint)
-      .map(({ id }) => id)
-  );
-  const permissions = await api.permissions.list();
-  for (const { id, subject, object, status } of permissions) {
-    if (
-      subject.type === "app" &&
-      others.has(subject.appId) &&
-      object.type === "collection" &&
-      status !== "revoked"
-    ) {
-      // oxlint-disable-next-line no-await-in-loop -- one revoke at a time
-      await api.permissions.revoke(id);
-    }
-  }
-};
-
 /** Grants the permission `id` as `api`'s admin, having reviewed it now. */
 export const grantReviewed = async (
   api: Api,
@@ -179,25 +151,27 @@ export const requestGranted = async (
 };
 
 /**
- * Core's database, with `first` run once, just before the first batch
- * after a statement that `writes` matches was prepared lands: another
- * writer getting there first.
+ * Core's database, with `first` run just before each of the first `times`
+ * batches after a statement that `writes` matches was prepared lands:
+ * another writer getting there first.
  */
 export const racingDb = (
   first: () => Promise<unknown>,
-  writes: RegExp
+  writes: RegExp,
+  times = 1
 ): D1Database => {
   const real = env.DB;
   let writing = false;
-  let raced = false;
+  let raced = 0;
   return {
     prepare: (query) => {
       writing ||= writes.test(query);
       return real.prepare(query);
     },
     batch: async <T>(statements: D1PreparedStatement[]) => {
-      if (writing && !raced) {
-        raced = true;
+      if (writing && raced < times) {
+        raced += 1;
+        writing = false;
         await first();
       }
       return await real.batch<T>(statements);

@@ -6,6 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./bounded-json": "./src/bounded-json.ts",
     "./duration": "./src/duration.ts",
     "./errors": "./src/errors.ts",
     "./evaluate": "./src/evaluate.ts",

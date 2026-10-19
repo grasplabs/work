@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { seedDependencyRequest } from "./dependency-request.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import { pileOf, toCard } from "./pile.ts";
 
 // The dashboard, from the nav: what waits on the person; the widget
@@ -45,10 +45,10 @@ const laterTests = tallyTests.replaceAll("tally", "later");
 const pageRead = { timeout: 20_000 };
 
 test("someone with nothing waiting sees no pile or activity, and a board with nothing on it yet", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("dashboard");
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Main" })
@@ -93,7 +93,7 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
 });
 
 test("a builder sees their workflows and domain on the board, and opens them in full", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("dashboardBoard");
   const name = `Invoices ${crypto.randomUUID()}`;
@@ -121,7 +121,7 @@ test("a builder sees their workflows and domain on the board, and opens them in 
     core[Symbol.dispose]();
   }
 
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto("/dashboard");
 
   // Where the workflows stand: a dot for each, in its state's column.
@@ -198,7 +198,7 @@ const boardTitles = (page: Page) =>
   });
 
 test("a person takes a widget off, adds it back and moves it, kept over a reload, and puts the board back as it began", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("dashboardLayout");
   const { core, api } = apiOf(user);
@@ -206,7 +206,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     const layout = await api.dashboard.layout();
     return layout?.widgets;
   };
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   await page.goto("/dashboard");
   const titles = boardTitles(page);
   const reset = page.getByRole("button", { name: "Back to how it began" });
@@ -303,10 +303,10 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
 });
 
 test("an admin sees the latest activity, with the way to the audit trail", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("dashboard");
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   await page.goto("/dashboard");
 
   const activity = page.getByRole("region", { name: "Activity" });
@@ -321,7 +321,7 @@ test("an admin sees the latest activity, with the way to the audit trail", async
 });
 
 test("someone given the permission approves the packages proposed for an engine, and an admin without it isn't asked", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, builder, approver } = peopleIn("dependencyApproval");
   const asAdmin = apiOf(admin);
@@ -389,7 +389,7 @@ test("someone given the permission approves the packages proposed for an engine,
   });
 
   // An admin manages who approves, and is asked nothing without it.
-  const adminPage = await pageOf(browser, admin);
+  const adminPage = await pageOf(admin);
   await adminPage.goto("/dashboard");
   await expect(
     adminPage.getByRole("heading", { level: 1, name: "Dashboard" })
@@ -398,7 +398,7 @@ test("someone given the permission approves the packages proposed for an engine,
     adminPage.getByRole("article", { name: "Packages for Totals" })
   ).toHaveCount(0);
 
-  const page = await pageOf(browser, approver);
+  const page = await pageOf(approver);
   await page.goto("/dashboard");
   let card = await toCard(page, "Packages for Totals");
   // Skipped, it goes to the back of the pile, and is still there to do.
@@ -454,7 +454,7 @@ test("someone given the permission approves the packages proposed for an engine,
   ).toHaveCount(1);
   await expect
     .poll(async () => {
-      const { approved } = await asBuilder.api.dependencies.status(app);
+      const { approved } = await asBuilder.api.dependencies.status({ app });
       return approved?.id;
     })
     .toBe(request.id);

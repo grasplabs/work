@@ -1,34 +1,42 @@
 import { connectErrors, wasTaken } from "@grasp-os/shared/connect";
 import type {
+  ConnectionPerson,
   ConnectResult,
   PendingAction,
   PendingActionsApi,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
-import {
-  authoritySchema,
-  permissionErrors,
+import { authoritySchema } from "@grasp-os/shared/permissions";
+import type {
+  Authority,
+  CodeSubject,
+  WorkContext,
 } from "@grasp-os/shared/permissions";
-import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { signedCall } from "./bindings.ts";
 import { personOf } from "./connections.ts";
-import { workflowRuns } from "./db/core/schema.ts";
+import { workflowResourceRuns, workflowRuns } from "./db/core/schema.ts";
+import { reauthorizedCapability, refusedForBinding } from "./decided-calls.ts";
 import { workspace } from "./durable-objects.ts";
 import { isProviderUnreachable } from "./resource-adapter.ts";
-import { requireHeldBinding } from "./resource-bindings.ts";
 import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { loadWorkflowBuild } from "./workflow-builds.ts";
+import {
+  callingRunOf,
+  requireCallAuthority,
+} from "./workflows/resource-authority.ts";
+import type { CallingRun } from "./workflows/resource-authority.ts";
+import { wakingHeld } from "./workflows/wakes.ts";
 import type { HeldOutcome } from "./workspace.ts";
 
 // Side effects that connect holds for their person (threat model R7, R12):
@@ -53,11 +61,27 @@ const endedStatuses: ReadonlySet<string> = new Set([
 
 /**
  * Whether the workflow run a held action came from has ended (or isn't
- * the App's): its step's key names the run, whichever of its App's code
- * made the call. A paused run hasn't: it may be resumed.
+ * the App's, or the workflow's): its step's key names the run, whichever
+ * of its App's code made the call. A paused run hasn't: it may be resumed.
  */
 const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
   const runId = runOfStepKey(held.idempotencyKey);
+  if (runId !== undefined && held.subject.type === "workflow") {
+    // A run of an independent workflow (a restricted one's call).
+    const run = await drizzle(env.DB)
+      .select({
+        workflowId: workflowResourceRuns.workflowResourceId,
+        status: workflowResourceRuns.status,
+      })
+      .from(workflowResourceRuns)
+      .where(eq(workflowResourceRuns.id, runId))
+      .get();
+    return (
+      run === undefined ||
+      run.workflowId !== held.subject.workflowId ||
+      endedStatuses.has(run.status)
+    );
+  }
   if (runId === undefined || held.subject.type !== "app") {
     return true;
   }
@@ -72,6 +96,110 @@ const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
     endedStatuses.has(run.status)
   );
 };
+
+/** How a task's step is named, and so its call's key (resource-host.ts). */
+const taskStepPrefix = "task:";
+
+/**
+ * The alias of the binding task `step` (a step's name, `task:<id>`) of
+ * run `run` calls, as its sealed build has it: only a connector call's.
+ */
+const heldAliasOf = async (
+  env: Env,
+  run: CallingRun,
+  step: string
+): Promise<string | undefined> => {
+  if (!step.startsWith(taskStepPrefix)) {
+    return undefined;
+  }
+  const taskId = step.slice(taskStepPrefix.length);
+  const pinned = await drizzle(env.DB)
+    .select({ manifestHash: workflowResourceRuns.manifestHash })
+    .from(workflowResourceRuns)
+    .where(eq(workflowResourceRuns.id, run.runId))
+    .get();
+  if (pinned === undefined) {
+    return undefined;
+  }
+  const build = await loadWorkflowBuild(
+    env,
+    run.workflowId,
+    run.version,
+    pinned.manifestHash
+  );
+  const task = build.tasks.find(({ id }) => id === taskId);
+  return task?.kind === "call" && task.call.name === "grasp.connector"
+    ? task.call.binding
+    : undefined;
+};
+
+/**
+ * Refuses (`workflow.call_denied`) a decision on a connector call a run
+ * of an independent workflow held for its person (pending-actions.ts)
+ * unless that run is still going, acts for `person`, its call's key names
+ * it and the task that made it, and the binding that task's call goes
+ * through, as the run's sealed build names it, is the call's permission's
+ * and allowed now (`requireCallAuthority`): confirming sends the call, so
+ * it is decided as the call itself would be, through its own alias only,
+ * never another that shares the permission.
+ */
+const requireHeldRunCallAllowed = async (
+  env: Env,
+  held: {
+    readonly subject: CodeSubject;
+    readonly context: WorkContext;
+    readonly idempotencyKey: string;
+    readonly permissionId: string;
+  },
+  person: string
+): Promise<void> => {
+  const { subject, context, idempotencyKey } = held;
+  const run =
+    subject.type === "workflow" &&
+    context.type === "workflowRun" &&
+    context.workflowId === subject.workflowId &&
+    runOfStepKey(idempotencyKey) === context.runId
+      ? await callingRunOf(env, subject.workflowId, context.runId)
+      : undefined;
+  const alias =
+    run?.principal === person
+      ? await heldAliasOf(
+          env,
+          run,
+          idempotencyKey.slice(idempotencyKey.indexOf(":") + 1)
+        )
+      : undefined;
+  const binding = alias === undefined ? undefined : run?.bindings.get(alias);
+  if (
+    run === undefined ||
+    binding?.kind !== "connector" ||
+    !("permissionId" in binding.target) ||
+    binding.target.permissionId !== held.permissionId
+  ) {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  await requireCallAuthority(env, run, binding);
+};
+
+/** Whether connect still holds the held action `id` for `person`. */
+const stillHeld = async (
+  env: Env,
+  person: ConnectionPerson,
+  id: string
+): Promise<boolean> =>
+  (await env.CONNECT.pendingAction({ person, id })) !== null;
+
+/**
+ * What a held action's run waits on it by (`wakingHeld`): none but a
+ * workflow run's, of an App.
+ */
+const heldWaitOf = (held: PendingAction) => ({
+  appId:
+    held.mode === "workflow" && held.subject.type === "app"
+      ? held.subject.appId
+      : null,
+  idempotencyKey: held.idempotencyKey,
+});
 
 /**
  * Tells the chat a held action came from how it ended, for its agent's
@@ -102,88 +230,34 @@ const tellChat = async (
   }
 };
 
-/**
- * Runs the held action `id` for the signed-in person it waits for, with
- * the input they were shown (`inputHash`): its answer, as the call would
- * have had it. Refused like any call once the App's or agent's permission
- * is gone, its context is restricted, or the person has left; and by
- * connect for anyone the action doesn't wait for, Grasp staff included,
- * which it records. A chat's agent is told how it ended (`tellChat`).
- */
-export const confirmPendingAction = async (
+/** `confirmPendingAction`, for the held action connect found (`held`). */
+const confirmHeld = async (
   env: Env,
   identity: Identity,
-  id: unknown,
-  inputHash: unknown
+  held: PendingAction,
+  request: { person: ConnectionPerson; id: unknown; inputHash: unknown }
 ): Promise<ConnectResult> => {
-  const person = await personOf(env, identity);
-  const request = { person, id, inputHash };
-  // Connect finds none for staff, and only the person's own.
-  const parsedId = z.uuid().safeParse(id);
-  const held = parsedId.success
-    ? await env.CONNECT.pendingAction({ person, id: parsedId.data })
-    : null;
-  if (held === null) {
-    // Connect refuses it, and records who tried: nothing confirms it.
-    return await env.CONNECT.confirmAction({ ...request, capability: null });
-  }
-  // A run that has ended can't take the answer: its held action goes.
-  // Accepted: a run cancelled between this check and connect taking the
-  // action still gets it run, as the person confirmed exactly that action,
-  // and the window is one request long.
-  if (held.mode === "workflow" && (await runEnded(env, held))) {
-    await env.CONNECT.dropForEndedRun({ person, id: held.id });
-    throw connectErrors.create("connect.run_ended");
-  }
+  const { person } = request;
   let capability: string;
-  // Set while the held call's binding is being checked: refused there, it
-  // could never be confirmed, so it leaves the person's list.
-  let staleBinding = false;
   try {
-    // An App's action names the version whose code asked for it, or no
-    // version was approved for it: refused, as `authorize` would.
-    if (held.subject.type === "app" && held.appVersion === null) {
-      throw permissionErrors.create("permission.denied", {
-        action: held.action,
-      });
-    }
-    // A call an App's action made through a resource binding runs only if
-    // that binding would still serve it now, as a live request would.
     // A binding connect can no longer read is refused, never skipped.
-    if (held.subject.type === "app" && held.binding !== null) {
-      staleBinding = true;
-      if (held.binding === "unreadable") {
-        throw operationErrors.create("resource.unavailable");
-      }
-      await requireHeldBinding(
-        env,
-        held.subject.appId,
-        held.binding,
-        held.action
-      );
-      staleBinding = false;
+    if (held.binding === "unreadable") {
+      throw operationErrors.create("resource.unavailable");
     }
-    const authority = authoritySchema.parse({
-      subject: held.subject,
-      onBehalfOf: identity.userId,
-      mode: held.mode,
-      ...(held.appVersion === null ? {} : { appVersion: held.appVersion }),
-    });
-    ({ capability } = await signedCall(
+    // A run of an independent workflow's call: only while the run's own
+    // authority for it holds, as its next call would need.
+    if (held.subject.type === "workflow") {
+      await requireHeldRunCallAllowed(env, held, identity.userId);
+    }
+    capability = await reauthorizedCapability(
       env,
+      identity,
       {
-        authority,
-        context: held.context,
-        connection: {
-          type: "connection",
-          connectionId: connectionIdSchema.parse(held.connectionId),
-          resource: held.resource ?? undefined,
-        },
-        permissionId: permissionIdSchema.parse(held.permissionId),
+        ...held,
+        binding: held.binding ?? undefined,
       },
-      { action: held.action, idempotencyKey: held.idempotencyKey },
-      held.id
-    ));
+      { kind: "confirm", pendingActionId: held.id }
+    );
   } catch (error) {
     // Refused here (the permission is gone, the person has left, the
     // context is invalid): recorded as connect records its own refusals,
@@ -200,6 +274,8 @@ export const confirmPendingAction = async (
     // left free, so the same call made again is decided afresh. One whose
     // provider couldn't be reached to say isn't known to be stale: it
     // keeps waiting, for the person to confirm once it can be checked.
+    const staleBinding =
+      held.binding === "unreadable" || refusedForBinding(error);
     if (staleBinding && !isProviderUnreachable(error)) {
       await env.CONNECT.dropStaleBinding({ person, id: held.id }).catch(
         (dropError: unknown) => {
@@ -234,6 +310,51 @@ export const confirmPendingAction = async (
 };
 
 /**
+ * Runs the held action `id` for the signed-in person it waits for, with
+ * the input they were shown (`inputHash`): its answer, as the call would
+ * have had it. Refused like any call once the App's or agent's permission
+ * is gone, its context is restricted, or the person has left; and by
+ * connect for anyone the action doesn't wait for, Grasp staff included,
+ * which it records. A chat's agent is told how it ended (`tellChat`).
+ */
+export const confirmPendingAction = async (
+  env: Env,
+  identity: Identity,
+  id: unknown,
+  inputHash: unknown
+): Promise<ConnectResult> => {
+  const person = await personOf(env, identity);
+  const request = { person, id, inputHash };
+  // Connect finds none for staff, and only the person's own.
+  const parsedId = z.uuid().safeParse(id);
+  const held = parsedId.success
+    ? await env.CONNECT.pendingAction({ person, id: parsedId.data })
+    : null;
+  if (held === null) {
+    // Connect refuses it, and records who tried: nothing confirms it,
+    // whatever connect answers.
+    await env.CONNECT.confirmAction({ ...request, capability: null });
+    throw connectErrors.create("connect.pending_not_found");
+  }
+  // A run that has ended can't take the answer: its held action goes.
+  // Accepted: a run cancelled between this check and connect taking the
+  // action still gets it run, as the person confirmed exactly that action,
+  // and the window is one request long.
+  if (held.mode === "workflow" && (await runEnded(env, held))) {
+    await env.CONNECT.dropForEndedRun({ person, id: held.id });
+    throw connectErrors.create("connect.run_ended");
+  }
+  // Its run's step waits on it: woken once it no longer waits, whatever
+  // happened (workflows/wakes.ts).
+  return await wakingHeld(
+    env,
+    heldWaitOf(held),
+    async () => await confirmHeld(env, identity, held, request),
+    async () => await stillHeld(env, person, held.id)
+  );
+};
+
+/**
  * Drops the held action `id` for the signed-in person it waits for: it
  * never runs. Connect refuses anyone the action doesn't wait for, and
  * records it. A chat's agent is told (`tellChat`).
@@ -248,7 +369,16 @@ const declinePendingAction = async (
   const held = z.uuid().safeParse(id).success
     ? await env.CONNECT.pendingAction({ person, id })
     : null;
-  await env.CONNECT.declineAction({ person, id });
+  await (held === null
+    ? env.CONNECT.declineAction({ person, id })
+    : wakingHeld(
+        env,
+        heldWaitOf(held),
+        async () => {
+          await env.CONNECT.declineAction({ person, id });
+        },
+        async () => await stillHeld(env, person, held.id)
+      ));
   if (held !== null) {
     await tellChat(env, held, identity.userId, "declined");
   }

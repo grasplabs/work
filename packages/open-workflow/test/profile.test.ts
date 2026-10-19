@@ -383,6 +383,74 @@ describe("the document and its Grasp metadata", () => {
     expect(result.ok ? result.workflow.bindings.size : undefined).toBe(0);
   });
 
+  it("checks the operations of every binding an action reaches, however it is reached", async () => {
+    // A task calls the workflow's own action `act`, declared after
+    // `loadNote`, which it uses; `loadNote` uses `jobStatus` with an
+    // operation its contract doesn't name.
+    const definition = probe([
+      {
+        act: {
+          call: "grasp.operation",
+          with: { binding: "act", arguments: {} },
+        },
+      },
+      done,
+    ]);
+    const { bindings } = definition.document.metadata.grasp;
+    const result = await validateWorkflow(
+      JSON.stringify({
+        ...definition,
+        document: {
+          ...definition.document,
+          metadata: {
+            grasp: {
+              ...definition.document.metadata.grasp,
+              bindings: {
+                ...bindings,
+                act: { kind: "operation", contract: "local:code/act.ts#act" },
+              },
+            },
+          },
+        },
+      }),
+      {
+        ...options,
+        catalog: (key) => {
+          const contract = options.catalog(key);
+          return key === "notes.get" && contract !== undefined
+            ? {
+                ...contract,
+                uses: [
+                  {
+                    alias: "jobStatus",
+                    kind: "connector",
+                    operations: ["purge"],
+                  },
+                ],
+              }
+            : contract;
+        },
+        modules: (key) =>
+          key === "local:code/act.ts#act"
+            ? {
+                kind: "operation",
+                input: JSON.stringify(v.object({}).descriptor),
+                output: JSON.stringify(v.object({}).descriptor),
+                uses: [{ alias: "loadNote", kind: "operation" }],
+              }
+            : options.modules?.(key),
+      }
+    );
+    expect(
+      result.ok
+        ? []
+        : result.diagnostics.map(({ code, pointer }) => ({ code, pointer }))
+    ).toContainEqual({
+      code: "binding.unknown_operation",
+      pointer: "/document/metadata/grasp/bindings/loadNote",
+    });
+  });
+
   it("resolves local: keys only in the module manifest, and others only in the catalog", async () => {
     const shadow = withGrasp({
       bindings: {
@@ -486,6 +554,13 @@ describe("tasks and calls", () => {
       "a task with two kinds",
       probe([{ both: { set: { a: 1 }, wait: "PT1S" } }]),
       { code: "task.ambiguous_kind", pointer: "/do/0/both", taskId: "both" },
+    ],
+    [
+      "a reusable timeout that names another",
+      probe([{ quick: { set: { a: 1 }, timeout: "alias" } }], {
+        timeouts: { short: { after: "PT1S" }, alias: "short" },
+      }),
+      { code: "profile.invalid_value", pointer: "/use/timeouts/alias" },
     ],
     [
       "a literal wait longer than the engine sleeps",

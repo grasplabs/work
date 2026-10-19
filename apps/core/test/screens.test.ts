@@ -1,9 +1,9 @@
 import { kitModules } from "@grasp-os/compiler";
 import { compatibilityDate } from "@grasp-os/shared/runtime";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
-import { buildScreens } from "../src/screens.ts";
+import { buildKeepMs, buildScreens, sweepBuilds } from "../src/screens.ts";
 
 /** A sample App: two screens on the kit, sharing one of its own components. */
 const sampleApp: Record<string, string> = {
@@ -119,10 +119,18 @@ const noBuilds: WorkerLoader = {
   },
 };
 
+/** Runs the cron's builds sweep at `at` until it has read every kind. */
+const sweptAt = async (at: number): Promise<void> => {
+  for (let run = 0; run < 24; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another, as the cron runs
+    await sweepBuilds(env, new Date(at));
+  }
+};
+
 // Every build starts an isolate with the compiler in it.
 describe("screen builds", { timeout: 60_000 }, () => {
   it("builds every screen into modules that run on the kit's", async () => {
-    const built = await buildScreens(env, sampleApp);
+    const built = await buildScreens(env, sampleApp, "app-test");
     if (!built.ok) {
       throw new Error(JSON.stringify(built.diagnostics, null, 2));
     }
@@ -150,7 +158,7 @@ describe("screen builds", { timeout: 60_000 }, () => {
   });
 
   it("names only the kit modules the App needs", async () => {
-    const built = await buildScreens(env, sampleApp);
+    const built = await buildScreens(env, sampleApp, "app-test");
 
     expect(built.ok && kitModulesOf(built)).toContain(
       "lucide-react~icons~inbox.js"
@@ -161,7 +169,7 @@ describe("screen builds", { timeout: 60_000 }, () => {
   });
 
   it("says what each screen loads: what it imports, not the App's other screens", async () => {
-    const built = await buildScreens(env, sampleApp);
+    const built = await buildScreens(env, sampleApp, "app-test");
     if (!built.ok) {
       throw new Error(JSON.stringify(built.diagnostics, null, 2));
     }
@@ -223,15 +231,19 @@ describe("screen builds", { timeout: 60_000 }, () => {
     const specifiers = components.map((name) =>
       name.slice(0, -".js".length).replaceAll("~", "/")
     );
-    const built = await buildScreens(env, {
-      ...screen("small"),
-      "screens/all.tsx": `${specifiers.map((specifier, index) => `import * as c${index} from "${specifier}";`).join("\n")}
+    const built = await buildScreens(
+      env,
+      {
+        ...screen("small"),
+        "screens/all.tsx": `${specifiers.map((specifier, index) => `import * as c${index} from "${specifier}";`).join("\n")}
 
 export default function All() {
   return <p>{[${specifiers.map((_, index) => `c${index}`).join(", ")}].length}</p>;
 }
 `,
-    });
+      },
+      "app-test"
+    );
     if (!built.ok) {
       throw new Error(JSON.stringify(built.diagnostics, null, 2));
     }
@@ -258,9 +270,11 @@ export default function All() {
   it("has the classes of the kit modules an App loads in its CSS, not the catalog's", async () => {
     // The sidebar's width, a class only the sidebar has.
     const sidebarClass = "w-\\(--sidebar-width\\)";
-    const without = await buildScreens(env, sampleApp);
-    const withSidebar = await buildScreens(env, {
-      "screens/desk.tsx": `import { Sidebar, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+    const without = await buildScreens(env, sampleApp, "app-test");
+    const withSidebar = await buildScreens(
+      env,
+      {
+        "screens/desk.tsx": `import { Sidebar, SidebarProvider } from "@grasp-os/ui/components/sidebar";
 
 export default function Desk() {
   return (
@@ -270,7 +284,9 @@ export default function Desk() {
   );
 }
 `,
-    });
+      },
+      "app-test"
+    );
 
     expect(without.ok && without.css).not.toContain(sidebarClass);
     expect(withSidebar.ok && withSidebar.css).toContain(sidebarClass);
@@ -287,15 +303,19 @@ export default function Desk() {
   });
 
   it("runs screens through the React Compiler", async () => {
-    const built = await buildScreens(env, {
-      "screens/counter.tsx": `import { useState } from "react";
+    const built = await buildScreens(
+      env,
+      {
+        "screens/counter.tsx": `import { useState } from "react";
 
 export default function Counter() {
   const [count, setCount] = useState(0);
   return <button onClick={() => setCount(count + 1)}>{count}</button>;
 }
 `,
-    });
+      },
+      "app-test"
+    );
 
     expect(built.ok && built.modules["app~screens~counter.js"]).toContain(
       '"react~compiler-runtime.js"'
@@ -303,8 +323,10 @@ export default function Counter() {
   });
 
   it("refuses imports from outside the kit, saying where", async () => {
-    const built = await buildScreens(env, {
-      "screens/desk.tsx": `import leftPad from "left-pad";
+    const built = await buildScreens(
+      env,
+      {
+        "screens/desk.tsx": `import leftPad from "left-pad";
 import { Dialog } from "@base-ui/react/dialog";
 import { Nope } from "@grasp-os/ui/components/nope";
 import { secret } from "../../outside";
@@ -318,7 +340,9 @@ export default function Desk() {
   return <p>{leftPad(Dialog, Nope, secret, remote, InboxIcon, NotAnIcon, icons)}</p>;
 }
 `,
-    });
+      },
+      "app-test"
+    );
 
     expect(built.ok).toBeFalsy();
     expect(
@@ -360,17 +384,26 @@ export default function Desk() {
       },
       load: (code) => env.LOADER.load(code),
     };
-    const built = await buildScreens({ ...env, LOADER: counting }, files);
+    const built = await buildScreens(
+      { ...env, LOADER: counting },
+      files,
+      "app-test"
+    );
     expect({ ok: built.ok, started }).toStrictEqual({ ok: true, started: 1 });
 
     // A build is its files': whichever App or version they come from, the
     // same files, next to any the build doesn't read, are built already.
-    const cached = await buildScreens({ ...env, LOADER: noBuilds }, files);
+    const cached = await buildScreens(
+      { ...env, LOADER: noBuilds },
+      files,
+      "app-test"
+    );
     expect(cached).toStrictEqual(built);
     await expect(
       buildScreens(
         { ...env, LOADER: noBuilds },
-        { ...files, "app/server.ts": "export class App {}\n" }
+        { ...files, "operations/notes.ts": "export {};\n" },
+        "app-test"
       )
     ).resolves.toStrictEqual(built);
 
@@ -378,25 +411,104 @@ export default function Desk() {
     await expect(
       buildScreens(
         { ...env, LOADER: noBuilds },
-        { ...files, "components/extra.ts": "export {};\n" }
+        { ...files, "components/extra.ts": "export {};\n" },
+        "app-test"
       )
     ).rejects.toThrow("Built again");
   });
 
+  it("keeps a cached build while it is used, and builds one the sweep took again, the same", async () => {
+    const files = screen(`kept ${crypto.randomUUID()}`);
+    const built = await buildScreens(env, files, "app-test");
+    const fromCache = async (at: number, failWrites = false) => {
+      // R2, as core writes to it, counting what is written, or failing it.
+      let writes = 0;
+      const counted = {
+        ...env,
+        LOADER: noBuilds,
+        FILES: {
+          get: env.FILES.get.bind(env.FILES),
+          put: async (...args: Parameters<R2Bucket["put"]>) => {
+            writes += 1;
+            if (failWrites) {
+              throw new Error("R2 is out");
+            }
+            return await env.FILES.put(...args);
+          },
+        },
+      };
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(at);
+      try {
+        const served = await buildScreens(counted, files, "app-test");
+        return { served, writes };
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    // Served a day on, it stays as it is; past half its time, it is
+    // written again as used then, so a build in use never reaches the
+    // sweep's limit.
+    const refreshed = now + buildKeepMs / 2 + day;
+    const soon = await fromCache(now + day);
+    // A refresh that fails still serves the build.
+    const unwritten = await fromCache(refreshed, true);
+    const later = await fromCache(refreshed);
+    // An object of another kind of cache, which this sweep leaves alone.
+    await env.FILES.put("package-builds/kept.json", "{}");
+    // Past its first use's time, but not its last's: kept.
+    await sweptAt(now + buildKeepMs + day);
+    const kept = await buildScreens(
+      { ...env, LOADER: noBuilds },
+      files,
+      "app-test"
+    );
+    // Past its last use's time: gone.
+    await sweptAt(refreshed + buildKeepMs + day);
+    const swept = await buildScreens(
+      { ...env, LOADER: noBuilds },
+      files,
+      "app-test"
+    ).then(
+      () => "served",
+      (error: unknown) => (error instanceof Error ? error.message : "")
+    );
+    const rebuilt = await buildScreens(env, files, "app-test");
+    expect({
+      soon,
+      unwritten,
+      later,
+      kept,
+      swept,
+      rebuilt,
+      other: (await env.FILES.head("package-builds/kept.json")) !== null,
+    }).toStrictEqual({
+      soon: { served: built, writes: 0 },
+      unwritten: { served: built, writes: 1 },
+      later: { served: built, writes: 1 },
+      kept: built,
+      swept: "Built again",
+      rebuilt: built,
+      other: true,
+    });
+  });
+
   it("serves no build, not even a cached one, where nothing bounds the compiler", async () => {
     const files = screen(`unbounded ${crypto.randomUUID()}`);
-    const built = await buildScreens(env, files);
+    const built = await buildScreens(env, files, "app-test");
     expect(built.ok).toBeTruthy();
 
     // On plain workerd with no sandbox and no opt-in (src/screens.ts).
     await expect(
-      buildScreens({ ...env, SANDBOX_IN_PROCESS: undefined }, files)
+      buildScreens({ ...env, SANDBOX_IN_PROCESS: undefined }, files, "app-test")
     ).rejects.toThrow("No sandbox bounds App code here");
   });
 
   it("builds other files on their own", async () => {
-    const first = await buildScreens(env, screen("first"));
-    const second = await buildScreens(env, screen("second"));
+    const first = await buildScreens(env, screen("first"), "app-test");
+    const second = await buildScreens(env, screen("second"), "app-test");
 
     expect(first.ok && first.modules["app~screens~desk.js"]).toContain("first");
     expect(second.ok && second.modules["app~screens~desk.js"]).toContain(

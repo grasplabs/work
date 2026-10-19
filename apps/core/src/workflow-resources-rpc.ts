@@ -1,11 +1,14 @@
+import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
 import type {
   AppWorkflowBinding,
   CatalogContractEntry,
   WorkflowBindingApproval,
+  WorkflowDraft,
   WorkflowMember,
   WorkflowParams,
   WorkflowResource,
   WorkflowResourcesApi,
+  WorkflowResourceRun,
   WorkflowResourceVersion,
   WorkflowStart,
   WorkflowVersionSource,
@@ -27,6 +30,11 @@ import {
   catalogContracts,
   publishCatalogContract,
 } from "./workflow-catalog.ts";
+import {
+  editWorkflowDraft,
+  publishWorkflowDraft,
+  workflowDraft,
+} from "./workflow-drafts.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
 import {
   createWorkflowResource,
@@ -42,6 +50,12 @@ import {
   workflowVersions,
 } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
+import { resourceRunTrace } from "./workflows/resource-run-trace.ts";
+import {
+  resourceRunFor,
+  terminateResourceRun,
+} from "./workflows/resource-runs.ts";
+import { sealPackages } from "./workflows/sealed-packages.ts";
 
 // Independent workflows over `/rpc` (workflow-resources.ts, where who may
 // do what is decided).
@@ -85,7 +99,31 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) =>
-        await publishWorkflowVersion(this.#env, person, id, input)
+        await publishWorkflowVersion(this.#env, person, id, input, sealPackages)
+    );
+  }
+
+  async draft(id: string): Promise<WorkflowDraft> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowDraft(this.#env, person, id)
+    );
+  }
+
+  async editDraft(id: string, input: unknown): Promise<WorkflowDraft> {
+    return await withPerson(
+      this.#check,
+      async (person) => await editWorkflowDraft(this.#env, person, id, input)
+    );
+  }
+
+  async publishDraft(
+    id: string,
+    input: unknown
+  ): Promise<WorkflowResourceVersion> {
+    return await withPerson(
+      this.#check,
+      async (person) => await publishWorkflowDraft(this.#env, person, id, input)
     );
   }
 
@@ -134,6 +172,27 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) =>
         await startWorkflow(this.#env, { type: "person", person }, id, input)
+    );
+  }
+
+  async run(id: string, runId: string): Promise<WorkflowResourceRun> {
+    return await withPerson(
+      this.#check,
+      async (person) => await resourceRunFor(this.#env, person, id, runId)
+    );
+  }
+
+  async runTrace(id: string, runId: string): Promise<WorkflowRunTrace> {
+    return await withPerson(
+      this.#check,
+      async (person) => await resourceRunTrace(this.#env, person, id, runId)
+    );
+  }
+
+  async terminateRun(id: string, runId: string): Promise<WorkflowResourceRun> {
+    return await withPerson(
+      this.#check,
+      async (person) => await terminateResourceRun(this.#env, person, id, runId)
     );
   }
 

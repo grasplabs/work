@@ -33,6 +33,7 @@ import type {
   StartConnection,
   StartToolkitConnection,
   UnknownOutcome,
+  UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
@@ -53,6 +54,7 @@ import {
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
 import { connectorContract } from "./contracts.ts";
+import { requireDecision } from "./decisions.ts";
 import {
   ackConnectorEvents,
   syncEventSources,
@@ -71,6 +73,7 @@ import {
   startConnection,
 } from "./oauth.ts";
 import {
+  listAllUnknownOutcomes,
   listUnknownOutcomes,
   refuseResolution,
   resolveOutcome,
@@ -81,6 +84,7 @@ import {
   anyPending,
   auditRefusedDecision,
   callOf,
+  decidedCallOf,
   dropForEndedRun,
   dropForBinding,
   dropForEndedRuns,
@@ -389,11 +393,7 @@ export default class Connect
     let read: Awaited<ReturnType<typeof heldOutcome>>;
     try {
       claims = await verifyCapability(signingKeys(this.env), capability, call);
-      if (claims.confirms !== undefined || claims.resolves !== undefined) {
-        throw capabilityErrors.create("capability.invalid", {
-          reason: "scope",
-        });
-      }
+      requireDecision(claims);
       read = await heldOutcome(this.env, claims);
     } catch (error) {
       const reason = codeOf(error);
@@ -456,12 +456,21 @@ export default class Connect
   }
 
   // Calls of unknown outcome (src/outcomes.ts). Core names the person from
-  // their session; only they see and resolve what acted for them.
+  // their session; only they see and resolve what acted for them. An
+  // organization's own admins list everyone's, without what was sent.
 
   async listUnknownOutcomes(
-    person: ConnectionPerson
+    person: ConnectionPerson,
+    before?: string
   ): Promise<UnknownOutcome[]> {
-    return await listUnknownOutcomes(this.env, person);
+    return await listUnknownOutcomes(this.env, person, before);
+  }
+
+  async listAllUnknownOutcomes(
+    admin: ConnectionPerson,
+    before?: string
+  ): Promise<UnknownOutcomeListing[]> {
+    return await listAllUnknownOutcomes(this.env, admin, before);
   }
 
   async unknownOutcome(request: unknown): Promise<UnknownOutcome | null> {
@@ -518,24 +527,11 @@ export default class Connect
     let claims: CapabilityClaims | undefined;
     try {
       claims = await verifyCapability(signingKeys(this.env), capability, call);
-      const { authority } = claims;
-      const subjectId =
-        authority.subject.type === "app"
-          ? authority.subject.appId
-          : authority.subject.agentId;
-      // Not the App version: core signs the one the held action recorded.
-      const forThisAction =
-        claims.confirms === held.id &&
-        claims.resolves === undefined &&
-        authority.mode === held.mode &&
-        authority.onBehalfOf === person.userId &&
-        authority.subject.type === held.subjectType &&
-        subjectId === held.subjectId;
-      if (!forThisAction) {
-        throw capabilityErrors.create("capability.invalid", {
-          reason: "scope",
-        });
-      }
+      requireDecision(claims, {
+        decision: { kind: "confirm", pendingActionId: held.id },
+        person,
+        call: decidedCallOf(held),
+      });
       if (inputHash !== held.inputHash) {
         throw connectErrors.create("connect.pending_changed");
       }
@@ -578,13 +574,9 @@ export default class Connect
     let claims: CapabilityClaims;
     try {
       claims = await verifyCapability(signingKeys(this.env), capability, call);
-      // A confirmation's capability runs a held action through
-      // `confirmAction`, never anything here.
-      if (claims.confirms !== undefined || claims.resolves !== undefined) {
-        throw capabilityErrors.create("capability.invalid", {
-          reason: "scope",
-        });
-      }
+      // A decision's capability decides its call through `confirmAction`
+      // or `resolveOutcome`, never anything here.
+      requireDecision(claims);
     } catch (error) {
       const reason = codeOf(error);
       await auditFailure(this.env, {

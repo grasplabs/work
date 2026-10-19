@@ -34,9 +34,10 @@ export type GatewayReply =
       /**
        * Streams the text's first `at` characters, then waits for `until`
        * before the rest (Anthropic and chat completions): an answer caught
-       * mid-stream.
+       * mid-stream. `reached` is called when the stream gets there, its
+       * first characters delivered.
        */
-      pause?: { at: number; until: Promise<unknown> };
+      pause?: { at: number; until: Promise<unknown>; reached?: () => void };
       /**
        * Streams the text's first `cut` characters, then closes the stream
        * with nothing after them, neither an end nor a count (Anthropic and
@@ -56,6 +57,8 @@ export type GatewayReply =
       errorType?: string;
       /** The refusal's body, when not the provider's usual error. */
       body?: unknown;
+      /** Headers of the refusal, such as a rate limit's `retry-after`. */
+      headers?: Record<string, string>;
     }
   | { hang: true };
 
@@ -63,6 +66,8 @@ export interface GatewayRequest {
   url: string;
   headers: Headers;
   body: unknown;
+  /** Its signal: aborted once its caller cut it off. */
+  signal: AbortSignal;
 }
 
 const encoder = new TextEncoder();
@@ -76,6 +81,7 @@ interface StreamEvent {
 /** Where a stream stops until the promise settles (`pause`). */
 interface StreamPause {
   until: Promise<unknown>;
+  reached?: () => void;
 }
 
 const sse = ({ event, data }: StreamEvent): Uint8Array =>
@@ -113,6 +119,9 @@ const eventStream = (
   const write = async (): Promise<void> => {
     try {
       for (const item of events) {
+        if ("until" in item) {
+          item.reached?.();
+        }
         // oxlint-disable-next-line no-await-in-loop -- in order, pausing where told
         await ("until" in item ? item.until : writer.write(sse(item)));
       }
@@ -160,11 +169,7 @@ const textDeltas = (
   });
   return pause === undefined
     ? [delta(text)]
-    : [
-        delta(text.slice(0, pause.at)),
-        { until: pause.until },
-        delta(text.slice(pause.at)),
-      ];
+    : [delta(text.slice(0, pause.at)), pause, delta(text.slice(pause.at))];
 };
 
 /** A content block of Anthropic's, as its stream opens it. */
@@ -331,7 +336,7 @@ const chatCompletionEvents = (
       ? [content(text)]
       : [
           content(text.slice(0, pause.at)),
-          { until: pause.until },
+          pause,
           content(text.slice(pause.at)),
         ]),
     ...(answer.toolCalls ?? []).map((call, index) =>
@@ -567,10 +572,16 @@ const workersAiBadInput = (
 };
 
 /**
- * A fake AI binding whose gateway answers with `replies`, in order. Its
- * `requests` are what reached the gateway.
+ * A fake AI binding whose gateway answers each request with what `respond`
+ * makes of it, given the requests so far, this one last: at once, or once
+ * a provider it asks has answered. Its `requests`
+ * are what reached the gateway.
  */
-export const fakeGateway = (...replies: GatewayReply[]) => {
+export const answeringGateway = (
+  respond: (
+    requests: readonly GatewayRequest[]
+  ) => GatewayReply | undefined | Promise<GatewayReply | undefined>
+) => {
   const requests: GatewayRequest[] = [];
   const fetch = async (
     input: Request | string | URL,
@@ -578,12 +589,17 @@ export const fakeGateway = (...replies: GatewayReply[]) => {
   ): Promise<Response> => {
     const request = new Request(input, init);
     const body: unknown = await request.json();
-    requests.push({ url: request.url, headers: request.headers, body });
+    requests.push({
+      url: request.url,
+      headers: request.headers,
+      body,
+      signal: request.signal,
+    });
     const badInput = workersAiBadInput(request.url, body);
     if (badInput !== undefined) {
       return badInput;
     }
-    const reply = replies.shift();
+    const reply = await respond(requests);
     if (reply === undefined) {
       throw new Error("The fake gateway has no reply left");
     }
@@ -609,10 +625,17 @@ export const fakeGateway = (...replies: GatewayReply[]) => {
             message: "Refused by the fake gateway",
           },
         },
-        { status: reply.status }
+        { status: reply.status, headers: reply.headers }
       );
     }
     return providerStream(request, reply, `log-${requests.length}`);
   };
   return { binding: { aiGatewayLogId: null, fetch }, requests };
 };
+
+/**
+ * A fake AI binding whose gateway answers with `replies`, in order. Its
+ * `requests` are what reached the gateway.
+ */
+export const fakeGateway = (...replies: GatewayReply[]) =>
+  answeringGateway(() => replies.shift());

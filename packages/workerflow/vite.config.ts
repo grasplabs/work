@@ -3,12 +3,13 @@ import { defaultExclude, defineProject } from "vite-plus";
 
 // Run objects are Durable Objects, so their tests run in workerd, through
 // the object's real boundary. The process-death tests run plain workerd
-// from Node instead (vite.process.config.ts).
+// from Node instead (vite.process.config.ts), and the conformance matrix
+// runs beside the reference engine (vite.conformance.config.ts).
 export default defineProject({
   test: {
     // Fails the suite when it isn't running in workerd.
     setupFiles: ["../../scripts/assert-workerd.ts"],
-    exclude: [...defaultExclude, "test/process/**"],
+    exclude: [...defaultExclude, "test/process/**", "test/conformance.test.ts"],
     // Sleeps and waits in the tests last seconds by design, so no margin
     // depends on how fast the machine is; the polls fail at 10 s first.
     testTimeout: 20_000,

@@ -945,7 +945,12 @@ describe("a subscription that waits", () => {
     const instance = await workflow("napper").get(id);
     // The history's rows each read of it goes through, in the run object.
     const reads: { rowsRead: number }[] = [];
-    await runInDurableObject(runObject("napper", id), (_, state) => {
+    await runInDurableObject(runObject("napper", id), (run, state) => {
+      // The read below waits through every cycle under one deadline, which
+      // the writes it filters out don't move: with the test's short wait, a
+      // slow runner closed it before the run's end. A host may let it wait
+      // this long.
+      Reflect.set(run, "subscriptionWaitMs", maxSubscriptionWaitMs);
       const { sql } = state.storage;
       const exec = sql.exec.bind(sql);
       Reflect.set(
@@ -963,7 +968,7 @@ describe("a subscription that waits", () => {
     using subscription = await instance.subscribe({
       filter: ["workflow_completed"],
     });
-    const waiting = subscription.next();
+    const waiting = refusalOf(subscription);
 
     const cycles = 15;
     for (let cycle = 0; cycle < cycles; cycle += 1) {
@@ -984,9 +989,10 @@ describe("a subscription that waits", () => {
       Reflect.deleteProperty(state.storage.sql, "exec");
     });
     await instance.terminate();
-    await within("the end", waiting);
+    const end = await within("the end", waiting);
     const read = reads.reduce((sum, cursor) => sum + cursor.rowsRead, 0);
 
+    expect(end).toBe("not refused");
     // Each row about once, and a few per read besides: never the whole
     // history again at each of the run's writes.
     expect(reads.length).toBeGreaterThan(cycles);

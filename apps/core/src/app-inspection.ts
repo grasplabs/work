@@ -17,7 +17,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
-import { buildAppCode, buildKey } from "./screens.ts";
+import { buildAppCode, buildKey, checkAppCode } from "./screens.ts";
 
 // Inspecting an App's code of spec 8's layout (spec 8, 16): building it
 // and reading its registration in an isolate of its own, never in core.
@@ -74,9 +74,36 @@ const buildDetails = (diagnostics: readonly Diagnostic[]) => ({
  */
 export const builtCode = async (
   env: Env,
-  files: Readonly<Record<string, string>>
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string,
+  /** Given up on: no compile starts, and it throws its reason. */
+  signal?: AbortSignal
 ): Promise<Record<string, string>> => {
-  const build = await buildAppCode(env, { ...files });
+  const build = await buildAppCode(env, { ...files }, app, signal);
+  signal?.throwIfAborted();
+  if (!build.ok) {
+    throw versionErrors.create(
+      "version.build_failed",
+      buildDetails(build.diagnostics)
+    );
+  }
+  return build.modules;
+};
+
+/**
+ * The App's code in `files`, with the host's real generated modules,
+ * built and type-checked against the SDK's server side (`checkAppCode`),
+ * as modules by flat name; `version.build_failed` with diagnostics if it
+ * doesn't build or check. What a release is sealed from.
+ */
+export const checkedCode = async (
+  env: Env,
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string
+): Promise<Record<string, string>> => {
+  const build = await checkAppCode(env, { ...files }, app);
   if (!build.ok) {
     throw versionErrors.create(
       "version.build_failed",
@@ -155,7 +182,14 @@ export const readManifest = (text: string): AppManifest => {
  */
 export const filesManifest = async (
   env: Env,
-  files: Readonly<Record<string, string>>
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string,
+  /**
+   * Given up on (a build job's lease lost): no compile nor inspection
+   * starts after, and it throws its reason.
+   */
+  signal?: AbortSignal
 ): Promise<AppManifest> => {
   const sdk = await serverSdkModules(env.ASSETS);
   const code = {
@@ -172,7 +206,9 @@ export const filesManifest = async (
   if (cached) {
     return readManifest(await cached.text());
   }
-  const symbolic = await builtCode(env, code);
+  signal?.throwIfAborted();
+  const symbolic = await builtCode(env, code, app, signal);
+  signal?.throwIfAborted();
   const text = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(text);
   await env.FILES.put(cacheKey, text);

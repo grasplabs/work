@@ -96,6 +96,8 @@ export class StoreWatches {
   readonly #counts = new Map<string, number>();
   /** When each person's watches, and everyone's (`""`), were last swept. */
   readonly #swept = new Map<string, number>();
+  /** Whether its store was discarded (`clear`): it keeps nothing more. */
+  #cleared = false;
 
   /** How many watches it holds. */
   get size(): number {
@@ -121,6 +123,11 @@ export class StoreWatches {
     }
     if (this.#watches.size >= storeMaxWatches) {
       await this.#sweepOnce("");
+    }
+    // A watch that waited on a sweep while the store was discarded is
+    // kept by nothing: no alarm sweeps a discarded store's watches.
+    if (this.#cleared) {
+      throw new Error("This store was discarded: it keeps no watches.");
     }
     if (
       this.#countOf(principal) >= querySubscriptionLimits.perPerson ||
@@ -171,6 +178,14 @@ export class StoreWatches {
       this.#counts.delete(watch.principal);
     }
     watch.watcher[Symbol.dispose]();
+  }
+
+  /** Lets go of every watch it keeps, and keeps none after: its store was discarded. */
+  clear(): void {
+    this.#cleared = true;
+    for (const id of this.#watches.keys()) {
+      this.unwatch(id);
+    }
   }
 
   /**

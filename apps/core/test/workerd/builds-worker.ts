@@ -371,6 +371,27 @@ export default {
         })
       );
     }
+    if (pathname === "/cancelled-build") {
+      // A request starts a build that holds the builder, and its caller
+      // gives up on it: then the same App's next build is asked for.
+      const caller = new AbortController();
+      const first = env.SELF.fetch(
+        `http://core/inspect?builder=busy&app=${searchParams.get("app") ?? ""}`,
+        { method: "POST", signal: caller.signal }
+      );
+      await scheduler.wait(500);
+      caller.abort();
+      try {
+        await first;
+      } catch {
+        // Given up on, as meant.
+      }
+      const next = await env.SELF.fetch(
+        `http://core/inspect?app=${searchParams.get("app") ?? ""}`,
+        { method: "POST" }
+      );
+      return new Response(next.body, next);
+    }
     if (pathname === "/cancelled-code") {
       // A request starts reading the builder's code, slowly, and its
       // caller gives up on it: then another asks for the code.
@@ -408,10 +429,12 @@ export default {
       SANDBOX_IN_PROCESS: undefined,
     } satisfies PackageBuilderEnv;
     const pkg = await packageOf(searchParams.get("package") ?? "plain");
+    // Whose build it is: the builder's sub-owner on the sandbox host.
+    const whose = searchParams.get("app") ?? "app-stand-in";
     if (pathname === "/build") {
       return Response.json(
         await outcomeOf(async () => {
-          const builder = packageBuilder(builderEnv);
+          const builder = packageBuilder(builderEnv)(whose);
           return await builtFiles(
             await builder.build({
               limits: { ...packageLimits, artifactBytes: 2 * 1024 * 1024 },
@@ -428,7 +451,7 @@ export default {
       return Response.json(
         await outcomeOf(async () => {
           for (const _ of [1, 2]) {
-            const builder = packageBuilder(builderEnv);
+            const builder = packageBuilder(builderEnv)(whose);
             // oxlint-disable-next-line no-await-in-loop -- one after the other
             await builder.inspect(packageLimits, [pkg]);
           }
@@ -438,7 +461,7 @@ export default {
     }
     return Response.json(
       await outcomeOf(async () => {
-        const builder = packageBuilder(builderEnv);
+        const builder = packageBuilder(builderEnv)(whose);
         return await builder.inspect(packageLimits, [pkg]);
       })
     );

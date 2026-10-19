@@ -1,8 +1,14 @@
+// oxlint-disable max-classes-per-file -- the fake live connection: its socket, its two targets and a subscription
 import { toBase64Url } from "@grasp-os/shared/encoding";
+import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
+import { RpcSession, RpcTarget } from "capnweb";
+import type { RpcStub, RpcTransport } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
+import { PortableLive } from "../src/client-live.ts";
+import type { PortableToken } from "../src/client-portable.ts";
 import type { Id } from "../src/index.ts";
 import { api } from "./notes/.grasp/references.ts";
 
@@ -47,12 +53,226 @@ interface Seen {
 }
 
 /**
- * The host's network: answers each call as `answer` says, with core's
- * `{ result }` or the response it gives; `answer` may throw to lose the
- * answer.
+ * What core pushes for what `answer` gave: a value, the `{ result }` of
+ * a response, or the refusal a refused response's `{ code }` says.
+ */
+const resultOf = async (value: unknown): Promise<unknown> => {
+  if (!(value instanceof Response)) {
+    return { ok: true, value };
+  }
+  const body: unknown = await value.json();
+  if (typeof body !== "object" || body === null) {
+    return undefined;
+  }
+  if ("result" in body) {
+    return body.result;
+  }
+  return "code" in body && typeof body.code === "string"
+    ? {
+        ok: false,
+        error: {
+          code: body.code,
+          message: body.code,
+          category: "authorization",
+          retryable: false,
+          requestId: "r",
+        },
+      }
+    : undefined;
+};
+
+/** The tokens core refuses a renewal with (`auth.unauthenticated`). */
+const renewRefusals = new Set<string>();
+
+/** How core refuses the next connections' `connect`, one code each. */
+const connectRefusals: string[] = [];
+
+/** A subscription of the fake live connection's: released once. */
+class Subscription extends RpcTarget {
+  readonly #release: () => void;
+
+  constructor(release: () => void) {
+    super();
+    this.#release = release;
+  }
+
+  release(): void {
+    this.#release();
+  }
+}
+
+/** A followed query of the fake live connection's, as its token's person. */
+class LiveQueries extends RpcTarget {
+  readonly #url: string;
+  readonly #answer: (seen: Seen) => Promise<unknown>;
+  readonly #seen: Seen[];
+  #token: string;
+
+  constructor(
+    url: string,
+    answer: (seen: Seen) => Promise<unknown>,
+    seen: Seen[],
+    token: string
+  ) {
+    super();
+    this.#url = url;
+    this.#answer = answer;
+    this.#seen = seen;
+    this.#token = token;
+  }
+
+  async watchQuery(
+    request: string,
+    onSnapshot: RpcStub<(push: QuerySnapshotPush) => void>
+  ): Promise<Subscription> {
+    const call = {
+      url: this.#url,
+      authorization: `Bearer ${this.#token}`,
+      credentials: undefined,
+      redirect: undefined,
+      body: request,
+    };
+    this.#seen.push(call);
+    const result = await resultOf(await this.#answer(call));
+    const held = onSnapshot.dup();
+    setTimeout(() => {
+      void held({ revision: 1, result });
+    }, 0);
+    return new Subscription(() => {
+      held[Symbol.dispose]();
+    });
+  }
+
+  renew(token: string): { expiresAt: number } {
+    if (renewRefusals.has(token)) {
+      throw Object.assign(new Error("auth.unauthenticated"), {
+        code: "auth.unauthenticated",
+      });
+    }
+    this.#seen.push({
+      url: this.#url,
+      authorization: `Bearer ${token}`,
+      credentials: undefined,
+      redirect: undefined,
+      body: "renew",
+    });
+    this.#token = token;
+    return { expiresAt: Date.now() + 60_000 };
+  }
+}
+
+/**
+ * The host's live connection as core answers it (core's portable-live.ts
+ * is tested end to end in apps/core): each followed query is read with
+ * `answer` as the connection's token, and pushed once.
+ */
+class LiveServer extends RpcTarget {
+  readonly #url: string;
+  readonly #answer: (seen: Seen) => Promise<unknown>;
+  readonly #seen: Seen[];
+
+  constructor(
+    url: string,
+    answer: (seen: Seen) => Promise<unknown>,
+    seen: Seen[]
+  ) {
+    super();
+    this.#url = url;
+    this.#answer = answer;
+    this.#seen = seen;
+  }
+
+  connect(token: string): LiveQueries {
+    const refused = connectRefusals.shift();
+    if (refused !== undefined) {
+      throw Object.assign(new Error(refused), { code: refused });
+    }
+    return new LiveQueries(this.#url, this.#answer, this.#seen, token);
+  }
+}
+
+/** The live connections the client opened since `network` was set up. */
+const liveSockets: { close: (code: number, reason: string) => void }[] = [];
+
+/**
+ * A `WebSocket` whose other end is a `LiveServer`, in memory: what the
+ * client sends reaches it, what it sends back arrives as messages.
+ */
+const fakeWebSocket = (
+  answer: (seen: Seen) => Promise<unknown>,
+  seen: Seen[]
+) =>
+  class FakeWebSocket extends EventTarget {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    readyState = FakeWebSocket.OPEN;
+    binaryType = "blob";
+    readonly #sent: string[] = [];
+    #waiting: PromiseWithResolvers<string> | undefined;
+
+    constructor(url: string) {
+      super();
+      liveSockets.push(this);
+      const transport: RpcTransport = {
+        send: (message) => {
+          setTimeout(() => {
+            if (this.readyState === FakeWebSocket.OPEN) {
+              this.dispatchEvent(
+                new MessageEvent("message", { data: message })
+              );
+            }
+          }, 0);
+        },
+        receive: async () => {
+          const next = this.#sent.shift();
+          if (next !== undefined) {
+            return next;
+          }
+          if (this.readyState !== FakeWebSocket.OPEN) {
+            throw new Error("Closed");
+          }
+          this.#waiting = Promise.withResolvers<string>();
+          return await this.#waiting.promise;
+        },
+      };
+      // oxlint-disable-next-line no-new -- the session runs from its transport
+      new RpcSession(transport, new LiveServer(url, answer, seen));
+    }
+
+    send(message: string): void {
+      const waiting = this.#waiting;
+      this.#waiting = undefined;
+      if (waiting === undefined) {
+        this.#sent.push(message);
+      } else {
+        waiting.resolve(message);
+      }
+    }
+
+    close(code = 1000, reason = ""): void {
+      if (this.readyState !== FakeWebSocket.OPEN) {
+        return;
+      }
+      this.readyState = FakeWebSocket.CLOSED;
+      this.#waiting?.reject(new Error("Closed"));
+      this.#waiting = undefined;
+      this.dispatchEvent(Object.assign(new Event("close"), { code, reason }));
+    }
+  };
+
+/**
+ * The host's network: answers each call, and each query followed over
+ * the live connection, as `answer` says, with core's `{ result }` or the
+ * response it gives; `answer` may throw to lose the answer.
  */
 const network = (answer: (seen: Seen) => Promise<unknown>) => {
   const seen: Seen[] = [];
+  liveSockets.length = 0;
+  connectRefusals.length = 0;
+  renewRefusals.clear();
+  vi.stubGlobal("WebSocket", fakeWebSocket(answer, seen));
   vi.stubGlobal(
     "fetch",
     async (input: string, init: RequestInit): Promise<Response> => {
@@ -85,6 +305,16 @@ const failureOf = async (promise: Promise<unknown>): Promise<GraspError> => {
     throw error;
   }
   throw new Error("It resolved");
+};
+
+/** Whether `promise` was refused, or resolved. */
+const failureOrNothing = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "resolved";
+  } catch {
+    return "refused";
+  }
 };
 
 /** A note ID, as the App's store makes them. */
@@ -431,7 +661,20 @@ describe("a portable host's client", () => {
     const seen = network(async ({ authorization }) => {
       await Promise.resolve();
       if (authorization === `Bearer ${tokenOf("ann")}`) {
-        throw new TypeError("The connection was reset.");
+        // An outcome the host can't tell: the action's key is left unknown
+        // (a lost answer would be sent again for its receipt).
+        return Response.json({
+          result: {
+            ok: false,
+            error: {
+              code: "operation.sandbox_lost",
+              message: "The sandbox stopped answering.",
+              category: "uncertain",
+              retryable: false,
+              requestId: "r",
+            },
+          },
+        });
       }
       return 3;
     });
@@ -573,6 +816,298 @@ describe("a portable host's client", () => {
     stop();
   });
 
+  it("swaps a live connection's token before it expires, asking no faster than every few seconds when the host has none newer", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    // Its `exp` 40 seconds on: the connection swaps it 30 seconds before.
+    const token = tokenOf("ann", expiry());
+    const seen = network(async () => await Promise.resolve({ title: "Ann's" }));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    const renewals = (): number =>
+      seen.filter(({ body }) => body === "renew").length;
+    const before = renewals();
+    await vi.advanceTimersByTimeAsync(9500);
+    const first = renewals();
+    // The host hands back the same token every time: tried again every
+    // five seconds at most, not in a loop, until it expires.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect({
+      shown: entry.snapshot.value,
+      before,
+      first,
+      until: renewals(),
+    }).toStrictEqual({
+      shown: { title: "Ann's" },
+      before: 0,
+      first: 1,
+      until: 7,
+    });
+    stop();
+  });
+
+  it("asks the host for a new token once the live connection refuses the one it holds", async () => {
+    // Both kept for a while: only a refusal makes the client ask again.
+    const first = tokenOf("ann", expiry());
+    const next = tokenOf("ann", expiry() + 1);
+    let token = first;
+    const seen = network(async ({ authorization, url }) => {
+      if (url.includes("/app-live/") && authorization === `Bearer ${first}`) {
+        // The session the token came from ended: core pushes the refusal.
+        return await Promise.resolve(
+          Response.json(
+            { code: "auth.unauthenticated", message: "Sign in to continue." },
+            { status: 401 }
+          )
+        );
+      }
+      return await Promise.resolve({ title: "Ann's" });
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await until(() => entry.snapshot.error !== undefined);
+    token = next;
+    await client.query(api.notes.get, { id: idOf(2) });
+    expect({
+      refused: entry.snapshot.error?.code,
+      sentNext: seen.at(-1)?.authorization,
+    }).toStrictEqual({
+      refused: "auth.unauthenticated",
+      sentNext: `Bearer ${next}`,
+    });
+    stop();
+  });
+
+  it("follows again over a new connection when core closes one to connect again, clearing nothing", async () => {
+    let reads = 0;
+    network(async () => {
+      reads += 1;
+      return await Promise.resolve({ title: `Ann's ${reads}` });
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(tokenOf("ann", expiry())),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const shown: unknown[] = [];
+    const stop = internals.subscribe(entry, () => {
+      shown.push(entry.snapshot.error?.code ?? entry.snapshot.value);
+    });
+    await until(() => entry.snapshot.value !== undefined);
+    // Core couldn't read the token yet (`connectAgainCloseCode`).
+    liveSockets[0]?.close(4503, "Token unreadable");
+    // Followed again after the client's backoff.
+    await vi.waitFor(
+      () => {
+        expect(shown).toHaveLength(2);
+      },
+      { timeout: 10_000, interval: 20 }
+    );
+    expect(liveSockets).toHaveLength(2);
+    expect(shown).toStrictEqual([{ title: "Ann's 1" }, { title: "Ann's 2" }]);
+    stop();
+  });
+
+  it("follows again when core can't read the token yet, clearing nothing", async () => {
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    connectRefusals.push("auth.token_unavailable");
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(tokenOf("ann", expiry())),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const shown: unknown[] = [];
+    const stop = internals.subscribe(entry, () => {
+      shown.push(entry.snapshot.error?.code ?? entry.snapshot.value);
+    });
+    await vi.waitFor(
+      () => {
+        expect(entry.snapshot.value).toBeDefined();
+      },
+      { timeout: 10_000, interval: 20 }
+    );
+    expect({ shown, sockets: liveSockets.length }).toStrictEqual({
+      shown: [{ title: "Ann's" }],
+      sockets: 2,
+    });
+    stop();
+  });
+
+  it("follows again once a host that failed to say its token recovers", async () => {
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    let failing = true;
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        await Promise.resolve();
+        if (failing) {
+          failing = false;
+          throw new Error("The host's sign-in is down for a moment.");
+        }
+        return tokenOf("ann", expiry());
+      },
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.waitFor(
+      () => {
+        expect(entry.snapshot).toStrictEqual({
+          value: { title: "Ann's" },
+          error: undefined,
+        });
+      },
+      { timeout: 10_000, interval: 20 }
+    );
+    stop();
+  });
+
+  it("leaves nothing scheduled for a connection closed while it renewed", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const renewal = Promise.withResolvers<string>();
+    let asked = 0;
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        asked += 1;
+        return asked === 1
+          ? await Promise.resolve(tokenOf("ann", expiry()))
+          : await renewal.promise;
+      },
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    // The renewal asks the host ten seconds on; the query is let go of
+    // meanwhile, and core closes the connection.
+    await vi.advanceTimersByTimeAsync(9500);
+    expect(asked).toBe(2);
+    stop();
+    liveSockets[0]?.close(1001, "Going away");
+    await vi.advanceTimersByTimeAsync(100);
+    // The host then fails to say: nothing is tried again for a closed
+    // connection. Of what was on the clock, only the host's wait for its
+    // answer ends; the client's own keep of the released query stays.
+    const scheduled = vi.getTimerCount();
+    renewal.reject(new Error("The host's sign-in is down."));
+    await vi.advanceTimersByTimeAsync(100);
+    expect({
+      shown: entry.snapshot.value,
+      scheduled: vi.getTimerCount(),
+    }).toStrictEqual({ shown: { title: "Ann's" }, scheduled: scheduled - 1 });
+  });
+
+  it("clears what it shows once a renewal finds the host signed out, before the old token expires", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    let token: string | null = tokenOf("ann", expiry());
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    const shown = entry.snapshot.value;
+    // Signed out on the host: the renewal, ten seconds on, finds nobody.
+    token = null;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect({
+      shown,
+      now: entry.snapshot.error?.code,
+      value: entry.snapshot.value,
+    }).toStrictEqual({
+      shown: { title: "Ann's" },
+      now: "auth.unauthenticated",
+      value: undefined,
+    });
+    stop();
+  });
+
+  it("opens nothing for a follow whose token arrives after every connection was closed", async () => {
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    const asked = Promise.withResolvers<PortableToken>();
+    const live = new PortableLive(origin, {
+      token: async () => await asked.promise,
+      forget: () => {},
+      ended: () => {},
+    });
+    const following = failureOrNothing(
+      live.watch(
+        app,
+        "{}",
+        () => {},
+        () => {}
+      )
+    );
+    // A fence, or someone else signing in, closes everything meanwhile.
+    live.closeAll();
+    asked.resolve({
+      text: tokenOf("ann"),
+      principal: "ann",
+      expiresAt: undefined,
+    });
+    expect({
+      followed: await following,
+      sockets: liveSockets.length,
+    }).toStrictEqual({ followed: "refused", sockets: 0 });
+  });
+
+  it("asks the host for another token once core refuses a renewal's, keeping the connection", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const first = tokenOf("ann", expiry());
+    // The host's next token, kept by the client for a while, which core
+    // refuses (its session ended); then one that works.
+    const refused = tokenOf("ann", expiry() + 60);
+    const working = tokenOf("ann", expiry() + 120);
+    const tokens = [first, refused, working];
+    let asked = 0;
+    const seen = network(async () => await Promise.resolve({ title: "Ann's" }));
+    renewRefusals.add(refused);
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        const token = tokens[Math.min(asked, tokens.length - 1)] ?? null;
+        asked += 1;
+        return await Promise.resolve(token);
+      },
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    // The renewal ten seconds on is refused; the next, five on, asks the
+    // host again rather than sending the refused token.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect({
+      shown: entry.snapshot.value,
+      renewed: seen
+        .filter(({ body }) => body === "renew")
+        .map(({ authorization }) => authorization),
+      sockets: liveSockets.length,
+    }).toStrictEqual({
+      shown: { title: "Ann's" },
+      renewed: [`Bearer ${working}`],
+      sockets: 1,
+    });
+    stop();
+  });
+
   it("gives up on a host that never answers for a token, and never keeps its late answer", async () => {
     vi.useFakeTimers();
     const requests: PromiseWithResolvers<string>[] = [];
@@ -609,7 +1144,7 @@ describe("a portable host's client", () => {
     );
   });
 
-  it("takes an answer that never comes as lost: an action's outcome is then unknown", async () => {
+  it("takes an answer that never comes as lost: an action's outcome is then unknown once its key no longer recovers it", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
       "fetch",
@@ -626,9 +1161,12 @@ describe("a portable host's client", () => {
       getToken: async () => await Promise.resolve(tokenOf("ann")),
     });
     const outcome = failureOf(client.action(api.notes.tally));
-    await vi.advanceTimersByTimeAsync(60_000);
+    // Sent again under its key, which would answer its receipt, for the
+    // lost answer's five minutes; past them, unknown.
+    await vi.advanceTimersByTimeAsync(7 * 60_000);
     const failure = await outcome;
     expect(failure.code).toBe("submission.outcome_unknown");
+    expect(failure.details).toHaveProperty("idempotencyKey");
   });
 
   it("takes any refusal of a token as one, whatever its body, and asks the host again", async () => {

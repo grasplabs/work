@@ -1,6 +1,6 @@
 import type {
-  WorkflowRollbackContext,
-  WorkflowStepContext,
+  AnyWorkflowRollbackContext,
+  AnyWorkflowStepContext,
 } from "../src/contracts.ts";
 import type { RunNotification } from "../src/notifications.ts";
 
@@ -106,7 +106,7 @@ export const effectsOf = (run: string, label?: string): Effect[] =>
 export const effect = async (
   run: string,
   label: string,
-  context: WorkflowStepContext
+  context: AnyWorkflowStepContext
 ): Promise<string> => {
   const receipt = `${label}#${effects.length + 1}`;
   effects.push({
@@ -195,7 +195,7 @@ export const eventOf = (warning: unknown): unknown =>
 export const undone = async (
   run: string,
   label: string,
-  context: WorkflowRollbackContext
+  context: AnyWorkflowRollbackContext
 ): Promise<void> => {
   const undoing = `undo-${label}`;
   effects.push({

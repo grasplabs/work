@@ -3,12 +3,13 @@ import type { Socket } from "node:dgram";
 import { once } from "node:events";
 
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { attackAppFiles } from "./attack-apps.ts";
+import { attackAppFiles, injectingAppFiles } from "./attack-apps.ts";
+import { test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 
@@ -49,6 +50,7 @@ const stopClock = async (page: Page): Promise<void> => {
  */
 interface PageBridge {
   call: (method: unknown, args: unknown[]) => Promise<unknown>;
+  callFunction: (request: unknown) => Promise<unknown>;
   authenticate: () => Promise<unknown>;
   apps: { list: () => Promise<unknown> };
   screens: {
@@ -146,10 +148,7 @@ test.beforeAll(async () => {
   const files = attackAppFiles({ attacker: attacker.url, turn: turn.url });
   probing = await releaseApp(builder, "Probes", screenAppFiles(attacker.url));
   attacking = await releaseApp(builder, "Attacks", files);
-  approved = await approvedApp(cast, "Approved attacks", {
-    "app/server.ts": files["app/server.ts"] ?? "",
-    "screens/injecting.tsx": files["screens/injecting.tsx"] ?? "",
-  });
+  approved = await approvedApp(cast, "Approved attacks", injectingAppFiles());
 });
 
 test.afterAll(() => {
@@ -157,10 +156,10 @@ test.afterAll(() => {
   turn.socket.close();
 });
 
-test("a screen reaches nothing but its own App's server", async ({
-  browser,
+test("a screen reaches nothing but its own App's functions", async ({
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const popups: string[] = [];
   page.on("popup", (popup) => {
     popups.push(popup.url());
@@ -189,58 +188,105 @@ test("a screen reaches nothing but its own App's server", async ({
     styleRule: "applied",
   });
 
-  // The bridge, reached past the SDK, offers only the App's own server.
+  // An answer shaped like the platform's error is only an answer, whether
+  // a call's result or a live query's snapshot pushed over the page's own
+  // connection: the page doesn't end the session over it. The request the
+  // screen's client sent for the call is kept: a valid one, for the probes
+  // below.
+  const asked = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      request.url().includes("/api/app-functions/")
+  );
+  await screen.getByRole("button", { name: "Ask" }).click();
+  const askRequest = await asked;
+  const validRequest = askRequest.postData() ?? "";
+  expect(validRequest).toContain('"contractId":"notes.lookLikeThePlatform"');
+  await expect(screen.getByRole("status", { name: "Answer" })).toHaveText(
+    "an answer"
+  );
+  await expect(screen.getByRole("status", { name: "Followed" })).toHaveText(
+    "an answer"
+  );
+  await expect(page.getByText("Your session has ended")).toHaveCount(0);
+
+  // The bridge, reached past the SDK, offers only the App's own functions.
   // A screen's own code can't get there: the frame runs only its build's
   // modules (the test below), so the test reaches in itself, as a
   // browser's devtools can.
   const frame = page.frame({ url: /\/screen-frame\?load=/u });
-  const bridge: unknown = await frame?.evaluate(async (runtime) => {
-    // SAFETY: the runtime's own module, whose `bridge` is the page's
-    // bridge as the frame holds it (@grasp-os/sdk/screen-runtime).
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const { bridge: connected } = (await import(runtime)) as {
-      bridge: () => PageBridge;
-    };
-    const toPage = connected();
-    // In the frame, where this runs: nothing from outside it is there.
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- see above
-    const tried = async (run: () => Promise<unknown>): Promise<string> => {
-      try {
-        await run();
-        return "allowed";
-      } catch (error) {
-        return typeof error === "object" && error !== null && "code" in error
-          ? String(error.code)
-          : "refused";
-      }
-    };
-    return {
-      nameObject: await tried(
-        async () => await toPage.call({ toString: () => "notes" }, [])
-      ),
-      session: await tried(async () => await toPage.authenticate()),
-      apps: await tried(async () => await toPage.apps.list()),
-      screens: await tried(
-        async () => await toPage.screens.call("another-app", "notes", [])
-      ),
-      prototype: await tried(async () => await toPage.constructor("return 1")),
-    };
-  }, "@grasp-os~sdk~screen-runtime.js");
+  const bridge: unknown = await frame?.evaluate(
+    async ({ runtime, valid }) => {
+      // SAFETY: the runtime's own module, whose `bridge` is the page's
+      // bridge as the frame holds it (@grasp-os/sdk/screen-runtime).
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const { bridge: connected } = (await import(runtime)) as {
+        bridge: () => PageBridge;
+      };
+      const toPage = connected();
+      // In the frame, where this runs: nothing from outside it is there.
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- see above
+      const tried = async (run: () => Promise<unknown>): Promise<string> => {
+        try {
+          await run();
+          return "allowed";
+        } catch (error) {
+          return typeof error === "object" && error !== null && "code" in error
+            ? String(error.code)
+            : "refused";
+        }
+      };
+      // A function call that reached core: "ran" if the function ran,
+      // otherwise why not.
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- see above
+      const called = async (run: () => Promise<unknown>): Promise<string> => {
+        try {
+          const answer: unknown = await run();
+          const result: unknown =
+            typeof answer === "object" && answer !== null && "result" in answer
+              ? answer.result
+              : undefined;
+          if (typeof result === "object" && result !== null && "ok" in result) {
+            return result.ok === true ? "ran" : "failed";
+          }
+          return "unread";
+        } catch (error) {
+          return typeof error === "object" && error !== null && "code" in error
+            ? String(error.code)
+            : "refused";
+        }
+      };
+      // Arrays cross the port intact (Cap'n Web drops an object's own
+      // `toString`), and one of a single string reads as that string to
+      // anything that coerces it.
+      return {
+        // A method name that isn't text: refused, never read as its text.
+        nameObject: await tried(async () => await toPage.call(["notes"], [])),
+        // The valid request as text runs (its key answers the kept answer)...
+        control: await called(async () => await toPage.callFunction(valid)),
+        // ...and the same request in an array is refused before core.
+        request: await called(async () => await toPage.callFunction([valid])),
+        session: await tried(async () => await toPage.authenticate()),
+        apps: await tried(async () => await toPage.apps.list()),
+        screens: await tried(
+          async () => await toPage.screens.call("another-app", "notes", [])
+        ),
+        prototype: await tried(
+          async () => await toPage.constructor("return 1")
+        ),
+      };
+    },
+    { runtime: "@grasp-os~sdk~screen-runtime.js", valid: validRequest }
+  );
   expect(bridge).toStrictEqual({
     nameObject: "screen.invalid",
+    control: "ran",
+    request: "screen.invalid",
     session: "refused",
     apps: "refused",
     screens: "refused",
     prototype: "refused",
   });
-
-  // An answer shaped like the platform's error is only an answer: the page
-  // doesn't end the session over it.
-  await screen.getByRole("button", { name: "Ask" }).click();
-  await expect(screen.getByRole("status", { name: "Answer" })).toHaveText(
-    "an answer"
-  );
-  await expect(page.getByText("Your session has ended")).toHaveCount(0);
 
   // Nothing got out; no socket opened, and no worker or script of the
   // attacker's ran; and the page stayed where it was.
@@ -262,12 +308,12 @@ test("a screen reaches nothing but its own App's server", async ({
 });
 
 test("an approved screen runs its build and nothing else: no handler, inline script, data: or blob: module or eval it lets in", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(screenPath(approved, "injecting"));
   const screen = page.frameLocator('iframe[title="injecting app"]');
-  // Its own modules run: it renders, and calls its server.
+  // Its own modules run: it renders, and reads its App's query.
   await expect(screen.getByRole("heading", { name: "Injecting" })).toBeVisible({
     timeout: 30_000,
   });
@@ -278,8 +324,8 @@ test("an approved screen runs its build and nothing else: no handler, inline scr
     (await screen.getByRole("status", { name: "Injected" }).textContent()) ?? ""
   );
   const frame = page.frame({ url: /\/screen-frame\?load=/u });
-  // The HTML its server sent is on the page, and its image has failed,
-  // which is when its `onerror` would have run.
+  // The HTML its App's query answered is on the page, and its image has
+  // failed, which is when its `onerror` would have run.
   await expect
     .poll(
       async () =>
@@ -316,8 +362,8 @@ test("an approved screen runs its build and nothing else: no handler, inline scr
   });
 });
 
-test("a screen can't send its frame to another origin", async ({ browser }) => {
-  const page = await pageOf(browser, builder);
+test("a screen can't send its frame to another origin", async ({ pageOf }) => {
+  const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
   await page.goto(screenPath(attacking, "leaving"));
 
@@ -337,9 +383,9 @@ test("a screen can't send its frame to another origin", async ({ browser }) => {
 });
 
 test("a screen that loads another document in its frame is stopped", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(screenPath(attacking, "wandering"));
 
   await expect(page.getByText(left)).toBeVisible({ timeout: 30_000 });
@@ -349,9 +395,9 @@ test("a screen that loads another document in its frame is stopped", async ({
 });
 
 test("a screen that sends more than its port takes is stopped, and the page says so", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(screenPath(attacking, "oversized"));
 
   await expect(page.getByText(disconnected)).toBeVisible({ timeout: 30_000 });
@@ -360,9 +406,9 @@ test("a screen that sends more than its port takes is stopped, and the page says
 });
 
 test("a frame that never says it is ready is given up on after ten seconds", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.clock.install();
   // In place of the frame's own document: one that says everything but
   // the one thing the page waits for.
@@ -405,9 +451,9 @@ test("a frame that never says it is ready is given up on after ten seconds", asy
 });
 
 test("a screen that never renders is given up on after ten seconds, whatever it says", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.clock.install();
   await page.goto(screenPath(attacking, "stuck"));
   // Its module ran, and told the page it had mounted, six ways.
@@ -428,9 +474,9 @@ test("a screen that never renders is given up on after ten seconds, whatever it 
 });
 
 test("WebRTC is left as the browser has it: nothing hidden, nothing claimed", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(screenPath(attacking, "turn"));
   const screen = page.frameLocator('iframe[title="turn app"]');
   await expect(screen.getByRole("status", { name: "WebRTC" })).not.toBeEmpty({

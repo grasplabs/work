@@ -31,6 +31,7 @@ const knowledge = (
   actions: [],
   operations: ["search"],
   collections,
+  measures: [],
   maxOutputTokens: null,
   structuredOutput: false,
   usedBy: ["help.find"],

@@ -24,6 +24,7 @@ import {
 } from "./helpers.ts";
 import { effectsOf, hold } from "./outside.ts";
 import {
+  byobViewBytes,
   slowStreamFirst,
   slowStreamRest,
   testMaxRunStreamBytes,
@@ -296,6 +297,52 @@ describe("a step's stream result", () => {
     expect(
       completions.map((event) => ("stepName" in event ? event.stepName : ""))
     ).toStrictEqual(["export-1", "digest-1"]);
+  });
+
+  it("is a byte stream: a BYOB reader reads a large result whole, in views smaller than a stored chunk", async () => {
+    const id = newId();
+    const sizes = [300 * kib, 400 * kib, 5];
+    const content = contentOf(sizes);
+    await workflow("byob-streamed").create({ id, params: { sizes } });
+
+    await expect(ended("byob-streamed", id)).resolves.toStrictEqual({
+      status: "complete",
+      output: {
+        sha256: await sha256(content),
+        length: content.byteLength,
+        largestRead: byobViewBytes,
+      },
+    });
+  });
+
+  it("is a byte stream a BYOB reader reads when another activation replays the step from storage", async () => {
+    const id = newId();
+    const sizes = [600 * kib];
+    const content = contentOf(sizes);
+    const digest = hold(id, "digest");
+    await workflow("byob-streamed").create({ id, params: { sizes } });
+    await within("digest to be held", digest.held);
+
+    await deliverAlarm("byob-streamed", id);
+    const status = await ended("byob-streamed", id);
+    digest.release();
+    await firstActivationEnded("byob-streamed", id);
+
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: {
+        sha256: await sha256(content),
+        length: content.byteLength,
+        largestRead: byobViewBytes,
+      },
+    });
+    expect(
+      effectsOf(id).map((effect) => [effect.label, effect.attempt])
+    ).toStrictEqual([
+      ["export", 1],
+      ["digest", 1],
+      ["digest", 2],
+    ]);
   });
 
   it("can't be completed by an upload superseded midway; the attempt that took over keeps its own", async () => {

@@ -1895,6 +1895,42 @@ describe("model binding budgets", { timeout: 120_000 }, () => {
     });
   });
 
+  it("tell an App its provider's rate limit from a used-up budget, each with when to try again", async () => {
+    const sealed = await sealedApp(modelFiles(nearCentBound));
+    await approveWriter(sealed, { perDay: 0.01 });
+    const { gatewayEnv: withGateway } = gatewayEnv([
+      // Refused for its rate, retries and all, the provider asking for a
+      // second and a half.
+      ...Array.from({ length: 3 }, () => ({
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after-ms": "1500" },
+      })),
+      longAnswer,
+    ]);
+    const rateLimited = outcomeOf(
+      await callOn(withGateway, sealed, "assist.attempt")
+    );
+    // Most of the day's cent spent: the next request has no room until
+    // the day is over.
+    const spent = await draftOn(withGateway, sealed);
+    const usedUp = outcomeOf(
+      await callOn(withGateway, sealed, "assist.attempt")
+    );
+    const [code, wait] = (typeof usedUp === "string" ? usedUp : "").split("|");
+    expect({
+      rateLimited,
+      spent,
+      usedUp: code,
+      untilTheDayIsOver: Number(wait) > 0 && Number(wait) <= 24 * 60 * 60,
+    }).toStrictEqual({
+      rateLimited: "resource.rate_limited|2",
+      spent: "Long.",
+      usedUp: "resource.budget_exhausted",
+      untilTheDayIsOver: true,
+    });
+  });
+
   it("apply a budget approved again to the next request, keeping what was spent", async () => {
     const sealed = await sealedApp(modelFiles(nearCentBound));
     await approveWriter(sealed, { perMonth: 0.01 });
@@ -2367,6 +2403,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           actions: [],
           operations: ["search"],
           collections: ["handbook", "salaries"],
+          measures: [],
           maxOutputTokens: null,
           structuredOutput: false,
           usedBy: ["desk.find"],
@@ -2392,6 +2429,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           actions: [],
           operations: [],
           collections: [],
+          measures: [],
           maxOutputTokens: null,
           structuredOutput: false,
           usedBy: ["desk.read"],
@@ -2411,6 +2449,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           actions: [],
           operations: [],
           collections: [],
+          measures: [],
           maxOutputTokens: 300,
           structuredOutput: false,
           usedBy: ["desk.draft"],

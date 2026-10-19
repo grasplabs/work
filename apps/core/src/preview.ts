@@ -1,3 +1,4 @@
+import { isAppLayout } from "@grasp-os/compiler";
 import { appErrors } from "@grasp-os/shared/apps";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
@@ -42,14 +43,19 @@ const facetName = (chatId: ChatId, app: string): string =>
  */
 export const loadPreview = async (
   env: Env,
-  { app, preview }: Required<Omit<TailOf, "version">>,
+  { app, preview }: Required<Pick<TailOf, "app" | "preview">>,
   draft: Draft
 ): Promise<DurableObjectClass> => {
   // On-prem, nothing bounds a draft's server object (a facet of core's own
   // Loader): refused unless the deployment says that's fine (GRA-501).
   requireBoundedHere(env, "a draft's preview");
   const files = Object.fromEntries(await draftFiles(env, app, draft));
-  const build = await buildServer(env, files);
+  // A draft of spec 8's layout runs only from its sealed draft release
+  // (sealed-previews.ts), never here, whatever server code it also has.
+  if (isAppLayout(files)) {
+    throw appErrors.create("app.method_invalid");
+  }
+  const build = await buildServer(env, files, app);
   if (!build.ok) {
     throw appErrors.create("app.build_failed", buildFailed(null, build));
   }

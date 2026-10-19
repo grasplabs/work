@@ -222,7 +222,10 @@ export const PackagesCard = ({
   const [review, setReview] = useState<DependencyReview>();
   const hintId = useId();
   const { t } = useLingui();
-  const engine = request.app.name;
+  // An App or a workflow, in one queue: what the packages are for says
+  // which, and only an App has a page to go to.
+  const engine = request.subject.name;
+  const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
   const requester = request.requestedBy.name;
   const targets = formatList(
     request.targets.map((target) => i18n._(targetNames[target]))
@@ -255,6 +258,9 @@ export const PackagesCard = ({
       busy={busy}
       details={
         <>
+          <p>
+            <Badge variant="outline">{kind}</Badge>
+          </p>
           <p>{request.purpose}</p>
           <div className="text-muted-foreground flex flex-col gap-1">
             <p>
@@ -364,13 +370,17 @@ export const PackagesCard = ({
       }
       failure={failure}
       name={
-        <Link
-          className="hover:underline focus-visible:underline"
-          params={{ engine: request.app.id }}
-          to="/domains/$engine"
-        >
-          {who}
-        </Link>
+        request.subject.type === "app" ? (
+          <Link
+            className="hover:underline focus-visible:underline"
+            params={{ engine: request.subject.id }}
+            to="/domains/$engine"
+          >
+            {who}
+          </Link>
+        ) : (
+          who
+        )
       }
       no={{
         label: t`Reject`,

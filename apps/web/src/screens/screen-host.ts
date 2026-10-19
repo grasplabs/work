@@ -1,5 +1,8 @@
+import { fileChannel } from "@grasp-os/sdk/host";
+import type { FileChannel } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
+import { decisionErrors } from "@grasp-os/shared/decisions";
 import { authErrors, errorPayloadSchema } from "@grasp-os/shared/errors";
 import { roleErrors } from "@grasp-os/shared/roles";
 import {
@@ -12,8 +15,18 @@ import {
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
+import { RpcStub } from "capnweb";
 
-import { CoreLink } from "./core-link.ts";
+import type { CoreConnection, SessionEnded } from "../core-connection.ts";
+import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import {
+  appDrafts,
+  clearDrafts,
+  lostAccess,
+  shutAppDrafts,
+  stopDrafts,
+} from "./form-drafts.ts";
+import type { AppDrafts } from "./form-drafts.ts";
 import {
   inTime,
   isMounted,
@@ -24,7 +37,10 @@ import {
 import type { ExpectedStart } from "./frame-stages.ts";
 import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
+import { frameGesture, openFilePort } from "./screen-files.ts";
 import { cancelStream, followStream } from "./screen-stream.ts";
+import { ownLink, tabLink } from "./tab-link.ts";
+import type { FrameLink, Joined } from "./tab-link.ts";
 
 // The page's side of an App's screen. The screen runs in a sandboxed frame
 // (core's screen-frame.ts) with no network, whose document core serves for
@@ -65,11 +81,22 @@ import { cancelStream, followStream } from "./screen-stream.ts";
 // screen sent elsewhere before, it can't.
 //
 // A frame is for the person its page's connection was first made for
-// (core-link.ts). When the browser's session turns out to be someone
+// (core-connection.ts). When the browser's session turns out to be someone
 // else's (a connection made again, or a function call core refused with
 // `auth.principal_changed`), or ends, the frame is stopped and emptied,
 // so nothing the screen held for the first person, such as their data or
 // a save it would send again, is left on the page or sent as the next.
+//
+// A tab's frames go over the shell's own connection (tab-link.ts, spec
+// 11.2), and each reaches its App on it through a way of its own (core's
+// `screens.frame`): bound to its App, its build and its person, decided
+// on its own build alone, and closed when the frame stops, which lets go
+// in core of everything the frame followed. The frames never see the
+// connection or each other. What ends the connection for its person
+// (signed out, or someone else's session) stops every frame on it before
+// the page loads again; what stops one frame (its build's approval taken
+// back, a broken channel, a timeout, the page leaving) stops that frame
+// alone.
 
 /** What the page shows about a screen besides the screen itself. */
 export type ScreenState =
@@ -140,11 +167,11 @@ const forCore = (value: unknown): never =>
   value as never;
 
 /** A signed-in session's API, as the page's link to core gives it. */
-type Session = Awaited<ReturnType<CoreLink["session"]>>;
+type Session = Awaited<ReturnType<FrameLink["session"]>>;
 
 /** Runs `run` on the link's signed-in session. */
 const on = async <T>(
-  link: CoreLink,
+  link: FrameLink,
   run: (session: Session) => Promise<T>
 ): Promise<T> => {
   const session = await link.session();
@@ -160,6 +187,123 @@ type Refused = Extract<
   "unreviewed" | "revoked" | "principal-changed"
 >;
 
+/** A frame's own way to its App, as core's `screens.frame` answers it. */
+type FrameApi = Awaited<ReturnType<Session["screens"]["frame"]>>;
+
+/**
+ * The frame's own way to its App on the tab's link (core's
+ * `screens.frame`), for the build core leased it: asked for on each
+ * connection the link makes, as one made again knows nothing of the last.
+ * `close` lets go of it, and core of everything the frame followed
+ * through it; nothing is asked for once it is closed.
+ */
+interface FrameHold {
+  use: <T>(run: (frame: FrameApi) => Promise<T>) => Promise<T>;
+  /**
+   * Sends one of the frame's plain requests as the link's person: `send`
+   * is called right after the last check that the frame still runs, in
+   * the same turn, so a frame stopped meanwhile (also while the link
+   * connected again) sends nothing.
+   */
+  asPerson: <T>(send: (person: string) => Promise<T>) => Promise<T>;
+  /** The link's session, refused as `person` is. */
+  session: () => Promise<Session>;
+  close: () => void;
+}
+
+const frameClosedError = (): Error => new Error("The frame was stopped.");
+
+/** Closes `frame` in core and lets go of it, gone already or not. */
+const letGo = async (frame: Promise<FrameApi>): Promise<void> => {
+  try {
+    const held = await frame;
+    try {
+      await held.close();
+    } finally {
+      held[Symbol.dispose]();
+    }
+  } catch {
+    // Gone with its connection, which let go of it in core too.
+  }
+};
+
+const holdFrame = (
+  link: FrameLink,
+  { app, lease }: Pick<ScreenBundle, "app" | "lease">
+): FrameHold => {
+  let held: { session: Session; frame: Promise<FrameApi> } | undefined;
+  let closed = false;
+  const ask = async (session: Session): Promise<FrameApi> => {
+    try {
+      return await session.screens.frame(app, lease);
+    } catch (error) {
+      // Asked again by the next call, not refused for good.
+      if (held?.session === session) {
+        held = undefined;
+      }
+      throw error;
+    }
+  };
+  /** `wait`'s answer, unless the frame is stopped before or meanwhile. */
+  const whileOpen = async <T>(wait: () => Promise<T>): Promise<T> => {
+    if (closed) {
+      throw frameClosedError();
+    }
+    const answer = await wait();
+    if (closed) {
+      throw frameClosedError();
+    }
+    return answer;
+  };
+  const current = async (): Promise<FrameApi> => {
+    // Stopped while the link connected: nothing is asked for that would
+    // never be closed.
+    const session = await whileOpen(async () => await link.session());
+    // Checked again in the turn it is asked for: a frame stopped since
+    // would hold a capability nobody closes.
+    if (closed) {
+      throw frameClosedError();
+    }
+    if (held?.session !== session) {
+      // The last connection's broke with it, and core let go of it then.
+      held = { session, frame: ask(session) };
+    }
+    // Stopped while core made it: nothing is sent on it.
+    const { frame } = held;
+    return await whileOpen(async () => await frame);
+  };
+  return {
+    use: async (run) => {
+      const frame = await current();
+      if (closed) {
+        throw frameClosedError();
+      }
+      // In this same turn, as `asPerson`: nothing stops the frame between.
+      return await run(frame);
+    },
+    asPerson: async (send) => {
+      if (closed) {
+        throw frameClosedError();
+      }
+      const person = await link.person();
+      if (closed) {
+        throw frameClosedError();
+      }
+      // In this same turn: nothing can stop the frame in between.
+      return await send(person);
+    },
+    session: async () => await whileOpen(async () => await link.session()),
+    close: () => {
+      closed = true;
+      const last = held;
+      held = undefined;
+      if (last !== undefined) {
+        void letGo(last.frame);
+      }
+    },
+  };
+};
+
 /**
  * Asks core whether the frame's build still gets its App's data, and
  * calls `refused` when it doesn't. Core's own answer on the page's own
@@ -167,12 +311,10 @@ type Refused = Extract<
  * can word as it likes.
  */
 const checkDelivery = async (
-  link: CoreLink,
-  { app, lease }: Pick<ScreenBundle, "app" | "lease">,
+  hold: FrameHold,
   refused: (reason: Refused) => void
 ): Promise<void> => {
-  const session = await link.session();
-  const delivery = await session.screens.present(app, lease);
+  const delivery = await hold.use(async (frame) => await frame.delivery());
   if (delivery !== "open") {
     refused(delivery);
   }
@@ -180,15 +322,45 @@ const checkDelivery = async (
 
 /** `checkDelivery`, for a call that doesn't wait for it. */
 const checkDeliveryNow = async (
-  link: CoreLink,
-  bundle: Pick<ScreenBundle, "app" | "lease">,
+  hold: FrameHold,
   refused: (reason: Refused) => void
 ): Promise<void> => {
   try {
-    await checkDelivery(link, bundle, refused);
+    await checkDelivery(hold, refused);
   } catch {
     // Asked again at the page's next check.
   }
+};
+
+/** The code of a refusal core answered, read from a copy of `response`. */
+const refusalCodeOf = async (response: Response): Promise<unknown> => {
+  try {
+    const payload = errorPayloadSchema.safeParse(await response.clone().json());
+    return payload.success ? payload.data.code : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * What core's answer to one of a frame's file requests means for the
+ * frame: someone else's session (`principal-changed`), a refusal for the
+ * build it runs (`build`, which the page then asks core about at once, as
+ * for a function call), or nothing.
+ */
+export const fileRefusal = async (
+  response: Response
+): Promise<"principal-changed" | "build" | undefined> => {
+  if (response.ok) {
+    return undefined;
+  }
+  const code = await refusalCodeOf(response);
+  if (response.status === 401 && code === "auth.principal_changed") {
+    return "principal-changed";
+  }
+  return code === "screen.unreviewed" || code === "screen.revoked"
+    ? "build"
+    : undefined;
 };
 
 /** Whether core refused a call for the build the frame runs. */
@@ -253,129 +425,257 @@ export const callFunction = async (
   });
 };
 
+/** What core pushes a query's subscriber: a refusal ends it. */
+type SnapshotCallback = (push: unknown) => Promise<unknown>;
+
+/** The error of a query's push that is core's refusal, if it is one. */
+const refusalOf = (push: unknown): unknown => {
+  if (typeof push !== "object" || push === null || !("result" in push)) {
+    return undefined;
+  }
+  const { result } = push;
+  return typeof result === "object" &&
+    result !== null &&
+    "ok" in result &&
+    result.ok === false &&
+    "error" in result
+    ? result.error
+    : undefined;
+};
+
 /**
- * A running App's screen: its own App's server, runs and error log. Each
- * connection is told which build the frame runs before its first call,
- * with core's lease on it, so one made again after a break is too.
+ * The frame's query callback, as the page passes it on to core: a push
+ * that is core's refusal (it checks access again while it follows) goes
+ * to `sawRefusal` before the frame hears it. Let go of once core lets go
+ * of it, as the frame's own stub would be.
+ */
+const seeingRefusals = (
+  onSnapshot: unknown,
+  sawRefusal: (error: unknown) => void
+): unknown => {
+  if (!(onSnapshot instanceof RpcStub)) {
+    return onSnapshot;
+  }
+  // SAFETY: the frame's stub is only called; a stub of anything else
+  // fails in the frame, not here, as the bridge's callbacks do.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const toFrame = onSnapshot.dup() as RpcStub<SnapshotCallback>;
+  return Object.assign(
+    async (push: unknown): Promise<unknown> => {
+      const refusal = refusalOf(push);
+      if (refusal !== undefined) {
+        sawRefusal(refusal);
+      }
+      return await toFrame(push);
+    },
+    {
+      [Symbol.dispose]: () => {
+        toFrame[Symbol.dispose]();
+      },
+    }
+  );
+};
+
+/**
+ * Asks the person, in Grasp's own dialog outside the frame, to confirm an
+ * answer a screen asked to give (decision-confirmation.tsx): whether they
+ * did.
+ */
+export type ConfirmDecision = (
+  pending: PendingConfirmation
+) => Promise<boolean>;
+
+/**
+ * A running App's screen: its own App's server, runs and error log. Its
+ * calls go through the frame's own way to its App (`hold`), so each is
+ * decided on the build this frame runs, whatever other frames of the App
+ * on the tab's connection run.
+ *
+ * A screen's answer to a decision is the person's only once they
+ * confirmed it in the page's own dialog (`confirm`): the page shows them
+ * what core says is asked and what would be recorded, mints the one-use
+ * confirmation on their click, and answers with it. The frame gets the
+ * answered decision, never the confirmation; nothing the frame sends can
+ * stand in for one. Cancelled, nothing is recorded, and the frame gets
+ * `decision.cancelled`.
  */
 const appTarget = (
-  link: CoreLink,
   bundle: ScreenBundle,
-  refused: (reason: Refused) => void
+  refused: (reason: Refused) => void,
+  hold: FrameHold,
+  confirm: ConfirmDecision,
+  drafts: AppDrafts
 ): FrameTarget => {
   const { app, version, screen, lease } = bundle;
-  let presentedOn: Session | undefined;
-  const framed = async <T>(
-    run: (screens: Session["screens"]) => Promise<T>
-  ): Promise<T> => {
-    const session = await link.session();
-    if (presentedOn !== session) {
-      await session.screens.present(app, lease);
-      presentedOn = session;
+  // Core's refusal pushed to what the screen follows, after it started:
+  // one of the person or the App drops the drafts; one of the build is
+  // core's to confirm to the page, which then stops the frame.
+  const sawRefusal = (error: unknown): void => {
+    drafts.refused(error);
+    if (refusedForBuild(error)) {
+      void checkDeliveryNow(hold, refused);
     }
+  };
+  const framed = async <T>(
+    run: (frame: FrameApi) => Promise<T>
+  ): Promise<T> => {
     try {
-      return await run(session.screens);
+      return await hold.use(run);
     } catch (error) {
+      // Whose drafts the frame reads and writes: core refusing the person
+      // or the App on any of the screen's calls drops them, whatever the
+      // frame does.
+      drafts.refused(error);
       if (refusedForBuild(error)) {
         // The frame gets the refusal as it is; whether to stop it is
         // core's answer to the page.
-        void checkDeliveryNow(link, bundle, refused);
+        void checkDeliveryNow(hold, refused);
+      }
+      // Never acted on as `auth.principal_changed`: what a call comes back
+      // with may be the App server's own error, worded as it likes, and
+      // ending the session reloads the tab for every frame. The frame's
+      // capability is bound to its connection's session, whose person
+      // never changes; someone else's cookie shows on a connection made
+      // again (core-connection.ts) or a plain request (`plain`).
+      throw error;
+    }
+  };
+  /**
+   * One of the frame's plain requests, as the link's person: it waits for
+   * a connection being made again, which fails when it is someone else's,
+   * and is never sent once the frame stopped. Core refusing it for the
+   * build, or as someone else's, is handled as for a call.
+   */
+  const plain = async <T>(send: (person: string) => Promise<T>): Promise<T> => {
+    try {
+      return await hold.asPerson(send);
+    } catch (error) {
+      drafts.refused(error);
+      if (refusedForBuild(error)) {
+        void checkDeliveryNow(hold, refused);
+      }
+      if (authErrors.codeOf(error) === "auth.principal_changed") {
+        refused("principal-changed");
       }
       throw error;
     }
   };
   return {
     call: async (method, args) =>
-      await framed(async (screens) => await screens.call(app, method, args)),
-    callFunction: async (request) => {
-      // Waits for a connection being made again, which fails when it is
-      // someone else's: then nothing is sent.
-      const person = await link.person();
-      try {
-        return await callFunction(app, { lease, person }, request);
-      } catch (error) {
-        if (refusedForBuild(error)) {
-          void checkDeliveryNow(link, bundle, refused);
-        }
-        if (authErrors.codeOf(error) === "auth.principal_changed") {
-          refused("principal-changed");
-        }
-        throw error;
-      }
-    },
-    streamFunction: async (what, request, onFrame, onEnded) => {
-      // As `callFunction`: never sent once the connection is someone else's.
-      const person = await link.person();
-      try {
-        return await followStream(
-          app,
-          { lease, person },
-          what,
-          request,
-          onFrame,
-          onEnded
-        );
-      } catch (error) {
-        if (refusedForBuild(error)) {
-          void checkDeliveryNow(link, bundle, refused);
-        }
-        if (authErrors.codeOf(error) === "auth.principal_changed") {
-          refused("principal-changed");
-        }
-        throw error;
-      }
-    },
-    cancelStream: async (request) => {
-      const person = await link.person();
-      try {
-        return await cancelStream(app, { lease, person }, request);
-      } catch (error) {
-        if (refusedForBuild(error)) {
-          void checkDeliveryNow(link, bundle, refused);
-        }
-        if (authErrors.codeOf(error) === "auth.principal_changed") {
-          refused("principal-changed");
-        }
-        throw error;
-      }
-    },
+      await framed(async (frame) => await frame.call(method, args)),
+    callFunction: async (request) =>
+      await plain(
+        async (person) => await callFunction(app, { lease, person }, request)
+      ),
+    streamFunction: async (what, request, onFrame, onEnded) =>
+      await plain(
+        async (person) =>
+          await followStream(
+            app,
+            { lease, person },
+            what,
+            request,
+            // A stream core refuses after it started (its access checked
+            // again) is refused like any call: the frame hears it as it is.
+            async (sent) => {
+              if (
+                typeof sent === "object" &&
+                sent !== null &&
+                "type" in sent &&
+                sent.type === "refused" &&
+                "error" in sent
+              ) {
+                sawRefusal(sent.error);
+              }
+              return await onFrame(sent);
+            },
+            onEnded
+          )
+      ),
+    cancelStream: async (request) =>
+      await plain(
+        async (person) => await cancelStream(app, { lease, person }, request)
+      ),
     report: async (problem) => {
-      await on(link, async ({ screens }) => {
-        await screens.report(app, { version, screen }, problem);
-      });
+      const { screens } = await hold.session();
+      await screens.report(app, { version, screen }, problem);
     },
     startRun: async (workflow, input) =>
-      await framed(
-        async (screens) => await screens.startRun(app, workflow, input)
-      ),
+      await framed(async (frame) => await frame.startRun(workflow, input)),
     runs: async (workflow) =>
-      await framed(async (screens) => await screens.runs(app, workflow)),
-    run: async (run) =>
-      await framed(async (screens) => await screens.run(app, run)),
-    decide: async (run, decision, answer) =>
-      await framed(
-        async (screens) =>
-          await screens.decide(app, run, decision, forCore(answer))
-      ),
+      await framed(async (frame) => await frame.runs(workflow)),
+    run: async (run) => await framed(async (frame) => await frame.run(run)),
+    decide: async (run, decision, answer) => {
+      const review = await framed(
+        async (frame) =>
+          await frame.reviewDecision(run, decision, forCore(answer))
+      );
+      if (review.state === "recorded") {
+        return review.decision;
+      }
+      if (!(await confirm(review))) {
+        throw decisionErrors.create("decision.cancelled");
+      }
+      const { confirmation } = await framed(
+        async (frame) =>
+          await frame.confirmDecision(
+            run,
+            decision,
+            review.decision.revision,
+            review.response
+          )
+      );
+      return await framed(
+        async (frame) =>
+          await frame.decide(run, decision, review.response, confirmation)
+      );
+    },
     summary: async (run) =>
-      await framed(async (screens) => await screens.summary(app, run)),
+      await framed(async (frame) => await frame.summary(run)),
     control: async (run, kind) =>
-      await framed(async (screens) => {
+      await framed(async (frame) => {
         if (kind !== "pause" && kind !== "resume" && kind !== "cancel") {
           throw screenErrors.create("screen.invalid");
         }
-        return await screens.control(app, run, kind);
+        return await frame.control(run, kind);
       }),
     watchRuns: async (workflow, onChange) =>
       await framed(
-        async (screens) =>
-          await screens.watchRuns(app, workflow, forCore(onChange))
+        async (frame) => await frame.watchRuns(workflow, forCore(onChange))
       ),
     watchQuery: async (request, onSnapshot) =>
       await framed(
-        async (screens) =>
-          await screens.watchQuery(app, lease, request, forCore(onSnapshot))
+        async (frame) =>
+          await frame.watchQuery(
+            request,
+            forCore(seeingRefusals(onSnapshot, sawRefusal))
+          )
       ),
+    // Handed over only while core still hands the frame's build the App's
+    // data, and the person their access: drafts are that data too.
+    drafts: async () => {
+      try {
+        const delivery = await hold.use(
+          async (frame) => await frame.delivery()
+        );
+        if (delivery !== "open") {
+          refused(delivery);
+          return {};
+        }
+      } catch (error) {
+        // Refused the person or the App: none, and none kept. Anything
+        // else (core out of reach) hands over nothing either, the drafts
+        // kept for when the check answers.
+        if (lostAccess(error)) {
+          drafts.refused(error);
+          return {};
+        }
+        throw error;
+      }
+      return await drafts.drafts();
+    },
+    saveDraft: drafts.save,
+    clearDrafts: drafts.clear,
   };
 };
 
@@ -391,13 +691,35 @@ const refusedInPreview = async (): Promise<never> => {
   throw appErrors.create("app.preview_side_effect");
 };
 
+/** Whether `frame` is a stream's last: its result, a refusal, or the end. */
+const isLastFrame = (frame: unknown): boolean =>
+  typeof frame === "object" &&
+  frame !== null &&
+  "type" in frame &&
+  (frame.type === "result" ||
+    frame.type === "refused" ||
+    frame.type === "closed");
+
+/** Tells the frame its stream's connection ended. Never throws. */
+const handedClosed = async (
+  onFrame: (frame: unknown) => Promise<unknown>
+): Promise<void> => {
+  try {
+    await onFrame({ type: "closed" });
+  } catch {
+    // The frame is gone.
+  }
+};
+
 /**
  * A preview of the chat's draft: its server calls go to the draft's
  * preview, what its screen reports to the chat's agent; it starts no
- * workflow run, finds none, and follows none.
+ * workflow run, finds none, and follows none. A draft of spec 8's layout
+ * runs on its draft release (core's sealed-previews.ts): its function
+ * calls and live queries go there, on a store of the preview's own.
  */
-const previewTarget = (
-  link: CoreLink,
+export const previewTarget = (
+  link: FrameLink,
   chatId: string,
   bundle: PreviewBundle
 ): FrameTarget => {
@@ -409,10 +731,70 @@ const previewTarget = (
         async ({ chats }) =>
           await chats.previewCall(chatId, app, revision, method, args)
       ),
-    // A draft's functions aren't sealed, so its preview has none to call.
-    callFunction: refusedInPreview,
-    streamFunction: refusedInPreview,
-    cancelStream: refusedInPreview,
+    callFunction: async (request) =>
+      await on(
+        link,
+        async ({ chats }) =>
+          await chats.previewFunction(chatId, app, revision, request)
+      ),
+    // A streaming action runs in the draft's preview too, on its draft
+    // release and store (core's sealed-previews.ts), relayed over the
+    // page's connection while the person may still have it.
+    streamFunction: async (what, request, onFrame, onEnded) =>
+      await on(link, async ({ chats }) => {
+        let ended = false;
+        // A last frame came, even if the frame hasn't taken it yet: no
+        // `closed` goes after it.
+        let lastCame = false;
+        const end = (): void => {
+          if (!ended) {
+            ended = true;
+            onEnded();
+          }
+        };
+        const subscription = await chats.previewStream(
+          chatId,
+          app,
+          revision,
+          what,
+          request,
+          forCore(async (frame: unknown) => {
+            const last = isLastFrame(frame);
+            lastCame ||= last;
+            try {
+              return await onFrame(frame);
+            } finally {
+              if (last) {
+                end();
+              }
+            }
+          })
+        );
+        // The connection dropped before the last frame: the frame hears
+        // `closed`, as a live screen's stream does when its request ends,
+        // so it attaches again (on the next connection) rather than wait.
+        const stub: unknown = subscription;
+        if (stub instanceof RpcStub) {
+          stub.onRpcBroken(() => {
+            if (!(ended || lastCame)) {
+              end();
+              void handedClosed(onFrame);
+            }
+          });
+        }
+        return {
+          release: () => {
+            end();
+            void subscription.release();
+          },
+        };
+      }),
+    cancelStream: async (request) =>
+      await on(
+        link,
+        async ({ chats }) =>
+          await chats.previewCancelStream(chatId, app, revision, request)
+      ),
     report: async (problem) => {
       await on(link, async ({ chats }) => {
         await chats.previewReport(chatId, app, revision, screen, problem);
@@ -430,35 +812,64 @@ const previewTarget = (
           await Promise.resolve();
         },
       }),
-    // As `callFunction`: a draft's functions aren't sealed.
-    watchQuery: refusedInPreview,
+    watchQuery: async (request, onSnapshot) =>
+      await on(
+        link,
+        async ({ chats }) =>
+          await chats.previewWatchQuery(
+            chatId,
+            app,
+            revision,
+            request,
+            forCore(onSnapshot)
+          )
+      ),
+    // A preview reads no real data, so it keeps no drafts of it.
+    drafts: async () => await Promise.resolve({}),
+    saveDraft: () => {
+      // Nothing to keep.
+    },
+    clearDrafts: () => {
+      // Nothing kept.
+    },
   };
 };
 
 /** Which build a frame runs, and the App's name to show around it. */
 type FrameCode = Pick<ScreenBundle, "name" | "artifact" | "frameToken">;
 
+/** What a frame's bridge reaches, and what runs once its screen does. */
+interface Connected {
+  target: FrameTarget;
+  /** Called once the screen runs, if given: `onState` says what the page shows. */
+  running?: (onState: (state: ScreenState) => void) => void;
+  /**
+   * The screen's file channel (spec 10.7.5), if it has one: a running
+   * App's screen does, under its lease and for the person the tab's link
+   * is for; a draft's preview doesn't.
+   */
+  files?: FileChannel;
+}
+
 /** What a frame runs, and what its bridge reaches. */
 interface FrameSource<Bundle extends FrameCode> {
   open: (session: Session) => Promise<Bundle>;
-  /** `refused` stops the frame: core no longer hands its build the data. */
-  target: (
-    link: CoreLink,
-    bundle: Bundle,
-    refused: (reason: Refused) => void
-  ) => FrameTarget;
   /**
-   * Called once the screen runs, if given: `cleanups` stop what it
-   * starts, `onState` says what the page shows, and `refused` stops the
-   * frame.
+   * Joins the connection the frame goes over: the tab's (`tabLink`), or
+   * one of its own, closed with the frame (`ownLink`).
    */
-  running?: (
-    link: CoreLink,
+  join: (onEnded: (why: SessionEnded) => void) => Joined;
+  /**
+   * What the frame's bridge reaches on the tab's `link`: `refused` stops
+   * the frame (core no longer hands its build the data, or the browser's
+   * session is someone else's), and `cleanups` stop what it starts.
+   */
+  connect: (
+    link: FrameLink,
     bundle: Bundle,
-    cleanups: (() => void)[],
-    onState: (state: ScreenState) => void,
-    refused: (reason: Refused) => void
-  ) => void;
+    refused: (reason: Refused) => void,
+    cleanups: (() => void)[]
+  ) => Connected;
 }
 
 /**
@@ -478,9 +889,10 @@ const runFrame = <Bundle extends FrameCode>(
 
   /**
    * Stops it all, once: what waits for the frame stops waiting, the
-   * bridge and its port close, timers end, and the page's connection for
-   * this frame closes (the first cleanup), and with it what the frame
-   * followed in core.
+   * frame leaves the tab's link (the first cleanup), its own way to its
+   * App closes, and with it what the frame followed in core, and the
+   * bridge and its port close and timers end. The link stays, for the
+   * tab's other frames.
    */
   const stop = (): void => {
     if (stopped.signal.aborted) {
@@ -506,19 +918,34 @@ const runFrame = <Bundle extends FrameCode>(
     onState(state);
   };
 
-  // The link ending stops the frame, signed out or not: nothing of the
-  // person's stays on the page, in the frame or its bridge, for whoever
-  // uses the browser next.
-  const link = new CoreLink((why) => {
+  // The session ending stops the frame, signed out or not, as it stops
+  // every frame of the tab: nothing of the person's stays on the page, in a
+  // frame or its bridge, for whoever uses the browser next.
+  const joined = source.join((why) => {
     fail(
       why === "signed-out"
         ? { status: "signed-out" }
         : { status: "failed", reason: "principal-changed" }
     );
   });
+  const { link } = joined;
   cleanups.push(() => {
-    link.close();
+    joined.leave();
   });
+
+  /**
+   * Stops the frame for `reason`. Core saying the browser's session is
+   * someone else's ends the person's session on the page, which stops
+   * every frame of the tab, this one too, and loads the page again;
+   * anything else stops this frame alone.
+   */
+  const refused = (reason: Refused): void => {
+    if (reason === "principal-changed") {
+      joined.end("principal-changed");
+      return;
+    }
+    fail({ status: "failed", reason });
+  };
 
   // The frame loads one document: its own, which `ready` answers for. A
   // load after that is the screen sending its frame to another address,
@@ -566,6 +993,8 @@ const runFrame = <Bundle extends FrameCode>(
       load,
       artifact: bundle.artifact,
       token: bundle.frameToken,
+      // The page's language, which the kit's helpers in the frame speak.
+      lang: document.documentElement.lang,
     })}`;
     await ready;
     if (stopped.signal.aborted) {
@@ -576,14 +1005,31 @@ const runFrame = <Bundle extends FrameCode>(
       artifact: bundle.artifact,
       generation,
     };
-    const refused = (reason: Refused): void => {
-      fail({ status: "failed", reason });
-    };
+    const {
+      target,
+      running,
+      files: channel,
+    } = source.connect(link, bundle, refused, cleanups);
     const { port1, port2 } = new MessageChannel();
     cleanups.push(
-      openBridge(port1, source.target(link, bundle, refused), () => {
+      openBridge(port1, target, () => {
         fail({ status: "failed", reason: "disconnected" });
       })
+    );
+    // The frame's files go over a port of their own, as `Blob`s, never in
+    // the bridge's text (screen-files.ts).
+    const files = new MessageChannel();
+    // Asked for by the person in this frame: a click (activation) with the
+    // frame focused, never one elsewhere on the page.
+    const gesture = frameGesture(frame, {
+      events: window,
+      active: () => navigator.userActivation.isActive,
+      focused: () => document.activeElement,
+      now: () => performance.now(),
+    });
+    cleanups.push(
+      gesture.close,
+      openFilePort(files.port1, channel, gesture.take)
     );
     const mounted = stage(
       "mounted",
@@ -594,7 +1040,7 @@ const runFrame = <Bundle extends FrameCode>(
     frame.contentWindow?.postMessage(
       { type: screenFrameMessage, ...expected },
       "*",
-      [port2]
+      [port2, files.port2]
     );
     onOpened(bundle.name);
     // Running only once the screen has rendered, never because its frame
@@ -604,7 +1050,7 @@ const runFrame = <Bundle extends FrameCode>(
       return;
     }
     onState({ status: "running" });
-    source.running?.(link, bundle, cleanups, onState, refused);
+    running?.(onState);
   };
 
   const run = async (): Promise<void> => {
@@ -628,35 +1074,95 @@ const runFrame = <Bundle extends FrameCode>(
 };
 
 /**
- * Runs `screen` of `app` in `frame`, and watches for a new current
- * version, and for its build no longer getting the App's data
- * (`runFrame`).
+ * What the page runs for `screen` of `app`, for one frame: its bridge
+ * reaches the App (`appTarget`), and the page checks on it while it runs.
+ * Whose drafts the frame reads and writes is the person signed in, as
+ * core says, never the frame. Core refusing the person or the App drops
+ * them and keeps no more for the frame, whatever it does: on any of the
+ * screen's calls, streaming ones too, and at the page's own checks.
  */
-export const runScreen = (
-  frame: HTMLIFrameElement,
+export const appScreen = (
   app: string,
   screen: string,
-  onState: (state: ScreenState) => void,
-  onOpened: (appName: string) => void
-): (() => void) =>
-  runFrame(
-    frame,
-    {
-      open: async (session) => await session.screens.open(app, screen),
-      target: appTarget,
-      running: (link, bundle, cleanups, setState, refused) => {
+  confirm: ConfirmDecision
+): Omit<FrameSource<ScreenBundle>, "join"> => ({
+  open: async (session) => {
+    try {
+      return await session.screens.open(app, screen);
+    } catch (error) {
+      // Refused the person or the App, not only this screen (one not
+      // found among the App's): its drafts were read under access gone.
+      if (lostAccess(error)) {
+        shutAppDrafts(app);
+      }
+      throw error;
+    }
+  },
+  connect: (link, bundle, refused, cleanups) => {
+    const hold = holdFrame(link, bundle);
+    const drafts = appDrafts(app, async () => {
+      const session = await hold.session();
+      const { userId } = await session.whoami();
+      return userId;
+    });
+    // Stopping the frame for access closes its drafts first, so a save
+    // still waiting to know who is signed in can't keep one afterwards.
+    const closing = (reason: Refused): void => {
+      drafts.close();
+      refused(reason);
+    };
+    // What the frame's drafts gathered is written when the page goes away
+    // (a refresh, a closed tab). When the frame stops, however it stops,
+    // they are written as far as who is signed in is known, and nothing
+    // more is kept for it: a save still waiting to know is lost.
+    const flush = (): void => {
+      drafts.flush();
+    };
+    addEventListener("pagehide", flush);
+    cleanups.push(() => {
+      removeEventListener("pagehide", flush);
+      drafts.stop();
+      hold.close();
+    });
+    return {
+      target: appTarget(bundle, closing, hold, confirm, drafts),
+      // Core's file channel, under the screen's lease, with the person's
+      // session: a plain request of the page's own origin, naming the
+      // person the frame is for. One core refuses as someone else's, or
+      // for the build, is handled as a function call's is.
+      files: fileChannel({
+        app,
+        lease: bundle.lease,
+        person: async () => await link.person(),
+        fetch: async (path, init) => {
+          const response = await fetch(path, {
+            ...init,
+            credentials: "same-origin",
+          });
+          const refusal = await fileRefusal(response);
+          if (refusal === "principal-changed") {
+            closing("principal-changed");
+          }
+          if (refusal === "build") {
+            void checkDeliveryNow(hold, closing);
+          }
+          return response;
+        },
+      }),
+      running: (setState) => {
         const { version } = bundle;
         const check = async (): Promise<void> => {
           try {
             // A screen that asks for nothing more still holds what it was
             // handed: this is when the page hears its approval is gone.
-            await checkDelivery(link, bundle, refused);
-            const session = await link.session();
+            await checkDelivery(hold, closing);
+            const session = await hold.session();
             if ((await session.screens.version(app)) !== version) {
               setState({ status: "updated" });
             }
-          } catch {
-            // Asked again at the next check.
+          } catch (error) {
+            drafts.refused(error);
+            // Anything else is asked again at the next check.
           }
         };
         const timer = setInterval(() => {
@@ -666,10 +1172,63 @@ export const runScreen = (
           clearInterval(timer);
         });
       },
+    };
+  },
+});
+
+/**
+ * Why a screen was stopped that means its drafts were read under access
+ * now gone: its build's approval. A refusal to open it is looked at by
+ * its code (`appScreen`), as a screen not found isn't the App.
+ */
+const dropsDrafts: ReadonlySet<FailureReason> = new Set([
+  "unreviewed",
+  "revoked",
+]);
+
+/**
+ * Runs `screen` of `app` in `frame`, and watches for a new current
+ * version, and for its build no longer getting the App's data
+ * (`runFrame`).
+ */
+export const runScreen = (
+  frame: HTMLIFrameElement,
+  core: CoreConnection,
+  app: string,
+  screen: string,
+  onState: (state: ScreenState) => void,
+  onOpened: (appName: string) => void,
+  confirm: ConfirmDecision
+): (() => void) => {
+  // A screen refused or stopped for access (the person's, or its build's)
+  // takes the person's drafts of its App with it; a session that ended,
+  // as the frame's link found out first, every draft (form-drafts.ts).
+  const stateOf = (state: ScreenState): void => {
+    if (state.status === "signed-out") {
+      stopDrafts();
+    } else if (
+      state.status === "failed" &&
+      state.reason === "principal-changed"
+    ) {
+      // Every draft was the person before's. The next screen, opened for
+      // the person now, keeps theirs.
+      clearDrafts();
+    } else if (state.status === "failed" && dropsDrafts.has(state.reason)) {
+      // Every running screen of the App stops keeping drafts too.
+      shutAppDrafts(app);
+    }
+    onState(state);
+  };
+  return runFrame(
+    frame,
+    {
+      ...appScreen(app, screen, confirm),
+      join: (onEnded) => tabLink(core, onEnded),
     },
-    onState,
+    stateOf,
     onOpened
   );
+};
 
 /**
  * Runs `screen` (the draft's first when none is named) of the chat's
@@ -685,8 +1244,15 @@ export const runPreview = (
     frame,
     {
       open: async (session) => await session.chats.preview(chatId, app, screen),
+      // A connection of its own: core keeps a preview's callbacks (its
+      // server calls') per connection, with no way of the frame's own to
+      // let go of them, so only closing the connection when the preview
+      // stops releases them (GRA-623).
+      join: ownLink,
       // A preview reads no real data, so no approval decides it.
-      target: (link, bundle) => previewTarget(link, chatId, bundle),
+      connect: (link, bundle) => ({
+        target: previewTarget(link, chatId, bundle),
+      }),
     },
     onState,
     onOpened

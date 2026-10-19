@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatTitleSchema,
@@ -19,38 +20,57 @@ import type {
   PreviewBundle,
   ProjectDocument,
 } from "@grasp-os/shared/chat";
-import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
+import {
+  authErrors,
+  internalErrors,
+  isExpectedError,
+} from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
-import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import {
   screenErrors,
   screenNameSchema,
   screenProblemSchema,
 } from "@grasp-os/shared/screens";
-import type { ScreenProblem } from "@grasp-os/shared/screens";
+import type {
+  QuerySnapshotPush,
+  ScreenProblem,
+} from "@grasp-os/shared/screens";
 import { z } from "zod";
 
+import type { FunctionAnswer } from "./app-functions.ts";
 import { appFor, draftFiles, screensIn } from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
-import { workspace } from "./durable-objects.ts";
+import { withReferencesText } from "./draft-references.ts";
+import { appHost, workspace } from "./durable-objects.ts";
 import { gatewaySettings, modelEffortsOf } from "./models.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
+import { relayPreviewStream } from "./preview-stream-relay.ts";
+import { QuerySubscriptions } from "./query-subscriptions.ts";
+import type { LiveReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
 import {
   admitPreviewCall,
+  admitWindow,
   argumentsFor,
   stillHasRole,
+  windowCharger,
   withinAnswer,
 } from "./screens-rpc.ts";
 import { screenCode } from "./screens.ts";
+import type { PreviewAnswer } from "./sealed-previews.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { questionSchema } from "./workspace.ts";
@@ -127,6 +147,102 @@ const refusals = {
 };
 
 /** The signed-in person's chats with the organization's agent. */
+/** A preview call's answer, as the chat's Workspace object sent it as text. */
+const previewAnswerOf = (text: string): PreviewAnswer =>
+  // SAFETY: core's own object made the text of a `PreviewAnswer`.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  JSON.parse(text) as PreviewAnswer;
+
+/** What a preview's live queries are keyed by: its chat and revision. */
+const previewKey = (chatId: ChatId, revision: number): string =>
+  `preview:${chatId}:${revision}`;
+
+/** The chat and revision `previewKey` made `key` of. */
+const previewOfKey = (
+  key: string | undefined
+): { chatId: ChatId; revision: number } => {
+  const [kind, chat, revision] = (key ?? "").split(":");
+  const parsed = chatIdSchema.safeParse(chat);
+  const at = Number(revision);
+  if (kind !== "preview" || !parsed.success || !Number.isInteger(at)) {
+    throw appErrors.create("app.preview_outdated");
+  }
+  return { chatId: parsed.data, revision: at };
+};
+
+/** Whether `by` builds App `app` now. */
+const buildsNow = async (
+  env: Env,
+  by: Identity,
+  app: AppId
+): Promise<boolean> => {
+  try {
+    await appFor(env, by, app, "builder");
+    return true;
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
+ * A page's live reads of its previews (query-subscriptions.ts): as the
+ * person behind the connection's session, pushed only while they build
+ * the App, read in the preview of the chat's draft at the revision the
+ * subscription named, on the preview's store; charged to the person's
+ * live reads of the App as a screen's are.
+ */
+const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
+  check,
+  // The draft still at the subscription's revision, and the person still
+  // building the App: a read under way as the draft moved on pushes
+  // nothing, and its subscription ends.
+  access: async (by, app, key) => {
+    const { chatId, revision } = previewOfKey(key);
+    const now = await workspace(env, personalWorkspaceId(by.userId)).draft(
+      chatId,
+      app
+    );
+    return now.revision === revision && (await buildsNow(env, by, app))
+      ? "open"
+      : "role";
+  },
+  roles: async (by, app) =>
+    (await buildsNow(env, by, app))
+      ? canonicalJson({ appMember: true, appBuilder: true })
+      : undefined,
+  admit: async (by, app, cost) =>
+    await appHost(env, app).admitLiveRead(by.userId, cost),
+  revocable: true,
+  forget: () => {
+    check.forget?.();
+  },
+  evaluate: async (by, app, key, request, deadline, chargePages) => {
+    const { chatId, revision } = previewOfKey(key);
+    const answered = previewAnswerOf(
+      await workspace(env, personalWorkspaceId(by.userId)).previewFunction(
+        chatId,
+        by.userId,
+        app,
+        revision,
+        request,
+        {
+          kind: "query",
+          deadline,
+          // A window's pages past what its read paid, charged as a
+          // version's live list charges them.
+          chargeWindow: async (pages) => {
+            await chargePages(pages);
+          },
+        }
+      )
+    );
+    return { result: answered.answer.result, reads: answered.reads };
+  },
+});
+
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
@@ -139,11 +255,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * session-check.ts).
    */
   readonly #stillOpen: StillOpen;
+  /** This connection's live queries of its previews (sealed-previews.ts). */
+  readonly #previewQueries: QuerySubscriptions;
 
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
+    this.#previewQueries = new QuerySubscriptions(
+      env,
+      previewReads(env, check)
+    );
     this.#stillOpen = async () => {
       try {
         await check();
@@ -432,11 +554,24 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       if (screens.length === 0) {
         throw screenErrors.create("screen.not_found");
       }
+      // A draft of spec 8's layout: its screens import the references its
+      // draft release generates, the very release their calls run on.
+      const withReferences = await withReferencesText(
+        Object.fromEntries(files),
+        async () =>
+          (await this.#chatsOf(by.userId).previewReferences(
+            chatIdOf(chatId),
+            by.userId,
+            id,
+            draft.revision
+          )) ?? undefined
+      );
       const built = await screenCode(
         this.#env,
-        Object.fromEntries(files),
+        withReferences,
         screen ?? screens[0],
-        null
+        null,
+        id
       );
       // A preview reads no real data, so no approval decides it; its
       // frame still runs exactly this build and nothing else.
@@ -496,6 +631,210 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         }
         throw error;
       }
+    });
+  }
+
+  /**
+   * Calls a function of the draft of spec 8's layout in its preview, as a
+   * screen's `callFunction` does (sealed-previews.ts): `request` is the
+   * call's text, as the screen's client sends it. Answers as a screen's
+   * call is answered (app-functions.ts), a refusal of the call included;
+   * throws only for a preview the person may not use or that is out of
+   * date.
+   */
+  async previewFunction(
+    chatId: string,
+    app: string,
+    revision: number,
+    request: string
+  ): Promise<FunctionAnswer> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      await admitPreviewCall(this.#env, by, id);
+      if (
+        typeof request !== "string" ||
+        request.length > functionRequestMaxBytes
+      ) {
+        throw screenErrors.create("screen.invalid");
+      }
+      // A paginated list's window counts its pages, as a screen's does.
+      await admitWindow(this.#env, by, id, request);
+      const answered = previewAnswerOf(
+        await this.#chatsOf(by.userId).previewFunction(
+          chatIdOf(chatId),
+          by.userId,
+          id,
+          revision,
+          request,
+          { chargeWindow: windowCharger(this.#env, by, id) }
+        )
+      );
+      return withinAnswer(answered.answer);
+    });
+  }
+
+  /**
+   * Follows a public query of the draft of spec 8's layout in its
+   * preview, as a screen's `watchQuery` does (query-subscriptions.ts),
+   * read on the preview's store as the person, while they build the App
+   * and the draft is at `revision`.
+   */
+  async previewWatchQuery(
+    chatId: string,
+    app: string,
+    revision: number,
+    request: string,
+    onSnapshot: (snapshot: QuerySnapshotPush) => void
+  ): Promise<RunSubscription> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      await admitPreviewCall(this.#env, by, id);
+      if (
+        typeof request !== "string" ||
+        request.length > functionRequestMaxBytes ||
+        typeof revision !== "number" ||
+        !isStub(onSnapshot)
+      ) {
+        throw screenErrors.create("screen.invalid");
+      }
+      // A window counts as the pages it reads (query-windows.ts).
+      await admitWindow(this.#env, by, id, request);
+      const chat = chatIdOf(chatId);
+      // The chat is theirs, with a draft of the App at `revision`.
+      const draft = await this.#chatsOf(by.userId).previewDraft(
+        chat,
+        by.userId,
+        id
+      );
+      if (draft.revision !== revision) {
+        throw appErrors.create("app.preview_outdated");
+      }
+      return this.#previewQueries.subscribe(
+        by,
+        id,
+        previewKey(chat, revision),
+        request,
+        onSnapshot
+      );
+    });
+  }
+
+  /**
+   * Starts (`stream`) or follows again (`attach`) a streaming action of the
+   * draft of spec 8's layout in its preview, as a screen's `streamFunction`
+   * does (sealed-previews.ts), relayed to `onFrame` only while the person
+   * still builds the App and the draft is still at `revision`
+   * (preview-stream-relay.ts). Each start and attach counts as one of the
+   * person's preview requests.
+   */
+  async previewStream(
+    chatId: string,
+    app: string,
+    revision: number,
+    what: "stream" | "attach",
+    request: string,
+    onFrame: (frame: unknown) => Promise<unknown>
+  ): Promise<RunSubscription> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      await admitPreviewCall(this.#env, by, id);
+      if (
+        (what !== "stream" && what !== "attach") ||
+        typeof request !== "string" ||
+        request.length > functionRequestMaxBytes ||
+        typeof revision !== "number" ||
+        !isStub(onFrame)
+      ) {
+        throw screenErrors.create("screen.invalid");
+      }
+      if (this.#watches.size >= maxWatches) {
+        throw agentErrors.create("agent.too_many_watches");
+      }
+      const chat = chatIdOf(chatId);
+      const chats = this.#chatsOf(by.userId);
+      // Its slot taken before anything is awaited, as `watch` takes one:
+      // starts made at once can't each find room.
+      const relayed: { stop?: () => void } = {};
+      const toPage = callbackFor(onFrame, this.#stillOpen, refusals, () => {
+        this.#watches.delete(toPage);
+        relayed.stop?.();
+      });
+      this.#watches.add(toPage);
+      let frames: ReadableStream<Uint8Array>;
+      try {
+        frames = await chats.previewStream(
+          chat,
+          by.userId,
+          id,
+          revision,
+          request,
+          what === "attach"
+        );
+      } catch (error) {
+        toPage[Symbol.dispose]();
+        throw error;
+      }
+      relayed.stop = relayPreviewStream(frames, {
+        deliver: toPage,
+        // The session still theirs, the App still theirs to build, and the
+        // draft still at the stream's revision.
+        stillOpen: async () => {
+          const now = await this.#check();
+          if (now.userId !== by.userId) {
+            throw authErrors.create("auth.unauthenticated");
+          }
+          if ((await chats.draftRevision(chat, id)) !== revision) {
+            throw appErrors.create("app.preview_outdated");
+          }
+          if (!(await buildsNow(this.#env, now, id))) {
+            throw roleErrors.create("role.forbidden");
+          }
+        },
+        cancel: async () =>
+          await chats.previewCancelStream(
+            chat,
+            by.userId,
+            id,
+            revision,
+            request
+          ),
+        requestId: crypto.randomUUID(),
+      }).stop;
+      return new RunSubscription(async () => {
+        await Promise.resolve();
+        toPage[Symbol.dispose]();
+      });
+    });
+  }
+
+  /**
+   * Asks the preview's invocation of the streaming action `request` names
+   * to stop, as a screen's `cancelStream` does: `{ requested }`.
+   */
+  async previewCancelStream(
+    chatId: string,
+    app: string,
+    revision: number,
+    request: string
+  ): Promise<{ requested: boolean }> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      await admitPreviewCall(this.#env, by, id);
+      if (
+        typeof request !== "string" ||
+        request.length > functionRequestMaxBytes
+      ) {
+        throw screenErrors.create("screen.invalid");
+      }
+      return {
+        requested: await this.#chatsOf(by.userId).previewCancelStream(
+          chatIdOf(chatId),
+          by.userId,
+          id,
+          revision,
+          request
+        ),
+      };
     });
   }
 

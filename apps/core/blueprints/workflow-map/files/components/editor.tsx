@@ -1,3 +1,5 @@
+import type { Id } from "@grasp-os/sdk";
+import { useMutation } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -10,23 +12,19 @@ import { Input } from "@grasp-os/ui/components/input";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { useState } from "react";
 
+import { api } from "#grasp";
+
 import { LinkForm } from "./link-form";
 import { ParametersEditor } from "./parameters";
 import { whilePending } from "./pending";
-import { ask, recordOf, refusal } from "./playbook";
-import type { Opened, Team, Workflow } from "./playbook";
-import { draftChanged, draftOf, draftProblem, recordToSave } from "./record";
+import { draftChanged, draftOf, draftProblem, toSave } from "./record";
 import type { Draft } from "./record";
 import { StepsEditor } from "./steps";
+import { recordOf, refusal, settle } from "./store";
+import type { Opened, Team, Workflow } from "./store";
 import { TeamPicker } from "./team-picker";
 import { expectedGain, formatHours, shortTextMax, totalsOf } from "./totals";
 import type { Step, Totals, WorkflowRecord } from "./totals";
-
-/** What a save answers: the workflow's document. */
-interface Saved {
-  id: string;
-  currentVersion: number;
-}
 
 const TotalsLine = ({ totals, label }: { totals: Totals; label: string }) => (
   <dl aria-label={label} className="flex flex-wrap gap-6 text-sm">
@@ -103,7 +101,7 @@ const DraftCard = ({
   /** Whether it has the whole width: nothing is set beside it. */
   wide: boolean;
   teams: Team[];
-  /** Whether it can be saved: read only for who can't change the Playbook. */
+  /** Whether it can be saved: read only for who can't change the map. */
   writable: boolean;
   onSave: () => void;
   /** Saves it as designed; undefined when a workflow can't be designed. */
@@ -260,7 +258,7 @@ const EditorHeader = ({
  * A workflow's editor: its title, team, steps with their numbers, and
  * parameters. A designed one shows its expected gain against the drawn
  * version beside it. `opened` is null for a new, drawn, workflow. Read
- * only for someone who can't change the Playbook (`writable`).
+ * only for someone who can't change the map (`writable`).
  */
 export const WorkflowEditor = ({
   opened,
@@ -273,7 +271,7 @@ export const WorkflowEditor = ({
   teams: Team[];
   writable: boolean;
   /** Opens the saved version, which replaces this editor. */
-  onSaved: (id: string) => Promise<void>;
+  onSaved: (id: Id<"workflows">) => Promise<void>;
   onBack: () => void;
 }) => {
   const current = opened?.current;
@@ -289,6 +287,7 @@ export const WorkflowEditor = ({
   const unsaved = draftChanged(draft, body, current);
   const [problem, setProblem] = useState("");
   const [busy, setBusy] = useState(false);
+  const saveWorkflow = useMutation(api.map.save);
   const refused = (code: string): void => {
     setProblem(refusal(code));
   };
@@ -308,7 +307,7 @@ export const WorkflowEditor = ({
   // version it saved is open (or it was refused), so nothing typed
   // meanwhile is lost when that version replaces this editor.
   const whileBusy = async (
-    run: () => Promise<string | undefined>
+    run: () => Promise<Id<"workflows"> | undefined>
   ): Promise<void> => {
     setProblem("");
     await whilePending(setBusy, async () => {
@@ -321,22 +320,20 @@ export const WorkflowEditor = ({
 
   const save = async (
     to: WorkflowRecord["state"]
-  ): Promise<string | undefined> => {
-    const toDesign = to === "designed";
-    const baseline = baselineFor(to);
-    const answer = await ask<Saved>("save", {
-      ...(current === undefined
-        ? {}
-        : { documentId: current.id, path: current.path }),
-      ifVersion: current?.version ?? 0,
-      record: recordToSave(current?.record ?? {}, draft, to, baseline),
-      body,
-      ...(toDesign && !designed ? { message: "Designed" } : {}),
-    });
+  ): Promise<Id<"workflows"> | undefined> => {
+    const answer = await settle(
+      async () =>
+        await saveWorkflow({
+          id: current?.id ?? null,
+          expectedRevision: current?.revision ?? null,
+          ...toSave(stored, draft, body, to, baselineFor(to)),
+        })
+    );
     if ("error" in answer) {
       refused(answer.error);
+      return undefined;
     }
-    return "error" in answer ? undefined : answer.ok.id;
+    return answer.ok.id;
   };
 
   return (

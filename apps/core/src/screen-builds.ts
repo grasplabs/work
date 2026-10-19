@@ -52,28 +52,47 @@ export const recordBuilds = async (
  * Builds every screen of `app`'s `version` from `files` and records what
  * each builds to. Never throws: a version whose screens don't build has
  * nothing to approve, and one that can't be recorded now is when it is
- * next opened or reviewed. Screens that import the App's references
- * (`#grasp`) build without them here, and fail: generating them inspects
- * the App's code, which the save's own build did once already
- * (save-builds.ts). They are recorded once the version is reviewed or
- * opened.
+ * next opened or reviewed.
+ *
+ * Screens that import the App's references (`#grasp`) build with them
+ * only given `withReferences`, as a version made current is recorded:
+ * its release is sealed by then, so the references are read back from it
+ * (screen-references.ts), the very bytes opening the screen builds, and
+ * the version waits on an admin before anyone opens it. A save records
+ * without them, and those screens fail to build there: generating them
+ * for a version not sealed yet inspects the App's code, which the save's
+ * own build did once already (save-builds.ts).
+ *
+ * What it records is only what each screen builds to (`screen_builds`),
+ * for what waits on an admin. Nothing reads it to decide what a screen
+ * gets: that is the approvals', and a build is approved only by an admin.
  */
 export const recordVersionBuilds = async (
   env: Env,
   app: AppId,
   version: number,
-  files: Record<string, string>
+  files: Record<string, string>,
+  {
+    withReferences,
+  }: {
+    /** `files` with the references their screens import, if they get them. */
+    withReferences?: (
+      files: Record<string, string>
+    ) => Promise<Record<string, string>>;
+  } = {}
 ): Promise<void> => {
   const screens = Object.keys(files).flatMap((path) => {
     const name = screenPath.exec(path)?.groups?.name;
     return name === undefined ? [] : [name];
   });
   try {
-    const codeOf = await versionScreens(env, files, version);
-    const built = await Promise.all(
+    const built =
+      withReferences === undefined ? files : await withReferences(files);
+    const codeOf = await versionScreens(env, built, version, app);
+    const recorded = await Promise.all(
       screens.map(async (name) => await codeOf(name))
     );
-    await recordBuilds(env, app, version, built);
+    await recordBuilds(env, app, version, recorded);
   } catch (error) {
     if (!isExpectedError(error)) {
       log.warn("screen.builds_not_recorded", {

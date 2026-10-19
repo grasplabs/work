@@ -3,13 +3,14 @@ import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { invoiceAppFiles } from "./invoice-app.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // Screens and workflows in one App, end to end, with the sample invoice
 // App: a screen starts the intake workflow and sees its run change live;
-// its reviewer answers on the same screen, open elsewhere, and
-// everyone with it open sees "waiting" go; and what the workflow's steps
+// its reviewer answers on the same screen, open elsewhere, confirming the
+// answer in Grasp's own dialog outside the screen (a cancelled one records
+// nothing), and everyone with it open sees "waiting" go; and what the workflow's steps
 // write to the App's data reaches every open screen without a refresh.
 
 /**
@@ -65,14 +66,11 @@ const invoicesOn = (screen: FrameLocator) =>
   screen.getByRole("list", { name: "Invoices" }).getByRole("listitem");
 
 test("a screen starts a run and follows it live, and an answer on another screen continues it for everyone", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, admin } = peopleIn("screenWorkflows");
   const app = await releaseApp(builder, admin);
-  const [first, second] = await Promise.all([
-    pageOf(browser, builder),
-    pageOf(browser, admin),
-  ]);
+  const [first, second] = await Promise.all([pageOf(builder), pageOf(admin)]);
   const [starter, reviewer] = await Promise.all([
     openIntake(first, app),
     openIntake(second, app),
@@ -89,7 +87,37 @@ test("a screen starts a run and follows it live, and an answer on another screen
     ])
   );
 
+  // The screen asks to approve; Grasp's own dialog, outside the frame,
+  // shows the reviewer what is asked and what would be recorded. Cancelled,
+  // nothing is: the run still waits for its review.
   await reviewer.getByRole("button", { name: "Approve review" }).click();
+  const confirmation = second.getByRole("alertdialog", {
+    name: "Confirm your approval",
+  });
+  await expect(confirmation).toBeVisible(live);
+  await expect(confirmation).toContainText("Approve INV-7");
+  await expect(confirmation).toContainText("Your answerApprove");
+  await confirmation.getByRole("button", { name: "Cancel" }).click();
+  await expect(confirmation).toBeHidden();
+  await expect(runsOn(reviewer)).toHaveText(["waitingApprove review"], live);
+
+  // Asked again at once, the screen is refused for a while, so it can't
+  // keep the reviewer behind the dialog; asked again after that, and
+  // confirmed, the answer is recorded.
+  await reviewer.getByRole("button", { name: "Approve review" }).click();
+  // Refused while paused: the dialog stays closed past the time its
+  // review would take to come back.
+  await second.waitForTimeout(1000);
+  await expect(confirmation).toBeHidden();
+  // Clicked only while the dialog is closed, so no click waits behind it.
+  await expect(async () => {
+    if (!(await confirmation.isVisible())) {
+      await reviewer.getByRole("button", { name: "Approve review" }).click();
+    }
+    await expect(confirmation).toBeVisible({ timeout: 3000 });
+  }).toPass({ timeout: 20_000 });
+  await confirmation.getByRole("button", { name: "Confirm" }).click();
+  await expect(confirmation).toBeHidden();
 
   // The run goes on: nobody sees it waiting any more, it completes, and
   // its last step books the invoice, on every screen.

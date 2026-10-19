@@ -20,6 +20,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
+import { toast } from "@grasp-os/ui/components/toast";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -147,6 +148,19 @@ export const PersonMenu = ({
     applyTheme(readTheme(identity.userId));
   }, [identity.userId]);
   const { isMobile } = useSidebar();
+  // The menu is gone once clicked: a sign-out core didn't carry out is
+  // said in a toast, and the page stays.
+  const signOutOrSay = async (): Promise<void> => {
+    try {
+      await signOut(core);
+    } catch {
+      toast.add({
+        type: "error",
+        title: t`Signing out didn't work`,
+        description: t`You're still signed in. Try again in a moment.`,
+      });
+    }
+  };
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -174,7 +188,7 @@ export const PersonMenu = ({
               <ThemeMenu userId={identity.userId} />
               <DropdownMenuItem
                 onClick={() => {
-                  void signOut(core);
+                  void signOutOrSay();
                 }}
               >
                 <LogOutIcon />

@@ -254,6 +254,17 @@ export const appsFoundBy = (env: Env, by: Person): SQL | undefined => {
 };
 
 /**
+ * The Apps `userId` owns or is shared with when the statement runs, as a
+ * person or through a team they are in then, as a condition on `apps`:
+ * those they have a role in unless they are an admin, who has one in
+ * every App. `appsFoundBy`, with their teams read by the statement
+ * itself, for a write that must see the teams its own batch has not taken
+ * away yet.
+ */
+export const appsOwnedOrSharedNow = (userId: string): SQL =>
+  sql`(${apps.ownerId} = ${userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId})))))`;
+
+/**
  * That `by` still has a role in `app` when the statement runs, as SQL: an
  * admin (as their session said), the App's owner, or someone it is shared
  * with, as a person or through a team they are in then. For guarding a

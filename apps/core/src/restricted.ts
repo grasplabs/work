@@ -7,7 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
-import { apps, workflowRuns } from "./db/core/schema.ts";
+import { apps, workflowResourceRuns, workflowRuns } from "./db/core/schema.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 
 // Restricted mode. Once a chat or an App reads restricted data (in
@@ -31,12 +31,17 @@ import { appHost, workspace } from "./durable-objects.ts";
 //
 // The flag is only as good as the boundaries between contexts: it must
 // follow every way data moves from one to another. A workflow run started
-// by an App must start from (and restrict) that App's flag, and state
-// shared across a workspace's chats would need a flag on the workspace, not
-// on each chat. Whatever adds such a flow adds the flag with it: a call
-// from one App to another's export carries it both ways (app-calls.ts),
-// and a chat started to fix a failed run starts restricted when the run's
-// App is, since the run's report may hold what it read (run-fixes.ts).
+// by an App starts from that App's flag, and state shared across a
+// workspace's chats would need a flag on the workspace, not on each chat.
+// Whatever adds such a flow adds the flag with it: a call from one App to
+// another's export carries it both ways (app-calls.ts); a chat started to
+// fix a failed run starts restricted when the run's App is, since the
+// run's report may hold what it read (run-fixes.ts); an independent
+// workflow's run started by a restricted App, or from a restricted chat,
+// is restricted for good, its receipt and row pinning it
+// (workflow-starts.ts), and restricts any App it calls before its input
+// reaches it (workflows/resource-calls.ts). Such a run shares nothing
+// with the workflow's other runs, so none of them is restricted by it.
 //
 // Entering restricted mode is audited, with the collections whose read
 // entered it as provenance: before the flag is set, so it's never set
@@ -120,6 +125,39 @@ const requireOwnApp = async (
 };
 
 /**
+ * Refuses a run of an independent workflow that isn't one of the workflow
+ * `authority` names, or doesn't exist. Answers whether it runs in
+ * restricted mode, as its row pins it.
+ */
+const requireOwnResourceRun = async (
+  env: RestrictedEnv,
+  authority: Authority,
+  context: Extract<WorkContext, { type: "workflowRun" }>
+): Promise<boolean> => {
+  const { subject } = authority;
+  if (
+    subject.type !== "workflow" ||
+    subject.workflowId !== context.workflowId
+  ) {
+    throw contextInvalid();
+  }
+  const found = await drizzle(env.DB)
+    .select({ restricted: workflowResourceRuns.restricted })
+    .from(workflowResourceRuns)
+    .where(
+      and(
+        eq(workflowResourceRuns.id, context.runId),
+        eq(workflowResourceRuns.workflowResourceId, context.workflowId)
+      )
+    )
+    .get();
+  if (found === undefined) {
+    throw contextInvalid();
+  }
+  return found.restricted;
+};
+
+/**
  * Whether `context` has read restricted data, and a run's workflow. Throws
  * `permission.context_invalid` for a context `authority` can't work in, or
  * one that doesn't exist: it has nowhere to keep the flag.
@@ -129,6 +167,10 @@ const restrictedState = async (
   authority: Authority,
   context: WorkContext
 ): Promise<{ restricted: boolean } & RunOf> => {
+  if (context.type === "workflowRun") {
+    // As its start decided, pinned on its row (`restrict`).
+    return { restricted: await requireOwnResourceRun(env, authority, context) };
+  }
   if (context.type !== "chat") {
     const run = await requireOwnApp(env, authority, context);
     const restricted = await appHost(env, context.appId).isRestricted();
@@ -160,6 +202,10 @@ const restrictedEntry = (
   sources: string[]
 ): AuditEntry => {
   const provenance = [...new Set(sources)];
+  if (context.type === "workflowRun") {
+    // `restrict` refuses such a run before it is recorded.
+    throw contextInvalid();
+  }
   if (context.type === "chat") {
     return {
       actor: delegateActorOf(authority),
@@ -189,6 +235,16 @@ const restrictedEntry = (
  * Puts `context` in restricted mode, for good, after reading from
  * `sources` (collection IDs); audited when it wasn't yet. Throws
  * `permission.context_invalid` as `restrictedState` does.
+ *
+ * A run of an independent workflow never enters it after it starts: it
+ * starts restricted or not, as its start decided (workflow-starts.ts,
+ * `restrictedStart`), and keeps that. It reads no Knowledge, and what it
+ * calls answers an unrestricted one nothing restricted (an operation of
+ * an App in restricted mode is refused, before and after:
+ * workflows/resource-calls.ts). Anything that would restrict an
+ * unrestricted one is refused instead, `permission.restricted`, so
+ * restricted data fails closed rather than reaching a run that would pass
+ * it on unrestricted. A restricted one already is.
  */
 export const restrict = async (
   env: Env,
@@ -199,6 +255,9 @@ export const restrict = async (
   const { restricted, ...run } = await restrictedState(env, authority, context);
   if (restricted) {
     return;
+  }
+  if (context.type === "workflowRun") {
+    throw permissionErrors.create("permission.restricted");
   }
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
