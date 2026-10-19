@@ -92,15 +92,15 @@ const of = (count: number, total: number): string => `${count} of ${total}`;
 const plural = (count: number, one: string, other: string): string =>
   count === 1 ? one : other;
 
-/** What a piece of work still lacks, in words: once it is known, what is left is questions. */
-const lackingWords = ({ standing, missing }: WorkflowRow): string => {
-  if (missing === 0) {
-    return "Nothing missing";
-  }
-  return standing === "known"
-    ? `${missing} ${plural(missing, "question", "questions")} left`
+/**
+ * What a piece of work still lacks, in words. Known or not, the count is
+ * everything `missingOf` names (people still to talk, steps, numbers and
+ * questions), so it is never called questions alone.
+ */
+const lackingWords = ({ missing }: WorkflowRow): string =>
+  missing === 0
+    ? "Nothing missing"
     : `${missing} ${plural(missing, "thing", "things")} missing`;
-};
 
 /** A large number over the words that say what it is, as on the platform's own list of workflows. */
 const Big = ({
