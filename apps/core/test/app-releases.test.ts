@@ -1354,6 +1354,62 @@ export const reach = action({
     );
   });
 
+  it("can't keep anything but server code under operations/: each is refused by name", async () => {
+    const strays = [
+      "operations/notes.json",
+      "operations/view.tsx",
+      "operations/types.d.ts",
+      // Never saved (a save refuses a hidden folder), never server code.
+      "operations/.hidden/notes.ts",
+    ];
+    const built = await buildAppCode(
+      env,
+      {
+        ...notesFiles(),
+        ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
+      },
+      "app-test"
+    );
+    expect({
+      ok: built.ok,
+      refused: new Set(
+        built.ok
+          ? []
+          : built.diagnostics
+              .filter(({ message }) =>
+                message.includes("which holds only the App's server code")
+              )
+              .map(({ file }) => file)
+      ),
+    }).toStrictEqual({ ok: false, refused: new Set(strays) });
+  });
+
+  it("builds each operations file as a module of its own, dotted folders included", async () => {
+    // A folder named like a file beside it: each still has its own module.
+    const built = await buildAppCode(
+      env,
+      {
+        ...notesFiles(),
+        "operations/v1.0/extra.ts": "export const one = 1;\n",
+        "operations/notes.ts/extra.ts": "export const two = 2;\n",
+      },
+      "app-test"
+    );
+    expect(
+      built.ok
+        ? Object.keys(built.modules).filter((name) =>
+            name.startsWith("app~operations~")
+          )
+        : built.diagnostics
+    ).toStrictEqual(
+      expect.arrayContaining([
+        "app~operations~notes.js",
+        "app~operations~v1.0~extra.js",
+        "app~operations~notes.ts~extra.js",
+      ])
+    );
+  });
+
   it("can't put generated modules in its source", async () => {
     const owner = await person("builder");
     const { id } = await createApp(env, owner, { name: "Notes" });
@@ -1772,6 +1828,10 @@ describe("screens", { timeout: 120_000 }, () => {
     ["the schema", 'import schema from "../schema.ts";'],
     ["the registration", 'import notes from "../app";'],
     ["an operation", 'import { create } from "../operations/notes.ts";'],
+    [
+      "an operation in a dotted folder",
+      'import { create } from "../operations/v1.0/notes.ts";',
+    ],
     ["the host's SDK", 'import { inspectApp } from "@grasp-os/sdk/host";'],
   ])(
     "never import %s: the build fails before it starts",

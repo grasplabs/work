@@ -30,6 +30,8 @@ import {
   isAppLayout,
   isAppTestSuite,
   maxAppTestSuites,
+  strayServerFileMessage,
+  strayServerFiles,
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
@@ -828,6 +830,17 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
   const tooMuch = appCodeLimitErrors(code);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
+  }
+  // Nothing under operations/ is passed over: what isn't server code is
+  // refused, by name.
+  const strays = strayServerFiles(code);
+  if (strays.length > 0) {
+    return {
+      ok: false,
+      diagnostics: strays.map((file) =>
+        problem("server", strayServerFileMessage(file), { file })
+      ),
+    };
   }
   if (!isAppLayout(code)) {
     return {

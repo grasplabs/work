@@ -64,9 +64,43 @@ export const generatedModules = {
 } as const;
 
 const schemaFiles: ReadonlySet<string> = new Set(["schema.ts", "values.ts"]);
-const operationFile = /^operations\/(?:[\w-]+\/)*[\w.-]+\.ts$/u;
 const migrationFile = /^migrations\/[\w.-]+\.ts$/u;
 const generatedFile = /^\.grasp\/[\w.-]+\.ts$/u;
+
+/** Where an App's operations are: server code only. */
+const appOperationsFolder = "operations/";
+
+/** Whether `path` is under `operations/`, whatever it is. */
+const isUnderOperations = (path: string): boolean =>
+  path.startsWith(appOperationsFolder);
+
+/**
+ * Whether `path` is one of the App's operations files: a `.ts` file
+ * anywhere under `operations/`, its folders named as any App path's may
+ * be (`appPathSegmentPattern`), dots included but never leading, so no
+ * `.`, `..` or hidden folder is ever server code.
+ */
+const isOperationFile = (path: string): boolean =>
+  isUnderOperations(path) &&
+  path.endsWith(".ts") &&
+  !path.endsWith(".d.ts") &&
+  path.split("/").every((segment) => appPathSegmentPattern.test(segment));
+
+/**
+ * The files under `operations/` that aren't operations files
+ * (`isOperationFile`): a build of the server code refuses each, so
+ * nothing there is ever silently left out of it.
+ */
+export const strayServerFiles = (
+  files: Readonly<Record<string, string>>
+): string[] =>
+  Object.keys(files).filter(
+    (path) => isUnderOperations(path) && !isOperationFile(path)
+  );
+
+/** Why `file`, one of `strayServerFiles`, is refused. */
+export const strayServerFileMessage = (file: string): string =>
+  `${file} is in operations/, which holds only the App's server code: TypeScript files (*.ts, not *.d.ts), in folders whose names don't start with a dot.`;
 
 /** Where an App's tests are: suites, their helpers and their fixtures. */
 export const appTestsFolder = "tests/";
@@ -133,7 +167,7 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   if (schemaFiles.has(path)) {
     return "schema";
   }
-  if (path === "app.ts" || operationFile.test(path)) {
+  if (path === "app.ts" || isOperationFile(path)) {
     return "server";
   }
   if (migrationFile.test(path)) {
@@ -178,14 +212,18 @@ export const workflowBuildFiles = (
 export const isAppLayout = (files: Readonly<Record<string, string>>): boolean =>
   Object.hasOwn(files, "app.ts") && Object.hasOwn(files, "schema.ts");
 
-/** The files a build of an App's server code reads: never its tests. */
+/**
+ * The files a build of an App's server code reads: never its tests, and
+ * everything under `operations/`, so it can refuse what isn't server code
+ * (`strayServerFiles`).
+ */
 export const appCodeFiles = (
   files: Readonly<Record<string, string>>
 ): Record<string, string> =>
   Object.fromEntries(
     Object.entries(files).filter(([path]) => {
       const kind = appCodeKind(path);
-      return kind !== undefined && kind !== "test";
+      return (kind !== undefined && kind !== "test") || isUnderOperations(path);
     })
   );
 
