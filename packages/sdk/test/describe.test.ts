@@ -826,12 +826,27 @@ describe(aiStepCalls, () => {
           `const f = () => { if (1) { var step = { llm: () => 1 }; } step.llm(); }; ${llm("reader")}`
         )
       ),
+      staticBlock: bindings(
+        workflowSource(
+          `class Counter { static { var step = { llm: () => 1 }; step.llm(); } } ${llm("reader")}`
+        )
+      ),
+      // A case's \`let\` is the switch's, not the function's around it.
+      switchCase: bindings(
+        workflowSource(
+          `const f = async (x) => { switch (x) { default: let step = 1; void step; } await step.llm("late", { binding: "other" }); };`
+        )
+      ),
+      optional: bindings(workflowSource('await step?.llm("read", {});')),
     }).toStrictEqual({
       plain: ["read:reader"],
       inTry: ["read:reader"],
       shadowed: ["read:reader"],
       hoisted: ["null:null", "null:null"],
       nestedVar: ["read:reader"],
+      staticBlock: ["read:reader"],
+      switchCase: ["late:other"],
+      optional: ["null:null"],
     });
   });
 
@@ -862,6 +877,12 @@ describe(aiStepCalls, () => {
       calls: bindings(
         workflowSource(`const kept = env; ${llm("reader")}`, "step, { env }")
       ),
+      kept: bindings(
+        workflowSource(
+          'const kept = env; const ask = step.llm; await step.llm?.("read", {});',
+          "step, { env }"
+        )
+      ),
       text: bindings(
         workflowSource(
           'const kept = env; // llm\nawait step.do("x", { description: "llm" }, async () => 1);',
@@ -871,6 +892,7 @@ describe(aiStepCalls, () => {
       unparsed: aiStepCalls("export default ("),
     }).toStrictEqual({
       calls: ["null:null"],
+      kept: ["null:null", "null:null"],
       text: [],
       unparsed: null,
     });

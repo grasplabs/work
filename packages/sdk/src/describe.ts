@@ -1419,7 +1419,8 @@ export interface AiStepCall {
 /**
  * The scopes under `body` (itself included) that declare `name`: a
  * variable, function or class in a block, a parameter of a nested
- * function, a catch binding; a `var` in the function it is written in.
+ * function, a catch binding; a `var` in the function (or class static
+ * block) it is written in.
  */
 const scopesDeclaring = (body: Node, name: string): Set<Node> => {
   const scopes = new Set<Node>();
@@ -1436,7 +1437,9 @@ const scopesDeclaring = (body: Node, name: string): Set<Node> => {
         declaration.kind === "var";
       const scope =
         ancestors.findLast(({ node: above }) =>
-          hoisted ? isFunctionNode(above) : isScope(above)
+          hoisted
+            ? isFunctionNode(above) || above.type === "StaticBlock"
+            : isScope(above) || above.type === "SwitchStatement"
         )?.node ?? body;
       scopes.add(scope);
     }
@@ -1503,9 +1506,10 @@ const aiStepCallOf = (
 };
 
 /**
- * Each call of an `llm` method in `source`, as an AI step whose model
- * can't be read: what is left to go by when the workflow's context can't
- * be read. Comments and strings aren't calls. Null when it doesn't parse.
+ * Each read of an `llm` member in `source` (called, optionally called, or
+ * kept to call later), as an AI step whose model can't be read: what is
+ * left to go by when the workflow's context can't be read. Comments and
+ * strings aren't reads. Null when it doesn't parse.
  */
 const llmCallsIn = (source: string): AiStepCall[] | null => {
   let file: Node;
@@ -1520,9 +1524,9 @@ const llmCallsIn = (source: string): AiStepCall[] | null => {
   const calls: AiStepCall[] = [];
   visit(file, (node) => {
     if (
-      node.type === "CallExpression" &&
-      node.callee.type === "MemberExpression" &&
-      nameOf(node.callee.property) === "llm"
+      (node.type === "MemberExpression" ||
+        node.type === "OptionalMemberExpression") &&
+      nameOf(node.property) === "llm"
     ) {
       calls.push({
         name: null,
