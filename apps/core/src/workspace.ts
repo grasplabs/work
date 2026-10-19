@@ -2557,6 +2557,24 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * The revision of the chat's draft of App `appId`: 0 when there is none
+   * (or no such chat). Its revision alone, for a check that runs often
+   * (preview-stream-relay.ts), never its files.
+   */
+  draftRevision(chatId: unknown, appId: string): number {
+    const chat = chatIdSchema.safeParse(chatId);
+    if (!chat.success) {
+      return 0;
+    }
+    const row = this.#db
+      .select({ revision: chatDrafts.revision })
+      .from(chatDrafts)
+      .where(and(eq(chatDrafts.chatId, chat.data), eq(chatDrafts.appId, appId)))
+      .get();
+    return row?.revision ?? 0;
+  }
+
+  /**
    * The title of `personId`'s own chat `chatId`; `null` when it is gone,
    * or not theirs. For a review of what the chat's agent proposed, read by
    * the person it acted for alone: a title may quote their question.
@@ -2980,6 +2998,61 @@ export class Workspace extends DurableObject<Env> {
       // Once the call ended, however: its failure is kept by then.
       this.#previewReports.saw(id, appId, draft.revision);
     }
+  }
+
+  /**
+   * Starts, joins or (`attach`) reads again `personId`'s invocation of the
+   * streaming action `request` names (its text, as a screen sends it) in
+   * the preview of their own chat's draft of App `appId` at `revision`
+   * (sealed-previews.ts): `app.preview_outdated` once the draft is at
+   * another. Answers its frames, as JSON lines: progress, then its result.
+   */
+  async previewStream(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown,
+    request: unknown,
+    attach: boolean
+  ): Promise<ReadableStream<Uint8Array>> {
+    const draft = this.previewDraft(chatId, personId, appId);
+    if (draft.revision !== revision) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    return await this.#sealedPreviews.openStream(
+      chatIdSchema.parse(chatId),
+      personId,
+      appIdSchema.parse(appId),
+      draft,
+      request,
+
+      attach
+    );
+  }
+
+  /**
+   * Asks `personId`'s invocation of the streaming action `request` names,
+   * in the preview of their own chat's draft of App `appId` at
+   * `revision`, to stop: whether it was still running.
+   */
+  async previewCancelStream(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown,
+    request: unknown
+  ): Promise<boolean> {
+    const draft = this.previewDraft(chatId, personId, appId);
+    if (draft.revision !== revision) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    return await this.#sealedPreviews.cancelStream(
+      chatIdSchema.parse(chatId),
+      personId,
+      appIdSchema.parse(appId),
+      draft,
+      request
+    );
   }
 
   /**

@@ -3,8 +3,8 @@ import { z } from "zod";
 import { defineErrorFamily } from "./errors.ts";
 import type { Json } from "./json.ts";
 
-// Submissions: one logical change a caller asks for, such as an App's
-// record save, kept by core as a receipt under the caller's idempotency
+// Submissions: one logical change a caller asks for, such as a mutation
+// of a business store, kept as a receipt under the caller's idempotency
 // key. A retry under the same key gets the outcome of the change already
 // made, never a second change; the same key with other input is refused.
 // A key is the caller's intent not to repeat itself, never a permission:
@@ -31,11 +31,6 @@ export const idempotencyKeySchema = z
   .max(128)
   .regex(/^[ -~]+$/u, "Printable ASCII only");
 
-/** What a caller may pass along with a submission. */
-export const submissionOptionsSchema = z
-  .strictObject({ idempotencyKey: idempotencyKeySchema.optional() })
-  .optional();
-
 export const submissionErrors = defineErrorFamily({
   "submission.key_invalid":
     "That isn't a valid idempotency key: 1 to 128 printable ASCII characters.",
@@ -53,35 +48,14 @@ export const submissionErrors = defineErrorFamily({
 
 /**
  * What a committed submission can still have to tell others, through its
- * outbox (committed in its batch): that a record changed, which whoever
- * follows the record's collection learns; a notification for a workflow
- * run; a workflow run to start. Each is handed over after the commit,
- * never as part of it: no change spans the store and a run. A kind is
- * staged only once something takes it (its consumer): invalidations with
- * live queries, notifications and starts with their dispatch.
+ * outbox (committed in its batch): a notification for a workflow run, or
+ * a workflow run to start. Each is handed over after the commit, never as
+ * part of it: no change spans the store and a run. A kind is staged only
+ * once something takes it (its consumer). Its content is defined where it
+ * is delivered.
  */
-export const submissionIntentKinds = [
-  "record.changed",
-  "workflow.notify",
-  "workflow.start",
-] as const;
-export type SubmissionIntentKind = (typeof submissionIntentKinds)[number];
-
-/** A record that a submission changed, at the version it made. */
-export interface RecordChanged {
-  kind: "record.changed";
-  collectionId: string;
-  documentId: string;
-  version: number;
-}
-
-/**
- * A workflow notification or start a submission staged: its content is
- * defined where it is delivered.
- */
-export interface WorkflowIntent {
+export interface SubmissionIntent {
   kind: "workflow.notify" | "workflow.start";
   data: Json;
 }
-
-export type SubmissionIntent = RecordChanged | WorkflowIntent;
+export type SubmissionIntentKind = SubmissionIntent["kind"];

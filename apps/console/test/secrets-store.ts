@@ -73,6 +73,7 @@ export const useStoreSecrets = (tokens: {
     [env.MICROSOFT_CLIENT_SECRET, "microsoft-secret"],
     [env.GOOGLE_CLIENT_SECRET, "google-secret"],
     [env.COMPOSIO_API_KEY, "composio-key"],
+    [env.APP_OAUTH_CLIENTS, "{}"],
   ];
   const stored: { admin: SecretsStoreAdmin; id: string }[] = [];
   beforeEach(async () => {

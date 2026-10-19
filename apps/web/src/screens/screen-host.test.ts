@@ -1,6 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { portTransport } from "@grasp-os/shared/screen-port";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
-import { RpcStub } from "capnweb";
+import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { CoreLink } from "./core-link.ts";
@@ -10,7 +11,13 @@ import {
   draftsFor,
   saveDraft,
 } from "./form-drafts.ts";
-import { appScreen, callFunction, fileRefusal } from "./screen-host.ts";
+import {
+  appScreen,
+  callFunction,
+  fileRefusal,
+  previewTarget,
+} from "./screen-host.ts";
+import type { FrameLink } from "./tab-link.ts";
 
 // The page relaying a screen's function call to core: whatever comes back
 // that isn't core's JSON reaches the screen as a coded error, never as
@@ -685,5 +692,138 @@ describe("core's answer to a screen's file request", () => {
       undefined,
       undefined,
     ]);
+  });
+});
+
+/**
+ * Core, over a real Cap'n Web session, as far as a preview's stream
+ * reaches it: its chats are itself, it sends each stream `frames` at
+ * once, and the hold on a stream it answers is one of its own, which only
+ * gets released.
+ */
+class PreviewCore extends RpcTarget {
+  released = false;
+  readonly #frames: readonly unknown[];
+
+  constructor(frames: readonly unknown[] = []) {
+    super();
+    this.#frames = frames;
+  }
+
+  get chats(): this {
+    return this;
+  }
+
+  previewStream(
+    _chatId: string,
+    _app: string,
+    _revision: number,
+    _what: string,
+    _request: string,
+    onFrame: (sent: unknown) => Promise<unknown>
+  ): PreviewCore {
+    for (const sent of this.#frames) {
+      void onFrame(sent).catch(() => {
+        // The page's side is gone.
+      });
+    }
+    return new PreviewCore();
+  }
+
+  release(): void {
+    this.released = true;
+  }
+}
+
+/**
+ * A preview's stream on the page, over a real session with core sending
+ * `sending`; `taking` is how the frame takes each. `drop` ends the session
+ * from core's side, as a dropped connection does.
+ */
+const previewStreamOver = async (
+  sending: readonly unknown[],
+  taking: () => Promise<unknown>
+) => {
+  const { port1, port2 } = new MessageChannel();
+  // oxlint-disable-next-line no-new -- the session serves core's side
+  new RpcSession(portTransport(port1), new PreviewCore(sending));
+  const core = new RpcSession<PreviewCore>(
+    portTransport(port2)
+  ).getRemoteMain();
+  const link = {
+    session: async () => await Promise.resolve(core),
+    person: async () => await Promise.resolve("ada"),
+    retrying: async <T>(run: (session: unknown) => Promise<T>) =>
+      await run(core),
+  };
+  // SAFETY: a preview's stream reaches only `chats.previewStream`, which
+  // this stand-in has.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+  const asLink = link as unknown as FrameLink;
+  const target = previewTarget(asLink, "chat", {
+    ...bundle,
+    revision: 1,
+    screens: ["home"],
+  });
+  const frames: unknown[] = [];
+  const seen = { frames, ended: 0 };
+  await target.streamFunction(
+    "stream",
+    "{}",
+    async (sent) => {
+      seen.frames.push(sent);
+      return await taking();
+    },
+    () => {
+      seen.ended += 1;
+    }
+  );
+  return {
+    seen,
+    drop: () => {
+      port1.postMessage(null);
+    },
+    close: () => {
+      port1.close();
+      port2.close();
+    },
+  };
+};
+
+describe("a preview's stream through the page", () => {
+  it("tells the frame `closed` and ends once its connection drops before the last frame", async () => {
+    const stream = await previewStreamOver(
+      [],
+      async () => await Promise.resolve(null)
+    );
+    stream.drop();
+    await vi.waitFor(() => {
+      expect(stream.seen).toStrictEqual({
+        frames: [{ type: "closed" }],
+        ended: 1,
+      });
+    });
+    stream.close();
+  });
+
+  it("sends no `closed` after a last frame the frame is still taking when the connection drops", async () => {
+    const result = { type: "result", seq: 1, result: { ok: true, value: 1 } };
+    const stream = await previewStreamOver(
+      [result],
+      // Never taken.
+      async () => await Promise.withResolvers<null>().promise
+    );
+    await vi.waitFor(() => {
+      expect(stream.seen.frames).toStrictEqual([result]);
+    });
+    stream.drop();
+    // A break handled now would have sent `closed` within a tick or two.
+    const waited = Promise.withResolvers<null>();
+    setTimeout(() => {
+      waited.resolve(null);
+    }, 50);
+    await waited.promise;
+    expect(stream.seen).toStrictEqual({ frames: [result], ended: 0 });
+    stream.close();
   });
 });

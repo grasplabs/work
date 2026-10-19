@@ -8,6 +8,7 @@ import type {
   ReferenceKind,
   ReferenceVisibility,
   ReturnOf,
+  StreamingFunction,
 } from "./references.ts";
 import { isResource, isWorkflowResource } from "./resources.ts";
 import type {
@@ -189,17 +190,11 @@ type RunMutation<Uses extends readonly Use[]> = <
 ) => Promise<ReturnOf<Reference>>;
 
 /**
- * A streaming action, as a definition or a generated reference: run only
- * in the foreground, by a screen (spec 10.7.6), never by another function.
- */
-type Streaming = { readonly stream: AnySchema } | { readonly mode: "stream" };
-
-/**
  * `ctx.runAction`: one of the actions `Uses` lists that answers once. A
  * streaming one isn't callable here: its progress has no one to go to.
  */
 type RunAction<Uses extends readonly Use[]> = <
-  Reference extends Exclude<UsedOfKind<Uses, "action">, Streaming>,
+  Reference extends Exclude<UsedOfKind<Uses, "action">, StreamingFunction>,
 >(
   reference: Reference,
   args: ArgsOf<Reference>

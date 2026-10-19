@@ -316,14 +316,34 @@ describe("the catalog", () => {
     return await core.authenticate().connections;
   };
 
-  it("lists Composio's toolkits next to the native providers", async () => {
+  it("lists Composio's toolkits next to the native providers, each described and in one of Grasp's groups", async () => {
     const connections = await userConnections();
     const { entries, composio } = await connections.catalog();
     expect(composio).toBe("listed");
-    expect(entries.map(({ source, id }) => `${source}:${id}`)).toStrictEqual([
-      "native:microsoft",
-      "native:google",
-      "composio:hubspot",
+    expect(
+      entries.map(({ source, id, description, group }) => ({
+        entry: `${source}:${id}`,
+        description,
+        group,
+      }))
+    ).toStrictEqual([
+      {
+        entry: "native:microsoft",
+        description:
+          "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+        group: "Email and calendar",
+      },
+      {
+        entry: "native:google",
+        description: "Gmail, Google Calendar, and files in Google Drive.",
+        group: "Email and calendar",
+      },
+      {
+        entry: "composio:hubspot",
+        description:
+          "HubSpot is a CRM platform for marketing, sales and service.",
+        group: "CRM",
+      },
     ]);
   });
 

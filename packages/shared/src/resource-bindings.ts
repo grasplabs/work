@@ -48,6 +48,10 @@ const modelNameSchema = z
  * - `guests`: one of the App's `{ type: "platform" }` permissions to invite
  *   guests (`guests`), checked on every call, and by every guest's link of
  *   a chat invited through it, which the binding's revocation stops too.
+ * - `app`: another App, whose current release serves each declared public
+ *   function exactly as declared: each call runs as the person the
+ *   calling App's call acts for, under that App's own roles (core's
+ *   resource-apps.ts). The admin's approval is the grant.
  */
 export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("model"), model: modelNameSchema }),
@@ -84,6 +88,7 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("guests"),
     permissionId: permissionIdSchema,
   }),
+  z.strictObject({ kind: z.literal("app"), appId: appIdSchema }),
 ]);
 export type BindingTarget = z.infer<typeof bindingTargetSchema>;
 export type BindingTargetInput = z.input<typeof bindingTargetSchema>;
@@ -243,6 +248,12 @@ export interface PlatformChoice {
   permissionId: string;
 }
 
+/** Another App, as an app resource's choice. */
+export interface AppChoice {
+  appId: string;
+  name: string;
+}
+
 /**
  * What an admin may bind a declared resource to now, by its kind:
  *
@@ -258,6 +269,8 @@ export interface PlatformChoice {
  *   (`platform`), the App's own active permissions to read them, one of
  *   which it needs; none, and nothing to choose, for its own measures;
  * - `guests`: the App's own active permissions to invite guests.
+ * - `app`: other Apps the admin may see whose current release serves every
+ *   declared function, public and exactly as declared.
  *
  * Approving checks the choice again: one that stopped serving since is
  * refused (`resource.target_invalid`). `truncated` says some were left
@@ -272,6 +285,7 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "store"; permissions: StoreChoice[] }
   | { kind: "statistics"; platform: boolean; permissions: PlatformChoice[] }
   | { kind: "guests"; permissions: PlatformChoice[] }
+  | { kind: "app"; apps: AppChoice[] }
 );
 
 /**
@@ -300,8 +314,8 @@ export interface DeclaredResource {
   /** A connector's declared actions; empty for the other kinds. */
   actions: string[];
   /**
-   * Knowledge's declared operations, a store's, by path, or statistics';
-   * empty for the other kinds.
+   * Knowledge's declared operations, a store's or an App's functions, by
+   * path, or statistics'; empty for the other kinds.
    */
   operations: string[];
   /** The platform's measures a statistics resource reads; empty otherwise. */

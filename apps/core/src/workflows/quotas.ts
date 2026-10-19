@@ -547,6 +547,13 @@ export interface QuotaAttempt {
   waitedMs?: number;
   /** When the engine gives up on it (ms since the epoch). */
   deadline: number;
+  /**
+   * Whether it collects the decided outcome of a connector call held for
+   * its person (resource-host.ts, `StepRun.collecting`): the attempt that
+   * was held took that call's host calls, so this one takes none, and is
+   * admitted though the lineage has none left.
+   */
+  collecting?: true;
 }
 
 /**
@@ -942,6 +949,24 @@ export interface AttemptOwner extends AdmissionScope {
   root: string;
 }
 
+/**
+ * That the lineage has host calls left for `attempt`, as SQL of its row:
+ * always, for one that collects a held call's outcome (`collecting`),
+ * which takes none.
+ */
+const hostCallsLeftSql = (attempt: QuotaAttempt, policy: QuotaPolicy): SQL =>
+  attempt.collecting === true
+    ? sql`1`
+    : sql`${runLineages.hostCalls} < ${policy.limits.lineageHostCalls}`;
+
+/** Whether the lineage, having made `made`, has none left for `attempt`. */
+const outOfHostCalls = (
+  attempt: QuotaAttempt,
+  made: number,
+  policy: QuotaPolicy
+): boolean =>
+  attempt.collecting !== true && made >= policy.limits.lineageHostCalls;
+
 /** `admitAttempt` under `policy`; `retried` once read again (`policyStill`). */
 const admitAttemptOnce = async (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
@@ -1011,6 +1036,7 @@ const admitAttemptOnce = async (
   // of this generation hold no more (`sharesReleased`), or a newer
   // activation's attempt was admitted. However late its call lands.
   const fencedOut = sql`(${fencedRun(run, attempt.generation)} OR EXISTS (SELECT 1 FROM ${held} WHERE ${held.runId} = ${run} AND ${held.generation} > ${attempt.generation}))`;
+  const hostCallsLeft = hostCallsLeftSql(attempt, policy);
   const written = await db.batch([
     lineageCreated(db, root),
     db
@@ -1049,7 +1075,7 @@ const admitAttemptOnce = async (
     db
       .insert(held)
       .select(
-        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND NOT ${fencedOut} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(attemptPool, owner, place, standing, now, shares)}`
+        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND NOT ${fencedOut} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${hostCallsLeft} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(attemptPool, owner, place, standing, now, shares)}`
       )
       .onConflictDoNothing(),
     // Held on the lineage only if that statement took the receipt.
@@ -1131,8 +1157,9 @@ const admitAttemptOnce = async (
     throw limitReached("age", policy);
   }
   // A lineage with no host calls left admits no attempt: its calls would
-  // all be refused, and a step catching them would only spin.
-  if (found.hostCalls >= policy.limits.lineageHostCalls) {
+  // all be refused, and a step catching them would only spin. But for one
+  // collecting a held call's outcome, which takes none.
+  if (outOfHostCalls(attempt, found.hostCalls, policy)) {
     throw limitReached("hostCalls", policy);
   }
   if (found.used >= policy.limits.workflowActiveMs) {

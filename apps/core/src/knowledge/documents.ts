@@ -5,11 +5,9 @@ import type {
 } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
 import {
   documentTypeOf,
   historyOptionsSchema,
-  isBuiltinDocumentType,
   knowledgeErrors,
   listDocumentsOptionsSchema,
   restoreInputSchema,
@@ -53,22 +51,13 @@ import { readableCollection, requireWritable } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import {
   FrontmatterError,
-  frontmatterType,
   parseBaseFields,
-  parseRecord,
-  savedFields,
+  parseFrontmatter,
 } from "./frontmatter.ts";
-import type { ParsedRecord } from "./frontmatter.ts";
+import type { ParsedDocument } from "./frontmatter.ts";
 import { extractLinks, splitSections } from "./markdown.ts";
 import type { Link, Section } from "./markdown.ts";
 import { memoryFileOf, requireWithinLimit } from "./memory-files.ts";
-import {
-  declaredTypes,
-  keptSetters,
-  noDeclaredTypes,
-  typeHeld,
-} from "./record-types.ts";
-import type { DeclaredTypes } from "./record-types.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its
@@ -104,23 +93,7 @@ interface Prepared {
   reviewDate: string | null;
   sections: Section[];
   links: Link[];
-  /** The record types declared for the collection, as it was checked. */
-  declared: DeclaredTypes;
 }
-
-/**
- * The record types declared for `collectionId` (record-types.ts), read
- * only when one of `types` is one an App declares: a save of a type the
- * platform knows, over one too, needs none.
- */
-export const declaredFor = async (
-  env: Env,
-  collectionId: string,
-  types: readonly (string | undefined)[]
-): Promise<DeclaredTypes> =>
-  types.every((type) => type === undefined || isBuiltinDocumentType(type))
-    ? noDeclaredTypes
-    : await declaredTypes(env, collectionId);
 
 const invalid = (issues: string[]) =>
   knowledgeErrors.create("knowledge.invalid", { issues });
@@ -132,16 +105,58 @@ const fileTitle = (path: string): string => {
 };
 
 /**
+ * A document's title: the frontmatter's, else a skill's name, else its
+ * first heading (of `found`, its sections), else its file name.
+ */
+const titleOf = (
+  path: string,
+  { type, frontmatter }: ParsedDocument,
+  found: readonly Section[]
+): string => {
+  const name =
+    type === "skill" && typeof frontmatter.name === "string"
+      ? frontmatter.name
+      : undefined;
+  const firstHeading = found
+    .map(({ headings }) => headings[0] ?? "")
+    .find((heading) => heading !== "");
+  return frontmatter.title ?? name ?? firstHeading ?? fileTitle(path);
+};
+
+/**
+ * The values a save of `text` at `path` gives the search index
+ * (0001_search.sql), as `prepare` reads them: its title and description,
+ * and each section's headings, joined by a space, and text. Undefined when
+ * its frontmatter doesn't read. A personal purge works out from these the
+ * tokens of every version it deletes (search-erasure.ts).
+ */
+export const indexedValuesOf = (
+  path: string,
+  text: string
+): string[] | undefined => {
+  let parsed: ParsedDocument;
+  try {
+    parsed = parseBaseFields(path, text);
+  } catch {
+    return undefined;
+  }
+  const found = splitSections(parsed.body);
+  return [
+    titleOf(path, parsed, found),
+    parsed.frontmatter.description,
+    ...found.flatMap(({ headings, text: sectionText }) => [
+      headings.join(" "),
+      sectionText,
+    ]),
+  ];
+};
+
+/**
  * Reads the text of the document at `path`, within the limits a save
  * keeps. Its title is the frontmatter's, else a skill's name, else its
  * first heading, else its file name.
  */
-const prepare = (
-  path: string,
-  text: string,
-  declared: DeclaredTypes,
-  purge: boolean
-): Prepared => {
+const prepare = (path: string, text: string, purge: boolean): Prepared => {
   const bytes = new TextEncoder().encode(text).byteLength;
   if (bytes > knowledgeTextMaxBytes) {
     throw knowledgeErrors.create("knowledge.too_large", {
@@ -149,11 +164,9 @@ const prepare = (
       maxBytes: knowledgeTextMaxBytes,
     });
   }
-  let parsed: ParsedRecord;
+  let parsed: ParsedDocument;
   try {
-    parsed = purge
-      ? parseBaseFields(path, text)
-      : parseRecord(path, text, declared);
+    parsed = purge ? parseBaseFields(path, text) : parseFrontmatter(path, text);
   } catch (error) {
     if (error instanceof FrontmatterError) {
       throw invalid(error.issues);
@@ -175,23 +188,15 @@ const prepare = (
       maxLinks: documentMaxLinks,
     });
   }
-  const name =
-    type === "skill" && typeof frontmatter.name === "string"
-      ? frontmatter.name
-      : undefined;
-  const firstHeading = found
-    .map(({ headings }) => headings[0] ?? "")
-    .find((heading) => heading !== "");
   return {
     type,
-    title: frontmatter.title ?? name ?? firstHeading ?? fileTitle(path),
+    title: titleOf(path, parsed, found),
     description: frontmatter.description,
     owner: frontmatter.owner,
     tags: frontmatter.tags,
     reviewDate: frontmatter.review ?? null,
     sections: found,
     links: linked,
-    declared,
   };
 };
 
@@ -270,11 +275,8 @@ const conflict = (existing: DocumentRow | undefined) =>
  * Reads `text` for the document at `path` in `collection`, refused as a
  * save would refuse it: one to the Grasp skills by anything but their
  * sync (`graspSync`), over a document's limits, frontmatter that doesn't
- * fit its type (a record type as the Apps that declare it for the
- * collection have it, record-types.ts), or, for a memory file, over that
- * file's size limit.
- * `declared` is the collection's record types when the caller read them
- * already; read here otherwise, if the text needs them. A purge's text
+ * fit its type, or, for a memory file, over that file's size limit. A
+ * purge's text
  * (`purge`) is checked for the fields every type has only
  * (`parseBaseFields`), whatever its type says.
  */
@@ -284,7 +286,6 @@ export const checkedText = async (
   path: string,
   text: string,
   graspSync = false,
-  declared?: DeclaredTypes,
   purge = false
 ): Promise<Prepared> => {
   // The Grasp skills are the release's (grasp-skills.ts): no save,
@@ -293,13 +294,7 @@ export const checkedText = async (
   if (collection.source === "grasp" && !graspSync) {
     throw knowledgeErrors.create("knowledge.read_only");
   }
-  const prepared = prepare(
-    path,
-    text,
-    declared ??
-      (await declaredFor(env, collection.id, [frontmatterType(path, text)])),
-    purge
-  );
+  const prepared = prepare(path, text, purge);
   const memoryFile = await memoryFileOf(collection, path);
   if (memoryFile !== undefined) {
     requireWithinLimit(env, memoryFile, text);
@@ -346,250 +341,18 @@ export interface Write {
   /** Set only by the sync of the Grasp skills, their one writer. */
   graspSync?: true;
   /**
-   * Kept fields this version sets instead of keeping them, by name: only
-   * the method a record type's declaration names for them (knowledge/
-   * records.ts).
-   */
-  sets?: Record<string, unknown>;
-  /**
    * Checked last, just before the batch is sent, with nothing awaited in
    * between: throws to refuse the write, such as a delegate's context that
    * became restricted while the save was being prepared.
    */
   lastCheck?: () => Promise<void>;
   /**
-   * Set only by a purge (purge.ts): removing personal data comes before a
-   * record's type and its kept fields, so its text is checked only for
-   * the fields every type has and a document's limits (`parseBaseFields`).
+   * Set only by a purge (purge.ts): removing personal data comes first, so
+   * its text is checked only for the fields every type has and a
+   * document's limits (`parseBaseFields`).
    */
   purge?: true;
-  /**
-   * The statements that commit the write's receipt (knowledge/
-   * receipts.ts, `commitOf`), given what the write answers and, for a
-   * write that changes nothing, the version it must still find: they go
-   * first in the batch, which the first refuses whole when it fails.
-   */
-  commit?: (
-    outcome: DocumentSummary,
-    unchanged?: { documentId: string; version: number }
-  ) => [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]];
-  /**
-   * Set when `text` is the text of the version at `ifVersion` already:
-   * with a `commit`, nothing is written but the receipt, and only while
-   * the document is still at that version, so the write is checked as
-   * any other and makes no new version.
-   */
-  unchanged?: true;
 }
-
-/** A frontmatter field's value, if it has one. */
-const fieldOf = (frontmatter: object | undefined, field: string): unknown =>
-  frontmatter === undefined
-    ? undefined
-    : Object.entries(frontmatter).find(([key]) => key === field)?.[1];
-
-/** A field's value as JSON, comparable whatever the order of its keys. */
-const comparable = (value: unknown): string | undefined =>
-  value === undefined ? undefined : canonicalJson(z.json().parse(value));
-
-/** The fields a record of `type` keeps, by its declarations (record-types.ts). */
-export const keptNames = (type: string, declared: DeclaredTypes): string[] => [
-  ...new Set(keptSetters(declared, type).keys()),
-];
-
-/** What `requireFieldsKept` compares: a version, and the one it goes over. */
-interface KeptCheck {
-  existing: DocumentRow | undefined;
-  ifVersion: number;
-  path: string;
-  text: string;
-  type: DocumentType;
-  collection: CollectionRow;
-  declared: DeclaredTypes;
-  /** A purge's: it rewrites kept fields too, personal data coming first. */
-  purge: boolean;
-  /** An admin's own save (`Writer.admin`). */
-  byAdmin: boolean | undefined;
-}
-
-/**
- * Refuses with `knowledge.invalid` a version that changes a kept field
- * (record-types.ts) of its type, unless the write `sets` it: a version
- * that doesn't set one has it as the version it goes over has it, when
- * that version is of the same type, and doesn't have it otherwise. Both
- * are read as their texts have them, checked against nothing, so a
- * version that no longer fits its type (after its schema changed) keeps
- * them all the same. The version it goes over is the one the write's
- * batch requires is still current, so nothing saved in between is
- * compared against. A version of another type than the one it goes over
- * is refused too while that one has a kept field its write doesn't set:
- * otherwise a round trip through another type would drop the field. A
- * write sets a field of the type it goes over only when the same App
- * owns that field in both types: another App's method sets its own
- * type's field of that name, never this one.
- *
- * While nobody declares the type it goes over, which fields it keeps
- * isn't known, so a record of it stays of it, whatever the write sets.
- * That is for as long as an App still has the type (`typeHeld`): its
- * current version waits for approval. Once no
- * App has it (its owner may no longer write the collection, or no longer
- * declares it), nothing would ever declare it again for its owner, and an
- * admin makes the record a plain `doc` by hand. Returns what the save's
- * audit event says of that: the type such a save takes the record out of
- * (`releasedType`), and nothing for any other save.
- */
-const requireFieldsKept = async (
-  env: Env,
-  db: DrizzleD1Database,
-  check: KeptCheck,
-  sets: Record<string, unknown> = {}
-): Promise<{ releasedType?: string }> => {
-  const { existing, ifVersion, path, text, type, declared, purge } = check;
-  if (purge) {
-    return {};
-  }
-  const before = existing
-    ? await db
-        .select({ text: versions.text })
-        .from(versions)
-        .where(
-          and(
-            eq(versions.documentId, existing.id),
-            eq(versions.number, ifVersion)
-          )
-        )
-        .get()
-    : undefined;
-  const savedRaw =
-    before === undefined ? undefined : savedFields(path, before.text);
-  const nowRaw = savedFields(path, text);
-  // The kept fields of the version's own type, each carried over only
-  // from a version of that same type (its same owner's): text of any other
-  // type (a `doc`, or another App's type with a field of the same name)
-  // carries nothing, and the field is then absent unless its method sets it.
-  const sameType = savedRaw?.type === type;
-  const declaredProblems = [...keptSetters(declared, type).keys()].flatMap(
-    (field) => {
-      const was = sameType ? fieldOf(savedRaw?.fields, field) : undefined;
-      const kept = Object.hasOwn(sets, field) ? fieldOf(sets, field) : was;
-      return comparable(fieldOf(nowRaw?.fields, field)) === comparable(kept)
-        ? []
-        : [
-            `frontmatter.${field}: only the method its record type gives it to changes it; a save keeps the version before's`,
-          ];
-    }
-  );
-  // And those of the type it goes over, when that is another: a version
-  // of another type (a `doc`, say) would drop them, and one of the type
-  // again after it would then set them afresh. So a record whose type
-  // keeps fields doesn't change type by hand while it has any of them.
-  const previous = savedRaw?.type;
-  const leaves = previous !== undefined && !sameType;
-  // The write's `sets` are by the new type's setters: they set a field
-  // of the type it goes over only where that field is the same App's in
-  // both, never another App's field of the same name.
-  const setters = keptSetters(declared, type);
-  const droppedProblems = leaves
-    ? [...keptSetters(declared, previous)].flatMap(([field, { app }]) =>
-        fieldOf(savedRaw?.fields, field) === undefined ||
-        (Object.hasOwn(sets, field) && setters.get(field)?.app === app)
-          ? []
-          : [
-              `frontmatter.type: a ${previous} keeps its ${field}, which only the method its record type gives it to changes, so it stays a ${previous}`,
-            ]
-      )
-    : [];
-  // A type nobody declares now (record-types.ts) has no kept fields to
-  // read here, though its records may hold some. A version of another
-  // type over one would drop them unseen, and one of the type again, once
-  // it is declared again, would set them afresh.
-  const undeclared =
-    leaves && !isBuiltinDocumentType(previous) && !declared.has(previous);
-  // But for an admin making it a plain doc once no App has the type any
-  // more: read only then, by the claim's key, and again just before the
-  // write (`requireStillReleased`).
-  const released =
-    undeclared &&
-    check.byAdmin === true &&
-    type === "doc" &&
-    !(await typeHeld(env, check.collection.id, previous));
-  const undeclaredProblems =
-    undeclared && !released
-      ? [
-          `frontmatter.type: no App declares ${previous} for this collection now, so which fields a ${previous} keeps isn't known, and it stays a ${previous}; once no App has the type any more, an admin can make it a plain doc`,
-        ]
-      : [];
-  const problems = [
-    ...declaredProblems,
-    ...droppedProblems,
-    ...undeclaredProblems,
-  ];
-  if (problems.length > 0) {
-    throw invalid(problems);
-  }
-  return released ? { releasedType: previous } : {};
-};
-
-/**
- * Refuses with `knowledge.invalid` a save that takes a record out of a
- * type no App had (`releasedType`, from `requireFieldsKept`) when an App
- * has it now: another App may have claimed it while the save was being
- * prepared, and the record is then that App's to keep. Read last, just
- * before the write's batch, as an App's write checks its context
- * (`Write.lastCheck`). The claim is in core's database and the document
- * in Knowledge's, which share no transaction, so a claim that lands
- * between this read and the batch is not seen: that takes an admin
- * converting the record at the very moment another App, granted the
- * collection and approved, first saves or reads a record of the type. The
- * save is audited with `releasedType` either way.
- */
-const requireStillReleased = async (
-  env: Env,
-  collectionId: string,
-  releasedType: string | undefined
-): Promise<void> => {
-  if (
-    releasedType !== undefined &&
-    (await typeHeld(env, collectionId, releasedType))
-  ) {
-    throw invalid([
-      `frontmatter.type: an App has ${releasedType} for this collection now, so it stays a ${releasedType}`,
-    ]);
-  }
-};
-
-/**
- * What a write's batch sends, and what it answers: its `change` (the
- * document, as `row`), after the statement that commits its receipt when
- * it has one (`Write.commit`); for a write that changes nothing
- * (`Write.unchanged`), that statement alone, answering the document as
- * it is (`existing`).
- */
-const committed = (
-  write: Write,
-  existing: DocumentRow | undefined,
-  row: DocumentRow,
-  change: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]
-): {
-  items: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]];
-  outcome: DocumentSummary;
-} => {
-  if (write.commit === undefined) {
-    return { items: change, outcome: toSummary(row) };
-  }
-  if (write.unchanged === true && existing !== undefined) {
-    const outcome = toSummary(existing);
-    return {
-      items: write.commit(outcome, {
-        documentId: existing.id,
-        version: existing.currentVersion,
-      }),
-      outcome,
-    };
-  }
-  const outcome = toSummary(row);
-  return { items: [...write.commit(outcome), ...change], outcome };
-};
 
 /**
  * Writes the next version, if the document is still at `ifVersion`
@@ -605,40 +368,17 @@ export const writeVersion = async (
   const { also = [], graspSync = false } = write;
   const db = drizzle(env.KNOWLEDGE);
   const existing = await findByPath(db, collection.id, path);
-  // The types of both the new version and the one it goes over: a kept
-  // field of either is kept.
-  const declared = await declaredFor(env, collection.id, [
-    frontmatterType(path, text),
-    existing?.type,
-  ]);
   const prepared = await checkedText(
     env,
     collection,
     path,
     text,
     graspSync,
-    declared,
     write.purge === true
   );
   if ((existing?.currentVersion ?? 0) !== ifVersion) {
     throw conflict(existing);
   }
-  const released = await requireFieldsKept(
-    env,
-    db,
-    {
-      existing,
-      ifVersion,
-      path,
-      text,
-      type: prepared.type,
-      collection,
-      declared,
-      purge: write.purge === true,
-      byAdmin: by.admin,
-    },
-    write.sets
-  );
   const now = new Date();
   const number = ifVersion + 1;
   const documentId = existing?.id ?? crypto.randomUUID();
@@ -671,8 +411,6 @@ export const writeVersion = async (
       collectionId: collection.id,
       version: number,
       ...(restoredFrom === null ? {} : { restoredFrom }),
-      // An admin made a record of a type no App has any more a plain doc.
-      ...released,
     },
   };
   const statements: BatchItem<"sqlite">[] = [
@@ -721,21 +459,16 @@ export const writeVersion = async (
           )
         )
     : db.insert(documents).values(row);
-  await requireStillReleased(env, collection.id, released.releasedType);
-  const { items, outcome } = committed(write, existing, row, [
-    document,
-    ...statements,
-  ]);
   await write.lastCheck?.();
   try {
-    await auditedBatch(env, db, items);
+    await auditedBatch(env, db, [document, ...statements]);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw conflict(await findByPath(db, collection.id, path));
     }
     throw error;
   }
-  return outcome;
+  return toSummary(row);
 };
 
 /**
