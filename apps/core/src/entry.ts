@@ -331,6 +331,16 @@ const respond = async (
     const level = checked.reason === "not_configured" ? "error" : "warn";
     return { response, level, fields: { refused: checked.reason } };
   } catch (error) {
+    // A body that took too long to arrive (`readAtMost`): the client's
+    // doing, answered as such wherever it was read.
+    if (requestErrors.codeOf(error) === "request.timeout") {
+      const response = errorResponse(
+        408,
+        requestErrors.create("request.timeout"),
+        requestId
+      );
+      return { response, level: "warn", fields: { refused: "timeout" } };
+    }
     const response = errorResponse(
       500,
       internalErrors.create("internal.unexpected"),

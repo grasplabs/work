@@ -23,7 +23,6 @@ import { chatAuthority, chatContext } from "./agent-scope.ts";
 import { startAppBinding } from "./app-workflow-bindings.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { permissions } from "./db/core/schema.ts";
-import { appHost } from "./durable-objects.ts";
 import type { WorkflowStarts } from "./operations.ts";
 import { defaultMaxAttempts } from "./outbox-delivery.ts";
 import type {
@@ -56,11 +55,13 @@ import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
 //   chat, read by that same statement (`agentAllowedSql`). A
 //   mutation's start, dispatched later, is decided then: authority lost
 //   since the commit starts nothing, and the refusal is audited.
-// - Restricted data carried into a run: an App that read restricted data
-//   starts no workflow (`workflow.start_restricted`), now or from its
-//   outbox, until independent runs carry the flag themselves (GRA-570).
-//   An agent in a restricted chat restricts the App before it writes
-//   there (agent-apps.ts), so the same holds for its calls.
+// - Restricted data carried into a run: a start of an App that read
+//   restricted data, now or from its outbox, starts a restricted run,
+//   which keeps that for good (workflow-starts.ts, `restrictedStart`), so
+//   connect holds its side effects for the person, the model rules apply
+//   to it, and any App it calls is restricted first. An agent in a
+//   restricted chat restricts the App before it writes there
+//   (agent-apps.ts), and the start reads the agent's chat too.
 // - A benign change racing a dispatch (a parameter edit, a member added):
 //   the admitting statement refuses a start whose decision went stale as
 //   `workflow.start_denied`, so the dispatch decides again before it
@@ -149,8 +150,9 @@ const requireLive = (signal: AbortSignal): void => {
 };
 
 /**
- * Starts the workflow App `authority` binds under `alias`: refused while
- * the App is restricted (see the header), audited naming `agent`. Stops,
+ * Starts the workflow App `authority` binds under `alias`, in restricted
+ * mode while the App or `agent`'s chat is (see the header), audited
+ * naming `agent`. Stops,
  * starting nothing, once `requireGoing` (a call's cancel or deadline, a
  * dispatch's hand-over) throws, asked again just before it is admitted.
  */
@@ -165,9 +167,6 @@ const startAsApp = async (
   if (authority.subject.type !== "app") {
     throw workflowResourceErrors.create("workflow.start_denied");
   }
-  if (await appHost(env, authority.subject.appId).isRestricted()) {
-    throw workflowResourceErrors.create("workflow.start_restricted");
-  }
   requireGoing?.();
   return await startAppBinding(
     env,
@@ -178,7 +177,8 @@ const startAsApp = async (
     agent === null
       ? undefined
       : agentAllowedSql(authority.subject.appId, authority.onBehalfOf, agent),
-    requireGoing
+    requireGoing,
+    agent
   );
 };
 

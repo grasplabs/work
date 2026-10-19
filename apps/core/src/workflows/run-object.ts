@@ -20,7 +20,7 @@ import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls, BusyRefusals } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
-import type { TriedOnceMarks } from "./resource-host.ts";
+import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { projectResourceRun } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 
@@ -182,6 +182,46 @@ export const triedOnceIn = (sql: SqlStorage): TriedOnceMarks => ({
           message: kept.message,
           ...(kept.code === undefined ? {} : { code: kept.code }),
         };
+  },
+});
+
+/**
+ * Where a run keeps the model calls its JSON workflow's actions made
+ * (resource-host.ts, `ActionModelCalls`; GRA-700): a table of its object's
+ * SQLite beside the engine's journal, dropped with it as `triedOnceTable`
+ * is. Only the host writes it, never the run's code. Written before the
+ * call goes out: the object's output gate holds the call until the write
+ * is durable, so a call made always counts.
+ */
+const modelCallsTable = "grasp_action_model_calls";
+
+/** The model calls the run's actions made, kept with it (`modelCallsTable`). */
+export const modelCallsIn = (sql: SqlStorage): ActionModelCalls => ({
+  count: () => {
+    const there =
+      sql
+        .exec(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+          modelCallsTable
+        )
+        .toArray().length > 0;
+    if (!there) {
+      return 0;
+    }
+    const [row] = sql
+      .exec<{ made: number }>(`SELECT count(*) AS made FROM ${modelCallsTable}`)
+      .toArray();
+    return row?.made ?? 0;
+  },
+  keep: (key) => {
+    if (!runIsThere(sql)) {
+      return;
+    }
+    // A row each time, never merged: a call kept twice was made twice.
+    sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${modelCallsTable} (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL)`
+    );
+    sql.exec(`INSERT INTO ${modelCallsTable} (key) VALUES (?)`, key);
   },
 });
 
@@ -390,6 +430,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         return await runPinned(this.env, pin, event, step, {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
           triedOnce: triedOnceIn(this.ctx.storage.sql),
+          modelCalls: modelCallsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
           revokeAttempt: (fence) => {

@@ -1,4 +1,4 @@
-import type { OAuthProvider } from "@grasp-os/shared/connect";
+import type { ConnectorProvider } from "@grasp-os/shared/connect";
 import { z } from "zod";
 
 import {
@@ -22,6 +22,7 @@ import type {
   RecoveryMode,
   Route,
 } from "./manifest.ts";
+import type { SignInInput } from "./sign-in.ts";
 
 // How a native connector is written: its tools, each with what connect
 // decides by (read-only or not, the one resource it acts on, the requests
@@ -551,7 +552,9 @@ export const defineTool = <
 export interface ConnectorDefinition {
   name: string;
   version: string;
-  provider: OAuthProvider;
+  provider: ConnectorProvider;
+  /** An app's provider record (sign-in.ts); never a suite's. */
+  signIn?: SignInInput;
   scopes: readonly string[];
   hosts: readonly string[];
   tools: readonly Tool[];
@@ -607,6 +610,7 @@ export const defineConnector = (definition: ConnectorDefinition): Connector => {
     name: definition.name,
     version: definition.version,
     provider: definition.provider,
+    signIn: definition.signIn,
     scopes: definition.scopes,
     hosts: definition.hosts,
     actions: Object.fromEntries(

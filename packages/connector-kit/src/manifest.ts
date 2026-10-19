@@ -1,7 +1,12 @@
 import { auditIdentifierMaxLength } from "@grasp-os/shared/audit";
-import { oauthProviderSchema } from "@grasp-os/shared/connect";
+import {
+  connectorProviderSchema,
+  oauthProviderSchema,
+} from "@grasp-os/shared/connect";
 import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { z } from "zod";
+
+import { endpointHost, signInSchema } from "./sign-in.ts";
 
 // A native connector's manifest: what connect knows of it without running
 // it. Connect's build reads it from the connector's module and ships it
@@ -332,8 +337,17 @@ export const connectorManifestSchema = z
   .strictObject({
     name: connectorNameSchema,
     version: z.string().regex(/^\d{1,4}\.\d{1,4}\.\d{1,4}$/u),
-    /** Whose OAuth token a call gets: a connection with this provider's. */
-    provider: oauthProviderSchema,
+    /**
+     * Whose token or key a call gets: a connection with this provider's.
+     * A suite (`microsoft`, `google`) or an app with its own record.
+     */
+    provider: connectorProviderSchema,
+    /**
+     * An app's provider record: how a person signs in to it (sign-in.ts).
+     * Required for an app, and never for a suite, whose sign-in connect
+     * handles itself.
+     */
+    signIn: signInSchema.optional(),
     /** The OAuth scopes its actions need, all among those connect asks for. */
     scopes: z.array(z.string().min(1).max(256)).max(64),
     /** Every host it may reach, exactly. */
@@ -341,6 +355,27 @@ export const connectorManifestSchema = z
     /** Each action (tool) by name, and the only requests it may send. */
     actions: z.record(permissionActionSchema, actionManifestSchema),
   })
+  .refine(
+    ({ provider, signIn }) =>
+      oauthProviderSchema.safeParse(provider).success ===
+      (signIn === undefined),
+    "An app's connector carries its provider record, and a suite's none"
+  )
+  .refine(
+    ({ signIn, scopes }) =>
+      signIn === undefined ||
+      (signIn.kind === "oauth2"
+        ? scopes.every((scope) => signIn.scopes.includes(scope))
+        : scopes.length === 0),
+    "A connector's scopes are among those its record asks for; an API key has none"
+  )
+  .refine(
+    ({ signIn, hosts }) =>
+      signIn === undefined ||
+      hosts.includes(endpointHost(signIn.account.url) ?? ""),
+    // The lookup carries the token or key: only where the calls go.
+    "The account lookup goes to one of the connector's hosts"
+  )
   .refine(
     ({ hosts, actions }) =>
       Object.values(actions).every(({ routes }) =>

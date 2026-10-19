@@ -1,5 +1,6 @@
 import { kitModuleName } from "@grasp-os/compiler";
 import { generatedImport } from "@grasp-os/open-workflow/generate";
+import { connectErrors } from "@grasp-os/shared/connect";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -24,7 +25,7 @@ import type {
   Stage,
 } from "@grasp-os/workflow-expressions/evaluate";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
-import { RpcTarget } from "cloudflare:workers";
+import { RpcTarget, waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 
 import { memberRole } from "../auth/identity.ts";
@@ -45,23 +46,28 @@ import {
   cpuLimitKill,
   forIsolate,
   fromIsolate,
+  heldCheckRetries,
   isCpuLimitKill,
   loadWaitAfter,
   loadWaitStart,
   markerOf,
+  maxWaits,
   queueTimedOut,
   settle,
   toStepError,
   waitKeyOf,
+  waitMsOf,
   waitStep,
 } from "./host.ts";
 import type { Busy, LoadWait, RunStep } from "./host.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import { callAction } from "./resource-action.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { makeCall } from "./resource-calls.ts";
+import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
+import { requirePackagesAdmitted } from "./sealed-packages.ts";
 
 // The host a run of an independent workflow's sealed build runs against
 // (resource-runs.ts): the calls the generated code's SDK makes
@@ -152,6 +158,12 @@ import { callCompute } from "./resource-compute.ts";
 //   `grasp.sleepUntil`'s) are made by the host within a step that records
 //   them; a sleep must be until exactly the deadline its task's enter step
 //   recorded (`#deadlines`), however it was reached.
+// - A held side effect taken for a failure, or run twice. A restricted
+//   run's connector call that connect holds for its person
+//   (`connect.held`) ends its step as held, using no retry, whatever the
+//   isolate made of it; the run waits, checking connect, and runs the
+//   step again under the same key once they decided, so connect answers
+//   what they decided, never a second send (`#waitWhileHeld`).
 // - Limits raising the host's ceilings. A task's timeout and the
 //   workflow's model calls are held to the lower of the build's sealed
 //   limit and the host's own (`configOf`, `HostedResourceRun`).
@@ -260,6 +272,11 @@ export interface ResourceHostHooks {
   attemptCall?: (call: Promise<unknown>, stepDone: Promise<unknown>) => void;
   /** Hears, once, that the isolate asked for what generated code never does. */
   tampered: (error: { name: string; message: string; code?: string }) => void;
+  /**
+   * The run's own sandbox session on-prem, once open: the parent of the
+   * sessions its actions run in (resource-action.ts).
+   */
+  sessionId?: () => string | undefined;
   /** The activation's fuel for expressions: {@link activationFuel} if unset. */
   activationFuel?: number;
   /**
@@ -275,7 +292,37 @@ export interface ResourceHostHooks {
    * then, as none is known never to have started.
    */
   triedOnce?: TriedOnceMarks;
+  /**
+   * The model calls the run's actions made, across its activations
+   * (run-object.ts, `modelCallsIn`). Unset, a count of this activation's
+   * alone.
+   */
+  modelCalls?: ActionModelCalls;
 }
+
+/**
+ * The model calls a run's actions made (GRA-700), kept with the run: an
+ * action step's record holds only its answer, and a failed attempt none,
+ * so its calls can't be counted from records on a replay. Each is kept,
+ * by its call's key, before it goes out.
+ */
+export interface ActionModelCalls {
+  /** How many were kept. */
+  count: () => number;
+  /** Keeps one, with its call's key: each time it is kept, as made. */
+  keep: (key: string) => void;
+}
+
+/** A count of one activation's alone (`ResourceHostHooks.modelCalls` unset). */
+const activationModelCalls = (): ActionModelCalls => {
+  const kept: string[] = [];
+  return {
+    count: () => kept.length,
+    keep: (key) => {
+      kept.push(key);
+    },
+  };
+};
 
 /**
  * What a run keeps of the attempts of its steps tried once (`triedOnce`),
@@ -491,6 +538,14 @@ const boundedJson = (
     : undefined;
 };
 
+/**
+ * What a step whose call connect held records (`StepAttempt.held`): never
+ * a record (`recordSchema` takes no such object), so it can't be taken
+ * for one, fresh or replayed.
+ */
+const heldMarker = { held: true } as const;
+const heldMarkerSchema = z.strictObject({ held: z.literal(true) });
+
 /** What core reads of the context the engine gives an attempt. */
 const attemptContextSchema = z.object({
   attempt: z.int().positive(),
@@ -532,6 +587,8 @@ export const maxResultBytes = platformLimits.stepPayloadBytes;
 const triedOnce = new Set<SealedCall["name"]>([
   "grasp.operation",
   "grasp.model",
+  // An action's effects aren't proven idempotent as a whole: once.
+  "grasp.action",
 ]);
 
 /**
@@ -656,6 +713,13 @@ interface StepAttempt {
   until: number | undefined;
   /** Whether it asked for its deadline: once, however it went. */
   untilAsked: boolean;
+  /**
+   * Whether connect held its call for the run's person (`connect.held`):
+   * the step then ends as held, whatever the isolate made of the answer.
+   */
+  held: boolean;
+  /** Whether it collects a held call's outcome (`StepRun.collecting`). */
+  collecting: boolean;
   /** Its admission: what admits each evaluation as a host call. */
   admission: AttemptAdmission;
 }
@@ -673,6 +737,13 @@ interface StepRun {
   entering: boolean;
   /** Its wait for load since its last admission (host.ts, `LoadWait`). */
   wait: LoadWait;
+  /**
+   * Whether its attempts collect a held connector call's decided outcome
+   * (`#waitWhileHeld`): from the first rerun after a hold, its attempts
+   * take none of the lineage's host calls (`#hostCall`), and are admitted
+   * though it has none left (quotas.ts, `QuotaAttempt.collecting`).
+   */
+  collecting: boolean;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
@@ -732,7 +803,8 @@ const templatesOf = (call: SealedCall): SealedTemplate[] => {
     }
     case "grasp.operation":
     case "grasp.connector":
-    case "grasp.compute": {
+    case "grasp.compute":
+    case "grasp.action": {
       return [call.arguments];
     }
     case "grasp.model": {
@@ -889,14 +961,18 @@ export class ResourceRunHost
    */
   readonly #deadlines = new Map<string, number>();
   /**
-   * The model calls the run has made: those its replayed steps recorded,
-   * as this activation reached them, and those this activation made
-   * itself, each counted as it is asked for (`#made`), before anything is
-   * awaited. Each new one is held to `maxModelCalls`.
+   * The model calls of the run's JSON model tasks: those its replayed steps
+   * recorded, as this activation reached them, and those this activation
+   * made itself, each counted as it is asked for (`#made`), before
+   * anything is awaited. Its actions' model calls are counted apart, kept
+   * with the run (`#actionModelCalls`); each new call is held to
+   * `maxModelCalls` against both (`#modelCallsUsed`).
    */
   #modelCalls = 0;
   /** The model tasks whose call this activation made, counted then. */
   readonly #modelCallsMade = new Set<string>();
+  /** The model calls of the run's actions, kept across its activations. */
+  readonly #actionModelCalls: ActionModelCalls;
   /** What the run keeps of its tried-once steps' attempts. */
   readonly #triedOnce: TriedOnceMarks;
 
@@ -913,6 +989,7 @@ export class ResourceRunHost
     this.#hooks = hooks;
     this.#activationFuel = hooks.activationFuel ?? activationFuel;
     this.#triedOnce = hooks.triedOnce ?? activationMarks();
+    this.#actionModelCalls = hooks.modelCalls ?? activationModelCalls();
     this.#readableParams = Object.fromEntries(
       run.build.params.flatMap((name) =>
         Object.hasOwn(run.params, name)
@@ -1067,6 +1144,7 @@ export class ResourceRunHost
           taskStart,
           entering,
           wait: loadWaitStart,
+          collecting: false,
         };
         const attemptStep = async (context: unknown): Promise<unknown> =>
           await this.#attempt(run, context, fn, stepDone.promise);
@@ -1078,13 +1156,40 @@ export class ResourceRunHost
         // Refused for load: the step runs again after a durable sleep, in
         // steps of core's own outside the run's step allowance, as an App
         // run's does (host.ts, `RunHost.do`), until it has waited as long
-        // as a step may.
+        // as a step may. Held for its person: waited for, then run again
+        // under a step of its own, its call under the same key, so connect
+        // answers what they decided. Fresh or replayed alike, each round
+        // as recorded.
         const waitKey = await waitKeyOf(stepName);
         for (
           let marker = markerOf(recorded), round = 1;
-          marker !== undefined;
+          marker !== undefined || heldMarkerSchema.safeParse(recorded).success;
           marker = markerOf(recorded), round += 1
         ) {
+          if (marker === undefined) {
+            // Only a connector call is held for its person, and connect
+            // answers its rerun what the person decided, under the same
+            // key: the attempt that was held took the host calls of its
+            // call and of everything it evaluated, and the rerun repeats
+            // that work only to collect the outcome, sending nothing new.
+            // So its attempts take none (GRA-570): a lineage that ran out
+            // while the person decided still gets the effect they let out.
+            // The wait's own checks and sleeps stay steps of the run's.
+            run.collecting =
+              step.task?.kind === "call" &&
+              step.task.call.name === "grasp.connector";
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            await this.#waitWhileHeld(stepName, round);
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            await this.#requirePerson();
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            recorded = await this.#step.do(
+              `${stepName}:held:${round}:run`,
+              engineConfigOf(step),
+              attemptStep
+            );
+            continue;
+          }
           // Only the host records a marker, and only a busy one.
           if (marker.kind !== "busy") {
             throw new Error(`Step "${stepName}" recorded a hold it can't have`);
@@ -1119,6 +1224,32 @@ export class ResourceRunHost
     } finally {
       stepDone.resolve(null);
     }
+  }
+
+  /**
+   * What attempt `attempt` of step `run` records, its function having
+   * settled as `result`: core's held marker when connect held its call
+   * for the run's person (a restricted run's side effect), so the step
+   * ends as held, not failed, using no retry, whatever the isolate made of
+   * the answer, and runs again once they decided (`#waitWhileHeld`);
+   * otherwise its record, or the failure it ended with.
+   */
+  #outcomeOf(
+    run: StepRun,
+    attempt: StepAttempt | undefined,
+    result: Settled<unknown>
+  ): unknown {
+    if (attempt?.held === true) {
+      return heldMarker;
+    }
+    if (!result.ok || attempt === undefined) {
+      throw toStepError(
+        result.ok
+          ? forIsolate(new Error("The attempt was cut off"))
+          : result.error
+      );
+    }
+    return this.#recordOf(run, attempt, result.value);
   }
 
   /**
@@ -1188,6 +1319,10 @@ export class ResourceRunHost
       if (attempt === undefined) {
         call = Promise.reject(cpuLimitKill());
       } else {
+        // An action is tried once: its packages are admitted before it is
+        // told to have run, so a check that can't answer for a moment
+        // leaves it to a later attempt, never a failure kept for good.
+        await this.#actionPackagesAdmitted(run, attempt, funded);
         ran();
         call = fn(this.#attemptHostOf(attempt));
       }
@@ -1217,14 +1352,7 @@ export class ResourceRunHost
       if (this.#tampered !== undefined) {
         throw toStepError(forIsolate(this.#tampered));
       }
-      if (!result.ok || attempt === undefined) {
-        throw toStepError(
-          result.ok
-            ? forIsolate(new Error("The attempt was cut off"))
-            : result.error
-        );
-      }
-      return this.#recordOf(run, attempt, result.value);
+      return this.#outcomeOf(run, attempt, result);
     } finally {
       // Settled last, however it ended: what it held of its lineage's time
       // turns into what it used, its evaluations' and its record's checks'
@@ -1249,7 +1377,8 @@ export class ResourceRunHost
       this.#activationFuel -= attemptFuel;
     }
     const admitted = await settle(
-      async () => await this.#admit(told, lease, run.name, run.wait)
+      async () =>
+        await this.#admit(told, lease, run.name, run.wait, run.collecting)
     );
     if (admitted.ok && "settle" in admitted.value) {
       return admitted.value;
@@ -1293,8 +1422,21 @@ export class ResourceRunHost
       exportAs: new Map(),
       until: undefined,
       untilAsked: false,
+      held: false,
+      collecting: run.collecting,
       admission,
     };
+  }
+
+  /**
+   * One of `attempt`'s lineage's host calls, unless it collects a held
+   * connector call's decided outcome (`StepRun.collecting`), whose host
+   * calls the attempt that was held already took.
+   */
+  static async #hostCall(attempt: StepAttempt): Promise<void> {
+    if (!attempt.collecting) {
+      await attempt.admission.hostCall();
+    }
   }
 
   /** The host `attempt`'s function gets in the isolate. */
@@ -1374,10 +1516,12 @@ export class ResourceRunHost
     told: z.infer<typeof attemptContextSchema>,
     lease: AttemptLease,
     step: string,
-    wait: LoadWait
+    wait: LoadWait,
+    collecting: boolean
   ): Promise<AttemptAdmission | Busy> {
     try {
       return await this.#hooks.admitAttempt({
+        ...(collecting ? { collecting: true } : {}),
         key: told.idempotencyKey,
         step,
         number: told.attempt,
@@ -1421,6 +1565,50 @@ export class ResourceRunHost
       !this.#modelCallsMade.has(task.id)
     ) {
       this.#modelCalls += 1;
+    }
+  }
+
+  /**
+   * Waits, in round `round`, while the call of step `stepName` (a call
+   * task's, whose key its call carries) is held for the run's person:
+   * each check a step of its own (retried, and replayed without asking
+   * connect again), then a durable sleep, a first wait (`waitMsOf`)
+   * doubling up to `maxWaits` of them, in steps named after the round.
+   * What connect says
+   * decides; a confirmation, a decline or a drop ends the wait, and the
+   * step's next run gets the answer. Each check and sleep is a step of
+   * the run's, so the run's step limit bounds the wait.
+   */
+  async #waitWhileHeld(stepName: string, round: number): Promise<void> {
+    const first = waitMsOf(this.#env);
+    const prefix = `${stepName}:held:${round}`;
+    // The key `#made` gives the task's call, in every attempt and round.
+    const idempotencyKey = stepIdempotencyKey(this.#run.runId, stepName);
+    for (let checks = 0; ; checks += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one check at a time
+      const held = await this.#step.do(
+        `${prefix}:${checks}:check`,
+        {
+          retries: {
+            limit: heldCheckRetries,
+            delay: first,
+            backoff: "exponential",
+          },
+        },
+        async () =>
+          await this.#env.CONNECT.anyPending({
+            onBehalfOf: this.#run.principal,
+            idempotencyKey,
+          })
+      );
+      if (held !== true) {
+        return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+      await this.#step.sleep(
+        `${prefix}:${checks}`,
+        first * Math.min(2 ** checks, maxWaits)
+      );
     }
   }
 
@@ -1829,7 +2017,7 @@ export class ResourceRunHost
     // One of its lineage's host calls, before any of core's CPU goes on
     // it: a lineage with none left evaluates nothing more, in this
     // activation or any later one.
-    await attempt.admission.hostCall();
+    await ResourceRunHost.#hostCall(attempt);
     this.#requireCurrent(attempt);
     const expressionCompiled = await this.#compiled(expression);
     // Compiling awaited: an attempt over meanwhile evaluates nothing.
@@ -2007,6 +2195,15 @@ export class ResourceRunHost
         return answer;
       } catch (error) {
         attempt.call = "failed";
+        // Only a connector call's hold makes the step wait and run again:
+        // connect keeps its answer under the step's key, so a rerun sends
+        // nothing new. An App export can answer `connect.held` too (a call
+        // of its own held, in a restricted App), but its step is tried
+        // once (`triedOnce`): running it again would run the App's code
+        // again, so it fails with the code, as any other answer.
+        attempt.held ||=
+          task.call.name === "grasp.connector" &&
+          connectErrors.codeOf(error) === "connect.held";
         throw error;
       }
     });
@@ -2030,7 +2227,7 @@ export class ResourceRunHost
     // One of its lineage's host calls, before anything of it is built or
     // sent, and before a model call takes its place: a lineage with none
     // left makes no more calls, in this attempt or any later one.
-    await attempt.admission.hostCall();
+    await ResourceRunHost.#hostCall(attempt);
     this.#requireCurrent(attempt);
     const { call } = task;
     if (call.name === "grasp.now") {
@@ -2043,13 +2240,20 @@ export class ResourceRunHost
       return this.#refuse(`Task "${task.id}" makes no call.`);
     }
     if (call.name === "grasp.model") {
-      if (this.#modelCalls >= this.#run.maxModelCalls) {
+      if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
         throw workflowResourceErrors.create("workflow.model_call_limit", {
           limit: this.#run.maxModelCalls,
         });
       }
       this.#modelCalls += 1;
       this.#modelCallsMade.add(task.id);
+    }
+    if (call.name === "grasp.compute") {
+      // Its modules' approved packages admitted again first, under the
+      // policy generation now: a graph revoked since fails the run here,
+      // never retried (decision 4, GRA-665). An action's were admitted as
+      // its attempt began (`#attemptOf`).
+      await this.#packagesAdmitted();
     }
     if (call.name === "grasp.compute") {
       // A calculation of the workflow's own sealed modules: no binding of
@@ -2063,6 +2267,9 @@ export class ResourceRunHost
         await this.#built(attempt, call.arguments, passed, passed.size),
         attempt.deadline
       );
+    }
+    if (call.name === "grasp.action") {
+      return await this.#action(attempt, task, call, passed);
     }
     const built = await this.#builtCall(attempt, call, passed);
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
@@ -2080,6 +2287,171 @@ export class ResourceRunHost
     });
   }
 
+  /**
+   * Admits the approved graph the run's version seals, if it seals one,
+   * for the call about to load its modules (workflows/sealed-packages.ts):
+   * `workflow.packages_revoked` once it is revoked.
+   */
+  async #packagesAdmitted(): Promise<void> {
+    const { packages } = this.#run.build;
+    if (packages !== undefined) {
+      await requirePackagesAdmitted(
+        this.#env,
+        this.#run.workflowId,
+        packages.graphHash
+      );
+    }
+  }
+
+  /**
+   * `#packagesAdmitted` for `run`'s attempt if it is an action's, before it
+   * is told to have run: a refusal ends the run as a step's error does (never tried
+   * again, so a graph approved again meanwhile runs nothing it refused);
+   * anything else is tried again, as an attempt that never started.
+   */
+  async #actionPackagesAdmitted(
+    { step }: StepRun,
+    attempt: StepAttempt,
+    funded: boolean
+  ): Promise<void> {
+    if (
+      step.kind !== "task" ||
+      step.task?.kind !== "call" ||
+      step.task.call.name !== "grasp.action"
+    ) {
+      return;
+    }
+    try {
+      await this.#packagesAdmitted();
+    } catch (error) {
+      // Nothing of it ran: its share of the fuel goes back whole.
+      attempt.over = true;
+      if (funded) {
+        this.#activationFuel += Math.max(0, attempt.budget.fuel);
+      }
+      throw workflowResourceErrors.codeOf(error) === "workflow.packages_revoked"
+        ? toStepError(forIsolate(error))
+        : error;
+    }
+  }
+
+  /**
+   * `#made`'s work for an action task: the action run in the modules'
+   * sandbox (resource-action.ts), each of its resource calls one of the
+   * run's named calls, as a task's own: its lineage's host call first,
+   * then `makeCall`, under its step's key and its ordinal.
+   */
+  async #action(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    call: Extract<SealedCall, { name: "grasp.action" }>,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<Json> {
+    const input = await this.#built(attempt, call.arguments, frame, frame.size);
+    const stepKey = stepIdempotencyKey(this.#run.runId, `task:${task.id}`);
+    return await callAction(
+      this.#env,
+      this.#run.build.compute,
+      this.#run.build.sdk,
+      call,
+      input,
+      attempt.deadline,
+      {
+        // The workflow's actions apart from its runs, as a child of the
+        // run's own session on-prem (resource-action.ts).
+        owner: `workflow-action:${this.#run.workflowId}`,
+        parent: this.#hooks.sessionId?.(),
+        make: async (built, ordinal) => {
+          this.#requireCurrent(attempt);
+          await attempt.admission.hostCall();
+          this.#requireCurrent(attempt);
+          // Taken once the call is admitted, as a model task's, and with
+          // nothing awaited between it and the call going out: one refused
+          // at admission takes none.
+          if (built.name === "grasp.model") {
+            try {
+              this.#reserveModelCall(
+                `${stepKey}:${attempt.number}:${attempt.generation}:${ordinal}`
+              );
+            } catch (error) {
+              // Refused before it is a named call, so no receipt of
+              // `makeCall`'s: kept as the evidence an action's call
+              // refused at admission leaves, naming its declared binding.
+              // That write never rejects (it logs one it can't keep), so
+              // the refusal below always stands.
+              await auditAdmissionRefusal(this.#env, this.#run.calling, {
+                build: this.#run.build.hash,
+                task: task.id,
+                attempt: attempt.number,
+                generation: attempt.generation,
+                call: built.binding,
+                errorCode:
+                  workflowResourceErrors.codeOf(error) ?? "internal.unexpected",
+                reason: "model_call_limit",
+              });
+              throw error;
+            }
+          }
+          return await makeCall(this.#env, this.#run.calling, task.id, built, {
+            key: `${stepKey}:${ordinal}`,
+            deadline: attempt.deadline,
+            fence: {
+              run: this.#run.runId,
+              key: attempt.key,
+              number: attempt.number,
+              generation: attempt.generation,
+            },
+            requireHolds: () => {
+              this.#requireCurrent(attempt);
+            },
+            fromAction: true,
+          });
+        },
+        // The request's own work until it is written: `callAction` waits
+        // for it only until the attempt's deadline, and a write it stopped
+        // waiting for still finishes rather than ending with the call.
+        refused: async (refusal) => {
+          const writing = auditAdmissionRefusal(this.#env, this.#run.calling, {
+            build: this.#run.build.hash,
+            task: task.id,
+            attempt: attempt.number,
+            generation: attempt.generation,
+            ...refusal,
+          });
+          waitUntil(writing);
+          await writing;
+        },
+      }
+    );
+  }
+
+  /**
+   * Takes one of the run's `maxModelCalls` for an action's model call keyed
+   * `key`, synchronously, against the count the run keeps (read again
+   * now), so two at once, in this activation or another, never both take
+   * the last; kept with the run before the call goes out, so a replay of
+   * its step, or of a failed attempt, still counts it (GRA-700). Refused
+   * (`workflow.model_call_limit`) once none is left.
+   */
+  #reserveModelCall(key: string): void {
+    if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
+      throw workflowResourceErrors.create("workflow.model_call_limit", {
+        limit: this.#run.maxModelCalls,
+      });
+    }
+    this.#actionModelCalls.keep(key);
+  }
+
+  /**
+   * The model calls the run has made, read now: its JSON model tasks', and
+   * its actions' as the run keeps them, read again from that store each
+   * time, so it alone says how many there were, whichever activation
+   * made them.
+   */
+  #modelCallsUsed(): number {
+    return this.#modelCalls + this.#actionModelCalls.count();
+  }
+
   /** `call`'s parts built (`#built`), as resource-calls.ts makes it. */
   async #builtCall(
     attempt: StepAttempt,
@@ -2090,7 +2462,8 @@ export class ResourceRunHost
           | "grasp.now"
           | "grasp.random"
           | "grasp.sleepUntil"
-          | "grasp.compute";
+          | "grasp.compute"
+          | "grasp.action";
       }
     >,
     frame: { input: Json; output: Json; size: number }
