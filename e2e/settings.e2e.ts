@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { pageOf, peopleIn } from "./people.ts";
+import { peopleIn } from "./people.ts";
 
 // Settings, as in the prototype: the workspace's sections for admins, the
 // account's for everyone, listed beside the section where the page has the
@@ -17,10 +17,10 @@ const sectionOf = (page: Page, name: string) =>
   page.getByRole("region", { name, exact: true });
 
 test("an admin opens Settings on the workspace, and each section from the list beside it", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("settings");
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings\/workspace$/u);
   const nav = page.getByRole("navigation", { name: "Settings" });
@@ -72,15 +72,15 @@ test("an admin opens Settings on the workspace, and each section from the list b
 });
 
 test("someone who isn't an admin opens Settings on their profile, with only their account's sections", async ({
-  browser,
+  pageOf,
 }) => {
   const { member } = peopleIn("settings");
-  const page = await pageOf(browser, member);
+  const page = await pageOf(member);
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await expect(
     page.getByRole("navigation", { name: "Settings" }).getByRole("link")
-  ).toHaveText(["Profile", "Notifications", "Security"]);
+  ).toHaveText(["Packages", "Profile", "Notifications", "Security"]);
   // Billing problems are told only to those who can fix them.
   await page
     .getByRole("navigation", { name: "Settings" })
@@ -90,10 +90,10 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
 });
 
 test("on a phone the sections are one control above the section", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("settings");
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings/profile");
   await expect(page.getByRole("navigation", { name: "Settings" })).toBeHidden();
