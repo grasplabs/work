@@ -2,12 +2,54 @@ import Babel from "@babel/standalone";
 import reactCompiler from "babel-plugin-react-compiler";
 
 /**
+ * The directives that switch the React Compiler off for the function (or
+ * module) that holds them, as it matches them: exactly this text.
+ */
+const compilerOptOuts: ReadonlySet<string> = new Set([
+  "use no memo",
+  "use no forget",
+]);
+
+/** What `refuseCompilerOptOuts` reads of a Babel directive's path. */
+interface DirectivePath {
+  node: { value: { value: string } };
+  buildCodeFrameError: (message: string) => Error;
+}
+
+/**
+ * A Babel plugin that refuses a directive switching the React Compiler off
+ * (`compilerOptOuts`), in any function body or the module's prologue,
+ * before the compiler runs: a component it skips would ship code it
+ * rejects, and every component goes through it (spec 19.1). Only a
+ * directive is refused; a string or a comment that names one is not.
+ */
+const refuseCompilerOptOuts = () => ({
+  visitor: {
+    Program: (program: {
+      traverse: (visitor: { Directive: (path: DirectivePath) => void }) => void;
+    }) => {
+      program.traverse({
+        Directive: (directive) => {
+          const { value } = directive.node.value;
+          if (compilerOptOuts.has(value)) {
+            throw directive.buildCodeFrameError(
+              `"${value}" is never in App code: it would switch the React Compiler off, and every component goes through it. Fix what the compiler refuses instead.`
+            );
+          }
+        },
+      });
+    },
+  },
+});
+
+/**
  * Compiles one TypeScript or TSX file to a JavaScript module in one Babel
  * pass: the React Compiler, then types stripped and JSX turned into calls to
  * `react/jsx-runtime`. `plugins` run first, on the source as written. Like
  * the frontend's build, it throws on anything the React Compiler can't
- * compile. `enableReanimatedCheck` is off: the check calls
- * `require.resolve`, which a Worker doesn't have.
+ * compile, and refuses a directive that would switch it off
+ * (`refuseCompilerOptOuts`). `enableReanimatedCheck` is off: the check
+ * calls `require.resolve`, which a Worker doesn't have.
  */
 export const compileModule = (
   source: string,
@@ -23,6 +65,7 @@ export const compileModule = (
     configFile: false,
     sourceType: "module",
     plugins: [
+      refuseCompilerOptOuts,
       ...plugins,
       [
         reactCompiler,

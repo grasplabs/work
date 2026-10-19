@@ -360,3 +360,78 @@ describe("the App compiler's surface", { timeout: 60_000 }, () => {
     expect(answers).toStrictEqual(["refused", "refused", "refused", "refused"]);
   });
 });
+
+/**
+ * A component the React Compiler refuses (it reassigns a prop as it
+ * renders), with `directive` at the top of its body.
+ */
+const rejected = (directive: string, name = "Probe"): string =>
+  `import { useState } from "react";
+
+export function ${name}(props: { count: number }) {
+  ${directive}
+  const [value] = useState(0);
+  props.count = value;
+  return <p>{props.count}</p>;
+}
+`;
+
+/** What building `files` beside the typical screen says, by file and rule. */
+const refusedIn = async (files: Record<string, string>) => {
+  const built = await buildScreens(
+    env,
+    { ...typicalApp, ...files },
+    "app-test"
+  );
+  return built.ok
+    ? "built"
+    : built.diagnostics
+        .filter(({ severity }) => severity === "error")
+        .map(({ file, rule, message }) => ({
+          file,
+          rule,
+          optOut: message.includes("would switch the React Compiler off"),
+        }));
+};
+
+describe(
+  "the React Compiler, which no App code switches off",
+  { timeout: 60_000 },
+  () => {
+    it.each([
+      [
+        "a function directive in a screen",
+        "screens/probe.tsx",
+        rejected('"use no memo";'),
+      ],
+      [
+        "the other function directive in a screen",
+        "screens/probe.tsx",
+        rejected('"use no forget";'),
+      ],
+      [
+        "an arrow function's directive in a component",
+        "components/probe.tsx",
+        'import { useState } from "react";\n\nexport const Probe = (props: { count: number }) => {\n  "use no forget";\n  const [value] = useState(0);\n  props.count = value;\n  return <p>{props.count}</p>;\n};\n',
+      ],
+      [
+        "a module directive in a component",
+        "components/probe.tsx",
+        `"use no memo";\n${rejected("")}`,
+      ],
+    ])("refuses %s", async (_case, path, source) => {
+      await expect(refusedIn({ [path]: source })).resolves.toStrictEqual([
+        { file: path, rule: "compile", optOut: true },
+      ]);
+    });
+
+    it("builds a component that only names a directive in a string or a comment, or holds another directive", async () => {
+      await expect(
+        refusedIn({
+          "components/label.tsx":
+            '// Never "use no memo" here: the compiler checks every component.\nexport function Label() {\n  "use strict";\n  const text = "use no memo";\n  return <p>{text}</p>;\n}\n',
+        })
+      ).resolves.toBe("built");
+    });
+  }
+);
