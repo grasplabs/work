@@ -331,6 +331,28 @@ export type WorkflowLimits = z.infer<typeof workflowLimitsSchema>;
 export type SealedExpression = z.infer<typeof sealedExpressionSchema>;
 
 /**
+ * The tasks `compiled` seals (`tasks.json`), read from its own bytes before
+ * anything is stored: none for a build that isn't executable, which never
+ * runs a task. For a review of the version a publication answers.
+ */
+export const compiledTasksOf = (
+  compiled: CompiledBuild
+): readonly SealedTask[] => {
+  const { build } = compiled;
+  if (!build.executable) {
+    return [];
+  }
+  const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
+  const bytes =
+    entry === undefined ? undefined : compiled.bytes.get(entry.sha256);
+  if (bytes === undefined) {
+    throw new Error("A compiled build holds no tasks.json");
+  }
+  return tasksFileSchema.parse(JSON.parse(new TextDecoder().decode(bytes)))
+    .tasks;
+};
+
+/**
  * The executable identity of a build: its generator, protocol, compiler and
  * every artifact it runs (the generated and compiled code, the expression
  * table, the SDK), not the definition's text or the source map, whose
@@ -871,6 +893,68 @@ const loadedModules = (
  */
 const verified = new Map<string, LoadedBuild>();
 const verifiedMax = 32;
+
+/**
+ * The tasks each version's build seals, by manifest hash, for its review:
+ * a version never changes. Small, so many more are kept than builds.
+ */
+const reviewedTasks = new Map<string, readonly SealedTask[]>();
+const reviewedTasksMax = 1024;
+
+/**
+ * The tasks version `version` of `id` seals, for its review (GRA-727):
+ * read from its `tasks.json` alone, hash-checked against the manifest
+ * (`manifest`, which the caller has checked against `manifestHash`),
+ * never by loading the whole build, so a listing of many versions reads
+ * one small file for each, and none twice. None for a build that isn't
+ * executable, which runs none.
+ */
+export const reviewedTasksOf = async (
+  env: Env,
+  id: string,
+  version: number,
+  manifest: string,
+  manifestHash: string
+): Promise<readonly SealedTask[]> => {
+  const kept =
+    verified.get(manifestHash)?.tasks ?? reviewedTasks.get(manifestHash);
+  if (kept !== undefined) {
+    return kept;
+  }
+  let build: SealedBuild;
+  try {
+    build = buildOf(manifest);
+  } catch {
+    throw corrupt(id, version, "build");
+  }
+  if (!build.executable) {
+    return [];
+  }
+  const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
+  const text = entry === undefined ? undefined : await artifactText(env, entry);
+  let tasks: readonly SealedTask[] | undefined;
+  try {
+    tasks =
+      text === undefined
+        ? undefined
+        : tasksFileSchema.safeParse(JSON.parse(text)).data?.tasks;
+  } catch {
+    // Sealed bytes that aren't JSON: corrupt, as ones of the wrong shape.
+    tasks = undefined;
+  }
+  if (tasks === undefined) {
+    throw corrupt(id, version, tasksArtifact);
+  }
+  const frozen = Object.freeze(tasks.map((task) => Object.freeze(task)));
+  if (reviewedTasks.size >= reviewedTasksMax) {
+    const [oldest] = reviewedTasks.keys();
+    if (oldest !== undefined) {
+      reviewedTasks.delete(oldest);
+    }
+  }
+  reviewedTasks.set(manifestHash, frozen);
+  return frozen;
+};
 
 /**
  * The loads running now in this isolate, by manifest hash: loads of a

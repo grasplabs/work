@@ -4964,6 +4964,10 @@ msgstr "Sa migration a transformé chaque enregistrement. Elle prend effet quand
 msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "Ses migrations sont illisibles : elle peut réécrire les enregistrements de n'importe quelle table"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Its model tasks"
+msgstr "Ses tâches de modèle"
+
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "Les valeurs par défaut de ses nouveaux champs sont en cours de remplissage. Les versions qui en ont besoin pourront être rendues actuelles une fois terminé."
@@ -10963,8 +10967,8 @@ msgid "Write your answer"
 msgstr "Écrivez votre réponse"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
-msgstr "Les écritures qu’un modèle peut orienter ne couvrent que les usages de chaque action, pas une tâche de modèle du workflow dont une tâche ultérieure transmet la réponse."
+msgid "Writes a model may steer cover each action's own model uses and the workflow's own model tasks. An action's model uses reach only that action; each of the workflow's model tasks is taken to reach every call the workflow makes."
+msgstr "Les écritures qu’un modèle peut orienter couvrent les usages de modèle de chaque action et les tâches de modèle du workflow. Les usages de modèle d’une action n’atteignent que cette action ; chaque tâche de modèle du workflow est censée atteindre chaque appel du workflow."
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Writes a model may steer: {target}"

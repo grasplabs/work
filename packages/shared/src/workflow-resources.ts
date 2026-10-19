@@ -722,6 +722,13 @@ export interface WorkflowResourceVersion {
   bindings: WorkflowVersionBinding[];
   /** What its own actions may do, as sealed with it, by binding. */
   actions: WorkflowActionReview[];
+  /**
+   * What the workflow's own model tasks may steer (GRA-727): when its build
+   * holds any model task, every write its call tasks may make, a called
+   * action's writing uses among them; empty otherwise. Conservative: a
+   * model task is taken to reach every call, whatever their order.
+   */
+  modelSteeredWrites: SteeredWrite[];
   build: WorkflowVersionBuild;
   author: string;
   createdAt: string;

@@ -4964,6 +4964,10 @@ msgstr "De migratie heeft elk record omgezet. Ze gaat in zodra een release die h
 msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "De migraties zijn niet te lezen: het kan de records van elke tabel herschrijven"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Its model tasks"
+msgstr "Zijn modeltaken"
+
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "De standaardwaarden van de nieuwe velden worden ingevuld. Releases die dit nodig hebben, kunnen actueel worden gemaakt zodra het klaar is."
@@ -10963,8 +10967,8 @@ msgid "Write your answer"
 msgstr "Schrijf je antwoord"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-msgid "Writes a model may steer cover the uses of each action alone, not a model task of the workflow whose answer a later task passes on."
-msgstr "Schrijfacties die een model kan sturen gelden alleen voor het gebruik van elke actie zelf, niet voor een modeltaak van de workflow waarvan een latere taak het antwoord doorgeeft."
+msgid "Writes a model may steer cover each action's own model uses and the workflow's own model tasks. An action's model uses reach only that action; each of the workflow's model tasks is taken to reach every call the workflow makes."
+msgstr "Schrijfacties die een model kan sturen omvatten het eigen modelgebruik van elke actie en de eigen modeltaken van de workflow. Het modelgebruik van een actie bereikt alleen die actie; van elke modeltaak van de workflow wordt aangenomen dat die elke aanroep van de workflow bereikt."
 
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Writes a model may steer: {target}"
