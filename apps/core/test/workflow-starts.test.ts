@@ -1243,7 +1243,7 @@ describe("what code and triggers may learn and name", () => {
     ]).toStrictEqual([1, 1, 0]);
   });
 
-  it("lets nobody name a workflow subject they don't build, a store reach a workflow, or a trigger start another workflow", async () => {
+  it("lets nobody name a workflow subject they don't build, a store reach a workflow, or a trigger do more than start its workflow", async () => {
     const ada = await person("builder");
     const bob = await person("builder");
     const theirs = await workflowOf(ada);
@@ -1262,6 +1262,21 @@ describe("what code and triggers may learn and name", () => {
     });
     const ask = async (by: Person, permission: PermissionRequest) =>
       await outcome(requestPermission(env, by, permission, rolesOf(by)));
+    // A trigger reaches nothing but a start: said as such, not as what
+    // else it named.
+    const triggerWrites: unknown = await refusal(
+      requestPermission(
+        env,
+        ada,
+        {
+          subject: { type: "trigger", triggerId: trigger.id },
+          object: { type: "collection", collectionId: "c" },
+          actions: ["write"],
+          binding: "NOTES",
+        },
+        rolesOf(ada)
+      )
+    );
     expect({
       // Bob has a role in the object, none in the subject.
       subjectNotBuilt: await ask(
@@ -1276,10 +1291,17 @@ describe("what code and triggers may learn and name", () => {
         ada,
         startsOn({ type: "trigger", triggerId: trigger.id }, shared.id)
       ),
+      triggerWrites:
+        typeof triggerWrites === "object" &&
+        triggerWrites !== null &&
+        "details" in triggerWrites
+          ? triggerWrites.details
+          : triggerWrites,
     }).toStrictEqual({
       subjectNotBuilt: "workflow.resource_unavailable",
       storeStarts: "permission.invalid",
       triggerElsewhere: "permission.invalid",
+      triggerWrites: { issues: ["object: A trigger only starts a workflow."] },
     });
   });
 });

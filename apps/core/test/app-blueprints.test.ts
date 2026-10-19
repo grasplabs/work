@@ -135,6 +135,12 @@ const share = async (
 
 const named = { name: "My notes", description: "Mine" };
 
+/** How many files the Apps' storage holds. */
+const appFiles = async (): Promise<number> => {
+  const listed = await env.FILES.list({ prefix: "apps/" });
+  return listed.objects.length;
+};
+
 /** A personal connection of `owner`'s, such as their mailbox. */
 const mailboxOf = async (owner: Person): Promise<string> => {
   const id = `connection-mailbox-${unique()}`;
@@ -271,6 +277,72 @@ describe("blueprints", { timeout: 60_000 }, () => {
         },
       ],
       names: [],
+    });
+  });
+
+  // Only reads of a collection are declarable now: a grant or a blueprint
+  // kept from before, holding a collection to write, is refused, never
+  // asked for again, and never an internal error.
+  it("ask for no collection to write, whatever an App or a blueprint held from before", async () => {
+    const owner = await personApi("builder");
+    const admin = await signedInApi(idp, "admin");
+    const source = await notesApp(owner);
+    const { collectionId } = await collectionWithNote(admin.api, {
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await requestGranted(
+      idp,
+      owner,
+      readCollection({ type: "app", appId: source }, collectionId)
+    );
+    const writes = async (actions: string[]) =>
+      await env.DB.prepare(
+        "UPDATE permissions SET actions = ? WHERE subject_id = ? AND object_type = 'collection'"
+      )
+        .bind(JSON.stringify(actions), source)
+        .run();
+    await writes(["read", "write"]);
+    const markedWhileWriting = await outcome(
+      owner.api.apps.blueprints.mark(source, 1)
+    );
+    await writes(["read"]);
+    const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
+    await env.DB.prepare("UPDATE blueprints SET permissions = ? WHERE id = ?")
+      .bind(
+        JSON.stringify([
+          {
+            object: { type: "collection", collectionId },
+            actions: ["read", "write"],
+            binding: "HANDBOOK",
+          },
+        ]),
+        blueprint
+      )
+      .run();
+    const name = `Copy ${unique()}`;
+    const storedBefore = await appFiles();
+    const created = await outcome(
+      owner.api.apps.blueprints.create(blueprint, { name })
+    );
+    // Refused before any of the copy's files were stored.
+    const storedAfter = await appFiles();
+    const copies = await env.DB.prepare(
+      "SELECT count(*) AS copies FROM apps WHERE name = ?"
+    )
+      .bind(name)
+      .first<number>("copies");
+
+    expect({
+      markedWhileWriting,
+      created,
+      copies,
+      filesLeft: storedAfter - storedBefore,
+    }).toStrictEqual({
+      markedWhileWriting: "permission.invalid",
+      created: "permission.invalid",
+      copies: 0,
+      filesLeft: 0,
     });
   });
 

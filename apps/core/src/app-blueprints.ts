@@ -306,6 +306,14 @@ export const createFromBlueprint = async (
     files.set(appMemoryPath, copiedMemory(blueprint.name));
   }
   const app = appIdSchema.parse(crypto.randomUUID());
+  // Its requests checked before anything is stored: one the blueprint may
+  // no longer declare refuses the copy with nothing left behind in R2.
+  const requests = declaredRequests(
+    by,
+    app,
+    blueprint.permissions,
+    blueprint.id
+  );
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
 
@@ -338,12 +346,6 @@ export const createFromBlueprint = async (
     exports: exportsIn(files),
     proposedBy: null,
   };
-  const requests = declaredRequests(
-    by,
-    app,
-    blueprint.permissions,
-    blueprint.id
-  );
   const db = drizzle(env.DB);
   // The App, only while the blueprint is still there and, for a marked
   // one, `by` still has a role in its App (`stillOpenTo`), selected from
