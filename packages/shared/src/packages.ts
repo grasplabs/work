@@ -349,19 +349,31 @@ export const dependencyIntentSchema = z
       .refine((targets) => new Set(targets).size === targets.length, {
         message: "Each target once",
       }),
-    /** package.json's `dependencies`: names and ranges. */
+    /**
+     * package.json's `dependencies`: each name and its range, as pairs,
+     * never an object keyed by name. Grasp's RPC (Cap'n Web) deletes every
+     * key an object inherits from Object.prototype as it decodes one, so
+     * a dependency named `constructor` would vanish on the way in. Kept as
+     * a record by name once read, each an own property.
+     */
     dependencies: z
-      .record(
-        packageNameSchema,
-        z.string().min(1).max(registryLimits.textLength)
+      .array(
+        z.strictObject({
+          name: packageNameSchema,
+          range: z.string().min(1).max(registryLimits.textLength),
+        })
       )
-      .refine((dependencies) => Object.keys(dependencies).length > 0, {
-        message: "At least one dependency",
-      })
+      .min(1, "At least one dependency")
+      .max(
+        dependencyMaxPackages,
+        `At most ${dependencyMaxPackages} dependencies`
+      )
       .refine(
-        (dependencies) =>
-          Object.keys(dependencies).length <= dependencyMaxPackages,
-        { message: `At most ${dependencyMaxPackages} dependencies` }
+        (pairs) => new Set(pairs.map(({ name }) => name)).size === pairs.length,
+        { message: "Each dependency once" }
+      )
+      .transform((pairs): Record<string, string> =>
+        Object.fromEntries(pairs.map(({ name, range }) => [name, range]))
       ),
     /**
      * What the App imports of them; each direct dependency's own name

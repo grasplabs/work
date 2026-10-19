@@ -107,7 +107,10 @@ export const intentFor = (
   sourceRevision: "rev-1",
   purpose: "Format dates in the report.",
   targets: ["browser"],
-  dependencies,
+  dependencies: Object.entries(dependencies).map(([name, range]) => ({
+    name,
+    range,
+  })),
   ...more,
 });
 

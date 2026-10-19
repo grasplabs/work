@@ -649,6 +649,36 @@ describe("the platform's own packages", () => {
     });
   });
 
+  it("takes every dependency the API is sent, a name Object.prototype also has included, each once", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    // Never deleted on the way in, as a key of an object would be: it
+    // reaches the registry's advisories, which never answer for it.
+    await publish(plain("constructor", "1.0.1"));
+    const inherited = await failure(
+      builder.api.dependencies.resolve(
+        intentFor(app, { constructor: "1.0.1", [dates]: "1.0.0" })
+      )
+    );
+    const twice = await failure(
+      builder.api.dependencies.resolve({
+        ...intentFor(app, { [dates]: "1.0.0" }),
+        dependencies: [
+          { name: dates, range: "1.0.0" },
+          { name: dates, range: "^1.0.0" },
+        ],
+      })
+    );
+    expect({
+      inherited: inherited.code,
+      twice: twice.code,
+    }).toStrictEqual({
+      inherited: "package.advisories_unchecked",
+      twice: "dependency.invalid",
+    });
+  });
+
   it("takes a dependency on React itself as the platform's, shown in the review", async () => {
     const { builder, app } = await builderWithApp();
     const hooks = named("react-hooks");
