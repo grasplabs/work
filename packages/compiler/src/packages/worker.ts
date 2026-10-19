@@ -83,7 +83,7 @@ export default class PackageBuilder extends WorkerEntrypoint {
     limits,
     packages,
   }: InspectRequest): Promise<PackageInspection[]> {
-    assertNoBindings(this.env, "The package builder");
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
     const inspected: PackageInspection[] = [];
     for (const tarball of packages) {
       // One at a time: each holds its unpacked files in memory.
@@ -95,7 +95,7 @@ export default class PackageBuilder extends WorkerEntrypoint {
 
   /** Builds one target of an approved lock (build.ts). */
   async build(request: BuildRequest): Promise<PackageBuildAnswer> {
-    assertNoBindings(this.env, "The package builder");
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
     return await buildTarget(request, esbuildWasm);
   }
 
@@ -109,6 +109,8 @@ export default class PackageBuilder extends WorkerEntrypoint {
     headers: TarballHeader[],
     read: ChunkRead
   ): Promise<PackageInspection[]> {
+    // Before a tarball is read: the isolate is checked as it is called.
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
     return await this.inspect({
       limits,
       packages: await readTarballs(headers, read),
@@ -126,6 +128,8 @@ export default class PackageBuilder extends WorkerEntrypoint {
     read: ChunkRead,
     write: WriteChunk
   ): Promise<PackageBuildAnswer> {
+    // Before a tarball is read: the isolate is checked as it is called.
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
     const answer = await this.build({
       ...request,
       packages: await readTarballs(request.packages, read),

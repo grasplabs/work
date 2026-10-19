@@ -1107,7 +1107,7 @@ export default class AppCompiler extends WorkerEntrypoint {
     target: Target,
     files: Record<string, string>
   ): Promise<TargetBuilds[Target]> {
-    assertNoBindings(this.env, "The App compiler");
+    assertNoBindings(this.env, this.ctx.props, "The App compiler");
     const known = knownTarget(targetBuilds, target, "build");
     // SAFETY: `known` is `target`, which picks its own builder.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -1137,7 +1137,7 @@ export default class AppCompiler extends WorkerEntrypoint {
     target: Target,
     files: Record<string, string>
   ): TargetInspections[Target] {
-    assertNoBindings(this.env, "The App compiler");
+    assertNoBindings(this.env, this.ctx.props, "The App compiler");
     const known = knownTarget(targetInspections, target, "inspect");
     return targetInspections[known](files);
   }
