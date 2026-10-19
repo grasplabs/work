@@ -55,6 +55,11 @@ msgstr "{0, plural, one {# fichier modifié dans ce chat, pas encore proposé} o
 msgid "{0, plural, one {# finding reported} other {# findings reported}}"
 msgstr "{0, plural, one {# constat signalé} other {# constats signalés}}"
 
+#. placeholder {0}: review.counts.findings - review.findings.length
+#: src/dashboard/dependency-requests.tsx
+msgid "{0, plural, one {# more finding not shown: only the gravest are kept.} other {# more findings not shown: only the gravest are kept.}}"
+msgstr "{0, plural, one {# constat de plus non affiché : seuls les plus graves sont conservés.} other {# constats de plus non affichés : seuls les plus graves sont conservés.}}"
+
 #. placeholder {0}: request.counts.packages
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
@@ -5296,6 +5301,11 @@ msgid "London (GMT)"
 msgstr "Londres (GMT)"
 
 #: src/dashboard/dependency-requests.tsx
+msgctxt "kind of finding"
+msgid "Lookalike name"
+msgstr "Nom ressemblant"
+
+#: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Faible"
@@ -10314,6 +10324,10 @@ msgstr "A été appelé par un autre domaine"
 #: src/activity/audit-words.ts
 msgid "Was refused adding a member to a domain"
 msgstr "N’a pas pu ajouter un membre à un domaine"
+
+#: src/activity/audit-words.ts
+msgid "Was refused packages known as malware"
+msgstr "Paquets refusés car connus comme logiciels malveillants"
 
 #: src/activity/audit-words.ts
 msgid "Was refused packages nobody approved"

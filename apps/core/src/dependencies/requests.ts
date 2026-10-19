@@ -17,6 +17,7 @@ import {
   subjectOfRef,
   dependencySummaryDirect,
   dependencySummaryFindings,
+  findingGravity,
   dependencyTargetSchema,
   packageKey,
 } from "@grasp-os/shared/dependencies";
@@ -32,6 +33,7 @@ import type {
   DependencyRequest,
   DependencyReview,
   DependencyStatus,
+  DependencyPackageRef,
   DependencySubject,
   DependencySubjectsInForce,
   DependencyTarget,
@@ -181,9 +183,12 @@ import {
 //   graph keeps, or never lands.
 //
 // Not stopped here: a licence is what the package states of itself, and
-// a request reports no findings yet (no advisory source is read). What a
-// person approves is the graph by its hash, so what is later fetched must
-// match it byte for byte to be admitted.
+// findings (lookalike names, the registry's advisories, GRA-699) warn the
+// approver, never refuse, but for known malware, which the resolver
+// refuses before proposing (`refuseMalware`): a graph without findings
+// isn't shown to be safe.
+// What a person approves is the graph by its hash, so what is later
+// fetched must match it byte for byte to be admitted.
 
 type Row = typeof dependencyRequests.$inferSelect;
 
@@ -416,15 +421,6 @@ const pendingFor = async (
     )
     .get();
 
-/** How grave each severity is, for which findings a list shows first. */
-const gravity: Record<DependencyFinding["severity"], number> = {
-  critical: 4,
-  high: 3,
-  moderate: 2,
-  low: 1,
-  info: 0,
-};
-
 /** The lock a resolve proposes its graph with, stored in the same batch. */
 interface ResolvedLock {
   lock: GraspLock;
@@ -478,12 +474,14 @@ const newRequest = (
   summary: {
     direct: graph.direct.slice(0, dependencySummaryDirect).map(packageKey),
     findings: proposal.findings
-      .toSorted((a, b) => gravity[b.severity] - gravity[a.severity])
+      .toSorted(
+        (a, b) => findingGravity[b.severity] - findingGravity[a.severity]
+      )
       .slice(0, dependencySummaryFindings),
   },
   direct: graph.direct.length,
   packages: graph.packages.length,
-  findings: proposal.findings.length,
+  findings: proposal.findingsTotal,
   refused: proposal.refused.length,
   previous,
   status: "pending",
@@ -689,9 +687,12 @@ const propose = async (
   // (`computation` alone).
   const subject = await builtSubject(env, by, subjectOfRef(proposal));
   const graph = canonicalGraph(proposal.graph);
+  // The total too: a resolve finding more or fewer below the kept ones
+  // is another review, never taken for the one waiting.
   const snapshot = canonicalJson({
     graph,
     findings: proposal.findings,
+    findingsTotal: proposal.findingsTotal,
     refused: proposal.refused,
   });
   const bytes = new TextEncoder().encode(snapshot).length;
@@ -769,6 +770,55 @@ export const proposeResolved = async (
 ): Promise<{ request: DependencyRequest; lock: GraspLock }> => {
   const { request, lock } = await propose(env, by, input, resolved);
   return { request, lock: lock ?? resolved.lock };
+};
+
+/** A package version a malware advisory affects, and the advisory. */
+export interface MalwareFound {
+  package: DependencyPackageRef;
+  advisory: string;
+}
+
+/** Most malware findings one refusal audits, each as its own event. */
+const malwareAuditedMax = 25;
+
+/**
+ * Refuses a resolve of `subject`'s graph because packages in it are known
+ * malware (`found`, GRA-699: Nick decided on 2026-10-19 that confirmed
+ * malware is refused, every other finding only warns). Audited, one event
+ * for each package and advisory (an audit value is identifier-sized), the
+ * first `malwareAuditedMax`, each saying how many were found; stored as no
+ * request: nobody can approve what was never proposed.
+ */
+export const refuseMalware = async (
+  env: Env,
+  by: Acting,
+  subject: DependencySubject,
+  found: readonly [MalwareFound, ...MalwareFound[]]
+): Promise<never> => {
+  const db = drizzle(env.DB);
+  const actor = by.actor ?? actorOf(by);
+  const [first, ...rest] = found.slice(0, malwareAuditedMax).map((malware) =>
+    outboxed(db, {
+      actor,
+      action: "dependency.malware_refused",
+      target: auditTargetOf(subject),
+      detail: {
+        [subject.type]: subject.id,
+        package: malware.package.name,
+        version: malware.package.version,
+        advisory: malware.advisory,
+        found: found.length,
+      },
+    })
+  );
+  if (first !== undefined) {
+    await auditedBatch(env, db, [first, ...rest]);
+  }
+  throw dependencyErrors.create("dependency.malware", {
+    packages: found.map(
+      (malware) => `${packageKey(malware.package)} (${malware.advisory})`
+    ),
+  });
 };
 
 /** How an App's or a workflow's dependencies stand, for its builders. */

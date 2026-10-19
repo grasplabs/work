@@ -157,6 +157,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "dependency.admission_refused",
     text: msg`Was refused packages nobody approved`,
   },
+  {
+    action: "dependency.malware_refused",
+    text: msg`Was refused packages known as malware`,
+  },
   { action: "dependency", text: msg`Changed a request for packages` },
   { action: "workflow.email.read", text: msg`Read an email attachment` },
   { action: "workflow.run.fix_asked", text: msg`Asked the agent to fix a run` },

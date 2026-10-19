@@ -6,12 +6,19 @@ import {
 import { sha512Integrity } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import {
+  advisorySeverities,
+  npmAdvisoriesRequestSchema,
   npmMetadataSchema,
   npmTarballRequestSchema,
   packageErrors,
   registryLimits,
 } from "@grasp-os/shared/packages";
-import type { NpmMetadata, NpmVersion } from "@grasp-os/shared/packages";
+import type {
+  NpmAdvisories,
+  NpmAdvisory,
+  NpmMetadata,
+  NpmVersion,
+} from "@grasp-os/shared/packages";
 import { z } from "zod";
 
 // The npm registry, as core reaches it through connect (the
@@ -42,6 +49,16 @@ import { z } from "zod";
 //   never in core, an agent or App code.
 // - Package text. A README, description or script body is never passed
 //   on; licence and ranges are bounded strings, data only.
+// - Advisories (GRA-699): asked of the registry's own bulk endpoint, the
+//   one `npm audit` asks, at a fixed path on the same origin, by POST with
+//   a body built here from checked names and versions; a redirect is
+//   refused outright. The answer is counted and capped as it arrives,
+//   kept only for the packages asked about, each advisory read strictly
+//   (an unknown severity or a malformed one fails the answer, never
+//   passes as no advisory), and an answer that can't be read is
+//   `package.registry_unavailable`, never an empty one. An advisory
+//   classified CWE-506 (Embedded Malicious Code) is passed on as malware,
+//   which core refuses: the bulk answer carries no other malware marker.
 
 const registry = new URL(npmRegistryOrigin);
 
@@ -633,4 +650,137 @@ export const npmTarball = async (input: unknown): Promise<Uint8Array> => {
     throw packageErrors.create("package.integrity_mismatch");
   }
   return bytes;
+};
+
+/** The registry's bulk advisory endpoint, as `npm audit` asks it. */
+const advisoriesUrl = new URL("/-/npm/v1/security/advisories/bulk", registry);
+
+/** An advisory as the registry sends it, read for what is passed on. */
+const sentAdvisorySchema = z.object({
+  id: z.union([z.int(), z.string().min(1).max(128)]),
+  url: z.string().max(2048).optional(),
+  title: z
+    .string()
+    .min(1)
+    .transform((title) => title.slice(0, 300)),
+  severity: z.enum(advisorySeverities),
+  vulnerable_versions: z.string().min(1).max(registryLimits.textLength),
+  /** The weaknesses it is classified as (`CWE-506`), when it says. */
+  cwe: z.array(z.string().max(32)).max(64).optional(),
+});
+
+/** Embedded Malicious Code: what marks an advisory as malware. */
+const malwareCwe = "CWE-506";
+
+/** A GitHub advisory's ID, as its URL names it. */
+const githubAdvisory = /\/advisories\/(?<id>GHSA(?:-[0-9a-z]{4}){3})$/u;
+
+/** `sent` as passed on: its GitHub ID where its URL has one. */
+const advisoryOf = (sent: z.infer<typeof sentAdvisorySchema>): NpmAdvisory => ({
+  id:
+    githubAdvisory.exec(sent.url ?? "")?.groups?.id ?? `npm:${String(sent.id)}`,
+  severity: sent.severity,
+  title: sent.title,
+  vulnerableVersions: sent.vulnerable_versions,
+  malware: sent.cwe?.includes(malwareCwe) ?? false,
+});
+
+/**
+ * The advisories the registry knows for the packages `input` names, by
+ * name, only those: for core to hold each exact version to. Fails, never
+ * answering none, when the registry's answer can't be read.
+ */
+export const npmAdvisories = async (input: unknown): Promise<NpmAdvisories> => {
+  const asked = packageErrors.parse(
+    "package.invalid",
+    npmAdvisoriesRequestSchema,
+    input
+  );
+  let response: Response;
+  try {
+    response = await fetch(advisoriesUrl, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(asked),
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+  } catch {
+    log.warn("npm.advisories_unreachable", {});
+    throw packageErrors.create("package.registry_unavailable");
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    log.warn("npm.advisories_failed", { status: response.status });
+    // The registry answers 503 to any body naming `constructor` (seen
+    // live, 2026-10-19): no retry ever reads it, so say so rather than
+    // that the registry couldn't be reached.
+    throw packageErrors.create(
+      Object.hasOwn(asked, "constructor")
+        ? "package.advisories_unchecked"
+        : "package.registry_unavailable"
+    );
+  }
+  let reservation: Reservation | undefined;
+  let text: string;
+  try {
+    reservation = reserveMetadata(0, "advisories");
+    text = await readTextCapped(
+      response,
+      registryLimits.advisoryBytes,
+      "advisories",
+      reservation
+    );
+  } catch (error) {
+    if (response.body !== null && !response.body.locked) {
+      await response.body.cancel();
+    }
+    // No package is too large here: an answer past the cap is one that
+    // can't be read, as the call's contract says.
+    if (packageErrors.codeOf(error) === "package.too_large") {
+      log.warn("npm.advisories_too_large", {});
+      throw packageErrors.create("package.registry_unavailable");
+    }
+    throw error;
+  } finally {
+    reservation?.release();
+  }
+  let sent: unknown;
+  try {
+    sent = JSON.parse(text);
+  } catch {
+    log.warn("npm.advisories_unreadable", {});
+    throw packageErrors.create("package.registry_unavailable");
+  }
+  const byName = z.record(z.string(), z.array(z.unknown())).safeParse(sent);
+  if (!byName.success) {
+    log.warn("npm.advisories_unreadable", {});
+    throw packageErrors.create("package.registry_unavailable");
+  }
+  const found: NpmAdvisories = {};
+  for (const name of Object.keys(asked)) {
+    const advisories = Object.hasOwn(byName.data, name)
+      ? (byName.data[name] ?? [])
+      : [];
+    if (advisories.length > registryLimits.advisoriesPerPackage) {
+      log.warn("npm.advisories_too_many", { package: name });
+      throw packageErrors.create("package.registry_unavailable");
+    }
+    const read = advisories.map((advisory) =>
+      sentAdvisorySchema.safeParse(advisory)
+    );
+    if (read.some(({ success }) => !success)) {
+      log.warn("npm.advisories_unreadable", { package: name });
+      throw packageErrors.create("package.registry_unavailable");
+    }
+    if (advisories.length > 0) {
+      found[name] = read.flatMap((parsed) =>
+        parsed.success ? [advisoryOf(parsed.data)] : []
+      );
+    }
+  }
+  return found;
 };

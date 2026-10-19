@@ -11,7 +11,11 @@ import { expect } from "vite-plus/test";
 import { z } from "zod";
 
 import type { NpmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
-import { npmAskedUrl, npmPublishUrl } from "./connect-providers.ts";
+import {
+  npmAdviseUrl,
+  npmAskedUrl,
+  npmPublishUrl,
+} from "./connect-providers.ts";
 import { unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
@@ -42,6 +46,21 @@ export const publish = async (published: Published): Promise<string> => {
   });
   return z.object({ integrity: z.string() }).parse(await response.json())
     .integrity;
+};
+
+/** The fake registry knows `advisory`, as npm sends one, for `name`. */
+export const advise = async (
+  name: string,
+  advisory: unknown
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  await providers.fetch(npmAdviseUrl, {
+    method: "POST",
+    body: JSON.stringify({ name, advisory }),
+  });
 };
 
 /** The paths the fake registry was asked for so far, in order. */

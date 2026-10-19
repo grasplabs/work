@@ -77,6 +77,7 @@ const proposalFor = (
   targets: ["computation"],
   graph,
   findings: [],
+  findingsTotal: 0,
   refused: [],
   ...changes,
 });

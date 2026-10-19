@@ -1,4 +1,5 @@
 import { platformPeers } from "@grasp-os/compiler";
+import { dependencyMaxFindings } from "@grasp-os/shared/dependencies";
 import { sha512Integrity, toHex } from "@grasp-os/shared/encoding";
 import { packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
@@ -14,6 +15,7 @@ import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  advise,
   askedPaths,
   crafted,
   daysAgo,
@@ -28,7 +30,7 @@ import {
 } from "./npm.ts";
 import type { Entries } from "./npm.ts";
 import { racingDb } from "./racing-db.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // Resolving an App's npm packages (src/packages/resolve.ts) from its threat
 // model: sources other than the registry, brand-new releases, a second
@@ -46,6 +48,15 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
+/** An advisory as the registry sends one. */
+const advisory = (more: Record<string, unknown>) => ({
+  id: 1_000_001,
+  url: "https://github.com/advisories/GHSA-aaaa-bbbb-cccc",
+  title: "Regular expression denial of service",
+  severity: "high",
+  vulnerable_versions: "<1.2.1",
+  ...more,
+});
 /** A builder with a new App of theirs. */
 const builderWithApp = async () => {
   const builder = await personApi("builder");
@@ -393,6 +404,249 @@ describe("the platform's own packages", () => {
         builder.api.dependencies.resolve(intentFor(app, { react: "^18.0.0" }))
       )
     ).resolves.toMatchObject({ code: "package.peer_conflict" });
+  });
+
+  it("shows the approver each package named like a popular one, and each advisory affecting its exact version", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    // One letter swapped in lodash's name; normalised alike to react-dom.
+    const squat = "loadsh";
+    const merged = "reactdom";
+    await publish(plain(dates, "1.2.0"));
+    await publish(plain(squat, "1.0.0"));
+    await publish(plain(merged, "1.0.0"));
+    const beta = named("beta");
+    await publish(plain(beta, "2.0.0-beta.1"));
+    // A scope's package named after the popular one it serves: noted only.
+    const scoped = `@${named("octo")}/request`;
+    await publish(plain(scoped, "1.0.0"));
+    await advise(dates, advisory({}));
+    // A prerelease of the release a range stops before: inside it.
+    await advise(
+      beta,
+      advisory({
+        id: 4,
+        url: undefined,
+        vulnerable_versions: "<2.0.0",
+        severity: "info",
+      })
+    );
+    // Not this version: left out.
+    await advise(
+      dates,
+      advisory({
+        id: 2,
+        url: undefined,
+        vulnerable_versions: "<1.0.0",
+        severity: "critical",
+      })
+    );
+    // A range it can't read: kept, as it can't be ruled out.
+    await advise(
+      dates,
+      advisory({
+        id: 3,
+        url: undefined,
+        vulnerable_versions: "not a range",
+        severity: "low",
+      })
+    );
+    const { request } = await builder.api.dependencies.resolve(
+      intentFor(app, {
+        [dates]: "1.2.0",
+        [squat]: "1.0.0",
+        [merged]: "1.0.0",
+        [beta]: "2.0.0-beta.1",
+        [scoped]: "1.0.0",
+      })
+    );
+    const review = await builder.api.dependencies.get(request.id);
+    const clean = named("clean");
+    await publish(plain(clean, "1.0.0"));
+    const { request: cleanRequest } = await builder.api.dependencies.resolve(
+      intentFor(app, { [clean]: "1.0.0" })
+    );
+    const cleanReview = await builder.api.dependencies.get(cleanRequest.id);
+    // A name Object.prototype also has: asked of the registry as any
+    // other, which never answers for it, and says so.
+    await publish(plain("constructor", "1.0.0"));
+    const inherited = await failure(
+      resolveDependencies(
+        env,
+        await builder.api.whoami(),
+        intentFor(app, { constructor: "1.0.0" })
+      )
+    );
+    expect({
+      findings: review.findings.map(({ kind, package: ref, severity, id }) => ({
+        kind,
+        package: `${ref.name}@${ref.version}`,
+        severity,
+        id,
+      })),
+      lookalikes: review.findings
+        .filter(({ kind }) => kind === "lookalike")
+        .map(({ summary }) => summary),
+      clean: cleanReview.findings,
+      inherited: inherited.code,
+    }).toStrictEqual({
+      // Gravest first.
+      findings: [
+        {
+          kind: "security",
+          package: `${dates}@1.2.0`,
+          severity: "high",
+          id: "GHSA-aaaa-bbbb-cccc",
+        },
+        {
+          kind: "lookalike",
+          package: `${squat}@1.0.0`,
+          severity: "moderate",
+          id: null,
+        },
+        {
+          kind: "lookalike",
+          package: `${merged}@1.0.0`,
+          severity: "moderate",
+          id: null,
+        },
+        {
+          kind: "security",
+          package: `${dates}@1.2.0`,
+          severity: "low",
+          id: "npm:3",
+        },
+        {
+          kind: "lookalike",
+          package: `${scoped}@1.0.0`,
+          severity: "info",
+          id: null,
+        },
+        {
+          kind: "security",
+          package: `${beta}@2.0.0-beta.1`,
+          severity: "info",
+          id: "npm:4",
+        },
+      ],
+      lookalikes: [
+        "Its name looks like lodash's, a popular package: check it is the one meant.",
+        "Its name looks like react-dom's, a popular package: check it is the one meant.",
+        `Published under ${scoped.split("/")[0]}, not the unscoped request, a popular package: check it is the one meant.`,
+      ],
+      clean: [],
+      inherited: "package.advisories_unchecked",
+    });
+  });
+
+  it("refuses a graph with a version known as malware, audited and stored as no request, and only warns on any other advisory", async () => {
+    const { builder, app } = await builderWithApp();
+    // A name as long as npm allows, near enough: what is audited of it fits.
+    const stream = named(`flatmap-stream-${"x".repeat(180)}`);
+    const dates = named("dates");
+    // Its install script would refuse it too: malware is refused as such.
+    await publish(
+      plain(stream, "0.1.1", {
+        dependencies: { [dates]: "^1.0.0" },
+        scripts: { postinstall: "node steal.js" },
+      })
+    );
+    await publish(plain(dates, "1.0.0"));
+    // Embedded Malicious Code: malware, however grave the registry says.
+    await advise(
+      stream,
+      advisory({
+        url: "https://github.com/advisories/GHSA-9x64-5r7x-2q53",
+        vulnerable_versions: "=0.1.1",
+        severity: "moderate",
+        cwe: ["CWE-506"],
+      })
+    );
+    // Critical, but not malware: shown, never refused.
+    await advise(
+      dates,
+      advisory({
+        severity: "critical",
+        cwe: ["CWE-94"],
+        vulnerable_versions: "*",
+      })
+    );
+    let refused: Awaited<ReturnType<typeof failure>> | undefined;
+    const events = await auditedDuring(async () => {
+      refused = await failure(
+        builder.api.dependencies.resolve(intentFor(app, { [stream]: "0.1.1" }))
+      );
+    });
+    const { pending } = await builder.api.dependencies.status({ app });
+    const { request } = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "1.0.0" })
+    );
+    const review = await builder.api.dependencies.get(request.id);
+    expect({
+      refused,
+      audited: events
+        .filter(({ action }) => action === "dependency.malware_refused")
+        .map(({ detail }) => detail),
+      pendingAfterRefusal: pending,
+      warned: review.findings.map(({ severity, id }) => ({ severity, id })),
+    }).toStrictEqual({
+      refused: {
+        code: "dependency.malware",
+        details: { packages: [`${stream}@0.1.1 (GHSA-9x64-5r7x-2q53)`] },
+      },
+      audited: [
+        {
+          app,
+          package: stream,
+          version: "0.1.1",
+          advisory: "GHSA-9x64-5r7x-2q53",
+          found: 1,
+        },
+      ],
+      pendingAfterRefusal: null,
+      warned: [{ severity: "critical", id: "GHSA-aaaa-bbbb-cccc" }],
+    });
+  });
+
+  it("keeps the gravest findings a request can hold, and counts the rest", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    // One more than a request keeps, the gravest last.
+    for (let id = 1; id <= dependencyMaxFindings; id += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await advise(dates, advisory({ id, url: undefined, severity: "low" }));
+    }
+    await advise(
+      dates,
+      advisory({ id: 9999, url: undefined, severity: "critical" })
+    );
+    const { request } = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "1.0.0" })
+    );
+    const review = await builder.api.dependencies.get(request.id);
+    // One more found, below those kept: the same findings, another total.
+    await advise(
+      dates,
+      advisory({ id: 5000, url: undefined, severity: "info" })
+    );
+    const { request: again } = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "1.0.0" })
+    );
+    const reviewAgain = await builder.api.dependencies.get(again.id);
+    expect({
+      kept: review.findings.length,
+      counted: review.counts.findings,
+      gravest: review.findings[0]?.id,
+      countedAgain: reviewAgain.counts.findings,
+      keptAgain: reviewAgain.findings,
+    }).toStrictEqual({
+      kept: dependencyMaxFindings,
+      counted: dependencyMaxFindings + 1,
+      gravest: "npm:9999",
+      countedAgain: dependencyMaxFindings + 2,
+      keptAgain: review.findings,
+    });
   });
 
   it("takes a dependency on React itself as the platform's, shown in the review", async () => {
@@ -968,21 +1222,37 @@ const approverOf = async () => {
   };
 };
 
-/** Connect, refusing as busy the first `times` asks for metadata. */
-const busyFor = (times: number) => {
+/** Connect, refusing as busy the first `times` asks of `busy`. */
+const busyFor = (
+  times: number,
+  busy: "npmMetadata" | "npmAdvisories" = "npmMetadata"
+) => {
   const asked = { count: 0 };
+  const refuse = () => {
+    asked.count += 1;
+    if (asked.count <= times) {
+      throw packageErrors.create("package.registry_busy");
+    }
+  };
   const connect = new Proxy(env.CONNECT, {
     get: (target, property): unknown => {
+      // An RPC binding's methods are called on it, never bound.
       if (property === "npmMetadata") {
         return async (name: string) => {
-          asked.count += 1;
-          if (asked.count <= times) {
-            throw packageErrors.create("package.registry_busy");
+          if (busy === "npmMetadata") {
+            refuse();
           }
           return await target.npmMetadata(name);
         };
       }
-      // An RPC binding's methods are called on it, never bound.
+      if (property === "npmAdvisories") {
+        return async (request: Parameters<typeof target.npmAdvisories>[0]) => {
+          if (busy === "npmAdvisories") {
+            refuse();
+          }
+          return await target.npmAdvisories(request);
+        };
+      }
       return property === "npmTarball"
         ? async (request: Parameters<typeof target.npmTarball>[0]) =>
             await target.npmTarball(request)
@@ -993,6 +1263,45 @@ const busyFor = (times: number) => {
 };
 
 describe("an App's locks and the files they name", () => {
+  it("refuses a resolution whose advisories couldn't be read, storing no request as one without findings", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const identity = await builder.api.whoami();
+    const unread = new Proxy(env.CONNECT, {
+      get: (target, property): unknown => {
+        if (property === "npmAdvisories") {
+          return async () => {
+            await Promise.resolve();
+            throw packageErrors.create("package.registry_unavailable");
+          };
+        }
+        // An RPC binding's methods are called on it, never bound.
+        if (property === "npmMetadata") {
+          return async (name: string) => await target.npmMetadata(name);
+        }
+        return property === "npmTarball"
+          ? async (request: Parameters<typeof target.npmTarball>[0]) =>
+              await target.npmTarball(request)
+          : Reflect.get(target, property);
+      },
+    });
+    const outcome = await failure(
+      resolveDependencies(
+        { ...env, CONNECT: unread },
+        identity,
+        intentFor(app, { [dates]: "^1.0.0" })
+      )
+    );
+    expect({
+      code: outcome.code,
+      locks: await lockedGraphs(app),
+    }).toStrictEqual({
+      code: "package.registry_unavailable",
+      locks: [],
+    });
+  });
+
   it("stores no lock when its request can't be stored", async () => {
     const { builder, app } = await builderWithApp();
     const dates = named("dates");
@@ -1310,16 +1619,27 @@ describe("an App's locks and the files they name", () => {
         intentFor(app, { [dates]: "^1.0.0" })
       )
     );
+    // The advisories too, asked once the whole graph is read.
+    const advisoriesOnce = busyFor(1, "npmAdvisories");
+    const advised = await resolveDependencies(
+      { ...env, CONNECT: advisoriesOnce.connect },
+      identity,
+      intentFor(app, { [dates]: "^1.0.0" })
+    );
     expect({
       resolved: resolved.lock.direct,
       askedOnce: once.asked.count,
       refused: refused.code,
       askedAlways: always.asked.count,
+      advised: advised.lock.direct,
+      advisoriesAsked: advisoriesOnce.asked.count,
     }).toStrictEqual({
       resolved: { [dates]: "1.0.0" },
       askedOnce: 2,
       refused: "package.registry_busy",
       askedAlways: 4,
+      advised: { [dates]: "1.0.0" },
+      advisoriesAsked: 2,
     });
   });
 });

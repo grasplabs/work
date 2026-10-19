@@ -62,6 +62,8 @@ export const npmRegistryFake = () => {
 
   const packages = new Map<string, Map<string, Stored>>();
   const overrides = new Map<string, () => Response>();
+  /** Advisories by package name, as the bulk endpoint sends them. */
+  const advisories = new Map<string, unknown[]>();
   const asked: {
     method: string;
     path: string;
@@ -340,6 +342,28 @@ export const npmRegistryFake = () => {
     if (override !== undefined) {
       return override();
     }
+    // The bulk advisory endpoint, as `npm audit` asks it: the advisories
+    // of each package the body names, as npm sends them.
+    if (
+      request.method === "POST" &&
+      url.pathname === "/-/npm/v1/security/advisories/bulk"
+    ) {
+      const body: unknown = JSON.parse(asked.at(-1)?.body ?? "{}");
+      const named =
+        typeof body === "object" && body !== null ? Object.keys(body) : [];
+      // As the registry does, for any body naming `constructor`.
+      if (named.includes("constructor")) {
+        return new Response("Service Unavailable", { status: 503 });
+      }
+      return Response.json(
+        Object.fromEntries(
+          named.flatMap((name) => {
+            const known = advisories.get(name);
+            return known === undefined ? [] : [[name, known]];
+          })
+        )
+      );
+    }
     if (request.method !== "GET") {
       return Response.json({ error: "Method not allowed" }, { status: 405 });
     }
@@ -376,6 +400,10 @@ export const npmRegistryFake = () => {
     publish,
     integrityOf,
     tarballPath,
+    /** Adds `advisory`, as npm sends one, to what `name` has. */
+    advise: (name: string, advisory: unknown): void => {
+      advisories.set(name, [...(advisories.get(name) ?? []), advisory]);
+    },
     /** Answers `path` with what `respond` makes, instead of the registry's own. */
     override: (path: string, respond: () => Response): void => {
       overrides.set(path, respond);
@@ -385,6 +413,7 @@ export const npmRegistryFake = () => {
     reset: (): void => {
       packages.clear();
       overrides.clear();
+      advisories.clear();
       asked.length = 0;
     },
   };

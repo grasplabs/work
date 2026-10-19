@@ -55,6 +55,8 @@ export const graphDraftsUrl = "https://graph-control.test/drafts";
  * version as connect's test/npm-registry-fake.ts takes it, as JSON.
  */
 export const npmPublishUrl = "https://npm-control.test/publish";
+/** POST `{ name, advisory }`: the registry knows `advisory` for `name`. */
+export const npmAdviseUrl = "https://npm-control.test/advise";
 
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
@@ -168,6 +170,11 @@ export default {
     }
     if (url.href === ${JSON.stringify(npmAskedUrl)}) {
       return Response.json(npm.asked.map(({ path }) => path));
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(npmAdviseUrl)}) {
+      const { name, advisory } = await request.json();
+      npm.advise(name, advisory);
+      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(npmPublishUrl)}) {
       const published = await request.json();
