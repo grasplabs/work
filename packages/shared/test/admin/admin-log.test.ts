@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  localDay,
+  utcDay,
   logDays,
   logHours,
   logItemsOf,
@@ -172,13 +172,22 @@ describe("how busy each day was", () => {
     expect([logDays(items, 7).length, logDays([])]).toStrictEqual([7, []]);
   });
 
-  it("counts one day by the hour", () => {
-    const at9 = new Date("2026-10-01T09:30:00").getTime();
+  it("puts a moment on its UTC day, also late in the evening", () => {
+    expect(
+      ["2026-10-01T09:30:00Z", "2026-10-01T23:30:00Z"].map((iso) =>
+        utcDay(Date.parse(iso))
+      )
+    ).toStrictEqual(["2026-10-01", "2026-10-01"]);
+  });
+
+  it("counts by UTC's hours, wherever it runs", () => {
+    const late = Date.parse("2026-10-01T23:30:00Z");
     const hours = logHours(
-      logItemsOf(at(noordkade), [{ what: "go", at: at9 }])
+      logItemsOf(at(noordkade), [{ what: "go", at: late }])
     );
     expect(hours).toHaveLength(24);
-    expect(hours[9]?.grasp).toBe(1);
-    expect(localDay(at9)).toBe("2026-10-01");
+    expect(
+      hours.flatMap((hour) => (hour.grasp > 0 ? [hour.hour] : []))
+    ).toStrictEqual([23]);
   });
 });
