@@ -48,7 +48,7 @@ export const workflowMemberSchema = z.strictObject({
  * it; `builder` also publishes versions, shares and deletes it. The
  * organization role caps it, as for Apps.
  */
-export const workflowRoleSchema = z.enum(["user", "builder"]);
+const workflowRoleSchema = z.enum(["user", "builder"]);
 export type WorkflowRole = z.infer<typeof workflowRoleSchema>;
 
 export const workflowShareSchema = workflowMemberSchema.extend({
