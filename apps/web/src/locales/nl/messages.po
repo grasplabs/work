@@ -2094,6 +2094,10 @@ msgstr "Gekoppeld."
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "Koppelen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Connecting it needs your organization's own sign-in app, which Grasp can't use yet."
+msgstr "Om het te koppelen heeft je organisatie een eigen inlog-app nodig, die Grasp nog niet kan gebruiken."
+
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Connection"
@@ -3807,6 +3811,10 @@ msgstr "Opnieuw aanmelden nodig"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Needs someone to sign in again"
 msgstr "Iemand moet opnieuw aanmelden"
+
+#: src/connections/integration-row.tsx
+msgid "Needs your own sign-in app"
+msgstr "Eigen inlog-app nodig"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
