@@ -915,8 +915,8 @@ const migrationSampleSchema = z.strictObject({
 
 /**
  * A migration's dry-run outputs, as core asks the store to check them
- * (`checkSampleOutputs`): each sampled record's ID and its transform's
- * output.
+ * (`checkSampleOutputs`): each sampled record's ID, the revision it was
+ * sampled at, and its transform's output.
  */
 const sampleOutputsSchema = z.strictObject({
   table: tableNameSchema,
@@ -926,7 +926,13 @@ const sampleOutputsSchema = z.strictObject({
     resourceVersion: z.number().int().min(1),
   }),
   outputs: z
-    .array(z.strictObject({ id: recordIdSchema, fields: storedFieldsSchema }))
+    .array(
+      z.strictObject({
+        id: recordIdSchema,
+        revision: z.number().int().min(1),
+        fields: storedFieldsSchema,
+      })
+    )
     .max(transformBatchMaxRows),
 });
 
@@ -3717,8 +3723,8 @@ export class StoreHost {
    * batch's (`#checkedWrites`): an output that doesn't fit the target or
    * the contract in force, changes a field that refers to records, or is
    * too large; null when it would write them all. Read in a transaction
-   * that writes nothing. A record gone since it was sampled is skipped,
-   * as a batch drops it.
+   * that writes nothing. A record gone or edited since it was sampled is
+   * skipped, as a batch drops or queues it.
    */
   checkSampleOutputs(
     storeId: StoreId,
@@ -3760,7 +3766,9 @@ export class StoreHost {
             )
           )
           .get();
-        if (record === undefined) {
+        // Gone, or edited since it was sampled: a batch drops or queues
+        // it rather than judge an output of what it no longer holds.
+        if (record === undefined || record.revision !== output.revision) {
           continue;
         }
         const refusal =

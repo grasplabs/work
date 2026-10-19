@@ -126,7 +126,10 @@ type SampleFailure =
 const failureOf = async (
   env: Env,
   store: StoreId,
-  sampled: SampledMigration & { readonly table: string },
+  sampled: SampledMigration & {
+    readonly table: string;
+    readonly revisions: ReadonlyMap<string, number>;
+  },
   transformed: TransformOutcome | undefined
 ): Promise<SampleFailure | null> => {
   if (transformed === undefined) {
@@ -144,7 +147,11 @@ const failureOf = async (
         resourceId: sampled.app,
         resourceVersion: sampled.version,
       },
-      outputs: transformed.rows.map(({ id, fields }) => ({ id, fields })),
+      outputs: transformed.rows.map(({ id, fields }) => ({
+        id,
+        revision: sampled.revisions.get(id) ?? 0,
+        fields,
+      })),
     })
   );
 };
@@ -315,7 +322,13 @@ export const sampleMigration = async (
     const failure = await failureOf(
       env,
       store,
-      { app, version, migration: name, table: declared.table },
+      {
+        app,
+        version,
+        migration: name,
+        table: declared.table,
+        revisions: new Map(rows.map(({ id, revision }) => [id, revision])),
+      },
       transformed
     );
     let outcome: MigrationSample["outcome"] = "passed";
