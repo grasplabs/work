@@ -420,7 +420,7 @@ export const TodoPile = ({
         message: "To do",
         context: "dashboard: what waits on you",
       })}
-      className="min-w-0"
+      className="@container min-w-0"
       onKeyDown={onKeys}
       ref={frame}
     >
