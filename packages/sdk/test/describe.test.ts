@@ -896,12 +896,21 @@ describe(aiStepCalls, () => {
           `switch (await step.llm("read", { binding: "first" })) { default: let step = 1; void step; }`
         )
       ),
+      // A \`function\` rather than an arrow is still the SDK's workflow.
+      plainFunction: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+export default workflow("sample", { params: {} }, async function (step) {
+  return await step.llm("read", { binding: "missing" });
+});
+`),
       unparsed: aiStepCalls("export default ("),
     }).toStrictEqual({
       calls: ["read:reader"],
       kept: ["null:null", "null:null"],
       data: [],
       discriminant: ["read:first"],
+      plainFunction: ["read:missing"],
       unparsed: null,
     });
   });

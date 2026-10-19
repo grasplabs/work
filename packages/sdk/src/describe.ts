@@ -1506,35 +1506,61 @@ const aiStepCallOf = (
 };
 
 /**
- * The workflow function of `source` and the name it takes its runner by
- * (`step`), read as leniently as the code allows: when its context can't
- * be read (`env` kept outside a step, say), from its first parameter.
- * Undefined when there is no such name to go by: code that doesn't parse,
- * isn't written with the SDK's `workflow`, or destructures its runner.
+ * The workflow function's body in `source` and the name it takes its
+ * runner by (`step`), read as leniently as the code allows: when its
+ * context can't be read (`env` kept outside a step, a \`function\` rather
+ * than an arrow), from the first parameter of the function passed to the
+ * SDK's `workflow`. Undefined when there is no such name to go by: code
+ * that doesn't parse, isn't written with `workflow`, or destructures its
+ * runner.
  */
-const runnerOf = (
-  source: string
-): { run: ArrowFunctionExpression; step: string } | undefined => {
+const runnerOf = (source: string): { body: Node; step: string } | undefined => {
   try {
     const { run, bindings } = readContext(source);
     return bindings.step === undefined
       ? undefined
-      : { run, step: bindings.step };
+      : { body: run.body, step: bindings.step };
   } catch (error) {
     if (!(error instanceof WorkflowError)) {
       throw error;
     }
   }
+  let file: Node;
   try {
-    const { run } = findWorkflowFunction(parseModule(source));
-    const [first] = run.params;
-    return first?.type === "Identifier" ? { run, step: first.name } : undefined;
+    file = parseModule(source);
   } catch (error) {
     if (error instanceof WorkflowError) {
       return undefined;
     }
     throw error;
   }
+  // Any call of the SDK's `workflow` whose function, an arrow or not,
+  // takes its runner by name.
+  const imports = sdkImportsOf(file);
+  let runner: { body: Node; step: string } | undefined;
+  visit(file, (node) => {
+    if (
+      runner === undefined &&
+      node.type === "CallExpression" &&
+      node.callee.type === "Identifier" &&
+      imports.get(node.callee.name) === "workflow"
+    ) {
+      const run = node.arguments.at(2);
+      const first =
+        run?.type === "ArrowFunctionExpression" ||
+        run?.type === "FunctionExpression"
+          ? run.params[0]
+          : undefined;
+      if (
+        first?.type === "Identifier" &&
+        (run?.type === "ArrowFunctionExpression" ||
+          run?.type === "FunctionExpression")
+      ) {
+        runner = { body: run.body, step: first.name };
+      }
+    }
+  });
+  return runner;
 };
 
 /**
@@ -1553,10 +1579,10 @@ export const aiStepCalls = (source: string): AiStepCall[] | null => {
   if (runner === undefined) {
     return null;
   }
-  const { run, step } = runner;
-  const shadowing = scopesDeclaring(run.body, step);
+  const { body, step } = runner;
+  const shadowing = scopesDeclaring(body, step);
   const calls: AiStepCall[] = [];
-  visit(run.body, (node, ancestors) => {
+  visit(body, (node, ancestors) => {
     if (
       node.type !== "Identifier" ||
       node.name !== step ||
@@ -1573,11 +1599,11 @@ export const aiStepCalls = (source: string): AiStepCall[] | null => {
         shadowing.has(above) &&
         !(above.type === "SwitchStatement" && key === "discriminant")
     )?.node;
-    if (scope !== undefined && scope !== run.body) {
+    if (scope !== undefined && scope !== body) {
       return;
     }
     const call =
-      scope === run.body
+      scope === body
         ? { name: null, binding: null, line: node.loc?.start.line ?? 0 }
         : aiStepCallOf(node, ancestors);
     if (call !== undefined) {
