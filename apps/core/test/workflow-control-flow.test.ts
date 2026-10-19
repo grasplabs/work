@@ -599,6 +599,7 @@ const hostOf = async (
         principal: by.userId,
         invoker: { type: "person", id: by.userId, appVersion: null },
         bindings: new Map(),
+        restricted: false,
       },
       maxModelCalls: 1,
     },

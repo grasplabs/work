@@ -523,14 +523,19 @@ export interface Kept {
   deletable: number;
 }
 
-export const keptOf = (view: OrgView): Kept => {
+/**
+ * What is kept of the interviews on `asOf`, the day the view is counted up
+ * to (`asOf` in admin-usage.ts): once the two weeks close, the view's day
+ * stops, but the days a person has to ask for a deletion don't.
+ */
+export const keptOf = (view: OrgView, asOf: string): Kept => {
   const agreed = view.interviews.filter((interview) => interview.approved);
   return {
     agreed: agreed.length,
     halfway: view.interviews.length - agreed.length,
     deleted: view.state.deleted.length,
     deletable: agreed.filter(
-      (interview) => view.day - interview.day <= DELETE_DAYS
+      (interview) => dateOn(view.org, interview.day + DELETE_DAYS) >= asOf
     ).length,
   };
 };

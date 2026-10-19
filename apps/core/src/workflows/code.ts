@@ -935,6 +935,8 @@ const runLoadFailure = (error: unknown): unknown => {
 /** How a run's load is let go of (`loadRun`). */
 export interface LoadOptions {
   over?: AbortSignal;
+  /** Hears the run's sandbox session ID on-prem, once it's open. */
+  onSession?: (id: string) => void;
   /**
    * Whether the run is still its activation's: not cancelled, nor taken
    * over by a newer activation (run-object.ts).
@@ -961,7 +963,7 @@ export interface RunIsolate {
 export const loadRunIsolate = <Attempt extends object = AttemptHost>(
   env: Env,
   { owner, mainModule, modules, attemptMethods: methods }: RunIsolate,
-  { over, current = () => true }: LoadOptions = {}
+  { over, current = () => true, onSession }: LoadOptions = {}
 ): {
   run: (
     host: RunHostCalls<Attempt> & RpcTarget,
@@ -1021,8 +1023,9 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
             try {
               return await runInSession(sandboxHost, call, {
                 signal,
-                opened: (_id, live) => {
+                opened: (id, live) => {
                   sessionLive = live;
+                  onSession?.(id);
                 },
               });
             } finally {

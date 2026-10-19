@@ -11,13 +11,13 @@ export interface Shown {
 }
 
 /** How the page opens snapshots, and refreshes one after a save. */
-export interface Viewer {
+export interface Viewer<Key> {
   /** Opens `id`: shown once it answers, unless another open came since. */
-  open: (id: string, to: Shown) => Promise<void>;
+  open: (id: Key, to: Shown) => Promise<void>;
   /** A save of `id`: its new version, if `id` is still the one shown. */
-  saved: (id: string, to: Shown) => Promise<void>;
+  saved: (id: Key, to: Shown) => Promise<void>;
   /** Opens `id` first, unless something was opened already. */
-  first: (id: string, to: Shown) => Promise<void>;
+  first: (id: Key, to: Shown) => Promise<void>;
 }
 
 /**
@@ -27,12 +27,12 @@ export interface Viewer {
  * when an open succeeds: a failed one leaves the snapshot shown as it was,
  * and saving it still refreshes it.
  */
-export const viewer = (
-  load: (id: string) => Promise<Outcome<Snapshot>>
-): Viewer => {
+export const viewer = <Key>(
+  load: (id: Key) => Promise<Outcome<Snapshot>>
+): Viewer<Key> => {
   let latest = 0;
-  let shown: string | null = null;
-  const open = async (id: string, to: Shown): Promise<void> => {
+  let shown: Key | null = null;
+  const open = async (id: Key, to: Shown): Promise<void> => {
     latest += 1;
     const asked = latest;
     const answer = await load(id);

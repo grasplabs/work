@@ -3,7 +3,9 @@
  * Worker reaches it in core's tests: part of the `connect-providers` Worker
  * (test/connect-providers.ts), so the real connect runs unchanged behind
  * core. It has two tools: `mail.send`, and `mail.search`, a read (which
- * the server doesn't say: only the admin's allowlist does). It records
+ * the server doesn't say: only the admin's allowlist does), also listed
+ * as `MAIL_SEND` and `MAIL_SEARCH`, with their input named, by which an
+ * App's connector resource can declare them. It records
  * every call that reached `mail.send`, every mail it really sent and every
  * search. Each server (by the name in its URL)
  * answers its next calls as a test plans them, and holds a search whose
@@ -97,6 +99,17 @@ const mailServer = async (request, url) => {
       tools: [
         { name: "mail.send", inputSchema: { type: "object" }, annotations: { readOnlyHint: false } },
         { name: "mail.search", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
+        {
+          name: "MAIL_SEND",
+          inputSchema: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" } }, required: ["to", "subject"] },
+          outputSchema: { type: "object", properties: { messageId: { type: "string" } }, required: ["messageId"] },
+          annotations: { readOnlyHint: false },
+        },
+        {
+          name: "MAIL_SEARCH",
+          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+          outputSchema: { type: "object", properties: { messages: { type: "array", items: { type: "string" } } }, required: ["messages"] },
+        },
       ],
     });
   }
@@ -104,7 +117,7 @@ const mailServer = async (request, url) => {
     server.ran.push({ tool: params.name, arguments: params.arguments });
     return rpcResult(id, server.answers[params.name]);
   }
-  if (params.name === "mail.search") {
+  if (params.name === "mail.search" || params.name === "MAIL_SEARCH") {
     server.searched.push(params.arguments.query);
     if (params.arguments.query.startsWith("hold")) {
       // Each held search waits for a release of its own, so the server

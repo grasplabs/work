@@ -11,6 +11,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
@@ -27,6 +28,7 @@ import { appVersions, permissions } from "../db/core/schema.ts";
 import { appHost } from "../durable-objects.ts";
 import { models } from "../models.ts";
 import { authorizeExport } from "../permissions.ts";
+import { restrict } from "../restricted.ts";
 import {
   approvalServing,
   callApprovedStoreOperation,
@@ -40,6 +42,7 @@ import {
   runContext,
 } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
+import { callKnowledge, callTemplate } from "./resource-reads.ts";
 
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
@@ -76,11 +79,20 @@ import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 //   (`workflow.call_invalid`); a model's answer against the task's own
 //   output schema, as sealed.
 // - Restricted data reaching a run that would pass it on. A run never
-//   enters restricted mode (restricted.ts): an operation of an App in
-//   restricted mode is refused before it is called, and its answer
-//   withheld if the App entered it meanwhile (`permission.restricted`);
-//   so is a store operation of a store whose App is restricted
-//   (`resource.unavailable`, workflow-bindings.ts).
+//   enters restricted mode once it runs (restricted.ts): for one that
+//   isn't restricted, an operation of an App in restricted mode is refused
+//   before it is called, and its answer withheld if the App entered it
+//   meanwhile (`permission.restricted`); so is a store operation of a
+//   store whose App is restricted (`resource.unavailable`,
+//   workflow-bindings.ts).
+// - A restricted run (one a restricted App started) passing on what its
+//   start carried. Its connector calls carry its restricted mode to
+//   connect, which holds every one but a native connector's declared
+//   reads for its person (`connect.held`; the run waits for their
+//   decision, resource-host.ts); its model calls are judged as restricted
+//   by the gateway's data rules; and an App it calls, through an export
+//   or a store operation, is restricted before the input reaches it
+//   (`carryRestricted`), audited with the run as provenance.
 // - Sensitive values in what a run records. A binding argument (a
 //   sensitive parameter's value, put in by the host) is sent to connect
 //   only, and a connector's answer that echoes one is refused
@@ -100,6 +112,12 @@ export interface Effect {
   readonly fence: AttemptFence;
   /** Throws unless its attempt still holds its lease, nothing awaited. */
   readonly requireHolds: () => void;
+  /**
+   * Whether one of the workflow's own actions makes it (resource-action.ts):
+   * a restricted run's action makes no connector call, whose held decision
+   * would outlive the action that can't wait for it.
+   */
+  readonly fromAction?: boolean;
 }
 
 /** A task's call, its arguments built by the host (resource-host.ts). */
@@ -126,6 +144,18 @@ export type BuiltCall =
       readonly outputSchema: Json;
       readonly model?: Json;
       readonly maxOutputTokens?: Json;
+    }
+  | {
+      /** A Knowledge collection's search or read, by an action (GRA-700). */
+      readonly name: "grasp.knowledge";
+      readonly binding: string;
+      readonly operation: "search" | "read";
+      readonly arguments: Json;
+    }
+  | {
+      /** A pinned template version's content, by an action (GRA-700). */
+      readonly name: "grasp.template";
+      readonly binding: string;
     };
 
 /** The binding kind each call goes through. */
@@ -133,6 +163,8 @@ const kindOf = {
   "grasp.operation": "operation",
   "grasp.connector": "connector",
   "grasp.model": "model",
+  "grasp.knowledge": "knowledge",
+  "grasp.template": "template",
 } as const;
 
 /** Keeps `entry` in the audit log, or fails before anything more. */
@@ -326,8 +358,9 @@ const callConnector = async (
     [call.operation, input, { idempotencyKey: effect.key }]
   );
   if (result.pending !== undefined) {
-    // Connect holds a workflow's side effect only in restricted mode,
-    // which a run never enters: never a success.
+    // Connect answers a workflow's held side effect (a restricted run's)
+    // with `connect.held`, whose decision the run waits for
+    // (resource-host.ts), never with a held answer: never a success.
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   let output: unknown;
@@ -362,6 +395,36 @@ const exportOf = async (
   return exported !== undefined && Object.hasOwn(exported, name)
     ? exported[name]
     : undefined;
+};
+
+/**
+ * Carries restricted mode into App `authority.subject` before `run` calls
+ * it, as a call from one App to another does (app-calls.ts): a restricted
+ * run restricts the App first, its input may carry what the run's start
+ * read restricted; an unrestricted run calls no App in restricted mode
+ * (`permission.restricted`), whose answer could carry what that App read.
+ */
+const carryRestricted = async (
+  env: Env,
+  run: CallingRun,
+  authority: Authority,
+  isAppRestricted: () => Promise<boolean>
+): Promise<void> => {
+  if (authority.subject.type !== "app") {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  if (run.restricted) {
+    await restrict(
+      env,
+      authority,
+      { type: "app", appId: authority.subject.appId },
+      [`workflow_run:${run.runId}`]
+    );
+    return;
+  }
+  if (await isAppRestricted()) {
+    throw permissionErrors.create("permission.restricted");
+  }
 };
 
 /** An operation call refused because the release it pins isn't current. */
@@ -399,7 +462,12 @@ const callStoreOperation = async (
   effect.requireHolds();
   const answer = await callApprovedStoreOperation(
     env,
-    { id: run.workflowId, version: run.version, approval },
+    {
+      id: run.workflowId,
+      version: run.version,
+      approval,
+      restrictedRun: run.restricted ? run.runId : null,
+    },
     input,
     {
       // As the run's own receipts name it: an independent run acts as no
@@ -486,9 +554,17 @@ const callOperation = async (
     throw releaseNotCurrent();
   }
   const host = appHost(env, app.data);
-  if (await host.isRestricted()) {
-    throw permissionErrors.create("permission.restricted");
-  }
+  await carryRestricted(
+    env,
+    run,
+    {
+      subject: { type: "app", appId: app.data },
+      onBehalfOf: run.principal,
+      mode: "workflow",
+      appVersion: target.appVersion,
+    },
+    async () => await host.isRestricted()
+  );
   effect.requireHolds();
   let answer: unknown;
   try {
@@ -549,8 +625,9 @@ const callOperation = async (
     }
     throw error;
   }
-  // The App may have read restricted data as it answered: withheld.
-  if (await host.isRestricted()) {
+  // The App may have read restricted data as it answered: withheld from
+  // a run that isn't restricted itself.
+  if (!run.restricted && (await host.isRestricted())) {
     throw permissionErrors.create("permission.restricted");
   }
   return requireShape(contract.output, rpcResult(answer), "output");
@@ -665,6 +742,64 @@ const callModel = async (
 };
 
 /**
+ * Why an action's call was refused at its host's own admission
+ * (resource-action.ts), before it was ever a named call: a binding its
+ * sealed `uses` doesn't list, a connector operation its use doesn't
+ * declare, a request of the wrong shape or past its bounds, one past the
+ * attempt's calls, or a model call past the run's `maxModelCalls`
+ * (resource-host.ts, GRA-700).
+ */
+export type AdmissionReason =
+  | "use_undeclared"
+  | "operation_undeclared"
+  | "request_invalid"
+  | "call_limit"
+  | "model_call_limit";
+
+/**
+ * Keeps the evidence of an action's call refused at its host's own
+ * admission, as `workflow.call.refused`, the event App runs' refused calls
+ * leave (workflows/host.ts): what the host knows of the run, its build,
+ * task and attempt, never what the isolate sent. `call` is a declared
+ * alias, or null: an undeclared one is the isolate's text. An event that
+ * can't be kept is logged; the refusal stands either way.
+ */
+export const auditAdmissionRefusal = async (
+  env: Env,
+  run: CallingRun,
+  refusal: {
+    readonly build: string;
+    readonly task: string;
+    readonly attempt: number;
+    readonly generation: number;
+    readonly call: string | null;
+    readonly errorCode: string;
+    readonly reason: AdmissionReason;
+  }
+): Promise<void> => {
+  try {
+    await audited(env, {
+      actor: { type: "system" },
+      action: "workflow.call.refused",
+      target: { type: "workflow_run", id: run.runId },
+      detail: {
+        workflow: run.workflowId,
+        version: run.version,
+        person: run.principal,
+        ...refusal,
+      },
+    });
+  } catch (error) {
+    log.error("workflow.call.audit_failed", {
+      runId: run.runId,
+      task: refusal.task,
+      errorCode: refusal.errorCode,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
  * Makes `call`, a task's named call with its arguments built, as task
  * `task` of `run`, for `effect`: through the binding its start froze for
  * the call's alias, once the authority behind it was decided again
@@ -716,6 +851,15 @@ export const makeCall = async (
   };
   let output: Json;
   try {
+    // Refused before anything is decided or sent, and kept as the call's
+    // receipt: connect would hold it for a decision no action waits for.
+    if (
+      effect.fromAction === true &&
+      run.restricted &&
+      call.name === "grasp.connector"
+    ) {
+      throw workflowResourceErrors.create("workflow.action_restricted");
+    }
     await requireCallAuthority(env, run, binding);
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
@@ -731,6 +875,14 @@ export const makeCall = async (
       }
       case "grasp.model": {
         output = await callModel(env, run, binding, call, effect);
+        break;
+      }
+      case "grasp.knowledge": {
+        output = await callKnowledge(env, run, binding, call);
+        break;
+      }
+      case "grasp.template": {
+        output = await callTemplate(env, binding);
         break;
       }
       default: {

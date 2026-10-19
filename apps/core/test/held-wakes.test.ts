@@ -52,7 +52,7 @@ const secondMail = { to: "ben@acme.test", subject: "Invoice INV-8" };
 /** A workflow `two` that sends `invoiceMail`, then `secondMail`. */
 const twoMails = workflowFiles(
   "two",
-  `  const send = async (name, mail) => await step.do(name, { description: "Send", sideEffect: true, input: mail, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse((await env.MAIL.call("mail.send", input, { idempotencyKey })).output));
+  `  const send = async (name: string, mail: { to: string; subject: string }) => await step.do(name, { description: "Send", sideEffect: true, input: mail, retries: { limit: 0 } }, async ({ idempotencyKey, input }) => JSON.parse(((await env.MAIL.call("mail.send", input, { idempotencyKey })) as { output: string }).output));
   return [await send("first", ${JSON.stringify(invoiceMail)}), await send("second", ${JSON.stringify(secondMail)})];`,
   { first: { messageId: "mocked" }, second: { messageId: "mocked" } }
 );

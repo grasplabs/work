@@ -301,6 +301,8 @@ export const pendingActions = sqliteTable(
     index("pending_actions_person_idx").on(table.onBehalfOf),
     // Dropping a disconnected connection's.
     index("pending_actions_connection_idx").on(table.connectionId),
+    // Dropping an ended run's, by the range of its steps' keys.
+    index("pending_actions_key_idx").on(table.idempotencyKey),
   ]
 );
 

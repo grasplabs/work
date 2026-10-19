@@ -192,6 +192,8 @@ const generate = async (
 ): Promise<unknown> => {
   const { prompt, instructions } = requestSchema.parse(args[0]);
   const { structuredOutput } = declaration;
+  const { runOrigin } = caller;
+  const shareSubject = caller.shareSubject ?? runOrigin?.shareSubject;
   try {
     const answer = await models(env).call({
       model: target.model,
@@ -204,12 +206,12 @@ const generate = async (
       ),
       purpose: "app.resource",
       // The App for a screen's call; the run for a workflow's, whose
-      // workflow and run lineage budgets then count it too.
-      trigger: caller.actor,
+      // workflow and run lineage budgets then count it too, as they do
+      // for a call made, through other Apps, from a run's: its requests
+      // are the run's, besides the called App's binding caps.
+      trigger: runOrigin?.actor ?? caller.actor,
       // A run's: whose share its requests take (BindingCaller).
-      ...(caller.shareSubject === undefined
-        ? {}
-        : { shareSubject: caller.shareSubject }),
+      ...(shareSubject === undefined ? {} : { shareSubject }),
       provenance: [...caller.sources.snapshot().collectionIds],
       connections: [...caller.sources.connections()],
       work: { authority: caller.authority, context: caller.context },

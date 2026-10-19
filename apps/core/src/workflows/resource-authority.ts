@@ -109,6 +109,11 @@ export interface CallingRun {
   };
   /** The catalog bindings its start froze, by alias. */
   readonly bindings: ReadonlyMap<string, FrozenCatalogBinding>;
+  /**
+   * Whether it runs in restricted mode, as its start decided and its row
+   * pins (restricted.ts): what it sends an App restricts that App first.
+   */
+  readonly restricted: boolean;
 }
 
 /** Who a run's calls act as: the workflow, for its principal, as a run. */
@@ -248,6 +253,7 @@ export const callingRunOf = async (
       version: workflowResourceRuns.version,
       principal: workflowResourceRuns.principalId,
       status: workflowResourceRuns.status,
+      restricted: workflowResourceRuns.restricted,
       invokerType: workflowStartReceipts.invokerType,
       invokerId: workflowStartReceipts.invokerId,
       originAppVersion: workflowStartReceipts.originAppVersion,
@@ -278,6 +284,7 @@ export const callingRunOf = async (
       appVersion: row.originAppVersion,
     },
     bindings: frozenBindingsOf(row.bindings),
+    restricted: row.restricted,
   };
 };
 

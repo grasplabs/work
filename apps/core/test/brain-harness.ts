@@ -360,33 +360,50 @@ export type KnowledgeStateCheck = "rows" | "counts";
 const stateOf = async (
   knowledge: KnowledgeStateCheck
 ): Promise<Map<string, string>> => {
-  const digests = new Map<string, string>();
-  for (const [name, db] of [
-    ["core", env.DB],
-    ["knowledge", env.KNOWLEDGE],
-  ] as const) {
-    // oxlint-disable-next-line no-await-in-loop -- one database at a time
-    for (const table of await tablesOf(db)) {
-      const key = `${name}.${table}`;
-      if (bookkeeping.has(key)) {
-        continue;
-      }
-      if (name === "knowledge" && knowledge === "counts") {
-        // oxlint-disable-next-line no-await-in-loop -- one table at a time
-        const counted = await db
-          .prepare(`SELECT count(*) AS count FROM "${table}"`)
-          .first<{ count: number }>();
-        digests.set(key, `${counted?.count ?? 0} rows`);
-      } else {
-        // oxlint-disable-next-line no-await-in-loop -- one table at a time
-        const { results } = await db.prepare(`SELECT * FROM "${table}"`).all();
-        const rows = results.map(rowText).toSorted().join("\n");
-        // oxlint-disable-next-line no-await-in-loop -- one table at a time
-        digests.set(key, await sha256Hex(rows));
-      }
+  // Each database's tables read in one batch, both databases at once: two
+  // round trips a database (its tables, then all their rows), rather than
+  // one a table, twice a trial. It was most of a trial's time but the
+  // model's (GRA-698).
+  const read = async (
+    name: "core" | "knowledge",
+    db: D1Database
+  ): Promise<[string, string][]> => {
+    const all = await tablesOf(db);
+    const tables = all.filter((table) => !bookkeeping.has(`${name}.${table}`));
+    if (tables.length === 0) {
+      return [];
     }
-  }
-  return digests;
+    const counts = name === "knowledge" && knowledge === "counts";
+    const results = await db.batch(
+      tables.map((table) =>
+        db.prepare(
+          counts
+            ? `SELECT count(*) AS count FROM "${table}"`
+            : `SELECT * FROM "${table}"`
+        )
+      )
+    );
+    return await Promise.all(
+      tables.map(async (table, index): Promise<[string, string]> => {
+        const rows = results[index]?.results ?? [];
+        const key = `${name}.${table}`;
+        if (counts) {
+          const [counted] = rows;
+          const count: unknown =
+            typeof counted === "object" && counted !== null
+              ? Reflect.get(counted, "count")
+              : undefined;
+          return [key, `${typeof count === "number" ? count : 0} rows`];
+        }
+        return [key, await sha256Hex(rows.map(rowText).toSorted().join("\n"))];
+      })
+    );
+  };
+  const [core, knowledgeTables] = await Promise.all([
+    read("core", env.DB),
+    read("knowledge", env.KNOWLEDGE),
+  ]);
+  return new Map([...core, ...knowledgeTables]);
 };
 
 /** The tables whose rows differ between two states. */
@@ -1337,11 +1354,16 @@ const trialStateOf = async (
   chatId: string,
   knowledge: KnowledgeStateCheck
 ): Promise<Map<string, string>> => {
-  const state = await stateOf(knowledge);
-  for (const [table, digest] of await workspaceStateOf(place, chatId)) {
+  // Read at once: nothing changes stored state while the gate reads it.
+  const [state, objectState, files] = await Promise.all([
+    stateOf(knowledge),
+    workspaceStateOf(place, chatId),
+    filesDigest(),
+  ]);
+  for (const [table, digest] of objectState) {
     state.set(table, digest);
   }
-  state.set("files", await filesDigest());
+  state.set("files", files);
   return state;
 };
 
