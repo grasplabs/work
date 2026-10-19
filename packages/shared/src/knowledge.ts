@@ -332,10 +332,9 @@ export const isBuiltinDocumentType = (
 ): type is BuiltinDocumentType => builtinDocumentTypes.has(type);
 
 /**
- * A document's type: one the platform knows (`builtinDocumentTypeSchema`),
- * or a record type an App declares for a collection it writes
- * (`recordTypeNameSchema`, `@grasp-os/shared/apps`): lowercase letters,
- * digits and single hyphens, starting with a letter.
+ * A document's type: one the platform knows (`builtinDocumentTypeSchema`)
+ * or any other its frontmatter names: lowercase letters, digits and single
+ * hyphens, starting with a letter.
  */
 export const documentTypeSchema = z
   .string()
@@ -347,55 +346,11 @@ export const documentTypeSchema = z
 export type DocumentType = z.infer<typeof documentTypeSchema>;
 
 /**
- * The name of a record type an App declares: a document type the platform
- * doesn't know itself.
- */
-export const recordTypeNameSchema = documentTypeSchema.refine(
-  (type) => !isBuiltinDocumentType(type),
-  { message: "A type the platform knows itself" }
-);
-
-/**
  * A stored document's type, as this release reads it: one that isn't a
  * type's name at all reads as a plain `doc`.
  */
 export const documentTypeOf = (stored: string): DocumentType =>
   documentTypeSchema.safeParse(stored).data ?? "doc";
-
-/**
- * Most records one page of records holds. Each is read with its text, up
- * to a document's size (1 MB), and a page crosses RPC whole: 20 keep the
- * largest page well under what one RPC message carries.
- */
-export const recordPageMaxLimit = 20;
-
-/** A page of records: in path order, after `after`, of `type` if given. */
-export const listRecordsOptionsSchema = z
-  .strictObject({
-    after: documentPathSchema.optional(),
-    limit: z.int().min(1).max(recordPageMaxLimit).default(recordPageMaxLimit),
-    type: documentTypeSchema.optional(),
-  })
-  .default({ limit: recordPageMaxLimit });
-export type ListRecordsOptions = z.input<typeof listRecordsOptionsSchema>;
-
-/**
- * A record to save through an App's collection stub (`saveRecord`): at
- * `path`, from `ifVersion` (0 for a new one), its frontmatter as data
- * (`record`, whose `type` picks the schema that checks it) and the
- * Markdown a person reads (`body`). Fields its type keeps (`kept` of the
- * type's declaration) that `record` leaves out are kept as the version it
- * goes over has them.
- */
-export const recordSaveSchema = z.strictObject({
-  path: documentPathSchema,
-  ifVersion: z.int().min(0),
-  record: z.looseObject({ type: documentTypeSchema }),
-  body: z.string(),
-  /** What changed, for the history. */
-  message: z.string().trim().max(500).optional(),
-});
-export type RecordSave = z.input<typeof recordSaveSchema>;
 
 /** A document's current state, without its text. */
 export interface DocumentSummary {
@@ -453,39 +408,6 @@ export interface Provenance {
 /** A document with one of its versions. */
 export interface DocumentRead extends DocumentSummary {
   version: Version;
-  provenance: Provenance;
-}
-
-/**
- * A document read as a record: its frontmatter as data (its `type`, and
- * the fields its type's schema reads, defaults filled in), and the
- * Markdown after it. How App code, which has no YAML parser, reads a
- * record: one of a type an App declares (`@grasp-os/shared/apps`), or any
- * other document.
- */
-export interface RecordRead extends DocumentRead {
-  record: Record<string, unknown>;
-  body: string;
-}
-
-/** A record at its current version, as a page of records lists it. */
-export interface RecordSummary extends DocumentSummary {
-  record: Record<string, unknown>;
-  body: string;
-}
-
-/**
- * A page of a collection's records, read in one read. A document listed
- * whose text doesn't fit its type any more (under another release's
- * schemas, or another version of the App that declares it, say), whose
- * type no App declares for the collection now, or that has no current
- * version, is in `unreadable`, and the others are still read.
- */
-export interface RecordPage {
-  records: RecordSummary[];
-  unreadable: DocumentSummary[];
-  /** The `after` of the next page, or `null` when this is the last. */
-  next: string | null;
   provenance: Provenance;
 }
 
@@ -776,7 +698,7 @@ const purgeTermSchema = z
  *   In scripts written without spaces (Chinese, Japanese, Thai, Lao,
  *   Khmer, Burmese) a term is found inside running text. A document's
  *   own path stays; links and other fields naming a document are
- *   rewritten like any text, kept fields of records too.
+ *   rewritten like any text.
  */
 export const purgeInputSchema = z.discriminatedUnion("type", [
   z.strictObject({

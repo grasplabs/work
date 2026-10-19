@@ -388,8 +388,10 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
   it("fail closed on a report that leaves a test out", async () => {
     // The suite's own code rewrites what the isolate reports: one failing
     // test reported as none.
-    const forging = `const stringify = JSON.stringify;
-JSON.stringify = (value, ...rest) =>
+    // Rewrites the runner's report on its way out: past the types on
+    // purpose, as a forger's code would.
+    const forging = `const stringify = JSON.stringify as (value: unknown, ...rest: unknown[]) => string;
+(JSON as { stringify: unknown }).stringify = (value: Record<string, unknown> | null, ...rest: unknown[]) =>
   value !== null && typeof value === "object" && "results" in value
     ? stringify({ fixtures: value.fixtures, results: [] })
     : stringify(value, ...rest);`;
@@ -491,15 +493,16 @@ export default appTest({
       ),
       "tests/b.test.ts": suiteOf("t.equal(1, 1);"),
     });
-    // The suites may take 500 ms in all: the first starts with that much
-    // left and runs out of it, the second can't start.
+    // The suites may take 500 ms in all: the first runs out of it, and is
+    // told the run's limit (not the time it happened to have left), the
+    // second can't start.
     const { code, failures } = await refusal(
       built,
       envWith({ APP_TEST_LIMITS_MS: "//500" })
     );
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
-      "tests/a.test.ts: it stopped: didn't finish within 0.5 seconds",
+      "tests/a.test.ts: it stopped: the version's tests ran past their 0.5 seconds",
       "tests/b.test.ts: didn't run: the version's tests ran past their 0.5 seconds",
     ]);
   });

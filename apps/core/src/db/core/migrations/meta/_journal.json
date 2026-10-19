@@ -687,6 +687,34 @@
       "when": 1792254841041,
       "tag": "0097_dependency_subjects",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "6",
+      "when": 1792271950011,
+      "tag": "0098_workflow_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "6",
+      "when": 1792320044672,
+      "tag": "0099_workflow_draft_modules",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "6",
+      "when": 1792332912349,
+      "tag": "0100_drop_record_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1792338548131,
+      "tag": "0101_immutable_insert_triggers",
+      "breakpoints": true
     }
   ]
 }

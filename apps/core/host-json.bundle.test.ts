@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -8,10 +8,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { text } from "node:stream/consumers";
 import { pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
 
-import { afterAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { parseJsonc } from "../../scripts/wrangler-config-rules.ts";
 import { hostJsonSource } from "./src/host-json.ts";
@@ -26,6 +27,56 @@ import { hostJsonSource } from "./src/host-json.ts";
 // values with nothing in scope but the language's built-ins.
 
 const here = import.meta.dirname;
+/** Stops every process `run` started that is still running. */
+const stopping = new AbortController();
+/** Each process `run` started, settled once it closed. */
+const closing = new Set<Promise<unknown>>();
+
+/**
+ * Runs `args` in Node to its end; failing with its output if it fails,
+ * or once `stopping` stops it.
+ */
+const run = async (
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv }
+): Promise<void> => {
+  const child = spawn(process.execPath, args, {
+    ...options,
+    signal: stopping.signal,
+  });
+  // Settled once it closed, whatever it failed with first (stopped, an
+  // AbortError comes before its close), or once it never started.
+  const closed = Promise.withResolvers<null>();
+  let failure: Error | undefined;
+  child.once("close", () => {
+    closed.resolve(null);
+  });
+  child.once("error", (error) => {
+    failure = error;
+    if (child.pid === undefined) {
+      closed.resolve(null);
+    }
+  });
+  closing.add(closed.promise);
+  const [stdout, stderr] = await Promise.all([
+    text(child.stdout),
+    text(child.stderr),
+  ]);
+  await closed.promise;
+  if (failure !== undefined) {
+    throw failure;
+  }
+  if (child.exitCode !== 0) {
+    throw new Error(`${stdout}${stderr}`);
+  }
+};
+/**
+ * How long the two bundles may take together. Each is a cold Wrangler CLI
+ * (Node, Wrangler's own bundle, esbuild): about a second on an idle
+ * machine, but several on a CI shard whose workers hold every core, past
+ * a test's default five seconds. They run at once, off the event loop.
+ */
+const bundlingTimeout = 120_000;
 const wrangler = path.join(here, "node_modules/wrangler/bin/wrangler.js");
 
 /** Core's own compatibility settings, from its wrangler.jsonc. */
@@ -85,7 +136,67 @@ globalThis.answers = (${cases}).map((value) => jsonAnswer(value));`,
 describe("the host's JSON module, bundled as Wrangler bundles core", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "host-json-bundle-"));
 
-  afterAll(() => {
+  /** Bundles the fixture into `<dir>/<plain|minified>/out/entry.js`. */
+  const bundled = async (minify: boolean): Promise<void> => {
+    const fixture = path.join(dir, minify ? "minified" : "plain");
+    mkdirSync(fixture, { recursive: true });
+    writeFileSync(
+      path.join(fixture, "collide.ts"),
+      'export function readJsonValue(): string {\n  return "another";\n}\n'
+    );
+    writeFileSync(
+      path.join(fixture, "entry.ts"),
+      [
+        'import { readJsonValue } from "./collide.ts";',
+        `import { hostJsonSource } from ${JSON.stringify(path.join(here, "src/host-json.ts"))};`,
+        "export const another = readJsonValue;",
+        "export const source = hostJsonSource;",
+        'export default { fetch: () => new Response("") };',
+        "",
+      ].join("\n")
+    );
+    writeFileSync(
+      path.join(fixture, "wrangler.jsonc"),
+      JSON.stringify({
+        name: "host-json-bundle",
+        main: "entry.ts",
+        ...coreSettings(),
+      })
+    );
+    await run(
+      [
+        // Wrangler's launcher passes Node's flags on to the CLI it
+        // spawns: without Sparkplug, Node 24's GC segfault (vite.config.ts)
+        // can't kill it. One that died anyway fails the setup.
+        "--no-sparkplug",
+        wrangler,
+        "deploy",
+        "--dry-run",
+        "--outdir",
+        "out",
+        ...(minify ? ["--minify"] : []),
+      ],
+      {
+        cwd: fixture,
+        env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1" },
+      }
+    );
+  };
+
+  beforeAll(async () => {
+    // Both settled before either's failure is told: none still writes.
+    const results = await Promise.allSettled([bundled(false), bundled(true)]);
+    const failed = results.find(({ status }) => status === "rejected");
+    if (failed?.status === "rejected") {
+      throw failed.reason;
+    }
+  }, bundlingTimeout);
+
+  afterAll(async () => {
+    // One the setup's bound cut short is stopped, and closed, before its
+    // directory goes.
+    stopping.abort();
+    await Promise.allSettled(closing);
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -96,51 +207,6 @@ describe("the host's JSON module, bundled as Wrangler bundles core", () => {
     "reads values the way the host does, %s, whatever names the bundler gave",
     async (label, minify) => {
       const fixture = path.join(dir, minify ? "minified" : "plain");
-      mkdirSync(fixture, { recursive: true });
-      writeFileSync(
-        path.join(fixture, "collide.ts"),
-        'export function readJsonValue(): string {\n  return "another";\n}\n'
-      );
-      writeFileSync(
-        path.join(fixture, "entry.ts"),
-        [
-          'import { readJsonValue } from "./collide.ts";',
-          `import { hostJsonSource } from ${JSON.stringify(path.join(here, "src/host-json.ts"))};`,
-          "export const another = readJsonValue;",
-          "export const source = hostJsonSource;",
-          'export default { fetch: () => new Response("") };',
-          "",
-        ].join("\n")
-      );
-      writeFileSync(
-        path.join(fixture, "wrangler.jsonc"),
-        JSON.stringify({
-          name: "host-json-bundle",
-          main: "entry.ts",
-          ...coreSettings(),
-        })
-      );
-      execFileSync(
-        process.execPath,
-        [
-          // Wrangler's launcher passes Node's flags on to the CLI it
-          // spawns: without Sparkplug, Node 24's GC segfault (vite.config.ts)
-          // can't kill it. A CLI that died anyway leaves no bundle, which
-          // the import below fails on.
-          "--no-sparkplug",
-          wrangler,
-          "deploy",
-          "--dry-run",
-          "--outdir",
-          "out",
-          ...(minify ? ["--minify"] : []),
-        ],
-        {
-          cwd: fixture,
-          env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1" },
-          stdio: "pipe",
-        }
-      );
       const bundle = path.join(fixture, "out/entry.js");
       const source = String((await exported(bundle, "source"))());
       const answers = isolatedAnswers(

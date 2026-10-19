@@ -18,7 +18,6 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
 import { exportsIn } from "./app-exports.ts";
-import { recordTypesIn } from "./app-records.ts";
 import {
   appFor,
   blueprintFiles,
@@ -338,7 +337,6 @@ export const createFromBlueprint = async (
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,
-    records: recordTypesIn(files),
   };
   const requests = declaredRequests(
     by,

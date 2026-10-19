@@ -132,8 +132,6 @@
   "@grasp-os/core test/platform-stops.test.ts": 0.6,
   "@grasp-os/core test/platform-updates.test.ts": 1.5,
   "@grasp-os/core test/portable-live.test.ts": 26.1,
-  "@grasp-os/core test/record-receipts.test.ts": 25.6,
-  "@grasp-os/core test/record-types.test.ts": 10.5,
   "@grasp-os/core test/roles.test.ts": 1.4,
   "@grasp-os/core test/rpc.test.ts": 2.1,
   "@grasp-os/core test/run-fixes.test.ts": 5.5,
