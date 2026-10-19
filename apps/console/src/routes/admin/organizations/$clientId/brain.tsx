@@ -56,6 +56,8 @@ const BrainSection = () => {
   const brain = brainOf(view);
   const taking = brain.teams.filter((team) => !team.off).length;
   const { percent, threshold, covered, differs } = brain;
+  // Teams missed once the interviews closed: the tile's warning says how many.
+  const unheard = view.closed ? taking - covered : 0;
   const stillOpen =
     differs > 0
       ? `${differs} ${plural(differs, "piece", "pieces")} of work told two ways, nobody knows why yet`
@@ -74,9 +76,14 @@ const BrainSection = () => {
             value={`${percent}%`}
           />
           <Figure
-            attention={view.closed && covered < taking}
+            attention={unheard > 0}
             label="Teams heard"
             ring={{ value: covered, of: taking }}
+            sub={
+              unheard > 0
+                ? `${unheard} ${plural(unheard, "team", "teams")} not heard before the interviews closed`
+                : undefined
+            }
             value={`${covered} of ${taking}`}
           />
           <Figure label="Agreed interviews" value={brain.interviews} />
