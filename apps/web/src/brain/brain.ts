@@ -1,9 +1,3 @@
-import { i18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural, select, t } from "@lingui/core/macro";
-
-import { formatDay, formatList, formatNumber } from "../format.ts";
-import { changes, latest } from "./history.ts";
 import type {
   AiKind,
   Answer,
@@ -26,7 +20,13 @@ import type {
   Workflow,
   WorkflowStatus,
   Workspace,
-} from "./workspace.ts";
+} from "@grasp-os/shared/brain";
+import { i18n } from "@lingui/core";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg, plural, select, t } from "@lingui/core/macro";
+
+import { formatDay, formatList, formatNumber } from "../format.ts";
+import { changes, latest } from "./history.ts";
 
 /**
  * The company brain: everything steps 1 and 2 collected, as notes in folders with links between

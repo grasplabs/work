@@ -23,7 +23,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { recordEvents } from "./audit.ts";
-import { composioTools } from "./catalog.ts";
+import { composioEntry, composioTools } from "./catalog.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
 import {
   auditRefusal,
@@ -442,6 +442,17 @@ export const startToolkitConnection = async (
   const key = composioKey(env);
   if (key === undefined || new URL(origin).origin !== origin) {
     throw connectionErrors.create("connection.provider_unavailable");
+  }
+  // Composio holds no app for it: starting would make an auth config it
+  // refuses, so nothing is made, and the attempt is recorded.
+  const { auth } = await composioEntry(key, toolkit);
+  if (auth === "own") {
+    await auditRefusal(env, person, "connection.connect", {
+      ...detailOf(toolkit),
+      outcome: "refused",
+      reason: "connection.own_auth_required",
+    });
+    throw connectionErrors.create("connection.own_auth_required");
   }
   // Only tools the toolkit has, each held to a resource only by one of its
   // own input properties: a name that matches nothing would be an entry

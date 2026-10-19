@@ -32,7 +32,7 @@ import type { SessionCheck } from "./session-check.ts";
 // called and when its day starts are the client's to say.
 
 /** The organization as stored, with what the deployment says about it. */
-const readOrganization = async (env: Env): Promise<Organization> => {
+export const readOrganization = async (env: Env): Promise<Organization> => {
   const [row] = await drizzle(env.DB)
     .select({ name: organizations.name, timeZone: organizations.timeZone })
     .from(organizations)

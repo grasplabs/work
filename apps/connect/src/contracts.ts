@@ -10,12 +10,12 @@ import type {
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { nativeConnector } from "./bundled-connectors.ts";
 import {
   composioContract,
   composioContractPrefix,
 } from "./composio-contracts.ts";
 import type { Connection } from "./connections.ts";
-import { nativeConnector } from "./connectors.ts";
 import { connections } from "./db/schema.ts";
 
 // Generated connector contracts (spec 12). Which one a connection serves
