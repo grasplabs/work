@@ -989,8 +989,8 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
   });
 
   it("refuses a migration's directive that would reach the rest of the server code", async () => {
-    // A migration's own type errors wait for GRA-690; what it would give
-    // the whole program doesn't.
+    // Refused before the type check reads it, as its directive would reach
+    // every file of the program.
     await expect(
       refusedSeal({
         ...withOperation(

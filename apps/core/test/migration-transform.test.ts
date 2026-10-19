@@ -160,15 +160,17 @@ const handlers = {
     title: Object.keys(row).sort().join(","),
     category: "general",
   })`,
-  "writes-managed": `(ctx, row) => ({ ...row, category: "general", _id: "n_forged" })`,
-  "writes-undeclared": `(ctx, row) => ({ ...row, category: "general", priority: 1 })`,
-  "writes-wrong-type": `(ctx, row) => ({ ...row, category: 42 })`,
-  "writes-too-much": `(ctx, row) => ({ ...row, category: "general", body: "x".repeat(100000) })`,
-  "spreads-row": `(ctx, row) => ({ ...row, category: "general" })`,
-  "rewrites-retained": `(ctx, row) => ({ ...row, category: "general", legacy: "changed" })`,
+  // Past the types (`as never`), as an attacker's code would: the host
+  // refuses what these write, whatever their types say.
+  "writes-managed": `(ctx, row) => ({ ...row, category: "general", _id: "n_forged" }) as never`,
+  "writes-undeclared": `(ctx, row) => ({ ...row, category: "general", priority: 1 }) as never`,
+  "writes-wrong-type": `(ctx, row) => ({ ...row, category: 42 }) as never`,
+  "writes-too-much": `(ctx, row) => ({ ...row, title: String(row.title), category: "general", body: "x".repeat(100000) })`,
+  "spreads-row": `(ctx, row) => ({ ...row, title: String(row.title), category: "general" })`,
+  "rewrites-retained": `(ctx, row) => ({ ...row, category: "general", legacy: "changed" }) as never`,
   throws: `(ctx, row) => {
     if (ctx.id === "n2") throw new Error("Can't tell this one's category");
-    return { ...row, category: "general" };
+    return { ...row, title: String(row.title), category: "general" };
   }`,
   "never-runs": `() => { throw new Error("App code ran"); }`,
 } as const;
@@ -178,20 +180,22 @@ const handlers = {
  * `appMaxMigrations`.
  */
 const moreHandlers = {
-  "answers-too-much": `(ctx, row) => ({ title: row.title, body: "x".repeat(100000), category: "general" })`,
+  "answers-too-much": `(ctx, row) => ({ title: String(row.title), body: "x".repeat(100000), category: "general" })`,
   "remembers-rows": `(() => {
     let seen = "";
     return (ctx, row) => {
-      const title = seen === "" ? row.title : seen;
-      seen = row.title;
+      const title = seen === "" ? String(row.title) : seen;
+      seen = String(row.title);
       return { ...row, title, category: "general" };
     };
   })()`,
-  "crypto-prototype": `(ctx, row) => ({ ...row, category: Object.getPrototypeOf(crypto).randomUUID.call(crypto) })`,
-  "date-prototype": `(ctx, row) => ({ ...row, category: String(new (Object.getPrototypeOf(new Date(0)).constructor)()) })`,
-  "intl-format": `(ctx, row) => ({ ...row, category: new Intl.DateTimeFormat("en").format() })`,
-  "intl-parts": `(ctx, row) => ({ ...row, category: new Intl.DateTimeFormat("en").formatToParts()[0].value })`,
-  "late-json": `(ctx, row) => ({ ...row, category: { toJSON: () => String(Math.random()) } })`,
+  // Past the types (`as never`), as an attacker's code would: the
+  // sandbox takes randomness and clocks away, whatever the types say.
+  "crypto-prototype": `(ctx, row) => ({ ...row, category: Object.getPrototypeOf(crypto).randomUUID.call(crypto) }) as never`,
+  "date-prototype": `(ctx, row) => ({ ...row, category: String(new (Object.getPrototypeOf(new Date(0)).constructor)()) }) as never`,
+  "intl-format": `(ctx, row) => ({ ...row, category: new Intl.DateTimeFormat("en").format() }) as never`,
+  "intl-parts": `(ctx, row) => ({ ...row, category: new Intl.DateTimeFormat("en").formatToParts()[0].value }) as never`,
+  "late-json": `(ctx, row) => ({ ...row, category: { toJSON: () => String(Math.random()) } }) as never`,
   "formats-given-date": `(ctx, row) => ({ ...row, title: new Intl.DateTimeFormat("en", { timeZone: "UTC" }).format(new Date(0)), category: "general" })`,
   "formats-detached": `(ctx, row) => {
     const { format } = new Intl.DateTimeFormat("en", { timeZone: "UTC" });
@@ -331,6 +335,86 @@ const run = async (name: Name, batch: readonly TransformRow[] = rows) => {
     : sealedMore());
   return await transformBatch(env, release, name, batch);
 };
+
+/**
+ * What sealing `source` as migration `name` answers: "ok", or the
+ * refusal's code and the files its diagnostics name. A type error is
+ * refused as the code is checked, before the migration's `toSchema` is;
+ * once past that, its `toSchema` is the one the seal names.
+ */
+const sealedSource = async (
+  name: string,
+  source: (fromSchema: string, toSchema: string) => string
+): Promise<{ code: unknown; files: string[] }> => {
+  const fixture = await appWith(baseFiles([name]));
+  const base = await seal(fixture);
+  const fromSchema = base.manifest.schemaHash;
+  const commit = async (toSchema: string) =>
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      notesFiles({ [name]: source(fromSchema, toSchema) }),
+      "Migrate"
+    );
+  await commit(placeholder);
+  const named = await refusalOf(async () => await seal(fixture, 2));
+  let refused = named;
+  if (named.code === "version.invalid_migration") {
+    await commit(namedSchema(named.details));
+    refused = await refusalOf(async () => await seal(fixture, 3));
+  }
+  const { code, details } = refused;
+  const diagnostics: unknown =
+    typeof details === "object" && details !== null
+      ? Reflect.get(details, "diagnostics")
+      : undefined;
+  return {
+    code,
+    files: Array.isArray(diagnostics)
+      ? [
+          ...new Set(
+            diagnostics.map((diagnostic: unknown) =>
+              String(
+                typeof diagnostic === "object" && diagnostic !== null
+                  ? Reflect.get(diagnostic, "file")
+                  : diagnostic
+              )
+            )
+          ),
+        ].toSorted()
+      : [],
+  };
+};
+
+describe("a migration's types", { timeout: 120_000 }, () => {
+  it.each([
+    [
+      "seals a spread of the previous shape it declares, with the field it adds",
+      "input: v.object({ title: noteFields.title }),",
+      '(ctx, row) => ({ ...row, category: "general" })',
+      { code: "ok", files: [] },
+    ],
+    [
+      "refuses a field of the wrong type for its table",
+      "input: v.object({ title: noteFields.title }),",
+      "(ctx, row) => ({ ...row, category: 42 })",
+      { code: "version.build_failed", files: ["migrations/typed.ts"] },
+    ],
+    [
+      "refuses a spread of a row it declares no shape for, which lacks a field its table requires",
+      "",
+      '(ctx, row) => ({ ...row, category: "general" })',
+      { code: "version.build_failed", files: ["migrations/typed.ts"] },
+    ],
+  ])("%s", async (_case, input, handler, expected) => {
+    await expect(
+      sealedSource("typed", (fromSchema, toSchema) =>
+        migrationSource("typed", handler, { fromSchema, toSchema, input })
+      )
+    ).resolves.toStrictEqual(expected);
+  });
+});
 
 describe("an explicit migration", { timeout: 120_000 }, () => {
   it("is sealed only when it transforms to the release's schema, which the refusal names", async () => {
@@ -697,18 +781,19 @@ describe("App code that forges its answer", { timeout: 120_000 }, () => {
   it("refuses an answer that isn't its rows", async () => {
     // The App's code makes the runner in its isolate answer fewer rows
     // than it was sent, as though they had been transformed.
+    // Past the types, as an attacker's code would: it forges at run time.
     const forgingPrelude = `const stringify = JSON.stringify;
-JSON.stringify = (value, ...rest) =>
+Reflect.set(JSON, "stringify", (value: unknown, ...rest: unknown[]) =>
   typeof value === "object" && value !== null && "ok" in value
     ? stringify({ ok: true, rows: [] })
-    : stringify(value, ...rest);`;
+    : Reflect.apply(stringify, JSON, [value, ...rest]));`;
     const { release } = await sealedMigrating(
       ["derive-category"],
       (fromSchema, toSchema) =>
         notesFiles({
           "derive-category": migrationSource(
             "derive-category",
-            "(ctx, row) => row",
+            "(ctx, row) => row as never",
             {
               fromSchema,
               toSchema,
