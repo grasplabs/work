@@ -630,7 +630,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         guest: {
           code: "model.over_budget",
           message:
-            "A model budget this call counts against is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+            "A model budget this call counts against is used up, so this model call can't be made. Ask your admin to have Grasp raise the budget.",
           details: { model: anthropic, because: "user" },
         },
         // Someone else's call holds it: a fixed wait, nothing of its timing.

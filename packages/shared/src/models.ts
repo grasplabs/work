@@ -11,7 +11,7 @@ export const modelErrors = defineErrorFamily({
   "model.sensitive_data":
     "This call carries sensitive data, and that model may not take it. Choose one this deployment allows for sensitive data.",
   "model.over_budget":
-    "A model budget this call counts against is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+    "A model budget this call counts against is used up, so this model call can't be made. Ask your admin to have Grasp raise the budget.",
   "model.run_limit":
     "This workflow run, with the runs it started, has reached the most model calls or model spend one run may have: spent, or held for calls whose cost isn't settled yet. No more model calls can be made in it.",
   "model.budget_busy":
