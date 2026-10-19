@@ -64,10 +64,10 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
 });
 
 test("a person opens a part's page from the brain's navigation, and a note in that part", async ({
-  browser,
+  pageOf,
 }) => {
   const { member } = peopleIn("brain");
-  const page = await pageOf(browser, member);
+  const page = await pageOf(member);
   await page.goto("/brain");
 
   await page
