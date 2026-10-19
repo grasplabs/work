@@ -18,6 +18,7 @@ import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellActivityRouteImport } from './routes/_shell.activity'
 import { Route as ShellConnectionsRouteImport } from './routes/_shell.connections'
 import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
+import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
 import { Route as ShellMembersRouteImport } from './routes/_shell.members'
 import { Route as ShellModelsRouteImport } from './routes/_shell.models'
 import { Route as ShellNotificationsRouteImport } from './routes/_shell.notifications'
@@ -122,6 +123,11 @@ const ShellConnectionsRoute = ShellConnectionsRouteImport.update({
 const ShellDashboardRoute = ShellDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellInboxRoute = ShellInboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellMembersRoute = ShellMembersRouteImport.update({
@@ -459,6 +465,7 @@ export interface FileRoutesByFullPath {
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
+  '/inbox': typeof ShellInboxRoute
   '/members': typeof ShellMembersRoute
   '/models': typeof ShellModelsRoute
   '/notifications': typeof ShellNotificationsRoute
@@ -529,6 +536,7 @@ export interface FileRoutesByTo {
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
+  '/inbox': typeof ShellInboxRoute
   '/members': typeof ShellMembersRoute
   '/models': typeof ShellModelsRoute
   '/notifications': typeof ShellNotificationsRoute
@@ -599,6 +607,7 @@ export interface FileRoutesById {
   '/_shell/activity': typeof ShellActivityRoute
   '/_shell/connections': typeof ShellConnectionsRoute
   '/_shell/dashboard': typeof ShellDashboardRoute
+  '/_shell/inbox': typeof ShellInboxRoute
   '/_shell/members': typeof ShellMembersRoute
   '/_shell/models': typeof ShellModelsRoute
   '/_shell/notifications': typeof ShellNotificationsRoute
@@ -673,6 +682,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/connections'
     | '/dashboard'
+    | '/inbox'
     | '/members'
     | '/models'
     | '/notifications'
@@ -743,6 +753,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/connections'
     | '/dashboard'
+    | '/inbox'
     | '/members'
     | '/models'
     | '/notifications'
@@ -812,6 +823,7 @@ export interface FileRouteTypes {
     | '/_shell/activity'
     | '/_shell/connections'
     | '/_shell/dashboard'
+    | '/_shell/inbox'
     | '/_shell/members'
     | '/_shell/models'
     | '/_shell/notifications'
@@ -952,6 +964,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof ShellDashboardRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/inbox': {
+      id: '/_shell/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof ShellInboxRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/members': {
@@ -1477,6 +1496,7 @@ interface ShellRouteChildren {
   ShellActivityRoute: typeof ShellActivityRoute
   ShellConnectionsRoute: typeof ShellConnectionsRoute
   ShellDashboardRoute: typeof ShellDashboardRoute
+  ShellInboxRoute: typeof ShellInboxRoute
   ShellMembersRoute: typeof ShellMembersRoute
   ShellModelsRoute: typeof ShellModelsRoute
   ShellNotificationsRoute: typeof ShellNotificationsRoute
@@ -1511,6 +1531,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellActivityRoute: ShellActivityRoute,
   ShellConnectionsRoute: ShellConnectionsRoute,
   ShellDashboardRoute: ShellDashboardRoute,
+  ShellInboxRoute: ShellInboxRoute,
   ShellMembersRoute: ShellMembersRoute,
   ShellModelsRoute: ShellModelsRoute,
   ShellNotificationsRoute: ShellNotificationsRoute,

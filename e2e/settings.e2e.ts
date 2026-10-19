@@ -7,9 +7,9 @@ import { peopleIn } from "./people.ts";
 // Settings, as in the prototype: the workspace's sections for admins, the
 // account's for everyone, listed beside the section where the page has the
 // room and as one control above it where it hasn't. The sections core
-// keeps nothing for yet (the workspace's name, Pulse, billing, emails, the
-// link for AI apps) show the prototype's empty state, and nothing in them
-// can be changed. Members, Models, AI spend and the audit trail have tests
+// keeps nothing for yet (the workspace's name, Pulse, billing, the link for
+// AI apps) show the prototype's empty state, and nothing in them can be
+// changed. The emails a person picks are kept, so their switches work. Members, Models, AI spend and the audit trail have tests
 // of their own (web, models, activity).
 
 /** A section of the page, by its heading. */
@@ -60,7 +60,7 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await expect(email.getByRole("switch")).toHaveCount(3);
   for (const toggle of await email.getByRole("switch").all()) {
     // oxlint-disable-next-line no-await-in-loop -- one switch at a time
-    await expect(toggle).toBeDisabled();
+    await expect(toggle).toBeEnabled();
   }
 
   await nav.getByRole("link", { name: "Security" }).click();
