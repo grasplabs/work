@@ -2236,6 +2236,7 @@ export class RunHost extends RpcTarget {
                 schema,
                 purpose: "workflow.step",
                 trigger: this.#actor,
+                runStep: { runId: this.#run.runId, step: attempt.step },
                 // Whose share it takes: who started the run, never the
                 // owner it acts for when nobody did.
                 shareSubject: this.#run.shareSubject,

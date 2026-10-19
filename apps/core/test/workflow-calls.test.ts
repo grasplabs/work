@@ -85,7 +85,7 @@ import {
   startDetailsPerSweep,
   sweepRunDetails,
 } from "../src/workflows/retention.ts";
-import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
+import { answeringGateway, fakeGateway, loggedRunStep } from "./ai-gateway.ts";
 import { release, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -1089,12 +1089,16 @@ describe("grasp.model calls of JSON workflows", () => {
       executable,
       end: endOf(run),
       requests: gateway.requests.length,
+      logged: gateway.requests.map(loggedRunStep),
       receipts: await receiptsOf(runId),
       callEvents: await callEventsOf(runId),
     }).toStrictEqual({
       executable: true,
       end: { status: "completed", output: { status: "Hello Ada" } },
       requests: 1,
+      // The gateway's log names the run and the task the request came
+      // from, so a provider behind it counts each task's requests.
+      logged: [`${runId}/greet`],
       receipts: ["started", "done"].map((outcome) => ({
         call: "grasp.model",
         binding: "summary",

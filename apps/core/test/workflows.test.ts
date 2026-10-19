@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
 import { startRun } from "../src/workflows/runs.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { fakeGateway, loggedRunStep } from "./ai-gateway.ts";
 import { grantReviewed, outlook, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { confirmedAnswer } from "./decisions.ts";
@@ -524,7 +524,12 @@ ${mailStep("after")}`,
       try {
         const run = await builder.api.workflows.start(app, "reader");
         await finished(run.id);
-        return await builder.api.workflows.status(run.id);
+        return {
+          ...(await builder.api.workflows.status(run.id)),
+          // Each request names its run and step in the gateway's log.
+          logged: gateway.requests.map(loggedRunStep),
+          expected: `${run.id}/extract`,
+        };
       } finally {
         answering.mockRestore();
       }
@@ -534,6 +539,10 @@ ${mailStep("after")}`,
     const fit = await runWithAnswers(
       '{"total": 1234, "from": "anna@example.com", "on": "2026-09-26"}'
     );
+    expect({
+      unfit: unfit.logged.map((logged) => logged === unfit.expected),
+      fit: fit.logged.map((logged) => logged === fit.expected),
+    }).toStrictEqual({ unfit: [true, true], fit: [true] });
     expect({ unfit, fit }).toMatchObject({
       unfit: {
         status: "failed",
