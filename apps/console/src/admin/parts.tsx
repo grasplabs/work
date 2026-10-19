@@ -8,6 +8,7 @@ import type {
   Stage,
   StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
+import { Progress } from "@grasp-os/ui/components/progress";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Fragment } from "react";
 import type { ReactNode } from "react";
@@ -126,12 +127,24 @@ export const Panel = ({
   </section>
 );
 
-/** A share of something as a small ring, filled as far as `value` is of `of`. */
-const Ring = ({ value, of }: { value: number; of: number }) => {
+/**
+ * So much of a whole as a small ring, dark on grey: for a number that is
+ * a share of something. The circle is 100 around, so the dark part is the
+ * percentage itself.
+ */
+export const Ring = ({
+  value,
+  of,
+  label,
+}: {
+  value: number;
+  of: number;
+  label: string;
+}) => {
   const share = of > 0 ? Math.min(Math.max(value / of, 0), 1) : 0;
   return (
     <span className="flex-none">
-      <span className="sr-only">{`${Math.round(share * 100)}%`}</span>
+      <span className="sr-only">{label}</span>
       <svg aria-hidden className="size-5 -rotate-90" viewBox="0 0 36 36">
         <circle
           className="stroke-border"
@@ -160,8 +173,9 @@ const Ring = ({ value, of }: { value: number; of: number }) => {
 
 /**
  * One number with what it counts, a line under it, and a ring where the
- * number is a share of something. The ring stands beside the label, so the
- * number has the whole tile, however narrow.
+ * number is a share of something. The ring stands beside the label, so
+ * the number has the whole tile, however narrow. Tiles in one row start
+ * at the same height, so their labels and numbers line up.
  */
 export const Figure = ({
   label,
@@ -169,21 +183,33 @@ export const Figure = ({
   sub,
   ring,
   attention = false,
+  className,
 }: {
   label: string;
   value: ReactNode;
   sub?: string;
   ring?: { value: number; of: number };
   attention?: boolean;
+  /** Where it stands in its grid. */
+  className?: string;
 }) => (
-  <div className="bg-card grid grid-cols-[minmax(0,1fr)_auto] content-start gap-x-2 gap-y-0.5 px-4 py-4 sm:px-5">
+  <div
+    className={cn(
+      "bg-card grid grid-cols-[minmax(0,1fr)_auto] content-start gap-x-2 gap-y-0.5 px-4 py-4 sm:px-5",
+      className
+    )}
+  >
     <span className="text-muted-foreground flex min-h-5 items-center text-xs">
       {label}
     </span>
-    {ring !== undefined && ring.of > 0 ? (
-      <Ring of={ring.of} value={ring.value} />
+    {ring && ring.of > 0 ? (
+      <Ring
+        label={`${Math.round(Math.min(Math.max(ring.value / ring.of, 0), 1) * 100)}%`}
+        of={ring.of}
+        value={ring.value}
+      />
     ) : null}
-    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium text-balance tabular-nums">
+    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium text-balance wrap-break-word hyphens-auto tabular-nums">
       {value}
     </span>
     {sub === undefined ? null : (
@@ -198,3 +224,38 @@ export const Figure = ({
     )}
   </div>
 );
+
+/**
+ * A few things counted, as rows: what each is, a bar as long as its share
+ * of the most, and the number. The words take the room they need and the
+ * bars start in one line; where the room is short the words are cut,
+ * never the bars.
+ */
+export const BarList = ({
+  rows,
+  label,
+}: {
+  rows: { id: string; label: ReactNode; value: number; shown?: string }[];
+  label: string;
+}) => {
+  const most = Math.max(1, ...rows.map((row) => row.value));
+  return (
+    <ul
+      aria-label={label}
+      className="grid grid-cols-[minmax(0,max-content)_minmax(5rem,1fr)_minmax(1.5rem,auto)] gap-x-3 gap-y-2.5"
+    >
+      {rows.map((row) => (
+        <li
+          className="col-span-3 grid grid-cols-subgrid items-center"
+          key={row.id}
+        >
+          <span className="text-muted-foreground truncate">{row.label}</span>
+          <Progress aria-hidden value={(row.value / most) * 100} />
+          <span className="text-right tabular-nums">
+            {row.shown ?? row.value}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+};

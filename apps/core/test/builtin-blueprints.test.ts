@@ -21,6 +21,7 @@ import {
   release,
 } from "../src/builtins.ts";
 import type { Release } from "../src/builtins.ts";
+import { withDraftReferences } from "../src/draft-references.ts";
 import { buildScreens } from "../src/screens.ts";
 import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -112,12 +113,22 @@ const helloActions = (
     .filter(({ target }) => target?.id === "hello")
     .map(({ action }) => action);
 
-/** A permission to read and write the collection `collectionId`. */
+/** A permission to read the collection `collectionId`. */
 const notesOf = (collectionId: CollectionId): DeclaredPermission => ({
   object: { type: "collection", collectionId },
-  actions: ["read", "write"],
+  actions: ["read"],
   binding: "NOTES",
 });
+
+/**
+ * A permission to invite guests: one that changes things, so a version no
+ * admin approved is asked for it again.
+ */
+const guests: DeclaredPermission = {
+  object: { type: "platform" },
+  actions: ["guests"],
+  binding: "GUESTS",
+};
 
 /** The trees stored for `hello`, by their hashes. */
 const helloTrees = async (): Promise<string[]> => {
@@ -267,16 +278,17 @@ describe("the built-in blueprints", () => {
           describeWorkflow(source);
         }
       }
-      // Its screens pass the compiler's checks, as they do when opened.
+      // Its screens pass the compiler's checks, with the references they
+      // import (`#grasp`), as they do when saved and opened.
       if (
         Object.keys(blueprint.files).some((path) => path.startsWith("screens/"))
       ) {
         // oxlint-disable-next-line no-await-in-loop -- as above
-        const screens = await buildScreens(
-          env,
-          { ...blueprint.files },
-          "app-test"
-        );
+        const files = await withDraftReferences(env, created.app.id, 1, {
+          ...blueprint.files,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        const screens = await buildScreens(env, files, created.app.id);
         if (!screens.ok || screens.diagnostics.length > 0) {
           throw new Error(
             `The screens of ${blueprint.id} don't pass: ${JSON.stringify(screens.diagnostics)}`
@@ -545,11 +557,7 @@ describe("the built-in blueprints", () => {
     await reinstall();
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const { collectionId } = await collectionWithNote(admin.api, {
-      name: `Granted ${unique()}`,
-      access: "everyone",
-    });
-    const declaring = releaseWith({ permissions: [notesOf(collectionId)] });
+    const declaring = releaseWith({ permissions: [guests] });
     await expect(install(declaring)).resolves.toBeTruthy();
     const created = await builder.api.apps.blueprints.create("hello", {
       name: "Granted",
@@ -569,7 +577,7 @@ describe("the built-in blueprints", () => {
               ...hello().files,
               [greetings]: `${hello().files[greetings]}\n// Changed.\n`,
             },
-            permissions: [notesOf(collectionId)],
+            permissions: [guests],
           })
         )
       ).resolves.toBeTruthy();
@@ -639,7 +647,7 @@ describe("the built-in blueprints", () => {
     await storedGrant(
       { type: "app", id: previous },
       { type: "collection", id: collectionId },
-      ["read", "write"],
+      ["read"],
       "NOTES",
       "requested"
     );

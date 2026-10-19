@@ -368,6 +368,38 @@ describe("a statistics declaration", () => {
   });
 });
 
+/** Reads an app declaration of `functions` back, as a manifest holds it. */
+const declareApp = (functions: unknown) => () =>
+  readResourceDeclaration({ "~resource": "app", alias: "crm", functions });
+
+describe("an app declaration", () => {
+  test("reads back as code declared it, and calls another App's queries, mutations and actions only", () => {
+    const crm = resource.app("crm", {
+      functions: {
+        "contacts.find": {
+          kind: "query",
+          args: { name: v.string() },
+          returns: v.array(v.string()),
+        },
+        "contacts.mail": { kind: "action", args: {}, returns: v.null() },
+      },
+    });
+    const shape = structuredClone(crm.functions["contacts.find"]);
+    expect({
+      read: JSON.stringify(readResourceDeclaration(structuredClone(crm))),
+      frozen: Reflect.set(crm.functions, "contacts.drop", shape),
+    }).toStrictEqual({ read: JSON.stringify(crm), frozen: false });
+    expect(
+      [
+        declareApp({ "contacts.find": { ...shape, kind: "stream" } }),
+        declareApp({ "contacts..find": shape }),
+        declareApp({}),
+        declareApp({ "contacts.find": { ...shape, extra: true } }),
+      ].map((declaration) => refusal(declaration).length > 0)
+    ).toStrictEqual([true, true, true, true]);
+  });
+});
+
 describe("inspection", () => {
   test("hands out a manifest frozen all the way down, and handlers it can't change", () => {
     const registered = notes();

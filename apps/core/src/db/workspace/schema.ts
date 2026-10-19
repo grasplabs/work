@@ -1,6 +1,6 @@
 /**
  * Workspace Durable Object SQLite: chats, agent state, and its person's
- * dashboard. Migrates itself on first wake-up after a release.
+ * dashboard and email preferences. Migrates itself on first wake-up after a release.
  */
 import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ChatId } from "@grasp-os/shared/ids";
@@ -372,6 +372,20 @@ export const dashboardWidgets = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.personId, table.position] })]
 );
+
+/**
+ * A person's own choice of the emails Grasp sends them, once they changed
+ * it: a row for each person who saved theirs; one never saved gets every
+ * email (`defaultEmailPreferences`). Kept in their own Workspace object,
+ * as their dashboard is.
+ */
+export const emailPreferences = sqliteTable("email_preferences", {
+  personId: text("person_id").primaryKey(),
+  needsYou: integer("needs_you", { mode: "boolean" }).notNull(),
+  weeklySummary: integer("weekly_summary", { mode: "boolean" }).notNull(),
+  billingProblems: integer("billing_problems", { mode: "boolean" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
 
 /**
  * The draft release a chat's preview of its draft of an App runs
