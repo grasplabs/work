@@ -1,10 +1,14 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { computePackagesFile, packageModuleName } from "@grasp-os/compiler";
+import { v } from "@grasp-os/sdk";
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { ConnectorContract } from "@grasp-os/shared/connect";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -13,6 +17,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { grantApprover } from "../src/dependencies/approvers.ts";
 import { policyGeneration } from "../src/dependencies/policy.ts";
@@ -23,7 +28,11 @@ import {
 } from "../src/dependencies/requests.ts";
 import { buildDependencies } from "../src/packages/build.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { compileModules } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
@@ -42,6 +51,7 @@ import {
   requirePackagesAdmitted,
   sealPackages,
 } from "../src/workflows/sealed-packages.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { noise, publish } from "./npm.ts";
 import { racingDb } from "./racing-db.ts";
 import { admittedFreely } from "./runs.ts";
@@ -202,6 +212,120 @@ export const total = compute({
   input: v.array(v.number().integer().min(0)).max(100),
   output: v.number().integer().min(0),
   handler: (amounts) => double(amounts.reduce((all, amount) => all + amount, 0)),
+});
+`;
+
+const descriptorOf = (schema: { descriptor: unknown }): string =>
+  JSON.stringify(schema.descriptor);
+
+/** What `mail.send` takes and answers, as descriptors. */
+const mailInput = descriptorOf(
+  v.object({ to: v.string(), subject: v.string() })
+);
+const mailOutput = descriptorOf(v.object({ messageId: v.string() }));
+
+const shapeText = (descriptor: string): string =>
+  JSON.stringify(
+    jsonSchemaOf(schemaFromDescriptor(descriptor).descriptor, { exact: true })
+  );
+
+/** `env`, its connect serving the `mail.send` contract for a connection. */
+const servingMail = (): Env => {
+  const contract: ConnectorContract = {
+    contract: "composio.mail@1",
+    actions: {
+      send: {
+        tool: "mail.send",
+        readOnly: false,
+        input: shapeText(mailInput),
+        output: shapeText(mailOutput),
+      },
+    },
+  };
+  return {
+    ...env,
+    CONNECT: new Proxy(env.CONNECT, {
+      get: (target, name): unknown =>
+        name === "connectorContract"
+          ? async () => await Promise.resolve(contract)
+          : Reflect.get(target, name),
+    }),
+  };
+};
+
+/** A permission `by` asks for and `admin` grants. */
+const granted = async (
+  by: Identity,
+  admin: Identity,
+  request: PermissionRequest
+): Promise<string> => {
+  const asked = await requestPermission(env, by, request, {
+    app: async (named: string, role: "user" | "builder") =>
+      await appFor(env, by, named, role),
+    resource: async (ref, needed) => {
+      await requireResourceRole(env, by, ref, needed);
+    },
+  });
+  await grantPermission(env, admin, asked.id, { version: null });
+  return asked.id;
+};
+
+/**
+ * A definition of `name` whose action `notify` sends mail through its
+ * `mail` binding, a connector of catalog contract `mailKey`.
+ */
+const mailingDefinitionOf = (name: string, mailKey: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {},
+          bindings: {
+            notify: {
+              kind: "operation",
+              contract: "local:code/notify.ts#notify",
+            },
+            mail: { kind: "connector", contract: mailKey },
+          },
+        },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      {
+        notify: {
+          call: "grasp.operation",
+          with: {
+            binding: "notify",
+            arguments: { to: "${ $workflow.input.who }" },
+          },
+        },
+      },
+    ],
+  });
+
+/** An action sending two mails, their subjects `pkg`'s `double` of 1 and 2. */
+const mailingUsing = (
+  pkg: string
+): string => `import { action, resource, v } from "@grasp-os/sdk/action";
+import { double } from ${JSON.stringify(pkg)};
+
+export const notify = action({
+  args: { to: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [resource.connector("mail", { operations: ["mail.send"] })],
+  handler: async (ctx, args) => {
+    await ctx.resources.mail.call("mail.send", { to: args.to, subject: String(double(1)) });
+    await ctx.resources.mail.call("mail.send", { to: args.to, subject: String(double(2)) });
+    return { status: "sent" };
+  },
 });
 `;
 
@@ -502,6 +626,78 @@ const actionRunWith = async () => {
   const runId = await started(builder, workflow.id);
   heldRuns.push({ by: builder, workflowId: workflow.id, runId });
   return { admin, builder, workflow, request, runId };
+};
+
+/**
+ * A run of a workflow of a new builder's whose action, importing an
+ * approved package, sends two mails, the first held at the mail server
+ * until the graph is ended as `ending` (`retired` or `revoked`): how the
+ * run ended, what the server did, and what was audited meanwhile.
+ */
+const mailedThroughEnding = async (ending: "retired" | "revoked") => {
+  const admin = await approver();
+  const pkg = await doubling();
+  const { builder, workflow, request } = await workflowWith(pkg);
+  await approve(admin, request);
+  const mailKey = `mail-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key: mailKey,
+    kind: "connector",
+    operations: { "mail.send": { input: mailInput, output: mailOutput } },
+  });
+  await publishWorkflowVersion(
+    env,
+    builder,
+    workflow.id,
+    {
+      definition: mailingDefinitionOf(workflow.name, mailKey),
+      basedOn: null,
+      modules: { "code/notify.ts": mailingUsing(pkg) },
+      packages: { graphHash: request.graphHash },
+    },
+    sealPackages
+  );
+  // The first mail is held at the server until the graph is ended.
+  const mail = await mailConnection(["slow"]);
+  const permissionId = await granted(builder, admin, {
+    subject: { type: "workflow", workflowId: workflow.id },
+    object: { type: "connection", connectionId: mail.id },
+    actions: ["mail.send"],
+    binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
+  });
+  // Connect serves the contract as the approval and the start check it.
+  const serving = servingMail();
+  await approveWorkflowBinding(serving, admin, workflow.id, {
+    alias: "mail",
+    target: { kind: "connector", permissionId, contract: "composio.mail@1" },
+    reviewed: { version: 1 },
+  });
+  const { runId } = await startWorkflow(
+    serving,
+    { type: "person", person: builder },
+    workflow.id,
+    { version: 1, input: { who: "Ada" }, key: unique() }
+  );
+  if (runId === null) {
+    throw new Error("The start admitted no run");
+  }
+  let run: Awaited<ReturnType<typeof ended>> | undefined;
+  const events = await auditedDuring(async () => {
+    try {
+      await vi.waitFor(
+        async () => {
+          await expect(mail.holding()).resolves.toBeTruthy();
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+      await end(admin, request, ending);
+    } finally {
+      // Released whatever the wait saw, so no call stays held.
+      await mail.release();
+    }
+    run = await ended(builder, workflow.id, runId);
+  });
+  return { run, server: await mail.did(), events };
 };
 
 describe("a workflow's modules importing approved packages", () => {
@@ -817,6 +1013,56 @@ describe("a workflow's modules importing approved packages", () => {
     await expect(ended(builder, workflow.id, runId)).resolves.toStrictEqual({
       status: "failed",
       code: "workflow.packages_revoked",
+    });
+  });
+
+  it("makes no call more of an action whose graph is revoked while it runs, audited", async () => {
+    const { run, server, events } = await mailedThroughEnding("revoked");
+
+    expect({
+      run,
+      // The mail sent before the revocation, and none after.
+      server,
+      audited: outcomesOf(events, [
+        "dependency.admission_refused",
+        "workflow.run.failed",
+      ]),
+    }).toStrictEqual({
+      run: { status: "failed", code: "workflow.packages_revoked" },
+      server: { calls: 1, sent: [{ to: "Ada", subject: "2" }] },
+      audited: [
+        {
+          action: "dependency.admission_refused",
+          reason: "revoked",
+          failureCode: null,
+        },
+        {
+          action: "workflow.run.failed",
+          reason: null,
+          failureCode: "workflow.packages_revoked",
+        },
+      ],
+    });
+  });
+
+  it("keeps making the calls of an action whose graph is retired while it runs", async () => {
+    const { run, server, events } = await mailedThroughEnding("retired");
+
+    // What a retired graph sealed keeps running, as a compute call's does.
+    expect({
+      run,
+      server,
+      refused: outcomesOf(events, ["dependency.admission_refused"]),
+    }).toStrictEqual({
+      run: { status: "completed", output: { status: "sent" } },
+      server: {
+        calls: 2,
+        sent: [
+          { to: "Ada", subject: "2" },
+          { to: "Ada", subject: "4" },
+        ],
+      },
+      refused: [],
     });
   });
 

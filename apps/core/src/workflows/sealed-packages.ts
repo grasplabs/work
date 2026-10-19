@@ -40,6 +40,9 @@ import type { SealedPackages } from "./package-seal.ts";
 //   generation now (`requirePackagesAdmitted`), which a revocation moves
 //   on: a run in flight fails at its next call (`workflow.packages_revoked`,
 //   never retried), the refusal audited once per graph and generation.
+//   Each resource call an action makes is admitted again too (GRA-700):
+//   its code acts until its attempt's deadline, and a graph revoked in
+//   that time makes no call more.
 
 /** What a workflow's packages are admitted for: its calculations. */
 const computationOnly: DependencyTarget[] = [workflowDependencyTarget];

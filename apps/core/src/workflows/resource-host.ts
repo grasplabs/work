@@ -2251,8 +2251,9 @@ export class ResourceRunHost
     if (call.name === "grasp.compute") {
       // Its modules' approved packages admitted again first, under the
       // policy generation now: a graph revoked since fails the run here,
-      // never retried (decision 4, GRA-665). An action's were admitted as
-      // its attempt began (`#attemptOf`).
+      // never retried (decision 4, GRA-665). An action's are admitted as
+      // its attempt begins (`#attemptOf`), and again before each of its
+      // calls (`#action`).
       await this.#packagesAdmitted();
     }
     if (call.name === "grasp.compute") {
@@ -2338,8 +2339,9 @@ export class ResourceRunHost
   /**
    * `#made`'s work for an action task: the action run in the modules'
    * sandbox (resource-action.ts), each of its resource calls one of the
-   * run's named calls, as a task's own: its lineage's host call first,
-   * then `makeCall`, under its step's key and its ordinal.
+   * run's named calls, as a task's own: its version's approved packages
+   * admitted again, its lineage's host call, then `makeCall`, under its
+   * step's key and its ordinal.
    */
   async #action(
     attempt: StepAttempt,
@@ -2362,6 +2364,14 @@ export class ResourceRunHost
         owner: `workflow-action:${this.#run.workflowId}`,
         parent: this.#hooks.sessionId?.(),
         make: async (built, ordinal) => {
+          this.#requireCurrent(attempt);
+          // Its version's approved packages admitted again, as a compute
+          // call's are: the attempt admitted them as it began, but its
+          // code acts until its deadline, and a graph revoked since makes
+          // no call more (`workflow.packages_revoked`, which fails the
+          // task as the action's refusal). Before anything else of the
+          // call's, so nothing of a revoked package's reaches a binding.
+          await this.#packagesAdmitted();
           this.#requireCurrent(attempt);
           await attempt.admission.hostCall();
           this.#requireCurrent(attempt);
