@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { pageOf, peopleIn } from "./people.ts";
+import { peopleIn } from "./people.ts";
 
 // The Brain, end to end: a person opens it from the sidebar, goes into a
 // part of it and opens a note there. Every deployment's brain has its
@@ -13,10 +13,10 @@ import { pageOf, peopleIn } from "./people.ts";
 const brainRead = { timeout: 15_000 };
 
 test("a person opens the brain from the sidebar, a part of it, and a note in that part", async ({
-  browser,
+  pageOf,
 }) => {
   const { member } = peopleIn("brain");
-  const page = await pageOf(browser, member);
+  const page = await pageOf(member);
   await page.goto("/");
 
   await page
