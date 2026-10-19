@@ -68,6 +68,7 @@ import {
   sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { inJurisdiction } from "./durable-objects.ts";
 import {
   evidenceFits,
   migrationEvidence,
@@ -805,6 +806,54 @@ const claimStore = async (
 const needsStore = (app: AppManifest): boolean =>
   Object.keys(app.schema.tables).length > 0 || app.preferences !== null;
 
+/**
+ * Plans `manifest`'s preferences onto `store`'s preferences contract
+ * (store-host.ts, `definePreferences`): refused when it changes one; with
+ * `apply`, the contract takes them. Nothing for an App without.
+ */
+const definedPreferences = async (
+  env: Env,
+  store: StoreId,
+  manifest: AppManifest,
+  apply: boolean
+): Promise<void> => {
+  if (manifest.preferences === null) {
+    return;
+  }
+  await inJurisdiction(env, env.DATA_STORES)
+    .getByName(store)
+    .definePreferences(store, JSON.stringify(manifest.preferences), apply);
+};
+
+/**
+ * Has `release`'s store's preferences contract take its preferences, once
+ * it is sealed: so a seal that failed left nothing there. A failure here
+ * leaves the release sealed (it is, and runs), and is logged; sealing the
+ * version again applies them again (`resealed`).
+ */
+const appliedPreferences = async (
+  env: Env,
+  release: Pick<Release, "app" | "store" | "manifest">
+): Promise<void> => {
+  if (release.store === null) {
+    return;
+  }
+  try {
+    await definedPreferences(
+      env,
+      storeIdSchema.parse(release.store.storeId),
+      release.app,
+      true
+    );
+  } catch (error) {
+    log.error("seal.preferences_not_applied", {
+      app: release.manifest.resourceId,
+      version: release.manifest.resourceVersion,
+      ...errorFields(error),
+    });
+  }
+};
+
 /** The SHA-256 of the canonical text of the App's functions. */
 const operationManifestHash = async (app: AppManifest): Promise<string> =>
   await sha256Hex(canonicalText(app.operations));
@@ -937,6 +986,12 @@ const boundStore = async (
   // no claim is ever written for a store that doesn't exist.
   const opened = await openStore(env, request.store);
   await claimStore(env, opened.id, request.app);
+  // Its preferences checked against the store's preferences contract
+  // first (store-host.ts, `definePreferences`): a version that changes one
+  // people may have chosen is refused before its tables are touched. The
+  // contract takes them only once the release is sealed
+  // (`appliedPreferences`).
+  await definedPreferences(env, opened.id, manifest, false);
   const defined = await defineSchemaOnStore(
     env,
     opened,
@@ -999,6 +1054,7 @@ const resealed = async (
       throw migrationErrors.create("migration.abandoned");
     }
   }
+  await appliedPreferences(env, release);
   return release;
 };
 
@@ -1386,8 +1442,14 @@ export const sealRelease = async (
     if (won.manifestHash !== hash) {
       throw versionErrors.create("version.seal_conflict");
     }
+    await appliedPreferences(env, won);
     return won;
   }
+  await appliedPreferences(env, {
+    app: manifest,
+    store,
+    manifest: releaseManifest,
+  });
   // What was just built and stored, as it was verified here: the next load
   // reads it all back from storage.
   return deepFreeze({

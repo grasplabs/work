@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/sdk";
 import { contractFingerprint, preferenceOperations } from "@grasp-os/sdk/host";
 import type { PreferenceOperationName } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
@@ -11,6 +12,7 @@ import {
   screenLeaseHeader,
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -41,14 +43,20 @@ import { routed, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-/** An App declaring `preferences`, with no tables unless `withNotes`. */
+/**
+ * An App declaring `preferences`, with no tables unless `withNotes`: a
+ * notes table whose title is `title` (a string unless given).
+ */
 const filesWith = (
   preferences: string,
-  { withNotes = false }: { withNotes?: boolean } = {}
+  {
+    withNotes = false,
+    title = "v.string()",
+  }: { withNotes?: boolean; title?: string } = {}
 ): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema(${withNotes ? "{ notes: defineTable({ title: v.string() }) }" : "{}"});
+export default defineSchema(${withNotes ? `{ notes: defineTable({ title: ${title} }) }` : "{}"});
 `,
   "app.ts": `import { app, v } from "@grasp-os/sdk";
 import schema from "./schema.ts";
@@ -72,6 +80,13 @@ export default app({
 const declared = `v.object({
     compact: v.boolean().default(false),
     theme: v.enum(["light", "dark"]).default("light"),
+  })`;
+
+/** The preferences declared, with a page size of at most `max`. */
+const withPageSize = (max: number): string => `v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light", "dark"]).default("light"),
+    pageSize: v.number().integer().min(10).max(${max}).default(25),
   })`;
 
 type Sealed = Fixture & { release: Release };
@@ -164,6 +179,31 @@ const valueOf = (result: OperationResult): unknown => {
     throw new Error(`The call failed: ${result.error.code}`);
   }
   return result.value;
+};
+
+/**
+ * Plants `chosen` as `personId`'s stored preferences of `desk`, past every
+ * check: a document that no longer fits, as no seal can leave one now.
+ */
+const planted = async (
+  desk: Sealed,
+  personId: string,
+  chosen: Record<string, unknown>,
+  revision = 1
+): Promise<void> => {
+  const storeId = storeIdSchema.parse(desk.release.store?.storeId);
+  await runInDurableObject(
+    inJurisdiction(env, env.DATA_STORES).getByName(storeId),
+    (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO sdk_preferences (person_id, revision, value_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (person_id) DO UPDATE SET revision = excluded.revision, value_json = excluded.value_json",
+        personId,
+        revision,
+        JSON.stringify(chosen),
+        Date.now()
+      );
+    }
+  );
 };
 
 /** `ok`, or the code the call failed with. */
@@ -599,9 +639,54 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     });
   });
 
-  it("refuse a stored value a later version no longer allows, rewriting nothing, until a patch replaces it", async () => {
+  it("leave nothing in the store's preferences contract from a seal that failed", async () => {
+    const desk = await sealedDesk(filesWith(declared, { withNotes: true }));
+    /** Seals the App's next `version` with `preferences` and `title`. */
+    const sealing = async (
+      version: number,
+      preferences: string,
+      title?: string
+    ): Promise<string> => {
+      await commitFiles(
+        env,
+        desk.owner,
+        desk.app,
+        filesWith(preferences, {
+          withNotes: true,
+          ...(title === undefined ? {} : { title }),
+        }),
+        `v${version}`
+      );
+      return await failure(async () => await seal(desk, version));
+    };
+    expect([
+      // A new preference, in a version whose table change needs a
+      // migration: the seal fails after its preferences were checked.
+      await sealing(2, withPageSize(100), "v.number()"),
+      // So the builder can still give it another shape.
+      await sealing(3, withPageSize(50)),
+      await sealing(4, withPageSize(100)),
+    ]).toStrictEqual([
+      "migration.required",
+      "ok",
+      "migration.preference_changed",
+    ]);
+  });
+
+  it("apply a sealed version's preferences again when it is sealed again, so a lost apply heals", async () => {
     const desk = await sealedDesk();
-    await update(desk, desk.owner, 0, { theme: "dark" });
+    const storeId = storeIdSchema.parse(desk.release.store?.storeId);
+    // The apply after the seal was lost, as if the store were unreachable.
+    await runInDurableObject(
+      inJurisdiction(env, env.DATA_STORES).getByName(storeId),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE sdk_store SET preferences_contract = NULL"
+        );
+      }
+    );
+    // Sealing the version again applies them again.
+    await seal(desk);
     await commitFiles(
       env,
       desk.owner,
@@ -612,24 +697,149 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
   })`),
       "Light only"
     );
-    const second = { ...desk, release: await seal(desk, 2) };
-    await setCurrentVersion(env, desk.owner, desk.app, 2);
-    expect(codeOf(await get(second, desk.owner))).toBe(
+    await expect(failure(async () => await seal(desk, 2))).resolves.toBe(
+      "migration.preference_changed"
+    );
+  });
+
+  it("serve a release's preferences only while the store's contract holds them, taking them at the first call if it lost them", async () => {
+    const desk = await sealedDesk();
+    /** Sets the store's preferences contract, as if another release had. */
+    const contractIs = async (contract: unknown): Promise<void> => {
+      const storeId = storeIdSchema.parse(desk.release.store?.storeId);
+      await runInDurableObject(
+        inJurisdiction(env, env.DATA_STORES).getByName(storeId),
+        (_instance, state) => {
+          state.storage.sql.exec(
+            "UPDATE sdk_store SET preferences_contract = ?",
+            contract === null ? null : JSON.stringify(contract)
+          );
+        }
+      );
+    };
+    // Another release, racing this one's seal, made the store's contract
+    // hold a narrower theme: this release serves no preference call.
+    await contractIs({
+      theme: v.enum(["light"]).default("light").descriptor,
+    });
+    expect([
+      codeOf(await get(desk, desk.owner)),
+      codeOf(await update(desk, desk.owner, 0, { compact: true })),
+    ]).toStrictEqual([
+      "migration.preference_changed",
+      "migration.preference_changed",
+    ]);
+    // The contract lost (its apply after the seal never landed): the first
+    // call puts this release's preferences back, so a narrowing seal is
+    // refused again.
+    await contractIs(null);
+    expect(codeOf(await get(desk, desk.owner))).toBe("ok");
+    await commitFiles(
+      env,
+      desk.owner,
+      desk.app,
+      filesWith(`v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light"]).default("light"),
+  })`),
+      "Light only"
+    );
+    await expect(failure(async () => await seal(desk, 2))).resolves.toBe(
+      "migration.preference_changed"
+    );
+  });
+
+  it("refuse a stored value that no longer fits, rewriting nothing, until a patch replaces it", async () => {
+    const desk = await sealedDesk();
+    await planted(desk, desk.owner.userId, { theme: "blue" });
+    expect(codeOf(await get(desk, desk.owner))).toBe(
       "data.incompatible_record"
     );
-    expect(codeOf(await update(second, desk.owner, 1, { compact: true }))).toBe(
+    expect(codeOf(await update(desk, desk.owner, 1, { compact: true }))).toBe(
       "data.incompatible_record"
     );
     // A patch that replaces the value that no longer fits is taken.
     expect(
-      valueOf(await update(second, desk.owner, 1, { theme: "light" }))
+      valueOf(await update(desk, desk.owner, 1, { theme: "light" }))
     ).toStrictEqual({ compact: false, theme: "light", _rev: 2 });
-    // Back on version 1, the stored choice is as it was.
-    await setCurrentVersion(env, desk.owner, desk.app, 1);
+  });
+
+  it("refuse at seal a version that changes a preference people may have chosen, and keep running the one before", async () => {
+    const desk = await sealedDesk();
+    await update(desk, desk.owner, 0, { theme: "dark" });
+    /** What sealing the App's next `version` with `preferences` does. */
+    const sealing = async (version: number, preferences: string) => {
+      await commitFiles(
+        env,
+        desk.owner,
+        desk.app,
+        filesWith(preferences),
+        `v${version}`
+      );
+      try {
+        await seal(desk, version);
+        return "sealed";
+      } catch (error) {
+        const { code, details } = z
+          .object({
+            code: z.string(),
+            details: z
+              .object({
+                changes: z.array(z.object({ preference: z.string() })),
+              })
+              .optional(),
+          })
+          .parse(error);
+        return `${code}: ${(details?.changes ?? []).map(({ preference }) => preference).join(", ")}`;
+      }
+    };
+    expect([
+      // Narrowed: people's "dark" would no longer fit.
+      await sealing(
+        2,
+        `v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light"]).default("light"),
+  })`
+      ),
+      // Widened: "blue" stored under it wouldn't fit version 1 after a
+      // rollback.
+      await sealing(
+        3,
+        `v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light", "dark", "blue"]).default("light"),
+  })`
+      ),
+      // Removed: kept by the store, so it comes back only as it was.
+      await sealing(4, "v.object({ compact: v.boolean().default(false) })"),
+      await sealing(
+        5,
+        `v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light"]).default("light"),
+  })`
+      ),
+      // As it was, with another default: taken.
+      await sealing(
+        6,
+        `v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light", "dark"]).default("dark"),
+  })`
+      ),
+    ]).toStrictEqual([
+      "migration.preference_changed: theme",
+      "migration.preference_changed: theme",
+      "sealed",
+      "migration.preference_changed: theme",
+      "sealed",
+    ]);
+    // Refused seals changed nothing: version 1 runs, and reads as before.
     expect(valueOf(await get(desk, desk.owner))).toStrictEqual({
       compact: false,
-      theme: "light",
-      _rev: 2,
+      theme: "dark",
+      _rev: 1,
     });
   });
 });
@@ -793,20 +1003,8 @@ describe(
       const admin = await signedIn("admin");
       const builder = await signedIn("builder");
       const desk = await sealedDesk(filesWith(declared), builder.acting);
-      await update(desk, builder.acting, 0, { theme: "dark" });
-      // Version 2 no longer allows "dark": what they stored no longer fits.
-      await commitFiles(
-        env,
-        builder.acting,
-        desk.app,
-        filesWith(`v.object({
-    compact: v.boolean().default(false),
-    theme: v.enum(["light"]).default("light"),
-  })`),
-        "Light only"
-      );
-      const second = { ...desk, release: await seal(desk, 2) };
-      await setCurrentVersion(env, builder.acting, desk.app, 2);
+      // What they stored no longer fits.
+      await planted(desk, builder.userId, { theme: "blue" });
       const review = await admin.api.screenTrust.review(desk.app);
       await admin.api.screenTrust.approve(desk.app, {
         version: review.version,
@@ -820,7 +1018,7 @@ describe(
         desk.app,
         bundle.lease,
         JSON.stringify({
-          reference: await referenceTo(second.release, "get"),
+          reference: await referenceTo(desk.release, "get"),
           input: {},
         }),
         follower.callback
@@ -833,7 +1031,7 @@ describe(
         );
       }, pushWait);
       // Repaired from elsewhere: the same subscription gets the document.
-      await update(second, builder.acting, 1, { theme: "light" });
+      await update(desk, builder.acting, 1, { theme: "light" });
       await vi.waitFor(() => {
         const result = last();
         expect(result?.ok === true ? result.value : undefined).toStrictEqual({
