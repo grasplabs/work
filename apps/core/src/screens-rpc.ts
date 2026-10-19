@@ -734,10 +734,11 @@ const errorLog = async (
 };
 
 /**
- * Waits for `read` however it ends, for a look that no longer needs its
- * answer (no role): so a failure of it is never left unhandled.
+ * Lets go of `read` for a look that no longer needs its answer (no role),
+ * without waiting for it: the callback is released at once, and a failure
+ * of the read is never left unhandled.
  */
-const drained = async (read: Promise<unknown>): Promise<void> => {
+const abandoned = async (read: Promise<unknown>): Promise<void> => {
   try {
     await read;
   } catch {
@@ -833,7 +834,8 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
           // of this revocation, and only with them (`standingNow`).
           const read = connection.standingNow(id, build);
           if (this.#closed || !(await hasRole())) {
-            await drained(read);
+            // Not awaited: it never rejects, and the screen must not wait.
+            void abandoned(read);
             return false;
           }
           return (
@@ -1149,7 +1151,8 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
         // of this revocation, and only with them (`#standingNow`).
         const read = this.#standingNow(app, artifact);
         if (!(await hasRole())) {
-          await drained(read);
+          // Not awaited: it never rejects, and the screen must not wait.
+          void abandoned(read);
           return false;
         }
         return (
