@@ -37,7 +37,7 @@ export type LogSource =
 
 export interface LogItem {
   key: string;
-  /** The day it happened, as the reader's own calendar has it. */
+  /** The day it happened, in UTC (`utcDay`). */
   on: string;
   /** The moment, where that is known; what is only known by its day has none. */
   at: number | null;
@@ -52,13 +52,14 @@ export interface LogItem {
   source: LogSource;
 }
 
-const two = (value: number) => String(value).padStart(2, "0");
-
-/** The day a moment falls on, on the reader's own calendar. */
-export const localDay = (at: number): string => {
-  const date = new Date(at);
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
-};
+/**
+ * The day a moment falls on, in UTC as its hours and the console's times
+ * are: on the reader's own calendar, an entry near midnight would sit under
+ * a day its time doesn't belong to, and the server and the browser would
+ * put it under different days.
+ */
+export const utcDay = (at: number): string =>
+  new Date(at).toISOString().slice(0, 10);
 
 const HAND_TOPIC: Record<TrailEntry["what"], LogTopic> = {
   made: "setup",
@@ -231,7 +232,7 @@ const fromWorker = (event: OrgEvent, index: number): LogItem | null => {
   }
   return byWorker(event, about, {
     key: `worker-${index}`,
-    on: localDay(at),
+    on: utcDay(at),
     at,
     topic,
     problem: false,
@@ -241,7 +242,7 @@ const fromWorker = (event: OrgEvent, index: number): LogItem | null => {
 
 const fromHand = (entry: TrailEntry, index: number): LogItem => ({
   key: `hand-${index}`,
-  on: localDay(entry.at),
+  on: utcDay(entry.at),
   at: entry.at,
   topic: HAND_TOPIC[entry.what],
   actor: "grasp",
