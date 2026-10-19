@@ -745,7 +745,7 @@ export const shadcnComponents = {
   textarea: {
     status: "supported",
     summary: "A text input over several lines.",
-    exports: ["Textarea"],
+    exports: ["Textarea", "textareaVariants"],
   },
   toast: {
     status: "supported",

@@ -131,7 +131,9 @@ describe("resolving an App's packages", () => {
       targets: ["browser", "server"],
       counts: { direct: 2, packages: 3, findings: 0, refused: 0 },
     });
-    const { policyGeneration } = await builder.api.dependencies.status(app);
+    const { policyGeneration } = await builder.api.dependencies.status({
+      app,
+    });
     await expect(
       admitDependencies(
         env,
@@ -916,7 +918,7 @@ describe("a chat's agent", () => {
       status: "pending",
       direct: { [dates]: "1.0.0" },
     });
-    const status = await builder.api.dependencies.status(app);
+    const status = await builder.api.dependencies.status({ app });
     expect(status.pending?.requestedVia).not.toBeNull();
     expect(status.approved).toBeNull();
   });
@@ -925,7 +927,7 @@ describe("a chat's agent", () => {
 /** The graphs `app` holds a lock for, in no order. */
 const lockedGraphs = async (app: string): Promise<string[]> => {
   const { results } = await env.DB.prepare(
-    "SELECT graph_hash FROM dependency_locks WHERE app_id = ?"
+    "SELECT graph_hash FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ?"
   )
     .bind(app)
     .all<{ graph_hash: string }>();
@@ -1001,7 +1003,7 @@ describe("an App's locks and the files they name", () => {
     const db = racingDb(async (target) => {
       await target
         .prepare(
-          "INSERT OR IGNORE INTO dependency_requests (id, app_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (?, ?, 'rev-0', ?, '[\"browser\"]', 'Another', '{}', '{\"direct\":[],\"findings\":[]}', 1, 1, 0, 0, NULL, 'pending', ?, NULL, ?, 0, NULL, NULL, NULL, NULL)"
+          "INSERT OR IGNORE INTO dependency_requests (id, subject_type, subject_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (?, 'app', ?, 'rev-0', ?, '[\"browser\"]', 'Another', '{}', '{\"direct\":[],\"findings\":[]}', 1, 1, 0, 0, NULL, 'pending', ?, NULL, ?, 0, NULL, NULL, NULL, NULL)"
         )
         .bind(
           crypto.randomUUID(),
@@ -1013,7 +1015,7 @@ describe("an App's locks and the files they name", () => {
         .run();
       await target
         .prepare(
-          "UPDATE dependency_requests SET id = ? WHERE app_id = ? AND status = 'pending'"
+          "UPDATE dependency_requests SET id = ? WHERE subject_type = 'app' AND subject_id = ? AND status = 'pending'"
         )
         .bind(crypto.randomUUID(), app)
         .run();
@@ -1232,7 +1234,7 @@ describe("an App's locks and the files they name", () => {
       await target.batch([
         target
           .prepare(
-            "INSERT OR IGNORE INTO dependency_requests (id, app_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (?, ?, 'rev-0', ?, '[\"workflow\"]', 'Another', '{}', '{\"direct\":[],\"findings\":[]}', 1, 1, 0, 0, NULL, 'approved', ?, NULL, ?, 0, ?, ?, 0, NULL)"
+            "INSERT OR IGNORE INTO dependency_requests (id, subject_type, subject_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (?, 'app', ?, 'rev-0', ?, '[\"workflow\"]', 'Another', '{}', '{\"direct\":[],\"findings\":[]}', 1, 1, 0, 0, NULL, 'approved', ?, NULL, ?, 0, ?, ?, 0, NULL)"
           )
           .bind(
             `raced-${app}`,
@@ -1245,7 +1247,7 @@ describe("an App's locks and the files they name", () => {
           ),
         target
           .prepare(
-            "INSERT OR IGNORE INTO dependency_locks (app_id, graph_hash, lock, created_at) VALUES (?, ?, '{}', ?)"
+            "INSERT OR IGNORE INTO dependency_locks (subject_type, subject_id, graph_hash, lock, created_at) VALUES ('app', ?, ?, '{}', ?)"
           )
           .bind(app, "e".repeat(64), Date.now()),
       ]);
@@ -1278,7 +1280,7 @@ describe("an App's locks and the files they name", () => {
     const db = racingDb(async (target) => {
       await target
         .prepare(
-          "UPDATE dependency_locks SET lock = lock || ' ' WHERE app_id = ?"
+          "UPDATE dependency_locks SET lock = lock || ' ' WHERE subject_type = 'app' AND subject_id = ?"
         )
         .bind(app)
         .run();

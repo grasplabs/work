@@ -7,7 +7,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { identifierMaxLength } from "@grasp-os/shared/ids";
+import { appIdSchema, identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -68,6 +68,12 @@ import type {
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
+import {
+  appAdapter,
+  currentReleaseOf,
+  declaredFingerprints,
+  servedIn,
+} from "./resource-apps.ts";
 import { connectorAdapter, contractReader } from "./resource-connector.ts";
 import type {
   ConnectionGrantRow,
@@ -139,6 +145,7 @@ const adapters: {
   store: storeAdapter,
   statistics: statisticsAdapter,
   guests: guestsAdapter,
+  app: appAdapter,
 };
 
 /** The SHA-256 of `declaration`, canonical, as a release sealed it. */
@@ -300,6 +307,9 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
   }
   if (target.kind === "guests") {
     return { permissionId: target.permissionId };
+  }
+  if (target.kind === "app") {
+    return { appId: target.appId };
   }
   if (target.kind === "statistics") {
     return target.permissionId === undefined
@@ -668,6 +678,19 @@ const choicesMax = 100;
 const reviewContractAsksMax = 50;
 
 /**
+ * The most other Apps one review considers as an app resource's choices,
+ * newest first: each one's current release is read once for the whole
+ * review, `reviewAppChecksAtOnce` at a time, and checked against each
+ * app resource's declaration in memory. An App past it can
+ * still be bound by its ID (`approve` checks any App the same way); the
+ * review says some were left out.
+ */
+const reviewAppCandidatesMax = 100;
+
+/** How many of a review's candidate Apps' releases are read at once. */
+const reviewAppChecksAtOnce = 10;
+
+/**
  * The most distinct store permissions one review resolves for choices,
  * across all its store resources: each reads the grant, the store and its
  * App's current release.
@@ -736,7 +759,61 @@ interface ReviewGrants {
   readonly platform: (
     action: PlatformAction
   ) => Promise<{ ids: string[]; truncated: boolean }>;
+  /**
+   * The other Apps an app resource may be bound to, newest first, at most
+   * `reviewAppCandidatesMax`, each with its current release (undefined
+   * once it has none), read once for the review; and whether there were
+   * more.
+   */
+  readonly apps: () => Promise<{
+    apps: ReviewedApp[];
+    truncated: boolean;
+  }>;
 }
+
+/** Another App a review considers for an app resource, with its current release. */
+interface ReviewedApp {
+  readonly appId: AppId;
+  readonly name: string;
+  readonly release: Release | undefined;
+}
+
+/**
+ * The other Apps `app`'s app resources may be bound to, newest first, at
+ * most `reviewAppCandidatesMax`, each with its current release, read
+ * `reviewAppChecksAtOnce` at a time; and whether there were more.
+ */
+const reviewedApps = async (
+  env: Env,
+  app: AppId
+): Promise<{ apps: ReviewedApp[]; truncated: boolean }> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id, name: apps.name })
+    .from(apps)
+    .where(sql`${apps.id} <> ${app} AND ${apps.currentVersion} IS NOT NULL`)
+    .orderBy(desc(apps.createdAt))
+    .limit(reviewAppCandidatesMax + 1);
+  const candidates = rows
+    .slice(0, reviewAppCandidatesMax)
+    .map(({ id, name }) => ({ appId: appIdSchema.parse(id), name }));
+  const reviewed: ReviewedApp[] = [];
+  for (
+    let start = 0;
+    start < candidates.length;
+    start += reviewAppChecksAtOnce
+  ) {
+    const batch = candidates.slice(start, start + reviewAppChecksAtOnce);
+    // oxlint-disable-next-line no-await-in-loop -- a few at a time, bounded
+    const read = await Promise.all(
+      batch.map(async (candidate) => ({
+        ...candidate,
+        release: await currentReleaseOf(env, candidate.appId),
+      }))
+    );
+    reviewed.push(...read);
+  }
+  return { apps: reviewed, truncated: rows.length > reviewAppCandidatesMax };
+};
 
 /** The App's grants and their collections' names, read once for a review. */
 const reviewGrants = async (
@@ -764,7 +841,12 @@ const reviewGrants = async (
           .from(collections)
           .where(inList(collections.id, ids));
   const platform = new Map<PlatformAction, Promise<string[]>>();
+  let others: Promise<{ apps: ReviewedApp[]; truncated: boolean }> | undefined;
   return {
+    apps: async () => {
+      others ??= reviewedApps(env, app);
+      return await others;
+    },
     platform: async (action) => {
       const reading =
         platform.get(action) ??
@@ -868,6 +950,23 @@ const choicesFor = async (
       permissions: granted.ids.map((permissionId) => ({ permissionId })),
       truncated: granted.truncated,
     };
+  }
+  if (declaration["~resource"] === "app") {
+    // Every candidate's release, read once for the review, checked in
+    // memory: an older App that serves the declaration is offered as a
+    // newer one is, however many app resources the App declares.
+    const [others, declared] = await Promise.all([
+      grants.apps(),
+      declaredFingerprints(declaration),
+    ]);
+    const serving = others.apps
+      .filter(
+        ({ release }) =>
+          release !== undefined &&
+          servedIn(release, declaration, declared) !== undefined
+      )
+      .map(({ appId, name }) => ({ appId, name }));
+    return { kind: "app", apps: serving, truncated: others.truncated };
   }
   if (declaration["~resource"] === "store") {
     const { rows, truncated } = grants.stores;
@@ -1064,6 +1163,9 @@ const operationsOf = (declaration: AnyResource): string[] => {
   ) {
     return [...declaration.operations];
   }
+  if (declaration["~resource"] === "app") {
+    return Object.keys(declaration.functions).toSorted();
+  }
   return declaration["~resource"] === "store"
     ? Object.keys(declaration.operations).toSorted()
     : [];
@@ -1181,6 +1283,7 @@ export const resourceBindingsFor = (
   const caller: BindingCaller = {
     ...given,
     counts: given.counts ?? new Map<string, number>(),
+    appCalls: given.appCalls ?? { used: 0 },
   };
   return async (
     declaration: AnyResource

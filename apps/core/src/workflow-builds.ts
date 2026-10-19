@@ -20,9 +20,11 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { packageLimits } from "@grasp-os/shared/packages";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
+  actionUsesSchema,
   workflowModuleLimits,
   workflowModulePattern,
 } from "@grasp-os/shared/workflow-modules";
@@ -43,12 +45,14 @@ import {
 } from "./db/core/schema.ts";
 import { releaseReservations } from "./release-retention.ts";
 import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
+import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
+import { sealedPackagesSchema } from "./workflows/package-seal.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
 // its definition, validated at publication, lowered into SDK TypeScript
 // (@grasp-os/open-workflow's generate.ts), type-checked and compiled into
-// JavaScript by the screen compiler, as App code is, and sealed with the
+// JavaScript by the App compiler, as App code is, and sealed with the
 // version: the original JSON, the generated code, the compiled module, the
 // expression table it names its expressions from, a source map and the SDK
 // modules it was compiled against, each a content-addressed artifact
@@ -231,6 +235,17 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     binding: aliasSchema,
     // The workflow's own module and export its binding names, as the
     // generator sealed them (generate.ts).
+    module: z.string().regex(workflowModulePattern).max(256),
+    export: z
+      .string()
+      .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
+      .max(256),
+    arguments: templateSchema,
+  }),
+  z.strictObject({
+    name: z.literal("grasp.action"),
+    binding: aliasSchema,
+    // One of the workflow's own actions, as the generator sealed it.
     module: z.string().regex(workflowModulePattern).max(256),
     export: z
       .string()
@@ -672,7 +687,47 @@ export interface LoadedBuild {
   readonly source: string;
   /** The workflow's own compute modules (workflow-modules.ts). */
   readonly compute: LoadedModules;
+  /**
+   * The approved graph its modules import, if any (GRA-665): every start
+   * and call admits it again (workflows/sealed-packages.ts). Its entries'
+   * modules are among `compute.modules`.
+   */
+  readonly packages: { readonly graphHash: string } | undefined;
 }
+
+/** The prefix of an approved package's module (`packageModuleName`). */
+const packageModulePrefix = "pkg~";
+
+/**
+ * Whether a build's compute modules hold exactly the package modules its
+ * manifest seals (`entries`, by name): each one, no other (none for a
+ * version that seals none), within a version's allowance together.
+ */
+const packagesAgree = (
+  modules: Readonly<Record<string, string>>,
+  entries: Readonly<Record<string, string>>
+): boolean => {
+  const sealed = new Set(Object.values(entries));
+  const held = Object.keys(modules).filter((name) =>
+    name.startsWith(packageModulePrefix)
+  );
+  const chars = held.reduce(
+    (total, name) => total + (modules[name]?.length ?? 0),
+    0
+  );
+  return (
+    held.length === sealed.size &&
+    held.every((name) => sealed.has(name)) &&
+    // The platform's ceiling, not a deployment's: a version sealed under
+    // any limit loads.
+    chars <= packageLimits.workflowPackageChars
+  );
+};
+
+/** Where a version's manifest seals the approved packages its modules import. */
+const manifestPackagesSchema = z.object({
+  packages: sealedPackagesSchema.optional(),
+});
 
 /** A version's compute modules, as sealed. */
 export interface LoadedModules {
@@ -698,10 +753,19 @@ const computeFileSchema = z.strictObject({
   contracts: z
     .record(
       z.string().max(512),
-      z.strictObject({
-        input: z.string().max(workflowModuleLimits.descriptorChars),
-        output: z.string().max(workflowModuleLimits.descriptorChars),
-      })
+      z.discriminatedUnion("kind", [
+        z.strictObject({
+          kind: z.literal("compute"),
+          input: z.string().max(workflowModuleLimits.descriptorChars),
+          output: z.string().max(workflowModuleLimits.descriptorChars),
+        }),
+        z.strictObject({
+          kind: z.literal("operation"),
+          input: z.string().max(workflowModuleLimits.descriptorChars),
+          output: z.string().max(workflowModuleLimits.descriptorChars),
+          uses: actionUsesSchema,
+        }),
+      ])
     )
     .refine(
       (contracts) =>
@@ -785,7 +849,14 @@ const loadedModules = (
     contracts: new Map(
       Object.entries(file.contracts).map(([key, contract]) => [
         key,
-        Object.freeze({ ...contract }),
+        Object.freeze({
+          ...contract,
+          ...(contract.kind === "operation"
+            ? {
+                uses: Object.freeze(contract.uses.map(sealedUse)),
+              }
+            : {}),
+        }),
       ])
     ),
     sources: Object.freeze(sources),
@@ -839,7 +910,7 @@ const verifiedBuild = async (
   id: string,
   version: number,
   build: SealedBuild
-): Promise<LoadedBuild> => {
+): Promise<Omit<LoadedBuild, "packages">> => {
   if (!build.executable) {
     throw corrupt(id, version, "not executable");
   }
@@ -898,12 +969,23 @@ const verifiedBuild = async (
   const compute = loadedModules(computeText, computeModules, moduleSources);
   // Every calculation a task calls is one the seal holds, of a module it
   // compiled: checked once here, so a run never looks one up in vain.
-  const callsSealed = tasks.tasks.every(
-    (task) =>
+  const callsSealed = tasks.tasks.every((task) => {
+    if (
       task.kind !== "call" ||
-      task.call.name !== "grasp.compute" ||
-      compute?.contracts.has(`${task.call.module}#${task.call.export}`) === true
-  );
+      (task.call.name !== "grasp.compute" && task.call.name !== "grasp.action")
+    ) {
+      return true;
+    }
+    // A calculation's contract for a compute task, an action's for an
+    // action task, never the other.
+    const sealed = compute?.contracts.get(
+      `${task.call.module}#${task.call.export}`
+    );
+    return (
+      sealed?.kind ===
+      (task.call.name === "grasp.compute" ? "compute" : "operation")
+    );
+  });
   if (compute === undefined || !callsSealed) {
     throw corrupt(id, version, "compute modules");
   }
@@ -963,13 +1045,25 @@ export const loadWorkflowBuild = async (
     return kept;
   }
   let build: SealedBuild;
+  let packages: z.infer<typeof manifestPackagesSchema>["packages"];
   try {
     build = buildOf(row.manifest);
+    ({ packages } = manifestPackagesSchema.parse(JSON.parse(row.manifest)));
   } catch {
     throw corrupt(id, version, "build");
   }
   return await sharedRun(verifying, hash, buildReadMs(env, build), async () => {
-    const loaded = await verifiedBuild(env, id, version, build);
+    const built = await verifiedBuild(env, id, version, build);
+    if (!packagesAgree(built.compute.modules, packages?.entries ?? {})) {
+      throw corrupt(id, version, "packages");
+    }
+    const loaded: LoadedBuild = Object.freeze({
+      ...built,
+      packages:
+        packages === undefined
+          ? undefined
+          : Object.freeze({ graphHash: packages.graphHash }),
+    });
     // A load that ran on past being taken for abandoned keeps what is
     // there already: the same build, as the hash is the same.
     if (!verified.has(hash)) {

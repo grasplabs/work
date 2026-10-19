@@ -8,6 +8,7 @@ import {
   generateModules,
   inspectApp,
   readAppManifest,
+  readSealedWorkflows,
   symbolicModules,
   workflowFingerprint,
 } from "../src/host.ts";
@@ -341,6 +342,45 @@ describe("workflow references", () => {
       bound
     );
   };
+
+  test("seal the workflow version each was resolved from, never into a reference", async () => {
+    const pinned = { workflowId: "workflow-1", version: 3 };
+    const files = await generatedWith([{ ...summarize, pinned }]);
+    const contracts: unknown = JSON.parse(
+      files[".grasp/contracts.json"] ?? "{}"
+    );
+    const sealedWorkflows: unknown =
+      typeof contracts === "object" && contracts !== null
+        ? Reflect.get(contracts, "workflows")
+        : undefined;
+    expect({
+      sealed: readSealedWorkflows(sealedWorkflows)
+        .filter(({ alias }) => alias === summarize.alias)
+        .map((workflow) => workflow.pinned),
+      inReferences: (files[".grasp/references.ts"] ?? "").includes(
+        "workflow-1"
+      ),
+    }).toStrictEqual({ sealed: [pinned], inReferences: false });
+  });
+
+  test.each([
+    ["no workflow", { version: 1 }],
+    ["an empty workflow", { workflowId: "", version: 1 }],
+    ["a version that isn't one", { workflowId: "workflow-1", version: 0 }],
+    ["a fractional version", { workflowId: "workflow-1", version: 1.5 }],
+  ])("refuse a sealed pin with %s", (_case, pinned) => {
+    expect(() =>
+      readSealedWorkflows({
+        summarizeNote: {
+          alias: "summarizeNote",
+          events: {},
+          listens: {},
+          decisions: {},
+          pinned,
+        },
+      })
+    ).toThrow(/pin/u);
+  });
 
   test("hold their contract and their events as data, and have no .start, .get or .cancel", () => {
     for (const reference of Object.values(workflows)) {
@@ -1139,16 +1179,36 @@ describe("screens and preferences", () => {
   });
 
   test.each([
-    ["public", { operations: { preferences: { list } } }],
-    ["internal", { internalOperations: { preferences: { secret } } }],
+    ["public", "preferences", { operations: { preferences: { list } } }],
+    [
+      "internal",
+      "preferences",
+      { internalOperations: { preferences: { secret } } },
+    ],
+    [
+      "public",
+      "workflows",
+      { operations: { workflows: { review: { queries: { runs: list } } } } },
+    ],
+    [
+      "internal",
+      "workflows",
+      { internalOperations: { workflows: { secret } } },
+    ],
   ])(
-    "no %s function registers under the preferences segment",
-    (_case, changes) => {
+    "no %s function registers under the %s segment",
+    (_case, _segment, changes) => {
       expect(refusal(() => small(changes))).toContain(
         "that path is the platform's"
       );
     }
   );
+
+  test("a nested workflows segment is the App's own", () => {
+    expect(() =>
+      small({ operations: { notes: { list }, admin: { workflows: { send } } } })
+    ).not.toThrow();
+  });
 });
 
 describe("browser resources", () => {

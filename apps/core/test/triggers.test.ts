@@ -19,7 +19,7 @@ import {
   whileEngineRefuses,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith } from "./workflow-apps.ts";
+import { appWith, workflowsApp } from "./workflow-apps.ts";
 
 // Triggers start workflows on their own. A schedule is a cron expression
 // in a schedule parameter, read in the trigger's time zone; core's cron
@@ -556,7 +556,7 @@ describe("activations racing", () => {
 
   it("leave the winner's schedules alone when another activation of the same version got there first", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, weekly());
+    const app = await workflowsApp(builder, weekly());
     const next = await committed(builder, app, {
       "workflows/weekly.ts":
         weekly()["workflows/weekly.ts"]?.replace("0 8 * * 1", "0 9 * * 1") ??
@@ -600,7 +600,7 @@ describe("activations racing", () => {
 
   it("make the version current once when the batch committed but its answer was lost", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, weekly());
+    const app = await workflowsApp(builder, weekly());
     const next = await committed(builder, app, {
       "workflows/weekly.ts":
         weekly()["workflows/weekly.ts"]?.replace("0 8 * * 1", "0 9 * * 1") ??
@@ -626,7 +626,7 @@ describe("activations racing", () => {
 
   it("refuse, and write nothing, when a schedule parameter is set meanwhile", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(builder, weekly());
+    const app = await workflowsApp(builder, weekly());
     const before = await schedulesOf(app);
     const next = await committed(builder, app, {
       "workflows/weekly.ts":
