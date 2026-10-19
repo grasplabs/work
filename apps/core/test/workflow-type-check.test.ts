@@ -8,7 +8,7 @@ import { buildWorkflows } from "../src/screens.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished } from "./runs.ts";
-import { refusal, signedInApi } from "./sign-in.ts";
+import { outcome as codeOf, refusal, signedInApi } from "./sign-in.ts";
 import { steeringCases } from "./steering-cases.ts";
 import { sampleApp, workflowFiles } from "./workflow-apps.ts";
 
@@ -380,6 +380,33 @@ describe(
             "export const twice = (value: number): number => value * 2;\n",
         })
       ).resolves.toStrictEqual({ ok: true, files: [], warned: [] });
+    });
+
+    it("never make a workflow of a file in a folder, dotted or not, even one that default-exports a workflow", async () => {
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Nested" });
+      const nested = checked("    return 1;")["workflows/checked.ts"] ?? "";
+      const { version } = await builder.api.apps.files.commit(
+        app,
+        {
+          ...sampleApp(),
+          ...checked("    return 1;"),
+          "workflows/lib.v2/nested.ts": nested.replace(
+            'workflow("checked"',
+            'workflow("nested"'
+          ),
+        },
+        "Nested"
+      );
+      await builder.api.apps.versions.setCurrent(app, version);
+      await expect(
+        Promise.all(
+          ["checked", "nested"].map(
+            async (workflow) =>
+              await codeOf(builder.api.workflows.start(app, workflow))
+          )
+        )
+      ).resolves.toStrictEqual(["ok", "workflow.not_found"]);
     });
 
     it("refuse, by name, anything under workflows/ that isn't workflow code", async () => {

@@ -406,6 +406,7 @@ const serverPath = (
   }
   const path = parts.join("/").replace(/\.tsx?$/u, "");
   return ["schema", "values", "app"].includes(path) ||
+    path.startsWith("app/") ||
     path.startsWith("operations/") ||
     path.startsWith("migrations/") ||
     path.startsWith(".grasp/")

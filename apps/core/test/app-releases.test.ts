@@ -1521,6 +1521,14 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
   });
 });
 
+/** A server class with files under app/ that aren't its code, and `line` atop it. */
+const serverWithStrays = (line: string) => ({
+  "app/server.ts": `${line}\n\nexport class App {}\n`,
+  "app/.hidden/x.ts": "export const x = 1;\n",
+  "app/x.d.ts": "export declare const y: number;\n",
+  "app/notes.md": "# Notes\n",
+});
+
 describe("App code that a seal refuses", { timeout: 120_000 }, () => {
   /** Notes with `changes` to its files, sealed. */
   const sealedWith = async (
@@ -1940,6 +1948,20 @@ export const reach = action({
         ? Object.keys(built.modules).toSorted((a, b) => a.localeCompare(b))
         : built.diagnostics
     ).toStrictEqual(["app~app~lib.v2~greeting.js", "app~app~server.js"]);
+  });
+
+  it("keeps what under app/ isn't server code out of a server class's build, so nothing imports it", async () => {
+    const [alone, importing] = await Promise.all(
+      ["", 'import { x } from "./.hidden/x.ts";\nexport const seen = x;'].map(
+        async (line) =>
+          await buildServer(env, serverWithStrays(line), "app-test")
+      )
+    );
+    expect({
+      modules:
+        alone?.ok === true ? Object.keys(alone.modules) : alone?.diagnostics,
+      importing: importing?.ok === true,
+    }).toStrictEqual({ modules: ["app~app~server.js"], importing: false });
   });
 
   it("builds each operations file as a module of its own, dotted folders included", async () => {
@@ -2440,6 +2462,7 @@ describe("screens", { timeout: 120_000 }, () => {
       "a migration in a dotted folder",
       'import derive from "../migrations/v1.0/derive.ts";',
     ],
+    ["a server class's code", 'import { App } from "../app/server.ts";'],
     ["the host's SDK", 'import { inspectApp } from "@grasp-os/sdk/host";'],
   ])(
     "never import %s: the build fails before it starts",

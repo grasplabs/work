@@ -425,9 +425,17 @@ export const buildScreens = async (
   if (strays.length > 0) {
     return { ok: false, diagnostics: strays };
   }
-  const sources = Object.entries(app).filter(
-    ([path]) => !declarationFile.test(path)
-  );
+  // Only screens, components and the references they import are
+  // compiled, whatever else is passed: what isn't is refused above, and
+  // kept out should that ever miss it. Declarations are only types.
+  const sources = Object.entries(app)
+    .filter(
+      ([path]) =>
+        screenFile.test(path) ||
+        componentsFolder.isFile(path) ||
+        path === screenReferences.path
+    )
+    .filter(([path]) => !declarationFile.test(path));
   const paths = sources.map(([path]) => path);
   if (!paths.some((path) => screenFile.test(path))) {
     return {
@@ -926,16 +934,21 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
 export const buildWorkflows = (
   files: Record<string, string>
 ): WorkflowBuild => {
-  const workflows = workflowFiles(files);
+  const read = workflowFiles(files);
   const context = workflowTypeContext(files);
-  const tooMuch = appCodeLimitErrors({ ...context, ...workflows });
+  const tooMuch = appCodeLimitErrors({ ...context, ...read });
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
-  const strays = strayProblems(workflows, [workflowsFolder], "workflows");
+  const strays = strayProblems(read, [workflowsFolder], "workflows");
   if (strays.length > 0) {
     return { ok: false, diagnostics: strays };
   }
+  // Only workflow code is compiled or checked, whatever else is passed:
+  // what isn't is refused above, and kept out should that ever miss it.
+  const workflows = Object.fromEntries(
+    Object.entries(read).filter(([path]) => workflowsFolder.isFile(path))
+  );
   const built = compileCode(workflowCode, workflows);
   if (!built.ok) {
     return built;
