@@ -562,6 +562,8 @@ export const migrationErrors = defineErrorFamily({
     "Only a failed schema change can be abandoned: this one's defaults are still being filled in.",
   "migration.abandoned":
     "An admin abandoned this schema change after its defaults couldn't be filled in, so a release sealed on it can't run on this store. Seal a new version.",
+  "migration.sample_busy":
+    "Another dry run of this migration is running, or it ran a few times in the last minute already. Try again in a minute.",
   "migration.not_declared":
     "This version declares no such explicit migration, or binds no store for it to run on.",
   "migration.invalid":
@@ -688,12 +690,6 @@ export interface AbandonedBackfill {
   abandonedAt: string;
 }
 
-/**
- * Business stores, for admins: a store's failed schema change, and
- * abandoning it (spec 17.2, 17.3). Abandoning keeps the store's contract
- * as it was and takes the releases sealed on the change out of force, so
- * the store takes schema changes again. Never Grasp staff.
- */
 /** Records a migration's dry run samples by default, and at most. */
 export const migrationSampleRows = 20;
 export const migrationSampleMaxRows = 100;
@@ -715,7 +711,9 @@ export type SampleMigration = z.input<typeof sampleMigrationSchema>;
  * every sampled record with what the target table takes, `failed` when it
  * didn't, `empty` when it had no record left to transform (done, or
  * not started). `failure` names the record and the transform's issues: for the
- * admin who asked alone, kept nowhere (the receipt keeps the reason).
+ * admin who asked alone, kept nowhere (the receipt keeps the reason). On a
+ * table read or written by owner, the issues only when the admin owns that
+ * record (a thrown message can carry its values): empty otherwise.
  */
 export interface MigrationSample {
   id: string;
@@ -730,6 +728,13 @@ export interface MigrationSample {
   failure: { record: string | null; reason: string; issues: string[] } | null;
 }
 
+/**
+ * Business stores, for admins: a store's failed schema change, and
+ * abandoning it (spec 17.2, 17.3), and dry-running an explicit migration on a
+ * sample of real records. Abandoning keeps the store's contract
+ * as it was and takes the releases sealed on the change out of force, so
+ * the store takes schema changes again. Never Grasp staff.
+ */
 export interface StoresApi {
   /** The store's pending schema change and its backfill; null for none. */
   backfill: (store: string) => Promise<StoreBackfill | null>;

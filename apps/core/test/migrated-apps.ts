@@ -1,3 +1,4 @@
+import type { Identity } from "@grasp-os/shared/rpc";
 import { storedFieldsSchema } from "@grasp-os/shared/stores";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
@@ -158,16 +159,20 @@ export const migrated = async (
     extra = {},
     firstCurrent = false,
     fixtures = passingFixtures,
+    owner,
   }: {
     extra?: Record<string, string>;
     firstCurrent?: boolean;
     fixtures?: string;
+    /** Who creates the App and writes its notes: a new builder unless given. */
+    owner?: Identity;
   } = {}
 ) => {
-  const fixture: Fixture = await appWith({
-    "schema.ts": v1Schema,
-    "app.ts": appFile(false),
-  });
+  const fixture: Fixture = await appWith(
+    { "schema.ts": v1Schema, "app.ts": appFile(false) },
+    "Notes",
+    owner
+  );
   const first = await seal(fixture);
   if (firstCurrent) {
     await setCurrentVersion(env, fixture.owner, fixture.app, 1);

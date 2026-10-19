@@ -902,7 +902,6 @@ const releaseCandidatesSchema = z
   )
   .max(compatibleVersionsMax);
 
-/** One batch of a backfill, as its run asks for it (`fillMissing`). */
 /** What a migration's dry run asks the store to sample (`sampleMigration`). */
 const migrationSampleSchema = z.strictObject({
   table: tableNameSchema,
@@ -914,6 +913,7 @@ const migrationSampleSchema = z.strictObject({
   limit: z.number().int().min(1).max(transformBatchMaxRows),
 });
 
+/** One batch of a backfill, as its run asks for it (`fillMissing`). */
 const backfillStepSchema = z.strictObject({
   target: backfillTargetSchema,
   attempt: z.number().int().min(1),
@@ -3623,33 +3623,6 @@ export class StoreHost {
   }
 
   /**
-   * Runs batch `batch` of the backfill of the pending target `target`
-   * for its run `attempt` (spec 17.2, 17.4 step 5): in one transaction,
-   * the next records after the backfill's cursor, at most
-   * `backfillBatchSize`, table after table of those it fills, in the
-   * order of their IDs. Each record gets the defaulted fields it lacks
-   * (store-fills.ts), which moves its revision on (and its table's
-   * generation), as any change of its document does; a record that holds
-   * a field keeps its value when it is valid, and fails the backfill
-   * (`state: "failed"`, naming the record) when it isn't, or when filling
-   * it in would make its document too large: never overwritten. The
-   * cursor, the counts and the batch's outcome commit with the records.
-   *
-   * The batch that finds no record left activates the target in the
-   * same transaction: compares and sets the store's contract against the
-   * one the target was planned from, and marks the backfill complete, its
-   * activation receipt. Records written meanwhile need no second look:
-   * every commit since the target became pending filled in what it wrote
-   * (`#flush`), whatever schema its writer was pinned to.
-   *
-   * Retried with the same batch (an answer that was lost), it answers the
-   * outcome it committed and does nothing; a batch other than the next,
-   * or a run the store moved past (`restartBackfill`), is refused
-   * (`migration.superseded`), and so is a target the store doesn't hold.
-   * A complete backfill answers complete to any run. Each batch renews
-   * the run's lease.
-   */
-  /**
    * A sample of the records `migration` of `consumer`'s release still has
    * to transform in `table`, at most `limit`, for its dry run
    * (migration-samples.ts, `sampleRows`): from where its pending target's
@@ -3717,6 +3690,33 @@ export class StoreHost {
     });
   }
 
+  /**
+   * Runs batch `batch` of the backfill of the pending target `target`
+   * for its run `attempt` (spec 17.2, 17.4 step 5): in one transaction,
+   * the next records after the backfill's cursor, at most
+   * `backfillBatchSize`, table after table of those it fills, in the
+   * order of their IDs. Each record gets the defaulted fields it lacks
+   * (store-fills.ts), which moves its revision on (and its table's
+   * generation), as any change of its document does; a record that holds
+   * a field keeps its value when it is valid, and fails the backfill
+   * (`state: "failed"`, naming the record) when it isn't, or when filling
+   * it in would make its document too large: never overwritten. The
+   * cursor, the counts and the batch's outcome commit with the records.
+   *
+   * The batch that finds no record left activates the target in the
+   * same transaction: compares and sets the store's contract against the
+   * one the target was planned from, and marks the backfill complete, its
+   * activation receipt. Records written meanwhile need no second look:
+   * every commit since the target became pending filled in what it wrote
+   * (`#flush`), whatever schema its writer was pinned to.
+   *
+   * Retried with the same batch (an answer that was lost), it answers the
+   * outcome it committed and does nothing; a batch other than the next,
+   * or a run the store moved past (`restartBackfill`), is refused
+   * (`migration.superseded`), and so is a target the store doesn't hold.
+   * A complete backfill answers complete to any run. Each batch renews
+   * the run's lease.
+   */
   fillMissing(
     storeId: StoreId,
     step: BackfillStep

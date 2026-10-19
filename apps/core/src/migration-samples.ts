@@ -10,15 +10,17 @@ import {
   sampleMigrationSchema,
 } from "@grasp-os/shared/stores";
 import type { MigrationSample } from "@grasp-os/shared/stores";
+import { and, count, eq, gt, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Member } from "./auth/identity.ts";
-import { migrationSamples } from "./db/core/schema.ts";
+import { migrationSampleLeases, migrationSamples } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { transformBatch } from "./migration-transform.ts";
+import type { TransformFailure } from "./migration-transform.ts";
 import { requireNotStaff } from "./sharing.ts";
 
 // An explicit migration's dry run on a sample of the real records it
@@ -43,8 +45,14 @@ import { requireNotStaff } from "./sharing.ts";
 //   written by owner the sample is one owner's records (the scan's own
 //   rule, `batchOf`), and the transform runs in a fresh isolate with no
 //   env and no network, as a backfill's batch does (`transformBatch`).
-// - The sample grows without bound: at most `migrationSampleMaxRows`
-//   records within a transform's bytes, in one sandbox call.
+// - The sample grows without bound, or samples pile up: at most
+//   `migrationSampleMaxRows` records within a transform's bytes, in one
+//   sandbox call; one dry run of a migration in flight at a time, and a
+//   few a minute (`takeLease`).
+// - One member's private values reach an admin: a transform's thrown
+//   message can carry its record's values verbatim, so on a table read or
+//   written by owner the admin gets the issues only for a record they own,
+//   and the reason alone otherwise.
 // - A sample of the wrong records vouches for a release: only records the
 //   release's pending migration still has to transform, from where its
 //   backfill stands in the store that version binds (a transformed record
@@ -78,13 +86,118 @@ const sampledSchema = z.array(
 const issuesMax = 20;
 const issueLength = 500;
 
+/** How long a dry run holds its migration's lease at most. */
+const leaseMs = 2 * 60 * 1000;
+
+/** Most dry runs of one migration of a version in a minute. */
+const samplesPerMinute = 5;
+
+/** One migration of one version: what a dry run's lease and cap count. */
+interface SampledMigration {
+  readonly app: string;
+  readonly version: number;
+  readonly migration: string;
+}
+
+/**
+ * Takes `sampled`'s lease for a new dry run, answering its token; refuses
+ * with `migration.sample_busy` while another holds it (one in flight per
+ * migration), or once `samplesPerMinute` ran in the last minute.
+ */
+const takeLease = async (
+  env: Env,
+  sampled: SampledMigration
+): Promise<string> => {
+  const db = drizzle(env.DB);
+  const now = Date.now();
+  const [recent] = await db
+    .select({ count: count() })
+    .from(migrationSamples)
+    .where(
+      and(
+        eq(migrationSamples.appId, sampled.app),
+        eq(migrationSamples.version, sampled.version),
+        eq(migrationSamples.migration, sampled.migration),
+        gt(migrationSamples.sampledAt, new Date(now - 60_000))
+      )
+    );
+  if ((recent?.count ?? 0) >= samplesPerMinute) {
+    throw migrationErrors.create("migration.sample_busy");
+  }
+  const token = crypto.randomUUID();
+  const until = new Date(now + leaseMs);
+  // Taken only where none is held, or the one held ran past its time.
+  const [taken] = await db
+    .insert(migrationSampleLeases)
+    .values({
+      appId: sampled.app,
+      version: sampled.version,
+      migration: sampled.migration,
+      token,
+      until,
+    })
+    .onConflictDoUpdate({
+      target: [
+        migrationSampleLeases.appId,
+        migrationSampleLeases.version,
+        migrationSampleLeases.migration,
+      ],
+      set: { token, until },
+      setWhere: lt(migrationSampleLeases.until, new Date(now)),
+    })
+    .returning({ token: migrationSampleLeases.token });
+  if (taken?.token !== token) {
+    throw migrationErrors.create("migration.sample_busy");
+  }
+  return token;
+};
+
+/** Lets go of the lease `token` holds, if it still holds it. */
+const releaseLease = async (env: Env, token: string): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(migrationSampleLeases)
+    .where(eq(migrationSampleLeases.token, token));
+};
+
+/**
+ * The admin `by`'s view of `failure`: the record and its reason, and its
+ * issues trimmed, unless the table is `owned` and the record isn't
+ * theirs: one member's private values (a thrown message can carry them
+ * verbatim) reach only that member, even an admin.
+ */
+const failureFor = (
+  by: Member,
+  failure: TransformFailure | null,
+  owned: boolean,
+  rows: readonly { id: string; owner: string }[]
+): MigrationSample["failure"] => {
+  if (failure === null) {
+    return null;
+  }
+  const owner = rows.find(({ id }) => id === failure.id)?.owner;
+  const shown = !owned || owner === by.userId;
+  return {
+    record: failure.id,
+    reason: failure.reason,
+    issues: shown
+      ? failure.issues
+          .slice(0, issuesMax)
+          .map((issue) => issue.slice(0, issueLength))
+      : [],
+  };
+};
+
 /**
  * Dry-runs `input`'s migration on a sample of the real records it would
  * transform, for `by`, an admin and not Grasp staff: its transform, in
  * the sandbox, on at most `input.rows` records of its table it still has
- * to transform, in the store its version binds. Keeps a receipt with
- * the version's migration evidence and audits it, both without values;
- * answers the admin with the failing record and its issues as well.
+ * to transform, in the store its version binds. One at a time per
+ * migration, and a few a minute (`takeLease`). Keeps a receipt with the
+ * version's migration evidence and audits it, both without values;
+ * answers the admin with the failing record and its issues as well. On a
+ * table read or written by owner, the issues (a transform's thrown
+ * message can carry the record's values verbatim) only when the admin
+ * owns that record; otherwise its reason alone.
  */
 export const sampleMigration = async (
   env: Env,
@@ -114,98 +227,95 @@ export const sampleMigration = async (
   ) {
     throw migrationErrors.create("migration.not_declared");
   }
+  const owned = access.read === "owner" || access.write === "owner";
   const store = storeIdSchema.parse(release.store.storeId);
-  const rows = sampledSchema.parse(
-    JSON.parse(
-      await storeObject(env, store).sampleMigration(store, {
-        table: declared.table,
-        migration: name,
-        consumer: { resourceId: app, resourceVersion: version },
-        limit,
-      })
-    )
-  );
-  const owners = new Set(rows.map(({ owner }) => owner)).size;
-  // A sandbox out of reach throws (`SandboxUnavailableError`): nothing is
-  // recorded, never a pass.
-  const transformed =
-    rows.length === 0
-      ? undefined
-      : await transformBatch(
-          env,
-          release,
-          name,
-          rows.map(({ id, owner, fields }) => ({ id, owner, fields }))
-        );
-  const failure =
-    transformed === undefined || transformed.ok ? null : transformed.failure;
-  let outcome: MigrationSample["outcome"] = "passed";
-  if (transformed === undefined) {
-    outcome = "empty";
-  } else if (failure !== null) {
-    outcome = "failed";
-  }
-  const sampledAt = new Date();
-  const id = crypto.randomUUID();
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db.insert(migrationSamples).values({
-      id,
-      appId: app,
-      version,
-      migration: name,
-      storeId: store,
-      outcome,
-      rows: rows.length,
-      owners,
-      reason: failure?.reason ?? null,
-      manifestHash: release.manifestHash,
-      fromSchema: declared.fromSchema,
-      toSchema: declared.toSchema,
-      sampledBy: by.userId,
-      sampledAt,
-    }),
-    outboxed(db, {
-      actor: actorOf(by),
-      action: "store.migration_sampled",
-      target: { type: "store", id: store },
-      detail: {
-        app,
+  const token = await takeLease(env, { app, version, migration: name });
+  try {
+    const rows = sampledSchema.parse(
+      JSON.parse(
+        await storeObject(env, store).sampleMigration(store, {
+          table: declared.table,
+          migration: name,
+          consumer: { resourceId: app, resourceVersion: version },
+          limit,
+        })
+      )
+    );
+    const owners = new Set(rows.map(({ owner }) => owner)).size;
+    // A sandbox out of reach throws (`SandboxUnavailableError`): nothing
+    // is recorded, never a pass.
+    const transformed =
+      rows.length === 0
+        ? undefined
+        : await transformBatch(
+            env,
+            release,
+            name,
+            rows.map(({ id, owner, fields }) => ({ id, owner, fields }))
+          );
+    const failure =
+      transformed === undefined || transformed.ok ? null : transformed.failure;
+    let outcome: MigrationSample["outcome"] = "passed";
+    if (transformed === undefined) {
+      outcome = "empty";
+    } else if (failure !== null) {
+      outcome = "failed";
+    }
+    const sampledAt = new Date();
+    const id = crypto.randomUUID();
+    const db = drizzle(env.DB);
+    await auditedBatch(env, db, [
+      db.insert(migrationSamples).values({
+        id,
+        appId: app,
         version,
         migration: name,
+        storeId: store,
         outcome,
         rows: rows.length,
         owners,
-        ...(failure === null ? {} : { reason: failure.reason }),
-      },
-    }),
-  ]);
-  log.info("store.migration_sampled", {
-    app,
-    version,
-    outcome,
-    rows: rows.length,
-    owners,
-  });
-  return {
-    id,
-    app,
-    version,
-    migration: name,
-    store,
-    outcome,
-    rows: rows.length,
-    owners,
-    sampledAt: sampledAt.toISOString(),
-    failure:
-      failure === null
-        ? null
-        : {
-            record: failure.id,
-            reason: failure.reason,
-            issues: failure.issues
-              .slice(0, issuesMax)
-              .map((issue) => issue.slice(0, issueLength)),
-          },
-  };
+        reason: failure?.reason ?? null,
+        manifestHash: release.manifestHash,
+        fromSchema: declared.fromSchema,
+        toSchema: declared.toSchema,
+        sampledBy: by.userId,
+        sampledAt,
+      }),
+      outboxed(db, {
+        actor: actorOf(by),
+        action: "store.migration_sampled",
+        target: { type: "store", id: store },
+        detail: {
+          app,
+          version,
+          migration: name,
+          outcome,
+          rows: rows.length,
+          owners,
+          ...(failure === null ? {} : { reason: failure.reason }),
+        },
+      }),
+    ]);
+    log.info("store.migration_sampled", {
+      app,
+      version,
+      outcome,
+      rows: rows.length,
+      owners,
+    });
+    return {
+      id,
+      app,
+      version,
+      migration: name,
+      store,
+      outcome,
+      rows: rows.length,
+      owners,
+      sampledAt: sampledAt.toISOString(),
+      failure: failureFor(by, failure, owned, rows),
+    };
+  } finally {
+    await releaseLease(env, token);
+  }
 };

@@ -2481,6 +2481,27 @@ export const migrationSamples = sqliteTable(
 );
 
 /**
+ * The migration dry run in flight, one per migration of a version at
+ * most (migration-samples.ts): taken before its sample is read, while
+ * none is held or the one held ran past `until` (a sample that died
+ * mid-way), and let go when it ends. `token` is the run's own, so only it
+ * lets its lease go.
+ */
+export const migrationSampleLeases = sqliteTable(
+  "migration_sample_leases",
+  {
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    migration: text().notNull(),
+    token: text().notNull(),
+    until: timestamp("until").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.version, table.migration] }),
+  ]
+);
+
+/**
  * The deployment's business stores (src/data-stores.ts): an inventory,
  * never a copy of their records. Each store's records, receipts and
  * outbox live in its own Durable Object (src/data-store.ts), named by
