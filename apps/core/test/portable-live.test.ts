@@ -2,6 +2,7 @@ import { GraspClient } from "@grasp-os/sdk/client";
 import type { GraspError } from "@grasp-os/sdk/client";
 import { clientInternals } from "@grasp-os/sdk/host";
 import { toBase64Url } from "@grasp-os/shared/encoding";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   accessEndedCloseCode,
@@ -25,11 +26,13 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { portableLiveAccounting } from "../src/portable-live.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { hostOrigin, hostSockets } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
+import { person as actingAs } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { callAuth, outcome, routed, signedIn, signedInApi } from "./sign-in.ts";
 
@@ -508,6 +511,46 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       builder: ["auth.unauthenticated"],
       theirs: ["app.not_found"],
     });
+  });
+
+  it("clears what a host shows once its App's release is revoked, with nothing written after", async () => {
+    const notes = await notesApp();
+    hostBrowser();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const client = portableClient(() => token);
+    await client.mutation(notes.api.create, { title: "Mine" });
+    const list = reading(client, notes.api.list, { pagination: {} });
+    await eventually(() => {
+      expect(list.now()).toStrictEqual(["Mine"]);
+    });
+    const head = await logHead();
+    // A portable host runs no build an admin approved: its App's release
+    // revoked is what takes the App's data from it.
+    await revokeRelease(
+      env,
+      await actingAs("admin"),
+      // The App's first version, the one notesApp made current.
+      { app: appIdSchema.parse(notes.app), version: 1 },
+      "Leaks data"
+    );
+    await eventually(() => {
+      expect(list.now()).toBe("screen.revoked");
+    });
+    const events = await eventsAfter(head);
+    const refused = events
+      .filter(({ action }) => action === "app.artifact.refused")
+      .map(
+        ({ detail }) =>
+          `${String(detail?.operation)}/${String(detail?.stage)}: ${String(detail?.reason)}`
+      );
+    expect({
+      shown: fromRefusal(list.seen, "screen.revoked"),
+      refused,
+    }).toStrictEqual({
+      shown: ["screen.revoked"],
+      refused: ["portable.watchQuery/push: revoked"],
+    });
+    list.stop();
   });
 
   it("clears what a host shows once its session ends with nothing written, though it can't connect again", async () => {

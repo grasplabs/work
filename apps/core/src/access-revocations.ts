@@ -19,6 +19,10 @@ import { appHost } from "./durable-objects.ts";
 // dropped (spec 11.4). Our own writes that can take a role in an App away
 // (unsharing it or lowering whom it is shared with, app-members.ts; a
 // member removed from the organization or given a lower role, members.ts)
+// and those that can take an App's data from a build of its screens (an
+// approval taken back or its data classified sensitive again,
+// screen-trust-rpc.ts; a grant making it sensitive again, permissions.ts;
+// its release revoked, release-retention.ts), for everyone of the App,
 // keep a revocation for each App they reached in their own batch
 // (`revocationsOf`), so it commits with the change or not at all, and tell
 // the hosts from those rows once it has (`tellKept`); the cron trigger

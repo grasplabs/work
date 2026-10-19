@@ -29,6 +29,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { revocationsOf, tellKept } from "./access-revocations.ts";
 import { appFor, screensIn, versionFiles } from "./apps.ts";
 import {
   auditedBatch,
@@ -352,8 +353,10 @@ export const approveScreens = async (
  * that lands only while it is approved and `by` is still an admin, in the
  * batch that records it and moves the App's policy generation on. Once
  * that batch has committed, every check of the gate reads it: the next
- * call, answer or push for that build is refused. Taking back what is
- * already taken back changes and records nothing.
+ * call, answer or push for that build is refused, and the App's open
+ * screens are told to look again (access-revocations.ts), so a live query
+ * of that build ends now, not at the App's next change. Taking back what
+ * is already taken back changes, records and tells nothing.
  */
 export const revokeScreen = async (
   env: Env,
@@ -383,7 +386,7 @@ export const revokeScreen = async (
     version: row.version,
     screen: row.screen,
   });
-  const [[revoked]] = await auditedBatch(env, db, [
+  const results = await auditedBatch(env, db, [
     db
       .update(screenArtifacts)
       .set({ status: "revoked", decidedBy: by.userId, decidedAt: new Date() })
@@ -398,7 +401,10 @@ export const revokeScreen = async (
       .returning(),
     outboxedEventWhere(db, event, sql`changes() > 0`),
     advanceGeneration(db, found.id, storedEvent(event.id)),
+    revocationsOf(db, eq(apps.id, found.id), null, storedEvent(event.id)),
   ]);
+  const [[revoked]] = results;
+  await tellKept(env, results[3]);
   if (!revoked) {
     await requireStillAdmin(env, by);
   }
@@ -409,8 +415,10 @@ export const revokeScreen = async (
  * accepting that it goes to code nobody approved, `sensitive` takes that
  * back. One write, only while `by` is still an admin, that moves the
  * App's policy generation on and is recorded on its own
- * (`app.output.classified`). Saying what already holds changes and
- * records nothing.
+ * (`app.output.classified`). Saying `sensitive` again tells the App's open
+ * screens to look again (access-revocations.ts), so a live query of a
+ * build nobody approved ends now. Saying what already holds changes,
+ * records and tells nothing.
  */
 export const classifyOutput = async (
   env: Env,
@@ -436,7 +444,7 @@ export const classifyOutput = async (
     output,
     previous,
   });
-  await auditedBatch(env, db, [
+  const classified = await auditedBatch(env, db, [
     db
       .insert(screenPolicies)
       // The table's columns, in its order.
@@ -452,7 +460,14 @@ export const classifyOutput = async (
         setWhere: sql`${screenPolicies.output} <> excluded.output`,
       }),
     outboxedEventWhere(db, event, sql`changes() > 0`),
+    revocationsOf(
+      db,
+      eq(apps.id, found.id),
+      null,
+      output === "sensitive" ? storedEvent(event.id) : sql`0`
+    ),
   ]);
+  await tellKept(env, classified[2]);
   const { output: now } = await standingOf(env, found.id);
   if (now !== output) {
     // Nothing landed: they are no longer an admin, or the App's policy

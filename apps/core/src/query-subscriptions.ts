@@ -67,9 +67,11 @@ import type { SessionCheck } from "./session-check.ts";
 //   pushed goes out after the refusal.
 // - A snapshot stays on screen after access is lost, because nothing
 //   commits to what it read (spec 11.4): every write that can take a role
-//   in an App away tells the App's host once it committed
-//   (access-revocations.ts), and the host tells every connection of those
-//   people that follows the App (`#follow`), on every tab and isolate.
+//   in an App away, or its data from a build (an approval taken back, its
+//   data sensitive again, its release revoked), tells the App's host once
+//   it committed (access-revocations.ts), and the host tells every
+//   connection of those people that follows the App (`#follow`), on every
+//   tab and isolate.
 //   The connection reads the session again now (`forget`), then passes
 //   each of the App's queries through the gate: a refusal ends it as
 //   above, clearing the screen; roles that changed read it again. No
@@ -297,12 +299,15 @@ interface Following {
   early: boolean;
 }
 
-/** What the connection's access check says, before each push of data. */
+/**
+ * What the connection's access check says, before each push of data: open,
+ * no role in the App, or the build refused (`revoked`, `unreviewed`).
+ */
 export type AccessCheck<By = Identity> = (
   by: By,
   app: AppId,
   artifact: string | undefined
-) => Promise<"open" | "role" | "build">;
+) => Promise<"open" | "role" | "revoked" | "unreviewed">;
 
 /** Whoever a connection's live queries are read for, by `userId`. */
 export interface Reader {
@@ -953,14 +958,19 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       return { roles, by };
     }
     this.#cleared.delete(key);
-    // Someone without a role is refused as a read refuses them: nothing
-    // of the App disclosed.
+    // A build refused is refused as such; anyone else (no role, or none
+    // read by the time the access was) as a read refuses them: nothing of
+    // the App disclosed.
+    if (
+      read.value !== undefined &&
+      (access === "revoked" || access === "unreviewed")
+    ) {
+      return {
+        refusal: refusalResult(screenErrors.create(`screen.${access}`)),
+      };
+    }
     return {
-      refusal: refusalResult(
-        access === "build"
-          ? screenErrors.create("screen.revoked")
-          : appErrors.create("app.not_found")
-      ),
+      refusal: refusalResult(appErrors.create("app.not_found")),
     };
   }
 
