@@ -88,9 +88,39 @@ export interface PendingReference {
 // everything else: the flow's state and PKCE verifier, and the tokens, which
 // never leave it (threat model R1).
 
-/** The outside systems a person connects through OAuth. */
+/**
+ * The suites a person connects through OAuth, pinned to the organization's
+ * own tenant: the IdPs people sign in with.
+ */
 export const oauthProviderSchema = z.enum(["microsoft", "google"]);
 export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
+
+/**
+ * Names no app may take: the suites above, whose sign-in connect handles
+ * itself, and Composio, whose connections are another kind.
+ */
+const reservedProviderIds: ReadonlySet<string> = new Set([
+  ...oauthProviderSchema.options,
+  "composio",
+]);
+
+/**
+ * Any other app a person signs in to, with OAuth 2.0 or an API key, as its
+ * native connector's provider record describes it (the connector kit's
+ * `signInSchema`): `hubspot`, `sample-crm`. Never one of the suites' names.
+ */
+export const appProviderSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{1,62}$/u)
+  .refine((id) => !reservedProviderIds.has(id), "A reserved provider name");
+export type AppProvider = z.infer<typeof appProviderSchema>;
+
+/** Whose token a native connector's calls get: a suite's or an app's. */
+export const connectorProviderSchema = z.union([
+  oauthProviderSchema,
+  appProviderSchema,
+]);
+export type ConnectorProvider = z.infer<typeof connectorProviderSchema>;
 
 /**
  * Personal: the person's own account, used only for them. Shared: an
@@ -130,19 +160,19 @@ export const connectionPersonSchema = z.strictObject({
 });
 export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 
-/** Starts connecting an account. */
+/** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
-  provider: oauthProviderSchema,
+  provider: connectorProviderSchema,
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
   /**
    * The organization at the provider, from the deployment's sign-in config:
    * its Entra tenant ID, or its Google Workspace domain. Only accounts in
-   * it can be connected.
+   * it can be connected. Required for those suites; an app has none.
    */
-  tenant: identifierSchema,
+  tenant: identifierSchema.optional(),
   /** A path on the deployment's origin; core checks it. */
   returnTo: z.string().startsWith("/").max(returnPathMaxLength),
 });
@@ -157,6 +187,28 @@ export const finishConnectionSchema = z.strictObject({
   error: z.string().min(1).max(256).optional(),
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
+
+/** Longest API key connect takes. */
+export const apiKeyMaxLength = 4096;
+
+/**
+ * Connects an app that signs in with an API key, which the person typed:
+ * connect checks it with the app (its provider record's account lookup)
+ * and seals it in the token vault, as it does OAuth tokens. It never comes
+ * back out, and never reaches the connector's code.
+ */
+export const connectWithKeySchema = z.strictObject({
+  person: connectionPersonSchema,
+  provider: appProviderSchema,
+  scope: connectionScopeSchema,
+  /** Printable ASCII only: it goes into a request header as it is. */
+  key: z
+    .string()
+    .min(1)
+    .max(apiKeyMaxLength)
+    .regex(/^[\u0021-\u007E]+$/u, "Not an API key"),
+});
+export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 
 export const disconnectSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -341,7 +393,8 @@ export interface ConnectionsApi {
   /**
    * Starts connecting a Composio toolkit, for an admin who consented: the
    * Composio URL to send their browser to. Composio sends it back to the
-   * same callback as a provider's OAuth flow.
+   * same callback as a provider's OAuth flow. A toolkit whose `auth` is
+   * `own` is refused (`connection.own_auth_required`), and recorded.
    */
   connectToolkit: (request: {
     toolkit: string;
@@ -399,7 +452,19 @@ export interface CatalogEntry {
   description: string | null;
   /** Which of Grasp's kinds of app it is ({@link catalogGroupOf}). */
   group: CatalogGroup;
+  /** Whose sign-in app connecting it takes ({@link CatalogAuth}). */
+  auth: CatalogAuth;
 }
+
+/**
+ * Whose sign-in app connecting an entry takes. `managed`: one Grasp or
+ * Composio holds, so connecting needs nothing but consent; every native
+ * provider is. `own`: a Composio toolkit Composio holds no app for, which
+ * the organization connects only with a sign-in app of its own (its own
+ * OAuth client or API key). Grasp can't take one yet, so connecting such a
+ * toolkit is refused (`connection.own_auth_required`).
+ */
+export type CatalogAuth = "managed" | "own";
 
 /**
  * Grasp's kinds of app, in the order the Integrations page lists them. Each
@@ -562,7 +627,8 @@ export type CatalogLogoType = (typeof catalogLogoTypes)[number];
  * The catalog, native entries first. `composio` says whether Composio's
  * toolkits are in it: `listed`, `off` (connect has no Composio key), or `unavailable` (Composio didn't answer,
  * or not completely: the native entries are listed all the same). Listed
- * are the toolkits Composio holds an app for that have tools.
+ * are the toolkits that have tools and take an account, whether Composio
+ * holds an app for them or not (`auth`).
  */
 export interface Catalog {
   entries: CatalogEntry[];
@@ -1170,6 +1236,14 @@ export interface ConnectApi extends PackageRegistryApi {
   finishConnection: (
     request: FinishConnection
   ) => Promise<{ connectionId: string; returnTo: string }>;
+  /**
+   * Connects an app that signs in with an API key, once the app accepted
+   * the key: the new connection, or the one that needed connecting again
+   * and holds the same account, as `finishConnection` has it.
+   */
+  connectWithKey: (
+    request: ConnectWithKey
+  ) => Promise<{ connectionId: string }>;
   /** The person's own connections and the shared ones. */
   listConnections: (person: ConnectionPerson) => Promise<ConnectionSummary[]>;
   /**
@@ -1210,7 +1284,9 @@ export interface ConnectApi extends PackageRegistryApi {
    * Starts connecting a Composio toolkit for an admin who consented, and
    * records their consent: the Composio URL to send their browser to.
    * `finishConnection` finishes it, as it does an OAuth flow, once
-   * Composio sends the browser back.
+   * Composio sends the browser back. One whose `auth` is `own` is refused
+   * and recorded before anything is made at Composio
+   * (`connection.own_auth_required`).
    */
   startToolkitConnection: (
     request: StartToolkitConnection
@@ -1218,8 +1294,8 @@ export interface ConnectApi extends PackageRegistryApi {
   /**
    * One catalog entry's tools, or `connect.catalog_entry_not_found` for
    * anything `catalog` doesn't list. Composio's toolkits are listed only if
-   * `composio` and connect has a Composio key, and only those Composio
-   * holds an app for that have tools. `connect.catalog_unavailable` when
+   * `composio` and connect has a Composio key, and only those that have
+   * tools and take an account. `connect.catalog_unavailable` when
    * Composio doesn't list the catalog or the toolkit's tools completely.
    */
   catalogTools: (request: CatalogToolsRequest) => Promise<CatalogTool[]>;
@@ -1402,6 +1478,8 @@ export const connectionErrors = defineErrorFamily({
     "Grasp staff can't connect accounts in a client's deployment.",
   "connection.not_offered":
     "Your organization doesn't offer this connection. An admin can offer it.",
+  "connection.own_auth_required":
+    "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
 });
 
 /** Which App's held actions of which binding to drop. */

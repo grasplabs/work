@@ -106,6 +106,7 @@ const microsoft = (status: "active" | "needs_reauth"): Integration => ({
   name: "Microsoft 365",
   categories: [],
   group: "Email and calendar",
+  auth: "managed",
   description: null,
   logo: null,
   toolCount: 3,
