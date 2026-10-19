@@ -4015,6 +4015,58 @@ export class App extends DurableObject {
 }
 `;
 
+/**
+ * A restricted run of a workflow of an admin's whose one task calls the
+ * sending export with `who`, its task's attempts given `seconds` when set,
+ * and the App's own send granted at the version it runs.
+ */
+const sendingRun = async (
+  mail: Awaited<ReturnType<typeof mailConnection>>,
+  who: string,
+  seconds?: number
+) => {
+  const { admin, app, workflowId } = await lookingUp(
+    sendingServer,
+    {
+      ...(seconds === undefined
+        ? {}
+        : { use: { timeouts: { quick: { after: { seconds } } } } }),
+      tasks: [
+        {
+          look: {
+            call: "grasp.operation",
+            with: { binding: "lookup", arguments: { who } },
+            ...(seconds === undefined ? {} : { timeout: "quick" }),
+          },
+        },
+        { finish: { set: { status: "called" } } },
+      ],
+    },
+    { access: "write" }
+  );
+  const asked = await requestPermission(
+    env,
+    admin,
+    {
+      subject: { type: "app", appId: appIdSchema.parse(app) },
+      object: {
+        type: "connection",
+        connectionId: connectionIdSchema.parse(mail.id),
+      },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    },
+    rolesOf(admin)
+  );
+  await grantPermission(env, admin, asked.id, { version: 1 });
+  // Started by a restricted App: the run, and the App it calls, are
+  // restricted, so connect holds the App's send for its person.
+  const starter = await startingApp(admin, admin, workflowId, {
+    restricted: true,
+  });
+  return { admin, app, workflowId, start: starter.start };
+};
+
 describe("an App's call held as an independent run's step called its export", () => {
   it("is dropped, audited, as soon as the step settles, failed or answered: confirming it after finds nothing and sends nothing", async () => {
     const mail = await mailConnection();
@@ -4024,43 +4076,8 @@ describe("an App's call held as an independent run's step called its export", ()
      * and the drop connect recorded.
      */
     const runFor = async (who: string) => {
-      const { admin, app, workflowId } = await lookingUp(
-        sendingServer,
-        {
-          tasks: [
-            {
-              look: {
-                call: "grasp.operation",
-                with: { binding: "lookup", arguments: { who } },
-              },
-            },
-            { finish: { set: { status: "called" } } },
-          ],
-        },
-        { access: "write" }
-      );
-      // The App's own send, granted at the version it runs.
-      const asked = await requestPermission(
-        env,
-        admin,
-        {
-          subject: { type: "app", appId: appIdSchema.parse(app) },
-          object: {
-            type: "connection",
-            connectionId: connectionIdSchema.parse(mail.id),
-          },
-          actions: ["mail.send"],
-          binding: "MAIL",
-        },
-        rolesOf(admin)
-      );
-      await grantPermission(env, admin, asked.id, { version: 1 });
-      // Started by a restricted App: the run, and the App it calls, are
-      // restricted, so connect holds the App's send for its person.
-      const starter = await startingApp(admin, admin, workflowId, {
-        restricted: true,
-      });
-      const runId = await starter.start();
+      const { admin, app, workflowId, start } = await sendingRun(mail, who);
+      const runId = await start();
       const end = endOf(await ended(admin, workflowId, runId));
       const key = stepIdempotencyKey(runId, "task:look");
       const waitingFor = await env.CONNECT.listPendingActions(
@@ -4121,6 +4138,32 @@ describe("an App's call held as an independent run's step called its export", ()
         dropped: droppedOnce,
         confirmed: "connect.pending_not_found",
       },
+      sent: 0,
+    });
+  });
+
+  it("never keeps the step open past its deadline for a drop that doesn't answer", async () => {
+    const mail = await mailConnection();
+    const { admin, workflowId, start } = await sendingRun(mail, "catch", 3);
+    const connect = env.CONNECT;
+    // Connect never answers the drop: the step goes on at its deadline.
+    env.CONNECT = new Proxy(connect, {
+      get: (target, property): unknown =>
+        property === "dropForSettledStep"
+          ? async () => {
+              await scheduler.wait(600_000);
+            }
+          : Reflect.get(target, property),
+    });
+    let end: ReturnType<typeof endOf>;
+    try {
+      end = endOf(await ended(admin, workflowId, await start()));
+    } finally {
+      env.CONNECT = connect;
+    }
+    const sent = await mail.did();
+    expect({ end, sent: sent.calls }).toStrictEqual({
+      end: { status: "completed", output: { status: "called" } },
       sent: 0,
     });
   });

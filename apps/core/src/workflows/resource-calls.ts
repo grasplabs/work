@@ -489,6 +489,12 @@ const callStoreOperation = async (
   return requireShape(contract.output, answer, "output");
 };
 
+/** The longest an export call waits for its held actions' drop. */
+const dropWaitMs = 2000;
+
+/** What a drop's wait leaves of the call's time, to settle in. */
+const dropMarginMs = 1000;
+
 /**
  * Drops whatever connect still holds under an export call's key `key` for
  * the run's person, once the App's method settled (GRA-748): a connection
@@ -499,23 +505,45 @@ const callStoreOperation = async (
  * send what no step collects. Settled either way, failed or answered
  * (App code may catch the hold and answer all the same), the action goes,
  * audited by connect (`step.settled`). A drop that fails is logged and
- * changes nothing of the call: confirming the action still finds its run
- * isn't its App's, and drops it then (pending-actions.ts, `runEnded`).
+ * changes nothing of the call, nor does one still going past a moment: confirming the action still finds its run isn't its App's,
+ * and drops it then (pending-actions.ts, `runEnded`).
  */
 const dropUncollected = async (
   env: Env,
   run: CallingRun,
-  key: string
+  key: string,
+  deadline: number
 ): Promise<void> => {
-  try {
-    await env.CONNECT.dropForSettledStep({
-      onBehalfOf: run.principal,
-      idempotencyKey: key,
-    });
-  } catch (error) {
+  const dropping = (async (): Promise<"dropped" | "failed"> => {
+    try {
+      await env.CONNECT.dropForSettledStep({
+        onBehalfOf: run.principal,
+        idempotencyKey: key,
+      });
+      return "dropped";
+    } catch (error) {
+      log.warn("workflow.export_hold_drop_failed", {
+        runId: run.runId,
+        ...errorFields(error),
+      });
+      return "failed";
+    }
+  })();
+  // Finished even once the call no longer waits for it.
+  waitUntil(dropping);
+  // Waited for a moment at most, and never into the call's last second: a
+  // slow drop never keeps the step's attempt, tried once, open past its
+  // deadline, which would fail a call that settled.
+  const late = (async (): Promise<"late"> => {
+    await scheduler.wait(
+      Math.max(0, Math.min(dropWaitMs, deadline - Date.now() - dropMarginMs))
+    );
+    return "late";
+  })();
+  if ((await Promise.race([dropping, late])) === "late") {
     log.warn("workflow.export_hold_drop_failed", {
       runId: run.runId,
-      ...errorFields(error),
+      reason: "deadline",
     });
   }
 };
@@ -657,7 +685,7 @@ const callOperation = async (
     }
     throw error;
   } finally {
-    await dropUncollected(env, run, effect.key);
+    await dropUncollected(env, run, effect.key, effect.deadline);
   }
   // The App may have read restricted data as it answered: withheld from
   // a run that isn't restricted itself.
