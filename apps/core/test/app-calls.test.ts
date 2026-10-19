@@ -89,6 +89,22 @@ export class App extends DurableObject {
     return { made };
   }
 
+  // Tries to record a statistics point \`times\` over, whatever each try
+  // answers: how many tries ended each way, by code.
+  async tryPoints(caller: Caller, input: { times: number }): Promise<Record<string, number>> {
+    const ends: Record<string, number> = {};
+    for (let time = 0; time < input.times; time += 1) {
+      let end = "recorded";
+      try {
+        await (this.env as Record<string, any>).STATISTICS.record(caller, { measure: "tries", value: 1 });
+      } catch (error) {
+        end = (error as { code?: string }).code ?? "unknown";
+      }
+      ends[end] = (ends[end] ?? 0) + 1;
+    }
+    return ends;
+  }
+
   findCustomers(caller: Caller, input: { query: string }): unknown[] {
     return [{ name: "Acme " + input.query, for: caller.userId, from: caller.app ?? null, key: caller.idempotencyKey ?? null }];
   }
@@ -234,6 +250,7 @@ const exported = {
     input: anyObject,
     output: { type: "array", items: {} },
   },
+  tryPoints: { access: "read", input: anyObject, output: {} },
   relay: { access: "read", input: relayInput, output: {} },
   relayWrite: { access: "write", input: relayInput, output: {} },
   readPayroll: { access: "read", input: anyObject, output: {} },
@@ -1646,15 +1663,31 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       ]);
     });
 
+    // A read-only call's points are refused, and still take from its
+    // budget: the CRM's call through a read grant tries one too many.
+    const refusedWrites = await via(
+      invoicing,
+      admin.userId,
+      "CRM",
+      "tryPoints",
+      {
+        times: budget + 1,
+      }
+    );
+
     expect({
       pointsThenReads,
       tooManyReads,
+      refusedWrites,
       readsThenCall,
       refused: callsIn(events).map(({ detail }) => detail),
     }).toStrictEqual({
       pointsThenReads: { made: budget, refused: "operation.call_limit" },
       tooManyReads: { made: budget, refused: "operation.call_limit" },
       readsThenCall: { made: budget, refused: "operation.call_limit" },
+      refusedWrites: {
+        ok: { "app.read_only": budget, "operation.call_limit": 1 },
+      },
       refused: [
         {
           method: "findCustomers",

@@ -1778,7 +1778,11 @@ export class App extends DurableObject<Env> {
    * a retry, which is another call with a budget of its own.
    */
   claimHostCall(token: string, use: InvocationKind): Admitted {
-    const resolved = this.admit(token, use);
+    // The token first, then the count, then what the call may do: a write
+    // a read-only call is refused (`app.read_only`) still counts, as the
+    // channel counts what it refuses, so a loop of refused writes ends at
+    // the budget too. A token of no running call counts for nothing.
+    const valid = this.admit(token, "read");
     const call = this.#calls.get(token);
     if (call === undefined) {
       throw appErrors.create("app.caller_invalid");
@@ -1789,7 +1793,7 @@ export class App extends DurableObject<Env> {
         maxHostCalls: platformLimits.invocationHostCalls,
       });
     }
-    return resolved;
+    return use === "write" ? this.admit(token, use) : valid;
   }
 
   /**
