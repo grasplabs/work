@@ -1794,6 +1794,16 @@ describe("an App binding a workflow", () => {
       // A builder of the workflow removes what holds it up.
       cy: await outcome(unbindWorkflowFromApp(env, cy, binding.id)),
     };
+    // The run the start admitted holds the workflow too, until it ends:
+    // the delete after the unbind waits for it, so only the binding is
+    // what the unbind removed.
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, ada, workflow.id, started.runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
     expect({
       byBob,
       byStaff,

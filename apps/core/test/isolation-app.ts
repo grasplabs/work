@@ -19,7 +19,13 @@ export default defineSchema({
   "operations/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "#grasp/server";
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// What these functions leave for later callers, typed loose on purpose:
+// they reach where an App's code never should.
+type Kept = { runMutation: (reference: unknown, args: unknown) => Promise<unknown> };
+const shared = globalThis as unknown as { kept?: Kept; poisoned?: string };
+const loose = (value: object) => value as Record<string, unknown>;
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -44,7 +50,7 @@ export const hold = action({
   returns: v.null(),
   uses: [create, titles],
   handler: async (ctx) => {
-    globalThis.kept = ctx;
+    shared.kept = ctx as unknown as Kept;
     await ctx.runMutation(create, { title: "A holding" });
     for (let polls = 0; polls < 50; polls += 1) {
       const seen = await ctx.runQuery(titles, {});
@@ -62,7 +68,7 @@ export const useKept = mutation({
   args: {},
   returns: v.string(),
   handler: async () => {
-    const kept = globalThis.kept;
+    const kept = shared.kept;
     if (kept === undefined) {
       return "nothing kept";
     }
@@ -101,9 +107,9 @@ export const poison = query({
   args: {},
   returns: v.null(),
   handler: () => {
-    globalThis.poisoned = "by the first caller";
-    Object.prototype.polluted = "by the first caller";
-    AppError.prototype.leaked = "by the first caller";
+    shared.poisoned = "by the first caller";
+    loose(Object.prototype).polluted = "by the first caller";
+    loose(AppError.prototype).leaked = "by the first caller";
     return null;
   },
 });
@@ -113,9 +119,9 @@ export const probe = query({
   args: {},
   returns: v.array(v.string()),
   handler: () => [
-    String(globalThis.poisoned ?? "clean"),
-    String(({}).polluted ?? "clean"),
-    String(AppError.prototype.leaked ?? "clean"),
+    String(shared.poisoned ?? "clean"),
+    String(loose({}).polluted ?? "clean"),
+    String(loose(AppError.prototype).leaked ?? "clean"),
   ],
 });
 `,

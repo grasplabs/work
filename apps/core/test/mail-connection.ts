@@ -33,6 +33,17 @@ export const mailWithSearch = [
 ];
 
 /**
+ * The mail tools by the names an App's connector resource declares,
+ * `MAIL_SEND`, and `MAIL_SEARCH` marked as a read, beside `mail.send` and
+ * `mail.search` for the workflows' own calls.
+ */
+export const mailForApps = [
+  ...mailWithSearch,
+  "MAIL_SEND",
+  { name: "MAIL_SEARCH", read: true },
+];
+
+/**
  * A shared mail connection in connect's registry, as a Composio toolkit's,
  * allowing `tools`, to a mail server of its own that answers its next
  * calls as `plan` says (then sends mail), and tells what it did.
