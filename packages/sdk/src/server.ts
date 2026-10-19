@@ -8,9 +8,14 @@ import type {
   ReferenceKind,
   ReferenceVisibility,
   ReturnOf,
+  StreamingFunction,
 } from "./references.ts";
-import { isResource } from "./resources.ts";
-import type { AnyResource, ResourceClient } from "./resources.ts";
+import { isResource, isWorkflowResource } from "./resources.ts";
+import type {
+  AnyResource,
+  ResourceClient,
+  WorkflowResource,
+} from "./resources.ts";
 import { tablesOf } from "./schema.ts";
 import type { AnyTable, SchemaDefinition } from "./schema.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -40,11 +45,14 @@ import type {
 //   call out through: no `uses`;
 // - a mutation reads and stages writes (`ctx.db`), which commit together
 //   after it returns, and may run the App's queries in the same staged
-//   state (`ctx.runQuery`); it has no resources, so no network;
+//   state (`ctx.runQuery`); it has no resources, so no network, and the
+//   only thing it starts is a workflow it lists, after it commits
+//   (`ctx.afterCommit.start`), as part of that commit;
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,
 //   and reaches outside capabilities only through `ctx.resources`, for
-//   the resources its `uses` lists.
+//   the resources its `uses` lists, and starts only the workflows it
+//   lists (`ctx.startWorkflow`).
 // The host enforces each of these again at run time, whatever App code
 // sends it; the types here make the mistakes fail to compile first.
 //
@@ -85,8 +93,79 @@ export type AnyReference = FunctionReference;
 
 export type { ArgsOf, ReturnOf } from "./references.ts";
 
-/** What a function's `uses` may list: functions of the App, and resources. */
-export type Use = AnyReference | AnyResource;
+/**
+ * What a function's `uses` may list: functions of the App, resources, and
+ * the workflows it starts.
+ */
+export type Use = AnyReference | AnyResource | AnyWorkflow;
+
+/** Any workflow declaration, whatever its input. */
+// oxlint-disable-next-line typescript/no-explicit-any -- the input is only read, by `WorkflowInput`
+export type AnyWorkflow = WorkflowResource<string, any>;
+
+/** The workflows among `Uses`. */
+type UsedWorkflow<Uses extends readonly Use[]> = Extract<
+  Uses[number],
+  AnyWorkflow
+>;
+
+/** The input a caller starts workflow `Workflow` with. */
+export type WorkflowInput<Workflow> =
+  Workflow extends WorkflowResource<string, infer Input> ? Input : never;
+
+/**
+ * A workflow start the host admitted: durable from the moment it resolves,
+ * whatever happens to the caller next. It doesn't wait for the run.
+ */
+export interface RunHandle {
+  /**
+   * The start's receipt: the same for every attempt of the same start (an
+   * action called again under the same idempotency key).
+   */
+  readonly startId: string;
+  /**
+   * The run executing it, or null for a version that has no executable
+   * build, which is admitted and never runs.
+   */
+  readonly runId: string | null;
+  /** The version of the workflow it started: the one its alias binds. */
+  readonly version: number;
+}
+
+/**
+ * What a start of `Workflow` takes: the workflow and its input, which may
+ * be left out where the input schema takes none (its default, say). Over a
+ * union, each workflow with its own input: never one's input for another,
+ * nor optional for one that needs it.
+ */
+type StartArgs<Workflow> = Workflow extends unknown
+  ? undefined extends WorkflowInput<Workflow>
+    ? [workflow: Workflow, input?: WorkflowInput<Workflow>]
+    : [workflow: Workflow, input: WorkflowInput<Workflow>]
+  : never;
+
+/** `ctx.startWorkflow`: one of the workflows `Uses` lists, with its input. */
+type StartWorkflow<Uses extends readonly Use[]> = <
+  Workflow extends UsedWorkflow<Uses>,
+>(
+  ...args: StartArgs<Workflow>
+) => Promise<RunHandle>;
+
+/**
+ * `ctx.afterCommit`: what a mutation hands on once it commits, as part of
+ * its commit, so nothing is handed on for a mutation that doesn't.
+ */
+export interface AfterCommit<Uses extends readonly Use[]> {
+  /**
+   * Starts one of the workflows `Uses` lists with `input`, once the
+   * mutation has committed: staged with its writes, in the same
+   * transaction, and started from the store's outbox exactly once. A
+   * mutation that fails, is rolled back or is superseded starts nothing.
+   */
+  readonly start: <Workflow extends UsedWorkflow<Uses>>(
+    ...args: StartArgs<Workflow>
+  ) => Promise<void>;
+}
 
 /** The references of kind `Kind` among `Uses`. */
 type UsedOfKind<
@@ -111,17 +190,11 @@ type RunMutation<Uses extends readonly Use[]> = <
 ) => Promise<ReturnOf<Reference>>;
 
 /**
- * A streaming action, as a definition or a generated reference: run only
- * in the foreground, by a screen (spec 10.7.6), never by another function.
- */
-type Streaming = { readonly stream: AnySchema } | { readonly mode: "stream" };
-
-/**
  * `ctx.runAction`: one of the actions `Uses` lists that answers once. A
  * streaming one isn't callable here: its progress has no one to go to.
  */
 type RunAction<Uses extends readonly Use[]> = <
-  Reference extends Exclude<UsedOfKind<Uses, "action">, Streaming>,
+  Reference extends Exclude<UsedOfKind<Uses, "action">, StreamingFunction>,
 >(
   reference: Reference,
   args: ArgsOf<Reference>
@@ -150,6 +223,7 @@ export interface MutationCtx<
 > {
   readonly db: DatabaseWriter<Tables>;
   readonly runQuery: RunQuery<Uses>;
+  readonly afterCommit: AfterCommit<Uses>;
 }
 
 /**
@@ -178,6 +252,16 @@ export interface ActionCtx<Uses extends readonly Use[] = readonly []> {
   readonly runMutation: RunMutation<Uses>;
   readonly runAction: RunAction<Uses>;
   readonly resources: Resources<Uses>;
+  /**
+   * Starts one of the workflows its `uses` lists, resolving once the host
+   * has admitted the start durably, not once the run ends. Called again
+   * under the same idempotency key, the action gets the same start back,
+   * matched by its place among the action's starts, as its mutations and
+   * resource requests are by theirs. Keep that order a function of the
+   * input: starts made at once, in whichever order they happen to land
+   * (`Promise.race`), can swap places on the second call.
+   */
+  readonly startWorkflow: StartWorkflow<Uses>;
 }
 
 /**
@@ -258,7 +342,7 @@ export interface MutationDefinition<
 > {
   readonly args: Shape;
   readonly returns: Returns;
-  /** The queries it runs and the notifications it sends; none unless listed. */
+  /** The queries it runs and the workflows it starts; none unless listed. */
   readonly uses?: Uses;
   readonly handler: (
     ctx: MutationCtx<Tables, Uses>,
@@ -274,7 +358,7 @@ export interface ActionDefinition<
 > {
   readonly args: Shape;
   readonly returns: Returns;
-  /** The functions and resources it calls; none unless listed. */
+  /** The functions, resources and workflows it calls; none unless listed. */
   readonly uses?: Uses;
   /** Declared only by a streaming action (`StreamActionDefinition`). */
   readonly stream?: undefined;
@@ -372,14 +456,15 @@ const usesOf = (uses: unknown): readonly Use[] => {
     if (
       !isServerFunction(use) &&
       !isResource(use) &&
+      !isWorkflowResource(use) &&
       referenceData(use) === undefined
     ) {
       return refuse(
         "`uses` lists the App's server functions, their generated references and `resource` declarations, never IDs or names."
       );
     }
-    // SAFETY: one of the three just checked: a definition, a resource
-    // declaration or a function reference read as data.
+    // SAFETY: one of those just checked: a definition, a resource or
+    // workflow declaration, or a function reference read as data.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     checked.push(use as Use);
   }

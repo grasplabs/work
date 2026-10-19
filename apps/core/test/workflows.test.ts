@@ -7,12 +7,12 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { grantReviewed, outlook, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { confirmedAnswer } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import {
@@ -27,14 +27,17 @@ import {
 } from "./runs.ts";
 import { refusal, signedInApi } from "./sign-in.ts";
 import {
+  appCall,
   appWith,
   bindModel,
   grantMail,
+  hitCall,
+  hitsOf,
   invoiceMail,
   mailer,
   modelRegistration,
   runEvents,
-  server,
+  sampleApp,
   workflowFiles,
 } from "./workflow-apps.ts";
 
@@ -63,12 +66,9 @@ const extractionModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 /**
  * The sample invoice workflow, as an App ships it: it matches the purchase
  * order, reads the total with a model, asks a reviewer above a threshold
- * and books the invoice, through its App's server code, typed by the
- * App's own class (`appServer`).
+ * and books the invoice, through its App's functions.
  */
-const invoiceWorkflow = `import { appServer, money, person, workflow, z } from "@grasp-os/sdk/workflow";
-
-import type { App } from "../app/server.ts";
+const invoiceWorkflow = `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "invoice-approval",
@@ -83,7 +83,7 @@ export default workflow(
     const order = await step.do(
       "match-po",
       { description: "Find the purchase order the invoice refers to", locked: true, input: input.purchaseOrder },
-      async ({ input: number }) => await appServer<App>(env).purchaseOrder(number)
+      async ({ input: number }) => await ${appCall("ledger.purchaseOrder", "query", "{ number }", "{ amount: number } | null")}
     );
     if (!order) {
       return { status: "unmatched" };
@@ -115,7 +115,7 @@ export default workflow(
         locked: true,
         input: { invoice: input.number, total: extracted.total },
       },
-      async ({ idempotencyKey, input: booking }) => await appServer<App>(env).book(booking, idempotencyKey)
+      async ({ input: booking }) => await ${appCall("ledger.book", "mutation", "booking", "string")}
     );
     return { status: "booked", entry };
   }
@@ -156,7 +156,7 @@ const mailStep = (
       await env.OUTLOOK.call("mail.list", {});
       return "sent";
     } catch (error) {
-      if (error.code === "connect.connection_not_found") {
+      if ((error as { code?: string }).code === "connect.connection_not_found") {
         return "reached";
       }
       throw error;
@@ -175,16 +175,6 @@ const listedStatus = async (
   const runs = await person.api.workflows.list(app);
   return runs.find(({ id }) => id === run)?.status;
 };
-
-/** How often the App counted `name` (its server's `hit`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
 
 /** A run a trigger started, which acts for the App's owner. */
 const triggered = async (app: string, workflow: string) =>
@@ -253,7 +243,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       { timeout: 10_000 }
     );
     answering.mockRestore();
-    await reviewer.api.decisions.answer(decision, { approved: true });
+    await confirmedAnswer(reviewer, decision, { approved: true });
     await finished(run.id);
     const logged = await allEvents();
     const audited = logged.filter(({ target }) => target?.id === run.id);
@@ -388,45 +378,42 @@ ${mailStep("after")}`,
     });
   });
 
+  // The v1 App server's methods and their bindings: they go with the
+  // server (GRA-645); run-functions.test.ts holds a sealed function's run
+  // to its approved version.
   it("refuse a run on a version no admin approved its App's server methods, which run the approved current one", async () => {
     const [admin, builder] = await Promise.all([
       personApi("admin"),
       personApi("builder"),
     ]);
-    // Server code that saves a record for its caller, into a collection
-    // everyone reads, which only admins change.
+    // Server code that lists the App's guest chats for its caller, under
+    // the permission to invite guests: one that changes things.
     const savingServer = `import { DurableObject } from "cloudflare:workers";
 
 export class App extends DurableObject {
-  async save(caller: unknown, path: string): Promise<unknown> {
-    const record = { type: "doc", title: "Finance" };
-    const saved = await (this.env as any).NOTES.saveRecord(caller, { path, ifVersion: 0, record, body: "" });
-    return saved.currentVersion;
+  async save(caller: unknown): Promise<unknown> {
+    const chats = await (this.env as any).GUESTS.list(caller);
+    return chats.length;
   }
 }
 `;
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Notes ${crypto.randomUUID().slice(0, 8)}`,
-      access: "everyone",
-    });
-    const path = `teams/finance-${crypto.randomUUID().slice(0, 8)}.md`;
     const version = (mark: string) => ({
       "app/server.ts": savingServer,
       ...workflowFiles(
         "saver",
         `  // ${mark}
   await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("save", { description: "Save", retries: { limit: 0 } }, async () => await env.APP.call("save", ${JSON.stringify(path)}));`,
-        { save: 1 }
+  return await step.do("save", { description: "Save", retries: { limit: 0 } }, async () => (await env.APP.call("save")) as Json);`,
+        { save: 0 }
       ),
     });
     const { id: app } = await builder.api.apps.create({ name: "Saver" });
     await release(builder, app, version("First."));
     const permission = await requestGranted(idp, builder, {
       subject: { type: "app", appId: app },
-      object: { type: "collection", collectionId },
-      actions: ["read", "write"],
-      binding: "NOTES",
+      object: { type: "platform" },
+      actions: ["guests"],
+      binding: "GUESTS",
     });
     // The run on the builder's own version waits; then harmless code is
     // made current, and an admin grants again for it.
@@ -454,8 +441,8 @@ export class App extends DurableObject {
     }).toMatchObject({
       attacked: { version: 2, status: "failed" },
       failedStep: { step: "save", errorCode: "permission.denied" },
-      // The run on the version the admin granted for saves.
-      approved: { version: 3, status: "completed", output: 1 },
+      // The run on the version the admin granted for lists the chats.
+      approved: { version: 3, status: "completed", output: 0 },
     });
   });
 
@@ -569,9 +556,9 @@ ${mailStep("after")}`,
       owner,
       workflowFiles(
         "triggered",
-        `  await step.do("first", { description: "First" }, async () => await env.APP.call("hit", "first"));
+        `  await step.do("first", { description: "First" }, async () => await ${hitCall(`"first"`)});
   await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("book", { description: "Book" }, async () => await env.APP.call("hit", "book"));`,
+  return await step.do("book", { description: "Book" }, async () => await ${hitCall(`"book"`)});`,
         { first: 1, book: 1 }
       )
     );
@@ -583,7 +570,7 @@ ${mailStep("after")}`,
     await woken(midWay.id);
     await finished(midWay.id);
     await rejoin();
-    const booked = await hitsOf(app, owner.userId, "book");
+    const booked = await hitsOf(owner, app, "book");
 
     // Offboarded by an admin before the run starts.
     await admin.api.members.remove(owner.userId);
@@ -653,14 +640,14 @@ ${mailStep("after")}`,
       await env.OUTLOOK.call("mail.list", {});
       read = "ok";
     } catch (error) {
-      read = error.code;
+      read = (error as { code?: string }).code;
     }
     let other;
     try {
       await env.DRIVE.call("files.list", {});
       other = "ok";
     } catch (error) {
-      other = error.code;
+      other = (error as { code?: string }).code;
     }
     return { fetched, read, other };
   });`,
@@ -696,9 +683,9 @@ ${mailStep("after")}`,
     const files = workflowFiles(
       "taker",
       `  return await step.do("take", { description: "Take" }, async () => {
-    const bindings = taken.find((one) => typeof one?.APP?.call === "function");
+    const bindings = taken.find((one) => typeof one?.APP?.callFunction === "function");
     if (bindings !== undefined) {
-      await bindings.APP.call("hit", "taken");
+      await bindings.APP?.callFunction?.({ contractId: "counter.hit", kind: "action" }, { name: "taken", execution: crypto.randomUUID() });
     }
     return bindings === undefined ? "nothing" : "bindings";
   });`,
@@ -707,20 +694,21 @@ ${mailStep("after")}`,
     // As the module loads, it puts its own in place of what a run's
     // bindings could be built with, each keeping what it is handed: no
     // `env` anywhere in its code.
-    const takes = `const taken = [];
+    const takes = `const taken: { APP?: { callFunction?: (...args: object[]) => Promise<unknown> } }[] = [];
 const RealProxy = globalThis.Proxy;
-globalThis.Proxy = function (target, handler) {
+// Past the types, as a module that takes what it is handed would be.
+globalThis.Proxy = function (target: object, handler: ProxyHandler<object>) {
   taken.push(target);
   return new RealProxy(target, handler);
-};
+} as unknown as ProxyConstructor;
 const realFromEntries = Object.fromEntries;
-Object.fromEntries = (entries) => {
+Object.fromEntries = (entries: Iterable<readonly [PropertyKey, unknown]>) => {
   const made = realFromEntries(entries);
   taken.push(made);
   return made;
 };
 const realHasOwn = Object.hasOwn;
-Object.hasOwn = (target, name) => {
+Object.hasOwn = (target: object, name: PropertyKey) => {
   taken.push(target);
   return realHasOwn(target, name);
 };
@@ -737,7 +725,7 @@ Object.hasOwn = (target, name) => {
     expect({
       status,
       output,
-      hits: await hitsOf(app, admin.userId, "taken"),
+      hits: await hitsOf(admin, app, "taken"),
     }).toStrictEqual({ status: "completed", output: "nothing", hits: 0 });
   });
 
@@ -779,7 +767,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
       return await refusal(builder.api.apps.versions.setCurrent(app, version));
     };
     const outcomes = [
-      await setCurrent({ "app/server.ts": server, ...failing }),
+      await setCurrent({ ...sampleApp(), ...failing }),
       await setCurrent({ "workflows/failing.workflow-tests.ts": null }),
     ];
     expect(
@@ -793,7 +781,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
   it("take shared code from a folder under workflows/, and say which files are workflows", async () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Shared" });
-    const helper = `export const greeting = (name) => \`Hello, \${name}\`;\n`;
+    const helper = `export const greeting = (name: string) => \`Hello, \${name}\`;\n`;
     const greet = workflowFiles("greet", `  return greeting("Anna");`);
     const importing = (from: string) =>
       `import { greeting } from "${from}";\n${greet["workflows/greet.ts"]}`;
@@ -807,7 +795,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
     };
 
     const directly = await setCurrent({
-      "app/server.ts": server,
+      ...sampleApp(),
       ...greet,
       "workflows/greet.ts": importing("./greeting.ts"),
       "workflows/greeting.ts": helper,
@@ -839,9 +827,16 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
     const admin = await personApi("admin");
     // Written by hand, past the SDK: the host is the boundary, not the SDK.
     const rogue = {
-      "workflows/rogue.ts": `export default {
+      "workflows/rogue.ts": `import type { WorkflowDefinition } from "@grasp-os/sdk/workflow";
+
+// Past the SDK: the engine as the host hands it to a run's code.
+type Engine = {
+  do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>;
+};
+
+export default {
   metadata: { id: "rogue", params: [] },
-  run: async (engine) => {
+  run: async (engine: Engine) => {
     await engine.do("$sneaky", {}, async () => "sneaked");
     // Steps the engine would refuse, which it fails the whole run for:
     // caught here, they must fail no more than their step.
@@ -855,7 +850,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
     try {
       await engine.do("$grasp:end", {}, async () => null);
     } catch (error) {
-      hijack = error.code;
+      hijack = String((error as { code?: string }).code);
     }
     try {
       await engine.do("failing", { retries: { limit: 0 } }, async () => {
@@ -867,7 +862,7 @@ export default workflowTests(definition, [{ name: "returns two", expect: { outpu
       name: "n".repeat(300),
     });
   },
-};
+} as unknown as WorkflowDefinition<never>;
 `,
       "workflows/rogue.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
 import definition from "./rogue.ts";
@@ -916,7 +911,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
       workflowFiles(
         "cancellable",
         `  await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("after", { description: "After" }, async () => await env.APP.call("hit", "after"));`,
+  return await step.do("after", { description: "After" }, async () => await ${hitCall(`"after"`)});`,
         { after: 1 }
       )
     );
@@ -993,7 +988,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
       ).length,
       afterLoad,
       leftOverRow,
-      after: await hitsOf(app, builder.userId, "after"),
+      after: await hitsOf(builder, app, "after"),
       raced,
       racedAudited: events.filter(
         ({ action, target }) =>
@@ -1113,12 +1108,12 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     const app = await appWith(admin, {
       ...workflowFiles(
         "outside",
-        `  const codeOf = async (key) => {
+        `  const codeOf = async (key: string) => {
     try {
       ${sendWith("key")};
       return "sent";
     } catch (error) {
-      return error.code;
+      return (error as { code?: string }).code;
     }
   };
   const outside = await codeOf("keys-outside");
@@ -1144,14 +1139,14 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
       try {
         ${sendWith('idempotencyKey + ":attempt-2"')};
       } catch (error) {
-        perAttempt = error.code;
+        perAttempt = String((error as { code?: string }).code);
       }
       // A constant key would answer every run with the first run's mail.
       let constant = "sent";
       try {
         ${sendWith('"invoice-INV-7"')};
       } catch (error) {
-        constant = error.code;
+        constant = String((error as { code?: string }).code);
       }
       return { perAttempt, constant };
     }
@@ -1299,7 +1294,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
       retries: { limit: 3, delay: 10 },
     },
     async () => {
-      await env.APP.call("hit", "check");
+      await ${hitCall(`"check"`)};
       throw new Error("Customer c-1 is blocked");
     }
   );`,
@@ -1312,7 +1307,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     const { failure } = await admin.api.workflows.status(run.id);
     expect({
       failure,
-      attempts: await hitsOf(app, admin.userId, "check"),
+      attempts: await hitsOf(admin, app, "check"),
     }).toMatchObject({
       failure: {
         step: "check",

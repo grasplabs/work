@@ -33,6 +33,18 @@ export const connectCallSchema = z.strictObject({
    * a person using an App) needs none: connect makes one as it holds it.
    */
   idempotencyKey: identifierSchema.optional(),
+  /**
+   * The stamp core recorded for a workflow run's mail (core's
+   * workflows/mail-stamps.ts), never in the input App code writes: connect
+   * gives it to a native connector's side effect (`stampMetaKey`), whose
+   * mail carries it as a header, so the copy a watched mailbox receives
+   * names the run that sent it. Kept with a held action, so it goes out
+   * with it once its person confirms.
+   */
+  stamp: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/u)
+    .optional(),
 });
 export type ConnectCall = z.infer<typeof connectCallSchema>;
 
@@ -76,9 +88,39 @@ export interface PendingReference {
 // everything else: the flow's state and PKCE verifier, and the tokens, which
 // never leave it (threat model R1).
 
-/** The outside systems a person connects through OAuth. */
+/**
+ * The suites a person connects through OAuth, pinned to the organization's
+ * own tenant: the IdPs people sign in with.
+ */
 export const oauthProviderSchema = z.enum(["microsoft", "google"]);
 export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
+
+/**
+ * Names no app may take: the suites above, whose sign-in connect handles
+ * itself, and Composio, whose connections are another kind.
+ */
+const reservedProviderIds: ReadonlySet<string> = new Set([
+  ...oauthProviderSchema.options,
+  "composio",
+]);
+
+/**
+ * Any other app a person signs in to, with OAuth 2.0 or an API key, as its
+ * native connector's provider record describes it (the connector kit's
+ * `signInSchema`): `hubspot`, `sample-crm`. Never one of the suites' names.
+ */
+export const appProviderSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{1,62}$/u)
+  .refine((id) => !reservedProviderIds.has(id), "A reserved provider name");
+export type AppProvider = z.infer<typeof appProviderSchema>;
+
+/** Whose token a native connector's calls get: a suite's or an app's. */
+export const connectorProviderSchema = z.union([
+  oauthProviderSchema,
+  appProviderSchema,
+]);
+export type ConnectorProvider = z.infer<typeof connectorProviderSchema>;
 
 /**
  * Personal: the person's own account, used only for them. Shared: an
@@ -118,19 +160,19 @@ export const connectionPersonSchema = z.strictObject({
 });
 export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 
-/** Starts connecting an account. */
+/** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
-  provider: oauthProviderSchema,
+  provider: connectorProviderSchema,
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
   /**
    * The organization at the provider, from the deployment's sign-in config:
    * its Entra tenant ID, or its Google Workspace domain. Only accounts in
-   * it can be connected.
+   * it can be connected. Required for those suites; an app has none.
    */
-  tenant: identifierSchema,
+  tenant: identifierSchema.optional(),
   /** A path on the deployment's origin; core checks it. */
   returnTo: z.string().startsWith("/").max(returnPathMaxLength),
 });
@@ -145,6 +187,28 @@ export const finishConnectionSchema = z.strictObject({
   error: z.string().min(1).max(256).optional(),
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
+
+/** Longest API key connect takes. */
+export const apiKeyMaxLength = 4096;
+
+/**
+ * Connects an app that signs in with an API key, which the person typed:
+ * connect checks it with the app (its provider record's account lookup)
+ * and seals it in the token vault, as it does OAuth tokens. It never comes
+ * back out, and never reaches the connector's code.
+ */
+export const connectWithKeySchema = z.strictObject({
+  person: connectionPersonSchema,
+  provider: appProviderSchema,
+  scope: connectionScopeSchema,
+  /** Printable ASCII only: it goes into a request header as it is. */
+  key: z
+    .string()
+    .min(1)
+    .max(apiKeyMaxLength)
+    .regex(/^[\u0021-\u007E]+$/u, "Not an API key"),
+});
+export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 
 export const disconnectSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -225,8 +289,29 @@ export interface ConnectionOwner {
   source: CatalogSource;
   /** A native provider (`microsoft`), or a Composio toolkit's slug. */
   provider: string;
+  /** The account's ID at the provider (Microsoft: its Entra object ID). */
+  accountId: string | null;
   /** The account at the provider, such as its email address. */
   accountName: string | null;
+  /**
+   * The account's own email address, as its provider's sign-in said: for
+   * Microsoft 365 the primary address it sends from, which may differ from
+   * its sign-in name (`accountName`). Null when the provider didn't say.
+   */
+  accountEmail: string | null;
+  /**
+   * The other addresses the account's mailbox receives mail at, its
+   * primary address and SMTP aliases, as its provider said when it was
+   * connected; none if that wasn't read.
+   */
+  accountAddresses: string[];
+  /**
+   * The addresses the account may send as besides those (Google's
+   * verified send-as addresses), as its provider said when it was
+   * connected: a run's senders, never its mailbox's addresses, since such
+   * an address may receive in another mailbox.
+   */
+  accountSenders: string[];
 }
 
 /**
@@ -799,7 +884,7 @@ export interface HeldCall {
  * capability core made for exactly that call, as for carrying it out.
  */
 export const heldOutcomeRequestSchema = connectCallSchema
-  .omit({ input: true })
+  .omit({ input: true, stamp: true })
   .required({ idempotencyKey: true });
 export type HeldOutcomeRequest = z.input<typeof heldOutcomeRequestSchema>;
 
@@ -808,8 +893,11 @@ export type HeldOutcomeRequest = z.input<typeof heldOutcomeRequestSchema>;
  * carried out now); they declined it, or it was dropped; it ran and
  * answered (`done`); it was sent and nobody can tell whether it took
  * effect (`unknown`: it may have been carried out, and is never sent
- * again under its key); or it didn't end well (`failed`: `reason` is the
- * error's code, and `output` what the tool said, for a tool's own error).
+ * again blindly under its key); its person said what became of such a
+ * call (`resolved`: `connect.resolved_done`, it took effect and is never
+ * sent again; `connect.resolved_not_done`, it didn't, and may be sent once
+ * more); or it didn't end well (`failed`: `reason` is the error's code,
+ * and `output` what the tool said, for a tool's own error).
  */
 export type HeldOutcome =
   | { state: "waiting" }
@@ -825,7 +913,17 @@ export type HeldOutcome =
 /** Workflow runs that have ended, each with its App: at most 50. */
 export const endedRunsSchema = z.strictObject({
   runs: z
-    .array(z.strictObject({ appId: identifierSchema, runId: identifierSchema }))
+    .array(
+      z.union([
+        // An App's run.
+        z.strictObject({ appId: identifierSchema, runId: identifierSchema }),
+        // A run of an independent workflow (a restricted one's).
+        z.strictObject({
+          workflowId: identifierSchema,
+          runId: identifierSchema,
+        }),
+      ])
+    )
     .max(50),
 });
 export type EndedRuns = z.input<typeof endedRunsSchema>;
@@ -909,8 +1007,6 @@ export const resolveOutcomeSchema = z.strictObject({
   person: connectionPersonSchema,
   key: unknownOutcomeKeySchema,
   choice: resolutionChoiceSchema,
-  /** The claim of the key the person was shown (`UnknownOutcome.claim`). */
-  claim: z.int().nonnegative(),
 });
 export type ResolveOutcome = z.input<typeof resolveOutcomeSchema>;
 
@@ -959,6 +1055,51 @@ export interface UnknownOutcome {
   claim: number;
   /** Null for a call whose origin connect doesn't have: it can't be resolved. */
   origin: UnknownOutcomeOrigin | null;
+  /** Where the list goes on after it: the next page is `before` it. */
+  cursor: UnknownOutcomeCursor;
+}
+
+/** Most calls of unknown outcome one list answers: the newest. */
+export const unknownOutcomeListLimit = 200;
+
+/**
+ * Where a list of calls of unknown outcome goes on: when the call was
+ * first sent, in milliseconds, and its random list ID; never its key,
+ * which App code chooses, nor anything counting other calls. A list
+ * `before` one answers the calls listed after it, newest first.
+ */
+export const unknownOutcomeCursorSchema = z
+  .string()
+  .regex(/^\d{1,15}\.[0-9a-f-]{0,36}$/u);
+export type UnknownOutcomeCursor = z.infer<typeof unknownOutcomeCursorSchema>;
+
+/**
+ * A call of unknown outcome as an organization's admin sees it, to follow
+ * up with the person it acted for: whose it is, what and where, and when.
+ * Never what was sent, nor its key (App code chooses keys), its claim or
+ * its origin: only that person resolves it, and only they see its input.
+ */
+export interface UnknownOutcomeListing {
+  /**
+   * For telling rows apart, unique across every page: a digest of what
+   * the listing shows anyway and the call's random list ID, never of its
+   * key.
+   */
+  id: string;
+  /** The person it acted for: theirs to resolve. */
+  onBehalfOf: string;
+  subject: CodeSubject;
+  connectionId: string;
+  /** As `PendingAction.connectionName`. */
+  connectionName: string | null;
+  action: string;
+  /** What the action does, as its tool names it, such as "Send an email". */
+  title?: string;
+  resource: string | null;
+  /** When it was first sent, ISO 8601. */
+  sentAt: string;
+  /** As `UnknownOutcome.cursor`. */
+  cursor: UnknownOutcomeCursor;
 }
 
 /**
@@ -966,7 +1107,19 @@ export interface UnknownOutcome {
  * their own. Grasp staff have none, and resolve none.
  */
 export interface UnknownOutcomesApi {
-  list: () => Promise<UnknownOutcome[]>;
+  /**
+   * The person's own, newest first, at most {@link unknownOutcomeListLimit}
+   * a page: a full page goes on `before` its last one's `cursor`.
+   */
+  list: (before?: UnknownOutcomeCursor) => Promise<UnknownOutcome[]>;
+  /**
+   * Every person's open calls of unknown outcome, newest first, paged as
+   * `list` is, for the organization's own admins only (never Grasp staff),
+   * to follow up with each call's person: read only, as
+   * `UnknownOutcomeListing` shows them. An admin resolves only their own,
+   * with `resolve`.
+   */
+  listAll: (before?: UnknownOutcomeCursor) => Promise<UnknownOutcomeListing[]>;
   /**
    * Says what became of the call `key` names: `happened` keeps it from
    * ever being sent again; `not_happened` lets it be sent once more, with
@@ -1069,6 +1222,14 @@ export interface ConnectApi extends PackageRegistryApi {
   finishConnection: (
     request: FinishConnection
   ) => Promise<{ connectionId: string; returnTo: string }>;
+  /**
+   * Connects an app that signs in with an API key, once the app accepted
+   * the key: the new connection, or the one that needed connecting again
+   * and holds the same account, as `finishConnection` has it.
+   */
+  connectWithKey: (
+    request: ConnectWithKey
+  ) => Promise<{ connectionId: string }>;
   /** The person's own connections and the shared ones. */
   listConnections: (person: ConnectionPerson) => Promise<ConnectionSummary[]>;
   /**
@@ -1209,10 +1370,23 @@ export interface ConnectApi extends PackageRegistryApi {
   anyPending: (request: PendingKey) => Promise<boolean>;
   /**
    * The calls of unknown outcome that acted for `person`, newest first (at
-   * most 200), those connect may still recover on its own included: none
-   * for Grasp staff.
+   * most 200 a page, the next `before` the last one's cursor), those
+   * connect may still recover on its own included: none for Grasp staff.
    */
-  listUnknownOutcomes: (person: ConnectionPerson) => Promise<UnknownOutcome[]>;
+  listUnknownOutcomes: (
+    person: ConnectionPerson,
+    before?: UnknownOutcomeCursor
+  ) => Promise<UnknownOutcome[]>;
+  /**
+   * Every person's calls of unknown outcome, newest first, paged as
+   * `listUnknownOutcomes` is, as an admin sees them: for `admin`, one of
+   * the organization's own admins as core read them now, never Grasp
+   * staff; refused to anyone else.
+   */
+  listAllUnknownOutcomes: (
+    admin: ConnectionPerson,
+    before?: UnknownOutcomeCursor
+  ) => Promise<UnknownOutcomeListing[]>;
   /** One call of unknown outcome of the person's, or `null`. */
   unknownOutcome: (
     request: UnknownOutcomeRequest
@@ -1386,6 +1560,8 @@ export const connectErrors = defineErrorFamily({
     "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it took effect: it won't be sent again, and what it returned isn't known.",
   "connect.resolved_not_done":
     "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it didn't take effect: it may be sent once more, with the same input.",
+  "connect.outcome_not_kept":
+    "What this call sent is no longer kept, so nobody can read what saying it didn't happen would let go out again: only that it happened can be said.",
   "connect.outcome_not_found":
     "There's no call of unknown outcome like that for you to resolve: it was resolved or recovered, or it isn't yours.",
   "connect.action_failed": "The action reported an error.",

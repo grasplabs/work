@@ -9,11 +9,13 @@ import { z } from "zod";
 
 import bundled from "#connectors";
 
-import { nativeConnector } from "../src/connectors.ts";
+import { nativeConnector } from "../src/bundled-connectors.ts";
 import { connections, connectionTokens } from "../src/db/schema.ts";
 import type { EgressProps } from "../src/egress.ts";
 import { providers as providerConfigs } from "../src/providers.ts";
 import { accessTokenFor } from "../src/tokens.ts";
+import { connectApp, fakeApps } from "./app-provider.ts";
+import type { AppName } from "./app-provider.ts";
 import {
   agentFor,
   callAs,
@@ -42,6 +44,7 @@ import { callTool as call, claimedAgo, toolError } from "./tool-calls.ts";
 // isolate, as connector code gone wrong would.
 
 const providers = fakeProviders();
+const apps = fakeApps();
 const api = fakeSampleApi();
 
 /** A person's own Microsoft account, connected to `server`. */
@@ -59,6 +62,35 @@ const connectionTo = async (
     .update(connections)
     .set({ server })
     .where(eq(connections.id, id));
+  return { id, person };
+};
+
+const appNames: ReadonlySet<string> = new Set<AppName>([
+  "sample-oauth",
+  "sample-key",
+]);
+const isApp = (provider: string): provider is AppName => appNames.has(provider);
+
+/**
+ * A person's own account at `provider`, connected to `server`: through
+ * the app's own sign-in for an app, whose connector is the one it names.
+ */
+const connectionOf = async (
+  server: string,
+  provider: string
+): Promise<{ id: string; person: ConnectionPerson }> => {
+  if (!isApp(provider)) {
+    return await connectionTo(
+      server,
+      provider === "google" ? "google" : "microsoft"
+    );
+  }
+  const person = someone();
+  const id = await connectApp(
+    apps,
+    person,
+    apps.account(provider, person.email)
+  );
   return { id, person };
 };
 
@@ -282,7 +314,7 @@ describe("a native connector", () => {
       capability: await signCapability(env.CAPABILITY_SIGNING_KEY, chat, {
         ...keyed,
         origin: chatOrigin,
-        confirms: held.id,
+        decision: { kind: "confirm", pendingActionId: held.id },
       }),
     });
     const ended = await exports.default.heldOutcome({
@@ -795,7 +827,7 @@ const egressProps = (fields: Partial<EgressProps> = {}): EgressProps => ({
   hosts: [sampleHost],
   routes: [{ method: "GET", host: sampleHost, path: "/v1/probe/{case}" }],
   values: {},
-  token: "a-token-for-one-call",
+  credential: { header: "authorization", value: "Bearer a-token-for-one-call" },
   expiresAt: Date.now() + 30_000,
   ...fields,
 });
@@ -806,7 +838,7 @@ describe("the egress handler", () => {
   it("sends nothing for a caller without a whole call's props", async () => {
     // As another Worker naming this entrypoint gets it: no call behind it.
     for (const props of [
-      egressProps({ token: "" }),
+      egressProps({ credential: { header: "authorization", value: "" } }),
       egressProps({ hosts: [] }),
       egressProps({ expiresAt: Number.NaN }),
     ]) {
@@ -847,7 +879,7 @@ describe("every native tool", { timeout: 60_000 }, () => {
   it.each(tools)(
     "$connector $action refuses a second resource selector",
     async ({ connector, provider, action }) => {
-      const connection = await connectionTo(connector, provider);
+      const connection = await connectionOf(connector, provider);
       const manifest = nativeConnector(connector)?.manifest;
       const tool = manifest?.actions[action];
       const field = tool?.resource ?? "mailbox";

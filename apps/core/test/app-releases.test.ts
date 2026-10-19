@@ -10,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
@@ -24,7 +25,13 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
-import { buildScreens } from "../src/screens.ts";
+import { platformRunner } from "../src/platform-sandbox.ts";
+import {
+  buildAppCode,
+  buildAppTests,
+  buildScreens,
+  buildWorkflows,
+} from "../src/screens.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -581,6 +588,76 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     ]).toStrictEqual([true, true, true, true, true]);
   });
 
+  it("answers the next load of a release whose first load was cancelled mid-read", async () => {
+    const fixture = await appWith(tablelessFiles());
+    const sealed = await seal(fixture);
+    // R2 that never answers a read: as the first load's request was
+    // cancelled while it read, which workerd never settles.
+    const reading = Promise.withResolvers<boolean>();
+    const stuck = new Proxy(env.FILES, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "get") {
+          return async (): Promise<never> => {
+            reading.resolve(true);
+            return await Promise.withResolvers<never>().promise;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const bounded = { ...env, RELEASE_READ_MS: "50" };
+    // Never awaited: it never answers.
+    const cancelled = loadRelease({ ...bounded, FILES: stuck }, fixture.app, 1);
+    await reading.promise;
+
+    const next = await Promise.race([
+      loadRelease(bounded, fixture.app, 1),
+      scheduler.wait(5000).then(() => "still waiting" as const),
+    ]);
+
+    expect(next === "still waiting" ? next : next.manifestHash).toBe(
+      sealed.manifestHash
+    );
+    await expect(
+      Promise.race([cancelled, Promise.resolve("never answers")])
+    ).resolves.toBe("never answers");
+  });
+
+  it("verifies a release anew after a load of it failed, keeping no failure", async () => {
+    const fixture = await appWith(tablelessFiles());
+    const sealed = await seal(fixture);
+    const entry = artifactAt(sealed, ".grasp/contracts.json");
+    const key = artifactKey(entry.sha256);
+    const stored = await env.FILES.get(key);
+    const bytes = (await stored?.arrayBuffer()) ?? new ArrayBuffer(0);
+    await env.FILES.delete(key);
+    const failed = await failure(
+      async () => await loadRelease(env, fixture.app, 1)
+    );
+    await env.FILES.put(key, bytes);
+
+    const loaded = await loadRelease(env, fixture.app, 1);
+
+    expect({
+      failed,
+      manifestHash: loaded.manifestHash,
+      manifest: loaded.manifest,
+      app: loaded.app,
+      modules: loaded.modules,
+      sdk: loaded.sdk,
+    }).toStrictEqual({
+      failed: "version.artifact_corrupt",
+      manifestHash: sealed.manifestHash,
+      manifest: sealed.manifest,
+      app: sealed.app,
+      modules: sealed.modules,
+      sdk: sealed.sdk,
+    });
+  });
+
   it("is refused when an artifact is gone", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
@@ -654,6 +731,288 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     await expect(
       failure(async () => await loadRelease(env, fixture.app, 1))
     ).resolves.toBe("version.not_sealed");
+  });
+});
+
+/** What a seal of `files` was refused with: its code, and the files its diagnostics name. */
+const refusedSeal = async (
+  files: Record<string, string>
+): Promise<{ code: string; files: string[] }> => {
+  const fixture = await appWith(files);
+  try {
+    await seal(fixture);
+    return { code: "ok", files: [] };
+  } catch (error) {
+    const refusal = z
+      .object({
+        code: z.string(),
+        details: z
+          .object({
+            diagnostics: z.array(z.object({ file: z.string().nullable() })),
+          })
+          .optional(),
+      })
+      .safeParse(error);
+    if (!refusal.success) {
+      return { code: String(error), files: [] };
+    }
+    const { code, details } = refusal.data;
+    return {
+      code,
+      files: [
+        ...new Set(
+          (details?.diagnostics ?? []).map(({ file }) => file ?? "(App)")
+        ),
+      ].toSorted(),
+    };
+  }
+};
+
+/** An operation file added to the notes, holding `source`. */
+const withOperation = (source: string): Record<string, string> => ({
+  ...notesFiles(),
+  "operations/extra.ts": source,
+});
+
+describe("server code a seal type-checks", { timeout: 120_000 }, () => {
+  it.each([
+    [
+      "a DOM global, which its isolate doesn't have",
+      "export const title = (): string => document.title;\n",
+    ],
+    [
+      "browser storage",
+      'export const saved = (): string | null => localStorage.getItem("x");\n',
+    ],
+    [
+      "a type error",
+      'import { v } from "@grasp-os/sdk";\nimport { query } from "#grasp/server";\n\nexport const wrong = query({ args: {}, returns: v.string(), handler: () => 1 });\n',
+    ],
+    [
+      "a path into the kit's packages, for its types",
+      'import type { runScreen } from "../node_modules/@grasp-os/sdk/src/screen-runtime.ts";\nexport type Reached = typeof runScreen;\n',
+    ],
+    [
+      "a module of the kit's screens, for its types",
+      'import type { ReactNode } from "react";\nexport type Reached = ReactNode;\n',
+    ],
+    [
+      "a module the SDK doesn't give it, named with a trailing slash",
+      'import type { GraspClient } from "@grasp-os/sdk/client/";\nexport type Reached = GraspClient;\n',
+    ],
+    [
+      "a reference path into the kit",
+      '/// <reference path="../node_modules/@grasp-os/sdk/src/client.ts" />\nexport const extra = 1;\n',
+    ],
+    [
+      "a lib it references, the DOM's",
+      '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
+    ],
+    [
+      "a types reference",
+      '/// <reference types="node" />\nexport const extra = 1;\n',
+    ],
+    [
+      "a dynamic import of the platform's bootstrap",
+      'export const load = async (): Promise<unknown> => await import("@grasp-os/sdk/client");\n',
+    ],
+    [
+      "a type's import() of the platform's bootstrap",
+      'export type Host = typeof import("@grasp-os/sdk/host");\n',
+    ],
+    [
+      "a re-export of everything of the platform's bootstrap",
+      'export * from "@grasp-os/sdk/client";\n',
+    ],
+    [
+      "a require-style import of the platform's bootstrap",
+      'import client = require("@grasp-os/sdk/client");\nexport const reached = client;\n',
+    ],
+    [
+      "a line the type check is told to ignore",
+      "// @ts-ignore\nexport const title = (): string => document.title;\n",
+    ],
+    [
+      "an error the type check is told to expect",
+      "// @ts-expect-error\nexport const title = (): string => document.title;\n",
+    ],
+    [
+      "a file the type check is told to skip",
+      "// @ts-nocheck\nexport const title = (): string => document.title;\n",
+    ],
+    [
+      "a line the type check is told to ignore, run into the next word",
+      "// @ts-ignoreX\nexport const title = (): string => document.title;\n",
+    ],
+    [
+      "a line the type check is told to ignore, in a block comment",
+      "/***@ts-ignore*/\nexport const title = (): string => document.title;\n",
+    ],
+    [
+      "a file the type check is told to skip, in another case",
+      "// @ts-NoCheck\nexport const title = (): string => document.title;\n",
+    ],
+    [
+      "an ambient module that shadows the SDK's",
+      'declare module "@grasp-os/sdk" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
+    ],
+  ])("refuses %s", async (_case, source) => {
+    await expect(refusedSeal(withOperation(source))).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["operations/extra.ts"],
+    });
+  });
+
+  it("refuses a name of another file that shares none, as the build loads each file on its own", async () => {
+    // Without imports or exports, TypeScript would read the other file as
+    // a script whose names every file sees; the build makes each a module.
+    await expect(
+      refusedSeal({
+        ...withOperation("export const greeting = (): string => shared;\n"),
+        "operations/extra-name.ts": 'const shared = "Hi";\n',
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["operations/extra.ts"],
+    });
+  });
+
+  it("refuses a test's type error with the server code's", async () => {
+    await expect(
+      refusedSeal({
+        ...notesFiles(),
+        "tests/helper.ts": 'export const count: number = "none";\n',
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["tests/helper.ts"],
+    });
+  });
+
+  it("checks no test that steers the check, so it gives the server code nothing", async () => {
+    // A test that doesn't build (here, globals it declares) never joins
+    // the check: the operation's `document` stays an error. It is refused
+    // where tests run, as a version is made current.
+    await expect(
+      refusedSeal({
+        ...withOperation(
+          "export const title = (): string => document.title;\n"
+        ),
+        "tests/helper.ts":
+          "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["operations/extra.ts"],
+    });
+  });
+
+  it("refuses a test that runs a streaming action as one that answers once", async () => {
+    // A streaming action runs only for a screen following it (spec
+    // 10.7.6): a test principal's `action` answers once, so its type
+    // refuses one, as the host does (`operation.mode_mismatch`).
+    const streamed = {
+      ...notesFiles(),
+      "operations/streams.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const once = action({ args: {}, returns: v.number(), handler: async () => 1 });
+
+export const progress = action({
+  args: {},
+  returns: v.number(),
+  stream: v.object({ done: v.number() }),
+  handler: async (ctx) => {
+    await ctx.emit({ done: 1 });
+    return 1;
+  },
+});
+`,
+      "app.ts": (notesFiles()["app.ts"] ?? "")
+        .replace(
+          'import schema from "./schema.ts";',
+          'import { once, progress } from "./operations/streams.ts";\nimport schema from "./schema.ts";'
+        )
+        .replace(
+          "operations: { notes: { get, create, tally } },",
+          "operations: { notes: { get, create, tally }, streams: { once, progress } },"
+        ),
+    };
+    const running = (reference: string): Record<string, string> => ({
+      ...streamed,
+      "tests/helper.ts": `import type { api } from "#grasp";
+import type { TestPrincipal } from "@grasp-os/sdk/testing";
+
+export const run = async (principal: TestPrincipal, refs: typeof api, flag: boolean): Promise<number> =>
+  await principal.action(${reference}, {});
+`,
+    });
+    await expect(
+      Promise.all(
+        [
+          "refs.streams.once",
+          "refs.streams.progress",
+          // Either one: it may stream, so it is refused as well.
+          "flag ? refs.streams.once : refs.streams.progress",
+        ].map(async (reference) => await refusedSeal(running(reference)))
+      )
+    ).resolves.toStrictEqual([
+      { code: "ok", files: [] },
+      { code: "version.build_failed", files: ["tests/helper.ts"] },
+      { code: "version.build_failed", files: ["tests/helper.ts"] },
+    ]);
+  });
+
+  it("seals tests that name the App's references and the SDK's testing module for their types", async () => {
+    await expect(
+      refusedSeal({
+        ...notesFiles(),
+        "tests/helper.ts":
+          'import type { api } from "#grasp";\nimport type * as testing from "@grasp-os/sdk/testing";\nexport type Checked = [typeof api, typeof testing];\n',
+      })
+    ).resolves.toStrictEqual({ code: "ok", files: [] });
+  });
+
+  it("refuses a migration's global declarations, which the rest of the server code would see", async () => {
+    await expect(
+      refusedSeal({
+        ...withOperation(
+          "export const title = (): string => document.title;\n"
+        ),
+        "migrations/0001-globals.ts":
+          "export {};\ndeclare global {\n  var document: { title: string };\n}\n",
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["migrations/0001-globals.ts"],
+    });
+  });
+
+  it("refuses a migration's directive that would reach the rest of the server code", async () => {
+    // A migration's own type errors wait for GRA-690; what it would give
+    // the whole program doesn't.
+    await expect(
+      refusedSeal({
+        ...withOperation(
+          "export const title = (): string => document.title;\n"
+        ),
+        "migrations/0001-dom.ts":
+          '/// <reference lib="dom" />\nexport const migration = 1;\n',
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["migrations/0001-dom.ts"],
+    });
+  });
+
+  it("seals what the worker's globals and the SDK type, with its generated modules", async () => {
+    await expect(
+      refusedSeal(
+        withOperation(
+          '/// <summary>A comment, not a directive.</summary>\n// Do not use @ts-ignore here: a comment that mentions it.\nexport const later = async (): Promise<string> => {\n  await new Promise((resolve) => setTimeout(resolve, 1));\n  return crypto.randomUUID() + new TextEncoder().encode("x").length + new URL("https://acme.test").host;\n};\n'
+        )
+      )
+    ).resolves.toStrictEqual({ code: "ok", files: [] });
   });
 });
 
@@ -832,7 +1191,15 @@ JSON.stringify = (value, ...rest) => {
     const events = await allEvents();
     // A version without tables made current: version 1 binds the store
     // still, kept as a rollback target.
-    await commitFiles(env, fixture.owner, fixture.app, tablelessFiles(), "Two");
+    // Its operations replaced: the notes' file goes, which reads tables
+    // version 2 doesn't have.
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { ...tablelessFiles(), "operations/notes.ts": null },
+      "Two"
+    );
     await seal(fixture, 2);
     await setCurrentVersion(env, fixture.owner, fixture.app, 2);
     const retained = await failure(async () => {
@@ -1008,7 +1375,394 @@ export const reach = action({
   });
 });
 
+/** The modules only the platform's bootstrap imports (spec 10.7.1). */
+const bootstrapModules = [
+  "@grasp-os/sdk/client",
+  "@grasp-os/sdk/host",
+  "@grasp-os/sdk/screen-runtime",
+] as const;
+
+/** How a file names a module: for its values, or for its types alone. */
+const importForms = {
+  values: (module: string, index: number) =>
+    `import { a${index} } from "${module}";\nvoid a${index};`,
+  types: (module: string, index: number) =>
+    `import type { A${index} } from "${module}";\nexport type B${index} = A${index};`,
+  "re-exported types": (module: string, index: number) =>
+    `export type { A${index} } from "${module}";`,
+  "an import type": (module: string, index: number) =>
+    `export type C${index} = typeof import("${module}");`,
+  "a type's require": (module: string, index: number) =>
+    `import type D${index} = require("${module}");\nexport type E${index} = typeof D${index};`,
+} as const;
+
+/** A file that names every bootstrap module as `form` writes one. */
+const namingAll = (form: (module: string, index: number) => string): string =>
+  bootstrapModules.map((module, index) => form(module, index)).join("\n");
+
+/** What a build said, whatever it built. */
+const saidSchema = z.object({
+  diagnostics: z
+    .array(
+      z.object({
+        file: z.string().optional(),
+        rule: z.string(),
+        message: z.string(),
+        severity: z.string(),
+      })
+    )
+    .default([]),
+});
+
+/** What a build said about `file`, as the modules each import it refused named. */
+const refusedIn = (built: object, file: string): string[] =>
+  saidSchema
+    .parse(built)
+    .diagnostics.filter((diagnostic) => diagnostic.file === file)
+    .flatMap(({ message }) =>
+      bootstrapModules.filter((module) => message.includes(`"${module}"`))
+    )
+    .toSorted();
+
+/** The errors a build said. */
+const errorsOf = (built: object): string[] =>
+  saidSchema
+    .parse(built)
+    .diagnostics.filter(({ severity }) => severity === "error")
+    .map(({ message }) => message);
+
+/** Types a screen may name that its values may not: only `{ v }` is the SDK root's. */
+const screenTypes =
+  'import type { ReturnOf } from "@grasp-os/sdk";\nimport type { ReactNode } from "react";\nexport type Shown = ReturnOf<never> | ReactNode;';
+
+/** Types other App code may name from a module its values may not reach. */
+const codeTypes =
+  'import type { Doc } from "@grasp-os/sdk/database";\nexport type Stored = Doc<never>;';
+
+/**
+ * Types a workflow may name: only the SDK's modules it imports, as its
+ * type check resolves them (it never reaches the App's schema, so a
+ * module like `@grasp-os/sdk/database` has nothing to give it).
+ */
+const workflowTypes =
+  'import type { WorkflowEnv } from "@grasp-os/sdk/workflow";\nexport type Bound = WorkflowEnv;';
+
+/** Each kind of App file, the build that reads it, and what it holds besides. */
+const targets = {
+  "a screen": {
+    types: screenTypes,
+    file: "screens/notes.tsx",
+    wrap: (lines: string) =>
+      `${lines}\nexport default function Notes() {\n  return null;\n}\n`,
+    build: async (files: Record<string, string>) =>
+      await buildScreens(env, files, "app-test"),
+  },
+  "a component": {
+    types: screenTypes,
+    file: "components/note.tsx",
+    others: {
+      "screens/notes.tsx":
+        'import { Note } from "../components/note";\n\nexport default function Notes() {\n  return <Note />;\n}\n',
+    },
+    wrap: (lines: string) =>
+      `${lines}\nexport function Note() {\n  return null;\n}\n`,
+    build: async (files: Record<string, string>) =>
+      await buildScreens(env, files, "app-test"),
+  },
+  "a declaration file": {
+    types: screenTypes,
+    file: "notes.d.ts",
+    // Declarations name modules only for their types.
+    typesOnly: true,
+    others: {
+      "screens/notes.tsx":
+        "export default function Notes() {\n  return null;\n}\n",
+    },
+    wrap: (lines: string) => `${lines}\nexport type Declared = string;\n`,
+    build: async (files: Record<string, string>) =>
+      await buildScreens(env, files, "app-test"),
+  },
+  "an operation": {
+    types: codeTypes,
+    file: "operations/extra.ts",
+    wrap: (lines: string) => `${lines}\nexport const extra = 1;\n`,
+    build: async (files: Record<string, string>) =>
+      await buildAppCode(env, files, "app-test"),
+  },
+  "the shared values": {
+    types: codeTypes,
+    file: "values.ts",
+    wrap: (lines: string) => `${lines}\nexport const shared = 1;\n`,
+    build: async (files: Record<string, string>) =>
+      await buildAppCode(env, files, "app-test"),
+  },
+  "a migration": {
+    types: codeTypes,
+    file: "migrations/0001-extra.ts",
+    wrap: (lines: string) => `${lines}\nexport const migration = 1;\n`,
+    build: async (files: Record<string, string>) =>
+      await buildAppCode(env, files, "app-test"),
+  },
+  "a test": {
+    types: codeTypes,
+    file: "tests/extra.test.ts",
+    wrap: (lines: string) => `${lines}\nexport const test = 1;\n`,
+    build: async (files: Record<string, string>) =>
+      await buildAppTests(env, files, "app-test"),
+  },
+  "a workflow": {
+    types: workflowTypes,
+    file: "workflows/extra.ts",
+    wrap: (lines: string) => `${lines}\nexport const workflow = 1;\n`,
+    build: async (files: Record<string, string>) =>
+      await buildWorkflows(env, files, "app-test"),
+  },
+} as const;
+
+/** A screen that imports `Props` by `line` and names it. */
+const screenShowingProps = (line: string): string =>
+  `${line}\nexport type Shown = Props;\nexport default function Notes() {\n  return null;\n}\n`;
+
 describe("screens", { timeout: 120_000 }, () => {
+  it("name for their types the App's own declarations, a folder's index among them", async () => {
+    const declarations = {
+      "components/types/index.d.ts":
+        "export interface Props {\n  title: string;\n}\n",
+      "components/named.d.ts":
+        "export interface Props {\n  title: string;\n}\n",
+    };
+    const [folder, extension, outside] = await Promise.all(
+      [
+        'import type { Props } from "../components/types";',
+        'import type { Props } from "../components/named.js";',
+        // A folder whose index would be the kit's, never an App file.
+        'import type { Props } from "../node_modules/@grasp-os/sdk/src";',
+      ].map(
+        async (line) =>
+          await buildScreens(
+            env,
+            {
+              ...notesFiles(),
+              ...declarations,
+              "screens/notes.tsx": screenShowingProps(line),
+            },
+            "app-test"
+          )
+      )
+    );
+    expect({
+      folder: errorsOf(folder ?? {}),
+      extension: errorsOf(extension ?? {}),
+      outside: errorsOf(outside ?? {}),
+    }).toStrictEqual({
+      folder: [],
+      extension: [],
+      outside: [
+        '"../node_modules/@grasp-os/sdk/src" is not a file of this App\'s screens.',
+      ],
+    });
+  });
+
+  it("check a screen's declaration naming a module by import() in a namespace as its build does", async () => {
+    // The compiler's check is its build's diagnostics (GRA-676, GRA-683),
+    // so the declaration's import check refuses it before any type check;
+    // the type check's resolution, which holds it as well, is tested on its
+    // own (packages/compiler, type-check.test.ts).
+    const files = {
+      ...notesFiles(),
+      "screens/notes.tsx":
+        "export default function Notes() {\n  return null;\n}\n",
+      "probe.d.ts":
+        'declare namespace Probe {\n  type Server = typeof import("@grasp-os/sdk/server");\n}\n',
+    };
+    const checked = z
+      .array(z.object({ file: z.string().optional(), rule: z.string() }))
+      .parse(
+        await platformRunner(env, "app-test").run("compiler", "check", [
+          "screens",
+          files,
+        ])
+      );
+    expect(
+      checked
+        .filter(({ file }) => file === "probe.d.ts")
+        .map(({ rule }) => rule)
+    ).toStrictEqual(["imports"]);
+  });
+
+  it.each([
+    [
+      "imports inside it, in a declaration file",
+      "leak.d.ts",
+      'declare module "x-probe" {\n  import type { runScreen } from "@grasp-os/sdk/screen-runtime";\n  import type { serverModule } from "@grasp-os/sdk/server";\n  global {\n    type Leak = [typeof runScreen, typeof serverModule];\n  }\n}\n',
+    ],
+    [
+      "imports inside it, in a component's declarations",
+      "components/leak.d.ts",
+      'declare module "x-probe" {\n  import type { runScreen } from "@grasp-os/sdk/screen-runtime";\n  global {\n    type Leak = [typeof runScreen];\n  }\n}\n',
+    ],
+    [
+      "one that shadows a kit module",
+      "shadow.d.ts",
+      'declare module "@grasp-os/sdk/react" {\n  export const useQuery: (reference: unknown) => unknown;\n}\n',
+    ],
+  ])("never declare a module by name: %s", async (_case, file, source) => {
+    const built = await buildScreens(
+      env,
+      {
+        ...notesFiles(),
+        "screens/notes.tsx":
+          "export type Reached = unknown;\nexport default function Notes() {\n  return null;\n}\n",
+        [file]: source,
+      },
+      "app-test"
+    );
+    expect({
+      ok: built.ok,
+      refused: saidSchema
+        .parse(built)
+        .diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file === file &&
+            diagnostic.message.startsWith("declare module")
+        ).length,
+    }).toStrictEqual({ ok: false, refused: 1 });
+  });
+
+  it("never declare globals, in a declaration file", async () => {
+    const built = await buildScreens(
+      env,
+      {
+        ...notesFiles(),
+        "screens/notes.tsx":
+          "export default function Notes() {\n  return null;\n}\n",
+        "globals.d.ts":
+          "export {};\ndeclare global {\n  var leak: number;\n}\n",
+      },
+      "app-test"
+    );
+    expect({
+      ok: built.ok,
+      refused: saidSchema
+        .parse(built)
+        .diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file === "globals.d.ts" &&
+            diagnostic.message.startsWith("declare global")
+        ).length,
+    }).toStrictEqual({ ok: false, refused: 1 });
+  });
+
+  it.each([
+    ["a screen", "screens/notes.tsx", "../"],
+    ["a declaration file", "notes.d.ts", "./"],
+  ])(
+    "never name the kit's own files for their types in %s, by any path",
+    async (_case, file, up) => {
+      const lines = [
+        `/// <reference path="${up}node_modules/@grasp-os/sdk/src/client.ts" />`,
+        '/// <reference types="node" />',
+        `export type R = typeof import("${up}node_modules/@grasp-os/sdk/src/screen-runtime.ts");`,
+        'import type * as C from "/node_modules/@grasp-os/sdk/src/client-core.ts";',
+        `import type { serverModule } from "${up}node_modules/@grasp-os/sdk/src/server.ts";`,
+        `import type { Doc } from "${up}node_modules/@grasp-os/sdk/src/database.ts";`,
+        "export type Reached = typeof C | typeof serverModule | Doc<never>;",
+      ].join("\n");
+      const screen = "export default function Notes() {\n  return null;\n}\n";
+      const built = await buildScreens(
+        env,
+        {
+          ...notesFiles(),
+          "screens/notes.tsx":
+            file === "screens/notes.tsx" ? `${lines}\n${screen}` : screen,
+          ...(file === "notes.d.ts" ? { [file]: lines } : {}),
+        },
+        "app-test"
+      );
+      const refused = saidSchema
+        .parse(built)
+        .diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file === file && diagnostic.rule === "imports"
+        );
+      expect({
+        ok: built.ok,
+        // The four imports, as the import check refuses them before any
+        // type check; then, alone, the two directives, as the type check
+        // refuses them.
+        imports: refused.length,
+      }).toStrictEqual({ ok: false, imports: 4 });
+      const directives = await buildScreens(
+        env,
+        {
+          ...notesFiles(),
+          "screens/notes.tsx":
+            file === "screens/notes.tsx"
+              ? `${lines.split("\n").slice(0, 2).join("\n")}\n${screen}`
+              : screen,
+          ...(file === "notes.d.ts"
+            ? { [file]: lines.split("\n").slice(0, 2).join("\n") }
+            : {}),
+        },
+        "app-test"
+      );
+      expect({
+        ok: directives.ok,
+        directives: saidSchema
+          .parse(directives)
+          .diagnostics.filter(
+            (diagnostic) =>
+              diagnostic.file === file && diagnostic.rule === "imports"
+          ).length,
+      }).toStrictEqual({ ok: false, directives: 2 });
+    }
+  );
+
+  it.each([
+    ["a screen", "screens/notes.tsx"],
+    ["a declaration file", "notes.d.ts"],
+  ])(
+    "never name the App's server code for its types in %s",
+    async (_case, file) => {
+      const typeLines = [
+        'import type { query } from "#grasp/server";',
+        'import type { internal } from "#grasp/server-references";',
+        'export type { create } from "../operations/notes.ts";',
+        'export type Schema = typeof import("../schema.ts");',
+      ];
+      const screen = "export default function Notes() {\n  return null;\n}\n";
+      const built = await buildScreens(
+        env,
+        {
+          ...notesFiles(),
+          "screens/notes.tsx":
+            file === "screens/notes.tsx"
+              ? `${typeLines.join("\n")}\nexport type Q = typeof query | typeof internal;\n${screen}`
+              : screen,
+          ...(file === "notes.d.ts"
+            ? {
+                [file]: typeLines
+                  .map((line) => line.replace("../", "./"))
+                  .join("\n"),
+              }
+            : {}),
+        },
+        "app-test"
+      );
+      expect({
+        ok: built.ok,
+        refused: saidSchema
+          .parse(built)
+          .diagnostics.filter((diagnostic) => diagnostic.file === file)
+          .map(({ message }) =>
+            message.includes(
+              "is the App's server code, which screens never import"
+            )
+          ),
+      }).toStrictEqual({ ok: false, refused: [true, true, true, true] });
+    }
+  );
+
   it.each([
     ["the server constructors", 'import { query } from "#grasp/server";'],
     [
@@ -1022,16 +1776,60 @@ describe("screens", { timeout: 120_000 }, () => {
   ])(
     "never import %s: the build fails before it starts",
     async (_case, line) => {
-      const build = await buildScreens(env, {
-        ...notesFiles(),
-        "screens/notes.tsx": `${line}\nexport default function Notes() {\n  return null;\n}\n`,
-      });
+      const build = await buildScreens(
+        env,
+        {
+          ...notesFiles(),
+          "screens/notes.tsx": `${line}\nexport default function Notes() {\n  return null;\n}\n`,
+        },
+        "app-test"
+      );
       expect(build.ok).toBeFalsy();
       expect(build.diagnostics.map(({ message }) => message)).toStrictEqual([
         expect.stringContaining(
           "is the App's server code, which screens never import"
         ),
       ]);
+    }
+  );
+});
+
+describe("import boundaries", { timeout: 120_000 }, () => {
+  it.each(
+    Object.entries(targets).flatMap(([target, kind]) =>
+      Object.entries(importForms)
+        .filter(([form]) => !("typesOnly" in kind && form === "values"))
+        .map(([form, write]) => [target, form, kind, write] as const)
+    )
+  )(
+    "keep the platform's bootstrap out of %s, naming it for its %s",
+    async (_target, _form, kind, write) => {
+      const { file, wrap, build } = kind;
+      const built = await build({
+        ...notesFiles(),
+        ...("others" in kind ? kind.others : {}),
+        [file]: wrap(namingAll(write)),
+      });
+      expect({ ok: built.ok, refused: refusedIn(built, file) }).toStrictEqual({
+        ok: false,
+        refused: [...bootstrapModules].toSorted(),
+      });
+    }
+  );
+
+  it.each(Object.entries(targets))(
+    "build %s that names none of it, with the types it may name",
+    async (_target, kind) => {
+      const { file, wrap, build, types } = kind;
+      const built = await build({
+        ...notesFiles(),
+        ...("others" in kind ? kind.others : {}),
+        [file]: wrap(types),
+      });
+      expect({
+        ok: built.ok,
+        errors: errorsOf(built),
+      }).toStrictEqual({ ok: true, errors: [] });
     }
   );
 });

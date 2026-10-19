@@ -8,7 +8,10 @@ import type {
 // entries in the order the engine journaled them, with each step's
 // attempts under that one step, each wait as one item from when it opened
 // to when it closed, and the run's own lifecycle and what couldn't be read
-// between them. Core reads the journal page by page; the page groups every
+// between them. A wait on an unknown outcome is one wait, however many
+// times it checked: core journals each check's wait on its own (host.ts
+// `#waitOrWoken`), so one that opens again right after it closed, with
+// nothing of the run between, goes on as the same item. Core reads the journal page by page; the page groups every
 // entry loaded so far, so a step whose retry came on a later page is still
 // one step.
 
@@ -93,8 +96,14 @@ export const historyItems = (
   const steps = new Map<string, Extract<HistoryItem, { type: "step" }>>();
   // A wait still open, by its kind and ID: what closes it next.
   const openWaits = new Map<string, Extract<HistoryItem, { type: "wait" }>>();
+  // The wait the entry before closed, if it closed one, and its key.
+  let justClosed:
+    | { key: string; wait: Extract<HistoryItem, { type: "wait" }> }
+    | undefined;
   const ordered = entries.toSorted((a, b) => a.sequence - b.sequence);
   for (const entry of ordered) {
+    const before = justClosed;
+    justClosed = undefined;
     if (entry.kind === "step" || entry.kind === "compensation") {
       const key = `${entry.kind}:${entry.stepId}`;
       let step = steps.get(key);
@@ -128,6 +137,14 @@ export const historyItems = (
       if (entry.state === "closed" && open !== undefined) {
         open.closedAt = entry.at;
         openWaits.delete(key);
+        justClosed = { key, wait: open };
+      } else if (
+        entry.state === "opened" &&
+        entry.waitKind === "outcome_unknown" &&
+        before?.key === key
+      ) {
+        before.wait.closedAt = null;
+        openWaits.set(key, before.wait);
       } else {
         const wait: Extract<HistoryItem, { type: "wait" }> = {
           type: "wait",
@@ -140,6 +157,8 @@ export const historyItems = (
         };
         if (entry.state === "opened") {
           openWaits.set(key, wait);
+        } else {
+          justClosed = { key, wait };
         }
         items.push(wait);
       }

@@ -14,6 +14,7 @@ import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
+import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
   appFunctionRoute,
   portableCallApp,
@@ -41,6 +42,7 @@ import {
   withoutArtifactToken,
 } from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
+import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
@@ -181,7 +183,9 @@ const connectionRouteResponse = async (
 
 /**
  * A call of an App's functions, from a screen's page or a portable host,
- * or a portable host's token request; `undefined` for any other path.
+ * a portable host's live connection, or its token request, or a
+ * screen's file channel request (app-file-route.ts); `undefined` for any
+ * other path.
  */
 const appCallResponse = async (
   pathname: string,
@@ -199,10 +203,25 @@ const appCallResponse = async (
   if (portableApp !== undefined) {
     return await portableFunctionResponse(request, env, portableApp, requestId);
   }
+  const liveApp = liveConnectionApp(pathname);
+  if (liveApp !== undefined) {
+    return portableLiveResponse(request, env, liveApp, requestId);
+  }
   const tokenApp = tokenRequestApp(pathname);
-  return tokenApp === undefined
+  if (tokenApp !== undefined) {
+    return await appTokenResponse(request, env, tokenApp, requestId);
+  }
+  const fileRoute = fileRouteOf(pathname, request.method);
+  if (fileRoute === "not_found") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  return fileRoute === undefined
     ? undefined
-    : await appTokenResponse(request, env, tokenApp, requestId);
+    : await appFileResponse(request, env, fileRoute, requestId);
 };
 
 /** Routes a request that has passed the router-secret check. */
@@ -307,6 +326,16 @@ const respond = async (
     const level = checked.reason === "not_configured" ? "error" : "warn";
     return { response, level, fields: { refused: checked.reason } };
   } catch (error) {
+    // A body that took too long to arrive (`readAtMost`): the client's
+    // doing, answered as such wherever it was read.
+    if (requestErrors.codeOf(error) === "request.timeout") {
+      const response = errorResponse(
+        408,
+        requestErrors.create("request.timeout"),
+        requestId
+      );
+      return { response, level: "warn", fields: { refused: "timeout" } };
+    }
     const response = errorResponse(
       500,
       internalErrors.create("internal.unexpected"),

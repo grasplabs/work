@@ -6,7 +6,6 @@ import type {
 } from "@grasp-os/shared/permissions";
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
 
 import type { Session } from "../core.ts";
 import {
@@ -161,43 +160,10 @@ export const objectOf = (
       msg`Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it`
     );
   }
-  return i18n._(msg`Workflow ${ph({ workflow: object.workflowId })}`);
-};
-
-/**
- * The record types a request to write a collection would claim there, and
- * those another App keeps there already, which this App wouldn't get:
- * named, for an admin to grant the one they want.
- */
-export const RecordTypeClaims = ({
-  request,
-  directory,
-}: {
-  request: Permission;
-  directory: Directory;
-}) => {
-  const { recordTypes } = request;
-  const { t } = useLingui();
-  if (recordTypes === undefined) {
-    return null;
+  if (object.type === "store") {
+    return i18n._(msg`Store ${ph({ store: object.storeId })}`);
   }
-  const claimed = formatList(recordTypes.claims);
-  return (
-    <>
-      {recordTypes.claims.length === 0 ? null : (
-        <span className="text-muted-foreground block text-xs">
-          <Trans>Would keep {claimed} records here</Trans>
-        </span>
-      )}
-      {recordTypes.taken.map(({ type, owner }) => (
-        <span key={type} className="text-destructive block text-xs">
-          {owner === null
-            ? t`Another domain already keeps ${type} records here: this domain's won't apply.`
-            : t`${ph({ domain: appName(directory, owner) })} already keeps ${type} records here: this domain's won't apply.`}
-        </span>
-      ))}
-    </>
-  );
+  return i18n._(msg`Workflow ${ph({ workflow: object.workflowId })}`);
 };
 
 /**

@@ -1,13 +1,19 @@
+import type { AccountLookup } from "@grasp-os/connector-kit/sign-in";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 
-import type { OAuthClientCredentials, ProviderConfig } from "./providers.ts";
+import type {
+  Credential,
+  OAuthClientCredentials,
+  OAuthProviderConfig,
+  ProviderAccount,
+} from "./providers.ts";
 
-// Talks to a provider's token and revocation endpoints. Every request
-// refuses redirects (a followed 307 would post the client secret and the
-// code somewhere else), times out, and reads at most a small answer. Errors
-// carry the HTTP status and the provider's OAuth error code, never its
-// description or anything it sent back: those can echo tokens, and errors
-// end up in logs.
+// Talks to a provider's token and revocation endpoints, and to an app's
+// account lookup. Every request refuses redirects (a followed 307 would
+// post the client secret and the code, or the token, somewhere else),
+// times out, and reads at most a small answer. Errors carry the HTTP
+// status and the provider's OAuth error code, never its description or
+// anything it sent back: those can echo tokens, and errors end up in logs.
 
 const timeoutMs = 10_000;
 const maxResponseBytes = 64 * 1024;
@@ -56,7 +62,7 @@ export interface TokenSet {
 }
 
 /** The first `maxResponseBytes` of the body; more than that is refused. */
-const readCapped = async (response: Response): Promise<string> => {
+export const readCapped = async (response: Response): Promise<string> => {
   const reader = response.body?.getReader();
   const decoder = new TextDecoder();
   const parts: string[] = [];
@@ -97,23 +103,48 @@ const jsonObject = (text: string): Record<string, unknown> => {
   return {};
 };
 
+/** Form-encodes `value`, as HTTP Basic's parts are for OAuth. */
+const formEncoded = (value: string): string =>
+  new URLSearchParams({ value }).toString().slice("value=".length);
+
+/**
+ * The client's credentials as RFC 6749 §2.3.1 has them: in the form, or
+ * as HTTP Basic, each part form-encoded first.
+ */
+const clientAuth = (
+  client: OAuthClientCredentials,
+  authentication: OAuthProviderConfig["clientAuthentication"]
+): { headers: Record<string, string>; fields: Record<string, string> } => {
+  if (authentication === "client_secret_post") {
+    return {
+      headers: {},
+      fields: { client_id: client.id, client_secret: client.secret },
+    };
+  }
+  return {
+    headers: {
+      Authorization: `Basic ${btoa(`${formEncoded(client.id)}:${formEncoded(client.secret)}`)}`,
+    },
+    fields: {},
+  };
+};
+
 /** Posts a form with the client's credentials; the JSON answer. */
 const post = async (
   url: string,
+  provider: Pick<OAuthProviderConfig, "clientAuthentication">,
   client: OAuthClientCredentials,
   fields: Record<string, string>
 ): Promise<Record<string, unknown>> => {
+  const auth = clientAuth(client, provider.clientAuthentication);
   const response = await fetch(url, {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/x-www-form-urlencoded",
+      ...auth.headers,
     },
-    body: new URLSearchParams({
-      ...fields,
-      client_id: client.id,
-      client_secret: client.secret,
-    }),
+    body: new URLSearchParams({ ...fields, ...auth.fields }),
     redirect: "manual",
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -162,7 +193,7 @@ const tokenSet = (
 
 /** Redeems an authorization code, with the flow's PKCE verifier. */
 export const exchangeCode = async (
-  provider: ProviderConfig,
+  provider: OAuthProviderConfig,
   client: OAuthClientCredentials,
   tenant: string,
   {
@@ -173,7 +204,7 @@ export const exchangeCode = async (
 ): Promise<TokenSet> => {
   const requestedAt = Date.now();
   return tokenSet(
-    await post(provider.tokenEndpoint(tenant), client, {
+    await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
@@ -185,14 +216,14 @@ export const exchangeCode = async (
 
 /** Redeems a refresh token. A provider that doesn't rotate sends none back. */
 export const refreshTokens = async (
-  provider: ProviderConfig,
+  provider: OAuthProviderConfig,
   client: OAuthClientCredentials,
   tenant: string,
   refreshToken: string
 ): Promise<TokenSet> => {
   const requestedAt = Date.now();
   return tokenSet(
-    await post(provider.tokenEndpoint(tenant), client, {
+    await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
     }),
@@ -206,7 +237,7 @@ export const refreshTokens = async (
  * revoked.
  */
 export const revokeToken = async (
-  provider: ProviderConfig,
+  provider: OAuthProviderConfig,
   client: OAuthClientCredentials,
   token: string
 ): Promise<boolean> => {
@@ -214,7 +245,7 @@ export const revokeToken = async (
     return false;
   }
   try {
-    await post(provider.revocationEndpoint, client, { token });
+    await post(provider.revocationEndpoint, provider, client, { token });
   } catch (error) {
     if (
       error instanceof OAuthResponseError &&
@@ -253,4 +284,86 @@ export const idTokenClaims = (idToken: string | undefined): unknown => {
   } catch {
     return undefined;
   }
+};
+
+/** Longest account ID, name or address taken from an app's lookup. */
+const maxAccountField = 256;
+
+/** What `pointer` (RFC 6901, plain names and indexes) names in `value`. */
+const at = (value: unknown, pointer: string): unknown => {
+  let current = value;
+  for (const name of pointer.split("/").slice(1)) {
+    if (Array.isArray(current) && /^\d+$/u.test(name)) {
+      current = current[Number(name)];
+    } else if (
+      typeof current === "object" &&
+      current !== null &&
+      !Array.isArray(current) &&
+      Object.hasOwn(current, name)
+    ) {
+      current = Reflect.get(current, name);
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+};
+
+/** A field of the account, as text, if it is some. */
+const textAt = (value: unknown, pointer: string | undefined): string | null => {
+  const found = pointer === undefined ? undefined : at(value, pointer);
+  const text =
+    typeof found === "number" && Number.isSafeInteger(found)
+      ? String(found)
+      : found;
+  return typeof text === "string" &&
+    text !== "" &&
+    text.length <= maxAccountField
+    ? text
+    : null;
+};
+
+/**
+ * The account a token or key is for, as an app's lookup names it: one GET
+ * to its lookup URL with the credential, its JSON answer read by the
+ * record's pointers. `null` when the app refused the credential, or its
+ * answer names no account. Nothing it sent back is logged or kept but
+ * those fields.
+ */
+export const lookupAccount = async (
+  lookup: AccountLookup,
+  credential: Credential
+): Promise<ProviderAccount | null> => {
+  let response: Response;
+  try {
+    response = await fetch(lookup.url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        [credential.header]: credential.value,
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    return null;
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    return null;
+  }
+  let body: unknown = undefined;
+  try {
+    body = JSON.parse(await readCapped(response));
+  } catch {
+    return null;
+  }
+  const id = textAt(body, lookup.id);
+  return id === null
+    ? null
+    : {
+        id,
+        name: textAt(body, lookup.name),
+        email: textAt(body, lookup.email),
+      };
 };

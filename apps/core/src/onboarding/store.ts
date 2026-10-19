@@ -1,3 +1,4 @@
+import { dayOf } from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
@@ -90,7 +91,6 @@ import { linkSecretOf } from "./link-secret.ts";
 import {
   agreementsIn,
   closesOn,
-  dayOf,
   dueLinks,
   leads,
   progressOf,

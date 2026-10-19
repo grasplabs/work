@@ -14,7 +14,11 @@ import { appHost, workspace } from "./durable-objects.ts";
 // - a live App's lines go to its error log (app-error-log.ts), in the
 //   App's own Durable Object, with its screens' problems;
 // - a draft's preview's lines go to the chat's Workspace object, for the
-//   agent's next check of the draft (preview-reports.ts).
+//   agent's next check of the draft (preview-reports.ts): a v1 draft's
+//   facet (preview.ts), and each isolate a spec 8 draft's sealed preview
+//   runs a function in (sealed-previews.ts), named by that function. Its
+//   props are core's, fixed as the isolate is made, never App code's: its
+//   lines reach only that chat's preview, at that revision.
 //
 // Bounded twice: the first lines of each call, each held to size, and the
 // newest entries of each log. Only what the App's code wrote is kept, with
@@ -33,6 +37,12 @@ export interface TailOf {
   version: number | null;
   /** The chat's draft at `revision`, for a preview. */
   preview?: { workspaceId: WorkspaceId; chatId: ChatId; revision: number };
+  /**
+   * The function the isolate runs, for an App of spec 8's layout, whose
+   * every isolate runs one (release-runner.ts): named as the lines'
+   * `method`, as a v1 server's RPC method is.
+   */
+  method?: string;
 }
 
 const levels = new Set<unknown>(["debug", "info", "log", "warn", "error"]);
@@ -67,11 +77,13 @@ const textOf = (message: unknown): string =>
  * call that logs a lot crowds out none of the others in the same batch.
  */
 export const serverLogsOf = (
-  events: readonly Pick<TraceItem, "event" | "logs">[]
+  events: readonly Pick<TraceItem, "event" | "logs">[],
+  named?: string
 ): ServerLog[] =>
   events.flatMap(({ event, logs }) => {
     const method =
-      event !== null && "rpcMethod" in event ? event.rpcMethod : null;
+      named ??
+      (event !== null && "rpcMethod" in event ? event.rpcMethod : null);
     return logs.slice(0, maxLinesPerCall).map((line) => ({
       at: new Date(line.timestamp).toISOString(),
       level: levelOf(line.level),
@@ -83,7 +95,7 @@ export const serverLogsOf = (
 /** The tail of an isolate running App server code. */
 export class AppTail extends WorkerEntrypoint<Env, TailOf> {
   override async tail(events: TraceItem[]): Promise<void> {
-    const logs = serverLogsOf(events);
+    const logs = serverLogsOf(events, this.ctx.props.method);
     if (logs.length === 0) {
       return;
     }

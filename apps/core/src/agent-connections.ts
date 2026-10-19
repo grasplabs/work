@@ -67,12 +67,18 @@ export interface AgentCallOutcome {
   /**
    * `waiting` for the person still (or being carried out now), `declined`
    * by them (or dropped), `done`, `unknown` (sent, and it may or may not
-   * have taken effect), or `failed`.
+   * have taken effect), `resolved` (such a call, of which its person said
+   * whether it took effect), or `failed`.
    */
   status: HeldOutcome["state"];
   /** What the action returned, once done; what it said, if it failed. */
   output: unknown;
-  /** Why it failed, or why its outcome is unknown. */
+  /**
+   * Why it failed, or why its outcome is unknown; once resolved, what its
+   * person said: `connect.resolved_done` (it took effect, and is never sent
+   * again) or `connect.resolved_not_done` (it didn't, and may be sent once
+   * more).
+   */
   error: string | null;
 }
 
@@ -92,8 +98,11 @@ const callOutcome = (outcome: HeldOutcome): AgentCallOutcome => {
       error: outcome.reason,
     };
   }
-  if (outcome.state === "unknown") {
-    return { status: "unknown", output: null, error: outcome.reason };
+  // Why it is unknown, or what its person said became of it: whether it
+  // won't be sent again (`connect.resolved_done`) or may be sent once more
+  // (`connect.resolved_not_done`).
+  if (outcome.state === "unknown" || outcome.state === "resolved") {
+    return { status: outcome.state, output: null, error: outcome.reason };
   }
   return { status: outcome.state, output: null, error: null };
 };

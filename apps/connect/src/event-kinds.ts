@@ -1,3 +1,4 @@
+import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
 import type { Json } from "@grasp-os/shared/json";
 
 import type { Connection } from "./connections.ts";
@@ -56,11 +57,30 @@ export interface SourceRead {
   ) => Promise<{ items: Item[]; cursor: string; more: boolean }>;
 }
 
-/** One event a read found: the provider's ID of the item, and its payload. */
+/**
+ * One event a read found: the provider's ID of the item, and its payload;
+ * for a message, the stamp it carries (`stampHeader`) if it carries one,
+ * which core checks against its own record before it believes it.
+ */
 export interface ReadEvent {
   id: string;
   payload: Json;
+  stamp?: string;
 }
+
+/**
+ * The stamp of a message whose headers are `headers` (`stampHeader`): the
+ * first such header that is a stamp (`stampPattern`); none otherwise.
+ */
+export const stampOf = (
+  headers: readonly { name: string; value: string }[] | null | undefined
+): string | undefined => {
+  const name = stampHeader.toLowerCase();
+  return headers
+    ?.filter((header) => header.name.toLowerCase() === name)
+    .map(({ value }) => value.trim())
+    .find((value) => stampPattern.test(value));
+};
 
 /** What one read of a source found, and where the next goes on from. */
 export interface ReadEvents {

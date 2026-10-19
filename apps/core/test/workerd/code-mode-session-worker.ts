@@ -4,11 +4,11 @@ import { inspectApp } from "@grasp-os/sdk/host";
 import { serverModule } from "@grasp-os/sdk/server";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
-import { releaseRunner } from "../../src/app-functions.ts";
 import { requestText } from "../../src/app-requests.ts";
 import { codeRuntime, describeRun, runCode } from "../../src/code-mode.ts";
 import type { OpenStore } from "../../src/data-stores.ts";
 import { callOperation } from "../../src/operations.ts";
+import { releaseRunner } from "../../src/release-runner.ts";
 import { runSessionOf } from "../../src/run-sessions.ts";
 import { sessionHost } from "../../src/sandboxed.ts";
 

@@ -26,5 +26,12 @@ export const sandboxParentHeader = "x-grasp-sandbox-parent";
 /** Whose session it is, for the per-owner cap. */
 export const sandboxOwnerHeader = "x-grasp-sandbox-owner";
 
+/**
+ * Whose work a session of a shared owner is (`platform:builder`'s builds
+ * of one App), for the per-sub-owner cap inside that owner's share. Only
+ * core sets it, from its own record of the call, never from App code.
+ */
+export const sandboxSubOwnerHeader = "x-grasp-sandbox-sub-owner";
+
 /** Marks a call's answer as the supervisor's verdict on the App's code. */
 export const sandboxVerdictHeader = "x-grasp-sandbox-verdict";

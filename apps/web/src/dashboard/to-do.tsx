@@ -1,4 +1,4 @@
-import type { PendingAction } from "@grasp-os/shared/connect";
+import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -28,7 +28,8 @@ import type { PileItem } from "./todo-pile.tsx";
 // What waits on the person, on top of the dashboard. What can be settled
 // on its card is a pile of cards, gone through one at a time
 // (`todo-pile.tsx`): changes an agent wants to make, which wait for them to
-// approve or reject; permission requests, which wait for an admin;
+// approve or reject; changes sent for them whose answer was lost, which
+// wait for them to say whether each happened (`outcome-card.tsx`); permission requests, which wait for an admin;
 // packages proposed for an engine, which wait for someone given the
 // permission to approve them. The rest is settled on its own page, and is
 // listed under the pile with the way there, not counted on it: the current
@@ -41,6 +42,8 @@ import type { PileItem } from "./todo-pile.tsx";
 /** What the dashboard read of what waits on the person, each part on its own. */
 export interface Waiting {
   held: Loaded<PendingAction[]>;
+  /** Calls of the person's whose answer was lost, for them to say what became of each. */
+  outcomes: Loaded<UnknownOutcome[]>;
   failed: Loaded<NotificationsPage>;
   integrations: Loaded<Integration[]>;
   /** Admins only. */
@@ -222,7 +225,7 @@ const ReconnectGroup = ({
 
 /** The cards of the pile, of what was read: core's order, kind by kind. */
 const pileOf = (
-  { held, requests, dependencies }: Waiting,
+  { held, outcomes, requests, dependencies }: Waiting,
   identity: Viewer
 ): PileItem[] => [
   ...(held.state === "ready"
@@ -230,6 +233,15 @@ const pileOf = (
         kind: "held",
         id: `held:${action.id}`,
         action,
+      }))
+    : []),
+  ...(outcomes.state === "ready"
+    ? outcomes.data.map((outcome): PileItem => ({
+        kind: "outcome",
+        // Its key and its claim: the same call sent again and lost again
+        // is another card.
+        id: `outcome:${JSON.stringify([outcome.key, outcome.claim])}`,
+        outcome,
       }))
     : []),
   ...(requests?.state === "ready" && decidesRequests(identity)
@@ -275,6 +287,7 @@ export const ToDo = ({
   const notLoaded = (
     [
       ["held", waiting.held],
+      ["outcomes", waiting.outcomes],
       ["requests", waiting.requests],
       ["dependencies", waiting.dependencies],
     ] as const

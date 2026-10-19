@@ -89,14 +89,31 @@ export const actorOf = ({
 }: Pick<Identity, "userId" | "staff">): AuditActor =>
   staff ? { type: "staff", userId } : { type: "person", userId };
 
-/** An App or agent, acting for a person, as the audit log names it. */
+/**
+ * An App, agent or independent workflow, acting for a person, as the audit
+ * log names it. A run of an independent workflow is the system, as every
+ * event of such runs names it, its run being the event's target
+ * (core's workflows/resource-runs.ts).
+ */
 export const delegateActorOf = ({
   subject,
   onBehalfOf,
-}: Authority): AuditActor =>
-  subject.type === "agent"
-    ? { type: "agent", agentId: subject.agentId, onBehalfOf }
-    : { type: "app", appId: subject.appId, part: "server" };
+}: Authority): AuditActor => {
+  switch (subject.type) {
+    case "agent": {
+      return { type: "agent", agentId: subject.agentId, onBehalfOf };
+    }
+    case "app": {
+      return { type: "app", appId: subject.appId, part: "server" };
+    }
+    case "workflow": {
+      return { type: "system" };
+    }
+    default: {
+      return subject satisfies never;
+    }
+  }
+};
 
 /**
  * A workflow run, acting on its own, as the audit log names it, with the

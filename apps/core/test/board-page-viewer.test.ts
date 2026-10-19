@@ -1,3 +1,4 @@
+import type { Id } from "@grasp-os/sdk";
 import { describe, expect, it } from "vite-plus/test";
 
 import type {
@@ -8,15 +9,16 @@ import { viewer } from "../blueprints/board-page/files/components/viewer.ts";
 
 // Which snapshot the board page shows as its answers come in
 // (components/viewer.ts): pure logic, so tested on its own, with the
-// server's answers released in the order each test needs. What can go
+// store's answers released in the order each test needs. What can go
 // wrong: a late answer shows a snapshot the person moved away from; a
 // failed open leaves the page acting on a snapshot it doesn't show, so a
 // save no longer refreshes the one shown and the next save conflicts.
 
-const snapshot = (id: string, version: number): Snapshot => ({
-  id,
-  path: `snapshots/${id}.md`,
-  version,
+const snapshot = (id: string, revision: number): Snapshot => ({
+  // SAFETY: a test's ID; the viewer only compares it.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  id: id as Id<"snapshots">,
+  revision,
   record: {},
   body: "",
 });
@@ -48,8 +50,8 @@ const server = () => {
 const watched = (load: (id: string) => Promise<Outcome<Snapshot>>) => {
   const seen: string[] = [];
   const to = {
-    show: ({ id, version }: Snapshot) => {
-      seen.push(`${id}@${version}`);
+    show: ({ id, revision }: Snapshot) => {
+      seen.push(`${id}@${revision}`);
     },
     refuse: (code: string) => {
       seen.push(code);

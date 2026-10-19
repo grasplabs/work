@@ -24,6 +24,7 @@ import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
 import type { ScreensApi } from "./screens.ts";
+import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { StoresApi } from "./stores.ts";
 import type { UploadsApi } from "./uploads.ts";
@@ -72,6 +73,8 @@ export interface SessionApi {
   readonly chats: ChatsApi;
   /** The person's own dashboard: which widgets are on it, in what order. */
   readonly dashboard: DashboardApi;
+  /** The person's own sessions: the browsers they are signed in on, and ending one. */
+  readonly sessions: SessionsApi;
   /** Permissions of Apps and agents. */
   readonly permissions: PermissionsApi;
   /**

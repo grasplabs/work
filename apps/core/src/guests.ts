@@ -23,6 +23,7 @@ import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { splitFrontmatterBlock } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { bindingTargetSchema } from "@grasp-os/shared/resource-bindings";
 import {
   and,
   asc,
@@ -49,7 +50,12 @@ import {
 } from "./audit-outbox.ts";
 import { signInConfig } from "./auth/config.ts";
 import { memberRole, teamsOf } from "./auth/identity.ts";
-import { apps, guestChats, guestMessages } from "./db/core/schema.ts";
+import {
+  appResourceBindings,
+  apps,
+  guestChats,
+  guestMessages,
+} from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
 import { graspSkills } from "./knowledge/grasp-skills.ts";
 import { gatewaySettings, models } from "./models.ts";
@@ -70,8 +76,9 @@ import { boundedText, jsonOf } from "./request-body.ts";
 //   secret, for one chat, and the member hands it to one person.
 // - A link that outlives its purpose: it works until it expires (at most
 //   14 days), the App revokes it, or the guest finishes; and only while
-//   the App still holds its permission, and the member it was made for
-//   is still a member who may use the App. Each is
+//   the App still holds its permission (and, for a chat a sealed function
+//   invited, the guests binding it went through still names it), and the
+//   member it was made for is still a member who may use the App. Each is
 //   checked on every request, never only at invitation. A revoked link
 //   opens nothing at all, not even what was written, however late the
 //   revoke lands in a request (what was written is read in one batch
@@ -211,6 +218,18 @@ const notRevoked = or(
 // The App's side: inviting, listing, reading back and revoking, each for
 // the member its method runs for, under the App's permission.
 
+/**
+ * How an App's call is recorded beyond who it acts for: who the audit log
+ * names (the App, for the person, unless the caller says otherwise: a
+ * workflow run, for a sealed function its step called), and the guests
+ * binding a sealed function's invitation went through, which its link
+ * then needs (`guestChat`).
+ */
+interface AppSide {
+  readonly actor?: AuditActor;
+  readonly bindingAlias?: string | null;
+}
+
 /** Refuses an App call unless it may, now. */
 const requireGuests = async (
   env: Env,
@@ -256,7 +275,8 @@ export const inviteGuest = async (
   authority: Authority,
   permissionId: PermissionId,
   input: unknown,
-  lastCheck?: () => Promise<void>
+  lastCheck?: () => Promise<void>,
+  { actor = delegateActorOf(authority), bindingAlias = null }: AppSide = {}
 ): Promise<GuestInvitation> => {
   await requireGuests(env, authority, permissionId);
   const app = appOf(authority);
@@ -289,6 +309,7 @@ export const inviteGuest = async (
     openedAt: null,
     endedAt: null,
     ended: null,
+    bindingAlias,
   };
   await lastCheck?.();
   // Only while the App has fewer than 50 open, checked as it inserts, so
@@ -307,11 +328,11 @@ export const inviteGuest = async (
     db
       .insert(guestChats)
       .select(
-        sql`SELECT ${row.id}, ${row.appId}, ${row.permissionId}, ${row.invitedBy}, ${name}, ${skill}, ${model}, ${row.tokenHash}, 0, NULL, ${now}, ${row.expiresAt.getTime()}, NULL, NULL, NULL WHERE (${openChats}) < ${guestOpenChatsMax}`
+        sql`SELECT ${row.id}, ${row.appId}, ${row.permissionId}, ${row.invitedBy}, ${name}, ${skill}, ${model}, ${row.tokenHash}, 0, NULL, ${now}, ${row.expiresAt.getTime()}, NULL, NULL, NULL, ${bindingAlias} WHERE (${openChats}) < ${guestOpenChatsMax}`
       )
       .returning({ id: guestChats.id }),
     outboxedIfChanged(db, {
-      actor: delegateActorOf(authority),
+      actor,
       action: "guest.invited",
       target: target(row.id),
       detail: { skill, days, onBehalfOf: authority.onBehalfOf },
@@ -371,14 +392,15 @@ export const readGuest = async (
   env: Env,
   authority: Authority,
   permissionId: PermissionId,
-  id: unknown
+  id: unknown,
+  { actor = delegateActorOf(authority) }: AppSide = {}
 ): Promise<GuestTranscript> => {
   await requireGuests(env, authority, permissionId);
   const row = await appChat(env, appOf(authority), id);
   const db = drizzle(env.DB);
   const messages = await messagesOf(db, row.id);
   await keepAuditEvent(env, db, {
-    actor: delegateActorOf(authority),
+    actor,
     action: "guest.read",
     target: target(row.id),
     detail: { messages: messages.length, onBehalfOf: authority.onBehalfOf },
@@ -398,7 +420,8 @@ export const revokeGuest = async (
   authority: Authority,
   permissionId: PermissionId,
   id: unknown,
-  lastCheck?: () => Promise<void>
+  lastCheck?: () => Promise<void>,
+  { actor = delegateActorOf(authority) }: AppSide = {}
 ): Promise<GuestChat> => {
   await requireGuests(env, authority, permissionId);
   const row = await appChat(env, appOf(authority), id);
@@ -415,7 +438,7 @@ export const revokeGuest = async (
       })
       .where(and(eq(guestChats.id, row.id), notRevoked)),
     outboxedIfChanged(db, {
-      actor: delegateActorOf(authority),
+      actor,
       action: "guest.revoked",
       target: target(row.id),
       detail: { onBehalfOf: authority.onBehalfOf },
@@ -482,6 +505,41 @@ const viewOf = async (
 };
 
 /**
+ * Refuses chat `row`, invited through the guests binding of its alias,
+ * unless that binding is still active and names the chat's permission:
+ * `guest.link_invalid`.
+ */
+const requireGuestsBinding = async (env: Env, row: ChatRow): Promise<void> => {
+  const binding = await drizzle(env.DB)
+    .select({ target: appResourceBindings.target })
+    .from(appResourceBindings)
+    .where(
+      and(
+        eq(appResourceBindings.appId, row.appId),
+        eq(appResourceBindings.alias, row.bindingAlias ?? ""),
+        eq(appResourceBindings.kind, "guests"),
+        eq(appResourceBindings.status, "active")
+      )
+    )
+    .get();
+  // A target that doesn't read serves nothing: the link fails closed.
+  let stored: unknown;
+  try {
+    stored = binding === undefined ? undefined : JSON.parse(binding.target);
+  } catch {
+    stored = undefined;
+  }
+  const bound = bindingTargetSchema.safeParse(stored);
+  if (
+    !bound.success ||
+    bound.data.kind !== "guests" ||
+    bound.data.permissionId !== row.permissionId
+  ) {
+    throw guestErrors.create("guest.link_invalid");
+  }
+};
+
+/**
  * The chat a guest's secret opens, and who it acts as: the App, for the
  * member it was made for, at the App's current version. A secret of no
  * chat, a revoked chat, and a chat whose App, permission or member (or
@@ -531,6 +589,12 @@ const guestChat = async (
       teams: await teamsOf(env.DB, row.invitedBy),
     };
     await appFor(env, person, row.appId, "user");
+    // Invited through a sealed function's binding: only while the App
+    // still holds an active guests binding of that alias naming the
+    // chat's permission. Revoking the binding stops its links.
+    if (row.bindingAlias !== null) {
+      await requireGuestsBinding(env, row);
+    }
   } catch (error) {
     if (isExpectedError(error)) {
       throw guestErrors.create("guest.link_invalid");

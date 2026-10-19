@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { pageOf, peopleIn } from "./people.ts";
+import { peopleIn } from "./people.ts";
 
 // The Models page: an admin reads the models the deployment allows, its
 // EU routing and data rules, and its budgets, as the stack's gateway config
@@ -15,10 +15,10 @@ const sectionOf = (page: Page, name: string) =>
   page.getByRole("region", { name, exact: true });
 
 test("an admin reads the allowed models, the rules and the budgets, and nobody else does", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, builder } = peopleIn("models");
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   // An old link leads to Settings → Models.
   await page.goto("/models");
   await expect(page).toHaveURL(/\/settings\/models$/u);
@@ -53,7 +53,7 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
     "Show or hide the sidebar",
   ]);
 
-  const refused = await pageOf(browser, builder);
+  const refused = await pageOf(builder);
   await refused.goto("/settings/models");
   await expect(refused.getByRole("alert")).toHaveText(
     "Your role doesn't allow that."
@@ -61,10 +61,10 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
 });
 
 test("an admin reads this month's AI spend against the budgets, and nobody else does", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, builder } = peopleIn("models");
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   await page.goto("/settings/models");
   await page
     .getByRole("navigation", { name: "Settings" })
@@ -85,7 +85,7 @@ test("an admin reads this month's AI spend against the budgets, and nobody else 
   await expect(sectionOf(page, "By workflow")).toHaveCount(0);
   await expect(sectionOf(page, "Workflows this month")).toBeVisible();
 
-  const refused = await pageOf(browser, builder);
+  const refused = await pageOf(builder);
   await refused.goto("/settings/spend");
   await expect(refused.getByRole("alert")).toHaveText(
     "Your role doesn't allow that."

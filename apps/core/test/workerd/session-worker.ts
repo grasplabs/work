@@ -19,6 +19,7 @@ import type {
   RunSession,
   Settled,
 } from "../../src/workflows/code.ts";
+import { isCpuLimitKill } from "../../src/workflows/host.ts";
 
 // Sessions on plain workerd (scripts/workerd-sandbox-session.test.ts): the
 // same `runInSession` core runs, with `SANDBOX_HOST` bound to the sandbox
@@ -389,6 +390,10 @@ const runHostCases: Record<
     body: `return await host.do("a", {}, async () => { for (;;) {} });`,
     cpuMs: 500,
   },
+  // A step whose code fills its memory: its process ended past it.
+  fills: {
+    body: `return await host.do("a", {}, async () => { const held = []; for (;;) { held.push(new Array(1000000).fill(held.length)); } });`,
+  },
   // A step whose call core answers with more than a session takes.
   bigAnswer: {
     body: `return await host.do("a", {}, async (attempt) => await attempt.readAttachment());`,
@@ -438,7 +443,12 @@ const runHostCase = async (env: StandInEnv, name: string) => {
         const attempt = new AttemptHost(calls, holds, holds);
         return { ok: true, value: await fn(attempt) };
       } catch (error) {
-        stepErrors.push(error instanceof Error ? error.name : "?");
+        // As the host takes it: the Loader's CPU kill, or an error by name.
+        if (isCpuLimitKill(error)) {
+          stepErrors.push("CPU limit kill");
+        } else {
+          stepErrors.push(error instanceof Error ? error.name : "?");
+        }
         return { ok: false, error: { name: "Error", message: "failed" } };
       }
     },

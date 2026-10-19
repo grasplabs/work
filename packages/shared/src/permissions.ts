@@ -17,7 +17,8 @@ import {
   workflowResourceIdSchema,
   workspaceIdSchema,
 } from "./ids.ts";
-import type { AppId, PermissionId } from "./ids.ts";
+import type { PermissionId } from "./ids.ts";
+import { storeOperationPathPattern } from "./operation-limits.ts";
 
 // Apps and agents start with nothing. Each thing they may use is one
 // permission: a person asks for it, an admin grants it (their own request
@@ -33,16 +34,65 @@ const agentSubjectSchema = z.strictObject({
   type: z.literal("agent"),
   agentId: agentIdSchema,
 });
+const workflowSubjectSchema = z.strictObject({
+  type: z.literal("workflow"),
+  workflowId: workflowResourceIdSchema,
+});
 
 /**
- * Whose code makes a call: an App's or an agent's. What a call's
- * authority names (`authoritySchema`).
+ * Whose code makes a call: an App's, an agent's, or an independent
+ * workflow's (a run of its sealed build, on the grants the workflow holds
+ * itself: core's workflows/resource-calls.ts). What a call's authority
+ * names (`authoritySchema`).
  */
 export const codeSubjectSchema = z.discriminatedUnion("type", [
   appSubjectSchema,
   agentSubjectSchema,
+  workflowSubjectSchema,
 ]);
 export type CodeSubject = z.infer<typeof codeSubjectSchema>;
+
+/** The ID of the App, agent or workflow `subject` names. */
+export const codeSubjectId = (subject: CodeSubject): string => {
+  switch (subject.type) {
+    case "app": {
+      return subject.appId;
+    }
+    case "agent": {
+      return subject.agentId;
+    }
+    case "workflow": {
+      return subject.workflowId;
+    }
+    default: {
+      return subject satisfies never;
+    }
+  }
+};
+
+/**
+ * The subject of type `type` and ID `id`, as a store keeps the two
+ * apart: refused, as any parse is, when `id` can't be one of that type.
+ */
+export const codeSubjectOf = (
+  type: CodeSubject["type"],
+  id: string
+): CodeSubject => {
+  switch (type) {
+    case "app": {
+      return codeSubjectSchema.parse({ type, appId: id });
+    }
+    case "agent": {
+      return codeSubjectSchema.parse({ type, agentId: id });
+    }
+    case "workflow": {
+      return codeSubjectSchema.parse({ type, workflowId: id });
+    }
+    default: {
+      return type satisfies never;
+    }
+  }
+};
 
 /**
  * Who a permission is for: an App, an agent, or an independent resource
@@ -53,10 +103,7 @@ export type CodeSubject = z.infer<typeof codeSubjectSchema>;
 export const permissionSubjectSchema = z.discriminatedUnion("type", [
   appSubjectSchema,
   agentSubjectSchema,
-  z.strictObject({
-    type: z.literal("workflow"),
-    workflowId: workflowResourceIdSchema,
-  }),
+  workflowSubjectSchema,
   z.strictObject({
     type: z.literal("store"),
     storeId: storeIdSchema,
@@ -82,7 +129,7 @@ const collectionObjectSchema = z.strictObject({
  * action per permission (its stub does that one thing):
  *
  * - `statistics`: the measures the platform publishes of Apps' runs
- *   (`platformMeasures` in `@grasp-os/shared/statistics`), which an App
+ *   (`platformMeasures` in `@grasp-os/shared/platform-measures`), which an App
  *   reads only once an admin grants it this, and then only of Apps whose
  *   runs the person it acts for may see. An App's own statistics need no
  *   permission.
@@ -97,8 +144,10 @@ const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
  * resource in it, such as one mailbox), a Knowledge collection, an
  * independent workflow (to follow its runs, `read`, or start it,
  * `start`), another App's exports: the methods of its server
- * code it lets other Apps call (`appExportsPath`), or the platform's own
- * statistics.
+ * code it lets other Apps call (`appExportsPath`), a business store's
+ * public operations (the public queries and mutations of the App that owns
+ * it, each action one of them by its path: core's store-operations.ts), or
+ * the platform's own statistics.
  */
 export const permissionObjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -115,6 +164,10 @@ export const permissionObjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("app"),
     appId: appIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("store"),
+    storeId: storeIdSchema,
   }),
   platformObjectSchema,
 ]);
@@ -155,6 +208,10 @@ const isActionOf = (type: PermissionObjectType, action: string): boolean => {
   if (type === "app") {
     return action === "read" || action === "write" || isExportName(action);
   }
+  // A store's public operations, each by its path, e.g. `notes.list`.
+  if (type === "store") {
+    return storeOperationPathPattern.test(action);
+  }
   const actions: readonly string[] = platformActions[type];
   return actions.includes(action);
 };
@@ -174,6 +231,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // A workflow run's own App (its server methods), next to its permissions.
   "APP",
   "APP_CALL_TIMEOUT_MS",
+  // Grasp's OAuth apps at the apps that aren't suites (connect's providers.ts).
+  "APP_OAUTH_CLIENTS",
   "APPS",
   "ASSETS",
   "AUDIT_ARCHIVE",
@@ -209,6 +268,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "PLATFORM_CHANGE",
   // The deployment's quota policy (core's src/workflows/quotas.ts).
   "QUOTA_LIMITS",
+  "RELEASE_READ_MS",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
   "RUN_RETENTION_DAYS",
@@ -225,6 +285,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "STATISTICS_READ_LIMITS",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+  "WORKFLOW_BUILD_READ_MS",
   "WORKFLOW_OFF_WAIT_MS",
   "WORKFLOW_RETRY_DELAY_MS",
   "WORKFLOW_RUNS",
@@ -307,6 +368,8 @@ export type PermissionRequest = z.input<typeof permissionRequestSchema>;
  * statistics, guest chats): the things that name the same thing for
  * whoever creates from it, where a connection is someone's or set up for
  * one App, and a workflow or exports name an App its creator may not see.
+ * A collection only to read: an App never writes one (it keeps what it
+ * writes in a business store), so `write` would give it nothing.
  */
 export const declaredPermissionSchema = z
   .strictObject({
@@ -316,14 +379,23 @@ export const declaredPermissionSchema = z
       platformObjectSchema,
     ]),
   })
-  .superRefine(checkGrant);
+  .superRefine(checkGrant)
+  .superRefine(({ object, actions }, context) => {
+    if (object.type === "collection" && actions.includes("write")) {
+      context.addIssue({
+        code: "custom",
+        path: ["actions"],
+        message: "An App only reads a collection",
+      });
+    }
+  });
 export type DeclaredPermission = z.infer<typeof declaredPermissionSchema>;
 
 /**
  * Requested: asked for, allows nothing yet. Active: granted, allows its
  * actions. Revoked: allows nothing, for good (ask again for a new one).
- * An App's active permission on a connection, to write a collection, to
- * start a workflow, or to call another App's exports other than all those
+ * An App's active permission on a connection, to start a workflow, or to
+ * call another App's exports other than all those
  * marked `read`, goes back to requested when someone who couldn't grant
  * it (Grasp staff included) makes another version of the App current
  * (`AppVersionsApi.setCurrent`), until an admin grants it again.
@@ -378,17 +450,6 @@ export interface Permission {
    * agent works.
    */
   chat: string | null;
-  /**
-   * On an App's request to write a collection: the record types the
-   * version of it current now declares there (`@grasp-os/shared/apps`),
-   * those it would claim once granted, and those another App has there
-   * already, which it would not get: that App is named to admins only.
-   * None otherwise.
-   */
-  recordTypes?: {
-    claims: string[];
-    taken: { type: string; owner: AppId | null }[];
-  };
 }
 
 /**
@@ -461,13 +522,21 @@ export const authoritySchema = z
       path: ["appVersion"],
       message: "An App's call names its version; an agent's none",
     }
+  )
+  .refine(
+    ({ subject, mode }) => subject.type !== "workflow" || mode === "workflow",
+    {
+      path: ["mode"],
+      message: "An independent workflow's call is a run's, never interactive",
+    }
   );
 export type Authority = z.infer<typeof authoritySchema>;
 
 /**
- * Where an App or agent works, and keeps its restricted mode: a chat, an
- * App, or a run of one of the App's workflows. The host sets it, like the
- * authority.
+ * Where an App, agent or independent workflow works, and keeps its
+ * restricted mode: a chat, an App, a run of one of the App's workflows, or
+ * a run of an independent workflow (`workflowRun`, core's
+ * workflows/resource-calls.ts). The host sets it, like the authority.
  */
 export const workContextSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -479,6 +548,11 @@ export const workContextSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("run"),
     appId: appIdSchema,
+    runId: runIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("workflowRun"),
+    workflowId: workflowResourceIdSchema,
     runId: runIdSchema,
   }),
 ]);

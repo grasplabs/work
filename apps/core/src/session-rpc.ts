@@ -19,6 +19,7 @@ import { OnboardingGateRpc } from "./onboarding/gate-rpc.ts";
 import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OnboardingStaffRpc } from "./onboarding/staff-rpc.ts";
 import { OrganizationRpc } from "./organization.ts";
+import { SessionsRpc } from "./own-sessions.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
 import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
@@ -73,12 +74,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
   readonly #dashboard: DashboardRpc;
+  readonly #sessions: SessionsRpc;
   readonly #notifications: NotificationsRpc;
   readonly #onboarding: OnboardingRpc;
   readonly #onboardingStaff: OnboardingStaffRpc;
   readonly #onboardingGate: OnboardingGateRpc;
 
-  constructor(env: Env, check: SessionCheck) {
+  /** `sessionId`: the session the connection is signed in with. */
+  constructor(env: Env, check: SessionCheck, sessionId: string) {
     super();
     this.#check = check;
     // Everything but the onboarding refuses staff who reach the onboarding alone.
@@ -109,10 +112,15 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
     this.#dashboard = new DashboardRpc(env, full);
+    this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#notifications = new NotificationsRpc(env, full);
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingStaff = new OnboardingStaffRpc(env, check);
     this.#onboardingGate = new OnboardingGateRpc(env, check);
+  }
+
+  get sessions(): SessionsRpc {
+    return this.#sessions;
   }
 
   get notifications(): NotificationsRpc {

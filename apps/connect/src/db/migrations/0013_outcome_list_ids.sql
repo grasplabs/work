@@ -1,0 +1,2 @@
+ALTER TABLE `idempotent_calls` ADD `list_id` text DEFAULT '' NOT NULL;--> statement-breakpoint
+CREATE INDEX `idempotent_calls_person_list_idx` ON `idempotent_calls` (`on_behalf_of`,`created_at`,`list_id`);

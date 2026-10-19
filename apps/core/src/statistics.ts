@@ -1,13 +1,15 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { delegateActorOf } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { isPlatformMeasure } from "@grasp-os/shared/platform-measures";
+import type { PlatformMeasure } from "@grasp-os/shared/platform-measures";
 import {
-  isPlatformMeasure,
   statisticErrors,
   statisticMaxApps,
   statisticMaxGroups,
@@ -16,7 +18,6 @@ import {
   statisticRowsPerDay,
 } from "@grasp-os/shared/statistics";
 import type {
-  PlatformMeasure,
   StatisticAnswer,
   StatisticGroup,
 } from "@grasp-os/shared/statistics";
@@ -508,7 +509,7 @@ const requireRunsVisible = async (
 };
 
 /** A platform read as its audit event names it. */
-interface PlatformRead {
+export interface PlatformRead {
   measure: string;
   /** The App whose measure it reads: none when the read names none. */
   app?: string;
@@ -554,16 +555,19 @@ export const platformReadOf = (input: unknown): PlatformRead | undefined => {
 
 /**
  * Audits a platform read by App code acting as `authority`: allowed, or
- * refused with why (`refused`, an error's code).
+ * refused with why (`refused`, an error's code). The audit log names
+ * `actor` as reading: the App, on behalf of the person, unless the caller
+ * says otherwise (a workflow run, for a sealed function its step called).
  */
 export const auditPlatformRead = async (
   env: Env,
   authority: Authority,
   read: PlatformRead,
-  refused?: string
+  refused?: string,
+  actor: AuditActor = delegateActorOf(authority)
 ): Promise<void> => {
   await keepAuditEvent(env, drizzle(env.DB), {
-    actor: delegateActorOf(authority),
+    actor,
     action: "statistics.read",
     // Every App one read asks for, by ID (at most as many as provenance
     // holds): those it counted, then the `unavailable` ones it didn't.
@@ -671,14 +675,16 @@ const endOf = (query: Query, now: Date): Date =>
  * `now`, today included; or, under the permission `platform` (its ID), one
  * the platform publishes of an App whose runs the person it acts for may
  * see (see above). A platform measure without it is `permission.denied`.
- * Every platform read is audited, allowed or refused, and why.
+ * Every platform read is audited, allowed or refused, and why, naming
+ * `actor` as reading (`auditPlatformRead`).
  */
 export const readStatistics = async (
   env: Env,
   authority: Authority,
   input: unknown,
   platform?: PermissionId,
-  now = new Date()
+  now = new Date(),
+  actor: AuditActor = delegateActorOf(authority)
 ): Promise<StatisticAnswer> => {
   const read = platformReadOf(input);
   if (read === undefined) {
@@ -712,16 +718,23 @@ export const readStatistics = async (
       env,
       authority,
       read,
-      isExpectedError(error) ? error.code : "internal.unexpected"
+      isExpectedError(error) ? error.code : "internal.unexpected",
+      actor
     );
     throw error;
   }
   const { visible, unavailable } = counted;
-  await auditPlatformRead(env, authority, {
-    ...read,
-    days: query.days,
-    ...(unavailable === undefined ? {} : { unavailable }),
-  });
+  await auditPlatformRead(
+    env,
+    authority,
+    {
+      ...read,
+      days: query.days,
+      ...(unavailable === undefined ? {} : { unavailable }),
+    },
+    undefined,
+    actor
+  );
   const answer = await platformMeasure(
     env,
     measure,

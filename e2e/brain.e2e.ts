@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { pageOf, peopleIn } from "./people.ts";
+import { peopleIn } from "./people.ts";
 
 // The Brain, end to end: a person opens it from the sidebar on its atlas,
 // goes into a part of it there and opens a note, and finds the note on the
@@ -15,10 +15,10 @@ import { pageOf, peopleIn } from "./people.ts";
 const brainRead = { timeout: 15_000 };
 
 test("a person opens the brain on its atlas, goes into a part of it, opens a note there and finds it on the atlas again", async ({
-  browser,
+  pageOf,
 }) => {
   const { member } = peopleIn("brain");
-  const page = await pageOf(browser, member);
+  const page = await pageOf(member);
   await page.goto("/");
 
   await page

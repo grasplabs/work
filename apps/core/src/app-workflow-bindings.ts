@@ -11,6 +11,7 @@ import type {
   WorkflowStart,
 } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor } from "./apps.ts";
@@ -24,6 +25,7 @@ import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
+import type { StartingAgent } from "./workflow-starts.ts";
 
 // Apps binding independent workflows (platform specification 3, 13.1,
 // 15.1): an App names an exact version of a workflow by an alias of its
@@ -253,7 +255,18 @@ export const startAppBinding = async (
   env: Env,
   authority: Authority,
   alias: unknown,
-  request: unknown
+  request: unknown,
+  /** What else the start's audit event names (the agent that had it made). */
+  noted?: Readonly<Record<string, string>>,
+  /**
+   * What else must hold as the start is admitted, as SQL (the permission
+   * of the agent that had it made), read by the admitting statement.
+   */
+  requires: SQL = sql`1`,
+  /** Asked just before the start is admitted: throws to start nothing. */
+  beforeAdmit?: () => void,
+  /** The agent whose call made it, whose chat's restricted mode it takes. */
+  agent: StartingAgent | null = null
 ): Promise<WorkflowStart> => {
   if (authority.subject.type !== "app" || typeof alias !== "string") {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
@@ -279,10 +292,12 @@ export const startAppBinding = async (
   }
   return await startWorkflow(
     env,
-    { type: "app", authority },
+    { type: "app", authority, agent },
     row.workflowResourceId,
     { version: row.workflowResourceVersion, input, key },
     sql`EXISTS (SELECT 1 FROM app_workflow_bindings
-      WHERE id = ${row.id} AND status = 'active')`
+      WHERE id = ${row.id} AND status = 'active') AND ${requires}`,
+    noted,
+    beforeAdmit
   );
 };

@@ -1,3 +1,4 @@
+import { dayOf } from "@grasp-os/shared/admin/org-record";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
@@ -18,7 +19,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
 import { onboardingGate, sessions, users } from "../db/core/schema.ts";
-import { closesOn, dayOf } from "./rules.ts";
+import { closesOn } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 
 // The gate of a deployment that is onboarding (`@grasp-os/shared/onboarding-gate`).

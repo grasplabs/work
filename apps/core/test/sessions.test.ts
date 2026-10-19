@@ -29,16 +29,45 @@ const clientHost = new URL(clientOrigin).host;
 
 describe("sessions end", () => {
   it("after twelve hours, and aren't extended by use", async () => {
-    const startedAt = Date.now();
-    const session = await signedIn(idp, "microsoft", entraPerson(acmeTenant));
-    const first = await whoami(session);
-    const again = await whoami(session);
+    const person = entraPerson(acmeTenant);
+    // The clock stands still while signing in: Better Auth stamps the
+    // session's end and then its start with clock reads of their own
+    // (`createSession`: `getDate(expiresIn)`, then `new Date()`), which a
+    // millisecond's tick may fall between. Held, the sign-in's window is
+    // one instant, so its end is exactly twelve hours after it: a second
+    // longer or shorter, or a millisecond, is caught. (Better Auth is
+    // left as it is; only the test's clock is held.)
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let signedInAt: number;
+    let first: Awaited<ReturnType<typeof whoami>>;
+    let again: Awaited<ReturnType<typeof whoami>>;
+    try {
+      signedInAt = Date.now();
+      const session = await signedIn(idp, "microsoft", person);
+      // Used six hours on, twice: a session refreshed by use would end
+      // later than twelve hours after signing in.
+      vi.setSystemTime(signedInAt + 6 * hour);
+      first = await whoami(session);
+      again = await whoami(session);
+    } finally {
+      vi.useRealTimers();
+    }
+    const stored = async () =>
+      await env.DB.prepare(
+        "SELECT created_at AS createdAt, expires_at AS expiresAt FROM sessions WHERE user_id = (SELECT user_id FROM accounts WHERE account_id = ?)"
+      )
+        .bind(person.sub)
+        .first<{ createdAt: number; expiresAt: number }>();
 
-    expect(Date.parse(first.expiresAt)).toBeGreaterThan(startedAt);
-    expect(Date.parse(first.expiresAt)).toBeLessThanOrEqual(
-      startedAt + 12 * hour + 1000
-    );
-    expect(again.expiresAt).toBe(first.expiresAt);
+    expect({
+      stored: await stored(),
+      shown: Date.parse(first.expiresAt),
+      afterUse: again.expiresAt,
+    }).toStrictEqual({
+      stored: { createdAt: signedInAt, expiresAt: signedInAt + 12 * hour },
+      shown: signedInAt + 12 * hour,
+      afterUse: first.expiresAt,
+    });
   });
 
   it("when they expire", async () => {

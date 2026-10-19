@@ -24,6 +24,22 @@ export class CallTree {
     this.parentSession = parentSession;
   }
 
+  #ownSession: string | undefined;
+
+  /**
+   * On-prem, the sandbox session, by its call ID, the function the caller
+   * named runs in, once open: a call another App's function makes on its
+   * behalf (a shared store's operation) runs in a child of it.
+   */
+  get session(): string | undefined {
+    return this.#ownSession;
+  }
+
+  /** Notes `callId` as the session its functions run in, as it opens. */
+  sessionOpened(callId: string): void {
+    this.#ownSession = callId;
+  }
+
   /** Counts `work`, a nested call just started, until it settles. */
   track(work: Promise<unknown>): void {
     this.#started.add(work);

@@ -1,10 +1,23 @@
+import type { Id } from "@grasp-os/sdk";
+import { useClient, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useRef, useState } from "react";
 
+import { api } from "#grasp";
+
 import { WorkflowEditor } from "../components/editor";
 import { WorkflowList } from "../components/overview";
-import { ask, refusal } from "../components/playbook";
-import type { Opened, Overview } from "../components/playbook";
+import {
+  drawnFrom,
+  listedFrom,
+  refusal,
+  settle,
+  workflowFrom,
+} from "../components/store";
+import type { Opened, Team } from "../components/store";
+
+/** How many workflows the list loads at a time. */
+const listPage = 10;
 
 /**
  * What the screen shows: every workflow, a new one (the `draw`-th drawn
@@ -56,25 +69,86 @@ const selectionOf = (view: View): string | null => {
 };
 
 /**
- * The workflow map: the Playbook's workflows by team, with their totals,
- * and an editor for each, drawn and designed side by side.
+ * Every workflow by team, with its totals, kept up to date as they are
+ * saved, loaded a page at a time.
+ */
+const Workflows = ({
+  teams,
+  writable,
+  onOpen,
+}: {
+  teams: Team[];
+  writable: boolean;
+  onOpen: (id: Id<"workflows">) => void;
+}) => {
+  const { items, hasMore, isLoading, loadMore } = usePaginatedQuery(
+    api.map.list,
+    {},
+    { initialPageSize: listPage }
+  );
+  return (
+    <div className="flex flex-col gap-4">
+      {isLoading && items.length === 0 ? (
+        <p className="text-muted-foreground text-sm">Loading workflows…</p>
+      ) : (
+        <WorkflowList
+          workflows={items.map(listedFrom)}
+          teams={teams}
+          writable={writable}
+          onOpen={onOpen}
+        />
+      )}
+      {hasMore ? (
+        <Button
+          variant="outline"
+          disabled={isLoading}
+          onClick={() => {
+            loadMore();
+          }}
+        >
+          More workflows
+        </Button>
+      ) : null}
+    </div>
+  );
+};
+
+/**
+ * The workflow map: its workflows by team, with their totals, and an
+ * editor for each, drawn and designed side by side.
  */
 const WorkflowMap = () => {
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const client = useClient();
+  const listedTeams = useQuery(api.teams.list, {});
+  const [writable, setWritable] = useState(false);
   const [view, setView] = useState<View>({ kind: "list" });
-  // Why the overview, or an opening, failed: each cleared when its own
-  // call next succeeds. The overview's shows only with the list, which it
-  // is about.
-  const [listProblem, setListProblem] = useState("");
+  // Why an opening failed, cleared when the next one succeeds.
   const [openProblem, setOpenProblem] = useState("");
   // What the person asked for last (a workflow's ID, a new drawing, or
-  // the list, null), and each opening and listing asked for, numbered: an
-  // answer to any but the latest, arriving late, is dropped, as it would
-  // show what they moved away from, or an older version.
+  // the list, null), and each opening asked for, numbered: an answer to
+  // any but the latest, arriving late, is dropped, as it would show what
+  // they moved away from, or an older version.
   const selected = useRef<string | null>(null);
   const openings = useRef(0);
-  const listings = useRef(0);
   const draws = useRef(0);
+
+  useEffect(() => {
+    let mounted = true;
+    const ask = async (): Promise<void> => {
+      // Only a hint for what the screen offers: the store checks every
+      // write whatever this says.
+      const answer = await settle(
+        async () => await client.action(api.access.writable, {})
+      );
+      if (mounted) {
+        setWritable("ok" in answer && answer.ok);
+      }
+    };
+    void ask();
+    return () => {
+      mounted = false;
+    };
+  }, [client]);
 
   // Asks for what the person chose, and forgets any opening on its way
   // (and why the last one failed).
@@ -85,48 +159,13 @@ const WorkflowMap = () => {
     setView(next);
   };
 
-  const list = async (): Promise<void> => {
-    listings.current += 1;
-    const asked = listings.current;
-    const answer = await ask<Overview>("overview");
-    if (asked !== listings.current) {
-      return;
-    }
-    if ("error" in answer) {
-      setListProblem(refusal(answer.error));
-      return;
-    }
-    setListProblem("");
-    setOverview(answer.ok);
-  };
-
-  useEffect(() => {
-    let mounted = true;
-    const first = async (): Promise<void> => {
-      listings.current += 1;
-      const asked = listings.current;
-      const answer = await ask<Overview>("overview");
-      if (!mounted || asked !== listings.current) {
-        return;
-      }
-      if ("error" in answer) {
-        setListProblem(refusal(answer.error));
-        return;
-      }
-      setListProblem("");
-      setOverview(answer.ok);
-    };
-    void first();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const open = async (id: string): Promise<void> => {
+  const open = async (id: Id<"workflows">): Promise<void> => {
     selected.current = id;
     openings.current += 1;
     const asked = openings.current;
-    const answer = await ask<Opened>("open", id);
+    const answer = await settle(
+      async () => await client.query(api.map.open, { id })
+    );
     if (asked !== openings.current) {
       return;
     }
@@ -134,28 +173,35 @@ const WorkflowMap = () => {
       setOpenProblem(refusal(answer.error));
       return;
     }
+    if (answer.ok === null) {
+      setOpenProblem(refusal("map.not_found"));
+      return;
+    }
+    const { current, drawn } = answer.ok;
     setOpenProblem("");
-    setView({ kind: "open", opened: answer.ok });
+    setView({
+      kind: "open",
+      opened: {
+        current: workflowFrom(current._id, current),
+        drawn:
+          drawn === null ? null : drawnFrom(current._id, current._rev, drawn),
+      },
+    });
   };
 
-  const showList = async (): Promise<void> => {
-    choose({ kind: "list" });
-    await list();
+  // After a save from `from`: what was saved opened, only while the
+  // person is still on what they saved. The list and the teams follow on
+  // their own.
+  const saved = async (from: View, id: Id<"workflows">): Promise<void> => {
+    if (selected.current === selectionOf(from)) {
+      await open(id);
+    }
   };
 
-  // After a save from `from`: the teams as they are now (one added while
-  // editing is among them), and what was saved opened, only while the
-  // person is still on what they saved.
-  const saved = async (from: View, id: string): Promise<void> => {
-    const still = selected.current === selectionOf(from);
-    await Promise.all([list(), still ? open(id) : Promise.resolve()]);
-  };
-
-  const teams = overview?.teams ?? [];
-  // Whether the Playbook takes this person's changes through the map
-  // (only an admin's, and only while the map may write it): if not, the
-  // map reads it.
-  const writable = overview?.writable === true;
+  const teams: Team[] = (listedTeams ?? []).map(({ _id, title }) => ({
+    id: _id,
+    title,
+  }));
 
   return (
     <main className="flex flex-col gap-4 p-6">
@@ -166,36 +212,21 @@ const WorkflowMap = () => {
           choose({ kind: "new", draw: draws.current });
         }}
       />
-      <Problem text={listProblem} shown={view.kind === "list"} />
       <Problem text={openProblem} shown />
-      {overview?.access === "none" ? (
-        <p className="text-muted-foreground text-sm">
-          The map needs the Playbook: an admin approves its permission first.
-        </p>
-      ) : null}
-      {view.kind === "list" && (overview?.unreadable.length ?? 0) > 0 ? (
-        <output className="text-muted-foreground text-sm">
-          Could not read{" "}
-          {overview?.unreadable.map(({ title }) => title).join(", ")}. The map
-          no longer reads what is stored for it.
-        </output>
-      ) : null}
-      {view.kind === "list" && overview?.access === "ok" ? (
-        <WorkflowList
-          workflows={overview.workflows}
+      {view.kind === "list" ? (
+        <Workflows
           teams={teams}
           writable={writable}
           onOpen={(id) => {
             void open(id);
           }}
         />
-      ) : null}
-      {view.kind === "list" ? null : (
+      ) : (
         <WorkflowEditor
           key={
             view.kind === "new"
               ? `new:${view.draw}`
-              : `${view.opened.current.id}@${view.opened.current.version}`
+              : `${view.opened.current.id}@${view.opened.current.revision}`
           }
           opened={view.kind === "new" ? null : view.opened}
           teams={teams}
@@ -204,7 +235,7 @@ const WorkflowMap = () => {
             await saved(view, id);
           }}
           onBack={() => {
-            void showList();
+            choose({ kind: "list" });
           }}
         />
       )}
