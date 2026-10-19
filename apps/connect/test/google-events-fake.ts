@@ -24,6 +24,41 @@ const notFound = (): Response =>
     404
   );
 
+/**
+ * `message` as Gmail answers it for `url`: with `format=metadata`, only
+ * the headers `metadataHeaders` asks for.
+ */
+const asAsked = (message: Item, url: URL): Item => {
+  const asked = new Set(
+    url.searchParams.getAll("metadataHeaders").map((name) => name.toLowerCase())
+  );
+  const { payload } = message;
+  if (
+    url.searchParams.get("format") !== "metadata" ||
+    typeof payload !== "object" ||
+    payload === null ||
+    !("headers" in payload) ||
+    !Array.isArray(payload.headers)
+  ) {
+    return message;
+  }
+  const headers: unknown[] = payload.headers;
+  return {
+    ...message,
+    payload: {
+      ...payload,
+      headers: headers.filter(
+        (header) =>
+          typeof header === "object" &&
+          header !== null &&
+          "name" in header &&
+          typeof header.name === "string" &&
+          asked.has(header.name.toLowerCase())
+      ),
+    },
+  };
+};
+
 export const googleEventsFake = () => {
   const mailboxes = new Map<string, { records: Item[][]; forgotten: number }>();
   const drives = new Map<string, Item[]>();
@@ -97,9 +132,10 @@ export const googleEventsFake = () => {
     }
     const id = /^messages\/(?<id>[^/]+)$/u.exec(found.rest)?.groups?.id;
     const message = messages.find((each) => each.id === id);
-    return message === undefined || deleted.has(String(id))
-      ? notFound()
-      : json(message);
+    if (message === undefined || deleted.has(String(id))) {
+      return notFound();
+    }
+    return json(asAsked(message, url));
   };
   const drive = (path: string, url: URL): Response => {
     const driveId = url.searchParams.get("driveId") ?? "";

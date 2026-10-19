@@ -1,4 +1,6 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import { isAppLayout } from "@grasp-os/compiler";
+import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import {
@@ -46,6 +48,7 @@ import {
 import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
+import { operationErrors } from "@grasp-os/shared/operations";
 import {
   bindingNameSchema,
   permissionActionSchema,
@@ -77,8 +80,10 @@ import type {
 import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import type { AppAnswer } from "./app.ts";
+import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
+import { buildDequeued } from "./build-admission.ts";
 import { BuildJobRecords } from "./build-job-records.ts";
 import type {
   BuildJobAdmission,
@@ -120,11 +125,16 @@ import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { catalog, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
-import { PreviewReports, serverProblem } from "./preview-reports.ts";
+import {
+  functionProblem,
+  PreviewReports,
+  serverProblem,
+} from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
+import { SealedPreviews } from "./sealed-previews.ts";
 import { runEngine } from "./workflows/engine.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -599,6 +609,19 @@ export class Workspace extends DurableObject<Env> {
 
   /** The chats' previews of their drafts (preview.ts). */
   readonly #previews = new Previews(this.ctx, this.env);
+
+  /** The chats' previews of their drafts of spec 8 Apps (sealed-previews.ts). */
+  readonly #sealedPreviews = new SealedPreviews(
+    this.ctx,
+    this.env,
+    this.#db,
+    (chatId, appId) =>
+      this.#db
+        .select({ revision: chatDrafts.revision })
+        .from(chatDrafts)
+        .where(and(eq(chatDrafts.chatId, chatId), eq(chatDrafts.appId, appId)))
+        .get()?.revision
+  );
 
   /** What those previews ran into (preview-reports.ts). */
   readonly #previewReports = new PreviewReports();
@@ -1754,6 +1777,10 @@ export class Workspace extends DurableObject<Env> {
               ...errorFields(error),
             });
           }
+          // A job ended while it waited for a share of builds asks no
+          // more: its place goes now, not once it lapses, so it holds no
+          // one back meanwhile (build-admission.ts).
+          await buildDequeued(this.env, { job: id }, Number.MAX_SAFE_INTEGER);
         })
       )
     );
@@ -2530,6 +2557,24 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * The revision of the chat's draft of App `appId`: 0 when there is none
+   * (or no such chat). Its revision alone, for a check that runs often
+   * (preview-stream-relay.ts), never its files.
+   */
+  draftRevision(chatId: unknown, appId: string): number {
+    const chat = chatIdSchema.safeParse(chatId);
+    if (!chat.success) {
+      return 0;
+    }
+    const row = this.#db
+      .select({ revision: chatDrafts.revision })
+      .from(chatDrafts)
+      .where(and(eq(chatDrafts.chatId, chat.data), eq(chatDrafts.appId, appId)))
+      .get();
+    return row?.revision ?? 0;
+  }
+
+  /**
    * The title of `personId`'s own chat `chatId`; `null` when it is gone,
    * or not theirs. For a review of what the chat's agent proposed, read by
    * the person it acted for alone: a title may quote their question.
@@ -2667,6 +2712,7 @@ export class Workspace extends DurableObject<Env> {
       // The preview of the revision before is over: its database goes now;
       // its problems are not the new revision's (preview-reports.ts).
       this.#previews.drop(chatId, appId);
+      this.#sealedPreviews.drop(chatId, appId);
       this.#draftsChanged(chatId);
     }
     return saved;
@@ -2741,6 +2787,7 @@ export class Workspace extends DurableObject<Env> {
   /** Stops the chat's preview of App `appId`, and forgets its reports. */
   #dropPreview(chatId: ChatId, appId: string): void {
     this.#previews.drop(chatId, appId);
+    this.#sealedPreviews.drop(chatId, appId);
     this.#previewReports.drop(chatId, appId);
   }
 
@@ -2905,6 +2952,198 @@ export class Workspace extends DurableObject<Env> {
       // Once the call ended, however: its failure is kept by then.
       this.#previewReports.saw(id, appId, draft.revision);
     }
+  }
+
+  /**
+   * Calls the function `request` names (its text, as a screen sends it)
+   * in the preview of `personId`'s own chat's draft of App `appId`, as a
+   * screen of the draft at `revision` does (sealed-previews.ts):
+   * `app.preview_outdated` once the draft is at another. A failure that
+   * is the draft's to fix is kept for the agent's next check. Answers the
+   * call's result, a refusal included, and what a query read, as JSON
+   * text (`PreviewAnswer`): plain data, whatever the call answered.
+   */
+  async previewFunction(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown,
+    request: unknown,
+    options: {
+      kind?: "query";
+      deadline?: number;
+      chargeWindow?: (pages: number, whole: number) => Promise<void>;
+    } = {}
+  ): Promise<string> {
+    const draft = this.previewDraft(chatId, personId, appId);
+    if (draft.revision !== revision) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    const id = chatIdSchema.parse(chatId);
+    try {
+      const answered = await this.#sealedPreviews.call(
+        id,
+        personId,
+        appIdSchema.parse(appId),
+        draft,
+        request,
+        options
+      );
+      const problem = functionProblem(request, answered.answer.result);
+      if (problem !== undefined) {
+        this.#previewReports.report(id, appId, draft.revision, problem);
+      }
+      return JSON.stringify(answered);
+    } finally {
+      // Once the call ended, however: its failure is kept by then.
+      this.#previewReports.saw(id, appId, draft.revision);
+    }
+  }
+
+  /**
+   * Starts, joins or (`attach`) reads again `personId`'s invocation of the
+   * streaming action `request` names (its text, as a screen sends it) in
+   * the preview of their own chat's draft of App `appId` at `revision`
+   * (sealed-previews.ts): `app.preview_outdated` once the draft is at
+   * another. Answers its frames, as JSON lines: progress, then its result.
+   */
+  async previewStream(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown,
+    request: unknown,
+    attach: boolean
+  ): Promise<ReadableStream<Uint8Array>> {
+    const draft = this.previewDraft(chatId, personId, appId);
+    if (draft.revision !== revision) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    return await this.#sealedPreviews.openStream(
+      chatIdSchema.parse(chatId),
+      personId,
+      appIdSchema.parse(appId),
+      draft,
+      request,
+
+      attach
+    );
+  }
+
+  /**
+   * Asks `personId`'s invocation of the streaming action `request` names,
+   * in the preview of their own chat's draft of App `appId` at
+   * `revision`, to stop: whether it was still running.
+   */
+  async previewCancelStream(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown,
+    request: unknown
+  ): Promise<boolean> {
+    const draft = this.previewDraft(chatId, personId, appId);
+    if (draft.revision !== revision) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    return await this.#sealedPreviews.cancelStream(
+      chatIdSchema.parse(chatId),
+      personId,
+      appIdSchema.parse(appId),
+      draft,
+      request
+    );
+  }
+
+  /**
+   * The `#grasp` references the screens of `personId`'s own chat's draft
+   * of App `appId` at `revision` import: generated from its draft
+   * release, sealed now if it isn't yet; null when it generates none.
+   * Throws as the seal does for a draft that doesn't build or inspect.
+   */
+  async previewReferences(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown
+  ): Promise<string | null> {
+    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
+    if (draft.revision !== revision) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    const app = appIdSchema.parse(appId);
+    const { release, version } = await this.#sealedPreviews.release(
+      id,
+      app,
+      draft
+    );
+    const generated = await generateModules(release.app, {
+      resourceId: app,
+      resourceVersion: version,
+    });
+    return generated[generatedPaths.references] ?? null;
+  }
+
+  /**
+   * Whether `personId`'s own chat's draft of App `appId` is of spec 8's
+   * layout, so its preview runs on its sealed draft release
+   * (sealed-previews.ts) and never as v1 server code.
+   */
+  async sealsDraft(
+    chatId: unknown,
+    personId: string,
+    appId: string
+  ): Promise<boolean> {
+    const { draft } = this.#draftToPreview(chatId, personId, appId);
+    const files = await draftFiles(this.env, appIdSchema.parse(appId), draft);
+    return isAppLayout(Object.fromEntries(files));
+  }
+
+  /**
+   * Calls the public function at `path` of `personId`'s own chat's draft
+   * of App `appId` with `input`, in its preview, as the draft is now: for
+   * the chat's agent (`env.build.call`), which hears how it went, so
+   * nothing is kept of it. `operation.not_found` for a path that isn't a
+   * public function of the draft. Answers as JSON text (`FunctionAnswer`).
+   */
+  async callDraftFunction(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    path: string,
+    input: unknown
+  ): Promise<string> {
+    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
+    const app = appIdSchema.parse(appId);
+    const { release, version } = await this.#sealedPreviews.release(
+      id,
+      app,
+      draft
+    );
+    const operation = Object.hasOwn(release.app.operations, path)
+      ? release.app.operations[path]
+      : undefined;
+    if (operation === undefined || operation.visibility !== "public") {
+      throw operationErrors.create("operation.not_found");
+    }
+    const request = JSON.stringify({
+      reference: {
+        resourceId: app,
+        resourceVersion: version,
+        contractId: path,
+        fingerprint: release.fingerprints[operation.path],
+        kind: operation.kind,
+      },
+      input,
+    });
+    const { answer } = await this.#sealedPreviews.call(
+      id,
+      personId,
+      app,
+      draft,
+      request
+    );
+    return JSON.stringify(answer);
   }
 
   /** Deletes the draft files and drafts the conditions name, in that order. */

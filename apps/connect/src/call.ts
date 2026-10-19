@@ -1,6 +1,7 @@
 import {
   effectKeyMetaKey,
   findMetaKey,
+  stampMetaKey,
   maxRetryAfterSeconds,
 } from "@grasp-os/connector-kit/manifest";
 import type { RecoveryMode } from "@grasp-os/connector-kit/manifest";
@@ -751,6 +752,24 @@ const recover = async (
 };
 
 /**
+ * The `_meta` a side effect is sent with: for a native connector, its
+ * effect key and a workflow run's mail stamp (`stamp`); nothing for any
+ * other server, whose tools are code we don't review, and where nothing
+ * is recovered.
+ */
+const nativeMetaOf = async (
+  connection: Connection,
+  scope: Parameters<typeof effectKeyOf>[0],
+  stamp: string | null
+): Promise<Record<string, Json> | undefined> =>
+  connection.serverKind === "native"
+    ? {
+        [effectKeyMetaKey]: await effectKeyOf(scope),
+        ...(stamp === null ? {} : { [stampMetaKey]: stamp }),
+      }
+    : undefined;
+
+/**
  * Carries out one call whose capability is verified: `claims` say exactly
  * this connection, resource, action and idempotency key, for this subject
  * and person. A side effect a person is there for, or of a restricted
@@ -839,6 +858,7 @@ export const carryOut = async (
       input,
       inputHash,
       idempotencyKey,
+      stamp: call.stamp ?? null,
     });
     return { ...heldAnswer, sideEffect, replayed: false, pending };
   }
@@ -849,12 +869,7 @@ export const carryOut = async (
   if (store === undefined || scope === undefined) {
     throw connectErrors.create("connect.idempotency_key_required");
   }
-  // Native connectors only get the effect key: a remote server's tools
-  // are code we don't review, and nothing is recovered there.
-  const meta: Record<string, Json> | undefined =
-    connection.serverKind === "native"
-      ? { [effectKeyMetaKey]: await effectKeyOf(scope) }
-      : undefined;
+  const meta = await nativeMetaOf(connection, scope, call.stamp ?? null);
   const sent: Sent = {
     callId: claims.jti,
     connection,

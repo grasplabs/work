@@ -17,6 +17,32 @@ import {
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 
+// V8's background JavaScript compilation off in the tests' workerd. Each
+// package build loads a fresh Loader isolate (esbuild's WebAssembly), which
+// then sits idle in the runtime that `isolate: false` keeps for the whole
+// worker. A Maglev or concurrent Sparkplug job of such an isolate that
+// needs a garbage collection waits on a V8 worker thread for the isolate's
+// main thread to run it, which workerd only does when it runs code in that
+// isolate again: never. On CI's 4-vCPU runners workerd has three worker
+// threads; once three jobs wait like that, the runtime stops, and Vitest
+// never times its test out (GRA-554: the stalls of package-builds and
+// package-artifacts, each runtime's three worker threads parked in
+// `CollectionBarrier::AwaitCollectionBackground`). Compiled on the main
+// thread, no job waits. Miniflare passes this variable on to every workerd
+// it starts; on CI the build-heavy files took as long with it as without.
+const noBackgroundCompile = [
+  "--no-concurrent-recompilation",
+  "--no-concurrent-sparkplug",
+];
+process.env.MINIFLARE_WORKERD_V8_FLAGS = [
+  ...new Set([
+    ...(process.env.MINIFLARE_WORKERD_V8_FLAGS ?? "").split(" "),
+    ...noBackgroundCompile,
+  ]),
+]
+  .filter((flag) => flag !== "")
+  .join(" ");
+
 const coreMigrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/core/migrations`
 );
@@ -37,7 +63,7 @@ const testStepLimit = 60;
 const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
 
 /**
- * The tests that run the compiler on whole Apps: the screen compiler's,
+ * The tests that run the compiler on whole Apps: the App compiler's,
  * and the App sandbox's, which builds each App's server code. They run as
  * their own project (vite.screens.config.ts), after the others, so their
  * long compiles don't starve the light tests of CPU.
@@ -53,10 +79,16 @@ export const screenTests = [
   "test/release-retention.test.ts",
   "test/app-activation.test.ts",
   "test/app-tests.test.ts",
+  "test/app-test-live.test.ts",
   "test/app-function-route.test.ts",
   "test/portable-client.test.ts",
+  "test/app-files.test.ts",
   "test/resource-bindings.test.ts",
   "test/resource-connectors.test.ts",
+  "test/store-operations.test.ts",
+  "test/sealed-workflow-starts.test.ts",
+  "test/definition-export.test.ts",
+  "test/workflow-query-subscriptions.test.ts",
   "test/run-functions.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
@@ -68,8 +100,10 @@ export const screenTests = [
   "test/workflow-chaos.test.ts",
   "test/reviewed-calls.test.ts",
   "test/held-runs.test.ts",
+  "test/held-wakes.test.ts",
   "test/unknown-outcome-runs.test.ts",
   "test/decisions.test.ts",
+  "test/decision-confirmations.test.ts",
   "test/decision-deadlines.test.ts",
   "test/workflow-params.test.ts",
   "test/build-on-save.test.ts",
@@ -84,6 +118,10 @@ export const screenTests = [
   "test/run-summary.test.ts",
   "test/run-history.test.ts",
   "test/rpc-targets.test.ts",
+  "test/statistics.test.ts",
+  "test/guests.test.ts",
+  "test/app-function-calls.test.ts",
+  "test/workflow-type-check.test.ts",
 ];
 
 /** Core's Worker test setup, shared by each of core's test projects. */
@@ -91,6 +129,7 @@ export const coreProject = (
   test: UserWorkspaceConfig["test"],
   {
     sandboxSocket,
+    bindings = {},
   }: {
     /**
      * For the on-prem project: the sandbox supervisor's socket, read when
@@ -98,6 +137,8 @@ export const coreProject = (
      * binds it, instead of running App code unbounded.
      */
     sandboxSocket?: () => string;
+    /** Bindings a project adds to the tests' env, such as a run's size. */
+    bindings?: Record<string, unknown>;
   } = {}
 ) =>
   defineProject({
@@ -173,6 +214,7 @@ export const coreProject = (
               graphExtractedBytes: 2 * 1024 * 1024,
               artifactBytes: 256 * 1024,
               appLocks: 3,
+              workflowPackageChars: 64 * 1024,
             },
             // The gateway runs call the model through; tests fake the AI binding.
             MODEL_GATEWAY: {
@@ -205,6 +247,7 @@ export const coreProject = (
             CORE_MIGRATIONS: coreMigrations,
             KNOWLEDGE_MIGRATIONS: knowledgeMigrations,
             CONNECT_MIGRATIONS: connectMigrations,
+            ...bindings,
           },
           // Connect's database, as CONNECT_DB, so the setup can migrate it.
           d1Databases: { CONNECT_DB: "grasp-os-connect" },
@@ -220,7 +263,7 @@ export const coreProject = (
                   },
                 }),
           },
-          // A stand-in frontend and the screen compiler, written by the
+          // A stand-in frontend and the App compiler, written by the
           // global setup.
           assets: { directory: "./dist/test-assets" },
           // The real connect Worker behind the CONNECT service binding,
@@ -271,6 +314,11 @@ export default coreProject({
     ...screenTests,
     // With the sandbox supervisor bound: vite.on-prem.config.ts.
     "test/on-prem/**",
+    // The Brain baseline's larger scale sizes, on request only:
+    // vite.brain-scale.config.ts.
+    "test/brain-scale-sizes.test.ts",
+    // The Brain baseline, in a group of its own: vite.brain.config.ts.
+    "test/brain-baseline.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

@@ -1,5 +1,22 @@
+import type {
+  GuestChat,
+  GuestInvitation,
+  GuestInvite,
+  GuestTranscript,
+} from "@grasp-os/shared/guests";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
-import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
+import {
+  resourceAliasPattern,
+  storeOperationPathMaxLength,
+  storeOperationPathPattern,
+} from "@grasp-os/shared/operation-limits";
+import { isPlatformMeasure } from "@grasp-os/shared/platform-measures";
+import type { PlatformMeasure } from "@grasp-os/shared/platform-measures";
+import type {
+  StatisticAnswer,
+  StatisticPoint,
+  StatisticQuery,
+} from "@grasp-os/shared/statistics";
 
 import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
 import type { FilesOperation } from "./references.ts";
@@ -12,7 +29,8 @@ import type {
 import { readDescriptor } from "./value-read.ts";
 import { descriptorOf, schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
-import type { Infer } from "./values.ts";
+import { v } from "./values.ts";
+import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 
 // `resource`: how an App says which outside capabilities its actions need
 // (spec 12, 32.3): a model, a connector's actions, knowledge collections,
@@ -24,9 +42,34 @@ import type { Infer } from "./values.ts";
 // Only an action can use one, through `ctx.resources.<alias>`, and only
 // one it lists in its `uses`; queries and mutations never reach the
 // network (inspection refuses a resource in their `uses`, app.ts).
+//
+// A store resource is another business store's public operations: the
+// public queries and mutations of the App that owns it, each named by its
+// path with the exact arguments and return the App declares for it, so
+// the binding resolves only where the store serves exactly that. Its
+// tables and schema stay the store's own: the declaration copies none of
+// them, and the host runs each call as that App's own code.
+//
+// A statistics resource is the platform's statistics: recording and
+// reading measures of the App's own, and reading the measures the
+// platform publishes it lists (`platform`), each only once an admin binds
+// it, and a platform measure only under a permission they granted.
+//
+// A guests resource is guest chats: inviting someone who isn't a member to
+// a short chat with a model, through a link, for the person the call acts
+// for; listing, reading back and revoking the App's chats. Only under a
+// permission an admin granted the App, which its binding names.
 
 /** The kinds of resource an action can use. */
-export type ResourceKind = "model" | "connector" | "knowledge" | "template";
+export type ResourceKind =
+  | "model"
+  | "connector"
+  | "knowledge"
+  | "template"
+  | "store"
+  | "statistics"
+  | "guests"
+  | "app";
 
 /** What a declaration's config may say about a model. */
 export interface ModelConfig<Output extends AnySchema | undefined> {
@@ -122,6 +165,92 @@ export interface TemplateConfig {
   readonly contract: string;
 }
 
+/** The kinds of a store's public operation a store resource may call. */
+export type StoreOperationKind = "query" | "mutation";
+
+/**
+ * One of a store's public operations, as a store resource declares it:
+ * its kind, its arguments (a map of field schemas, as the store's App
+ * declares the function's `args`) and its return, exactly as that App
+ * declares them.
+ */
+export interface StoreOperationConfig<
+  Shape extends ValueShape = ValueShape,
+  Returns extends AnySchema = AnySchema,
+> {
+  readonly kind: StoreOperationKind;
+  readonly args: Shape;
+  readonly returns: Returns;
+}
+
+/** What a declaration's config may say about a store. */
+export interface StoreConfig<
+  Operations extends Readonly<Record<string, StoreOperationConfig>>,
+> {
+  /** The store's public operations the App calls, by path, e.g. `notes.list`. */
+  readonly operations: Operations;
+}
+
+/** What a statistics resource may do: record points, read measures. */
+export type StatisticsOperation = "record" | "read";
+
+/** What a declaration's config may say about statistics. */
+export interface StatisticsConfig<
+  Operations extends readonly StatisticsOperation[],
+> {
+  /** Recording points of the App's own measures, reading measures, or both. */
+  readonly operations: Operations;
+  /**
+   * The measures the platform publishes the App reads, each once: only
+   * with `read`, and only under a permission an admin binds. None for
+   * the App's own measures only.
+   */
+  readonly platform?: readonly PlatformMeasure[];
+}
+
+/** What a guests resource may do with the App's guest chats. */
+export type GuestsOperation = "invite" | "list" | "read" | "revoke";
+/** The kinds of another App's public function an app resource may call. */
+export type AppFunctionKind = "query" | "mutation" | "action";
+
+/**
+ * One of another App's public functions, as an app resource declares it:
+ * its kind, its arguments (a map of field schemas, as that App declares
+ * the function's `args`) and its return, exactly as that App declares them.
+ */
+export interface AppFunctionConfig<
+  Shape extends ValueShape = ValueShape,
+  Returns extends AnySchema = AnySchema,
+> {
+  readonly kind: AppFunctionKind;
+  readonly args: Shape;
+  readonly returns: Returns;
+}
+
+/** What a declaration's config may say about another App. */
+export interface AppConfig<
+  Functions extends Readonly<Record<string, AppFunctionConfig>>,
+> {
+  /** The App's public functions this App calls, by path, e.g. `contacts.find`. */
+  readonly functions: Functions;
+}
+
+/** One of another App's functions as a declaration holds it: data only. */
+export interface AppFunctionShape {
+  readonly kind: AppFunctionKind;
+  /** The object descriptor of its arguments. */
+  readonly args: ValueDescriptor;
+  readonly returns: ValueDescriptor;
+}
+
+/** One store operation as a declaration holds it: data only. */
+export interface StoreOperationShape {
+  readonly kind: StoreOperationKind;
+  /** The object descriptor of its arguments. */
+  readonly args: ValueDescriptor;
+  readonly returns: ValueDescriptor;
+}
+
 interface DeclarationBase<Kind extends ResourceKind, Alias extends string> {
   readonly "~resource": Kind;
   readonly alias: Alias;
@@ -166,6 +295,52 @@ export interface TemplateResource<
   readonly contract: string;
 }
 
+/** A requirement of another store's public operations. */
+export interface StoreResource<
+  Alias extends string = string,
+  Operations extends Readonly<Record<string, StoreOperationConfig>> = Readonly<
+    Record<string, StoreOperationConfig>
+  >,
+> extends DeclarationBase<"store", Alias> {
+  readonly operations: Readonly<Record<string, StoreOperationShape>>;
+  /** The operations' types, for types only: never set. */
+  readonly "~operations"?: Operations;
+}
+
+/** A statistics requirement. */
+export interface StatisticsResource<
+  Alias extends string = string,
+  Operations extends readonly StatisticsOperation[] =
+    readonly StatisticsOperation[],
+> extends DeclarationBase<"statistics", Alias> {
+  readonly operations: Operations;
+  /** The platform's measures it reads: empty for the App's own only. */
+  readonly platform: readonly PlatformMeasure[];
+}
+
+/** A guests requirement. */
+export interface GuestsResource<
+  Alias extends string = string,
+  Operations extends readonly GuestsOperation[] = readonly GuestsOperation[],
+> extends DeclarationBase<"guests", Alias> {
+  readonly operations: Operations;
+}
+
+/**
+ * A requirement of another App's public functions: the App is the one an
+ * admin binds it to, which must serve each exactly as declared.
+ */
+export interface AppResource<
+  Alias extends string = string,
+  Functions extends Readonly<Record<string, AppFunctionConfig>> = Readonly<
+    Record<string, AppFunctionConfig>
+  >,
+> extends DeclarationBase<"app", Alias> {
+  readonly functions: Readonly<Record<string, AppFunctionShape>>;
+  /** The functions' types, for types only: never set. */
+  readonly "~functions"?: Functions;
+}
+
 /**
  * A files requirement (spec 10.7.5, 32.3): what the App's screens may do
  * with files, through the host. Browser-facing: no function lists it.
@@ -195,12 +370,65 @@ export interface LinksResource<
 /** A requirement the App's screens use, never its functions. */
 export type BrowserResource = FilesResource | LinksResource;
 
+/**
+ * A workflow requirement (spec 7.4, 9.5): an independent workflow the App
+ * starts, by an alias of its own. An action starts it
+ * (`ctx.startWorkflow`), and a mutation stages its start for after it
+ * commits (`ctx.afterCommit.start`), each only one it lists in its
+ * `uses`. Like every requirement it grants nothing: the host starts the
+ * version the App's builders bound under the alias, through the App's
+ * own `start` permission on that workflow, acting for the person the call
+ * acts for, and checks both again as each start is admitted. It never
+ * reaches the workflow engine.
+ */
+export interface WorkflowResource<
+  Alias extends string = string,
+  Input = unknown,
+  Output = unknown,
+> {
+  readonly "~resource": "workflow";
+  readonly alias: Alias;
+  /**
+   * The descriptor of the input the App starts it with: what the host
+   * checks a start's input against before it goes anywhere.
+   */
+  readonly input: ValueDescriptor;
+  /**
+   * The descriptor of the output a completed run gives. With the input, it
+   * is the contract the App's screens rely on: they get a reference to it
+   * pinned to that contract's fingerprint (`workflows.<alias>` in
+   * `#grasp`), and name it in what they ask of the host. The App's own
+   * starts are checked against the bound version's input as they are
+   * admitted, not against this contract.
+   */
+  readonly output: ValueDescriptor;
+  /** The input as a caller passes it, for types only: never set. */
+  readonly "~input"?: Input;
+  /** The output a completed run gives, for types only: never set. */
+  readonly "~output"?: Output;
+}
+
+/** What a workflow declaration's config says. */
+export interface WorkflowConfig<
+  Input extends AnySchema,
+  Output extends AnySchema,
+> {
+  /** The input the App starts it with. */
+  readonly input: Input;
+  /** The output a completed run gives. */
+  readonly output: Output;
+}
+
 /** Any resource requirement. */
 export type AnyResource =
   | ModelResource<string, unknown>
   | ConnectorResource
   | KnowledgeResource
-  | TemplateResource;
+  | TemplateResource
+  | StoreResource
+  | StatisticsResource
+  | GuestsResource
+  | AppResource;
 
 /** One search result from knowledge: a title and an excerpt of it. */
 export interface KnowledgeHit {
@@ -292,17 +520,140 @@ export interface TemplateClient {
   readonly read: () => Promise<TemplateContent>;
 }
 
+/**
+ * What `ctx.resources.<alias>` is for a store: each declared operation by
+ * its path, with its arguments, answering its return.
+ */
+export interface StoreClient<
+  Operations extends Readonly<Record<string, StoreOperationConfig>>,
+> {
+  readonly call: <Path extends Extract<keyof Operations, string>>(
+    ...call: StoreCallArgs<Operations, Path>
+  ) => Promise<Infer<Operations[Path]["returns"]>>;
+}
+
+/** What `ctx.resources.<alias>` is for statistics, by its operations. */
+export type StatisticsClient<
+  Operations extends readonly StatisticsOperation[],
+> = ("record" extends Operations[number]
+  ? {
+      /**
+       * Records one point of a measure of the App's own: a workflow
+       * run's step's points count once the step completes.
+       */
+      readonly record: (point: StatisticPoint) => Promise<null>;
+    }
+  : unknown) &
+  ("read" extends Operations[number]
+    ? {
+        /**
+         * Reads a measure of the App's own, or one of the platform's the
+         * declaration lists, added up as `query` asks.
+         */
+        readonly read: (query: StatisticQuery) => Promise<StatisticAnswer>;
+      }
+    : unknown);
+
+/** What `ctx.resources.<alias>` is for guests, by its operations. */
+export type GuestsClient<Operations extends readonly GuestsOperation[]> =
+  ("invite" extends Operations[number]
+    ? {
+        /**
+         * Invites a guest, for the person the call acts for: only a
+         * person's own call, never a workflow run's. The answer holds the
+         * link, shown once.
+         */
+        readonly invite: (invite: GuestInvite) => Promise<GuestInvitation>;
+      }
+    : unknown) &
+    ("list" extends Operations[number]
+      ? {
+          /** The App's guest chats: the open ones first, newest first. */
+          readonly list: () => Promise<GuestChat[]>;
+        }
+      : unknown) &
+    ("read" extends Operations[number]
+      ? {
+          /** A guest chat of the App, with what was written: untrusted text. */
+          readonly read: (id: string) => Promise<GuestTranscript>;
+        }
+      : unknown) &
+    ("revoke" extends Operations[number]
+      ? {
+          /** Stops a guest chat's link for good. */
+          readonly revoke: (id: string) => Promise<GuestChat>;
+        }
+      : unknown);
+
+/**
+ * What `ctx.resources.<alias>` is for another App: each declared function
+ * by its path, with its arguments, answering its return.
+ */
+export interface AppClient<
+  Functions extends Readonly<Record<string, AppFunctionConfig>>,
+> {
+  readonly call: <Path extends Extract<keyof Functions, string>>(
+    ...call: StoreCallArgs<Functions, Path>
+  ) => Promise<Infer<Functions[Path]["returns"]>>;
+}
+
+/**
+ * A store call's arguments: each path of `Path` paired with its own
+ * arguments, so a path that may be either of two needs arguments that fit
+ * whichever it is, never just one of them.
+ */
+type StoreCallArgs<
+  Operations extends Readonly<
+    Record<string, { readonly args: ValueShape; readonly returns: AnySchema }>
+  >,
+  Path,
+> =
+  Path extends Extract<keyof Operations, string>
+    ? [path: Path, args: ObjectInput<Operations[Path]["args"]>]
+    : never;
+
 /** What `ctx.resources.<alias>` is for `Resource`. */
-export type ResourceClient<Resource> =
-  Resource extends ModelResource<string, infer Output>
+export type ResourceClient<Resource> = Resource extends {
+  readonly "~resource": infer Kind extends ResourceKind;
+}
+  ? ResourceClients<Resource>[Kind]
+  : never;
+
+/** Each kind's client for `Resource`, a declaration of that kind. */
+interface ResourceClients<Resource> {
+  readonly model: Resource extends ModelResource<string, infer Output>
     ? ModelClient<Output>
-    : Resource extends ConnectorResource<string, infer Contract, infer Actions>
-      ? ConnectorClient<Contract, Actions>
-      : Resource extends KnowledgeResource<string, infer Operations>
-        ? KnowledgeClient<Operations>
-        : Resource extends TemplateResource
-          ? TemplateClient
-          : never;
+    : never;
+  readonly connector: Resource extends ConnectorResource<
+    string,
+    infer Contract,
+    infer Actions
+  >
+    ? ConnectorClient<Contract, Actions>
+    : never;
+  readonly knowledge: Resource extends KnowledgeResource<
+    string,
+    infer Operations
+  >
+    ? KnowledgeClient<Operations>
+    : never;
+  readonly template: TemplateClient;
+  readonly store: Resource extends StoreResource<string, infer Operations>
+    ? StoreClient<Operations>
+    : never;
+  readonly statistics: Resource extends StatisticsResource<
+    string,
+    infer Operations
+  >
+    ? StatisticsClient<Operations>
+    : never;
+  readonly guests: Resource extends GuestsResource<string, infer Operations>
+    ? GuestsClient<Operations>
+    : never;
+  readonly app: Resource extends AppResource<string, infer Functions>
+    ? AppClient<Functions>
+    : never;
+}
 
 /** Why a resource's declaration was refused. */
 export class ResourceDefinitionError extends Error {
@@ -338,9 +689,66 @@ const browserDeclarations = new WeakSet<object>();
 export const isResource = (value: unknown): value is AnyResource =>
   typeof value === "object" && value !== null && declarations.has(value);
 
+/** Every workflow declaration `resource` made. */
+const workflowDeclarations = new WeakSet<object>();
+
+/** Whether `value` is a workflow declaration `resource` made. */
+export const isWorkflowResource = (value: unknown): value is WorkflowResource =>
+  typeof value === "object" &&
+  value !== null &&
+  workflowDeclarations.has(value);
+
 /** Whether `value` is a files or links declaration `resource` made. */
 export const isBrowserResource = (value: unknown): value is BrowserResource =>
   typeof value === "object" && value !== null && browserDeclarations.has(value);
+
+/** The operations a guests resource may declare. */
+const guestsOperations: readonly GuestsOperation[] = [
+  "invite",
+  "list",
+  "read",
+  "revoke",
+];
+
+/** The operations a statistics resource may declare. */
+const statisticsOperations: readonly StatisticsOperation[] = ["record", "read"];
+
+/**
+ * The platform measures a statistics declaration reads: none, or each
+ * once, of those the platform publishes, and only with `read`.
+ */
+const checkedPlatform = (
+  platform: unknown,
+  operations: readonly StatisticsOperation[]
+): readonly PlatformMeasure[] => {
+  if (platform === undefined) {
+    return Object.freeze([]);
+  }
+  if (!Array.isArray(platform) || platform.length === 0) {
+    return refuse(
+      "A statistics resource's `platform` lists the platform's measures it reads, at least one."
+    );
+  }
+  if (!operations.includes("read")) {
+    return refuse(
+      "A statistics resource reads the platform's measures only with `read`."
+    );
+  }
+  const listed: readonly unknown[] = platform;
+  const measures: PlatformMeasure[] = [];
+  for (const measure of listed) {
+    if (typeof measure !== "string" || !isPlatformMeasure(measure)) {
+      return refuse(
+        "A statistics resource lists only measures the platform publishes, such as `platform.workflow_runs`."
+      );
+    }
+    if (measures.includes(measure)) {
+      refuse(`A statistics resource lists \`${measure}\` twice.`);
+    }
+    measures.push(measure);
+  }
+  return Object.freeze(measures);
+};
 
 /** The operations a files resource may declare. */
 const filesOperations: readonly FilesOperation[] = [
@@ -481,6 +889,13 @@ const declaredForBrowser = (declaration: BrowserResource): BrowserResource => {
   return frozen;
 };
 
+/** A workflow declaration, frozen and registered as genuine. */
+const declaredWorkflow = (declaration: WorkflowResource): WorkflowResource => {
+  const frozen = deepFreeze(declaration);
+  workflowDeclarations.add(frozen);
+  return frozen;
+};
+
 /** The origins a links declaration lists: 1 to 32 exact HTTPS origins. */
 const checkedOrigins = (origins: unknown): readonly string[] => {
   if (
@@ -501,6 +916,133 @@ const checkedOrigins = (origins: unknown): readonly string[] => {
   }
   return Object.freeze(checked);
 };
+
+/** The descriptors of one store operation's arguments and return. */
+type StoreShapeOf = (config: Record<string, unknown>) => {
+  readonly args: ValueDescriptor;
+  readonly returns: ValueDescriptor;
+};
+
+/**
+ * A store declaration's operations, as data: 1 to 32 paths, each one of a
+ * store's operation paths (`storeOperationPathPattern`), a query or a
+ * mutation, its arguments an object, each with the descriptors `shapeOf`
+ * reads from its config: from schemas in code, from data in a manifest.
+ */
+const checkedStoreOperations = (
+  operations: unknown,
+  shapeOf: StoreShapeOf,
+  { actions = false }: { readonly actions?: boolean } = {}
+): Readonly<Record<string, AppFunctionShape>> => {
+  // An app resource's are another App's functions; a store resource's a
+  // store's operations: each refusal names what it was given.
+  const named = actions
+    ? { resource: "An app resource", key: "functions", one: "function" }
+    : {
+        resource: "A store resource",
+        key: "operations",
+        one: "store operation",
+      };
+  if (!isPlainObject(operations)) {
+    return refuse(
+      `${named.resource}'s \`${named.key}\` is an object of paths.`
+    );
+  }
+  const entries = Object.entries(operations);
+  if (entries.length === 0 || entries.length > listMax) {
+    return refuse(
+      `${named.resource} lists between 1 and ${listMax} ${named.key}.`
+    );
+  }
+  const checked: Record<string, AppFunctionShape> = {};
+  for (const [path, entry] of entries) {
+    if (
+      path.length > storeOperationPathMaxLength ||
+      !storeOperationPathPattern.test(path)
+    ) {
+      return refuse(
+        `\`${path}\` isn't a ${named.one}'s path: up to four dotted names, at most ${storeOperationPathMaxLength} characters.`
+      );
+    }
+    const config = checkedConfig(entry, ["kind", "args", "returns"]);
+    const { kind } = config;
+    if (
+      kind !== "query" &&
+      kind !== "mutation" &&
+      !(actions && kind === "action")
+    ) {
+      return refuse(
+        actions
+          ? "An app resource calls another App's queries, mutations and actions."
+          : "A store resource calls a store's queries and mutations, never its actions."
+      );
+    }
+    const { args, returns } = shapeOf(config);
+    if (args.kind !== "object") {
+      return refuse(`A ${named.one}'s arguments are an object.`);
+    }
+    checked[path] = { kind, args, returns };
+  }
+  return checked;
+};
+
+/** A store operation's descriptors, from the schemas code declares it with. */
+const shapeFromSchemas: StoreShapeOf = (config) => {
+  if (!isPlainObject(config.args)) {
+    return refuse(
+      "An operation's `args` is a map of field names to schemas, as its App declares them."
+    );
+  }
+  // SAFETY: `args` was checked to be a plain object; `v.object` checks
+  // each field is a schema.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const argsSchema = v.object(config.args as ValueShape);
+  return {
+    args: structuredClone(descriptorOf(argsSchema)),
+    returns: structuredClone(descriptorOf(config.returns)),
+  };
+};
+
+/** A store operation's descriptors, as a manifest holds them. */
+const shapeFromData: StoreShapeOf = (config) => ({
+  args: readDescriptor(config.args, 1, { nodes: 0 }),
+  returns: readDescriptor(config.returns, 1, { nodes: 0 }),
+});
+
+/** An app declaration, from its alias and its functions as data. */
+const appDeclaration = (
+  alias: unknown,
+  functions: unknown,
+  shapeOf: StoreShapeOf
+): AppResource =>
+  // SAFETY: built from what was checked: the alias and the functions,
+  // each with its descriptors, as `AppResource` holds them.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  declared({
+    "~resource": "app",
+    alias: checkedAlias(alias),
+    functions: checkedStoreOperations(functions, shapeOf, { actions: true }),
+  }) as AppResource;
+
+/** A store declaration, from its alias and its operations as data. */
+const storeDeclaration = (
+  alias: unknown,
+  operations: unknown,
+  shapeOf: StoreShapeOf
+): StoreResource =>
+  // SAFETY: built from what was checked: the alias and the operations,
+  // each with its descriptors, as `StoreResource` holds them.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  declared({
+    "~resource": "store",
+    alias: checkedAlias(alias),
+    // SAFETY: without `actions`, every operation checked is a query or a
+    // mutation, as a store operation's shape holds.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    operations: checkedStoreOperations(operations, shapeOf) as Readonly<
+      Record<string, StoreOperationShape>
+    >,
+  }) as StoreResource;
 
 /**
  * Resource requirements (spec 32.3). Each answers a frozen declaration to
@@ -620,6 +1162,150 @@ export const resource = Object.freeze({
     }) as TemplateResource<Alias>;
   },
   /**
+   * Some of another business store's public operations, by path: queries
+   * and mutations, each with exactly the arguments and return its App
+   * declares, so the host binds only a store that serves exactly that.
+   */
+  store: <
+    const Alias extends string,
+    const Operations extends Readonly<Record<string, StoreOperationConfig>>,
+  >(
+    alias: Alias,
+    config: StoreConfig<Operations>
+  ): StoreResource<Alias, Operations> => {
+    const checked = checkedConfig(config, ["operations"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the operations given, by path.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return storeDeclaration(
+      alias,
+      checked.operations,
+      shapeFromSchemas
+    ) as StoreResource<Alias, Operations>;
+  },
+  /**
+   * The platform's statistics: recording and reading the App's own
+   * measures, and reading the platform's it lists in `platform`.
+   */
+  statistics: <
+    const Alias extends string,
+    const Operations extends readonly [
+      StatisticsOperation,
+      ...StatisticsOperation[],
+    ],
+  >(
+    alias: Alias,
+    config: StatisticsConfig<Operations>
+  ): StatisticsResource<Alias, Operations> => {
+    const checked = checkedConfig(config, ["operations", "platform"]);
+    const operations = checkedList(
+      checked.operations,
+      "operations",
+      statisticsOperations
+    ).filter(
+      (operation): operation is StatisticsOperation =>
+        operation === "record" || operation === "read"
+    );
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and lists holding exactly the names
+    // given, in order.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declared({
+      "~resource": "statistics",
+      alias: checkedAlias(alias),
+      operations,
+      platform: checkedPlatform(checked.platform, operations),
+    }) as StatisticsResource<Alias, Operations>;
+  },
+  /**
+   * An independent workflow the App starts, with input of `input`: listed
+   * in the App's `uses`, and in the `uses` of each action that starts it
+   * and each mutation that stages its start. Only ever what the App's
+   * builders bind under the alias, started through the App's own
+   * permission; never the engine.
+   */
+  workflow: <
+    const Alias extends string,
+    Input extends AnySchema,
+    Output extends AnySchema,
+  >(
+    alias: Alias,
+    config: WorkflowConfig<Input, Output>
+  ): WorkflowResource<Alias, InferInput<Input>, Infer<Output>> => {
+    const checked = checkedConfig(config, ["input", "output"]);
+    const input = descriptorOf(checked.input);
+    const output = descriptorOf(checked.output);
+    // A start left without input takes the schema's default; an input that
+    // may be absent with none would be no JSON for the run to start with.
+    if (input.presence === "optional") {
+      refuse(
+        "A workflow's input is required or has a default, never only optional."
+      );
+    }
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given and the schemas' descriptors.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declaredWorkflow({
+      "~resource": "workflow",
+      alias: checkedAlias(alias),
+      // The descriptors, as data: what the host checks a start against.
+      input: structuredClone(input),
+      output: structuredClone(output),
+    }) as WorkflowResource<Alias, InferInput<Input>, Infer<Output>>;
+  },
+  /**
+   * Guest chats, under a permission an admin binds: inviting a guest for
+   * the person the call acts for, and listing, reading back and revoking
+   * the App's chats.
+   */
+  guests: <
+    const Alias extends string,
+    const Operations extends readonly [GuestsOperation, ...GuestsOperation[]],
+  >(
+    alias: Alias,
+    config: { readonly operations: Operations }
+  ): GuestsResource<Alias, Operations> => {
+    const checked = checkedConfig(config, ["operations"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the operations given, in order.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declared({
+      "~resource": "guests",
+      alias: checkedAlias(alias),
+      operations: checkedList(
+        checked.operations,
+        "operations",
+        guestsOperations
+      ).filter((operation): operation is GuestsOperation =>
+        guestsOperations.some((known) => known === operation)
+      ),
+    }) as GuestsResource<Alias, Operations>;
+  },
+  /**
+   * Some of another App's public functions, by path: queries, mutations
+   * and actions, each with exactly the arguments and return that App
+   * declares, so the host binds only an App that serves exactly that. Each
+   * call runs as the person this App's call acts for, under the other
+   * App's own roles.
+   */
+  app: <
+    const Alias extends string,
+    const Functions extends Readonly<Record<string, AppFunctionConfig>>,
+  >(
+    alias: Alias,
+    config: AppConfig<Functions>
+  ): AppResource<Alias, Functions> => {
+    const checked = checkedConfig(config, ["functions"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the functions given, by path.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return appDeclaration(
+      alias,
+      checked.functions,
+      shapeFromSchemas
+    ) as AppResource<Alias, Functions>;
+  },
+  /**
    * What the App's screens may do with files through the host: upload,
    * read, attach, delete. Listed in the App's `uses`, never a function's.
    */
@@ -678,7 +1364,7 @@ export const resource = Object.freeze({
  */
 export const readResourceDeclaration = (
   data: unknown
-): AnyResource | BrowserResource => {
+): AnyResource | BrowserResource | WorkflowResource => {
   if (!isPlainObject(data)) {
     return refuse("A resource declaration is an object.");
   }
@@ -716,8 +1402,48 @@ export const readResourceDeclaration = (
   if (kind === "template") {
     return resource.template(alias, loose);
   }
+  if (kind === "store") {
+    const { operations, ...rest } = config;
+    if (Object.keys(rest).length > 0) {
+      return refuse("A store resource's config has only `operations`.");
+    }
+    return storeDeclaration(alias, operations, shapeFromData);
+  }
+  if (kind === "statistics") {
+    // A manifest holds no platform measures as an empty list; code leaves
+    // `platform` out for none.
+    const { platform, ...rest } = config;
+    // SAFETY: as above.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const statisticsConfig = {
+      ...rest,
+      ...(Array.isArray(platform) && platform.length === 0 ? {} : { platform }),
+    } as never;
+    return resource.statistics(alias, statisticsConfig);
+  }
+  if (kind === "guests") {
+    return resource.guests(alias, loose);
+  }
+  if (kind === "app") {
+    const { functions, ...rest } = config;
+    if (Object.keys(rest).length > 0) {
+      return refuse("An app resource's config has only `functions`.");
+    }
+    return appDeclaration(alias, functions, shapeFromData);
+  }
   if (kind === "files") {
     return resource.files(alias, loose);
+  }
+  if (kind === "workflow") {
+    const { input, output, ...rest } = config;
+    // SAFETY: as above: `workflow` refuses any key but `input` and `output`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const workflowConfig = {
+      ...rest,
+      input: schemaOf(readDescriptor(input, 1, { nodes: 0 })),
+      output: schemaOf(readDescriptor(output, 1, { nodes: 0 })),
+    } as never;
+    return resource.workflow(alias, workflowConfig);
   }
   if (kind === "links") {
     return resource.links(alias, loose);

@@ -78,6 +78,34 @@
       "when": 1791631785284,
       "tag": "0010_submission_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792279168421,
+      "tag": "0011_search_secure_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792322988431,
+      "tag": "0012_search_rebuilds",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792332912662,
+      "tag": "0013_drop_submissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792338856044,
+      "tag": "0014_sections_insert_triggers",
+      "breakpoints": true
     }
   ]
 }

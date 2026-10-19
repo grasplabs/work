@@ -1,4 +1,5 @@
 import { toBase64 } from "@grasp-os/connector-kit/content";
+import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
 import { z } from "zod";
 
 // Mail as Gmail sends and stores it: RFC 5322 messages. Gmail takes a new
@@ -50,6 +51,12 @@ interface OutgoingMessage {
   cc: readonly string[];
   bcc: readonly string[];
   replyTo: readonly string[];
+  /**
+   * The stamp core recorded for the run that sends it, as the
+   * `stampHeader` header; none for no stamp. Only a stamp
+   * (`stampPattern`), never text a caller wrote, so it can't add headers.
+   */
+  stamp?: string | null;
 }
 
 /**
@@ -65,6 +72,7 @@ export const rawMessage = ({
   cc,
   bcc,
   replyTo,
+  stamp,
 }: OutgoingMessage): string => {
   const addresses = (name: string, values: readonly string[]): string[] =>
     values.length === 0 ? [] : [`${name}: ${values.join(`,${crlf} `)}`];
@@ -76,6 +84,9 @@ export const rawMessage = ({
     ...addresses("Cc", cc),
     ...addresses("Bcc", bcc),
     ...addresses("Reply-To", replyTo),
+    ...(typeof stamp === "string" && stampPattern.test(stamp)
+      ? [`${stampHeader}: ${stamp}`]
+      : []),
     subject === "" ? "Subject: " : `Subject: ${encodedWords(subject)}`,
     "MIME-Version: 1.0",
     `Content-Type: text/${bodyType === "html" ? "html" : "plain"}; charset="UTF-8"`,

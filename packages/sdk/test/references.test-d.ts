@@ -18,12 +18,12 @@ import type {
   ReturnOf,
   ScreenInputOf,
 } from "../src/index.ts";
+import type { workflows } from "./notes/.grasp/references.ts";
 import {
   api,
   preferences,
   resources,
   screens,
-  workflows,
 } from "./notes/.grasp/references.ts";
 import { internal } from "./notes/.grasp/server-references.ts";
 import type {
@@ -183,8 +183,10 @@ void resources.mail;
 // Preferences, as declared: a default may be left out.
 expectTypeOf(preferences).toExtend<{ readonly resourceId: string }>();
 
-// No workflow bindings yet, and no children of any.
-expectTypeOf(workflows).toEqualTypeOf<Readonly<Record<never, never>>>();
+// The workflows the App binds, and nothing else (workflow-references.test-d.ts).
+expectTypeOf<keyof typeof workflows>().toEqualTypeOf<
+  "archiveNotes" | "summarizeNote"
+>();
 
 // Any reference takes a single answer's and a stream's alike.
 const anyReferences: readonly AnyOperationReference[] = [

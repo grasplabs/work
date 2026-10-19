@@ -6,23 +6,28 @@ import {
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
 import {
   admitAttempt,
   admitChild,
   quotaPolicy,
 } from "../src/workflows/quotas.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
-import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { withCpuKills } from "./cpu-kills.ts";
 import { mockIdp } from "./idp.ts";
 import { racingDb } from "./racing-db.ts";
-import { finished, runObject, sleeping, woken } from "./runs.ts";
+import {
+  finished,
+  runObject,
+  sleeping,
+  withPolicyReadFailingOnce,
+  woken,
+} from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appWith, hitCall, hitsOf, workflowFiles } from "./workflow-apps.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
 // how often a step is tried and how long its steps run in all, each held
@@ -113,20 +118,10 @@ const failedWith = async (run: string): Promise<unknown> => {
   )?.detail.error;
 };
 
-/** How many times the App's server counted `name` (its `hits`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
-
 /** A step that takes about `ms`, then returns 1. */
 const working = (name: string, ms: number) =>
   `  await step.do("${name}", { description: "Work" }, async () => {
-    await scheduler.wait(${ms});
+    await new Promise((resolve) => setTimeout(resolve, ${ms}));
     return 1;
   });`;
 
@@ -139,18 +134,23 @@ const hanging = (name: string, retries: "most" | "undeclared" = "most") =>
   workflowFiles(
     name,
     `  return await step.do("hang", { description: "Hang", timeout: "1 second"${retries === "most" ? ', retries: { limit: 4, delay: 1, backoff: "constant" }' : ""} }, async () => {
-    await env.APP.call("hit", "${name}");
+    await ${hitCall(`"${name}"`)};
     await new Promise(() => {});
   });`,
     { hang: null }
   );
 
-/** A first attempt at the step `key`, holding `ms` from now: a minute unless said. */
+/**
+ * A first attempt at the step `key`, holding `ms` from now: a minute
+ * unless said. Of an activation past any the engine ran of the run it is
+ * admitted for, as its next one: an attempt of a generation the engine
+ * has fenced is admitted no more (quotas.ts, `sharesReleased`).
+ */
 const attemptOf = (key: string, ms = 60_000) => ({
   key,
   step: key,
   number: 1,
-  generation: 1,
+  generation: 100,
   deadline: Date.now() + ms,
 });
 
@@ -179,149 +179,6 @@ const busyWaitsOf = async (run: string): Promise<number> =>
         )
         .one().waits
   );
-
-/**
- * What `run` returns, with core's database failing the first read of the
- * quota policy meanwhile, as D1 can for a moment, and whether one failed.
- */
-const withPolicyReadFailingOnce = async <Result>(
-  run: () => Promise<Result>
-): Promise<{ failed: boolean; value: Result }> => {
-  const database = env.DB;
-  let failed = false;
-  env.DB = new Proxy(database, {
-    get: (target, property) => {
-      if (property === "prepare") {
-        return (query: string) => {
-          if (!failed && query.includes("quota_policies")) {
-            failed = true;
-            return target.prepare("SELECT broken_for_the_test()");
-          }
-          return target.prepare(query);
-        };
-      }
-      const value: unknown = Reflect.get(target, property);
-      return typeof value === "function"
-        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-        : value;
-    },
-  });
-  try {
-    return { value: await run(), failed };
-  } finally {
-    env.DB = database;
-  }
-};
-
-/** How the Loader stops an isolate past its `limits.cpuMs`, as Cloudflare documents it. */
-const cpuKill = (): Error => new Error("Worker exceeded CPU time limit.");
-
-/** The host core gives a run's isolate, as the isolate calls it (code.ts, runMain). */
-interface RunCallHost {
-  do: (
-    name: string,
-    options: unknown,
-    fn: (attempt: unknown) => Promise<unknown>
-  ) => Promise<unknown>;
-  sleep: (...args: unknown[]) => Promise<unknown>;
-  waitForDecision: (...args: unknown[]) => Promise<unknown>;
-}
-
-/**
- * The `run` of a run's entrypoint `target`, with the Loader stopping the
- * isolate past its CPU time as each attempt of step `step` that `kills`
- * picks starts (`counted`, from 1, across activations): that attempt's
- * call, every other call into the isolate still out, and the run's own
- * call all reject with it.
- */
-const killingRun =
-  (
-    target: object,
-    step: string,
-    kills: (attempt: number) => boolean,
-    counted: { attempts: number }
-  ) =>
-  async (host: RunCallHost, input: unknown): Promise<unknown> => {
-    const real: unknown = Reflect.get(target, "run");
-    if (typeof real !== "function") {
-      throw new TypeError("The run's isolate has no run");
-    }
-    const killed = Promise.withResolvers<never>();
-    killed.promise.catch(() => null);
-    const watched: RunCallHost = {
-      do: async (stepName, stepOptions, fn) =>
-        await host.do(stepName, stepOptions, async (attempt) => {
-          if (stepName === step) {
-            counted.attempts += 1;
-            if (kills(counted.attempts)) {
-              const error = cpuKill();
-              killed.reject(error);
-              throw error;
-            }
-          }
-          // Every call into the isolate still out ends with it.
-          return await Promise.race([fn(attempt), killed.promise]);
-        }),
-      sleep: async (...waitArgs) => await host.sleep(...waitArgs),
-      waitForDecision: async (...waitArgs) =>
-        await host.waitForDecision(...waitArgs),
-    };
-    const ran: Promise<unknown> = Promise.resolve(
-      Reflect.apply(real, target, [watched, input])
-    );
-    return await Promise.race([ran, killed.promise]);
-  };
-
-/**
- * What `run` returns while the Loader stops a run's isolate past its CPU
- * time as each attempt of step `step` that `kills` picks starts (counted
- * from 1 across activations), as Cloudflare does (`killingRun`). Plain
- * workerd enforces no `cpuMs`, so the Loader is stood in for; the
- * isolate, the host and the engine are real.
- */
-const withCpuKills = async <Result>(
-  step: string,
-  kills: (attempt: number) => boolean,
-  run: () => Promise<Result>
-): Promise<Result> => {
-  const loader = env.LOADER;
-  const counted = { attempts: 0 };
-  const getWorker = (...args: Parameters<WorkerLoader["get"]>) =>
-    new Proxy(loader.get(...args), {
-      get: (worker, property): unknown =>
-        property === "getEntrypoint"
-          ? (...entrypointArgs: Parameters<typeof worker.getEntrypoint>) => {
-              const entrypoint = worker.getEntrypoint(...entrypointArgs);
-              return entrypointArgs[0] === "Run"
-                ? new Proxy(entrypoint, {
-                    get: (target, name): unknown =>
-                      name === "run"
-                        ? killingRun(target, step, kills, counted)
-                        : Reflect.get(target, name),
-                  })
-                : entrypoint;
-            }
-          : Reflect.get(worker, property),
-    });
-  env.LOADER = new Proxy(loader, {
-    get: (target, property): unknown =>
-      property === "get" ? getWorker : Reflect.get(target, property),
-  });
-  const retryDelay = env.WORKFLOW_RETRY_DELAY_MS;
-  // A retry comes soon, but not at once: the engine parks its step, as for
-  // any backoff, and the run's next activation runs it.
-  env.WORKFLOW_RETRY_DELAY_MS = "200";
-  try {
-    return await run();
-  } finally {
-    env.LOADER = loader;
-    if (retryDelay === undefined) {
-      Reflect.deleteProperty(env, "WORKFLOW_RETRY_DELAY_MS");
-    } else {
-      env.WORKFLOW_RETRY_DELAY_MS = retryDelay;
-    }
-  }
-};
 
 /** An App with a workflow that does nothing, `noop`. */
 const noopApp = async (builder: Builder): Promise<string> =>
@@ -406,7 +263,6 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       ...hanging("undeclared", "undeclared"),
       ...hanging("lowered"),
     });
-    await serverBuilt(app, 1);
 
     const declared = await withQuotas({}, async () => {
       const run = await builder.api.workflows.start(app, "declared");
@@ -430,11 +286,11 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const declaredRun = await builder.api.workflows.status(declared);
     const undeclaredRun = await builder.api.workflows.status(undeclared);
     expect({
-      declared: await hitsOf(app, builder.userId, "declared"),
-      undeclared: await hitsOf(app, builder.userId, "undeclared"),
+      declared: await hitsOf(builder, app, "declared"),
+      undeclared: await hitsOf(builder, app, "undeclared"),
       // Its own error, its fifth attempt's timeout: never a sixth refused.
       undeclaredWith: undeclaredRun.failure?.error.message,
-      lowered: await hitsOf(app, builder.userId, "lowered"),
+      lowered: await hitsOf(builder, app, "lowered"),
       loweredWith: await failedWith(lowered),
       declaredStatus: declaredRun.status,
     }).toStrictEqual({
@@ -610,14 +466,21 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     // Written by hand, past the SDK: the host is the boundary, not the SDK.
     const app = await appWith(builder, {
-      "workflows/wide.ts": `export default {
+      "workflows/wide.ts": `import type { WorkflowDefinition } from "@grasp-os/sdk/workflow";
+
+// Past the SDK: the engine as the host hands it to a run's code.
+type Engine = {
+  do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>;
+};
+
+export default {
   metadata: { id: "wide", params: [] },
-  run: async (engine) => {
-    const outcome = async (name, options) => {
+  run: async (engine: Engine) => {
+    const outcome = async (name: string, options: object) => {
       try {
         return await engine.do(name, options, async () => "ran");
       } catch (error) {
-        return error.code ?? error.message;
+        return (error as { code?: string }).code ?? (error as { message?: string }).message;
       }
     };
     return {
@@ -626,7 +489,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       within: await outcome("within", { timeout: 60_000, retries: { limit: 4 } }),
     };
   },
-};
+} as unknown as WorkflowDefinition<unknown>;
 `,
       "workflows/wide.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
 import definition from "./wide.ts";
@@ -774,7 +637,7 @@ ${working("c", 10)}
       workflowFiles(
         "slow",
         `  await step.do("work", { description: "Work" }, async () => {
-    await scheduler.wait(3000);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     return 1;
   });
   return 1;`,
@@ -863,12 +726,13 @@ ${working("c", 10)}
     const admission = await admitAttempt(env, lineage, returned);
     await admission.settle();
     const afterReturn = await outcome(admitAttempt(env, lineage, returned));
-    // Never returned: once its 50 ms have passed, the next admission
-    // settles it as used up.
-    const died = attemptOf("died", 50);
+    // Never returned: once its time has passed, the next admission
+    // settles it as used up. Long enough that asking again while it holds
+    // is still within it on a slow runner.
+    const died = attemptOf("died", 1500);
     await admitAttempt(env, lineage, died);
     const whileHolding = await outcome(admitAttempt(env, lineage, died));
-    await scheduler.wait(100);
+    await scheduler.wait(1600);
     const next = await outcome(admitAttempt(env, lineage, attemptOf("next")));
     const afterLapse = await outcome(admitAttempt(env, lineage, died));
 
@@ -975,6 +839,58 @@ ${working("c", 10)}
       with: "workflow.lineage_limit",
       completed: ["$params", "a", "b", "c", "d", "e"],
     });
+  });
+
+  it("refuse a step's run again after a wait for load past the policy's steps, whatever limit the run loaded with while the policy couldn't be read", async () => {
+    const builder = await signedInApi(idp, "builder");
+    // Its own steps: a, the pause and b, its third.
+    const app = await appWith(builder, {
+      ...workflowFiles(
+        "paced",
+        `${working("a", 1)}
+  await step.sleep("pause", { description: "Wait", duration: "3 seconds" });
+${working("b", 1)}
+  return 1;`,
+        { a: 1, b: 1 }
+      ),
+      ...workflowFiles("noop", "  return 1;"),
+    });
+    const holderRun = await builder.api.workflows.start(app, "noop");
+    await finished(holderRun.id);
+
+    const result = await withQuotas({ workflowPersonAttempts: 1 }, async () => {
+      // The person's one attempt at once held while the run pauses: b
+      // waits for load.
+      const run = await builder.api.workflows.start(app, "paced");
+      await sleeping(run.id, "pause");
+      const held = await admitAttempt(
+        env,
+        ownerOf(holderRun.id, app, builder.userId),
+        attemptOf(`hold:${run.id}`)
+      );
+      await vi.waitFor(
+        async () => {
+          await expect(busyWaitsOf(run.id)).resolves.toBeGreaterThan(0);
+        },
+        { timeout: 30_000, interval: 200 }
+      );
+      // The operator lowers the steps to one; the run's next load can't
+      // read the policy, and counts by the limit it last read.
+      return await withQuotas(
+        { workflowPersonAttempts: 1, workflowSteps: 1 },
+        async () =>
+          await withPolicyReadFailingOnce(async () => {
+            await held.settle();
+            await finished(run.id);
+            return run.id;
+          })
+      );
+    });
+
+    expect({
+      failed: result.failed,
+      with: await failedWith(result.value),
+    }).toStrictEqual({ failed: true, with: "workflow.lineage_limit" });
   });
 
   it("count only a run's own steps against the operator's allowance, so an allowance of one runs a one-step workflow and refuses a second step", async () => {

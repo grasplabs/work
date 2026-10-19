@@ -4,7 +4,7 @@ import path from "node:path";
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { stateDir } from "./stack.ts";
 
@@ -165,13 +165,13 @@ const appWithWaitingRun = async (
   });
 
 test("a builder follows a waiting run to its decision, then changes and tests a workflow", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, user } = peopleIn("workflows");
   const name = `Invoices ${crypto.randomUUID()}`;
   const app = await appWithWaitingRun(builder, user, name);
 
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Main" })
@@ -275,13 +275,13 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
 });
 
 test("someone an App is shared with reads its workflow, with nothing to change or test", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, user } = peopleIn("workflows");
   const name = `Invoices ${crypto.randomUUID()}`;
   const app = await appWithWaitingRun(builder, user, name);
 
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   // Core refuses the App's contents, as for an App it doesn't have: the
   // Runs tab's Workflow filter can't offer its workflows.
   await page.routeWebSocket("**/rpc", (socket) => {
@@ -366,7 +366,7 @@ const coreSql = (statement: string): void => {
 };
 
 test("a run waiting for a share of its App's runs reads as queued, with when it tries again, not failed or running", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("workflows");
   const name = `Reminders ${crypto.randomUUID()}`;
@@ -395,7 +395,7 @@ test("a run waiting for a share of its App's runs reads as queued, with when it 
   coreSql(
     `INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES ('${run}', 'e2e-step', '${builder.userId}', '${app}', ${asked}, ${asked}, 'app', ${retryAt}, 0, ${retryAt})`
   );
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   try {
     // The Runs tab: queued, with the share and when it tries again.
     await page.goto(`/workflows?tab=runs&app=${app}`);

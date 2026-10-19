@@ -3,10 +3,12 @@ import {
   dependencyErrors,
   npmRegistryOrigin,
   packageKey,
+  subjectOfRef,
 } from "@grasp-os/shared/dependencies";
 import type {
   DependencyGraph,
   DependencyRequest,
+  DependencySubject,
 } from "@grasp-os/shared/dependencies";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
@@ -37,10 +39,11 @@ import satisfies from "semver/functions/satisfies";
 import validRange from "semver/ranges/valid";
 import { z } from "zod";
 
-import { appFor } from "../apps.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { proposeResolved } from "../dependencies/requests.ts";
+import { builtSubject } from "../dependencies/subject-builders.ts";
+import { ofSubject } from "../dependencies/subjects.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
 import type { PackageBuilderRun } from "./builder.ts";
 import { verifiedTarball } from "./tarballs.ts";
@@ -609,10 +612,10 @@ const resolveGraph = async (
 export const graphOfLock = (lock: GraspLock): DependencyGraph =>
   lockGraph(lock);
 
-/** The App's approved lock last approved, if any: what it keeps. */
+/** The subject's approved lock last approved, if any: what it keeps. */
 const previousLock = async (
   env: Env,
-  app: string
+  subject: DependencySubject
 ): Promise<GraspLock | undefined> => {
   const row = await drizzle(env.DB)
     .select({ lock: dependencyLocks.lock })
@@ -620,13 +623,14 @@ const previousLock = async (
     .innerJoin(
       dependencyLocks,
       and(
-        eq(dependencyLocks.appId, dependencyRequests.appId),
+        eq(dependencyLocks.subjectType, dependencyRequests.subjectType),
+        eq(dependencyLocks.subjectId, dependencyRequests.subjectId),
         eq(dependencyLocks.graphHash, dependencyRequests.graphHash)
       )
     )
     .where(
       and(
-        eq(dependencyRequests.appId, app),
+        ofSubject(dependencyRequests, subject),
         eq(dependencyRequests.status, "approved")
       )
     )
@@ -789,10 +793,13 @@ export interface Resolved {
 }
 
 /**
- * Resolves what an App's package.json asks for (`intent`) into an exact
- * graph and lock, checks every package's bytes without running them, and
- * proposes the graph for a person's approval. For one of the App's
- * builders, or the chat's agent acting for one; never Grasp staff.
+ * Resolves what an App's or a workflow's package.json asks for
+ * (`intent`) into an exact graph and lock, checks every package's bytes
+ * without running them, and proposes the graph for a person's approval.
+ * For one of its builders, or the chat's agent acting for one; never
+ * Grasp staff. A workflow's packages are for its compute modules only
+ * (`computation`): the intent refuses any other target before anything
+ * is fetched.
  */
 export const resolveDependencies = async (
   env: Env,
@@ -808,16 +815,18 @@ export const resolveDependencies = async (
   // Dynamic Worker whose CPU the runtime bounds, on-prem on the sandbox
   // host (builder.ts). Where neither bounds it, nothing resolves, refused
   // before any tarball is fetched.
-  const builder = packageBuilder(env);
+  const builderOf = packageBuilder(env);
   const intent = dependencyErrors.parse(
     "dependency.invalid",
     dependencyIntentSchema,
     input
   );
+  const asked = subjectOfRef(intent);
+  const builder = builderOf(`${asked.type}:${asked.id}`);
   if (by.staff) {
     throw dependencyErrors.create("dependency.forbidden");
   }
-  await appFor(env, by, intent.app, "builder");
+  await builtSubject(env, by, asked);
   const limits = packageLimitsOf(env.PACKAGE_LIMITS);
   for (const [name, range] of Object.entries(intent.dependencies)) {
     registryRange(name, range);
@@ -834,7 +843,7 @@ export const resolveDependencies = async (
   const resolution = new Resolution(
     env,
     limits,
-    await previousLock(env, intent.app)
+    await previousLock(env, asked)
   );
   await resolveGraph(resolution, intent.dependencies);
   const nodes = [...resolution.nodes.values()];
@@ -852,7 +861,7 @@ export const resolveDependencies = async (
   await inspectGraph(env, nodes, limits, refusals, builder);
   if (refusals.total() > 0) {
     log.info("packages.refused", {
-      app: intent.app,
+      [asked.type]: asked.id,
       refusals: refusals.total(),
     });
     throw packageErrors.create("package.refused", {
@@ -879,7 +888,7 @@ export const resolveDependencies = async (
     env,
     by,
     {
-      app: intent.app,
+      [asked.type]: asked.id,
       sourceRevision: intent.sourceRevision,
       purpose: intent.purpose,
       targets: intent.targets,

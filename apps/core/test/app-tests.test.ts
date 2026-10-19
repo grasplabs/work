@@ -5,7 +5,7 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
@@ -388,8 +388,10 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
   it("fail closed on a report that leaves a test out", async () => {
     // The suite's own code rewrites what the isolate reports: one failing
     // test reported as none.
-    const forging = `const stringify = JSON.stringify;
-JSON.stringify = (value, ...rest) =>
+    // Rewrites the runner's report on its way out: past the types on
+    // purpose, as a forger's code would.
+    const forging = `const stringify = JSON.stringify as (value: unknown, ...rest: unknown[]) => string;
+(JSON as { stringify: unknown }).stringify = (value: Record<string, unknown> | null, ...rest: unknown[]) =>
   value !== null && typeof value === "object" && "results" in value
     ? stringify({ fixtures: value.fixtures, results: [] })
     : stringify(value, ...rest);`;
@@ -491,15 +493,16 @@ export default appTest({
       ),
       "tests/b.test.ts": suiteOf("t.equal(1, 1);"),
     });
-    // The suites may take 500 ms in all: the first starts with that much
-    // left and runs out of it, the second can't start.
+    // The suites may take 500 ms in all: the first runs out of it, and is
+    // told the run's limit (not the time it happened to have left), the
+    // second can't start.
     const { code, failures } = await refusal(
       built,
       envWith({ APP_TEST_LIMITS_MS: "//500" })
     );
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
-      "tests/a.test.ts: it stopped: didn't finish within 0.5 seconds",
+      "tests/a.test.ts: it stopped: the version's tests ran past their 0.5 seconds",
       "tests/b.test.ts: didn't run: the version's tests ran past their 0.5 seconds",
     ]);
   });
@@ -704,6 +707,38 @@ describe("fixture stores", () => {
     ).resolves.toBe("kept");
     await expect(tablesIn(store)).resolves.toBeGreaterThan(0);
     await expect(opened.generations(["notes"])).resolves.toBeDefined();
+  });
+
+  it("let go of their live queries' watchers once discarded", async () => {
+    const app = await sealed();
+    const id = await fixtureStore(app);
+    const object = env.DATA_STORES.getByName(id);
+    const { notes } = await object.generations(id, ["notes"]);
+    let released = 0;
+    // A watcher as core passes one: released once the store lets go of it.
+    const watcher = Object.assign(
+      (_tables: string[]): void => {
+        // Told of no write: nothing writes to the store here.
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          released += 1;
+        },
+      }
+    );
+    await object.watch(
+      id,
+      "fixture-note-owner",
+      { notes: notes ?? 0 },
+      watcher
+    );
+    expect(released).toBe(0);
+
+    await discardFixtureStore(env, id);
+
+    await vi.waitFor(() => {
+      expect(released).toBe(1);
+    });
   });
 
   it("never discard a store core didn't record as a fixture", async () => {

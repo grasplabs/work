@@ -5,6 +5,7 @@ import type {
 } from "@grasp-os/shared/guests";
 import { guestErrors } from "@grasp-os/shared/guests";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
@@ -18,12 +19,14 @@ import {
 import type { InvocationKind } from "./app.ts";
 import { forSandbox } from "./bindings.ts";
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
+import { declaresGuests } from "./resource-guests.ts";
 
 /**
  * Guest chats, as an App's server code holds them under the permission an
  * admin granted it (`{ type: "platform" }`, `guests`), by that
  * permission's name: `await this.env.GUESTS.invite(caller, { name, skill
- * })` (guests.ts). Like every stub, each call passes the caller of the App
+ * })` (guests.ts). Nothing, once the App's current sealed release declares
+ * a guests resource (resource-guests.ts): then only its binding serves. Like every stub, each call passes the caller of the App
  * method it runs in, and acts for them, only while that call runs. Only
  * a person using the App invites (`guest.invalid` for a workflow run's
  * call, or one through another App's export): the member a chat is made
@@ -93,6 +96,12 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   ): Promise<T> {
     const { app, permissionId } = this.ctx.props;
     try {
+      // An App whose sealed release declares guests is governed by its
+      // binding alone: its v1 server invites, lists, reads and revokes
+      // nothing, so no link it sends outlives the binding.
+      if (await declaresGuests(this.env, app)) {
+        throw permissionErrors.create("permission.denied");
+      }
       const token = tokenOf(caller);
       const { authority, path, fence } = await callerOf(
         this.env,

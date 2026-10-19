@@ -21,6 +21,21 @@ export const help = resource.links("help", {
   origins: ["https://help.example.com"],
 });
 
+/** Summarizes a note: takes its ID, gives its summary. */
+export const summarizeNote = resource.workflow("summarizeNote", {
+  input: v.object({
+    noteId: v.id("notes"),
+    style: v.enum(["short", "long"]).default("short"),
+  }),
+  output: v.object({ summary: v.string(), words: v.number().integer() }),
+});
+
+/** Archives the notes: takes nothing, gives nothing. */
+export const archiveNotes = resource.workflow("archiveNotes", {
+  input: v.object({}),
+  output: v.null(),
+});
+
 export default app({
   name: "Notes",
   schema,
@@ -48,5 +63,5 @@ export default app({
       input: v.object({ id: v.id("notes") }),
     },
   ],
-  uses: [attachments, help],
+  uses: [attachments, help, summarizeNote, archiveNotes],
 });

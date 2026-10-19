@@ -13,6 +13,8 @@ import {
   provenanceMetaKey,
   provenanceSchema,
   resourceMetaKey,
+  stampMetaKey,
+  stampPattern,
 } from "./manifest.ts";
 import type {
   ActionManifest,
@@ -124,9 +126,15 @@ export interface ToolDefinition<
   ) => Promise<ToolResult<z.input<Output>> | null>;
 }
 
-/** The effect key a call carries, if connect sent one. */
+/** The effect key a call carries, and its stamp, if connect sent them. */
 export interface Effect {
   key: string | null;
+  /**
+   * The stamp core recorded for a workflow run's mail (`stampMetaKey`),
+   * for a mail tool to put on what it sends as `stampHeader`; null
+   * otherwise.
+   */
+  stamp: string | null;
 }
 
 /** What went wrong in a tool's error, for code to act on. */
@@ -234,14 +242,21 @@ export interface Tool {
   call: (args: unknown, meta?: unknown) => Promise<CallResult>;
 }
 
-/** What a call's `_meta` asks: its effect key, and whether to find it. */
-const callMetaOf = (meta: unknown): { key: string | null; find: boolean } => {
+/**
+ * What a call's `_meta` asks: its effect key, its stamp, and whether to
+ * find it.
+ */
+const callMetaOf = (
+  meta: unknown
+): { key: string | null; stamp: string | null; find: boolean } => {
   if (typeof meta !== "object" || meta === null) {
-    return { key: null, find: false };
+    return { key: null, stamp: null, find: false };
   }
   const key: unknown = Reflect.get(meta, effectKeyMetaKey);
+  const stamp: unknown = Reflect.get(meta, stampMetaKey);
   return {
     key: typeof key === "string" && effectKeyPattern.test(key) ? key : null,
+    stamp: typeof stamp === "string" && stampPattern.test(stamp) ? stamp : null,
     find: Reflect.get(meta, findMetaKey) === true,
   };
 };
@@ -502,7 +517,10 @@ export const defineTool = <
         result = looked;
       } else {
         try {
-          result = await definition.run(parsed.data, { key: effect.key });
+          result = await definition.run(parsed.data, {
+            key: effect.key,
+            stamp: effect.stamp,
+          });
         } catch (error) {
           return runFailure(error, readOnly);
         }

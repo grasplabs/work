@@ -2,7 +2,7 @@ import { mapConcurrently } from "@grasp-os/shared/release";
 import type { Role } from "@grasp-os/shared/roles";
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import { test } from "@playwright/test";
-import type { Browser, BrowserContext, Page } from "@playwright/test";
+import type { BrowserContext } from "@playwright/test";
 import { newWebSocketRpcSession } from "capnweb";
 
 /**
@@ -18,6 +18,13 @@ import { origin } from "./stack.ts";
 
 /** Signs session cookies on the test stack only; never a real secret. */
 export const testAuthSecret = "e2e-only-better-auth-secret-of-32-chars-or-more";
+
+/**
+ * Signs the capabilities core gives connect for each connector call, on
+ * the test stack only (core and connect alike); never a real secret.
+ */
+export const testCapabilityKey =
+  "e2e-only-capability-signing-key-of-32-chars-or-more";
 
 const sessionCookie = "__Host-grasp.session_token";
 
@@ -165,6 +172,13 @@ const cast = {
   notesAppSignedOut: { first: "builder" },
   notesLive: { builder: "builder" },
   writerApp: { builder: "builder" },
+  notesPages: { builder: "builder" },
+  notesDrafts: { builder: "builder" },
+  notesLanguage: { builder: "builder" },
+  signOutFailure: { member: "user" },
+  workflowEditor: { builder: "builder" },
+  workflowDiagram: { builder: "builder" },
+  workflowModules: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },
@@ -191,6 +205,7 @@ const cast = {
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
   chat: { user: "user" },
+  unknownOutcome: { admin: "admin", other: "admin", member: "user" },
   chatDock: { user: "user" },
   exports: { admin: "admin" },
   chatBuilds: { builder: "builder" },
@@ -218,6 +233,7 @@ const cast = {
   languages: { member: "user" },
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
+  contexts: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;
@@ -332,16 +348,26 @@ export const peopleIn = <S extends Scene>(
 };
 
 /**
- * Carries a page's `/rpc` connection through Node, which adds the
- * person's session cookie. Only for WebKit, which keeps a Secure cookie
- * from `http://localhost` where Chromium and Firefox send it: the stack
- * runs without TLS, so its pages would be signed out there. Everything
- * the page and core say to each other passes as it is.
+ * Carries a page's `/rpc` connection, and its screens' function calls
+ * (`/api/app-functions/`, plain requests, not the socket), through Node,
+ * which adds the person's session cookie. Only for WebKit, which keeps a
+ * Secure cookie from `http://localhost` where Chromium and Firefox send
+ * it: the stack runs without TLS, so its pages would be signed out there.
+ * Everything the page and core say to each other passes as it is.
  */
 const carrySession = async (
   context: BrowserContext,
   person: Person
 ): Promise<void> => {
+  await context.route("**/api/app-functions/**", async (route) => {
+    const response = await route.fetch({
+      headers: {
+        ...route.request().headers(),
+        cookie: `${sessionCookie}=${encodeURIComponent(person.cookie)}`,
+      },
+    });
+    await route.fulfill({ response });
+  });
   await context.routeWebSocket("**/rpc", (page) => {
     const core = rpcSocket(person);
     const waiting: string[] = [];
@@ -392,16 +418,6 @@ export const signInTo = async (
   ]);
 };
 
-/** A page signed in as `person`, in a browser context of its own. */
-export const pageOf = async (
-  browser: Browser,
-  person: Person
-): Promise<Page> => {
-  const context = await browser.newContext();
-  await signInTo(context, person);
-  return await context.newPage();
-};
-
 /**
  * Classifies the App's data as ordinary, as the configured admin: its
  * screens then get it without anyone approving their code. For tests of
@@ -419,6 +435,27 @@ export const ordinaryData = async (app: string): Promise<void> => {
   try {
     const { generation } = await api.screenTrust.review(app);
     await api.screenTrust.classify(app, "ordinary", generation);
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * Classifies the App's data as sensitive again: its builds nobody
+ * approved get none of it from then on, the screens already running
+ * included.
+ */
+export const sensitiveData = async (app: string): Promise<void> => {
+  const cookie = process.env[adminVariable];
+  if (cookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { generation } = await api.screenTrust.review(app);
+    await api.screenTrust.classify(app, "sensitive", generation);
   } finally {
     core[Symbol.dispose]();
   }

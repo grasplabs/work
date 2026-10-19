@@ -16,6 +16,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { apps, users, workflowRuns } from "./db/core/schema.ts";
+import { personOf } from "./model-admission.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { LedgerScope, LedgerScopeName } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
@@ -110,21 +111,10 @@ export interface BudgetInput {
 }
 
 /** The person a call is made by or for, if any. */
-const personOf = ({ trigger, work }: BudgetInput): string | undefined => {
-  if (trigger.type === "person" || trigger.type === "staff") {
-    return trigger.userId;
-  }
-  if (trigger.type === "agent") {
-    return trigger.onBehalfOf;
-  }
-  // A guest's chat spends the budget of the member it was made for.
-  if (trigger.type === "guest") {
-    return trigger.invitedBy;
-  }
-  return work !== undefined && "authority" in work
-    ? work.authority.onBehalfOf
-    : undefined;
-};
+const budgetPersonOf = (input: BudgetInput): string | undefined =>
+  // A guest's chat spends the budget of the member it was made for (its
+  // share of the requests in flight is its own: model-admission.ts).
+  input.trigger.type === "guest" ? input.trigger.invitedBy : personOf(input);
 
 const monthPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 
@@ -198,7 +188,7 @@ export const scopesFor = (
   input: BudgetInput,
   lineageRequests: number
 ): LedgerScope[] => {
-  const person = personOf(input);
+  const person = budgetPersonOf(input);
   const scopes: Scoped[] = [
     {
       scope: "deployment",

@@ -372,3 +372,56 @@ export const dashboardWidgets = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.personId, table.position] })]
 );
+
+/**
+ * The draft release a chat's preview of its draft of an App runs
+ * (sealed-previews.ts): the draft sealed at `revision` as the version it
+ * would become (`version`), its manifest's canonical text and that text's
+ * SHA-256. One per chat and App; replaced when the draft changes, and
+ * gone with the draft, its proposal or the chat. Never a version's
+ * release: no version is sealed here.
+ */
+export const previewReleases = sqliteTable(
+  "preview_releases",
+  {
+    chatId: text("chat_id").$type<ChatId>().notNull(),
+    appId: text("app_id").notNull(),
+    revision: integer().notNull(),
+    version: integer().notNull(),
+    manifest: text().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.chatId, table.appId] })]
+);
+
+/**
+ * Each artifact a preview's draft release names (`previewReleases`), by
+ * the SHA-256 of its bytes: its text, whose UTF-8 bytes are those sealed,
+ * read back and checked against that hash at every load.
+ */
+export const previewReleaseArtifacts = sqliteTable(
+  "preview_release_artifacts",
+  {
+    chatId: text("chat_id").$type<ChatId>().notNull(),
+    appId: text("app_id").notNull(),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.appId, table.sha256] }),
+  ]
+);
+
+/**
+ * The store each preview of a chat's draft of an App reads and writes, at
+ * the draft's `revision` (sealed-previews.ts): a fixture store of the
+ * stores' namespace that core's inventory never lists. Recorded before
+ * its object is first touched, and forgotten only once it is discarded,
+ * so none is lost to a failure in between.
+ */
+export const previewStores = sqliteTable("preview_stores", {
+  storeId: text("store_id").primaryKey(),
+  chatId: text("chat_id").$type<ChatId>().notNull(),
+  appId: text("app_id").notNull(),
+  revision: integer().notNull(),
+});

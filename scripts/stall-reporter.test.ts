@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import StallReporter, { budgetMs, reportDelayMs } from "./stall-reporter.ts";
 import type { ReportedCase, ReportedModule } from "./stall-reporter.ts";
@@ -589,9 +589,32 @@ describe("why a run ended", () => {
     const { reporter, written, state, summary } = await explaining(0.05);
     const builds = file("package-builds");
     reporter.onTestRunStart();
-    reporter.onTestModuleStart(builds);
-    reporter.onTestCaseReady(test(builds, "spins forever", { timeout: 20 }));
-    await wait(pastTheGrace);
+    // A clock a millisecond on at every reading while the test starts, as
+    // a loaded runner's can be between two readings, then held just past
+    // the test's timeout and grace (70 ms) from its first reading.
+    const start = Date.now();
+    let clock = start;
+    let step = 1;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => {
+      const reading = clock;
+      clock += step;
+      return reading;
+    });
+    try {
+      reporter.onTestModuleStart(builds);
+      reporter.onTestCaseReady(test(builds, "spins forever", { timeout: 20 }));
+      step = 0;
+      clock = start + 72;
+      // Ended by the reporter's own check, however long that takes here.
+      await vi.waitFor(
+        () => {
+          expect(state.ended).toBe(1);
+        },
+        { timeout: 10_000, interval: 10 }
+      );
+    } finally {
+      now.mockRestore();
+    }
 
     const explained = await summary();
     expect({

@@ -128,3 +128,74 @@ export const recordReferences = (
   }
   return found;
 };
+
+/** The IDs of the files `value` holds under `descriptor`, into `found`. */
+const filesIn = (
+  descriptor: ValueDescriptor,
+  value: Json | undefined,
+  found: Set<string>
+): void => {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (descriptor.kind === "file") {
+    if (isObject(value) && typeof value.id === "string") {
+      found.add(value.id);
+    }
+  } else if (descriptor.kind === "object") {
+    if (isObject(value)) {
+      for (const [name, field] of Object.entries(descriptor.fields)) {
+        filesIn(field, value[name], found);
+      }
+    }
+  } else if (descriptor.kind === "record") {
+    if (isObject(value)) {
+      for (const entry of Object.values(value)) {
+        filesIn(descriptor.value, entry, found);
+      }
+    }
+  } else if (descriptor.kind === "array") {
+    if (isArray(value)) {
+      for (const item of value) {
+        filesIn(descriptor.item, item, found);
+      }
+    }
+  } else if (descriptor.kind === "union") {
+    const matched = descriptor.members.find((member) =>
+      validates(member, value)
+    );
+    if (matched !== undefined) {
+      filesIn(matched, value, found);
+    }
+  }
+};
+
+/**
+ * The IDs of the files a record with `fields` holds, under its table's
+ * field descriptors `table`: every `v.file()` value, at any depth, a
+ * union read as the validator reads it (its first accepting member). Each
+ * file once, however many places hold it: a file is held per record.
+ */
+export const recordFiles = (
+  table: Readonly<Record<string, ValueDescriptor>>,
+  fields: StoreFields
+): Set<string> => {
+  const found = new Set<string>();
+  for (const [name, field] of Object.entries(table)) {
+    filesIn(field, fields[name], found);
+  }
+  return found;
+};
+
+/**
+ * The IDs of the files a call's arguments hold under their descriptor,
+ * which the host checks the caller may use before the call runs.
+ */
+export const valueFiles = (
+  descriptor: ValueDescriptor,
+  value: Json
+): Set<string> => {
+  const found = new Set<string>();
+  filesIn(descriptor, value, found);
+  return found;
+};

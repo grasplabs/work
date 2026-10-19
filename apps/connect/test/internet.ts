@@ -1,10 +1,13 @@
 /**
  * The internet, as connect's tests see it: every request that leaves
  * connect lands in `answer`, and tests read back what was sent. OAuth
- * requests go on to the fake providers (test/oauth-provider.ts), whose spy
- * on fetch must be registered first.
+ * requests, and the lookup of a connecting account's own addresses, go on
+ * to the fake providers (test/oauth-provider.ts), whose spy on fetch must
+ * be registered first.
  */
 import { afterEach, beforeEach, vi } from "vite-plus/test";
+
+import { profileUrls } from "./oauth-provider.ts";
 
 /** One request that left connect. */
 export interface SentRequest {
@@ -35,7 +38,10 @@ export const fakeInternet = (
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
-      if (oauthHosts.has(url.hostname)) {
+      if (
+        oauthHosts.has(url.hostname) ||
+        profileUrls.has(url.origin + url.pathname)
+      ) {
         return await passThrough(input, init);
       }
       sent.push({

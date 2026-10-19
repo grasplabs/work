@@ -56,11 +56,26 @@ const drained = async (): Promise<void> => {
   await drainAuditOutboxes(env);
 };
 
-/** The events the deployment's log appended after position `after`. */
-export const eventsAfter = async (after: number): Promise<AuditEvent[]> => {
+/**
+ * The log's events after position `after`, outboxes drained, and the
+ * position of the last of them (`after` when none): one read of the log,
+ * so nothing appended between two reads is skipped.
+ */
+export const eventsAfterWithHead = async (
+  after: number
+): Promise<{ events: AuditEvent[]; head: number }> => {
   await drained();
   const entries = await entriesAfter(after);
-  return entries.map(({ event }) => event);
+  return {
+    events: entries.map(({ event }) => event),
+    head: entries.at(-1)?.seq ?? after,
+  };
+};
+
+/** The events the deployment's log appended after position `after`. */
+export const eventsAfter = async (after: number): Promise<AuditEvent[]> => {
+  const { events } = await eventsAfterWithHead(after);
+  return events;
 };
 
 /** Every event in the deployment's log, oldest first, outboxes drained. */

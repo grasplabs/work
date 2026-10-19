@@ -10,7 +10,7 @@
 // too: a declaration may only be stricter.
 //
 // Free of dependencies, like app-limits.ts and operation-limits.ts, which
-// take their values from here: the screen compiler's isolate and the SDK's
+// take their values from here: the App compiler's isolate and the SDK's
 // root module import those, and can't bring Zod along.
 
 const kib = 1024;
@@ -104,6 +104,24 @@ export const platformLimits = {
   /** Live independent triggers one person has (core's trigger-resources.ts). */
   triggerResourcesPerPerson: 100,
 
+  // Model requests in flight (core's model ledger, model-admission.ts).
+  /**
+   * Provider requests to models in flight at once in the whole client
+   * deployment: the tenant's share of its model gateway.
+   */
+  modelClientRequests: 16,
+  /** Provider requests in flight at once for one person. */
+  modelPersonRequests: 4,
+  /** Provider requests in flight at once of one App. */
+  modelAppRequests: 8,
+  /**
+   * Model calls waiting at once for a share of the requests in flight, for
+   * one person: past it, a call is refused (`model.queued`), not queued.
+   */
+  modelQueuedPerPerson: 32,
+  /** Model calls waiting at once for a share, of one App. */
+  modelQueuedPerApp: 64,
+
   // Calls a run lineage makes.
   /** Provider requests of one run lineage, retries included. */
   lineageModelRequests: 100,
@@ -118,10 +136,60 @@ export const platformLimits = {
   /** Requests in a burst. */
   browserRequestBurst: 20,
 
-  // Builds.
-  /** Build jobs one tenant has running at once. */
+  // App files (spec 10.7.5). Spec 18.1 sets no figure for them: these are
+  // this release's starting ceilings, held by core and the page alike.
+  /** One file an App's screen uploads. */
+  appFileBytes: 25 * mib,
+  /** One chunk of an upload, as the page sends it and core keeps it. */
+  appFileChunkBytes: 1 * mib,
+  /** A file a screen previews in its frame: larger ones have no preview. */
+  appFilePreviewBytes: 4 * mib,
+  /**
+   * The pixels of an image a screen previews, as its header declares them:
+   * a few megabytes can declare an image that decodes to gigabytes, so a
+   * larger one has no preview. Room for a phone camera's photo.
+   */
+  appFilePreviewPixels: 50_000_000,
+  /** Uploads one person has open in one App's store at once. */
+  appFileOpenUploads: 8,
+  /** How long an upload has, from its start, to be finished. */
+  appFileUploadMs: 60 * minute,
+  /** How long a finished file no record holds is kept before it is deleted. */
+  appFileOrphanMs: 1 * day,
+  // Storage quotas. Without them a person could publish a file per two
+  // requests (about 1.5 GB a minute under the browser request budget) and
+  // keep it for the orphan retention, or for good once attached, all on
+  // the client's EU bucket. The figures leave room for real work (a few
+  // dozen documents waiting to be attached, a few hundred large ones kept)
+  // and bound what one person, or one App's store, can hold at once.
+  /** Finished files no record holds, one person's in one store at once. */
+  appFileUnattachedPerPerson: 50,
+  /** Bytes of files (open, finished or attached) one person keeps in a store. */
+  appFilePersonBytes: 2 * 1024 * mib,
+  /** Bytes of files one App's store keeps, everyone's together. */
+  appFileStoreBytes: 20 * 1024 * mib,
+  /**
+   * Chunk requests one person's screens of an App may send: their own
+   * budget, apart from the request budget, enough for a 25 MB file and its
+   * resends in a burst, and 300 MB a minute after.
+   */
+  appFileChunkBurst: 32,
+  appFileChunksPerMinute: 300,
+  /** How long one download may take to stream, from its first byte. */
+  appFileDownloadMs: 2 * minute,
+  /**
+   * How long a page waits on one chunk's request (1 MB) before it counts
+   * as lost and is sent again.
+   */
+  appFileChunkSendMs: 1 * minute,
+
+  // Builds (core's build-admission.ts).
+  /** Build jobs one tenant has building at once: the client's share. */
   tenantBuildJobs: 2,
-  /** Build jobs one resource or content key has running at once. */
+  /**
+   * Build jobs one resource or content key has building at once: for an
+   * App's build jobs, the App.
+   */
   keyBuildJobs: 1,
 
   // Dependencies.

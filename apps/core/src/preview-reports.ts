@@ -1,6 +1,8 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { ChatId } from "@grasp-os/shared/ids";
+import { categoryOf } from "@grasp-os/shared/operations";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import type { ServerLog } from "@grasp-os/shared/screens";
 
 // What a chat's preview of its draft ran into (preview.ts), for the
@@ -82,6 +84,74 @@ export const serverProblem = (
     at: method,
     kind: "failed",
     message: message.slice(0, maxMessage),
+  };
+};
+
+/** The function a call's request names, as text for a problem's `at`. */
+const functionOf = (request: unknown): string => {
+  try {
+    const parsed: unknown =
+      typeof request === "string" ? JSON.parse(request) : undefined;
+    const reference: unknown =
+      typeof parsed === "object" && parsed !== null
+        ? Reflect.get(parsed, "reference")
+        : undefined;
+    const contract: unknown =
+      typeof reference === "object" && reference !== null
+        ? Reflect.get(reference, "contractId")
+        : undefined;
+    return typeof contract === "string" ? contract.slice(0, 256) : "function";
+  } catch {
+    return "function";
+  }
+};
+
+/**
+ * The refusals of a draft of spec 8's layout that a change of its code
+ * fixes: code that doesn't seal (sealed-previews.ts). Never one of what was
+ * kept (`version.manifest_corrupt`, `version.artifact_corrupt`), which no
+ * change of the draft fixes.
+ */
+export const draftSealFailures: ReadonlySet<string> = new Set([
+  "version.unsealable",
+  "version.build_failed",
+  "version.inspection_failed",
+  "version.invalid_manifest",
+  "version.unstable_manifest",
+]);
+
+/**
+ * What a preview's call of a function of a draft of spec 8's layout
+ * (sealed-previews.ts) failed with, as a problem of the draft: one of its
+ * code (`source`) or of a contract a function or its caller broke
+ * (`contract`), or code that doesn't seal, all the draft's to fix;
+ * nothing for a result that
+ * succeeded, an error the App meant (`domain`), or a refusal that isn't
+ * the draft's (an out-of-date preview, a person who lost access).
+ */
+export const functionProblem = (
+  request: unknown,
+  result: OperationResult
+): PreviewProblem | undefined => {
+  if (result.ok) {
+    return undefined;
+  }
+  const category = categoryOf(result.error.code);
+  if (
+    category !== "source" &&
+    category !== "contract" &&
+    !draftSealFailures.has(result.error.code)
+  ) {
+    return undefined;
+  }
+  return {
+    source: "server",
+    at: functionOf(request),
+    kind: "failed",
+    message: `${result.error.code}: ${result.error.message}`.slice(
+      0,
+      maxMessage
+    ),
   };
 };
 

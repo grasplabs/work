@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { seedDependencyRequest } from "./dependency-request.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // An engine's approved npm packages, and taking an approval back: its
 // builders see them in the engine's Packages tab; someone who may approve
@@ -80,14 +80,14 @@ const retireElsewhere = async (
 };
 
 test("someone who may approve packages and isn't a member sees only an engine's packages, and retires them", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, approver, app } = await engineWithPackages(
     "enginePackages",
     "Charts"
   );
 
-  const page = await pageOf(browser, approver);
+  const page = await pageOf(approver);
   await page.goto(`/engines/${app}`);
   await expect(
     page.getByRole("heading", { level: 1, name: "Charts" })
@@ -117,7 +117,7 @@ test("someone who may approve packages and isn't a member sees only an engine's 
   await expect(row).toContainText("Replaced by the platform's chart.");
 
   // A builder sees them in the engine's Packages tab, and ends nothing.
-  const builderPage = await pageOf(browser, builder);
+  const builderPage = await pageOf(builder);
   await builderPage.goto(`/engines/${app}`);
   await builderPage.getByRole("tab", { name: "Packages" }).click();
   const builderRow = builderPage
@@ -129,7 +129,7 @@ test("someone who may approve packages and isn't a member sees only an engine's 
 });
 
 test("someone who may approve packages and builds other engines sees only this one's packages", async ({
-  browser,
+  pageOf,
 }) => {
   // An approver's organization role doesn't decide it: core lets them
   // list the packages of an engine they aren't a member of.
@@ -138,7 +138,7 @@ test("someone who may approve packages and builds other engines sees only this o
     "Ledger"
   );
 
-  const page = await pageOf(browser, approver);
+  const page = await pageOf(approver);
   await page.goto(`/engines/${app}`);
   await expect(
     page.getByRole("heading", { level: 1, name: "Ledger" })
@@ -153,13 +153,13 @@ test("someone who may approve packages and builds other engines sees only this o
 });
 
 test("reads the packages again when a decision fails, keeping why", async ({
-  browser,
+  pageOf,
 }) => {
   const { approver, app, request } = await engineWithPackages(
     "enginePackagesRefresh",
     "Ledger"
   );
-  const page = await pageOf(browser, approver);
+  const page = await pageOf(approver);
   await page.goto(`/engines/${app}`);
   await page
     .getByRole("button", { name: "Revoke the packages for Ledger" })
@@ -192,13 +192,13 @@ test("reads the packages again when a decision fails, keeping why", async ({
 });
 
 test("shows the packages as the page reads them again, when someone else ended them meanwhile", async ({
-  browser,
+  pageOf,
 }) => {
   const { approver, app, request } = await engineWithPackages(
     "enginePackagesFresh",
     "Budget"
   );
-  const page = await pageOf(browser, approver);
+  const page = await pageOf(approver);
   await page.goto(`/engines/${app}`);
   await expect(
     page
@@ -233,13 +233,13 @@ test("shows the packages as the page reads them again, when someone else ended t
 });
 
 test("reads a builder's packages when the tab opens, not when the page loaded", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, approver, app, request } = await engineWithPackages(
     "enginePackagesTab",
     "Forecast"
   );
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(`/engines/${app}`);
   await expect(page.getByRole("tab", { name: /^Apps/u })).toBeVisible(pageRead);
 
@@ -255,13 +255,13 @@ test("reads a builder's packages when the tab opens, not when the page loaded", 
 });
 
 test("stays busy until the list was read again, so a decision is never sent twice", async ({
-  browser,
+  pageOf,
 }) => {
   const { approver, app } = await engineWithPackages(
     "enginePackagesBusy",
     "Payroll"
   );
-  const page = await pageOf(browser, approver);
+  const page = await pageOf(approver);
   await page.goto(`/engines/${app}`);
   await page
     .getByRole("button", { name: "Retire the packages for Payroll" })
@@ -308,13 +308,13 @@ test("stays busy until the list was read again, so a decision is never sent twic
 });
 
 test("says the list may be out of date when it can't be read again", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, approver, app, grant } = await engineWithPackages(
     "enginePackagesStale",
     "Travel"
   );
-  const page = await pageOf(browser, approver);
+  const page = await pageOf(approver);
   await page.goto(`/engines/${app}`);
   await page
     .getByRole("button", { name: "Retire the packages for Travel" })

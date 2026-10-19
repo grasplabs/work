@@ -7,6 +7,8 @@
   "sideEffects": false,
   "exports": {
     "./agent": "./src/agent.ts",
+    "./app-file-limits": "./src/app-file-limits.ts",
+    "./app-files": "./src/app-files.ts",
     "./app-limits": "./src/app-limits.ts",
     "./app-releases": "./src/app-releases.ts",
     "./apps": "./src/apps.ts",
@@ -21,6 +23,7 @@
     "./dashboard": "./src/dashboard.ts",
     "./deadline": "./src/deadline.ts",
     "./decisions": "./src/decisions.ts",
+    "./definition-packages": "./src/definition-packages.ts",
     "./dependencies": "./src/dependencies.ts",
     "./deployment-config": "./src/deployment-config.ts",
     "./encoding": "./src/encoding.ts",
@@ -53,6 +56,7 @@
     "./permissions": "./src/permissions.ts",
     "./platform-change": "./src/platform-change.ts",
     "./platform-limits": "./src/platform-limits.ts",
+    "./platform-measures": "./src/platform-measures.ts",
     "./portable": "./src/portable.ts",
     "./quota-policy": "./src/quota-policy.ts",
     "./record-ids": "./src/record-ids.ts",
@@ -82,6 +86,8 @@
     "./uploads": "./src/uploads.ts",
     "./value-bounds": "./src/value-bounds.ts",
     "./value-depth": "./src/value-depth.ts",
+    "./workflow-diagrams": "./src/workflow-diagrams.ts",
+    "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
     "./workflows": "./src/workflows.ts"
   },

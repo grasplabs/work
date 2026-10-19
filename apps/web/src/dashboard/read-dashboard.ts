@@ -22,6 +22,7 @@ import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
 import { defaultWidgets } from "./layout.ts";
+import { loadEveryPage } from "./outcome-pages.ts";
 import { reportWindow, todayUtc } from "./programme.ts";
 import type { ReportReads } from "./report.ts";
 import { fullDays } from "./runs.ts";
@@ -51,29 +52,42 @@ export const readWaiting = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<Waiting> => {
-  const [held, failed, integrations, requests, dependencies, screens] =
-    await Promise.all([
-      loadFromCore(
-        core,
-        async (session) => await session.pendingActions.list()
-      ),
-      loadFromCore(core, readNotifications),
-      loadFromCore(core, readIntegrations),
-      decidesRequests(identity)
-        ? loadFromCore(core, readPendingRequests)
-        : undefined,
-      loadFromCore(
-        core,
-        async (session) => await session.dependencies.waiting()
-      ),
-      decidesRequests(identity)
-        ? loadFromCore(
-            core,
-            async (session) => await session.screenTrust.waiting()
-          )
-        : undefined,
-    ]);
-  return { held, failed, integrations, requests, dependencies, screens };
+  const [
+    held,
+    outcomes,
+    failed,
+    integrations,
+    requests,
+    dependencies,
+    screens,
+  ] = await Promise.all([
+    loadFromCore(core, async (session) => await session.pendingActions.list()),
+    loadEveryPage(
+      core,
+      async (session, before) => await session.unknownOutcomes.list(before)
+    ),
+    loadFromCore(core, readNotifications),
+    loadFromCore(core, readIntegrations),
+    decidesRequests(identity)
+      ? loadFromCore(core, readPendingRequests)
+      : undefined,
+    loadFromCore(core, async (session) => await session.dependencies.waiting()),
+    decidesRequests(identity)
+      ? loadFromCore(
+          core,
+          async (session) => await session.screenTrust.waiting()
+        )
+      : undefined,
+  ]);
+  return {
+    held,
+    outcomes,
+    failed,
+    integrations,
+    requests,
+    dependencies,
+    screens,
+  };
 };
 
 /**

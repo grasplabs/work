@@ -25,6 +25,9 @@ export const engineOfTest = (): {
     sleep: async () => {
       await Promise.resolve();
     },
+    sleepUntil: async () => {
+      await Promise.resolve();
+    },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
   };
   const leaseOf: HostHooks["leaseOf"] = (key, attempt) =>

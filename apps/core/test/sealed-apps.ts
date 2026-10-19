@@ -1,11 +1,20 @@
+import {
+  contractFingerprint,
+  declaredWorkflows,
+  workflowQueries,
+} from "@grasp-os/sdk/host";
+import type { WorkflowQueryName } from "@grasp-os/sdk/host";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 
-import { sealRelease } from "../src/app-releases.ts";
+import { callAppFunction } from "../src/app-functions.ts";
+import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, createApp } from "../src/apps.ts";
+import { commitFiles, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, shareStore } from "../src/data-stores.ts";
 import {
@@ -51,9 +60,11 @@ export interface Fixture {
 /** A builder's App `name` with `files` as its first version, and a store for it. */
 export const appWith = async (
   files: Record<string, string>,
-  name = "Notes"
+  name = "Notes",
+  /** Who creates it: a new builder unless given. */
+  by?: Identity
 ): Promise<Fixture> => {
-  const owner = await person("builder");
+  const owner = by ?? (await person("builder"));
   const { id } = await createApp(env, owner, { name });
   await commitFiles(env, owner, id, files, "First version");
   return { owner, app: id, store: await createStore(env, owner) };
@@ -79,6 +90,55 @@ export const seal = async (
   version = 1
 ): Promise<Release> =>
   await sealRelease(env, { app, version, store, by: owner });
+
+/** A public function of an App's release, as a screen names it. */
+export interface FunctionName {
+  /** Its contract, `<module>.<name>` as the App's `operations` group it. */
+  readonly contractId: string;
+  readonly kind: "query" | "mutation" | "action";
+}
+
+/**
+ * The fingerprint a reference names for a function the release lacks:
+ * well formed, so the call is refused for what it names, not its shape.
+ */
+const noFingerprint = "0".repeat(64);
+
+/**
+ * What `by` gets calling `name` of App `app` with `input`, as a screen
+ * calls it (`callAppFunction`): against the release of the App's current
+ * version, by its reference there, or one of no version when it has none.
+ */
+export const calledAs = async (
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: string,
+  { contractId, kind }: FunctionName,
+  input: unknown = {}
+): Promise<OperationResult> => {
+  const id = appIdSchema.parse(app);
+  const { currentVersion } = await findApp(env, id);
+  const released =
+    currentVersion === null
+      ? undefined
+      : await loadRelease(env, id, currentVersion);
+  const fingerprints = released?.fingerprints ?? {};
+  const answered = await callAppFunction(
+    env,
+    by,
+    app,
+    JSON.stringify({
+      reference: {
+        resourceId: app,
+        resourceVersion: currentVersion ?? 1,
+        contractId,
+        fingerprint: fingerprints[contractId] ?? noFingerprint,
+        kind,
+      },
+      input,
+    })
+  );
+  return answered.result;
+};
 
 /** The error code `work` fails with. */
 export const failure = async (
@@ -126,4 +186,30 @@ export const sweptAway = async (app: AppId, version: number): Promise<void> => {
     );
   }
   throw new Error(`Retention kept version ${version} of App ${app}`);
+};
+
+/**
+ * The reference to query `name` of the workflow the App declares as
+ * `alias`, as `#grasp` generates it from `release`.
+ */
+export const queryReference = async (
+  release: Release,
+  alias: string,
+  name: WorkflowQueryName
+) => {
+  const bound = declaredWorkflows(release.app, release.workflows).find(
+    (workflow) => workflow.alias === alias
+  );
+  const operation =
+    bound === undefined ? undefined : workflowQueries(bound)[name];
+  if (operation === undefined) {
+    throw new Error(`No query ${name} of ${alias}`);
+  }
+  return {
+    resourceId: release.manifest.resourceId,
+    resourceVersion: release.manifest.resourceVersion,
+    contractId: operation.path,
+    fingerprint: await contractFingerprint(operation),
+    kind: "query" as const,
+  };
 };

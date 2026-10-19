@@ -223,6 +223,8 @@ describe("publishing a version", () => {
       definitionVersion: "1.0.0",
       profile: "grasp-open-workflow/1",
       bindings: [],
+      // No actions of its own: an empty list, recorded as such.
+      actions: [],
       author: ada.userId,
       definitionHash: await canonicalHash(
         definitionOf({ name: workflow.name })
@@ -836,6 +838,7 @@ describe("what keeps a workflow from being deleted", () => {
       hidden: 1,
       triggers: { ids: [], hidden: 0 },
       appBindings: [],
+      liveRuns: 0,
     });
     const events = await allEvents();
     const refused = events.find(
@@ -868,6 +871,7 @@ describe("what keeps a workflow from being deleted", () => {
       hidden: 0,
       triggers: { ids: [], hidden: 0 },
       appBindings: [],
+      liveRuns: 0,
     });
   });
 
@@ -1088,15 +1092,47 @@ describe("stored versions", () => {
     )
       .bind(definitionOf({ name: child.name, status: "tampered" }), child.id)
       .run();
+    // A manifest that lost what its actions may do is malformed, even
+    // with its hash written to match: no version is listed as doing
+    // nothing for want of the record. And one whose list was changed,
+    // however well formed, no longer hashes to what was sealed: review
+    // never shows less than the build allows.
+    const bare = await workflowOf(ada, "bare");
+    await publish(ada, bare.id, definitionOf({ name: bare.name }));
+    const sealed = await env.DB.prepare(
+      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ?"
+    )
+      .bind(bare.id)
+      .first<{ manifest: string }>();
+    const { actions: _dropped, ...withoutActions } = z
+      .record(z.string(), z.json())
+      .parse(JSON.parse(sealed?.manifest ?? "{}"));
+    const rehashed = canonicalJson(withoutActions);
+    await env.DB.prepare(
+      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ?"
+    )
+      .bind(rehashed, await sha256Hex(rehashed), bare.id)
+      .run();
+    const altered = await workflowOf(ada, "altered");
+    await publish(ada, altered.id, definitionOf({ name: altered.name }));
+    await env.DB.prepare(
+      `UPDATE workflow_resource_versions SET manifest = json_set(manifest, '$.actions', json('[{"binding":"notify","module":"code/notify.ts","export":"notify","uses":[]}]')) WHERE workflow_resource_id = ?`
+    )
+      .bind(altered.id)
+      .run();
     const parent = await workflowOf(ada, "parent");
     expect({
       definition: await outcome(workflowDefinition(env, ada, child.id, 1)),
       binding: await outcome(
         publish(ada, parent.id, bindingDefinition(parent.name, child.name))
       ),
+      actions: await outcome(workflowVersions(env, ada, bare.id)),
+      alteredActions: await outcome(workflowVersions(env, ada, altered.id)),
     }).toStrictEqual({
       definition: "workflow.version_corrupt",
       binding: "workflow.version_corrupt",
+      actions: "workflow.version_corrupt",
+      alteredActions: "workflow.version_corrupt",
     });
   });
 

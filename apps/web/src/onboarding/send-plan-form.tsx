@@ -182,7 +182,7 @@ export const SendPlanForm = ({
                 size="xs"
                 variant="ghost"
               >
-                {t`Change`}
+                {t({ message: "Change", context: "change which teams" })}
                 <ChevronDownIcon data-icon="inline-end" />
               </Button>
             )}

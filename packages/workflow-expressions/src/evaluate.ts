@@ -6,7 +6,8 @@ import { writeJson, writeJsonArray } from "./bounded-json.ts";
 import { durationMs } from "./duration.ts";
 import { expressionError, expressionErrors } from "./errors.ts";
 import type { ExpressionSite } from "./errors.ts";
-import { runJq } from "./jq.ts";
+import { runFuel, runJq } from "./jq.ts";
+import type { JqRun } from "./jq.ts";
 import { evaluatorLimits, sizeText } from "./limits.ts";
 import { checkSource, isBindableVariable, stageVariables } from "./source.ts";
 import type { VariablePath } from "./source.ts";
@@ -57,6 +58,39 @@ export interface CompileOptions<S extends Stage = Stage> {
 // jq's exit codes: 3 for a compile error, 5 for a runtime one.
 const jqCompileError = 3;
 
+/** The evaluation last queued on each shared budget (`drawing`). */
+const budgetQueues = new WeakMap<object, Promise<unknown>>();
+
+/**
+ * Runs `run` with fuel drawn from `budget` (`give` says how much, from
+ * what is left): taken before it runs and what it didn't spend given back
+ * after. Evaluations sharing a budget run one after the other, so one
+ * never fails for fuel another only holds while it runs: what each spends
+ * is what the same expressions spend run in turn.
+ */
+const drawing = async (
+  budget: { fuel: number } | undefined,
+  give: (left: number) => number,
+  run: (given: number) => Promise<JqRun>
+): Promise<JqRun> => {
+  if (budget === undefined) {
+    return await run(give(runFuel));
+  }
+  const before = budgetQueues.get(budget) ?? Promise.resolve();
+  const turn = (async (): Promise<JqRun> => {
+    await before.catch(() => null);
+    const given = give(budget.fuel);
+    budget.fuel -= given;
+    const ran = await run(given);
+    if (ran.kind === "completed") {
+      budget.fuel += given - ran.fuelUsed;
+    }
+    return ran;
+  })();
+  budgetQueues.set(budget, turn);
+  return await turn;
+};
+
 const fail = (
   site: ExpressionSite,
   code: Parameters<typeof expressionError>[0],
@@ -64,6 +98,39 @@ const fail = (
   more: { expected?: string; reason?: string } = {}
 ): never => {
   throw expressionError(code, site, { remedy, ...more });
+};
+
+/**
+ * Runs `program` on `stdin` with what is left of `budget` (`drawing`), at
+ * most a run's own fuel: `expression.budget_exhausted` at `site` when it
+ * ran out of the budget's fuel, short of its own.
+ */
+const budgetedRun = async (
+  budget: { fuel: number } | undefined,
+  site: ExpressionSite,
+  program: string,
+  stdin: string
+): Promise<JqRun> => {
+  let given = runFuel;
+  const run = await drawing(
+    budget,
+    (left) => Math.max(0, Math.min(left, runFuel)),
+    async (fuel) => {
+      given = fuel;
+      if (fuel <= 0) {
+        return { kind: "exhausted", resource: "fuel" };
+      }
+      return await runJq(program, stdin, fuel);
+    }
+  );
+  if (run.kind === "exhausted" && run.resource === "fuel" && given < runFuel) {
+    return fail(
+      site,
+      "expression.budget_exhausted",
+      "Do less work in the task's expressions, or split the task."
+    );
+  }
+  return run;
 };
 
 /**
@@ -156,7 +223,14 @@ const variableNamesOf = (expression: CompiledExpression): string[] => [
  */
 export const compileExpression = async <S extends Stage>(
   source: string,
-  options: CompileOptions<S>
+  options: CompileOptions<S>,
+  /**
+   * Whether it is an expression of a sealed build, which jq compiled as it
+   * was published: checked against the profile again, but not compiled by
+   * jq again. That runs it, and a run would spend fuel on it that depends
+   * on whether this isolate compiled it already.
+   */
+  sealed = false
 ): Promise<CompiledExpression<S>> => {
   const read = readCallerData(
     { pointer: "" },
@@ -245,16 +319,18 @@ export const compileExpression = async <S extends Stage>(
       );
     }
   }
-  // jq compiles it against nulls; only a compile error matters here.
-  const names = variableNamesOf(expression);
-  const run = await runJq(
-    programFor(source, names),
-    JSON.stringify(Array.from({ length: names.length + 1 }, () => null))
-  );
-  if (run.kind === "completed" && run.exitCode === jqCompileError) {
-    fail(site, "expression.invalid", "Fix the expression's jq syntax.", {
-      reason: compileMessage(run.stderr),
-    });
+  if (!sealed) {
+    // jq compiles it against nulls; only a compile error matters here.
+    const names = variableNamesOf(expression);
+    const run = await runJq(
+      programFor(source, names),
+      JSON.stringify(Array.from({ length: names.length + 1 }, () => null))
+    );
+    if (run.kind === "completed" && run.exitCode === jqCompileError) {
+      fail(site, "expression.invalid", "Fix the expression's jq syntax.", {
+        reason: compileMessage(run.stderr),
+      });
+    }
   }
   compiledExpressions.add(expression);
   return expression;
@@ -561,7 +637,14 @@ const contextText = <S extends Stage>(
 export const evaluateExpression = async <S extends Stage>(
   expression: CompiledExpression<S>,
   scope: EvaluationScope<S>,
-  contract: ResultContract
+  contract: ResultContract,
+  /**
+   * Fuel shared by several evaluations (a workflow step's, say): this one
+   * gets no more than is left of it, and what it spends is taken from it.
+   * Running out of it is `expression.budget_exhausted`, never retried:
+   * the same expressions spend the same fuel every time.
+   */
+  budget?: { fuel: number }
 ): Promise<Json> => {
   if (!compiledExpressions.has(expression)) {
     throw expressionError(
@@ -578,7 +661,9 @@ export const evaluateExpression = async <S extends Stage>(
     () => contextText(expression, scope)
   );
 
-  const run = await runJq(
+  const run = await budgetedRun(
+    budget,
+    site,
     programFor(expression.source, variableNamesOf(expression)),
     stdin
   );

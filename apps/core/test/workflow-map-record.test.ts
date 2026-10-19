@@ -1,23 +1,27 @@
+import type { Id } from "@grasp-os/sdk";
 import { describe, expect, it } from "vite-plus/test";
 
-import { recordOf } from "../blueprints/workflow-map/files/components/playbook.ts";
-import type { Workflow } from "../blueprints/workflow-map/files/components/playbook.ts";
 import {
   draftChanged,
   draftProblem,
   draftOf,
-  recordToSave,
+  toSave,
 } from "../blueprints/workflow-map/files/components/record.ts";
+import { recordOf } from "../blueprints/workflow-map/files/components/store.ts";
+import type { Workflow } from "../blueprints/workflow-map/files/components/store.ts";
 import { expectedGain } from "../blueprints/workflow-map/files/components/totals.ts";
-import type { Step } from "../blueprints/workflow-map/files/components/totals.ts";
+import type {
+  Step,
+  WorkflowRecord,
+} from "../blueprints/workflow-map/files/components/totals.ts";
 
-// The record the workflow map's editor saves from what it holds: pure
-// logic, so tested on its own. What can go wrong: a field cleared in the
-// editor survives from the stored record; a designed workflow's gain is
-// lost when no drawn version is beside it; a drawn one keeps a gain; the
-// link to an App workflow is sent (the Playbook keeps it, and refuses a
-// save that sets it); and the editor thinks nothing changed when it did,
-// or that something did when only the order of its fields did.
+// What the workflow map's editor saves from what it holds: pure logic, so
+// tested on its own. What can go wrong: a field cleared in the editor
+// survives from the stored workflow; a designed workflow's gain is lost
+// when no drawn version is beside it; a drawn one keeps a gain; the link
+// to an App workflow is sent (the store keeps it, and refuses a save that
+// sends it); and the editor thinks nothing changed when it did, or that
+// something did when only the order of its fields did.
 
 const estimated = (value: number) => ({ value, basis: "estimated" as const });
 
@@ -42,49 +46,55 @@ const designedSteps: Step[] = [
   },
 ];
 
-/** A designed workflow as the Playbook stores it: linked, in a team, with a gain. */
-const stored = {
+/** A test's ID of `Table`: the editor never looks inside one. */
+const idOf = <Table extends string>(id: string): Id<Table> =>
+  // SAFETY: a test's ID; nothing here reads what, if anything, it names.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  id as Id<Table>;
+
+const finance = idOf<"teams">("team-finance");
+
+/** A designed workflow as the map reads it: linked, in a team, with a gain. */
+const stored: WorkflowRecord = {
   type: "workflow",
   title: "Pay",
   state: "designed",
-  team: "teams/finance.md",
+  team: finance,
   steps: designedSteps,
   parameters: [],
   gain: { hoursPerWeek: 7 },
   app: { appId: "app-1", workflowId: "pay" },
-  description: "",
-  tags: ["money"],
 };
 
 const workflow: Workflow = {
-  id: "doc-1",
-  path: "workflows/pay.md",
+  id: idOf<"workflows">("workflow-1"),
+  revision: 3,
   version: 3,
   record: stored,
   body: "Pay what we owe.",
 };
 
-describe("the workflow map's saved record", () => {
-  it("takes what the map edits from the editor alone, so clearing the team clears it", () => {
+describe("what the workflow map saves", () => {
+  it("takes what the map edits from the editor alone, so clearing the team clears it, and sends no link", () => {
     const draft = { ...draftOf(recordOf(workflow)), team: null };
-    const record = recordToSave(stored, draft, "designed");
+    const saved = toSave(stored, draft, workflow.body, "designed");
     expect({
-      team: "team" in record,
-      app: "app" in record,
-      tags: record.tags,
-    }).toStrictEqual({ team: false, app: false, tags: ["money"] });
+      team: saved.team,
+      app: "app" in saved,
+      notes: saved.notes,
+    }).toStrictEqual({ team: null, app: false, notes: "Pay what we owe." });
   });
 
   it("works out a designed workflow's gain from the drawn steps, keeps it without them, and drops it for a drawn one", () => {
     const draft = draftOf(recordOf(workflow));
     expect({
-      beside: recordToSave(stored, draft, "designed", drawnSteps).gain,
-      alone: recordToSave(stored, draft, "designed").gain,
-      drawn: "gain" in recordToSave(stored, draft, "drawn"),
+      beside: toSave(stored, draft, "", "designed", drawnSteps).gain,
+      alone: toSave(stored, draft, "", "designed").gain,
+      drawn: toSave(stored, draft, "", "drawn").gain,
     }).toStrictEqual({
       beside: { hoursPerWeek: 9.5 },
       alone: { hoursPerWeek: 7 },
-      drawn: false,
+      drawn: null,
     });
   });
 
@@ -130,10 +140,10 @@ describe("the workflow map's saved record", () => {
     });
   });
 
-  it("says why a draft can't be saved, the gain its numbers make above the Playbook's limit included, rather than letting the save fail", () => {
+  it("says why a draft can't be saved, the gain its numbers make above the map's limit included, rather than letting the save fail", () => {
     const draft = draftOf(recordOf(workflow));
     // Each number within its own limit, and still a gain of 200,000 hours
-    // a week: more than the Playbook's 100,000.
+    // a week: more than the map's 100,000.
     const big: Step[] = [
       {
         name: "Match",
@@ -174,7 +184,7 @@ describe("the workflow map's saved record", () => {
       tooMany: "Each number is between 0 and 10,000.",
       bigGain: 200_000,
       tooMuchGain:
-        "The expected gain is over 100,000 hours a week, more than the Playbook takes: check the numbers.",
+        "The expected gain is over 100,000 hours a week, more than the map takes: check the numbers.",
       atTheLimit: undefined,
     });
   });

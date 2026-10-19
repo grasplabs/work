@@ -747,6 +747,24 @@ export const readGeneration = (sql: SqlStorage): number | undefined =>
   sql.exec<{ generation: number }>("SELECT generation FROM run").toArray()[0]
     ?.generation;
 
+/**
+ * The newest generation none of whose attempts holds a lease any more
+ * (`readAttemptLease`), whatever its code still does: the run's
+ * generation once no activation of it is open (it suspended, paused or
+ * ended, or a command took the run, leaving it none), one less while one
+ * is. It never goes back: a generation only grows, and an activation over
+ * never opens again. An activation that died is open until another takes
+ * the run over: only the watchdog tells a dead one from a slow one.
+ */
+export const readGenerationOver = (sql: SqlStorage): number | undefined => {
+  const [row] = sql
+    .exec<{ generation: number; open: number }>(
+      "SELECT generation, EXISTS (SELECT 1 FROM activations WHERE activations.generation = run.generation AND activations.ended_at IS NULL) AS open FROM run"
+    )
+    .toArray();
+  return row === undefined ? undefined : row.generation - row.open;
+};
+
 const eventColumns = "seq, type, payload, key, accepted_at, consumed_by";
 
 /** The event a wait took, if it took one. */
