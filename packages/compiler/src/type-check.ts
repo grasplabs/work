@@ -6,7 +6,9 @@
  */
 import ts from "typescript";
 
+import { generatedModules, serverSdkImports } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
+import { computeSdkImports, sdkImports } from "./imports.ts";
 import { ownEntry, screenReferences } from "./kit.ts";
 
 /**
@@ -93,6 +95,45 @@ export const serverTarget = (
   mapped: new Set(Object.keys(generated)),
   allowed,
 });
+
+/**
+ * How an App's server code is type-checked: the
+ * generated modules by their aliases, and by name the SDK's modules it
+ * and they import: its root, the server constructors, the database's
+ * types the constructors name, and nothing else.
+ */
+export const appCodeTarget = serverTarget(
+  generatedModules,
+  new Set([
+    ...serverSdkImports,
+    "@grasp-os/sdk/database",
+    // Its tests' (app-code.ts): what the source checks give tests alone.
+    "@grasp-os/sdk/testing",
+  ])
+);
+
+/**
+ * How an App's workflows are type-checked: no DOM, which
+ * their isolate doesn't have, no JSX, each file a module of its own; by
+ * name only the SDK's workflow modules they may import, and those the
+ * App's server code their types may name imports (`appCodeTarget`'s),
+ * with its generated modules by their aliases. A workflow's values reach
+ * none of the server's: its build holds them to `sdkImports`.
+ */
+export const workflowTarget = serverTarget(
+  generatedModules,
+  new Set([...sdkImports, ...serverSdkImports, "@grasp-os/sdk/database"])
+);
+
+/**
+ * How a JSON workflow's compute modules are type-checked:
+ * a worker's lib and no DOM, which their isolate doesn't have, no JSX,
+ * each file a module of its own; and by name only the SDK's modules they
+ * may import (`computeSdkImports`), with their own files. An approved
+ * package entry resolves to no file, so to the ambient module the host
+ * declares for it (`buildComputeModules`), never to anything of the kit.
+ */
+export const computeTarget = serverTarget({}, new Set(computeSdkImports));
 
 /** Where TypeScript's own declarations (`lib.dom.d.ts`, …) are. */
 export const libLocation = "/node_modules/typescript/lib";
