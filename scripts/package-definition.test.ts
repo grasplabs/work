@@ -776,7 +776,7 @@ describe(
       });
     });
 
-    it("refuses a package of an older format by its format, to be exported again", async () => {
+    it("refuses a package of another format by its format, saying how to recover", async () => {
       // As core exported them before a workflow carried its packages.
       const { workflows, ...current } = definitionOf();
       const older = {
@@ -795,9 +795,23 @@ describe(
         message =
           error instanceof PackagingError ? error.message : String(error);
       }
-      expect(message).toBe(
-        `The package is format 1; this checkout reads format ${definitionPackageFormatVersion}. Export the App's definition again.`
-      );
+      let newer = "packaged";
+      try {
+        await packaged(
+          {
+            ...current,
+            workflows,
+            formatVersion: definitionPackageFormatVersion + 1,
+          },
+          scratch().out
+        );
+      } catch (error) {
+        newer = error instanceof PackagingError ? error.message : String(error);
+      }
+      expect({ message, newer }).toStrictEqual({
+        message: `The package is format 1; this checkout reads format ${definitionPackageFormatVersion}. Export the App's definition again.`,
+        newer: `The package is format ${definitionPackageFormatVersion + 1}; this checkout reads format ${definitionPackageFormatVersion}. Update this checkout to package it.`,
+      });
     });
 
     it("renames the finished project onto an empty --out and leaves nothing beside it", async () => {

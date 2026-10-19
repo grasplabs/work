@@ -352,7 +352,7 @@ export interface PackagingInput {
 }
 
 /** The package `definition`, of a protocol this checkout runs, or a refusal. */
-/** Just the format a package says it has, to refuse an older one by name. */
+/** Just the format a package says it has, to refuse another one by name. */
 const formatSchema = z.object({ formatVersion: z.int() });
 
 const readDefinition = (definition: unknown): DefinitionPackage => {
@@ -361,8 +361,12 @@ const readDefinition = (definition: unknown): DefinitionPackage => {
     format.success &&
     format.data.formatVersion !== definitionPackageFormatVersion
   ) {
+    const remedy =
+      format.data.formatVersion < definitionPackageFormatVersion
+        ? "Export the App's definition again."
+        : "Update this checkout to package it.";
     return refuse(
-      `The package is format ${format.data.formatVersion}; this checkout reads format ${definitionPackageFormatVersion}. Export the App's definition again.`
+      `The package is format ${format.data.formatVersion}; this checkout reads format ${definitionPackageFormatVersion}. ${remedy}`
     );
   }
   const parsed = definitionPackageSchema.safeParse(definition);
