@@ -1107,6 +1107,10 @@ msgstr "Une recherche dans {where} n’a rien trouvé {searches, plural, one {un
 msgid "A step"
 msgstr "Une étape"
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "A workflow to check or approve, a run waiting on you, or a change to a live workflow."
+msgstr "Un workflow à vérifier ou à valider, une exécution qui vous attend, ou une modification d’un workflow en production."
+
 #: src/engines/store-changes.tsx
 msgid "Abandon the change"
 msgstr "Abandonner la modification"
@@ -1889,6 +1893,10 @@ msgstr "Avant :"
 #: src/chat/builds.tsx
 msgid "Being built"
 msgstr "En construction"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Billing problems"
+msgstr "Problèmes de facturation"
 
 #: src/engines/resource-bindings.tsx
 msgid "Bind {alias}"
@@ -3102,6 +3110,7 @@ msgstr "Versions précédentes"
 msgid "Edit"
 msgstr "Modifier"
 
+#: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Email"
 msgstr "E-mail"
@@ -3188,6 +3197,10 @@ msgstr "Chaque appel reste dans l’UE : oui."
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
 msgstr "Chaque équipe invitée a eu son entretien"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Every Monday: hours, runs, and what is waiting."
+msgstr "Chaque lundi : heures, exécutions et ce qui est en attente."
 
 #: src/brain/brain-atlas.ts
 msgid "Every one of them is interviewed."
@@ -3607,6 +3620,10 @@ msgstr "Grasp n’a pas pu lire cette politique"
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
 msgstr "Grasp ne sait pas d'où cela vient, cela ne peut donc pas être résolu ici."
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Grasp doesn’t send these emails yet. What you choose here applies once it does."
+msgstr "Grasp n’envoie pas encore ces e-mails. Ce que vous choisissez ici s’appliquera dès que ce sera le cas."
 
 #: src/landscape/usage-tab.tsx
 msgid "Grasp doesn't track who uses {appName} yet. Usage shows here once it does."
@@ -5306,6 +5323,10 @@ msgstr "Repéré dans"
 #: src/brain/brain.ts
 msgid "Noticed in {source}"
 msgstr "Repéré dans {source}"
+
+#: src/routes/_shell.settings.tsx
+msgid "Notifications"
+msgstr "Notifications"
 
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
@@ -8637,6 +8658,10 @@ msgstr "Semaine {week} sur {weeks}"
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Semaine {week} sur {weeks} · {stage}"
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Weekly summary"
+msgstr "Récapitulatif hebdomadaire"
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
 msgid "What"
@@ -8820,6 +8845,10 @@ msgctxt "column: when a run happened"
 msgid "When"
 msgstr "Quand"
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "When a payment fails or the card is about to run out, so you can fix it in time."
+msgstr "Quand un paiement échoue ou que la carte arrive à expiration, pour que vous puissiez régler cela à temps."
+
 #: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"
 msgstr "Quand un e-mail arrive pour {localPart}"
@@ -8827,6 +8856,10 @@ msgstr "Quand un e-mail arrive pour {localPart}"
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
 msgstr "quand quelqu’un le lance"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "When something needs you"
+msgstr "Quand quelque chose requiert votre attention"
 
 #: src/workflows/triggers.tsx
 msgid "When the event {event} happens"
@@ -8857,6 +8890,10 @@ msgstr "Où cette application apparaît"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
 msgstr "Quels domaines et quels agents ont des autorisations : {why}"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Which emails Grasp sends you. Only to you; nobody else’s change."
+msgstr "Les e-mails que Grasp vous envoie. Uniquement à vous ; les réglages des autres ne changent pas."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."

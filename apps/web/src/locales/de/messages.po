@@ -1107,6 +1107,10 @@ msgstr "Eine Suche in {where} hat {searches, plural, one {einmal} other {#-mal}}
 msgid "A step"
 msgstr "Ein Schritt"
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "A workflow to check or approve, a run waiting on you, or a change to a live workflow."
+msgstr "Ein Workflow zum Prüfen oder Freigeben, ein Lauf, der auf Sie wartet, oder eine Änderung an einem Live-Workflow."
+
 #: src/engines/store-changes.tsx
 msgid "Abandon the change"
 msgstr "Änderung verwerfen"
@@ -1889,6 +1893,10 @@ msgstr "Vorher:"
 #: src/chat/builds.tsx
 msgid "Being built"
 msgstr "Im Aufbau"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Billing problems"
+msgstr "Probleme bei der Abrechnung"
 
 #: src/engines/resource-bindings.tsx
 msgid "Bind {alias}"
@@ -3102,6 +3110,7 @@ msgstr "Frühere Versionen"
 msgid "Edit"
 msgstr "Bearbeiten"
 
+#: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Email"
 msgstr "E-Mail"
@@ -3188,6 +3197,10 @@ msgstr "Jeder Aufruf bleibt in der EU: ja."
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
 msgstr "Alle eingeladenen Teams interviewt"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Every Monday: hours, runs, and what is waiting."
+msgstr "Jeden Montag: Stunden, Läufe und was wartet."
 
 #: src/brain/brain-atlas.ts
 msgid "Every one of them is interviewed."
@@ -3607,6 +3620,10 @@ msgstr "Grasp konnte diese Richtlinie nicht lesen"
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
 msgstr "Grasp weiß nicht, woher dies kam, daher kann es hier nicht geklärt werden."
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Grasp doesn’t send these emails yet. What you choose here applies once it does."
+msgstr "Grasp sendet diese E-Mails noch nicht. Was Sie hier wählen, gilt, sobald es das tut."
 
 #: src/landscape/usage-tab.tsx
 msgid "Grasp doesn't track who uses {appName} yet. Usage shows here once it does."
@@ -5306,6 +5323,10 @@ msgstr "Bemerkt in"
 #: src/brain/brain.ts
 msgid "Noticed in {source}"
 msgstr "Bemerkt in {source}"
+
+#: src/routes/_shell.settings.tsx
+msgid "Notifications"
+msgstr "Benachrichtigungen"
 
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
@@ -8637,6 +8658,10 @@ msgstr "Woche {week} von {weeks}"
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Woche {week} von {weeks} · {stage}"
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Weekly summary"
+msgstr "Wochenzusammenfassung"
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
 msgid "What"
@@ -8820,6 +8845,10 @@ msgctxt "column: when a run happened"
 msgid "When"
 msgstr "Wann"
 
+#: src/routes/_shell.settings.notifications.tsx
+msgid "When a payment fails or the card is about to run out, so you can fix it in time."
+msgstr "Wenn eine Zahlung fehlschlägt oder die Karte bald abläuft, damit Sie es rechtzeitig beheben können."
+
 #: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"
 msgstr "Wenn eine E-Mail für {localPart} eingeht"
@@ -8827,6 +8856,10 @@ msgstr "Wenn eine E-Mail für {localPart} eingeht"
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
 msgstr "wenn ihn jemand startet"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "When something needs you"
+msgstr "Wenn etwas auf Sie wartet"
 
 #: src/workflows/triggers.tsx
 msgid "When the event {event} happens"
@@ -8857,6 +8890,10 @@ msgstr "Wo diese App vorkommt"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
 msgstr "Welche Domänen und Agenten Berechtigungen haben: {why}"
+
+#: src/routes/_shell.settings.notifications.tsx
+msgid "Which emails Grasp sends you. Only to you; nobody else’s change."
+msgstr "Welche E-Mails Grasp Ihnen sendet. Nur an Sie; die Einstellungen anderer bleiben unverändert."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."
