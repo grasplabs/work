@@ -1,5 +1,6 @@
+import type { Source, Statement, StatementKind } from "@grasp-os/shared/brain";
+
 import type { Place } from "./transcript.ts";
-import type { Source, Statement, StatementKind } from "./workspace.ts";
 
 /**
  * What a note's page says about its statements: who they came from, when it was last heard, and
