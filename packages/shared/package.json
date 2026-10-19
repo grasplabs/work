@@ -23,6 +23,7 @@
     "./admin/admin-tools": "./src/admin/admin-tools.ts",
     "./admin/admin-usage": "./src/admin/admin-usage.ts",
     "./admin/admin-view": "./src/admin/admin-view.ts",
+    "./admin/admin-workflows": "./src/admin/admin-workflows.ts",
     "./admin/document-reading": "./src/admin/document-reading.ts",
     "./admin/hours": "./src/admin/hours.ts",
     "./admin/interview-turn": "./src/admin/interview-turn.ts",
