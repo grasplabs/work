@@ -17,16 +17,19 @@ import { searchRebuilds } from "../db/knowledge/schema.ts";
 // of that term leaves it there as long as the page holds other terms. So
 // after a purge the separators each term's tokens would have are looked
 // up, an index seek per segment, and only when one still holds a token
-// is the whole index rebuilt, as every purge did before. Whatever can't
+// that no live row holds too (then it reveals nothing the index doesn't:
+// common words, and an ID's trigrams, head pages all the time) is the
+// whole index rebuilt, as every purge did before. Whatever can't
 // be checked (secure-delete off or refused, a term that isn't plain
 // ASCII, a directory that can't be read) is rebuilt too: the rebuild is
 // the fallback, never skipped.
 //
-// What may stay: fragments of at most three characters of a word without
-// digits, in the trigram index and the words index's prefix indexes, which
-// hold the same for any text with those letters; never a whole token of a
-// term longer than that, and of a token with a digit (an ID, a PIN, a
-// group of a number) never as much as three characters.
+// What may stay, beyond what live text holds: fragments of at most three
+// characters of a word without digits, in the trigram index and the words
+// index's prefix indexes, which hold the same for any text with those
+// letters; never a whole token of a term longer than that, and of a token
+// with a digit (an ID, a PIN, a group of a number) never as much as three
+// characters.
 //
 // Nothing a lookup carries (the terms) is ever logged: a failed query's
 // error repeats its parameters, so only the error's name is.
@@ -34,11 +37,8 @@ import { searchRebuilds } from "../db/knowledge/schema.ts";
 // A personal purge deletes a whole collection, whose terms it doesn't
 // name: before deleting it, it reads every version of its documents, each
 // of which the index held once, and checks the tokens they gave the index
-// (threat model in GRA-696). Its
-// common words ("the", single letters) head pages all the time, so a
-// separator that holds one of its tokens counts only when no live row
-// still holds the token: then it reveals nothing the index doesn't. That
-// check is capped; past the caps, the index is rebuilt.
+// (threat model in GRA-696), the same way. Its checks are capped; past
+// the caps, the index is rebuilt.
 //
 // Secure deletes are turned on by the migration `0011_search_secure_delete`,
 // with a rebuild. Remote D1 may refuse what local workerd allows (reading
@@ -319,26 +319,102 @@ export const holdsAny = (
   return found.some((one) => holdsToken(one, least.get(one.key) ?? 1));
 };
 
-/** Whether a page separator of the index still holds one of `keys`' tokens. */
-const separatorsHold = async (
+/** Keys looked up in one query. */
+const keysPerLookup = 500;
+
+/** Lookups of live rows in one batch. */
+const liveLookupsPerBatch = 50;
+
+/** Lookups of whether a live row still holds a token, past which a purge rebuilds. */
+const liveLookupsCap = 1000;
+
+/** A held separator, and the FTS5 query that finds a live row explaining it. */
+interface Held {
+  readonly table: IndexKey["table"];
+  readonly query: string;
+}
+
+/**
+ * The query for a live row that holds what separator `found` holds of its
+ * key, each one lookup however large the index: the trigram itself, in
+ * the trigram index; the separator's prefix, in a prefix index, when it
+ * has the two or three characters the prefix indexes keep; otherwise the
+ * key's whole token, as a term. Never a longer prefix, whose query merges
+ * every term that starts with it.
+ */
+const liveQueryOf = (table: IndexKey["table"], found: Found): Held => {
+  const token = found.key.slice(1);
+  if (table === "search_trigrams") {
+    return { table, query: `"${token.replaceAll('"', '""')}"` };
+  }
+  const prefix = (found.separator ?? "").slice(1);
+  return !found.key.startsWith("0") && prefix.length >= 2
+    ? { table, query: `"${prefix}"*` }
+    : { table, query: `"${token}"` };
+};
+
+/**
+ * Whether the search index still holds something of `keys`' tokens that
+ * no live row explains, after their rows' secure deletes: "clean" when
+ * not, "rebuild" when it does, "capped" when finding out would take
+ * more than `liveLookupsCap` lookups. A separator that holds a token a
+ * live row still holds reveals nothing the index doesn't: common words,
+ * and an ID's trigrams, head pages all the time (GRA-732).
+ */
+const leftUnexplained = async (
   db: DrizzleD1Database,
   keys: readonly IndexKey[]
-): Promise<boolean> => {
+): Promise<"clean" | "rebuild" | "capped"> => {
+  const held = new Map<string, Held>();
   for (const table of ["search_words", "search_trigrams"] as const) {
     const ofTable = keys.filter((key) => key.table === table);
-    if (ofTable.length > 0) {
-      // oxlint-disable-next-line no-await-in-loop -- one index, then the other
+    for (let at = 0; at < ofTable.length; at += keysPerLookup) {
+      const chunk = ofTable.slice(at, at + keysPerLookup);
+      // oxlint-disable-next-line no-await-in-loop -- one chunk at a time
       const found = await separatorsOf(
         db,
         table,
-        ofTable.map(({ key }) => key)
+        chunk.map(({ key }) => key)
       );
-      if (holdsAny(ofTable, found)) {
-        return true;
+      const least = new Map(chunk.map((key) => [key.key, key.least]));
+      for (const one of found) {
+        if (holdsToken(one, least.get(one.key) ?? 1)) {
+          const live = liveQueryOf(table, one);
+          held.set(`${live.table}:${live.query}`, live);
+        }
       }
     }
   }
-  return false;
+  if (held.size > liveLookupsCap) {
+    // Counts only: never a term.
+    log.warn("knowledge.purge.index_check_capped", {
+      keys: keys.length,
+      liveLookups: held.size,
+    });
+    return "capped";
+  }
+  const lookups = [...held.values()];
+  for (let at = 0; at < lookups.length; at += liveLookupsPerBatch) {
+    // Builders, not `db.all`: drizzle's D1 batch can't bind a raw
+    // statement's parameters.
+    const [first, ...rest] = lookups
+      .slice(at, at + liveLookupsPerBatch)
+      .map(({ table, query }) =>
+        db
+          .select({ live: sql<number>`1` })
+          .from(sql.raw(table))
+          .where(sql`${sql.raw(table)} MATCH ${query}`)
+          .limit(1)
+      );
+    if (first !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+      const results = await db.batch([first, ...rest]);
+      if (results.some((rows) => rows.length === 0)) {
+        return "rebuild";
+      }
+    }
+  }
+  return "clean";
 };
 
 /** An error's name alone: never its message, which may repeat a query's terms. */
@@ -351,19 +427,29 @@ export const errorNameOf = (error: unknown): string =>
  * (`secure`, from `secureDeleteReady` before the writes), the terms'
  * tokens are known (`tokensKnown`: no occurrence was part of a longer
  * token, as one beside a script written without spaces is, "東京Visser"),
- * no purge recorded a rebuild still owed (`rebuildOwed`), and no page
- * separator holds a token of them, there is nothing left to do;
- * otherwise the index is rebuilt. Throws when the rebuild fails.
+ * no other purge recorded a rebuild still owed (`rebuildOwed`), and no
+ * page separator holds a token of them that no live row explains
+ * (`leftUnexplained`), there is nothing left to do, and this purge's own
+ * owed rebuild (`id`) is cleared; otherwise the index is rebuilt, which
+ * clears it. Throws when the rebuild fails.
  */
 export const eraseFromSearchIndex = async (
   db: DrizzleD1Database,
   terms: readonly string[],
-  { secure, tokensKnown }: { secure: boolean; tokensKnown: boolean }
+  {
+    secure,
+    tokensKnown,
+    id,
+  }: { secure: boolean; tokensKnown: boolean; id: string }
 ): Promise<void> => {
   const keys = secure && tokensKnown ? indexKeysOf(terms) : undefined;
   if (keys !== undefined) {
     try {
-      if (!(await anyRebuildOwed(db)) && !(await separatorsHold(db, keys))) {
+      if (
+        !(await anyRebuildOwed(db, id)) &&
+        (await leftUnexplained(db, keys)) === "clean"
+      ) {
+        await db.delete(searchRebuilds).where(eq(searchRebuilds.id, id));
         return;
       }
     } catch (error) {
@@ -388,7 +474,7 @@ export const collectionCheckCaps = {
   /** Distinct page-directory keys looked up. */
   keys: 20_000,
   /** Lookups of whether a live row still holds a token. */
-  liveLookups: 1000,
+  liveLookups: liveLookupsCap,
 } as const;
 
 /**
@@ -400,12 +486,6 @@ const maxTokenLength = 256;
 
 /** Versions' text read at once: no more than the character cap in all. */
 const versionsPerRead = 20;
-
-/** Keys looked up in one query. */
-const keysPerLookup = 500;
-
-/** Lookups of live rows in one batch. */
-const liveLookupsPerBatch = 50;
 
 /**
  * What `unicode61` may take as part of a token: a letter, a digit, a
@@ -685,89 +765,6 @@ export const rebuildOwedIfChanged = (
   );
 };
 
-/** A held separator, and the FTS5 query that finds a live row explaining it. */
-interface Held {
-  readonly table: IndexKey["table"];
-  readonly query: string;
-}
-
-/**
- * The query for a live row that holds what separator `found` holds of its
- * key, each one lookup however large the index: the trigram itself, in
- * the trigram index; the separator's prefix, in a prefix index, when it
- * has the two or three characters the prefix indexes keep; otherwise the
- * key's whole token, as a term. Never a longer prefix, whose query merges
- * every term that starts with it.
- */
-const liveQueryOf = (table: IndexKey["table"], found: Found): Held => {
-  const token = found.key.slice(1);
-  if (table === "search_trigrams") {
-    return { table, query: `"${token.replaceAll('"', '""')}"` };
-  }
-  const prefix = (found.separator ?? "").slice(1);
-  return !found.key.startsWith("0") && prefix.length >= 2
-    ? { table, query: `"${prefix}"*` }
-    : { table, query: `"${token}"` };
-};
-
-/**
- * Whether the search index still holds something of `keys`' tokens that
- * no live row explains, after their rows' secure deletes: "clean" when
- * not, "rebuild" when it does, "capped" when finding out took more than
- * `collectionCheckCaps` allows.
- */
-const collectionLeft = async (
-  db: DrizzleD1Database,
-  keys: readonly IndexKey[]
-): Promise<"clean" | "rebuild" | "capped"> => {
-  const held = new Map<string, Held>();
-  for (const table of ["search_words", "search_trigrams"] as const) {
-    const ofTable = keys.filter((key) => key.table === table);
-    for (let at = 0; at < ofTable.length; at += keysPerLookup) {
-      const chunk = ofTable.slice(at, at + keysPerLookup);
-      // oxlint-disable-next-line no-await-in-loop -- one chunk at a time
-      const found = await separatorsOf(
-        db,
-        table,
-        chunk.map(({ key }) => key)
-      );
-      const least = new Map(chunk.map((key) => [key.key, key.least]));
-      for (const one of found) {
-        if (holdsToken(one, least.get(one.key) ?? 1)) {
-          const live = liveQueryOf(table, one);
-          held.set(`${live.table}:${live.query}`, live);
-        }
-      }
-    }
-  }
-  if (held.size > collectionCheckCaps.liveLookups) {
-    loggedCapped({ keys: keys.length, liveLookups: held.size });
-    return "capped";
-  }
-  const lookups = [...held.values()];
-  for (let at = 0; at < lookups.length; at += liveLookupsPerBatch) {
-    // Builders, not `db.all`: drizzle's D1 batch can't bind a raw
-    // statement's parameters.
-    const [first, ...rest] = lookups
-      .slice(at, at + liveLookupsPerBatch)
-      .map(({ table, query }) =>
-        db
-          .select({ live: sql<number>`1` })
-          .from(sql.raw(table))
-          .where(sql`${sql.raw(table)} MATCH ${query}`)
-          .limit(1)
-      );
-    if (first !== undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one batch at a time
-      const results = await db.batch([first, ...rest]);
-      if (results.some((rows) => rows.length === 0)) {
-        return "rebuild";
-      }
-    }
-  }
-  return "clean";
-};
-
 /**
  * Leaves nothing of a deleted collection's text in the search index, after
  * the batch that deleted it, which recorded its own rebuild as owed (`id`,
@@ -787,7 +784,7 @@ export const eraseCollectionFromSearchIndex = async (
     try {
       if (
         !(await anyRebuildOwed(db, id)) &&
-        (await collectionLeft(db, plan.keys)) === "clean"
+        (await leftUnexplained(db, plan.keys)) === "clean"
       ) {
         await db.delete(searchRebuilds).where(eq(searchRebuilds.id, id));
         return;

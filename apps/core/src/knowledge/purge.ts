@@ -118,7 +118,7 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // gone once evicted), fragments of a word of at most three characters
 // left in the search index's page directory (search-erasure.ts: any text
 // with those letters leaves the same; a token with a digit, never three
-// of its characters), the pages SQLite freed, which keep their old bytes
+// of its characters), beyond what live text holds, the pages SQLite freed, which keep their old bytes
 // until reused (D1 has no `PRAGMA secure_delete`), D1's own point-in-time
 // recovery, and anything outside Knowledge. And it reaches too far where a name is an
 // ordinary word too (Will, Mark, May): every "will" goes.
@@ -1062,7 +1062,11 @@ const purgeContent = async (
   const secure = await secureDeleteReady(db);
   const purgeId = crypto.randomUUID();
   // Recorded before anything changes, so no purge goes unrecorded however
-  // far it gets.
+  // far it gets, with the rebuild it owes until its check finds nothing
+  // left: one that fails after its writes, and isn't run again, leaves the
+  // next purge to rebuild. A separator another document's text explained
+  // at a purge's check that this one then takes the term from is covered
+  // so, too.
   await auditedBatch(env, db, [
     outboxed(
       db,
@@ -1075,20 +1079,26 @@ const purgeContent = async (
         purgeId
       )
     ),
-    ...(tokensKnown ? [] : [rebuildOwed(db, purgeId)]),
+    rebuildOwed(db, purgeId),
   ]);
   const done: Counts[] = [];
-  for (const one of named) {
-    // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
-    done.push(await purgeDocument(env, db, person, one, matcher));
-  }
-  if (!tokensKnown) {
-    // A rebuild from now on covers this purge's writes.
+  try {
+    for (const one of named) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
+      done.push(await purgeDocument(env, db, person, one, matcher));
+    }
+  } finally {
+    // A rebuild from now on covers this purge's writes, also when one of
+    // them failed: it writes no more.
     await owedWritesDone(db, purgeId);
   }
   await cleanUpOriginals(env);
   await cleanSearchIndex(async () => {
-    await eraseFromSearchIndex(db, input.terms, { secure, tokensKnown });
+    await eraseFromSearchIndex(db, input.terms, {
+      secure,
+      tokensKnown,
+      id: purgeId,
+    });
   });
   return { purgeId, ...sum(done) };
 };
