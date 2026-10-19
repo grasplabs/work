@@ -17,8 +17,13 @@ import { catalogBindingKinds } from "./workflow-resources.ts";
 // entries its modules import, never as an approval: the destination asks
 // for and approves them again before anything it publishes seals them.
 
-/** The format of a definition package. */
-export const definitionPackageFormatVersion = 1;
+/**
+ * The format of a definition package. 2 since a workflow version carries
+ * the approved packages it seals (GRA-737): a format 1 package has no
+ * room for them, so one of a version that sealed some would have lost
+ * them without saying so, and is refused, to be exported again.
+ */
+export const definitionPackageFormatVersion = 2;
 
 /** The most workflow versions one package holds. */
 export const definitionPackageMaxWorkflows = 64;

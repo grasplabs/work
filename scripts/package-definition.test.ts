@@ -15,7 +15,10 @@ import path from "node:path";
 
 import { inspectApp } from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
-import { definitionPackageSchema } from "@grasp-os/shared/definition-packages";
+import {
+  definitionPackageFormatVersion,
+  definitionPackageSchema,
+} from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { canonicalText } from "@grasp-os/shared/json";
 import { graspLockSchema } from "@grasp-os/shared/packages";
@@ -138,7 +141,7 @@ const greeting = (): Record<string, string> => ({
 const definitionOf = (
   files: Record<string, string> = notesFiles()
 ): DefinitionPackage => ({
-  formatVersion: 1,
+  formatVersion: definitionPackageFormatVersion,
   app: {
     version: 3,
     provenance: {
@@ -773,6 +776,30 @@ describe(
       });
     });
 
+    it("refuses a package of an older format by its format, to be exported again", async () => {
+      // As core exported them before a workflow carried its packages.
+      const { workflows, ...current } = definitionOf();
+      const older = {
+        ...current,
+        formatVersion: 1,
+        workflows: Object.fromEntries(
+          Object.entries(workflows).map(
+            ([key, { packages: _packages, ...workflow }]) => [key, workflow]
+          )
+        ),
+      };
+      let message = "packaged";
+      try {
+        await packaged(older, scratch().out);
+      } catch (error) {
+        message =
+          error instanceof PackagingError ? error.message : String(error);
+      }
+      expect(message).toBe(
+        `The package is format 1; this checkout reads format ${definitionPackageFormatVersion}. Export the App's definition again.`
+      );
+    });
+
     it("renames the finished project onto an empty --out and leaves nothing beside it", async () => {
       const { dir, out } = scratch();
       mkdirSync(out);
@@ -842,7 +869,10 @@ describe(
           )
         ),
         notAPackage: await refusalOf(
-          packaged({ formatVersion: 1 }, scratch().out)
+          packaged(
+            { formatVersion: definitionPackageFormatVersion },
+            scratch().out
+          )
         ),
       }).toStrictEqual({
         nonEmpty: "refused",

@@ -72,7 +72,10 @@ import {
   readSealedWorkflows,
 } from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
-import { definitionPackageSchema } from "@grasp-os/shared/definition-packages";
+import {
+  definitionPackageFormatVersion,
+  definitionPackageSchema,
+} from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock, LockedPackage } from "@grasp-os/shared/packages";
@@ -349,7 +352,19 @@ export interface PackagingInput {
 }
 
 /** The package `definition`, of a protocol this checkout runs, or a refusal. */
+/** Just the format a package says it has, to refuse an older one by name. */
+const formatSchema = z.object({ formatVersion: z.int() });
+
 const readDefinition = (definition: unknown): DefinitionPackage => {
+  const format = formatSchema.safeParse(definition);
+  if (
+    format.success &&
+    format.data.formatVersion !== definitionPackageFormatVersion
+  ) {
+    return refuse(
+      `The package is format ${format.data.formatVersion}; this checkout reads format ${definitionPackageFormatVersion}. Export the App's definition again.`
+    );
+  }
   const parsed = definitionPackageSchema.safeParse(definition);
   if (!parsed.success) {
     return refuse("The file isn't a definition package this checkout reads.");
