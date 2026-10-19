@@ -6,6 +6,7 @@ import { isInterviewer } from "./interviewer.ts";
 import type { Interviewer } from "./interviewer.ts";
 import { PHASES, TAGS } from "./interviews.ts";
 import type { PersonState, Phase } from "./interviews.ts";
+import type { Member, Unknown } from "./onboarding-admin.ts";
 import { present } from "./present.ts";
 
 /**
@@ -483,6 +484,13 @@ export interface HeldInterview {
   completed: string | null;
   /** When they last left in the middle, and in which part. */
   stopped: { at: string; phase: Phase } | null;
+  /**
+   * What Stephen wrote down, as numbers alone, where what was said stays elsewhere: Grasp OS's
+   * core keeps it behind its audited transcript read, and its admin snapshot carries only the
+   * counts (`admin-snapshot-adapter.ts`). Every fact written down, and how many of those the person
+   * took out in the read-back. With it, `progress` holds no lines or facts, and none are missing.
+   */
+  counted?: { facts: number; out: number };
 }
 
 /** Where one interview stands, without what was said in it: all the plan, the links and the numbers need, cheap to read on every change. */
@@ -712,6 +720,14 @@ export interface StaffSnapshot {
   /** The AI used for this organization, day by day, as the Worker counted it. */
   usage: MeterDay[];
   now: string;
+  /** Who is in the company's platform, where that is known: Grasp OS's core names its members; the prototype's Worker had none. */
+  members?: Member[];
+  /** How much Grasp knows, in percent, where the organization counts it itself, as Grasp OS's core does for its gate. */
+  known?: number;
+  /** Grasp's staff paused the interviews, where the organization holds that itself, as Grasp OS's core does. */
+  paused?: boolean;
+  /** What the organization's own record doesn't hold yet, as Grasp OS's core holds no contract or drawn work: not a draft, not nothing, but not known. */
+  unknown?: Unknown;
 }
 
 /** What the company's own admin sees: their onboarding, their people with the links to send, and numbers per team. Never anyone's words. */

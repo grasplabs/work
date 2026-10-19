@@ -272,7 +272,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     const sections = page
       .getByRole("navigation", { name: "Settings" })
       .getByRole("link");
-    await expect(sections.last()).toHaveText("Notifications");
+    await expect(sections.last()).toHaveText("Security");
     return {
       // Without how many wait.
       nav: texts.map((text) => text.replace(/\d+ things? waiting$/u, "")),
@@ -283,6 +283,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const [chat, ...rest] = everyone;
   const nav = [chat, "Dashboard", ...rest];
   const menu = ["Settings", "Sign out"];
+  const account = ["Profile", "Notifications", "Security"];
   expect({
     admin: await sidebarOf(admin),
     builder: await sidebarOf(builder),
@@ -292,21 +293,23 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
       nav,
       menu,
       settings: [
+        "Workspace",
         "Members and roles",
         "Models",
         "AI spend",
+        "Pulse",
         "Audit trail",
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
+        "Billing",
         // What approved packages are in use, for anyone but Grasp staff:
         // core lists it only to those who may approve packages.
         "Packages",
-        "Profile",
-        "Notifications",
+        ...account,
       ],
     },
-    builder: { nav, menu, settings: ["Packages", "Profile", "Notifications"] },
-    user: { nav, menu, settings: ["Packages", "Profile", "Notifications"] },
+    builder: { nav, menu, settings: ["Packages", ...account] },
+    user: { nav, menu, settings: ["Packages", ...account] },
   });
 });
 

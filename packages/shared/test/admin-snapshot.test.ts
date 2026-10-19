@@ -94,4 +94,21 @@ describe("the admin snapshot as the console reads it", () => {
       )
     );
   });
+
+  it("drops a purpose it doesn't know whatever that purpose's numbers look like", () => {
+    const newer = snapshot({
+      usage: [
+        {
+          day: "2026-10-16",
+          use: { dreams: { "a-model": { minutes: 3 } }, wishes: 4 },
+        },
+      ],
+    });
+
+    expect(adminSnapshotSchema.parse(newer)).toStrictEqual(
+      adminSnapshotSchema.parse(
+        snapshot({ usage: [{ day: "2026-10-16", use: {} }] })
+      )
+    );
+  });
 });
