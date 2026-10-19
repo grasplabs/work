@@ -681,10 +681,7 @@ interface Invocation {
   kind: InvocationKind;
   /** Statistics points it recorded and reads it made (`claimStatistic`). */
   statistics?: { point: number; read: number };
-  /**
-   * The reads, calls and resource requests its stubs made
-   * (`claimHostCall`), each counted once, as it first reaches the host.
-   */
+  /** The stub calls it made (`claimHostCall`), each counted as it starts. */
   hostCalls?: number;
   /** The version its code runs on, once started. */
   version?: number;
@@ -1765,23 +1762,23 @@ export class App extends DurableObject<Env> {
    * `admit` does, and counts it against the call's host calls: the same
    * budget an App function's operation channel has
    * (`platformLimits.invocationHostCalls`, 100; operation-channel.ts), for
-   * the App's stubs, which reach core outside that channel. Reads, calls
-   * and resource requests count, each as it reaches the host, refused or
-   * not; writes (`use` "write") don't, as staged writes don't on the
-   * channel: each has bounds of its own. Past the budget the stub call is
-   * refused, `operation.call_limit`, before it does anything: a method's
-   * loop of reads ends there, however long its deadline. Only a stub
-   * call's first admission counts (app-bindings.ts, `countedCallerOf`):
-   * one admitted again before it acts, or before its answer goes back,
-   * is admitted with `admit` alone. Kept for the call's life, in memory,
-   * as its token is: a call the object outlives not, nor a retry, which
-   * is another call with a budget of its own.
+   * the App's stubs, which reach core outside that channel. Every stub
+   * call counts, each as it reaches the host, refused or not: a read, a
+   * call of another App, a connection's action, a statistics point, a
+   * guest invited, each a request of a resource outside the App, as the
+   * channel counts its resource requests whatever they change. (The App's
+   * own writes, to its SQLite, never come through a stub: the channel's
+   * uncounted staged writes have no stub here.) Past the budget the stub
+   * call is refused, `operation.call_limit`, before it does anything: a
+   * method's loop of them ends there, however long its deadline. Only a
+   * stub call's first admission counts (app-bindings.ts,
+   * `countedCallerOf`): one admitted again before it acts, or before its
+   * answer goes back, is admitted with `admit` alone. Kept for the call's
+   * life, in memory, as its token is: a call the object outlives not, nor
+   * a retry, which is another call with a budget of its own.
    */
   claimHostCall(token: string, use: InvocationKind): Admitted {
     const resolved = this.admit(token, use);
-    if (use === "write") {
-      return resolved;
-    }
     const call = this.#calls.get(token);
     if (call === undefined) {
       throw appErrors.create("app.caller_invalid");

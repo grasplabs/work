@@ -1593,7 +1593,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("answer one call's stubs' reads and calls only up to its host-call budget, its writes not counted, and every call its own budget", async () => {
+  it("answer one call's stub calls only up to its host-call budget, its writes and reads alike, and every call its own budget", async () => {
     const admin = await personApi("admin");
     const { collectionId } = await collectionWithNote(
       { knowledge: admin.api.knowledge },
@@ -1619,7 +1619,8 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       );
     const budget = platformLimits.invocationHostCalls;
 
-    // Statistics points are writes: the reads after them get the budget.
+    // Statistics points are stub calls too: they take from the budget the
+    // reads after them get.
     const pointsThenReads = await useMany([
       {
         binding: "STATISTICS",
@@ -1651,7 +1652,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       readsThenCall,
       refused: callsIn(events).map(({ detail }) => detail),
     }).toStrictEqual({
-      pointsThenReads: { made: 5 + budget },
+      pointsThenReads: { made: budget, refused: "operation.call_limit" },
       tooManyReads: { made: budget, refused: "operation.call_limit" },
       readsThenCall: { made: budget, refused: "operation.call_limit" },
       refused: [

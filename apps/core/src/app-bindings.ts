@@ -154,9 +154,8 @@ export const callerOf = async (
 
 /**
  * Who `caller` is, as `callerOf` says, for a stub call as it starts:
- * counted against its call's host calls (`App.claimHostCall`), a read,
- * call or resource request once each, `operation.call_limit` past the
- * call's budget. Each stub call starts here once; it is admitted again
+ * counted against its call's host calls (`App.claimHostCall`), once,
+ * `operation.call_limit` past the call's budget. Each stub call starts here once; it is admitted again
  * (`stillAdmitted`, `handedBack`) without counting.
  */
 export const countedCallerOf = async (
