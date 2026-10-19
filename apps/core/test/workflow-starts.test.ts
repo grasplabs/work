@@ -219,6 +219,19 @@ const granted = async (
 };
 
 /** `start` on workflow `id`, for `subject`. */
+/** The triggers a refusal's details name, if it names any. */
+const triggersIn = (failed: object | undefined): unknown => {
+  if (failed === undefined || !("details" in failed)) {
+    return undefined;
+  }
+  const { details } = failed;
+  return typeof details === "object" &&
+    details !== null &&
+    "triggers" in details
+    ? details.triggers
+    : undefined;
+};
+
 const startsOn = (
   subject: PermissionRequest["subject"],
   id: string
@@ -1021,17 +1034,25 @@ describe("a trigger starting a workflow", () => {
             : value;
         },
       });
-      const deleted = await outcome(
+      const answer: unknown = await refusal(
         deleteWorkflowResource({ ...env, DB: racing }, ada, workflow.id)
       );
       const events = await allEvents();
-      const refused = events.filter(
-        ({ action, target }) =>
-          action === "workflow.delete_refused" && target?.id === workflow.id
-      );
+      const about = (action: string) =>
+        events.filter(
+          (event) => event.action === action && event.target?.id === workflow.id
+        );
+      const failed =
+        typeof answer === "object" && answer !== null ? answer : undefined;
       return {
-        deleted,
-        refused: refused.map(({ detail }) => detail?.reason),
+        deleted:
+          failed !== undefined && "code" in failed ? failed.code : answer,
+        triggers: triggersIn(failed),
+        refused: about("workflow.delete_refused").map(
+          ({ detail }) => detail?.reason
+        ),
+        deletedEvents: about("workflow.deleted").length,
+        trigger: trigger.id,
       };
     };
 
@@ -1045,12 +1066,34 @@ describe("a trigger starting a workflow", () => {
       before: deletes <= 2 ? true : undefined,
       after: deletes <= 2 ? false : undefined,
     }));
+    // Gone after the first try, back for good before the second: bound by
+    // it, and named.
+    const returned = await deletion((deletes) => ({
+      before: deletes === 2 ? true : undefined,
+      after: deletes === 1 ? false : undefined,
+    }));
 
-    expect({ once, always }).toStrictEqual({
-      once: { deleted: "ok", refused: [] },
+    expect({ once, always, returned }).toStrictEqual({
+      once: {
+        deleted: "ok",
+        triggers: undefined,
+        refused: [],
+        deletedEvents: 1,
+        trigger: once.trigger,
+      },
       always: {
         deleted: "workflow.resource_busy",
+        triggers: undefined,
         refused: ["workflow.resource_busy"],
+        deletedEvents: 0,
+        trigger: always.trigger,
+      },
+      returned: {
+        deleted: "workflow.resource_bound",
+        triggers: { ids: [returned.trigger], hidden: 0 },
+        refused: ["workflow.resource_bound"],
+        deletedEvents: 0,
+        trigger: returned.trigger,
       },
     });
   });

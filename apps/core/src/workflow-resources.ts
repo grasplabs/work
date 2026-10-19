@@ -191,10 +191,13 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   Apps (app-access.ts). Anyone else gets `workflow.resource_unavailable`,
 //   the same as for a workflow that doesn't exist.
 // - Deleting a workflow something runs. Deletion is refused while the
-//   current version of another live workflow binds it
-//   (`workflow.resource_bound`), checked in the statement that marks it
-//   deleted; a publication's binding in turn requires its target live in
-//   the publication's batch, so one of the two wins. Only current versions
+//   current version of another live workflow binds it, a trigger or an App
+//   binding may start it, or a run of it is live (`workflow.resource_bound`),
+//   checked in the statement that marks it deleted; a publication's binding
+//   in turn requires its target live in the publication's batch, so one of
+//   the two wins. A refusal whose hold is gone by the time it is read tries
+//   that statement once more, then answers `workflow.resource_busy`: never
+//   bound by nothing, and never deleted past the guard. Only current versions
 //   count, so nobody can make another's workflow undeletable for good with
 //   an old version; the refusal names the binders the caller may see and
 //   counts the rest, and its event names them all. A deleted workflow
@@ -2871,11 +2874,15 @@ const refuseDeletion = async (
 
 /**
  * Deletes workflow `id` for `by`, who must build it and isn't Grasp staff,
- * in one statement that requires the current version of no other live
- * workflow to bind it. Otherwise `workflow.resource_bound`, audited with
- * the binders' IDs, and answered with the binders `by` may see and a count
- * of those they may not (`WorkflowBinders`). Its row and versions stay,
- * never served again.
+ * in one statement that requires nothing to hold it (`deletedOnce`): the
+ * current version of no other live workflow binding it, no trigger able
+ * to start it, no App binding able to start it, and no run of it still
+ * live. Otherwise `workflow.resource_bound`, audited with what holds it,
+ * and answered with the binders `by` may see and a count of those they may
+ * not, its triggers, App bindings and live runs (`WorkflowBinders`). A
+ * refusal that finds nothing holding it (the hold gone in between) tries
+ * the statement once more, then answers `workflow.resource_busy`, audited
+ * the same. Its row and versions stay, never served again.
  */
 export const deleteWorkflowResource = async (
   env: Env,
@@ -2908,4 +2915,7 @@ export const deleteWorkflowResource = async (
       await refuseDeletion(env, by, workflow.id, blockers, blocked);
     }
   }
+  // Never reached (the last try refuses whatever it finds), and never a
+  // success if it were: a deletion only succeeds by its statement.
+  throw workflowResourceErrors.create("workflow.resource_busy");
 };
