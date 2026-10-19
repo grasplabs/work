@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { testRun } from "../src/testing.ts";
 import {
   appExports,
+  appFunctions,
   appServer,
   money,
   number,
@@ -959,6 +960,92 @@ describe("idempotency keys", () => {
     // Two writes, two different keys.
     expect(keys).toHaveLength(2);
     expect(new Set(keys).size).toBe(2);
+  });
+});
+
+describe(appFunctions, () => {
+  /** A workflow that proposes a draft through its App's functions stub. */
+  const proposing = workflow(
+    "proposing",
+    { params: noParams, input: z.string() },
+    async (step, { env, input }) =>
+      await step.do("propose", { description: "Propose it" }, async () => {
+        const answered = await appFunctions(env).mutation("drafts.propose", {
+          title: input,
+        });
+        return answered.ok ? answered.value : answered.error.code;
+      })
+  );
+
+  it("calls the run's App's function of that path and kind, answering what the host answers", async () => {
+    const calls: unknown[][] = [];
+    const run = await testRun(proposing, {
+      input: "Notes",
+      env: {
+        APP: {
+          callFunction: async (...args) => {
+            calls.push(args);
+            return { ok: true, value: "draft-1" };
+          },
+        },
+      },
+    });
+
+    expect({ run: run.status, calls }).toStrictEqual({
+      run: "completed",
+      calls: [
+        [
+          { contractId: "drafts.propose", kind: "mutation" },
+          { title: "Notes" },
+        ],
+      ],
+    });
+    expect(run).toMatchObject({ output: "draft-1" });
+  });
+
+  it("has its three methods and nothing else, inherited or added, and calls nothing until one is called", async () => {
+    const calls: unknown[][] = [];
+    const stub = appFunctions({
+      APP: {
+        callFunction: async (...args) => {
+          calls.push(args);
+          return { ok: true, value: null };
+        },
+      },
+    });
+    const reachable = [
+      "then",
+      "toJSON",
+      "toString",
+      "constructor",
+      "call",
+      "callFunction",
+      "hasOwnProperty",
+    ].filter((name) => Reflect.get(stub, name) !== undefined);
+
+    expect({
+      methods: Object.keys(stub),
+      reachable,
+      prototype: Reflect.getPrototypeOf(stub),
+      frozen: Object.isFrozen(stub),
+      added: Reflect.set(stub, "other", () => null),
+      awaited: (await Promise.resolve(stub)) === stub,
+      calls,
+    }).toStrictEqual({
+      methods: ["query", "mutation", "action"],
+      reachable: [],
+      prototype: null,
+      frozen: true,
+      added: false,
+      awaited: true,
+      calls: [],
+    });
+  });
+
+  it("refuses to call without the run's App", async () => {
+    await expect(appFunctions({}).query("drafts.list", {})).rejects.toThrow(
+      "The run has no App to call (env.APP)"
+    );
   });
 });
 

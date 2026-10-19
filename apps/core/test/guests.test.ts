@@ -66,6 +66,11 @@ import { action } from "#grasp/server";
 
 export const guests = resource.guests("guests", { operations: ${operations} });
 
+// What the declaration may leave out, called past its types on purpose:
+// the call is what refuses it.
+const loose = (client: object) =>
+  client as unknown as Record<string, (...input: unknown[]) => Promise<unknown>>;
+
 const outcome = async (run: () => Promise<unknown>): Promise<string> => {
   try {
     return JSON.stringify({ ok: (await run()) ?? null });
@@ -82,28 +87,28 @@ export const invite = action({
   args: { json: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.guests.invite(JSON.parse(args.json))),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).invite(JSON.parse(args.json))),
 });
 
 export const list = action({
   args: {},
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx) => await outcome(async () => await ctx.resources.guests.list()),
+  handler: async (ctx) => await outcome(async () => await loose(ctx.resources.guests).list()),
 });
 
 export const read = action({
   args: { id: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.guests.read(args.id)),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).read(args.id)),
 });
 
 export const revoke = action({
   args: { id: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.guests.revoke(args.id)),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).revoke(args.id)),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
@@ -1053,14 +1058,14 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     });
     const { app } = await guestApp(builder, {
       ...guestFiles(),
-      "workflows/inviter.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/inviter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("inviter", { params: {}, input: z.object({ chat: z.string() }) }, async (step, { env, input }) =>
   await step.do("ask", { description: "Invite", sideEffect: true, input: null, retries: { limit: 0 } }, async () => ({
-    invited: await env.APP.callFunction(${reference("invite")}, ${inviteInput}),
-    listed: await env.APP.callFunction(${reference("list")}, {}),
-    read: await env.APP.callFunction(${reference("read")}, { id: input.chat }),
-    revoked: await env.APP.callFunction(${reference("revoke")}, { id: input.chat }),
+    invited: (await env.APP.callFunction(${reference("invite")}, ${inviteInput})) as Json,
+    listed: (await env.APP.callFunction(${reference("list")}, {})) as Json,
+    read: (await env.APP.callFunction(${reference("read")}, { id: input.chat })) as Json,
+    revoked: (await env.APP.callFunction(${reference("revoke")}, { id: input.chat })) as Json,
   }))
 );
 `,

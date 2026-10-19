@@ -1,3 +1,5 @@
+import { canBuild } from "@grasp-os/shared/roles";
+import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { runFilterStatuses } from "@grasp-os/shared/workflows";
 import type { RunFilterStatus } from "@grasp-os/shared/workflows";
 import {
@@ -23,6 +25,8 @@ import type { Session } from "../core.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
+import { IndependentWorkflows } from "../workflows/independent-workflows.tsx";
 import { needsAttention } from "../workflows/lists.ts";
 import { listRuns, listWorkflows, openableApps } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
@@ -199,6 +203,20 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
   );
 };
 
+/** The independent workflows, or why they couldn't be read. */
+const Independent = ({
+  page,
+  canCreate,
+}: {
+  page: Loaded<WorkflowResource[]>;
+  canCreate: boolean;
+}) =>
+  page.state === "ready" ? (
+    <IndependentWorkflows canCreate={canCreate} workflows={page.data} />
+  ) : (
+    <NotLoadedState page={page} />
+  );
+
 /** The address of a tab: the lists take no filters. */
 const tabSearch = (tab: string): WorkflowsSearch => {
   if (tab === "runs" || tab === "needs") {
@@ -253,6 +271,12 @@ const Workflows = () => {
                   <WorkflowsOverview rows={page.workflows.data} />
                 ) : (
                   <NotLoadedState page={page.workflows} />
+                )}
+                {page.independent === undefined ? null : (
+                  <Independent
+                    canCreate={canBuild(identity.role)}
+                    page={page.independent}
+                  />
                 )}
               </div>
             ) : null}
@@ -329,9 +353,20 @@ export const Route = createFileRoute("/_shell/workflows/")({
     deps: { tab, app, workflow, status },
   }) => {
     if (tab !== "runs") {
+      const [workflows, independent] = await Promise.all([
+        loadFromCore(core, listWorkflows),
+        // The independent workflows only where the full list shows.
+        tab === "needs"
+          ? undefined
+          : loadFromCore(
+              core,
+              async (session) => await session.workflowResources.list()
+            ),
+      ]);
       return {
         tab: tab ?? ("workflows" as const),
-        workflows: await loadFromCore(core, listWorkflows),
+        workflows,
+        independent,
       };
     }
     const [runs, filters, models] = await Promise.all([

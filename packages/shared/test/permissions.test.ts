@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   bindingNameSchema,
+  declaredPermissionSchema,
   permissionRequestSchema,
 } from "../src/permissions.ts";
 
@@ -75,6 +76,26 @@ describe("permission requests", () => {
     );
     expect(isValid({ actions })).toBeFalsy();
     expect(isValid({ actions: actions.slice(0, 8) })).toBeTruthy();
+  });
+});
+
+/** Whether a blueprint may declare `actions` on a collection. */
+const declared = (actions: string[]): boolean =>
+  declaredPermissionSchema.safeParse({
+    object: { type: "collection", collectionId: "c" },
+    actions,
+    binding: "NOTES",
+  }).success;
+
+describe("permissions a blueprint declares", () => {
+  // Every App created from it holds them, and an App only reads a
+  // collection.
+  it("read a collection, and never write it", () => {
+    expect({
+      read: declared(["read"]),
+      readWrite: declared(["read", "write"]),
+      write: declared(["write"]),
+    }).toStrictEqual({ read: true, readWrite: false, write: false });
   });
 });
 

@@ -1,6 +1,6 @@
 import { fileChannel } from "@grasp-os/sdk/host";
 import { fileLimits } from "@grasp-os/shared/app-file-limits";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { frameGesture, openFilePort } from "./screen-files.ts";
@@ -332,6 +332,68 @@ describe("a screen's file port", () => {
       release();
       close();
       gesture.close();
+      port.close();
+    }
+  });
+
+  it("starts no save for a download whose screen stopped it while its bytes were assembled", async () => {
+    const { promise: stopped, resolve: haveStopped } =
+      Promise.withResolvers<null>();
+    const channel = fileChannel({
+      app: "app",
+      lease: "lease",
+      person: async () => await Promise.resolve("person"),
+      fetch: async (path) => {
+        if (!path.endsWith("/content")) {
+          return Response.json({
+            id: path.split("/").at(-2) ?? "",
+            name: "notes.pdf",
+            mimeType: "application/pdf",
+            size: 2,
+          });
+        }
+        // Its bytes end only once the screen stopped the download.
+        const body = new ReadableStream<Uint8Array>({
+          start: async (controller) => {
+            controller.enqueue(new Uint8Array([1]));
+            await stopped;
+            controller.enqueue(new Uint8Array([2]));
+            controller.close();
+          },
+        });
+        return await Promise.resolve(new Response(body));
+      },
+    });
+    const saved = vi.spyOn(URL, "createObjectURL");
+    const { port1: port, port2: page } = new MessageChannel();
+    const close = openFilePort(page, channel, () => true);
+    // The page answers the call once its download is over, however it
+    // ended: after its bytes came and whatever it did with them.
+    const { promise: ended, resolve: end } = Promise.withResolvers<null>();
+    port.addEventListener("message", (event: MessageEvent<unknown>) => {
+      const { data } = event;
+      if (typeof data === "object" && data !== null && "call" in data) {
+        end(null);
+      }
+    });
+    port.start();
+    try {
+      port.postMessage({
+        type: "download",
+        call: 1,
+        resource: "attachments",
+        file: fileOf(1),
+      });
+      await settle();
+      port.postMessage({ type: "stop", call: 1 });
+      await settle();
+      haveStopped(null);
+      await ended;
+      // Its bytes all came, after the stop: no URL was made to save them.
+      expect(saved).toHaveBeenCalledTimes(0);
+    } finally {
+      saved.mockRestore();
+      close();
       port.close();
     }
   });

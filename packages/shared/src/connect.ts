@@ -88,9 +88,39 @@ export interface PendingReference {
 // everything else: the flow's state and PKCE verifier, and the tokens, which
 // never leave it (threat model R1).
 
-/** The outside systems a person connects through OAuth. */
+/**
+ * The suites a person connects through OAuth, pinned to the organization's
+ * own tenant: the IdPs people sign in with.
+ */
 export const oauthProviderSchema = z.enum(["microsoft", "google"]);
 export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
+
+/**
+ * Names no app may take: the suites above, whose sign-in connect handles
+ * itself, and Composio, whose connections are another kind.
+ */
+const reservedProviderIds: ReadonlySet<string> = new Set([
+  ...oauthProviderSchema.options,
+  "composio",
+]);
+
+/**
+ * Any other app a person signs in to, with OAuth 2.0 or an API key, as its
+ * native connector's provider record describes it (the connector kit's
+ * `signInSchema`): `hubspot`, `sample-crm`. Never one of the suites' names.
+ */
+export const appProviderSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{1,62}$/u)
+  .refine((id) => !reservedProviderIds.has(id), "A reserved provider name");
+export type AppProvider = z.infer<typeof appProviderSchema>;
+
+/** Whose token a native connector's calls get: a suite's or an app's. */
+export const connectorProviderSchema = z.union([
+  oauthProviderSchema,
+  appProviderSchema,
+]);
+export type ConnectorProvider = z.infer<typeof connectorProviderSchema>;
 
 /**
  * Personal: the person's own account, used only for them. Shared: an
@@ -130,19 +160,19 @@ export const connectionPersonSchema = z.strictObject({
 });
 export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 
-/** Starts connecting an account. */
+/** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
-  provider: oauthProviderSchema,
+  provider: connectorProviderSchema,
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
   /**
    * The organization at the provider, from the deployment's sign-in config:
    * its Entra tenant ID, or its Google Workspace domain. Only accounts in
-   * it can be connected.
+   * it can be connected. Required for those suites; an app has none.
    */
-  tenant: identifierSchema,
+  tenant: identifierSchema.optional(),
   /** A path on the deployment's origin; core checks it. */
   returnTo: z.string().startsWith("/").max(returnPathMaxLength),
 });
@@ -157,6 +187,28 @@ export const finishConnectionSchema = z.strictObject({
   error: z.string().min(1).max(256).optional(),
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
+
+/** Longest API key connect takes. */
+export const apiKeyMaxLength = 4096;
+
+/**
+ * Connects an app that signs in with an API key, which the person typed:
+ * connect checks it with the app (its provider record's account lookup)
+ * and seals it in the token vault, as it does OAuth tokens. It never comes
+ * back out, and never reaches the connector's code.
+ */
+export const connectWithKeySchema = z.strictObject({
+  person: connectionPersonSchema,
+  provider: appProviderSchema,
+  scope: connectionScopeSchema,
+  /** Printable ASCII only: it goes into a request header as it is. */
+  key: z
+    .string()
+    .min(1)
+    .max(apiKeyMaxLength)
+    .regex(/^[\u0021-\u007E]+$/u, "Not an API key"),
+});
+export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 
 export const disconnectSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -861,7 +913,17 @@ export type HeldOutcome =
 /** Workflow runs that have ended, each with its App: at most 50. */
 export const endedRunsSchema = z.strictObject({
   runs: z
-    .array(z.strictObject({ appId: identifierSchema, runId: identifierSchema }))
+    .array(
+      z.union([
+        // An App's run.
+        z.strictObject({ appId: identifierSchema, runId: identifierSchema }),
+        // A run of an independent workflow (a restricted one's).
+        z.strictObject({
+          workflowId: identifierSchema,
+          runId: identifierSchema,
+        }),
+      ])
+    )
     .max(50),
 });
 export type EndedRuns = z.input<typeof endedRunsSchema>;
@@ -1160,6 +1222,14 @@ export interface ConnectApi extends PackageRegistryApi {
   finishConnection: (
     request: FinishConnection
   ) => Promise<{ connectionId: string; returnTo: string }>;
+  /**
+   * Connects an app that signs in with an API key, once the app accepted
+   * the key: the new connection, or the one that needed connecting again
+   * and holds the same account, as `finishConnection` has it.
+   */
+  connectWithKey: (
+    request: ConnectWithKey
+  ) => Promise<{ connectionId: string }>;
   /** The person's own connections and the shared ones. */
   listConnections: (person: ConnectionPerson) => Promise<ConnectionSummary[]>;
   /**
