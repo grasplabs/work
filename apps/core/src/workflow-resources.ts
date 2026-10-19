@@ -478,9 +478,6 @@ export const listWorkflowResources = async (
 const workflowContractKey =
   /^(?<namespace>[a-z0-9-]+)\/(?<name>[a-z0-9-]+)\/(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/u;
 
-/** At most this many workflow contracts are looked up for one definition. */
-const maxWorkflowBindings = 64;
-
 /**
  * A binding as publication resolved it: another workflow's exact version,
  * or a host catalog contract by its key and fingerprint, whose serving
@@ -503,9 +500,6 @@ export type PinnedBinding =
       contractId: string;
       fingerprint: string;
     };
-
-/** At most this many catalog contracts are looked up for one definition. */
-const maxCatalogBindings = 64;
 
 /**
  * The most a version's contract and manifest may each take as text: with
@@ -586,22 +580,25 @@ const declaredParamsSchema = z.object({
   }),
 });
 
+/** `text` read as JSON, or undefined when it isn't. */
+const parsedJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * The contract keys a definition's bindings name, workflow contracts and
  * host catalog ones apart, read from its text only to know what to look up
  * before validation: what validation then resolves through the catalog is
- * all that counts. Text that isn't JSON names none, and validation
- * refuses it.
+ * all that counts. Text that isn't JSON (`parsed` undefined) names none,
+ * and validation refuses it.
  */
 const namedKeys = (
-  definition: string
+  parsed: unknown
 ): { workflows: string[]; catalog: string[] } => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(definition);
-  } catch {
-    return { workflows: [], catalog: [] };
-  }
   const declared = declaredBindingsSchema.safeParse(parsed);
   if (!declared.success) {
     return { workflows: [], catalog: [] };
@@ -621,8 +618,9 @@ const namedKeys = (
     }
   }
   return {
-    workflows: [...workflows].slice(0, maxWorkflowBindings),
-    catalog: [...catalog].slice(0, maxCatalogBindings),
+    // No more than a definition may bind: validation refuses the rest.
+    workflows: [...workflows].slice(0, profileLimits.maxBindings),
+    catalog: [...catalog].slice(0, profileLimits.maxBindings),
   };
 };
 
@@ -869,7 +867,8 @@ const inspectDefinition = async (
   by: Acting,
   workflow: Pick<Live, "name">,
   definition: string,
-  modules?: ModuleContracts
+  modules?: ModuleContracts,
+  parsed: unknown = parsedJson(definition)
 ): Promise<
   | { ok: true; checked: CheckedWorkflow; bindings: PinnedBinding[] }
   | { ok: false; problems: WorkflowDefinitionProblem[] }
@@ -877,7 +876,7 @@ const inspectDefinition = async (
   // Every contract the definition names, resolved before validation,
   // which looks contracts up as it goes: workflows for `by`, catalog
   // contracts from the host catalog.
-  const named = namedKeys(definition);
+  const named = namedKeys(parsed);
   const catalog = await resolveCatalogKeys(env, named.catalog);
   const resolved = new Map<string, ResolvedWorkflow>();
   for (const key of named.workflows) {
@@ -992,7 +991,8 @@ const checkDefinition = async (
   by: Acting,
   workflow: Pick<Live, "name">,
   definition: string,
-  modules: CompiledModules | undefined
+  modules: CompiledModules | undefined,
+  parsed: unknown
 ): Promise<{
   checked: CheckedWorkflow;
   bindings: PinnedBinding[];
@@ -1002,7 +1002,8 @@ const checkDefinition = async (
     by,
     workflow,
     definition,
-    modules
+    modules,
+    parsed
   );
   if (!inspected.ok) {
     const [first] = inspected.problems;
@@ -1462,7 +1463,8 @@ const statedVersionSchema = z.object({
 });
 
 /**
- * The version of workflow `id` already published from `definition`: the
+ * The version of workflow `id` already published from the definition
+ * `parsed` (undefined for text that isn't JSON, which matches none): the
  * one under the semantic version its text states, if it was published
  * from the same definition (`definitionHashOf`, so whitespace and key
  * order aside). Read off the text alone: a saved version passed
@@ -1473,15 +1475,9 @@ const statedVersionSchema = z.object({
 const savedPublication = async (
   env: Env,
   id: string,
-  definition: string,
+  parsed: unknown,
   modulesHash: string | null
 ): Promise<WorkflowResourceVersion | undefined> => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(definition);
-  } catch {
-    return undefined;
-  }
   const stated = statedVersionSchema.safeParse(parsed).data?.document.version;
   if (stated === undefined) {
     return undefined;
@@ -1850,13 +1846,10 @@ const publish = async (
   // A retry of a publication that was saved answers the saved version
   // before its bindings are resolved again: the builder may have lost
   // their role in a workflow it binds since, or that workflow been
-  // deleted, and the version still binds what it pinned then.
-  const saved = await savedPublication(
-    env,
-    workflow.id,
-    definition,
-    modulesHash
-  );
+  // deleted, and the version still binds what it pinned then. Its text
+  // read once: for this, and for the keys its bindings name.
+  const parsed = parsedJson(definition);
+  const saved = await savedPublication(env, workflow.id, parsed, modulesHash);
   if (saved !== undefined) {
     return saved;
   }
@@ -1877,7 +1870,8 @@ const publish = async (
     by,
     workflow,
     definition,
-    modules
+    modules,
+    parsed
   );
   await requireStaffKeepsBindings(env, by, workflow, bindings);
   // Of its canonical JSON: a retry that differs only in whitespace or key
@@ -1934,19 +1928,12 @@ const publish = async (
       // publishing again reserves afresh.
       throw workflowResourceErrors.create("workflow.version_conflict");
     }
-    if (
-      notNullFailed(error, "workflow_resource_versions.workflow_resource_id")
-    ) {
-      if ((await liveWorkflow(env, workflow.id)) === undefined) {
-        throw unavailable();
-      }
-      // The current version moved: to this very definition, if an
-      // identical publication won the race, which is then this one's.
-      const won = await sameVersion();
-      if (won === undefined) {
-        throw workflowResourceErrors.create("workflow.version_conflict");
-      }
-      return won;
+    const moved = notNullFailed(
+      error,
+      "workflow_resource_versions.workflow_resource_id"
+    );
+    if (moved && (await liveWorkflow(env, workflow.id)) === undefined) {
+      throw unavailable();
     }
     if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
       throw definitionInvalid([
@@ -1958,10 +1945,12 @@ const publish = async (
         },
       ]);
     }
-    if (!isUniqueViolation(error)) {
+    if (!moved && !isUniqueViolation(error)) {
       throw error;
     }
-    // Another publication of the same number or semantic version won.
+    // The current version moved, or another publication of the same
+    // number or semantic version won: this one's, if it was this very
+    // definition.
     const won = await sameVersion();
     if (won === undefined) {
       throw workflowResourceErrors.create("workflow.version_conflict");
