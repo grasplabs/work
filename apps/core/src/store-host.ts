@@ -3627,9 +3627,9 @@ export class StoreHost {
    * to transform in `table`, at most `limit`, for its dry run
    * (migration-samples.ts, `sampleRows`): from where its pending target's
    * backfill stands, read in a transaction that writes nothing, so
-   * neither a record nor the backfill moves. Empty when no pending target
-   * of that release migrates the table with it (its migration done, or
-   * never started).
+   * neither a record nor the backfill moves. Empty when no change is
+   * pending (its migration done); `migration.not_pending` when another
+   * release's is.
    */
   sampleMigration(
     storeId: StoreId,
@@ -3648,13 +3648,17 @@ export class StoreHost {
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
       const pending = this.#pendingTarget();
-      const [resourceId, resourceVersion] = pending?.migrations?.consumer ?? [];
+      if (pending === null) {
+        return [];
+      }
+      // Another release's change is pending here: this one's migration
+      // hasn't run, so "nothing left" would be false.
+      const [resourceId, resourceVersion] = pending.migrations?.consumer ?? [];
       if (
-        pending === null ||
         resourceId !== consumer.resourceId ||
         resourceVersion !== consumer.resourceVersion
       ) {
-        return [];
+        throw migrationErrors.create("migration.not_pending");
       }
       const migrated = this.#migratedTables(pending).find(
         (found) => found.table === table && found.migration === migration

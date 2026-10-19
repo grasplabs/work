@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { OpenStore } from "../src/data-stores.ts";
 import { sampleMigration } from "../src/migration-samples.ts";
+import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { allEvents } from "./audit-events.ts";
 import { deriving, migrated, notesOf, refusalOf } from "./migrated-apps.ts";
@@ -36,14 +37,41 @@ const receiptsOf = async (app: string) => {
   return results;
 };
 
-/** How many dry-run leases `app` holds. */
+/** How many dry-run leases on `app` are held now. */
 const leasesOf = async (app: string): Promise<unknown> => {
   const held = await env.DB.prepare(
-    "SELECT count(*) AS count FROM migration_sample_leases WHERE app_id = ?"
+    "SELECT count(*) AS count FROM migration_sample_leases WHERE app_id = ? AND until > ?"
   )
-    .bind(app)
+    .bind(app, Date.now())
     .first();
   return held?.count;
+};
+
+/** A lease `id` on `app`'s version 3 migration, granted now, held until `until`. */
+const grant = async (app: string, id: string, until: number) => {
+  await env.DB.prepare(
+    "INSERT INTO migration_sample_leases (id, app_id, version, migration, granted_at, until) VALUES (?, ?, 3, 'derive-category', ?, ?)"
+  )
+    .bind(id, app, Date.now(), until)
+    .run();
+};
+
+/** Points the store's pending change at `app`'s version `version`. */
+const pendingFor = async (
+  store: OpenStore,
+  app: string,
+  version: number
+): Promise<void> => {
+  await runInDurableObject(
+    env.DATA_STORES.getByName(store.id),
+    (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE sdk_schema_backfills SET migrations = json_set(migrations, '$.consumer', json_array(?, ?)) WHERE state <> 'complete'",
+        app,
+        version
+      );
+    }
+  );
 };
 
 /** Every console channel a Worker's logs go out on, spied on. */
@@ -156,31 +184,23 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       admin: await taken(admin, asked),
       // Another dry run of it in flight holds its lease.
       held: await (async () => {
-        await env.DB.prepare(
-          "INSERT INTO migration_sample_leases (app_id, version, migration, token, until) VALUES (?, 3, 'derive-category', 'held', ?)"
-        )
-          .bind(fixture.app, Date.now() + 60_000)
-          .run();
+        await grant(fixture.app, "held", Date.now() + 60_000);
         return await taken(admin, asked);
       })(),
       // One whose lease ran out holds nothing.
       expired: await (async () => {
         await env.DB.prepare(
-          "UPDATE migration_sample_leases SET until = ? WHERE app_id = ?"
+          "UPDATE migration_sample_leases SET until = ? WHERE id = 'held'"
         )
-          .bind(Date.now() - 1, fixture.app)
+          .bind(Date.now() - 1)
           .run();
         return await taken(admin, asked);
       })(),
-      // Five in the last minute: the next waits.
+      // Five granted in the last minute, whatever became of them: the
+      // next waits.
       sixth: await (async () => {
-        await env.DB.batch(
-          [1, 2, 3].map(() =>
-            env.DB.prepare(
-              "INSERT INTO migration_samples (id, app_id, version, migration, store_id, outcome, rows, owners, reason, manifest_hash, from_schema, to_schema, sampled_by, sampled_at) SELECT ?, app_id, version, migration, store_id, outcome, rows, owners, reason, manifest_hash, from_schema, to_schema, sampled_by, sampled_at FROM migration_samples WHERE app_id = ? LIMIT 1"
-            ).bind(crypto.randomUUID(), fixture.app)
-          )
-        );
+        await grant(fixture.app, "ended-1", Date.now() - 1);
+        await grant(fixture.app, "ended-2", Date.now() - 1);
         return await taken(admin, asked);
       })(),
       leases: await leasesOf(fixture.app),
@@ -333,6 +353,66 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       scan: scanning,
       work: working,
       notes: before.notes,
+    });
+  });
+
+  it("lets go of its lease however it ends, grants it to one at a time, and samples only its own pending change", async () => {
+    const { fixture, store } = await migrated(5, failingOnNote4, {
+      fixtures: '[{ row: { title: "Note" } }]',
+    });
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalOf(async () => {
+            await requireStoreSchemaActive(env, fixture.app, 3);
+          })
+        ).resolves.toMatchObject({ code: "migration.backfill_failed" });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
+    const admin = await person("admin");
+    const asked = {
+      app: fixture.app,
+      version: 3,
+      migration: "derive-category",
+    };
+    // Another version's change pending on the store: nothing of this
+    // one's to sample, and no receipt saying so.
+    await pendingFor(store, fixture.app, 4);
+    const elsewhere = await taken(admin, asked);
+    await pendingFor(store, fixture.app, 3);
+    // No sandbox to run it in: refused, the lease let go.
+    const unavailable = await sampleMigration(
+      {
+        ...env,
+        RUNTIME_PROFILE: "workerd",
+        SANDBOX_HOST: undefined,
+        SANDBOX_IN_PROCESS: undefined,
+      },
+      admin,
+      asked
+    ).then(
+      () => "ok",
+      (error: unknown) => error instanceof SandboxUnavailableError
+    );
+    const heldAfterUnavailable = await leasesOf(fixture.app);
+    // Two at once: one runs, the other waits.
+    const both = await Promise.all([taken(admin, asked), taken(admin, asked)]);
+    const receipts = await receiptsOf(fixture.app);
+    expect({
+      elsewhere,
+      unavailable,
+      heldAfterUnavailable,
+      both: both.map(String).toSorted((a, b) => a.localeCompare(b)),
+      receipts: receipts.map(({ outcome }) => outcome),
+      held: await leasesOf(fixture.app),
+    }).toStrictEqual({
+      elsewhere: "migration.not_pending",
+      unavailable: true,
+      heldAfterUnavailable: 0,
+      both: ["migration.sample_busy", "ok"],
+      receipts: ["failed"],
+      held: 0,
     });
   });
 

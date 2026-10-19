@@ -1,12 +1,13 @@
 CREATE TABLE `migration_sample_leases` (
+	`id` text PRIMARY KEY NOT NULL,
 	`app_id` text NOT NULL,
 	`version` integer NOT NULL,
 	`migration` text NOT NULL,
-	`token` text NOT NULL,
-	`until` integer NOT NULL,
-	PRIMARY KEY(`app_id`, `version`, `migration`)
+	`granted_at` integer NOT NULL,
+	`until` integer NOT NULL
 );
 --> statement-breakpoint
+CREATE INDEX `migration_sample_leases_migration_idx` ON `migration_sample_leases` (`app_id`,`version`,`migration`,`granted_at`);--> statement-breakpoint
 CREATE TABLE `migration_samples` (
 	`id` text PRIMARY KEY NOT NULL,
 	`app_id` text NOT NULL,
@@ -24,8 +25,7 @@ CREATE TABLE `migration_samples` (
 	`sampled_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `migration_samples_latest_idx` ON `migration_samples` (`app_id`,`version`,`migration`,`sampled_at`);
---> statement-breakpoint
+CREATE INDEX `migration_samples_latest_idx` ON `migration_samples` (`app_id`,`version`,`migration`,`sampled_at`);--> statement-breakpoint
 -- A sample's receipt is evidence: append-only, as the frozen workflow
 -- records are (0080, 0101). Neither updated, nor deleted, nor replaced by
 -- an insert over its key or its rowid; the latest receipt decides, so

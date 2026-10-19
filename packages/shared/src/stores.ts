@@ -564,6 +564,8 @@ export const migrationErrors = defineErrorFamily({
     "An admin abandoned this schema change after its defaults couldn't be filled in, so a release sealed on it can't run on this store. Seal a new version.",
   "migration.sample_busy":
     "Another dry run of this migration is running, or it ran a few times in the last minute already. Try again in a minute.",
+  "migration.not_pending":
+    "This version's migration isn't the change pending on its store, so there is nothing of it to dry-run yet.",
   "migration.not_declared":
     "This version declares no such explicit migration, or binds no store for it to run on.",
   "migration.invalid":

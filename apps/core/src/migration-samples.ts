@@ -10,7 +10,7 @@ import {
   sampleMigrationSchema,
 } from "@grasp-os/shared/stores";
 import type { MigrationSample } from "@grasp-os/shared/stores";
-import { and, count, eq, gt, lt } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -91,6 +91,7 @@ const leaseMs = 2 * 60 * 1000;
 
 /** Most dry runs of one migration of a version in a minute. */
 const samplesPerMinute = 5;
+const minuteMs = 60_000;
 
 /** One migration of one version: what a dry run's lease and cap count. */
 interface SampledMigration {
@@ -100,63 +101,60 @@ interface SampledMigration {
 }
 
 /**
- * Takes `sampled`'s lease for a new dry run, answering its token; refuses
- * with `migration.sample_busy` while another holds it (one in flight per
- * migration), or once `samplesPerMinute` ran in the last minute.
+ * Takes a lease on `sampled` for a new dry run, answering its token;
+ * refuses with `migration.sample_busy` while another run of it holds one
+ * (one in flight per migration), or once `samplesPerMinute` were granted
+ * in the last minute, whether or not those runs got as far as a receipt.
+ * One statement decides both, so two asking at once can't both have it.
  */
 const takeLease = async (
   env: Env,
   sampled: SampledMigration
 ): Promise<string> => {
-  const db = drizzle(env.DB);
   const now = Date.now();
-  const [recent] = await db
-    .select({ count: count() })
-    .from(migrationSamples)
-    .where(
-      and(
-        eq(migrationSamples.appId, sampled.app),
-        eq(migrationSamples.version, sampled.version),
-        eq(migrationSamples.migration, sampled.migration),
-        gt(migrationSamples.sampledAt, new Date(now - 60_000))
-      )
-    );
-  if ((recent?.count ?? 0) >= samplesPerMinute) {
-    throw migrationErrors.create("migration.sample_busy");
-  }
   const token = crypto.randomUUID();
-  const until = new Date(now + leaseMs);
-  // Taken only where none is held, or the one held ran past its time.
-  const [taken] = await db
-    .insert(migrationSampleLeases)
-    .values({
-      appId: sampled.app,
-      version: sampled.version,
-      migration: sampled.migration,
+  const [, granted] = await env.DB.batch<{ id: string }>([
+    // What no longer counts: let go, and granted over a minute ago.
+    env.DB.prepare(
+      "DELETE FROM migration_sample_leases WHERE app_id = ? AND version = ? AND migration = ? AND until <= ? AND granted_at <= ?"
+    ).bind(
+      sampled.app,
+      sampled.version,
+      sampled.migration,
+      now,
+      now - minuteMs
+    ),
+    env.DB.prepare(
+      `INSERT INTO migration_sample_leases (id, app_id, version, migration, granted_at, until)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6
+      WHERE NOT EXISTS (SELECT 1 FROM migration_sample_leases
+          WHERE app_id = ?2 AND version = ?3 AND migration = ?4 AND until > ?5)
+        AND (SELECT count(*) FROM migration_sample_leases
+          WHERE app_id = ?2 AND version = ?3 AND migration = ?4 AND granted_at > ?7) < ?8
+      RETURNING id`
+    ).bind(
       token,
-      until,
-    })
-    .onConflictDoUpdate({
-      target: [
-        migrationSampleLeases.appId,
-        migrationSampleLeases.version,
-        migrationSampleLeases.migration,
-      ],
-      set: { token, until },
-      setWhere: lt(migrationSampleLeases.until, new Date(now)),
-    })
-    .returning({ token: migrationSampleLeases.token });
-  if (taken?.token !== token) {
+      sampled.app,
+      sampled.version,
+      sampled.migration,
+      now,
+      now + leaseMs,
+      now - minuteMs,
+      samplesPerMinute
+    ),
+  ]);
+  if (granted?.results[0]?.id !== token) {
     throw migrationErrors.create("migration.sample_busy");
   }
   return token;
 };
 
-/** Lets go of the lease `token` holds, if it still holds it. */
+/** Lets go of the lease `token` holds: still counted for the minute. */
 const releaseLease = async (env: Env, token: string): Promise<void> => {
   await drizzle(env.DB)
-    .delete(migrationSampleLeases)
-    .where(eq(migrationSampleLeases.token, token));
+    .update(migrationSampleLeases)
+    .set({ until: new Date() })
+    .where(eq(migrationSampleLeases.id, token));
 };
 
 /**

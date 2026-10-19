@@ -2481,23 +2481,32 @@ export const migrationSamples = sqliteTable(
 );
 
 /**
- * The migration dry run in flight, one per migration of a version at
- * most (migration-samples.ts): taken before its sample is read, while
- * none is held or the one held ran past `until` (a sample that died
- * mid-way), and let go when it ends. `token` is the run's own, so only it
- * lets its lease go.
+ * The leases migration dry runs were granted (migration-samples.ts), one
+ * row per run: taken before its sample is read, while no other run of
+ * the same migration of a version holds one (`until` still ahead; a run
+ * that died mid-way holds it until then) and fewer than a few were
+ * granted in the last minute, counted here whether or not the run got
+ * as far as its receipt. Let go as the run ends, `until` set to then.
+ * `id` is the run's own token, so only it lets its lease go. Rows past
+ * the minute and let go are pruned as the next lease is taken.
  */
 export const migrationSampleLeases = sqliteTable(
   "migration_sample_leases",
   {
+    id: text().primaryKey(),
     appId: text("app_id").notNull(),
     version: integer().notNull(),
     migration: text().notNull(),
-    token: text().notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
     until: timestamp("until").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.appId, table.version, table.migration] }),
+    index("migration_sample_leases_migration_idx").on(
+      table.appId,
+      table.version,
+      table.migration,
+      table.grantedAt
+    ),
   ]
 );
 
