@@ -80,7 +80,16 @@ class FakePage extends RpcTarget {
   readonly subscriptions: { args: unknown[]; callback: RpcStub<Callback> }[] =
     [];
 
+  /** The code core refuses `watchNotes` with, once set, as core would. */
+  refuse: string | undefined;
+  /** How many subscriptions it refused. */
+  refused = 0;
+
   call(method: string, args: unknown[]): string {
+    if (method === "watchNotes" && this.refuse !== undefined) {
+      this.refused += 1;
+      throw Object.assign(new Error("Refused."), { code: this.refuse });
+    }
     const last = args.at(-1);
     if (method === "watchNotes" && isCallback(last)) {
       this.subscriptions.push({
@@ -131,6 +140,12 @@ class FakePage extends RpcTarget {
     return new FakeHold(follower);
   }
 }
+
+/** The code a refusal carries, as core sends it. */
+const codeOf = (refusal: unknown): unknown =>
+  typeof refusal === "object" && refusal !== null && "code" in refusal
+    ? refusal.code
+    : undefined;
 
 /**
  * Waits until everything the screen sent before now has reached the page,
@@ -221,6 +236,65 @@ describe(live, () => {
       received: [["Call Acme"]],
       afterStop: "rejected",
     });
+  });
+
+  it("drops what it showed once core lets go, then shows the build's revocation and stops subscribing", async () => {
+    const ended: unknown[] = [];
+    const stop = live(
+      "watchNotes",
+      [],
+      () => {
+        // Nothing shown in this test.
+      },
+      (refusal) => {
+        ended.push(refusal === undefined ? "let go" : codeOf(refusal));
+      }
+    );
+    await roundTrip();
+    // Core refuses it from now on, as once the build's approval is taken
+    // back, and lets go of its callback.
+    page.refuse = "screen.revoked";
+    callbackAt(0)[Symbol.dispose]();
+    await roundTrip();
+    const atRelease = [...ended];
+    await vi.advanceTimersByTimeAsync(1000);
+    await roundTrip();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await roundTrip();
+    stop();
+    expect({
+      atRelease,
+      refusal: ended.filter((each) => each !== "let go"),
+      tries: page.refused,
+    }).toStrictEqual({
+      atRelease: ["let go"],
+      refusal: ["screen.revoked"],
+      tries: 1,
+    });
+  });
+
+  it("keeps trying, backing off, after a refusal that may lift", async () => {
+    const ended: unknown[] = [];
+    const stop = live(
+      "watchNotes",
+      [],
+      () => {
+        // Nothing shown in this test.
+      },
+      (refusal) => {
+        ended.push(refusal);
+      }
+    );
+    await roundTrip();
+    page.refuse = "screen.unreviewed";
+    callbackAt(0)[Symbol.dispose]();
+    await roundTrip();
+    await vi.advanceTimersByTimeAsync(1000);
+    await roundTrip();
+    await vi.advanceTimersByTimeAsync(2000);
+    await roundTrip();
+    stop();
+    expect(page.refused).toBe(2);
   });
 
   it("subscribes again, backing off, when its callback is let go, and never once stopped", async () => {
@@ -339,6 +413,43 @@ describe(followRuns, () => {
     stop();
 
     expect(shown).toStrictEqual([["newer"], ["pushed"]]);
+  });
+
+  it("shows no runs and the refusal once core refuses the build as revoked, and reads no more", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const name = workflow();
+    const shown: unknown[] = [];
+    const refused: unknown[] = [];
+    const stop = followRuns(
+      name,
+      (runs) => {
+        shown.push(runs);
+      },
+      (refusal) => {
+        refused.push(codeOf(refusal));
+      }
+    );
+    await settle();
+    readAt(0).resolve(["run-1"]);
+    await settle();
+    const revoked = Object.assign(new Error("Revoked."), {
+      code: "screen.revoked",
+    });
+    readAt(1).reject(revoked);
+    await settle();
+    const reads = page.reads.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    stop();
+    expect({
+      shown,
+      refused,
+      readsAfter: page.reads.length - reads,
+    }).toStrictEqual({
+      shown: [["run-1"], []],
+      refused: ["screen.revoked"],
+      readsAfter: 0,
+    });
   });
 
   it("tries a failed read again, backing off, until one shows, the first read too", async () => {

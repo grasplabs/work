@@ -2145,10 +2145,176 @@ export class App extends DurableObject {
 }
 `;
 
+/**
+ * An App the builder made from the sample with its screen approved, and
+ * the builder's connection presenting that build, as the page does.
+ */
+const approvedSample = async (admin: Person, builder: Person) => {
+  const app = await sampleApp(builder);
+  const review = await admin.api.screenTrust.review(app);
+  await admin.api.screenTrust.approve(app, {
+    version: review.version,
+    generation: review.generation,
+    artifacts: builtArtifacts(review.screens),
+  });
+  const bundle = await builder.api.screens.open(app, "notes");
+  return { app, bundle };
+};
+
+/** A page's callback that records what it gets, and whether it was let go of. */
+const keptCallback = () => {
+  const received: unknown[] = [];
+  const state = { released: false };
+  const callback = Object.assign(
+    (value: unknown): void => {
+      received.push(value);
+    },
+    {
+      [Symbol.dispose]: (): void => {
+        state.released = true;
+      },
+    }
+  );
+  return { received, state, callback };
+};
+
+/** Undoes nothing. */
+const nothingUndone = (): void => {
+  // Nothing done yet.
+};
+
+/** The query that reads what core holds for a build (`standingOf`). */
+const readsStanding = /AS releaseRevoked/u;
+
 describe(
   "the v1 server's calls of a revoked build",
   { timeout: 60_000 },
   () => {
+    it("read a build's standing once for every callback the connection keeps at a revocation", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const { app, bundle } = await approvedSample(admin, builder);
+      const reads = { standing: 0 };
+      const counted = {
+        ...env,
+        DB: new Proxy(env.DB, {
+          get: (target, property) => {
+            if (property === "prepare") {
+              return (query: string): D1PreparedStatement => {
+                if (readsStanding.test(query)) {
+                  reads.standing += 1;
+                }
+                return target.prepare(query);
+              };
+            }
+            const value: unknown = Reflect.get(target, property);
+            return typeof value === "function"
+              ? (...args: unknown[]): unknown =>
+                  Reflect.apply(value, target, args)
+              : value;
+          },
+        }),
+      };
+      const { core } = await openRpc(builder.session, { coreEnv: counted });
+      using api = core.authenticate();
+      await api.screens.present(app, bundle.lease);
+      const kept = Array.from({ length: 5 }, () => keptCallback());
+      for (const { callback, received } of kept) {
+        // oxlint-disable-next-line no-await-in-loop -- one kept at a time
+        await api.screens.call(app, "watchNotes", [callback]);
+        // oxlint-disable-next-line no-await-in-loop -- its first push in
+        await vi.waitFor(() => {
+          expect(received).toStrictEqual([[]]);
+        });
+      }
+      // What the calls and their first pushes read is done.
+      await vi.waitFor(() => {
+        expect(
+          kept.every(({ received }) => received.length === 1)
+        ).toBeTruthy();
+      });
+      const before = reads.standing;
+      await admin.api.screenTrust.revoke(app, bundle.artifact);
+      await vi.waitFor(
+        () => {
+          expect(kept.every(({ state }) => state.released)).toBeTruthy();
+        },
+        { timeout: 20_000, interval: 50 }
+      );
+      expect(reads.standing - before).toBe(1);
+    });
+
+    it("let go of the callbacks the App keeps when the App's revocations can't be followed", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const { app, bundle } = await approvedSample(admin, builder);
+      await builder.api.screens.present(app, bundle.lease);
+      let undo = nothingUndone;
+      await runInDurableObject(
+        appHost(env, appIdSchema.parse(app)),
+        (instance) => {
+          // SAFETY: an App's object's prototype holds its methods.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          const methods = Object.getPrototypeOf(instance) as Record<
+            string,
+            (...args: unknown[]) => Promise<unknown>
+          >;
+          const original = methods.followAccess;
+          if (original === undefined) {
+            throw new Error("An App's object follows access");
+          }
+          methods.followAccess = async (): Promise<unknown> =>
+            await Promise.reject(new Error("The App's host is away."));
+          undo = () => {
+            methods.followAccess = original;
+          };
+        }
+      );
+      const kept = keptCallback();
+      try {
+        await builder.api.screens.call(app, "watchNotes", [kept.callback]);
+        await vi.waitFor(
+          () => {
+            expect(kept.state.released).toBeTruthy();
+          },
+          { timeout: 20_000, interval: 50 }
+        );
+      } finally {
+        undo();
+      }
+      expect(kept.state.released).toBeTruthy();
+    });
+
+    it("keep no more than fifty callbacks a connection's calls have its Apps keep", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const { app, bundle } = await approvedSample(admin, builder);
+      await builder.api.screens.present(app, bundle.lease);
+      // On a held clock, a minute on every fifteen calls: what a person
+      // may ask a minute isn't what this bounds.
+      const answers = await atStoppedClock(async (advance) => {
+        const got: string[] = [];
+        for (let at = 0; at < 51; at += 1) {
+          if (at % 15 === 14) {
+            advance(60_000);
+          }
+          got.push(
+            // oxlint-disable-next-line no-await-in-loop -- one kept at a time
+            await outcome(
+              builder.api.screens.call(app, "watchNotes", [
+                keptCallback().callback,
+              ])
+            )
+          );
+        }
+        return got;
+      });
+      expect({
+        kept: answers.filter((answer) => answer === "ok").length,
+        last: answers.at(-1),
+      }).toStrictEqual({ kept: 50, last: "screen.too_many_subscriptions" });
+    });
+
     it("let go of a callback the App keeps once the approval is taken back, with nothing pushed after", async () => {
       const admin = await personApi("admin");
       const builder = await personApi("builder");

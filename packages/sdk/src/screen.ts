@@ -70,6 +70,7 @@
  */
 import { useEffect, useState } from "react";
 
+import { fences } from "./client-error.ts";
 import { bridge } from "./screen-runtime.ts";
 
 /**
@@ -91,21 +92,59 @@ export const callServer = async <Answer = unknown>(
 /** How long to wait before subscribing again, at first and at most. */
 const retryMs = { first: 1000, most: 30_000 };
 
+/** The code core refused with, when `error` carries one. */
+const codeOf = (error: unknown): string | undefined =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  typeof error.code === "string"
+    ? error.code
+    : undefined;
+
+/**
+ * Refusals no new subscription or read gets past: the build's approval,
+ * or the release it runs, taken back. Others that fence (a role lost, a
+ * build not approved yet) may lift, so it keeps trying, backing off.
+ */
+const finalRefusals: ReadonlySet<string> = new Set([
+  "screen.revoked",
+  "version.revoked",
+]);
+
+/** `error` as an `Error`, to throw in a component. */
+const asError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+/**
+ * Whether `error` is core refusing the person or their build the App's
+ * data (`fences`): what a screen shows must go, and the refusal show.
+ */
+const refusedData = (error: unknown): boolean => {
+  const code = codeOf(error);
+  return code !== undefined && fences(code);
+};
+
 /**
  * Subscribes with `subscribe`, which passes the listener it's given on to
  * core: `onChange` gets every value core sends it, and `onSubscribed` runs
- * each time a subscription is made. When the connection drops, it
- * subscribes again once it is back, backing off to every 30 s. Returns a
- * function that stops it; once stopped, the callback rejects whatever
- * core sends it next, so core drops it.
+ * each time a subscription is made. Once core lets go of its callback
+ * (the connection dropped, or core refused it: a role lost, the build's
+ * trust taken back), `onEnded` runs with nothing, so what was shown goes,
+ * and it subscribes again, backing off to every 30 s. A subscription core
+ * refuses the person or their build runs `onEnded` with the refusal, for
+ * the screen to show; one that can't lift (`finalRefusals`) stops it
+ * trying. Returns a function that stops it; once stopped, the callback
+ * rejects whatever core sends it next, so core drops it.
  */
 const follow = (
   what: string,
   subscribe: (listener: (value: unknown) => void) => Promise<unknown>,
   onChange: (value: unknown) => void,
-  onSubscribed?: () => void
+  onSubscribed?: () => void,
+  onEnded?: (refusal?: unknown) => void
 ): (() => void) => {
   let stopped = false;
+  let refused = false;
   let delay = retryMs.first;
   let retry: ReturnType<typeof setTimeout> | undefined;
   const again = async (): Promise<void> => {
@@ -126,7 +165,11 @@ const follow = (
       },
       {
         [Symbol.dispose]: (): void => {
-          if (!stopped) {
+          if (stopped) {
+            return;
+          }
+          onEnded?.();
+          if (!refused) {
             retry = setTimeout(() => {
               void again();
             }, delay);
@@ -141,6 +184,19 @@ const follow = (
         onSubscribed?.();
       }
     } catch (error) {
+      if (stopped) {
+        return;
+      }
+      if (refusedData(error)) {
+        onEnded?.(error);
+        if (finalRefusals.has(codeOf(error) ?? "")) {
+          // Nothing it tries again can get past it: it stops trying.
+          refused = true;
+          clearTimeout(retry);
+          retry = undefined;
+        }
+        return;
+      }
       // The screen's own error: the runtime reports it to the error log.
       console.error(`Subscribing to ${what} failed`, error);
     }
@@ -162,41 +218,71 @@ const follow = (
  * that lets it go releases it, which this reads as a dropped connection:
  * it subscribes again and again, backing off to every 30 s.
  *
+ * Once core lets go of the callback, `onEnded` runs with nothing: what the
+ * screen shows from it must go. When core refuses the person or their
+ * build (a role lost, the build's approval taken back), it runs with the
+ * refusal; after a refusal that can't lift (`screen.revoked`), it stops
+ * subscribing.
+ *
  * Once stopped, the callback rejects whatever the server sends it next, so
  * the server drops it (see above).
  */
 export const live = (
   method: string,
   args: readonly unknown[],
-  onChange: (value: unknown) => void
+  onChange: (value: unknown) => void,
+  onEnded?: (refusal?: unknown) => void
 ): (() => void) =>
   follow(
     method,
     async (listener) => await bridge().call(method, [...args, listener]),
-    onChange
+    onChange,
+    undefined,
+    onEnded
   );
 
 /**
  * The latest value a server method sent (see `live`), in a component:
- * `initial` until the first. `args` are plain data; a change in them
- * subscribes again.
+ * `initial` until the first, and again once core lets go of its
+ * subscription, until it sends another. When core refuses the person or
+ * their build (`screen.revoked` once the build's approval is taken back),
+ * the component throws the refusal, as `useQuery` does, so the screen
+ * shows it rather than what it had. `args` are plain data; a change in
+ * them subscribes again.
  */
 export const useLive = <Value>(
   method: string,
   initial: Value,
   ...args: unknown[]
 ): Value => {
-  const [value, setValue] = useState(initial);
+  const [shown, setShown] = useState<
+    { readonly value: Value } | { readonly refusal: Error } | undefined
+  >();
   const argsJson = JSON.stringify(args);
   useEffect(() => {
     const withArgs: unknown = JSON.parse(argsJson);
-    return live(method, Array.isArray(withArgs) ? withArgs : [], (next) => {
-      // SAFETY: as in `callServer`, the value is the App's own contract.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      setValue(next as Value);
-    });
+    return live(
+      method,
+      Array.isArray(withArgs) ? withArgs : [],
+      (next) => {
+        // SAFETY: as in `callServer`, the value is the App's own contract.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        setShown({ value: next as Value });
+      },
+      (refusal) => {
+        setShown(
+          refusal === undefined ? undefined : { refusal: asError(refusal) }
+        );
+      }
+    );
   }, [method, argsJson]);
-  return value;
+  if (shown === undefined) {
+    return initial;
+  }
+  if ("refusal" in shown) {
+    throw shown.refusal;
+  }
+  return shown.value;
 };
 
 // The App's workflows
@@ -411,6 +497,9 @@ const followWorkflow = (workflow: string): RunFollowing => {
       held = hold;
     },
     tellAll,
+    tellAll,
+    // Let go of, or refused: each follower reads its runs again, as the
+    // person, and a read core refuses them clears what it shows.
     tellAll
   );
   return {
@@ -456,11 +545,16 @@ const onRunChange = (workflow: string, onChange: () => void): (() => void) => {
  * shows is never older than what it showed last, whatever order reads
  * come back in. A read that fails leaves the runs as they were and is
  * tried again, backing off to every 30 s, until it or a newer read
- * succeeds. Returns a function that stops it.
+ * succeeds; one core refuses the person or their build (`fences`) shows
+ * no runs and calls `onRefused` with the refusal, and after one that
+ * can't lift (`screen.revoked`) it reads no more. Core letting go of the
+ * workflow's subscription reads them again. Returns a function that stops
+ * it.
  */
 export const followRuns = (
   workflow: string,
-  onRuns: (runs: ScreenRun[]) => void
+  onRuns: (runs: ScreenRun[]) => void,
+  onRefused?: (refusal: Error) => void
 ): (() => void) => {
   let stopped = false;
   let started = 0;
@@ -480,7 +574,18 @@ export const followRuns = (
         onRuns(runs as ScreenRun[]);
       }
     } catch (error) {
-      console.error(`Reading the runs of ${workflow} failed`, error);
+      if (refusedData(error)) {
+        if (!stopped && mine > shown) {
+          shown = mine;
+          onRuns([]);
+          onRefused?.(asError(error));
+        }
+        if (finalRefusals.has(codeOf(error) ?? "")) {
+          return;
+        }
+      } else {
+        console.error(`Reading the runs of ${workflow} failed`, error);
+      }
       // Tried again unless a newer read has started, which shows instead.
       if (!stopped && mine === started) {
         retry = setTimeout(() => {
@@ -516,13 +621,16 @@ const isRunNotFound = (error: unknown): boolean =>
  * however old the run is (`followRuns` lists the newest 100 only). With
  * `null` when core has no such run, or none the person may see. A read
  * that fails otherwise leaves it as it was and is tried again, backing off
- * to every 30 s, as `followRuns` does; a newer read always wins over an
- * older one. Returns a function that stops it.
+ * to every 30 s, as `followRuns` does, and one core refuses the person or
+ * their build shows `null` and calls `onRefused`, as `followRuns` does; a
+ * newer read always wins over an older one. Returns a function that stops
+ * it.
  */
 export const followRun = (
   workflow: string,
   run: string,
-  onRun: (run: ScreenRun | null) => void
+  onRun: (run: ScreenRun | null) => void,
+  onRefused?: (refusal: Error) => void
 ): (() => void) => {
   let stopped = false;
   let started = 0;
@@ -549,7 +657,17 @@ export const followRun = (
         show(mine, null);
         return;
       }
-      console.error(`Reading run ${run} of ${workflow} failed`, error);
+      if (refusedData(error)) {
+        if (!stopped && mine > shown) {
+          show(mine, null);
+          onRefused?.(asError(error));
+        }
+        if (finalRefusals.has(codeOf(error) ?? "")) {
+          return;
+        }
+      } else {
+        console.error(`Reading run ${run} of ${workflow} failed`, error);
+      }
       if (!stopped && mine === started) {
         retry = setTimeout(() => {
           void read(Math.min(delay * 2, retryMs.most));
@@ -583,15 +701,30 @@ export const useRun = (
   const [followed, setFollowed] = useState<{
     key: string;
     run: ScreenRun | null | undefined;
+    refusal?: Error;
   }>({ key: `${workflow}/${run}`, run: undefined });
   useEffect(
     () =>
-      followRun(workflow, run, (found) => {
-        setFollowed({ key: `${workflow}/${run}`, run: found });
-      }),
+      followRun(
+        workflow,
+        run,
+        (found) => {
+          setFollowed({ key: `${workflow}/${run}`, run: found });
+        },
+        (refusal) => {
+          setFollowed({ key: `${workflow}/${run}`, run: null, refusal });
+        }
+      ),
     [workflow, run]
   );
-  return followed.key === `${workflow}/${run}` ? followed.run : undefined;
+  if (followed.key !== `${workflow}/${run}`) {
+    return undefined;
+  }
+  // Refused the person or their build: thrown, as `useQuery` does.
+  if (followed.refusal !== undefined) {
+    throw followed.refusal;
+  }
+  return followed.run;
 };
 
 /** Pauses, resumes or cancels `run`, and answers the platform's receipt. */
@@ -670,14 +803,25 @@ export const useWorkflow = (
   const [followed, setFollowed] = useState<{
     workflow: string;
     runs: ScreenRun[];
+    refusal?: Error;
   }>({ workflow, runs: [] });
   useEffect(
     () =>
-      followRuns(workflow, (runs) => {
-        setFollowed({ workflow, runs });
-      }),
+      followRuns(
+        workflow,
+        (runs) => {
+          setFollowed({ workflow, runs });
+        },
+        (refusal) => {
+          setFollowed({ workflow, runs: [], refusal });
+        }
+      ),
     [workflow]
   );
+  // Refused the person or their build: thrown, as `useQuery` does.
+  if (followed.workflow === workflow && followed.refusal !== undefined) {
+    throw followed.refusal;
+  }
   return {
     runs: followed.workflow === workflow ? followed.runs : [],
     start: async (input) => {
