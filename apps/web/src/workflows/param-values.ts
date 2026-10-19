@@ -25,9 +25,15 @@ export const paramKindOf = (schema: unknown): ParamKind => {
   return "json";
 };
 
-/** A value as its field shows it: text, or JSON for anything not a string. */
-export const paramText = (value: unknown): string =>
-  typeof value === "string" ? value : JSON.stringify(value);
+/**
+ * A value as a field of kind `kind` shows it: a string field the string
+ * as it is, any other its JSON, a string's quotes included, so what is
+ * shown reads back as the same value (`paramValueOf`).
+ */
+export const paramText = (kind: ParamKind, value: unknown): string =>
+  kind === "string" && typeof value === "string"
+    ? value
+    : JSON.stringify(value);
 
 /**
  * The value text `text` stands for in a field of kind `kind`, or

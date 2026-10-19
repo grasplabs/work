@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { paramKindOf, paramText, paramValueOf } from "./param-values.ts";
+import type { ParamKind } from "./param-values.ts";
 
 describe("a workflow parameter's field", () => {
   it("takes a value by the kind its schema says", () => {
@@ -24,7 +25,28 @@ describe("a workflow parameter's field", () => {
         paramValueOf("json", "null"),
         paramValueOf("json", "{"),
       ],
-      shown: [paramText("plain"), paramText(4), paramText({ a: [1] })],
+      shown: [
+        paramText("string", "plain"),
+        paramText("number", 4),
+        paramText("json", { a: [1] }),
+        // A string in a JSON field (a nullable string's) keeps its quotes.
+        paramText("json", "hello"),
+        paramText("json", "null"),
+      ],
+      // What each field shows reads back as the same value.
+      roundTrips: (
+        [
+          ["string", "plain"],
+          ["number", 4],
+          ["json", "hello"],
+          ["json", "null"],
+          ["json", null],
+          ["json", { a: [1] }],
+        ] as const
+      ).map(
+        ([kind, value]: readonly [Exclude<ParamKind, "boolean">, unknown]) =>
+          paramValueOf(kind, paramText(kind, value))
+      ),
     }).toStrictEqual({
       kinds: ["boolean", "number", "number", "string", "json", "json", "json"],
       values: [
@@ -39,7 +61,15 @@ describe("a workflow parameter's field", () => {
         { value: null },
         undefined,
       ],
-      shown: ["plain", "4", '{"a":[1]}'],
+      shown: ["plain", "4", '{"a":[1]}', '"hello"', '"null"'],
+      roundTrips: [
+        { value: "plain" },
+        { value: 4 },
+        { value: "hello" },
+        { value: "null" },
+        { value: null },
+        { value: { a: [1] } },
+      ],
     });
   });
 });

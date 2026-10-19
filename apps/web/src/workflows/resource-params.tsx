@@ -70,7 +70,9 @@ const ParamInput = ({
       />
     );
   }
-  if (kind === "json") {
+  // A sensitive value is masked whatever its kind, JSON included: what a
+  // builder types to replace it is never shown.
+  if (kind === "json" && !param.sensitive) {
     return (
       <Textarea
         aria-describedby={errorId}
@@ -96,7 +98,7 @@ const ParamInput = ({
       onChange={(event) => {
         onText(event.target.value);
       }}
-      placeholder={replacing}
+      placeholder={replacing ?? (kind === "json" ? t`A JSON value` : undefined)}
       type={param.sensitive ? "password" : "text"}
       value={text}
     />
@@ -120,7 +122,9 @@ const ParamField = ({
   const { t } = useLingui();
   const kind = paramKindOf(param.schema);
   const shownValue = param.set && !param.sensitive;
-  const [text, setText] = useState(shownValue ? paramText(param.value) : "");
+  const [text, setText] = useState(
+    shownValue ? paramText(kind, param.value) : ""
+  );
   const [checked, setChecked] = useState(param.value === true);
   const [saved, setSaved] = useState(false);
   const id = `param-${param.name}`;
@@ -144,7 +148,8 @@ const ParamField = ({
     }
     onSaved(updated);
     setSaved(true);
-    if ("reset" in change) {
+    // A sensitive value goes once saved: it is never shown again.
+    if ("reset" in change || param.sensitive) {
       setText("");
     }
   };
@@ -235,9 +240,19 @@ export const ResourceParams = ({
   loaded: WorkflowParams;
   editable: boolean;
 }) => {
-  // What core returned for the last save here, over what the page loaded
-  // with: its revision is the one the next save names.
+  // What core returned for the last save here, or what the page loaded,
+  // whichever is newer: its revision is the one the next save names. The
+  // page loads again once a version is published, which may declare other
+  // parameters: taken as it comes, unless a save here is newer. Each field
+  // keeps what is typed in it.
   const [params, setParams] = useState(loaded);
+  const [seen, setSeen] = useState(loaded);
+  if (loaded !== seen) {
+    setSeen(loaded);
+    if (loaded.revision >= params.revision) {
+      setParams(loaded);
+    }
+  }
   if (params.params.length === 0) {
     return (
       <p className="text-muted-foreground">
