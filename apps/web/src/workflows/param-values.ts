@@ -87,3 +87,38 @@ export const fieldValueOf = (
   }
   return paramValueOf(kind, text);
 };
+
+/** What a field's shown value came from: its text, switch and revision. */
+export interface FieldBase {
+  text: string;
+  checked: boolean;
+  revision: number;
+}
+
+/**
+ * The base a field takes as the page reads its parameter at a newer
+ * revision (`next`), and whether it shows the new value: an untouched
+ * field does, at that revision. An edited one keeps what is typed, and
+ * moves to that revision only if its own value is unchanged there, so a
+ * save of another field doesn't make its edit conflict; otherwise, or for
+ * a sensitive one, whose value is never shown to compare, it keeps the
+ * revision it read, and its save is refused as a conflict
+ * (`workflow.params_conflict`), never let overwrite another's change.
+ */
+export const nextFieldBase = (
+  base: FieldBase,
+  next: FieldBase,
+  { edited, sensitive }: { edited: boolean; sensitive: boolean }
+): { base: FieldBase; refill: boolean } => {
+  if (next.revision === base.revision) {
+    return { base, refill: false };
+  }
+  if (!edited) {
+    return { base: next, refill: true };
+  }
+  const unchanged = next.text === base.text && next.checked === base.checked;
+  return {
+    base: unchanged && !sensitive ? { ...base, revision: next.revision } : base,
+    refill: false,
+  };
+};

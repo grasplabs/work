@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   fieldValueOf,
+  nextFieldBase,
   paramKindOf,
   paramText,
   paramValueOf,
@@ -115,6 +116,47 @@ describe("a workflow parameter's field", () => {
         { value: null },
         { value: { a: [1] } },
       ],
+    });
+  });
+
+  it("takes a newer revision as it may without overwriting another's change", () => {
+    const base = { text: "4", checked: false, revision: 1 };
+    const sameValue = { text: "4", checked: false, revision: 2 };
+    const otherValue = { text: "7", checked: false, revision: 2 };
+    expect({
+      sameRevision: nextFieldBase(
+        base,
+        { ...otherValue, revision: 1 },
+        {
+          edited: false,
+          sensitive: false,
+        }
+      ),
+      untouched: nextFieldBase(base, otherValue, {
+        edited: false,
+        sensitive: false,
+      }),
+      editedUnchanged: nextFieldBase(base, sameValue, {
+        edited: true,
+        sensitive: false,
+      }),
+      editedChanged: nextFieldBase(base, otherValue, {
+        edited: true,
+        sensitive: false,
+      }),
+      editedSensitive: nextFieldBase(base, sameValue, {
+        edited: true,
+        sensitive: true,
+      }),
+    }).toStrictEqual({
+      sameRevision: { base, refill: false },
+      // Shows the new value, at its revision.
+      untouched: { base: otherValue, refill: true },
+      // Keeps what is typed, at the newer revision: nothing changed it.
+      editedUnchanged: { base: sameValue, refill: false },
+      // Keeps the revision it read: its save is refused as a conflict.
+      editedChanged: { base, refill: false },
+      editedSensitive: { base, refill: false },
     });
   });
 });

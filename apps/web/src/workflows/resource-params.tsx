@@ -12,8 +12,13 @@ import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { fieldValueOf, paramKindOf, paramText } from "./param-values.ts";
-import type { ParamKind } from "./param-values.ts";
+import {
+  fieldValueOf,
+  nextFieldBase,
+  paramKindOf,
+  paramText,
+} from "./param-values.ts";
+import type { FieldBase, ParamKind } from "./param-values.ts";
 
 // An independent workflow's parameters, as its current version declares
 // them (GRA-674): for anyone with a role, each with whether a value is
@@ -25,6 +30,17 @@ import type { ParamKind } from "./param-values.ts";
 
 /** What saving one parameter sends: a value, or back to its default. */
 type Change = { value: unknown } | { reset: true };
+
+/** What a field shows of `param` read at `revision`: never a sensitive value. */
+const baseOf = (
+  kind: ParamKind,
+  param: WorkflowParamSetting,
+  revision: number
+): FieldBase => ({
+  text: param.set && !param.sensitive ? paramText(kind, param.value) : "",
+  checked: !param.sensitive && param.value === true,
+  revision,
+});
 
 /** What `setParams` takes for `change` of parameter `name`, read at `revision`. */
 const changeInput = (name: string, revision: number, change: Change) =>
@@ -121,12 +137,23 @@ const ParamField = ({
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
   const kind = paramKindOf(param.schema);
-  const shownValue = param.set && !param.sensitive;
-  const [text, setText] = useState(
-    shownValue ? paramText(kind, param.value) : ""
-  );
-  const [checked, setChecked] = useState(param.value === true);
+  const fresh = baseOf(kind, param, revision);
+  // What the field shows came from, its revision the one its save names.
+  const [base, setBase] = useState(fresh);
+  const [text, setText] = useState(fresh.text);
+  const [checked, setChecked] = useState(fresh.checked);
   const [toggled, setToggled] = useState(false);
+  if (fresh.revision !== base.revision) {
+    const next = nextFieldBase(base, fresh, {
+      edited: text !== base.text || checked !== base.checked || toggled,
+      sensitive: param.sensitive,
+    });
+    setBase(next.base);
+    if (next.refill) {
+      setText(fresh.text);
+      setChecked(fresh.checked);
+    }
+  }
   const [saved, setSaved] = useState(false);
   const id = `param-${param.name}`;
   const read = fieldValueOf(kind, {
@@ -142,7 +169,7 @@ const ParamField = ({
       async (session) =>
         await session.workflowResources.setParams(
           workflow,
-          changeInput(param.name, revision, change)
+          changeInput(param.name, base.revision, change)
         )
     );
     if (updated === undefined) {
@@ -150,14 +177,17 @@ const ParamField = ({
     }
     onSaved(updated);
     setSaved(true);
-    // A sensitive value goes once saved: it is never shown again.
-    if ("reset" in change || param.sensitive) {
-      setText("");
-    }
-    if (param.sensitive) {
-      setChecked(false);
-      setToggled(false);
-    }
+    // Shows what was saved, as read back (a sensitive value never is), at
+    // the revision the save made.
+    const savedParam = updated.params.find(({ name }) => name === param.name);
+    const after =
+      savedParam === undefined
+        ? { ...base, revision: updated.revision }
+        : baseOf(kind, savedParam, updated.revision);
+    setBase(after);
+    setText(after.text);
+    setChecked(after.checked);
+    setToggled(false);
   };
   return (
     <form
