@@ -153,7 +153,7 @@ test("the dashboard counts the programme's weeks from the plan, and exports its 
 
   await expect(page.getByText("Week 1 of 8 · Under way")).toBeVisible();
   await expect(
-    page.getByText(/^Report on week 1 ready in [1-7] days?$/u)
+    page.getByText(/^Your next report is ready (?:tomorrow|in [2-7] days)$/u)
   ).toBeVisible();
   await page.getByRole("button", { name: "Export report" }).click();
 
