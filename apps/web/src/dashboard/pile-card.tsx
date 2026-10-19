@@ -63,8 +63,16 @@ export interface Answer {
   disabled?: boolean;
   /** The id of a line that says why it waits. */
   describedBy?: string;
-  /** Asked once more before it is done, in a dialog: for a no that can't be taken back. */
-  confirm?: { title: string; description: string };
+  /**
+   * Asked once more before it is done, in a dialog: for an answer that
+   * can't be taken back. Its button warns (`destructive`) unless `variant`
+   * says otherwise.
+   */
+  confirm?: {
+    title: string;
+    description: string;
+    variant?: "default" | "destructive";
+  };
 }
 
 /** How long the pointer rests on a button before what it does is said, in milliseconds: someone who presses at once is told nothing. */
@@ -145,7 +153,7 @@ const AnswerButton = ({
               // with the next card all the same.
               void press(true);
             }}
-            variant="destructive"
+            variant={confirm.variant ?? "destructive"}
           >
             {answer.label}
           </Button>

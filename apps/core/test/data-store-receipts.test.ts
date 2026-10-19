@@ -841,13 +841,14 @@ describe("alarm", () => {
     const store = await newStore();
     const input = { title: "Launch" };
     const held = heldBy(await store.claim(await claimOf("k1", input)));
-    // Staged while something took starts; this deployment takes none now.
+    // Staged while something took notifications; this deployment takes
+    // none now.
     await commitWith(
       store,
       insertOf(held, "Launch", {
-        intents: [{ kind: "workflow.start", data: {} }],
+        intents: [{ kind: "workflow.notify", data: {} }],
       }),
-      { "workflow.start": taker([]) }
+      { "workflow.notify": taker([]) }
     );
 
     await runDurableObjectAlarm(objectOf(store));

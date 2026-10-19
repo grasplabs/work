@@ -387,7 +387,11 @@ export default class StallReporter implements Reporter {
   }
 
   onTestCaseReady(testCase: ReportedCase): void {
-    this.#heardFrom(testCase.module);
+    // One moment for both: its file was heard from when the test started,
+    // never a millisecond before, so a test that runs past its timeout is
+    // named before its file is said to have gone quiet.
+    const now = Date.now();
+    this.#heardFrom(testCase.module, now);
     // Its result came first: it isn't running.
     if (this.#finished.has(testCase.id)) {
       return;
@@ -395,7 +399,7 @@ export default class StallReporter implements Reporter {
     const running = this.#cases.get(testCase.id);
     this.#cases.set(testCase.id, {
       testCase,
-      started: running?.started ?? Date.now(),
+      started: running?.started ?? now,
     });
   }
 
@@ -446,10 +450,10 @@ export default class StallReporter implements Reporter {
     });
   }
 
-  #heardFrom(testModule: ReportedModule): void {
+  #heardFrom(testModule: ReportedModule, now = Date.now()): void {
     const running = this.#modules.get(testModule.id);
     if (running !== undefined) {
-      running.heard = Date.now();
+      running.heard = now;
     }
   }
 

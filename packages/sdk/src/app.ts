@@ -1,3 +1,4 @@
+import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import { canonicalText } from "@grasp-os/shared/json";
 import {
   appMaxOperations,
@@ -9,11 +10,16 @@ import {
 import { isMigration } from "./migration.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
 import { referenceData } from "./references.ts";
-import { isBrowserResource, isResource } from "./resources.ts";
+import {
+  isBrowserResource,
+  isResource,
+  isWorkflowResource,
+} from "./resources.ts";
 import type {
   AnyResource,
   BrowserResource,
   ResourceKind,
+  WorkflowResource,
 } from "./resources.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import type {
@@ -59,8 +65,9 @@ import type { AnySchema } from "./value-schema.ts";
 // - screens (spec 8) are a list of named routes, each a screen file and
 //   the route input its parameters are validated with, and `preferences`
 //   (spec 10.7.7), when declared, is a strict object; the top-level path
-//   segment `preferences` is the platform's, so no function registers
-//   under it and declaring preferences later never collides with one;
+//   segments `preferences` and `workflows` are the platform's, so no
+//   function registers under them and declaring preferences or workflows
+//   later never collides with one;
 // - migrations (spec 17.2, migration.ts) are `migration` declarations,
 //   each named once, one a table, of a table the schema has, whose
 //   `output` declares exactly that table's fields.
@@ -131,9 +138,10 @@ export interface AppDefinition<
   readonly preferences?: AnySchema;
   /**
    * The resources it needs, each by a distinct alias: those its actions
-   * use, and those its screens use (files, links).
+   * use, those its screens use (files, links), and the workflows its
+   * actions start and its mutations start after they commit.
    */
-  readonly uses: readonly (AnyResource | BrowserResource)[];
+  readonly uses: readonly (AnyResource | BrowserResource | WorkflowResource)[];
   /**
    * Its explicit migrations (spec 17.2), each a `migration` declared in
    * `migrations/`: transforms of one of its tables' records to this
@@ -158,6 +166,11 @@ export type UseManifest =
   | {
       readonly type: "resource";
       readonly kind: ResourceKind;
+      readonly alias: string;
+    }
+  | {
+      /** A workflow it starts (an action) or stages a start of (a mutation). */
+      readonly type: "workflow";
       readonly alias: string;
     };
 
@@ -197,6 +210,8 @@ export interface AppManifest {
   readonly resources: Readonly<Record<string, AnyResource>>;
   /** The resources its screens use (files, links), by alias. */
   readonly browserResources: Readonly<Record<string, BrowserResource>>;
+  /** The workflows its functions start, by alias. */
+  readonly workflows: Readonly<Record<string, WorkflowResource>>;
   /** Its screens, by name, in the order declared. */
   readonly screens: Readonly<Record<string, ScreenManifest>>;
   /** Its preferences' strict object, or null when it declares none. */
@@ -256,11 +271,17 @@ const appKeys: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The top-level path segment the platform keeps for an App's preferences
- * (spec 10.7.7): no function registers under it, whether or not the App
- * declares preferences now.
+ * The top-level path segments the platform keeps, with what each is for:
+ * `preferences` for an App's preferences (spec 10.7.7) and `workflows` for
+ * its generated workflow references (`workflows.<alias>.queries.*`), which
+ * the host answers itself. No function registers under either, whether or
+ * not the App declares preferences or workflows now, so declaring one
+ * later never shadows or is shadowed by a function.
  */
-export const reservedSegment = "preferences";
+export const reservedSegments: ReadonlyMap<string, string> = new Map([
+  ["preferences", "the App's preferences"],
+  ["workflows", "the App's workflow references"],
+]);
 
 /**
  * Path segments no function registers at, at any depth: the names a
@@ -316,9 +337,11 @@ const walk = (
         `\`${path}\` can't be registered: \`${name}\` is a name a reference itself answers, never a path segment.`
       );
     }
-    if (prefix.length === 0 && name === reservedSegment) {
+    const reservedFor =
+      prefix.length === 0 ? reservedSegments.get(name) : undefined;
+    if (reservedFor !== undefined) {
       refuse(
-        `\`${what}\` can't register \`${reservedSegment}\`: that path is the platform's, for the App's preferences.`
+        `\`${what}\` can't register \`${name}\`: that path is the platform's, for ${reservedFor}.`
       );
     }
     const property = Object.getOwnPropertyDescriptor(tree, name);
@@ -342,34 +365,52 @@ const walk = (
   }
 };
 
-/** The App's resources by alias, each declared once, across both kinds. */
+/** The App's resources by alias, each declared once, across every kind. */
 const resourcesOf = (
   uses: unknown
 ): {
   actions: Map<string, AnyResource>;
   browser: Map<string, BrowserResource>;
+  workflows: Map<string, WorkflowResource>;
 } => {
   if (!Array.isArray(uses)) {
     return refuse("An App's `uses` lists `resource` declarations.");
   }
   const actions = new Map<string, AnyResource>();
   const browser = new Map<string, BrowserResource>();
+  const workflows = new Map<string, WorkflowResource>();
   const listed: readonly unknown[] = uses;
   for (const use of listed) {
-    if (!isResource(use) && !isBrowserResource(use)) {
+    if (
+      !isResource(use) &&
+      !isBrowserResource(use) &&
+      !isWorkflowResource(use)
+    ) {
       refuse("An App's `uses` lists `resource` declarations only.");
       continue;
     }
-    if (actions.has(use.alias) || browser.has(use.alias)) {
+    if (
+      actions.has(use.alias) ||
+      browser.has(use.alias) ||
+      workflows.has(use.alias)
+    ) {
       refuse(`Two of the App's resources have alias \`${use.alias}\`.`);
     }
     if (isResource(use)) {
       actions.set(use.alias, use);
+    } else if (isWorkflowResource(use)) {
+      workflows.set(use.alias, use);
     } else {
       browser.set(use.alias, use);
     }
   }
-  return { actions, browser };
+  const files = [...browser.values()].filter(
+    (use) => use["~resource"] === "files"
+  ).length;
+  if (files > fileLimits.resources) {
+    refuse(`An App declares at most ${fileLimits.resources} files resources.`);
+  }
+  return { actions, browser, workflows };
 };
 
 /** A screen's or a route parameter's name: an identifier. */
@@ -758,7 +799,8 @@ const usesOf = (
   path: string,
   paths: ReadonlyMap<unknown, string>,
   functions: ReadonlyMap<string, AnyFunction>,
-  resources: ReadonlyMap<string, AnyResource>
+  resources: ReadonlyMap<string, AnyResource>,
+  workflows: ReadonlyMap<string, WorkflowResource>
 ): UseManifest[] => {
   const seen = new Set<unknown>();
   return fn.uses.map((use): UseManifest => {
@@ -780,6 +822,19 @@ const usesOf = (
         );
       }
       return { type: "resource", kind: use["~resource"], alias: use.alias };
+    }
+    if (isWorkflowResource(use)) {
+      // A start is a change, never a read: an action makes one, a mutation
+      // stages one with its commit. A query lists nothing.
+      if (fn.kind === "query") {
+        refuse(`\`${path}\` is a query: it starts no workflow.`);
+      }
+      if (workflows.get(use.alias) !== use) {
+        refuse(
+          `\`${path}\` starts workflow \`${use.alias}\`, which the App's \`uses\` doesn't list.`
+        );
+      }
+      return { type: "workflow", alias: use.alias };
     }
     const { target, kind } = usedFunction(use, path, paths, functions);
     if (fn.kind === "mutation" && kind !== "query") {
@@ -877,7 +932,11 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
   // Throws for a schema `defineSchema` didn't make, and for access that
   // names a table the schema hasn't or a mode that doesn't exist.
   const manifest = schemaManifest(schema, access);
-  const { actions: resources, browser } = resourcesOf(definition.uses);
+  const {
+    actions: resources,
+    browser,
+    workflows,
+  } = resourcesOf(definition.uses);
   const screens = screensOf(definition.screens);
   const preferences = preferencesOf(definition.preferences);
 
@@ -920,7 +979,9 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
         args: fn.args.descriptor,
         returns: fn.returns.descriptor,
         stream: fn.stream === null ? null : fn.stream.descriptor,
-        uses: Object.freeze(usesOf(fn, path, paths, functions, resources)),
+        uses: Object.freeze(
+          usesOf(fn, path, paths, functions, resources, workflows)
+        ),
         tables: Object.freeze(
           verbsOf(
             manifest,
@@ -946,6 +1007,7 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
       operations,
       resources: Object.fromEntries(resources),
       browserResources: Object.fromEntries(browser),
+      workflows: Object.fromEntries(workflows),
       screens,
       preferences,
       migrations,

@@ -1,5 +1,6 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 
+import { retryAccessRevocations } from "./access-revocations.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
@@ -8,22 +9,26 @@ import { refreshDailySignals } from "./daily-signals.ts";
 import { handleRequest } from "./entry.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
-import { drainSubmissionOutbox } from "./knowledge/outbox.ts";
-import { sweepReceipts } from "./knowledge/receipts.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
+import { sweepBuilds } from "./screens.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { repairControls } from "./workflows/controls.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
+import {
+  repairResourceStarts,
+  repairResourceTerminations,
+} from "./workflows/resource-runs.ts";
 import { sweepRunDetails } from "./workflows/retention.ts";
 import { repairStarts } from "./workflows/runs.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
+import { repairWakes } from "./workflows/wakes.ts";
 
 /** The cron trigger that runs every 15 minutes (wrangler.jsonc). */
 const quarterHourCron = "*/15 * * * *";
@@ -70,15 +75,21 @@ export default {
   },
   // Every minute: audit events waiting in core's outboxes and connect's
   // (see src/audit-outbox.ts), personal connections of removed people still
-  // connected (see src/members.ts), Apps copied from a blueprint left
+  // connected (see src/members.ts), revocations an App's host couldn't be
+  // told of, told again (see src/access-revocations.ts), Apps copied from a blueprint left
   // pending (see src/app-blueprints.ts), uploads left behind
   // (see src/knowledge/uploads.ts), a new version of core, audited as
   // a platform update (see src/platform-updates.ts), and workflows'
   // schedules due by the minute it runs for (see src/workflows/triggers.ts),
   // starts core stopped in the middle of, sent to the engine again (see
-  // `repairStarts`, src/workflows/runs.ts) and pauses, resumes and
+  // `repairStarts`, src/workflows/runs.ts, and `repairResourceStarts`,
+  // src/workflows/resource-runs.ts), terminations of runs cancelled while
+  // starting the engine is still to confirm (`repairResourceTerminations`,
+  // the same file), and pauses, resumes and
   // cancels the engine is still to confirm (see `repairControls`,
-  // src/workflows/controls.ts), and connector events:
+  // src/workflows/controls.ts), wakes owed to runs waiting on a person,
+  // sent again (see `repairWakes`, src/workflows/wakes.ts), and connector
+  // events:
   // where connect listens, and the events it read, delivered (see
   // src/workflows/connector-events.ts).
   //
@@ -93,7 +104,8 @@ export default {
   // chats 30 days after they ended (see src/guests.ts), and the details
   // of workflow runs that ended longer ago than their retention (see
   // src/workflows/retention.ts), and screens' staged builds 30 days
-  // after they were last staged (see src/screen-frame.ts), and npm
+  // after they were last staged (see src/screen-frame.ts), and cached
+  // builds 30 days after they were last used (see src/screens.ts), and npm
   // tarballs and package builds no lock names any more (see
   // src/packages/cleanup.ts), and sealed App releases nothing keeps any
   // more, with the artifacts no other release names (see
@@ -115,8 +127,8 @@ export default {
             sweepGuestChats(env, new Date(controller.scheduledTime)),
             sweepRunDetails(env, new Date(controller.scheduledTime)),
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
+            sweepBuilds(env, new Date(controller.scheduledTime)),
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
-            sweepReceipts(env, new Date(controller.scheduledTime)),
             sweepReleases(env, new Date(controller.scheduledTime)),
             sweepTestFixtures(env, new Date(controller.scheduledTime)),
             sweepTokenKeys(env, new Date(controller.scheduledTime)),
@@ -124,8 +136,8 @@ export default {
           ]
         : [
             drainAuditOutboxes(env),
-            drainSubmissionOutbox(env),
             retryDisconnects(env),
+            retryAccessRevocations(env),
             sweepUploads(env),
             // Deploys apply migrations first (CI's db:migrate, and the
             // console's deploy), so `platform_versions` exists. A version
@@ -135,7 +147,10 @@ export default {
             recordPlatformUpdate(env),
             startDueSchedules(env, new Date(controller.scheduledTime)),
             repairStarts(env),
+            repairResourceStarts(env, new Date(controller.scheduledTime)),
+            repairResourceTerminations(env, new Date(controller.scheduledTime)),
             repairControls(env),
+            repairWakes(env, new Date(controller.scheduledTime)),
             pumpConnectorEvents(env),
           ];
     const results = await Promise.allSettled(jobs);

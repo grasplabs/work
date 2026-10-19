@@ -1,78 +1,60 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
-import type { AppCallerInput } from "../src/app.ts";
 import { builtins, fingerprintOf, release } from "../src/builtins.ts";
-import {
-  grantReviewed,
-  release as releaseFiles,
-  revokeOtherCopies,
-  serverBuilt,
-} from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
+import { calledAs } from "./sealed-apps.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 
 // The workflow map, the built-in App (apps/core/blueprints/workflow-map/):
-// an App created from it asks for the Playbook, and once an admin grants
-// it, keeps its workflows there as records, round trip: drawn, designed
-// with the drawn version beside it, and linked to an App workflow. These
-// tests go in through the App's server methods, as its screen calls them.
+// its teams and workflows in the App's own store, drawn, designed beside
+// the version last drawn, and linked to an App workflow, every version
+// kept. What can go wrong, tried below: someone who isn't one of the
+// App's builders changing the map, or someone the App isn't shared with
+// reading it; a save setting what only the map sets (the version last
+// drawn, the link) or dropping it; a linked workflow drawn again; edits
+// written over someone else's, or a version lost; a team that isn't one;
+// and a list or a read past what a query may answer.
 
 const idp = mockIdp();
 
 const workflowMap = "workflow-map";
 
-/** The collection the workflow map declares, and keeps its records in. */
-const playbookCollectionId = "playbook";
+type Person = Awaited<ReturnType<typeof signedInApi>>;
 
-const as = (userId: string): AppCallerInput => ({
-  userId,
-  mode: "interactive",
-});
+/** What `person` gets calling the map's `path` (a `kind`) with `input`. */
+const call = async (
+  person: Person,
+  app: AppId,
+  path: string,
+  kind: "query" | "mutation" | "action",
+  input: unknown = {}
+): Promise<OperationResult> =>
+  await calledAs(
+    await person.api.whoami(),
+    app,
+    { contractId: path, kind },
+    input
+  );
 
-/** What a server method answered (`{ ok }`), as `schema` reads it. */
-const okOf = <T>(answer: unknown, schema: z.ZodType<T>): T => {
-  const { ok } = z.object({ ok: schema }).parse(answer);
-  return ok;
+/** What a call answered; a refusal fails the test, saying why. */
+const valueOf = (result: OperationResult): unknown => {
+  if (!result.ok) {
+    throw new Error(`Refused: ${result.error.code} ${result.error.message}`);
+  }
+  return result.value;
 };
 
-const workflowSchema = z.object({
-  id: z.string(),
-  path: z.string(),
-  version: z.number(),
-  record: z.record(z.string(), z.unknown()),
-  body: z.string(),
-});
+/** Why a call was refused, or `ok`. */
+const codeOf = (result: OperationResult): string =>
+  result.ok ? "ok" : result.error.code;
 
-const openedSchema = z.object({
-  current: workflowSchema,
-  drawn: workflowSchema.nullable(),
-});
-
-const overviewSchema = z.object({
-  access: z.enum(["none", "ok"]),
-  writable: z.boolean(),
-  workflows: z.array(workflowSchema),
-  unreadable: z.array(z.object({ path: z.string(), title: z.string() })),
-  teams: z.array(z.object({ path: z.string(), title: z.string() })),
-});
-
-/** The most records one read of the overview lists. */
-const pageMax = 20;
-
-/** The fewest reads that list `records`: at least one, even for none. */
-const readsFor = (records: number): number =>
-  Math.max(1, Math.ceil(records / pageMax));
-
-const savedSchema = z.object({
-  id: z.string(),
-  path: z.string(),
-  currentVersion: z.number(),
-});
+const observed = (value: number) => ({ value, basis: "observed" });
+const estimated = (value: number) => ({ value, basis: "estimated" });
 
 const numbers = (frequency: number, minutes: number, people: number) => ({
   frequency: { value: frequency, basis: "estimated" },
@@ -80,11 +62,11 @@ const numbers = (frequency: number, minutes: number, people: number) => ({
   people: { value: people, basis: "estimated" },
 });
 
-/** A drawn workflow as the map's screen saves it. */
+/** A drawn workflow, as the map's screen saves it. */
 const drawn = {
-  type: "workflow",
   title: "Pay supplier invoices",
   state: "drawn",
+  team: null,
   steps: [
     {
       name: "Match the invoice",
@@ -94,480 +76,717 @@ const drawn = {
     },
   ],
   parameters: [{ name: "Approval limit", value: "5000" }],
+  gain: null,
+  notes: "Pay what we owe.",
 };
 
-/** An admin's App created from the workflow map, its Playbook granted. */
-const setUp = async () => {
+const designedSteps = [
+  {
+    name: "Match the invoice",
+    handover: false,
+    kind: "automated",
+    numbers: numbers(30, 1, 1),
+  },
+];
+
+const savedSchema = z.object({ id: z.string(), version: z.number() });
+
+const workflowSchema = z
+  .object({
+    _rev: z.number(),
+    version: z.number(),
+    title: z.string(),
+    state: z.string(),
+    team: z.string().nullable(),
+    steps: z.array(z.unknown()),
+    gain: z.object({ hoursPerWeek: z.number() }).nullable(),
+    drawnVersion: z.number().nullable(),
+    app: z.object({ appId: z.string(), workflowId: z.string() }).nullable(),
+    notes: z.string(),
+  })
+  .loose();
+
+const openedSchema = z
+  .object({
+    current: workflowSchema,
+    drawn: z
+      .looseObject({
+        version: z.number(),
+        state: z.string(),
+        steps: z.array(z.unknown()),
+      })
+      .nullable(),
+  })
+  .nullable();
+
+const pageSchema = z.object({
+  items: z.array(z.looseObject({ id: z.string(), version: z.number() })),
+});
+
+/** An admin's App created from the workflow map. */
+const mapOf = async (admin: Person): Promise<AppId> => {
   await builtins(env).ensureInstalled(await fingerprintOf(release));
-  const admin = await signedInApi(idp, "admin");
-  const created = await admin.api.apps.blueprints.create(workflowMap, {
+  const made = await admin.api.apps.blueprints.create(workflowMap, {
     name: `Our map ${unique()}`,
   });
-  const asked = created.permissions.map(
-    ({ object, actions, binding, status }) => ({
-      object,
-      actions,
-      binding,
-      status,
-    })
-  );
-  await revokeOtherCopies(admin.api, workflowMap, created.app.id);
-  for (const { id } of created.permissions) {
-    // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-    await grantReviewed(admin.api, id);
-  }
-  await admin.api.apps.versions.setCurrent(created.app.id, 1);
-  await serverBuilt(created.app.id, 1);
-  return { admin, app: appIdSchema.parse(created.app.id), asked };
+  await admin.api.apps.versions.setCurrent(made.app.id, 1);
+  return appIdSchema.parse(made.app.id);
 };
 
-const call = async (
+/** A workflow and the version of it last drawn, as `person` opens it. */
+const opened = async (person: Person, app: AppId, id: string) =>
+  openedSchema.parse(
+    valueOf(await call(person, app, "map.open", "query", { id }))
+  );
+
+/** Saves `fields` as a new workflow (`id` null) or from `expectedRevision`. */
+const save = async (
+  person: Person,
   app: AppId,
-  userId: string,
-  method: string,
-  ...args: unknown[]
-): Promise<unknown> => await callApp(env, app, as(userId), method, args);
+  id: string | null,
+  expectedRevision: number | null,
+  fields: Record<string, unknown>
+): Promise<OperationResult> =>
+  await call(person, app, "map.save", "mutation", {
+    id,
+    expectedRevision,
+    ...fields,
+  });
+
+/** Someone signed in with `role`, sharing `app` with its admin as `as`. */
+const memberOf = async (
+  admin: Person,
+  app: AppId,
+  role: "user" | "builder",
+  as: "user" | "builder"
+): Promise<Person> => {
+  const person = await signedInApi(idp, role);
+  await admin.api.apps.members.add(app, {
+    type: "person",
+    id: person.userId,
+    role: as,
+  });
+  return person;
+};
+
+/** A step at its longest: each text field 200 characters. */
+const longStep = (index: number) => ({
+  name: `${index}`.padEnd(200, "n"),
+  who: "w".repeat(200),
+  tool: "t".repeat(200),
+  handover: false,
+});
 
 describe("the workflow map", { timeout: 60_000 }, () => {
-  it("asks for the Playbook, and keeps a workflow there as it is drawn, then designed beside the drawn version", async () => {
-    const { admin, app, asked } = await setUp();
-    expect(asked).toStrictEqual([
-      {
-        object: { type: "collection", collectionId: playbookCollectionId },
-        actions: ["read", "write"],
-        binding: "PLAYBOOK",
-        status: "requested",
-      },
-    ]);
-
-    const team = okOf(
-      await call(app, admin.userId, "addTeam", "Finance"),
-      z.object({ path: z.string(), title: z.string() })
+  it("keeps a workflow drawn, then designed beside the version last drawn, every version kept", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const team = z.string().parse(
+      valueOf(
+        await call(admin, app, "teams.add", "mutation", {
+          title: " Finance ",
+        })
+      )
     );
-    const first = okOf(
-      await call(app, admin.userId, "save", {
-        ifVersion: 0,
-        record: { ...drawn, team: team.path },
-        body: "Pay what we owe.",
-      }),
-      savedSchema
+    const first = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, { ...drawn, team }))
     );
-    const listed = okOf(
-      await call(app, admin.userId, "overview"),
-      overviewSchema
+    const v1 = await opened(admin, app, first.id);
+    // Drawn again: version 2, the one designing starts from.
+    valueOf(
+      await save(admin, app, first.id, v1?.current._rev ?? 0, {
+        ...drawn,
+        team,
+        title: "Pay invoices",
+      })
     );
-    const openedDrawn = okOf(
-      await call(app, admin.userId, "open", first.id),
-      openedSchema
-    );
-
-    const designedSteps = [
-      {
-        name: "Match the invoice",
-        handover: false,
-        kind: "automated",
-        numbers: numbers(30, 1, 1),
-      },
-    ];
-    okOf(
-      await call(app, admin.userId, "save", {
-        documentId: first.id,
-        path: openedDrawn.current.path,
-        ifVersion: 1,
-        record: {
-          ...drawn,
-          team: team.path,
-          state: "designed",
-          steps: designedSteps,
-          gain: { hoursPerWeek: 9.5 },
-        },
-        body: "Pay what we owe.",
-        message: "Designed",
-      }),
-      savedSchema
-    );
-    const openedDesigned = okOf(
-      await call(app, admin.userId, "open", first.id),
-      openedSchema
-    );
-
-    // Saved again without its team, as the editor does once "No team" is
-    // picked: the team is gone. From version 2 again, someone else's save
-    // came first.
-    const { team: _team, ...withoutTeam } = openedDesigned.current.record;
-    okOf(
-      await call(app, admin.userId, "save", {
-        documentId: first.id,
-        path: openedDesigned.current.path,
-        ifVersion: 2,
-        record: withoutTeam,
-        body: "Pay what we owe.",
-      }),
-      savedSchema
-    );
-    const stale = await call(app, admin.userId, "save", {
-      documentId: first.id,
-      path: openedDesigned.current.path,
-      ifVersion: 2,
-      record: withoutTeam,
-      body: "Pay what we owe.",
-    });
-    const cleared = okOf(
-      await call(app, admin.userId, "open", first.id),
-      openedSchema
-    );
-
-    expect({
-      listed: listed.workflows
-        .filter(({ id }) => id === first.id)
-        .map(({ version, record }) => ({
-          version,
-          title: record.title,
-          team: record.team,
-        })),
-      teams: listed.teams.filter(({ path }) => path === team.path),
-      drawn: [openedDrawn.current.record, openedDrawn.drawn],
-      designed: {
-        version: openedDesigned.current.version,
-        state: openedDesigned.current.record.state,
-        steps: openedDesigned.current.record.steps,
-        gain: openedDesigned.current.record.gain,
-        besideVersion: openedDesigned.drawn?.version,
-        besideSteps: openedDesigned.drawn?.record.steps,
-      },
-      cleared: [cleared.current.version, "team" in cleared.current.record],
-      stale,
-    }).toStrictEqual({
-      listed: [{ version: 1, title: "Pay supplier invoices", team: team.path }],
-      teams: [{ path: team.path, title: "Finance" }],
-      drawn: [{ ...drawn, team: team.path, description: "", tags: [] }, null],
-      designed: {
-        version: 2,
+    const v2 = await opened(admin, app, first.id);
+    valueOf(
+      await save(admin, app, first.id, v2?.current._rev ?? 0, {
+        ...drawn,
+        team,
+        title: "Pay invoices",
         state: "designed",
         steps: designedSteps,
         gain: { hoursPerWeek: 9.5 },
-        besideVersion: 1,
-        besideSteps: drawn.steps,
-      },
-      cleared: [3, false],
-      stale: { error: "knowledge.conflict" },
-    });
-  });
-
-  it("links a designed workflow to an App workflow, and refuses whoever may not change the Playbook", async () => {
-    const { admin, app } = await setUp();
-    const user = await signedInApi(idp, "user");
-    const { id: payables } = await admin.api.apps.create({
-      name: `Payables ${unique()}`,
-    });
-    await releaseFiles(admin, payables, {
-      "app/server.ts": "export class App {}\n",
-      "workflows/pay.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow(
-  "pay",
-  { input: z.unknown(), params: {} },
-  async (step) => await step.do("count", { description: "Count" }, async () => 1)
-);
-`,
-      "workflows/pay.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import pay from "./pay.ts";
-
-export default workflowTests(pay, [{ name: "counts", mocks: { count: 1 }, expect: { output: 1 } }]);
-`,
-    });
-    const designed = okOf(
-      await call(app, admin.userId, "save", {
-        ifVersion: 0,
-        record: { ...drawn, state: "designed" },
-        body: "",
-      }),
-      savedSchema
+      })
     );
-
-    const linked = okOf(
-      await call(app, admin.userId, "link", {
-        documentId: designed.id,
-        ifVersion: 1,
-        appId: payables,
-        workflowId: "pay",
-      }),
-      savedSchema
+    const v3 = await opened(admin, app, first.id);
+    // Designed again, without its team: still beside version 2.
+    valueOf(
+      await save(admin, app, first.id, v3?.current._rev ?? 0, {
+        ...drawn,
+        title: "Pay invoices",
+        state: "designed",
+        steps: designedSteps,
+        gain: { hoursPerWeek: 9.5 },
+      })
     );
-    const opened = okOf(
-      await call(app, admin.userId, "open", designed.id),
-      openedSchema
+    const v4 = await opened(admin, app, first.id);
+    const teams = z
+      .array(z.looseObject({ _id: z.string(), title: z.string() }))
+      .parse(valueOf(await call(admin, app, "teams.list", "query")));
+    const listed = pageSchema.parse(
+      valueOf(await call(admin, app, "map.list", "query", { pagination: {} }))
     );
-    const writableFor = async (userId: string) => {
-      const listed = okOf(await call(app, userId, "overview"), overviewSchema);
-      return listed.writable;
-    };
-    expect({
-      linked: linked.currentVersion,
-      app: opened.current.record.app,
-      // The map is read only for whoever may not change the Playbook.
-      writable: {
-        admin: await writableFor(admin.userId),
-        user: await writableFor(user.userId),
-      },
-      user: await call(app, user.userId, "save", {
-        ifVersion: 0,
-        record: drawn,
-        body: "",
-      }),
-      team: await call(app, user.userId, "addTeam", "Finance"),
-      // Linked, it stays designed.
-      redrawn: await call(app, admin.userId, "save", {
-        documentId: designed.id,
-        path: designed.path,
-        ifVersion: 2,
-        record: drawn,
-        body: "",
-      }),
-    }).toStrictEqual({
-      linked: 2,
-      app: { appId: payables, workflowId: "pay" },
-      writable: { admin: true, user: false },
-      user: { error: "knowledge.forbidden" },
-      team: { error: "knowledge.forbidden" },
-      redrawn: { error: "map.linked_drawn" },
-    });
-  });
-
-  it("lists the workflows it can read when some can't be, and names those", async () => {
-    const { admin, app } = await setUp();
-    const save = async (title: string) =>
-      okOf(
-        await call(app, admin.userId, "save", {
-          ifVersion: 0,
-          record: { ...drawn, title },
-          body: "",
-        }),
-        savedSchema
-      );
-    const kept = await save(`Kept ${unique()}`);
-    const unfit = await save(`Unfit ${unique()}`);
-    const gone = await save(`Gone ${unique()}`);
-    // As a rollback to a release with other schemas would leave it.
-    await env.KNOWLEDGE.prepare(
-      "UPDATE versions SET text = ? WHERE document_id = ?"
-    )
-      .bind("---\ntype: workflow\nstate: sketched\n---\n", unfit.id)
-      .run();
-    // Its current version gone: listed, with no text to read.
-    await env.KNOWLEDGE.prepare("DELETE FROM versions WHERE document_id = ?")
-      .bind(gone.id)
-      .run();
-
-    const listed = okOf(
-      await call(app, admin.userId, "overview"),
-      overviewSchema
-    );
-    const unreadable = new Set(listed.unreadable.map(({ path }) => path));
-    expect({
-      kept: listed.workflows.some(({ id }) => id === kept.id),
-      listed: listed.workflows.some(
-        ({ id }) => id === unfit.id || id === gone.id
-      ),
-      unreadable: [unfit.path, gone.path].map((path) => unreadable.has(path)),
-    }).toStrictEqual({ kept: true, listed: false, unreadable: [true, true] });
-  });
-
-  it("reads its overview a page of records at a time, each page one read in the audit log", async () => {
-    const { admin, app } = await setUp();
-    // More than a page (20), so the overview reads at least two.
-    await Promise.all(
-      Array.from(
-        { length: 21 },
-        async (_, index) =>
-          await call(app, admin.userId, "save", {
-            ifVersion: 0,
-            record: { ...drawn, title: `Paged ${index} ${unique()}` },
-            body: "",
-          })
+    const firstVersion = workflowSchema.nullable().parse(
+      valueOf(
+        await call(admin, app, "map.version", "query", {
+          id: first.id,
+          version: 1,
+        })
       )
     );
 
-    let listed: z.infer<typeof overviewSchema> | undefined;
-    const events = await auditedDuring(async () => {
-      listed = okOf(await call(app, admin.userId, "overview"), overviewSchema);
-    });
-    const reads = events.filter(({ action }) => action === "knowledge.read");
-    const counted = z.object({ read: z.string(), count: z.number() });
-    const workflows =
-      (listed?.workflows.length ?? 0) + (listed?.unreadable.length ?? 0);
-    const teams = listed?.teams.length ?? 0;
-    const counts = reads.map(({ detail }) => counted.parse(detail).count);
     expect({
-      kinds: [
-        ...new Set(reads.map(({ detail }) => counted.parse(detail).read)),
-      ],
-      read: counts.reduce((sum, count) => sum + count, 0),
-      pageFits: counts.every((count) => count <= pageMax),
-      // One read for each page, never one for each workflow.
-      events: reads.length,
+      teams: teams.map(({ _id, title }) => ({ id: _id, title })),
+      versions: [v1, v2, v3, v4].map((found) => ({
+        version: found?.current.version,
+        state: found?.current.state,
+        team: found?.current.team,
+        drawnVersion: found?.current.drawnVersion,
+        beside: found?.drawn?.version ?? null,
+        besideState: found?.drawn?.state ?? null,
+      })),
+      gain: v4?.current.gain,
+      notes: v4?.current.notes,
+      // Listed without its notes.
+      listed: listed.items.map((item) => ({
+        id: item.id,
+        version: item.version,
+        notes: "notes" in item,
+      })),
+      firstVersion: firstVersion && {
+        version: firstVersion.version,
+        title: firstVersion.title,
+        state: firstVersion.state,
+      },
     }).toStrictEqual({
-      kinds: ["records"],
-      read: workflows + teams,
-      pageFits: true,
-      events: readsFor(workflows) + readsFor(teams),
+      // Trimmed, as the schema keeps text.
+      teams: [{ id: team, title: "Finance" }],
+      versions: [
+        {
+          version: 1,
+          state: "drawn",
+          team,
+          drawnVersion: null,
+          beside: null,
+          besideState: null,
+        },
+        {
+          version: 2,
+          state: "drawn",
+          team,
+          drawnVersion: null,
+          beside: null,
+          besideState: null,
+        },
+        {
+          version: 3,
+          state: "designed",
+          team,
+          drawnVersion: 2,
+          beside: 2,
+          besideState: "drawn",
+        },
+        {
+          version: 4,
+          state: "designed",
+          team: null,
+          drawnVersion: 2,
+          beside: 2,
+          besideState: "drawn",
+        },
+      ],
+      gain: { hoursPerWeek: 9.5 },
+      notes: "Pay what we owe.",
+      listed: [{ id: first.id, version: 4, notes: false }],
+      firstVersion: {
+        version: 1,
+        title: "Pay supplier invoices",
+        state: "drawn",
+      },
     });
   });
 
-  it("opens and saves only workflows, never turning another record into one", async () => {
-    const { admin, app } = await setUp();
-    const team = okOf(
-      await call(app, admin.userId, "addTeam", `Finance ${unique()}`),
-      z.object({ path: z.string(), title: z.string() })
+  it("sets the version last drawn and the link itself: a save can't set or drop either, and a linked workflow stays designed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const first = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, drawn))
     );
-    const teamRow = await env.KNOWLEDGE.prepare(
-      "SELECT id FROM documents WHERE collection_id = ? AND path = ?"
-    )
-      .bind(playbookCollectionId, team.path)
-      .first<{ id: string }>();
-    const teamId = teamRow?.id ?? "";
-    const workflow = okOf(
-      await call(app, admin.userId, "save", {
-        ifVersion: 0,
-        record: drawn,
-        body: "",
-      }),
-      z.object({ id: z.string(), path: z.string() })
+    const v1 = await opened(admin, app, first.id);
+    const link = { appId: "app-1", workflowId: "pay" };
+    const drawnLink = codeOf(
+      await call(admin, app, "map.link", "mutation", {
+        id: first.id,
+        expectedRevision: v1?.current._rev,
+        app: link,
+      })
     );
-    const saveOver = async (input: Record<string, unknown>) =>
-      await call(app, admin.userId, "save", {
-        ifVersion: 1,
-        record: drawn,
-        body: "",
-        ...input,
-      });
+    const designed = { ...drawn, state: "designed", steps: designedSteps };
+    valueOf(await save(admin, app, first.id, v1?.current._rev ?? 0, designed));
+    const v2 = await opened(admin, app, first.id);
+    valueOf(
+      await call(admin, app, "map.link", "mutation", {
+        id: first.id,
+        expectedRevision: v2?.current._rev,
+        app: link,
+      })
+    );
+    const v3 = await opened(admin, app, first.id);
+    const revision = v3?.current._rev ?? 0;
+    const sneaked = {
+      byHandLink: codeOf(
+        await save(admin, app, first.id, revision, {
+          ...designed,
+          app: { appId: "app-2", workflowId: "other" },
+        })
+      ),
+      byHandDrawn: codeOf(
+        await save(admin, app, first.id, revision, {
+          ...designed,
+          drawnVersion: 3,
+        })
+      ),
+      drawnAgain: codeOf(await save(admin, app, first.id, revision, drawn)),
+    };
+    // Saved again as designed: the link and the version last drawn kept.
+    valueOf(await save(admin, app, first.id, revision, designed));
+    const v4 = await opened(admin, app, first.id);
+    expect({
+      drawnLink,
+      sneaked,
+      linked: [v3, v4].map((found) => ({
+        version: found?.current.version,
+        app: found?.current.app,
+        drawnVersion: found?.current.drawnVersion,
+      })),
+    }).toStrictEqual({
+      drawnLink: "map.not_designed",
+      sneaked: {
+        byHandLink: "contract.invalid_args",
+        byHandDrawn: "contract.invalid_args",
+        drawnAgain: "map.linked_drawn",
+      },
+      linked: [
+        { version: 3, app: link, drawnVersion: 1 },
+        { version: 4, app: link, drawnVersion: 1 },
+      ],
+    });
+  });
+
+  it("never writes over someone else's edits, nor loses a version", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const designed = { ...drawn, state: "designed", steps: designedSteps };
+    const first = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, drawn))
+    );
+    const v1 = await opened(admin, app, first.id);
+    valueOf(await save(admin, app, first.id, v1?.current._rev ?? 0, designed));
+    const v2 = await opened(admin, app, first.id);
+    const read = v2?.current._rev ?? 0;
+    // Someone else saves first.
+    valueOf(
+      await save(admin, app, first.id, read, { ...designed, title: "Theirs" })
+    );
+    const stale = {
+      saved: codeOf(
+        await save(admin, app, first.id, read, { ...designed, title: "Mine" })
+      ),
+      linked: codeOf(
+        await call(admin, app, "map.link", "mutation", {
+          id: first.id,
+          expectedRevision: read,
+          app: { appId: "app-1", workflowId: "pay" },
+        })
+      ),
+    };
+    const now = await opened(admin, app, first.id);
+    const fourth = valueOf(
+      await call(admin, app, "map.version", "query", {
+        id: first.id,
+        version: 4,
+      })
+    );
+    expect({
+      stale,
+      now: {
+        version: now?.current.version,
+        title: now?.current.title,
+        app: now?.current.app,
+      },
+      fourth,
+    }).toStrictEqual({
+      stale: { saved: "data.conflict", linked: "data.conflict" },
+      now: { version: 3, title: "Theirs", app: null },
+      // Neither refused write left a version behind.
+      fourth: null,
+    });
+  });
+
+  it("is read by everyone it is shared with, and changed by its builders alone", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const first = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, drawn))
+    );
+    const drawnFirst = await opened(admin, app, first.id);
+    valueOf(
+      await save(admin, app, first.id, drawnFirst?.current._rev ?? 0, {
+        ...drawn,
+        state: "designed",
+      })
+    );
+    const v1 = await opened(admin, app, first.id);
+    const member = await memberOf(admin, app, "user", "user");
+    const builder = await memberOf(admin, app, "builder", "builder");
+    const outsider = await signedInApi(idp, "user");
+    const by = async (
+      person: Person,
+      path: string,
+      kind: "query" | "mutation" | "action",
+      input: unknown = {}
+    ) => codeOf(await call(person, app, path, kind, input));
+    const writable = async (person: Person) =>
+      valueOf(await call(person, app, "access.writable", "action"));
 
     expect({
-      openTeam: await call(app, admin.userId, "open", teamId),
-      overTeam: await saveOver({ documentId: teamId, path: team.path }),
-      unnamed: await saveOver({ path: workflow.path }),
-      elsewhere: await saveOver({
-        documentId: workflow.id,
-        path: team.path,
-      }),
-      asTeam: await call(app, admin.userId, "save", {
-        ifVersion: 0,
-        record: { type: "team", title: "Not a workflow" },
-        body: "",
-      }),
-      // What it may: the workflow, by its ID at its path, changed (a save
-      // that changes nothing makes no version).
-      workflow: okOf(
-        await saveOver({
-          documentId: workflow.id,
-          path: workflow.path,
-          body: "Changed.",
+      member: {
+        list: await by(member, "map.list", "query", { pagination: {} }),
+        open: await by(member, "map.open", "query", { id: first.id }),
+        teams: await by(member, "teams.list", "query"),
+        writable: await writable(member),
+        save: codeOf(await save(member, app, null, null, drawn)),
+        edit: codeOf(
+          await save(member, app, first.id, v1?.current._rev ?? 0, drawn)
+        ),
+        team: await by(member, "teams.add", "mutation", { title: "Ops" }),
+        link: await by(member, "map.link", "mutation", {
+          id: first.id,
+          expectedRevision: v1?.current._rev,
+          app: { appId: "app-1", workflowId: "pay" },
         }),
-        z.object({ currentVersion: z.number() })
+      },
+      builder: {
+        writable: await writable(builder),
+        save: codeOf(await save(builder, app, null, null, drawn)),
+      },
+      admin: await writable(admin),
+      outsider: await by(outsider, "map.list", "query", { pagination: {} }),
+      // Theirs, untouched.
+      version: await opened(admin, app, first.id).then(
+        (found) => found?.current.version
       ),
     }).toStrictEqual({
-      openTeam: { error: "map.not_workflow" },
-      overTeam: { error: "map.not_workflow" },
-      unnamed: { error: "map.not_workflow" },
-      elsewhere: { error: "map.not_workflow" },
-      asTeam: { error: "map.not_workflow" },
-      workflow: { currentVersion: 2 },
-    });
-    // The team is as it was: one version, still a team.
-    const { results } = await env.KNOWLEDGE.prepare(
-      "SELECT type, current_version AS version FROM documents WHERE id = ?"
-    )
-      .bind(teamId)
-      .all();
-    expect(results).toStrictEqual([{ type: "team", version: 1 }]);
-  });
-
-  it("keeps the Playbook's workflows the first copy's: a second copy is shown as another App's to the admin, and links nothing", async () => {
-    const { admin, app } = await setUp();
-    const designed = okOf(
-      await call(app, admin.userId, "save", {
-        ifVersion: 0,
-        record: { ...drawn, state: "designed" },
-        body: "",
-      }),
-      savedSchema
-    );
-    // A second copy, granted without taking the first one's away.
-    const second = await admin.api.apps.blueprints.create(workflowMap, {
-      name: `Another map ${unique()}`,
-    });
-    const listed = await admin.api.permissions.list({
-      type: "app",
-      appId: second.app.id,
-    });
-    for (const { id } of second.permissions) {
-      // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-      await grantReviewed(admin.api, id);
-    }
-    await admin.api.apps.versions.setCurrent(second.app.id, 1);
-    await serverBuilt(second.app.id, 1);
-    const copy = appIdSchema.parse(second.app.id);
-    expect({
-      shown: listed.map(({ recordTypes }) => recordTypes),
-      link: await call(copy, admin.userId, "link", {
-        documentId: designed.id,
-        ifVersion: 1,
-        appId: app,
-        workflowId: "pay",
-      }),
-      // The first copy still links it.
-      owner: okOf(
-        await call(app, admin.userId, "link", {
-          documentId: designed.id,
-          ifVersion: 1,
-          appId: copy,
-          workflowId: "pay",
-        }),
-        savedSchema
-      ).currentVersion,
-    }).toStrictEqual({
-      shown: [
-        {
-          claims: [],
-          taken: [
-            { type: "workflow", owner: app },
-            { type: "team", owner: app },
-          ],
-        },
-      ],
-      link: { error: "knowledge.invalid" },
-      owner: 2,
+      member: {
+        list: "ok",
+        open: "ok",
+        teams: "ok",
+        writable: false,
+        save: "data.write_denied",
+        edit: "data.write_denied",
+        team: "data.write_denied",
+        link: "data.write_denied",
+      },
+      builder: { writable: true, save: "ok" },
+      admin: true,
+      outsider: "app.not_found",
+      version: 2,
     });
   });
 
-  it("says it has no Playbook until an admin grants it", async () => {
-    await builtins(env).ensureInstalled(await fingerprintOf(release));
+  it("holds no more teams than it lists", async () => {
     const admin = await signedInApi(idp, "admin");
-    const created = await admin.api.apps.blueprints.create(workflowMap, {
-      name: `Ungranted ${unique()}`,
+    const app = await mapOf(admin);
+    const add = async (title: string) =>
+      codeOf(await call(admin, app, "teams.add", "mutation", { title }));
+    for (let count = 0; count < 100; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time
+      await add(`Team ${String(count).padStart(3, "0")}`);
+    }
+    const listed = z
+      .array(z.unknown())
+      .parse(valueOf(await call(admin, app, "teams.list", "query")));
+    // Its title sorts first: listed, it would push out the last one.
+    expect({ listed: listed.length, more: await add("AAA") }).toStrictEqual({
+      listed: 100,
+      more: "map.too_many_teams",
     });
-    await admin.api.apps.versions.setCurrent(created.app.id, 1);
-    await serverBuilt(created.app.id, 1);
-    const app = appIdSchema.parse(created.app.id);
+  });
+
+  it("takes no team that isn't one of its own, and designs nothing never drawn", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const first = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, drawn))
+    );
     expect({
-      overview: await call(app, admin.userId, "overview"),
-      save: await call(app, admin.userId, "save", {
-        ifVersion: 0,
-        record: drawn,
-        body: "",
-      }),
+      // A workflow's ID where a team's goes.
+      notATeam: codeOf(
+        await save(admin, app, null, null, { ...drawn, team: first.id })
+      ),
+      madeUp: codeOf(
+        await save(admin, app, null, null, { ...drawn, team: "team-1" })
+      ),
+      designedFirst: codeOf(
+        await save(admin, app, null, null, { ...drawn, state: "designed" })
+      ),
     }).toStrictEqual({
-      overview: {
-        ok: {
-          access: "none",
-          writable: false,
-          workflows: [],
-          unreadable: [],
-          teams: [],
+      notATeam: "data.reference_invalid",
+      madeUp: "contract.invalid_args",
+      designedFirst: "map.not_drawn",
+    });
+  });
+
+  it("works out each workflow's hours for another App: times × minutes × people over 60, one person where none is said, observed only when every number is", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const saved = async (title: string, steps: unknown[]) =>
+      savedSchema.parse(
+        valueOf(await save(admin, app, null, null, { ...drawn, title, steps }))
+      ).id;
+    const mixed = await saved("Mixed", [
+      {
+        name: "One",
+        handover: false,
+        numbers: {
+          frequency: estimated(30),
+          minutes: observed(10),
+          people: estimated(2),
         },
       },
-      save: { error: "permission.denied" },
+      {
+        name: "Two",
+        handover: false,
+        numbers: { frequency: observed(1), minutes: observed(30) },
+      },
+    ]);
+    const seen = await saved("Seen", [
+      {
+        name: "One",
+        handover: false,
+        numbers: { frequency: observed(1), minutes: observed(30) },
+      },
+    ]);
+    const none = await saved("None", [{ name: "One", handover: false }]);
+    const absurd = await saved("Absurd", [
+      {
+        name: "One",
+        handover: false,
+        numbers: {
+          frequency: estimated(10_000),
+          minutes: estimated(10_000),
+          people: estimated(10_000),
+        },
+      },
+    ]);
+    const page = z
+      .object({
+        items: z.array(
+          z.looseObject({
+            id: z.string(),
+            current: z
+              .object({
+                hoursPerWeek: z.number(),
+                basis: z.string(),
+                minutesPerPass: z.number(),
+              })
+              .loose(),
+          })
+        ),
+      })
+      .parse(
+        valueOf(
+          await call(admin, app, "figures.list", "query", { pagination: {} })
+        )
+      );
+    const of = (id: string) => {
+      const found = page.items.find((item) => item.id === id)?.current;
+      return (
+        found && {
+          hoursPerWeek: found.hoursPerWeek,
+          basis: found.basis,
+          minutesPerPass: found.minutesPerPass,
+        }
+      );
+    };
+    expect({
+      mixed: of(mixed),
+      seen: of(seen),
+      none: of(none),
+      absurd: of(absurd)?.hoursPerWeek,
+    }).toStrictEqual({
+      // 30 × 10 × 2 + 1 × 30 minutes: 10.5 hours; a pass, 20 + 30 minutes.
+      mixed: { hoursPerWeek: 10.5, basis: "estimated", minutesPerPass: 50 },
+      seen: { hoursPerWeek: 0.5, basis: "observed", minutesPerPass: 30 },
+      none: { hoursPerWeek: 0, basis: "estimated", minutesPerPass: 0 },
+      // Held to what the figures hold.
+      absurd: 100_000,
+    });
+  });
+
+  it("takes no control characters in a name, none but tabs and line breaks in notes, no half surrogate, and only identifiers as a link's IDs", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const saved = async (fields: Record<string, unknown>) =>
+      codeOf(await save(admin, app, null, null, { ...drawn, ...fields }));
+    const designed = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, drawn))
+    );
+    const v1 = await opened(admin, app, designed.id);
+    valueOf(
+      await save(admin, app, designed.id, v1?.current._rev ?? 0, {
+        ...drawn,
+        state: "designed",
+      })
+    );
+    const v2 = await opened(admin, app, designed.id);
+    const linked = async (appId: string, workflowId: string) =>
+      codeOf(
+        await call(admin, app, "map.link", "mutation", {
+          id: designed.id,
+          expectedRevision: v2?.current._rev,
+          app: { appId, workflowId },
+        })
+      );
+    expect({
+      title: await saved({ title: "Pay\u0007 invoices" }),
+      tab: await saved({ title: "Pay\tinvoices" }),
+      who: await saved({
+        steps: [{ name: "Match", who: "Con\u001Btroller", handover: false }],
+      }),
+      parameter: await saved({
+        parameters: [{ name: "Limit", value: "5\u0000000" }],
+      }),
+      halfSurrogate: await saved({ title: "Pay \uD800 invoices" }),
+      notesBreaks: await saved({ notes: "Line one\n\tLine two\r\n" }),
+      notesControl: await saved({ notes: "Line\u0001 one" }),
+      team: codeOf(
+        await call(admin, app, "teams.add", "mutation", {
+          title: "Fin\u0008ance",
+        })
+      ),
+      linkSpace: await linked("app 1", "pay"),
+      linkQuote: await linked("app-1", 'pay"'),
+      linkFine: await linked("app-1.v2", "pay_now:1"),
+    }).toStrictEqual({
+      title: "map.invalid",
+      tab: "map.invalid",
+      who: "map.invalid",
+      parameter: "map.invalid",
+      halfSurrogate: "map.invalid",
+      notesBreaks: "ok",
+      notesControl: "map.invalid",
+      team: "map.invalid",
+      linkSpace: "map.invalid",
+      linkQuote: "map.invalid",
+      linkFine: "ok",
+    });
+  });
+
+  it("opens a workflow with its notes and the version last drawn without them, within what a query answers", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    // As much as a workflow holds: steps near the listed bound, and notes
+    // at their longest, of characters 3 bytes each.
+    const big = {
+      ...drawn,
+      steps: Array.from({ length: 12 }, (_, index) => longStep(index)),
+      notes: "€".repeat(30_000),
+    };
+    const first = savedSchema.parse(
+      valueOf(await save(admin, app, null, null, big))
+    );
+    const v1 = await opened(admin, app, first.id);
+    valueOf(
+      await save(admin, app, first.id, v1?.current._rev ?? 0, {
+        ...big,
+        state: "designed",
+      })
+    );
+    const answer = await call(admin, app, "map.open", "query", {
+      id: first.id,
+    });
+    const read = openedSchema.parse(valueOf(answer));
+    expect({
+      notes: read?.current.notes.length,
+      drawnVersion: read?.drawn?.version,
+      drawnNotes: read?.drawn !== null && "notes" in (read?.drawn ?? {}),
+    }).toStrictEqual({ notes: 30_000, drawnVersion: 1, drawnNotes: false });
+  });
+
+  it("pages its figures for another App in an order no save changes, so a rename between pages loses or repeats none", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    const ids = [];
+    for (const title of ["Bill", "Close", "Deliver"]) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they're made
+      const made = await save(admin, app, null, null, { ...drawn, title });
+      ids.push(savedSchema.parse(valueOf(made)).id);
+    }
+    const figuresSchema = z.object({
+      items: z.array(z.looseObject({ id: z.string() })),
+      nextCursor: z.string().nullable(),
+    });
+    const page = async (cursor: string | null) =>
+      figuresSchema.parse(
+        valueOf(
+          await call(admin, app, "figures.list", "query", {
+            pagination: { pageSize: 2, cursor },
+          })
+        )
+      );
+    const first = await page(null);
+    // The one not read yet is renamed to sort first by title.
+    const last = ids[2] ?? "";
+    const before = await opened(admin, app, last);
+    valueOf(
+      await save(admin, app, last, before?.current._rev ?? 0, {
+        ...drawn,
+        title: "Account",
+      })
+    );
+    const second = await page(first.nextCursor);
+    expect([...first.items, ...second.items].map(({ id }) => id)).toStrictEqual(
+      ids
+    );
+  });
+
+  it("keeps a page of the list within what a query answers, however much its workflows hold", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await mapOf(admin);
+    // Each field within its limit, all at their longest too much to list.
+    const tooLarge = codeOf(
+      await save(admin, app, null, null, {
+        ...drawn,
+        steps: Array.from({ length: 100 }, (_, index) => longStep(index)),
+      })
+    );
+    // As much as one workflow may hold, eleven times over.
+    const large = {
+      ...drawn,
+      steps: Array.from({ length: 30 }, (_, index) => longStep(index)),
+      notes: "n".repeat(30_000),
+    };
+    const saveLarge = async (): Promise<void> => {
+      valueOf(await save(admin, app, null, null, large));
+    };
+    for (let count = 0; count < 11; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one save at a time
+      await saveLarge();
+    }
+    const page = pageSchema.parse(
+      valueOf(
+        await call(admin, app, "map.list", "query", {
+          pagination: { pageSize: 50 },
+        })
+      )
+    );
+    expect({ tooLarge, page: page.items.length }).toStrictEqual({
+      tooLarge: "map.too_large",
+      page: 10,
     });
   });
 });

@@ -95,6 +95,10 @@ export const operationErrors = defineErrorFamily({
     "The model budget this request counts against is used up, so it wasn't sent.",
   "resource.budget_busy":
     "Model requests still under way hold what's left of the budget this request counts against, so it wasn't sent. Try again shortly.",
+  "resource.queued":
+    "Other requests running now fill this share of the model requests that may run at once, so this one wasn't sent yet. Try again after the wait it names.",
+  "resource.rate_limited":
+    "The model's provider is taking no more requests for now, so this request wasn't answered. Try again after the wait it names.",
   "resource.awaiting_confirmation":
     "This request waits for the person it acts for to confirm it. Make the same call again once they have.",
   "resource.declined":
@@ -105,6 +109,12 @@ export const operationErrors = defineErrorFamily({
     "The arguments don't fit the contract of the resource's action.",
   "resource.item_not_found":
     "The resource has no such item, or none the App may read for this person.",
+  "resource.operation_failed":
+    "The store's operation refused the request or failed: its details name the store's own code.",
+  "resource.busy":
+    "The store's operation couldn't run just now. Try again shortly.",
+  "resource.limit_reached":
+    "The App used this resource as much as it may in one call, one minute or one day, holds as much of it open as it may at once, or made as deep, as round or as many calls between Apps as it may, so this request wasn't made. Its details name which.",
   "contract.invalid_resource_result":
     "A resource answered something its contract doesn't allow.",
   "contract.invalid_args": "The arguments don't fit the operation.",
@@ -126,6 +136,8 @@ export const operationErrors = defineErrorFamily({
     "The operation staged a change its schema doesn't allow.",
   "contract.invalid_request":
     "The operation's code sent the host something that isn't JSON.",
+  "contract.not_paginated":
+    "That query doesn't take a pagination argument and answer pages, so it can't be read as a paginated list.",
   "mutation.too_large":
     "This change stages more than one commit can hold, with what it returns.",
   "operation.read_limit":
@@ -156,11 +168,16 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.not_allowed": "contract",
   "resource.budget_exhausted": "operational",
   "resource.budget_busy": "operational",
+  "resource.queued": "operational",
+  "resource.rate_limited": "operational",
   "resource.awaiting_confirmation": "operational",
   "resource.item_not_found": "domain",
   "resource.invalid_args": "contract",
   "resource.declined": "domain",
   "resource.idempotency_conflict": "contract",
+  "resource.operation_failed": "domain",
+  "resource.busy": "operational",
+  "resource.limit_reached": "operational",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
   "data.referenced": "domain",
@@ -213,6 +230,13 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "submission.deadline_passed",
   // Nothing was sent; room comes back as requests under way settle.
   "resource.budget_busy",
+  // Nothing was sent; a share comes back as requests in flight end, and a
+  // provider's rate as its window passes.
+  "resource.queued",
+  "resource.rate_limited",
+  // A shared store's operation that couldn't run now (busy, a concurrent
+  // change): nothing it did stands in the way of the same call again.
+  "resource.busy",
   "operation.sandbox_busy",
   "operation.sandbox_unavailable",
   // Nothing was published; the build runs on, cached for the next try.

@@ -14,11 +14,13 @@ import { integrationsOf } from "../connections/integrations.ts";
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useCore } from "../use-core.ts";
+import { everyPage } from "./outcome-pages.ts";
 import { decidesRequests, toReconnect } from "./to-do.tsx";
 import type { Viewer } from "./to-do.tsx";
 
 // The nav's way to the dashboard, with how many things wait on the person
 // (as the prototype's badge, `app-sidebar.tsx`): changes to confirm,
+// changes sent whose answer was lost, for the person to say what became of,
 // unread failed workflows, connections to sign in to again, packages to
 // approve and, for admins, permission requests and apps to approve. Read again on every other page the person
 // opens and after every change on one; nothing is marked read by counting.
@@ -43,6 +45,19 @@ const readCount = async (
         const held = await session.pendingActions.list();
         return held.length;
       })
+    ),
+    // Each page within its own few seconds (`readWithin`).
+    countOf(
+      (async () => {
+        const lost = await everyPage(
+          async (before) =>
+            await readWithin(
+              core,
+              async (session) => await session.unknownOutcomes.list(before)
+            )
+        );
+        return lost.length;
+      })()
     ),
     countOf(
       readWithin(core, async (session) => {

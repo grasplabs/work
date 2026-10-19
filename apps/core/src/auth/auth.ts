@@ -26,6 +26,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
+import { teamAccessMayHaveDropped, teamGone } from "../access-revocations.ts";
 import {
   auditedBatch,
   keepAuditEvent,
@@ -74,7 +75,8 @@ const keyRotationSeconds = 30 * 24 * 60 * 60;
 
 /**
  * Who App tokens are for: a portable host's calls of this deployment's
- * App functions, and nothing else that reads a token of core's.
+ * App functions and its live connection (portable-live.ts), and nothing
+ * else that reads a token of core's.
  */
 export const appTokenAudience = (origin: string): string =>
   `${origin}${portableFunctionPath}`;
@@ -701,6 +703,19 @@ const createAuth = (
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
         teams: { enabled: true },
+        // Leaving a team, or the team's deletion, can take a role in each
+        // App shared with it away: their hosts tell the open screens to
+        // look again (access-revocations.ts).
+        organizationHooks: {
+          afterRemoveTeamMember: async ({ teamMember }) => {
+            await teamAccessMayHaveDropped(env, teamMember.teamId, [
+              teamMember.userId,
+            ]);
+          },
+          afterDeleteTeam: async ({ team }) => {
+            await teamGone(env, team.id);
+          },
+        },
       }),
       sso({
         // Providers come only from deployment config, never from the

@@ -10,7 +10,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { appLimits } from "@grasp-os/shared/app-limits";
-import { appRecordTypesMaxLength } from "@grasp-os/shared/apps";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { writeBlueprints } from "./build-blueprints.ts";
@@ -58,30 +57,19 @@ const build = (dir: string): string => {
   return out;
 };
 
-const server = { "app/server.ts": "export class App {}\n" };
+const schema = {
+  "schema.ts":
+    'import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n',
+};
 
 /** A collection a built-in declares. */
 const tasks = { id: "tasks", name: "Tasks", description: "Things to do." };
 
-/** A permission to read and write `tasks`, under `binding`. */
-const onTasks = (binding = "TASKS", actions = ["read", "write"]) => ({
+/** A permission on `tasks`, to read unless `actions` say otherwise. */
+const onTasks = (binding = "TASKS", actions = ["read"]) => ({
   object: { type: "collection", collectionId: "tasks" },
   actions,
   binding,
-});
-
-/**
- * Record types of `task` records in `tasks`, whose frontmatter is of JSON
- * Schema type `type`, as `app/records.json`.
- */
-const records = (type = "object") => ({
-  "app/records.json": JSON.stringify({
-    task: {
-      collection: "tasks",
-      description: "A thing to do.",
-      schema: { type },
-    },
-  }),
 });
 
 /** The built-ins a module embeds. */
@@ -109,7 +97,7 @@ describe("the built-in blueprints' build", () => {
   });
 
   it("embeds a built-in that passes every check", () => {
-    const out = build(fixture("fine", server));
+    const out = build(fixture("fine", schema));
     expect(embedded(out)).toStrictEqual([
       {
         id: "fine",
@@ -117,14 +105,14 @@ describe("the built-in blueprints' build", () => {
         description: "A test's built-in.",
         collections: [],
         permissions: [],
-        files: server,
+        files: schema,
       },
     ]);
   });
 
   it("embeds the collections and permissions a built-in declares", () => {
     const out = build(
-      fixture("asks", server, {
+      fixture("asks", schema, {
         collections: [tasks],
         permissions: [onTasks()],
       })
@@ -136,6 +124,10 @@ describe("the built-in blueprints' build", () => {
 
   it.each([
     ["an action a collection doesn't have", [onTasks("TASKS", ["delete"])]],
+    [
+      "write on a collection, which an App never does",
+      [onTasks("TASKS", ["read", "write"])],
+    ],
     ["a binding name twice", [onTasks(), onTasks("TASKS", ["read"])]],
     ["a platform binding name", [onTasks("KNOWLEDGE")]],
     [
@@ -149,7 +141,7 @@ describe("the built-in blueprints' build", () => {
       ],
     ],
   ])("fails for a declared permission with %s", (_case, permissions) => {
-    const dir = fixture("asks", server, { collections: [tasks], permissions });
+    const dir = fixture("asks", schema, { collections: [tasks], permissions });
     expect(() => build(dir)).toThrow("blueprint.json");
     expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });
@@ -163,85 +155,18 @@ describe("the built-in blueprints' build", () => {
     ],
     ["a collection twice", [tasks, tasks], []],
   ])("fails for %s", (_case, collections, permissions) => {
-    const dir = fixture("asks", server, { collections, permissions });
+    const dir = fixture("asks", schema, { collections, permissions });
     expect(() => build(dir)).toThrow("blueprint.json");
     expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });
 
-  it("embeds a built-in whose record types the commit would take", () => {
-    const files = { ...server, ...records() };
-    const out = build(
-      fixture("typed", files, {
-        collections: [tasks],
-        permissions: [onTasks()],
-      })
-    );
-    expect(embedded(out)).toMatchObject([{ id: "typed", files }]);
-  });
-
   it.each([
-    ["record types that aren't JSON", '{ "task": ', "Not JSON"],
-    [
-      "a record type whose frontmatter isn't an object",
-      records("string")["app/records.json"],
-      "task.schema: A record's frontmatter is an object",
-    ],
-    [
-      "a record type with a field the schema doesn't know",
-      JSON.stringify({
-        task: { collection: "tasks", schema: { type: "object" }, colour: "" },
-      }),
-      'task: Unrecognized key: "colour"',
-    ],
-    [
-      "record types over the commit's length",
-      JSON.stringify({ padding: "x".repeat(appRecordTypesMaxLength) }),
-      `At most ${appRecordTypesMaxLength} characters`,
-    ],
-  ])("fails, naming the built-in, for %s", (_case, text, issue) => {
-    const dir = fixture(
-      "typed",
-      { ...server, "app/records.json": text },
-      { collections: [tasks], permissions: [onTasks()] }
-    );
-    expect(() => build(dir)).toThrow(
-      `${path.join(dir, "typed")}: files/app/records.json: ${issue}`
-    );
-    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
-  });
-
-  it.each([
-    ["a collection it doesn't declare", [], []],
-    [
-      "a collection it only asks to read",
-      [tasks],
-      [onTasks("TASKS", ["read"])],
-    ],
-  ])(
-    "fails for a record type kept in %s",
-    (_case, collections, permissions) => {
-      const dir = fixture(
-        "typed",
-        { ...server, ...records() },
-        {
-          collections,
-          permissions,
-        }
-      );
-      expect(() => build(dir)).toThrow(
-        `${path.join(dir, "typed")}: files/app/records.json: task: its collection tasks`
-      );
-      expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
-    }
-  );
-
-  it.each([
-    ["a hidden file", "hidden", { ...server, ".env": "SECRET=1\n" }, "files/"],
+    ["a hidden file", "hidden", { ...schema, ".env": "SECRET=1\n" }, "files/"],
     ["a path an App can't have", "spaced", { "app/my file.ts": "" }, "files/"],
     [
       "a file over an App's limit",
       "large",
-      { "app/server.ts": "x".repeat(appLimits.fileLength + 1) },
+      { "schema.ts": "x".repeat(appLimits.fileLength + 1) },
       "files/",
     ],
     [

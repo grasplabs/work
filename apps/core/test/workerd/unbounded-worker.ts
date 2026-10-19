@@ -19,7 +19,7 @@ import {
 } from "../../src/workflows/code.ts";
 
 // A workflow's code, a draft's preview, an App's server object, the
-// screen compiler and the package builder on plain workerd
+// App compiler and the package builder on plain workerd
 // with no sandbox and no `SANDBOX_IN_PROCESS=unbounded`
 // (scripts/workerd-unbounded-loaders.test.ts): core loads none of them, as
 // no sandbox bounds them here. Those the sandbox host runs (a workflow's
@@ -144,7 +144,8 @@ export default {
               { ...env, SANDBOX_HOST: undefined },
               {
                 "screens/home.tsx": "export default () => null;",
-              }
+              },
+              "app-test"
             )
         )
       );

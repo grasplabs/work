@@ -386,6 +386,7 @@ const keepRead = async (
     found.events.map(async (event) => ({
       id: await eventIdOf(event),
       payload: event.payload,
+      stamp: event.stamp,
     }))
   );
   const done = new Date();
@@ -414,6 +415,7 @@ const keepRead = async (
           action,
           type: source.type,
           payload: event.payload,
+          ...(event.stamp === undefined ? {} : { stamp: event.stamp }),
         }),
         retryAt: done,
         createdAt: done,

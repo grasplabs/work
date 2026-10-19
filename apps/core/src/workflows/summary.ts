@@ -33,7 +33,9 @@ import { detailsRemoved, removedText } from "./retention.ts";
 // queue its revision moves on. One whose step stopped asking (its
 // activation died while it waited) stops showing queued once its place
 // lapses, a minute and a half on, before anything writes its row: the next
-// admission that drops the place moves its revision on.
+// admission that drops the place moves its revision on. A run whose step's
+// model call waits for a share of the model requests in flight shows the
+// same way (model-waits.ts).
 
 /** What the one read of a run's summary returns. */
 const rowSchema = z.object({
@@ -230,15 +232,22 @@ export const runSummary = async (
           ORDER BY CASE c.kind WHEN 'cancel' THEN 0 ELSE 1 END
           LIMIT 1) AS pending,
        (SELECT json_object('waitingFor', q.waiting_for, 'retryAt', q.retry_at)
-          FROM workflow_admission_queue q
-          WHERE q.run_id = r.id AND q.seen_at > ?
+          FROM (
+            SELECT p.waiting_for, p.retry_at FROM workflow_admission_queue p
+              WHERE p.run_id = r.id AND p.seen_at > ?1
+            UNION ALL
+            SELECT m.waiting_for, m.retry_at FROM workflow_model_waits m
+              WHERE m.run_id = r.id AND m.seen_at > ?1
+                AND m.waiting_for IS NOT NULL
+          ) q
           ORDER BY q.retry_at
           LIMIT 1) AS queued
      FROM workflow_runs r
-     WHERE r.id = ? AND r.app_id = ?`
+     WHERE r.id = ?2 AND r.app_id = ?3`
   )
     // A place that stopped asking no longer holds the run in the queue
-    // (admission.ts): the run is no longer waiting there.
+    // (admission.ts), nor does a step's model call that stopped asking
+    // for a share (model-waits.ts): the run is no longer waiting there.
     .bind(Date.now() - queueLiveMs, id.data, found.id)
     .first();
   if (read === null) {

@@ -1,10 +1,11 @@
 import { isAppLayout } from "@grasp-os/compiler";
 import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
-import type { AppManifest } from "@grasp-os/sdk/host";
+import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 
 import { filesManifest } from "./app-inspection.ts";
+import { boundWorkflowsOf } from "./bound-workflows.ts";
 
 // What an App's screens import as `#grasp` (spec 8, 10.1): the public
 // references the host generates from its server code. They are data (each
@@ -28,57 +29,87 @@ const mentionsReferences = (files: Readonly<Record<string, string>>): boolean =>
   );
 
 /**
- * `files` with the references their screens import as `#grasp`, generated
- * for `app`'s `version` from the manifest `manifestOf` reads: unchanged
- * when no screen names them, when the files aren't of spec 8's layout, or
- * when their server code doesn't inspect. A screen that imports them then
- * fails its build and says so, and the server build says why.
+ * `files` with the references their screens import as `#grasp`, as
+ * `referencesOf` answers them: unchanged when no screen names them, when
+ * the files aren't of spec 8's layout, or when there are none (their
+ * server code doesn't build or inspect: an expected error). A screen that
+ * imports them then fails its build and says so, and the server build
+ * says why.
  */
-export const withReferencesFrom = async (
-  app: AppId,
-  version: number,
+export const withReferencesText = async (
   files: Record<string, string>,
-  manifestOf: () => Promise<AppManifest | undefined>
+  referencesOf: () => Promise<string | undefined>
 ): Promise<Record<string, string>> => {
   if (!(mentionsReferences(files) && isAppLayout(files))) {
     return files;
   }
-  let manifest: AppManifest | undefined;
+  let references: string | undefined;
   try {
-    manifest = await manifestOf();
+    references = await referencesOf();
   } catch (error) {
     if (isExpectedError(error)) {
       return files;
     }
     throw error;
   }
-  if (manifest === undefined) {
-    return files;
-  }
-  const generated = await generateModules(manifest, {
-    resourceId: app,
-    resourceVersion: version,
-  });
-  const references = generated[generatedPaths.references];
   return references === undefined
     ? files
     : { ...files, [generatedPaths.references]: references };
 };
 
+/** What references are generated from: a manifest, and its bound workflows. */
+export interface ReferenceSource {
+  readonly manifest: AppManifest;
+  readonly workflows: readonly WorkflowBindingExtras[];
+}
+
+/**
+ * `files` with the references their screens import as `#grasp`, generated
+ * for `app`'s `version` from what `sourceOf` reads (see
+ * `withReferencesText`).
+ */
+export const withReferencesFrom = async (
+  app: AppId,
+  version: number,
+  files: Record<string, string>,
+  sourceOf: () => Promise<ReferenceSource | undefined>
+): Promise<Record<string, string>> =>
+  await withReferencesText(files, async () => {
+    const source = await sourceOf();
+    const generated =
+      source === undefined
+        ? {}
+        : await generateModules(
+            source.manifest,
+            { resourceId: app, resourceVersion: version },
+            source.workflows
+          );
+    return Object.hasOwn(generated, generatedPaths.references)
+      ? generated[generatedPaths.references]
+      : undefined;
+  });
+
 /**
  * `files` as saved or drafted, for `app`'s `version` (a draft's base), with
  * the references their own server code generates: inspected as they are,
- * never read from a sealed release, which may hold other code.
+ * never read from a sealed release, which may hold other code, with the
+ * workflows they declare as the App binds them now.
  */
 export const withDraftReferences = async (
   env: Env,
   app: AppId,
   version: number,
-  files: Record<string, string>
+  files: Record<string, string>,
+  /**
+   * Given up on (a build job's lease lost): generating them starts no
+   * compile nor inspection, and it throws its reason.
+   */
+  signal?: AbortSignal
 ): Promise<Record<string, string>> =>
-  await withReferencesFrom(
-    app,
-    version,
-    files,
-    async () => await filesManifest(env, files)
-  );
+  await withReferencesFrom(app, version, files, async () => {
+    const manifest = await filesManifest(env, files, app, signal);
+    return {
+      manifest,
+      workflows: await boundWorkflowsOf(env, app, manifest),
+    };
+  });

@@ -96,6 +96,7 @@ const runReading = async (changes: Partial<Env> = {}) => {
       workflow: workflowIdSchema.parse("scans"),
       version: 1,
       runId,
+      shareSubject: userId,
       authority: authoritySchema.parse({
         subject: { type: "app", appId: app },
         onBehalfOf: userId,

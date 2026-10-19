@@ -1,6 +1,6 @@
 import type {
-  WorkflowRollbackContext,
-  WorkflowStepContext,
+  AnyWorkflowRollbackContext,
+  AnyWorkflowStepContext,
 } from "../src/contracts.ts";
 import type { RunNotification } from "../src/notifications.ts";
 
@@ -106,7 +106,7 @@ export const effectsOf = (run: string, label?: string): Effect[] =>
 export const effect = async (
   run: string,
   label: string,
-  context: WorkflowStepContext
+  context: AnyWorkflowStepContext
 ): Promise<string> => {
   const receipt = `${label}#${effects.length + 1}`;
   effects.push({
@@ -131,6 +131,20 @@ export const effect = async (
  * took them (worker.ts).
  */
 export const hostNotifications: RunNotification[] = [];
+
+/**
+ * Each batch of notifications the host took, with the activation fence as
+ * the run stood when it took it (`WorkflowRun.generationOver`).
+ */
+export const hostFences: {
+  run: string;
+  statuses: string[];
+  over: number | undefined;
+}[] = [];
+
+/** The fences the host was told with `run`'s batches, in order. */
+export const fencesOf = (run: string) =>
+  hostFences.filter((fence) => fence.run === run);
 
 /** How many more deliveries the host fails, by instance ID. */
 export const notifyFailures = new Map<string, number>();
@@ -181,7 +195,7 @@ export const eventOf = (warning: unknown): unknown =>
 export const undone = async (
   run: string,
   label: string,
-  context: WorkflowRollbackContext
+  context: AnyWorkflowRollbackContext
 ): Promise<void> => {
   const undoing = `undo-${label}`;
   effects.push({

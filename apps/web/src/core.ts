@@ -104,6 +104,19 @@ export const wait = async (ms: number): Promise<void> => {
   });
 };
 
+/** The ceiling of the pause before connecting again, at first and at most. */
+const reconnectCeilingMs = { first: 1000, most: 30_000 } as const;
+
+/**
+ * How long to wait before reconnect attempt `attempt` (0 for the first
+ * after a drop): anything up to a ceiling that doubles from 1 s to 30 s
+ * (spec 11.4, full jitter), so tabs that lost core together, as when it
+ * restarts, don't all come back at the same moment.
+ */
+export const reconnectDelay = (attempt: number): number =>
+  Math.random() *
+  Math.min(reconnectCeilingMs.most, reconnectCeilingMs.first * 2 ** attempt);
+
 /**
  * Whether `error` may pass when core is asked again: core out of reach or
  * failing, never a refusal it meant. Told by the error's shape alone, so a

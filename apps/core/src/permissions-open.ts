@@ -1,10 +1,13 @@
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { isAdmin } from "@grasp-os/shared/roles";
+import { drizzle } from "drizzle-orm/d1";
 
 import { appsFoundBy, appsReadableBy } from "./app-access.ts";
 import type { Member } from "./auth/identity.ts";
 import { requireStoreManager } from "./data-stores.ts";
+import { sdkStoreOwners } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { listPermissions } from "./permissions.ts";
 import { requireTriggerManager } from "./trigger-resources.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
@@ -24,6 +27,21 @@ const lets = async (check: () => Promise<unknown>): Promise<boolean> => {
     }
     throw error;
   }
+};
+
+/** The App that owns each of `stores` (`sdk_store_owners`), by store. */
+const storeOwners = async (
+  env: Env,
+  stores: readonly string[]
+): Promise<Map<string, string>> => {
+  if (stores.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ store: sdkStoreOwners.storeId, app: sdkStoreOwners.appId })
+    .from(sdkStoreOwners)
+    .where(inList(sdkStoreOwners.storeId, [...new Set(stores)]));
+  return new Map(rows.map(({ store, app }) => [store, app]));
 };
 
 /** Each resource's answer, by its kind and ID, for one listing. */
@@ -117,18 +135,33 @@ export const permissionsOpenTo = async (
     appsFoundBy(env, by),
     status
   );
+  // A store object names the App that owns it (`listPermissions` lists
+  // only those whose owner is open), which must be readable too.
+  const owners = await storeOwners(
+    env,
+    listed.flatMap(({ object }) =>
+      object.type === "store" ? [object.storeId] : []
+    )
+  );
   const named = listed.flatMap(({ subject: of, object }) => [
     ...(of.type === "app" ? [of.appId] : []),
     ...(object.type === "app" ? [object.appId] : []),
+    ...(object.type === "store" ? [owners.get(object.storeId) ?? ""] : []),
   ]);
-  const readable = await appsReadableBy(env, by, [...new Set(named)]);
+  const readable = await appsReadableBy(
+    env,
+    by,
+    [...new Set(named)].filter((app) => app !== "")
+  );
   const open: Permission[] = [];
   const answers: Answers = new Map();
   for (const permission of listed) {
     const { subject: of, object } = permission;
     const appsOpen =
       (of.type !== "app" || readable.has(of.appId)) &&
-      (object.type !== "app" || readable.has(object.appId));
+      (object.type !== "app" || readable.has(object.appId)) &&
+      (object.type !== "store" ||
+        readable.has(owners.get(object.storeId) ?? ""));
     // oxlint-disable-next-line no-await-in-loop -- each listed permission's own resources
     if (appsOpen && (await resourcesOpen(env, by, permission, answers))) {
       open.push(permission);

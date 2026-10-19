@@ -97,12 +97,12 @@ import {
 } from "./config.ts";
 import type { RollbackWork, StepConfig, StepWork } from "./config.ts";
 import type {
+  AnyWorkflowStepContext,
   WorkflowDefinition,
   WorkflowError,
   WorkflowDuration,
   WorkflowEvent,
   WorkflowStep,
-  WorkflowStepContext,
   WorkflowStepEvent,
 } from "./contracts.ts";
 import {
@@ -357,7 +357,7 @@ interface Registration {
   readonly work: RollbackWork;
   readonly config: StepConfig;
   /** The step's own context, as its latest attempt was given it. */
-  readonly context: WorkflowStepContext;
+  readonly context: AnyWorkflowStepContext;
   /** The step's result as journaled, if it succeeded. */
   readonly value: string | null;
 }
@@ -524,7 +524,7 @@ const contextOf = (
   identity: StepIdentity,
   claim: Claim,
   config: StepConfig
-): WorkflowStepContext => ({
+): AnyWorkflowStepContext => ({
   step: { name: identity.name, count: identity.occurrence },
   attempt: claim.attempt,
   idempotencyKey: claim.key,

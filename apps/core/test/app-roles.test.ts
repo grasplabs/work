@@ -3,9 +3,10 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { outlook, release, serverBuilt } from "./apps.ts";
+import { outlook, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { calledAs } from "./sealed-apps.ts";
 import {
   auditedDuring,
   letSessionRecheckPass,
@@ -35,24 +36,52 @@ const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
 const files = {
-  "app/server.ts": "export class App {}\n",
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
   "screens/desk.tsx": "export default () => <p>Desk</p>;\n",
 };
 
 /** The run each App `newApp` makes has: one that has ended. */
 const runOf = (app: string): string => `run-${app}`;
 
-/** A released App of `owner`'s, its server built, with an ended run. */
+/** A released App of `owner`'s, sealed, with an ended run. */
 const newApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Desk ${unique()}` });
   const version = await release(owner, id, files);
-  await serverBuilt(id, version);
   await env.DB.prepare(
     "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'report', ?, ?, 'completed', ?, ?)"
   )
     .bind(runOf(id), id, version, owner.userId, Date.now(), Date.now())
     .run();
   return id;
+};
+
+/** The code a function call of `person`'s was refused with, or "ok". */
+const functionOutcome = async (
+  { api }: Pick<Person, "api">,
+  app: string
+): Promise<string> => {
+  const answered = await calledAs(await api.whoami(), app, {
+    contractId: "desk.missing",
+    kind: "query",
+  });
+  return answered.ok ? "ok" : answered.error.code;
 };
 
 /** What `person` gets from each call their role in an App decides. */
@@ -69,7 +98,7 @@ const callsOn = async ({ api }: Person, app: string) => ({
     )
   ),
   open: await outcome(api.screens.open(app, "desk")),
-  call: await outcome(api.screens.call(app, "missing", [])),
+  call: await functionOutcome({ api }, app),
   runs: await outcome(api.workflows.list(app)),
   status: await outcome(api.workflows.status(runOf(app))),
   start: await outcome(api.workflows.start(app, "report")),
@@ -107,8 +136,8 @@ const asUser = {
   screen: "ok",
   report: "ok",
   open: "ok",
-  // Past the role check: the App's server fails on a method it lacks.
-  call: "app.failed",
+  // Past the role check: the App's release has no such function.
+  call: "operation.not_found",
   runs: "ok",
   status: "ok",
   // Past the role check: the App has no such workflow.
@@ -141,8 +170,8 @@ const lists = async ({ api }: Person, app: string): Promise<boolean> => {
 // Each test releases an App of its own and, through `callsOn`, makes some
 // thirty calls in a row, opening its screen among them: that builds the
 // screens of that App's version, which the build cache can't share across
-// Apps (it keys builds by App). The server is built ahead (`serverBuilt`),
-// but a loaded runner still takes longer than the default five seconds,
+// Apps (it keys builds by App). A loaded runner takes longer than the
+// default five seconds for that,
 // as screen-bridge.test.ts's tests do.
 describe("App roles", { timeout: 60_000 }, () => {
   it("keep an App private to its owner and the admins", async () => {
