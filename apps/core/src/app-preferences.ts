@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { PreferenceOperationName } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
@@ -13,10 +14,15 @@ import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { dataErrors } from "@grasp-os/shared/stores";
+import {
+  idempotencyKeySchema,
+  submissionErrors,
+} from "@grasp-os/shared/submissions";
 
 import type { Release } from "./app-releases.ts";
 import { inJurisdiction } from "./durable-objects.ts";
-import { preferencesTable } from "./store-host.ts";
+import { preferencesWatch } from "./store-host.ts";
+import type { StoredPreferences } from "./store-host.ts";
 
 // An App's preferences (spec 10.7.7): `preferences.get` and
 // `preferences.update`, which the SDK declares (preference-operations.ts)
@@ -48,19 +54,37 @@ import { preferencesTable } from "./store-host.ts";
 //   the next one only while that is still the current one, in one
 //   transaction (`data.conflict` otherwise). A patch that changes nothing
 //   writes nothing and keeps the revision.
-// - Access lost mid-call: the caller's gate (the release not revoked, the
-//   person's role read again, the deadline) runs before the store is
-//   read or written. A live `get` is read again through the screen's
+// - A save whose answer was lost, sent again: an `update` under an
+//   idempotency key keeps the key, its input's hash and its answer with
+//   the person's row; a resend of that write answers that answer, never a
+//   conflict with itself, and the same key with another input is refused
+//   (`submission.key_conflict`). Only the last write's key is kept: a
+//   resend after a later write conflicts on its revision instead.
+// - Access lost mid-call: the caller's gate (their own check, an agent's
+//   grant say; the release not revoked; the person's role read again; the
+//   deadline) runs before the store is read, and again right before it is
+//   written. A live `get` is read again through the screen's
 //   subscription, which lets go once access goes.
-// - What a live read tells: a watch is told only that the preferences'
-//   generation moved, never whose; core reads again as the subscriber.
+// - Activity leaked through live reads, or one person spending everyone's
+//   budget for them: a live `get` watches its own person's revision only
+//   (`preferencesWatch`), so a write tells the reads of the person who
+//   made it and nobody else's.
 // - Stored preferences that no longer fit the App's (a later version
 //   changed them): only what the person chose is stored, never a default,
 //   so a field they never set is answered with the default in force. A
 //   stored key the App no longer declares is left out of the answer and
-//   kept as stored, so going back to a version with it finds it again. A
-//   declared field whose stored value no longer fits is refused
-//   (`data.incompatible_record`), never coerced, dropped or rewritten.
+//   kept until the person next writes, which drops it: going back to a
+//   version with it finds it until then, and the document never grows
+//   with what earlier versions declared. A declared field whose stored
+//   value no longer fits is refused (`data.incompatible_record`), never
+//   coerced or rewritten; a patch that replaces it is taken.
+//
+// Audit: like a write of the App's own records, a preference write isn't
+// audited one by one; an agent's call of either is audited as
+// `agent.call`, and a
+// chat's agent may read or change its person's own preferences under its
+// grant on the App (`read` for `get`, `write` for `update`). Erasing a
+// person's preferences belongs to person erasure, as their records do.
 
 const pathPattern = /^preferences\.(?<name>get|update)$/u;
 
@@ -205,49 +229,78 @@ const effectiveOf = (
   );
 };
 
-/**
- * The person's document: what they chose, as stored (only the fields
- * they set, never a default, so a later default reaches them); what that
- * is under the App's preferences now, defaults filling in the rest; and
- * its revision.
- */
-const documentOf = (
-  operation: ResolvedPreferenceOperation,
-  stored: { valueJson: string | null; revision: number }
-): {
-  chosen: Record<string, Json>;
-  fields: Record<string, Json>;
-  revision: number;
-} => {
-  let chosen: unknown = {};
-  if (stored.valueJson !== null) {
-    try {
-      chosen = JSON.parse(stored.valueJson);
-    } catch {
-      throw dataErrors.create("data.incompatible_record");
-    }
+/** What the person chose, as stored: only the fields they set. */
+const chosenOf = (stored: StoredPreferences): Record<string, Json> => {
+  if (stored.valueJson === null) {
+    return {};
+  }
+  let chosen: unknown;
+  try {
+    chosen = JSON.parse(stored.valueJson);
+  } catch {
+    throw dataErrors.create("data.incompatible_record");
   }
   if (!isObject(chosen)) {
     throw dataErrors.create("data.incompatible_record");
   }
-  return {
-    chosen,
-    fields: effectiveOf(operation, chosen, () =>
-      dataErrors.create("data.incompatible_record")
-    ),
-    revision: stored.revision,
-  };
+  return chosen;
+};
+
+/** Only the fields of `chosen` the App declares now. */
+const declaredOf = (
+  operation: ResolvedPreferenceOperation,
+  chosen: Record<string, Json>
+): Record<string, Json> => {
+  const declared = declaredNames(operation.preferences);
+  return Object.fromEntries(
+    Object.entries(chosen).filter(([name]) => declared.has(name))
+  );
 };
 
 /** What both operations answer: the fields and `_rev`, as declared. */
 const answerOf = (
   operation: ResolvedPreferenceOperation,
-  document: { fields: Record<string, Json>; revision: number }
-): Json => {
-  const answer = { ...document.fields, _rev: document.revision };
-  return checked(operation.returns, answer, () =>
+  fields: Record<string, Json>,
+  revision: number
+): Json =>
+  checked(operation.returns, { ...fields, _rev: revision }, () =>
     operationErrors.create("contract.invalid_return")
   );
+
+/** The answer a keyed write kept, read back. */
+const keptAnswer = (answerJson: string): Json =>
+  // SAFETY: core wrote it, as the canonical text of an answer it checked.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  JSON.parse(answerJson) as Json;
+
+/** `get`: what the person has, watched by their own revision. */
+const answerGet = (
+  operation: ResolvedPreferenceOperation,
+  caller: PreferencesCaller,
+  storeId: StoreId,
+  stored: StoredPreferences
+): OperationResult => {
+  const fields = effectiveOf(operation, chosenOf(stored), () =>
+    dataErrors.create("data.incompatible_record")
+  );
+  caller.observeReads?.(storeId, {
+    [preferencesWatch(caller.userId)]: stored.revision,
+  });
+  return { ok: true, value: answerOf(operation, fields, stored.revision) };
+};
+
+/** What the person has now, or undefined when it no longer fits. */
+const currentOf = (
+  operation: ResolvedPreferenceOperation,
+  chosen: Record<string, Json>
+): Record<string, Json> | undefined => {
+  try {
+    return effectiveOf(operation, chosen, () =>
+      dataErrors.create("data.incompatible_record")
+    );
+  } catch {
+    return undefined;
+  }
 };
 
 /**
@@ -258,7 +311,8 @@ export const answerPreferences = async (
   env: Env,
   caller: PreferencesCaller,
   operation: ResolvedPreferenceOperation,
-  input: unknown
+  input: unknown,
+  idempotencyKey?: string
 ): Promise<OperationResult> => {
   const args = checked(operation.args, input, () =>
     operationErrors.create("contract.invalid_args")
@@ -266,45 +320,75 @@ export const answerPreferences = async (
   await caller.gate();
   const { storeId, stub } = storeOfRelease(env, caller.release);
   const stored = await stub.readPreferences(storeId, caller.userId);
-  const current = documentOf(operation, stored);
   if (operation.name === "get") {
-    caller.observeReads?.(storeId, { [preferencesTable]: stored.generation });
-    return { ok: true, value: answerOf(operation, current) };
+    return answerGet(operation, caller, storeId, stored);
   }
   const { expectedRevision, patch } = args;
   if (!isObject(patch)) {
     throw operationErrors.create("contract.invalid_args");
   }
-  if (expectedRevision !== current.revision) {
+  const key =
+    idempotencyKey === undefined
+      ? undefined
+      : submissionErrors.parse(
+          "submission.key_invalid",
+          idempotencyKeySchema,
+          idempotencyKey
+        );
+  const inputHash = await sha256Hex(canonicalText(args));
+  // A resend of the last write, its answer lost: that answer again, not a
+  // conflict with itself. The same key for another change is refused.
+  if (key !== undefined && stored.lastKey === key) {
+    if (stored.lastInputHash !== inputHash || stored.lastAnswerJson === null) {
+      throw submissionErrors.create("submission.key_conflict");
+    }
+    return { ok: true, value: keptAnswer(stored.lastAnswerJson) };
+  }
+  if (expectedRevision !== stored.revision) {
     throw dataErrors.create("data.conflict");
   }
   // Only the fields the patch names: one it leaves out stays as it was.
   const changed = Object.fromEntries(
     Object.entries(patch).filter(([, value]) => value !== undefined)
   );
-  // What the person chose, with the patch: stored as that, never with
-  // the defaults, and checked whole as the App's preferences now.
-  const chosen = { ...current.chosen, ...changed };
+  const before = chosenOf(stored);
+  // What the person chose, with the patch, stored as that and never with
+  // the defaults: a later default reaches them. Keys the App no longer
+  // declares are dropped as they are written, so the document never
+  // grows with what earlier versions declared. Checked whole as the
+  // App's preferences now, the stored values with the patch's over them:
+  // a patch that replaces a value that no longer fits is taken.
+  const chosen = { ...declaredOf(operation, before), ...changed };
   const next = effectiveOf(operation, chosen, () =>
-    operationErrors.create("contract.invalid_args")
+    dataErrors.create("data.incompatible_record")
   );
   // A patch that changes nothing they have writes nothing: the revision
   // stays.
-  if (canonicalText(next) === canonicalText(current.fields)) {
-    return { ok: true, value: answerOf(operation, current) };
+  const current = currentOf(operation, before);
+  if (current !== undefined && canonicalText(next) === canonicalText(current)) {
+    return { ok: true, value: answerOf(operation, current, stored.revision) };
   }
+  const answer = answerOf(operation, next, stored.revision + 1);
+  // As late as it can be: access lost since the read writes nothing.
+  await caller.gate();
   const written = await stub.writePreferences(
     storeId,
     caller.userId,
-    current.revision,
-    canonicalText(chosen)
+    stored.revision,
+    canonicalText(chosen),
+    key === undefined
+      ? undefined
+      : { key, inputHash, answerJson: canonicalText(answer) }
   );
+  if ("replay" in written) {
+    return { ok: true, value: keptAnswer(written.replay) };
+  }
+  if ("keyConflict" in written) {
+    throw submissionErrors.create("submission.key_conflict");
+  }
   // Another write landed since this one read: the caller reads again.
   if ("conflict" in written) {
     throw dataErrors.create("data.conflict");
   }
-  return {
-    ok: true,
-    value: answerOf(operation, { fields: next, revision: written.revision }),
-  };
+  return { ok: true, value: answer };
 };

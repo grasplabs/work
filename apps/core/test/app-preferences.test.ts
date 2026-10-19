@@ -1,9 +1,16 @@
 import { contractFingerprint, preferenceOperations } from "@grasp-os/sdk/host";
 import type { PreferenceOperationName } from "@grasp-os/sdk/host";
+import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
+import {
+  appFunctionPath,
+  screenLeaseHeader,
+  screenPersonHeader,
+} from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -11,16 +18,19 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { loadRelease } from "../src/app-releases.ts";
+import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appMembers } from "../src/db/core/schema.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { preferencesWatch } from "../src/store-host.ts";
 import { mockIdp } from "./idp.ts";
-import { appWith, person, seal } from "./sealed-apps.ts";
+import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { signedInApi } from "./sign-in.ts";
+import { clientOrigin } from "./sign-in-config.ts";
+import { routed, signedInApi } from "./sign-in.ts";
 
 // An App's preferences (spec 10.7.7, app-preferences.ts): `preferences.get`
 // and `preferences.update`, answered by core for the signed-in person from
@@ -109,13 +119,18 @@ const callWith = async (
   { app }: Sealed,
   by: Pick<Identity, "userId" | "role" | "teams">,
   reference: unknown,
-  input: unknown
+  input: unknown,
+  idempotencyKey?: string
 ): Promise<OperationResult> => {
   const answered = await callAppFunction(
     env,
     by,
     app,
-    JSON.stringify({ reference, input })
+    JSON.stringify({
+      reference,
+      input,
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    })
   );
   return answered.result;
 };
@@ -132,12 +147,16 @@ const update = async (
   desk: Sealed,
   by: Pick<Identity, "userId" | "role" | "teams">,
   expectedRevision: number,
-  patch: unknown
+  patch: unknown,
+  idempotencyKey?: string
 ): Promise<OperationResult> =>
-  await callWith(desk, by, await referenceTo(desk.release, "update"), {
-    expectedRevision,
-    patch,
-  });
+  await callWith(
+    desk,
+    by,
+    await referenceTo(desk.release, "update"),
+    { expectedRevision, patch },
+    idempotencyKey
+  );
 
 /** The value of a call that succeeded; fails the test otherwise. */
 const valueOf = (result: OperationResult): unknown => {
@@ -150,6 +169,8 @@ const valueOf = (result: OperationResult): unknown => {
 /** `ok`, or the code the call failed with. */
 const codeOf = (result: OperationResult): string =>
   result.ok ? "ok" : result.error.code;
+
+const pushWait = { timeout: 30_000, interval: 50 };
 
 describe("an App's preferences", { timeout: 120_000 }, () => {
   it("answer the defaults at revision 0 until the person writes, even for an App with no tables", async () => {
@@ -209,6 +230,9 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       { theme: "blue" },
       { compact: "yes" },
       { compact: null },
+      // Own keys, as JSON makes them: never the prototype's.
+      JSON.parse('{"__proto__": {"compact": true}}'),
+      JSON.parse('{"constructor": {"prototype": {"compact": true}}}'),
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one after the other
       expect(codeOf(await update(desk, desk.owner, 0, patch))).toBe(
@@ -265,6 +289,34 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       theme: "dark",
       _rev: 1,
     });
+  });
+
+  it("tell a live read only of its own person's writes", async () => {
+    const desk = await sealedDesk();
+    const colleague = await person("user");
+    await share(desk, colleague);
+    const storeId = storeIdSchema.parse(desk.release.store?.storeId);
+    const store = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
+    // A watch of the owner's preferences, as their screen's live read
+    // keeps one.
+    const told: string[][] = [];
+    await store.watch(
+      storeId,
+      desk.owner.userId,
+      { [preferencesWatch(desk.owner.userId)]: 0 },
+      (tables: string[]) => {
+        told.push(tables);
+      }
+    );
+    await update(desk, colleague, 0, { compact: true });
+    await update(desk, colleague, 1, { theme: "dark" });
+    // Told in order: by the time the owner's own write is told, any telling
+    // of the colleague's writes would have come before it.
+    await update(desk, desk.owner, 0, { theme: "dark" });
+    await vi.waitFor(() => {
+      expect(told).toHaveLength(1);
+    }, pushWait);
+    expect(told).toStrictEqual([[preferencesWatch(desk.owner.userId)]]);
   });
 
   it("resolve only references the App's current release generates", async () => {
@@ -345,10 +397,10 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     );
     const admin = await person("admin");
     await revokeRelease(env, admin, { app: desk.app, version: 1 }, "Leaks");
-    expect(
-      codeOf(await update(desk, desk.owner, 0, { compact: true }))
-    ).not.toBe("ok");
-    expect(codeOf(await get(desk, desk.owner))).not.toBe("ok");
+    expect(codeOf(await update(desk, desk.owner, 0, { compact: true }))).toBe(
+      "version.revoked"
+    );
+    expect(codeOf(await get(desk, desk.owner))).toBe("version.revoked");
   });
 
   it("pass the caller's own check and the deadline as late as they can, so access lost mid-call reads and writes nothing", async () => {
@@ -377,10 +429,86 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       Date.now() - 1
     );
     expect(codeOf(late.result)).toBe("operation.deadline_exceeded");
+    // Still allowed when it read, no longer when it would write: nothing
+    // is written.
+    let checks = 0;
+    const lostBeforeWrite = await callAppFunction(
+      env,
+      desk.owner,
+      desk.app,
+      request,
+      Date.now() + 60_000,
+      async () => {
+        checks += 1;
+        if (checks > 1) {
+          await Promise.reject(new Error("Permission revoked"));
+        }
+      }
+    );
+    expect({ ok: lostBeforeWrite.result.ok, checks }).toStrictEqual({
+      ok: false,
+      checks: 2,
+    });
     expect(valueOf(await get(desk, desk.owner))).toMatchObject({ _rev: 0 });
   });
 
-  it("store only what the person chose: a later default reaches them, and a field a version removes comes back with it", async () => {
+  it("answer a resend of a write whose answer was lost from its key, and refuse the key for another change", async () => {
+    const desk = await sealedDesk();
+    const key = crypto.randomUUID();
+    const first = valueOf(
+      await update(desk, desk.owner, 0, { compact: true }, key)
+    );
+    // The answer was lost; the client sends the same save again, and gets
+    // the committed answer, not a conflict with itself.
+    const resent = valueOf(
+      await update(desk, desk.owner, 0, { compact: true }, key)
+    );
+    expect({ first, resent }).toStrictEqual({
+      first: { compact: true, theme: "light", _rev: 1 },
+      resent: { compact: true, theme: "light", _rev: 1 },
+    });
+    // The same key for a different change, from either revision; and a
+    // key that isn't one.
+    expect([
+      codeOf(await update(desk, desk.owner, 0, { theme: "dark" }, key)),
+      codeOf(await update(desk, desk.owner, 1, { theme: "dark" }, key)),
+      codeOf(await update(desk, desk.owner, 1, {}, "not\u0001ascii")),
+    ]).toStrictEqual([
+      "submission.key_conflict",
+      "submission.key_conflict",
+      "submission.key_invalid",
+    ]);
+    // A new key is a new change, from the revision it read.
+    expect(
+      valueOf(
+        await update(
+          desk,
+          desk.owner,
+          1,
+          { theme: "dark" },
+          crypto.randomUUID()
+        )
+      )
+    ).toStrictEqual({ compact: true, theme: "dark", _rev: 2 });
+  });
+
+  it("give an App with preferences and no tables its store only at seal", async () => {
+    const fixture = await appWith(filesWith(declared), "Desk");
+    await expect(
+      failure(
+        async () =>
+          await sealRelease(env, {
+            app: fixture.app,
+            version: 1,
+            by: fixture.owner,
+          })
+      )
+    ).resolves.toBe("version.store_unbound");
+    const release = await seal(fixture);
+    expect(release.store?.storeId).toBe(fixture.store);
+  });
+
+  it("store only what the person chose: a later default reaches them, and a field a version removes is kept until they write", async () => {
     const desk = await sealedDesk();
     await update(desk, desk.owner, 0, { compact: true });
     /** Seals the App's next version with `preferences`, and runs it. */
@@ -420,20 +548,29 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       theme: "light",
       _rev: 2,
     });
+    // Back on version 2 before they write again, the page size they chose
+    // is there again: reading rewrote nothing.
+    await setCurrentVersion(env, desk.owner, desk.app, 2);
+    expect(valueOf(await get(second, desk.owner))).toMatchObject({
+      pageSize: 50,
+      _rev: 2,
+    });
+    // A write on version 3 drops what it no longer declares, so the
+    // document never grows with what earlier versions declared.
+    await setCurrentVersion(env, desk.owner, desk.app, 3);
     expect(
       valueOf(await update(third, desk.owner, 2, { compact: false }))
     ).toStrictEqual({ compact: false, theme: "light", _rev: 3 });
-    // Back on version 2, the page size they chose is there again.
     await setCurrentVersion(env, desk.owner, desk.app, 2);
     expect(valueOf(await get(second, desk.owner))).toStrictEqual({
       compact: false,
       theme: "dark",
-      pageSize: 50,
+      pageSize: 25,
       _rev: 3,
     });
   });
 
-  it("refuse a stored value a later version no longer allows, rewriting nothing", async () => {
+  it("refuse a stored value a later version no longer allows, rewriting nothing, until a patch replaces it", async () => {
     const desk = await sealedDesk();
     await update(desk, desk.owner, 0, { theme: "dark" });
     await commitFiles(
@@ -454,12 +591,16 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     expect(codeOf(await update(second, desk.owner, 1, { compact: true }))).toBe(
       "data.incompatible_record"
     );
+    // A patch that replaces the value that no longer fits is taken.
+    expect(
+      valueOf(await update(second, desk.owner, 1, { theme: "light" }))
+    ).toStrictEqual({ compact: false, theme: "light", _rev: 2 });
     // Back on version 1, the stored choice is as it was.
     await setCurrentVersion(env, desk.owner, desk.app, 1);
     expect(valueOf(await get(desk, desk.owner))).toStrictEqual({
       compact: false,
-      theme: "dark",
-      _rev: 1,
+      theme: "light",
+      _rev: 2,
     });
   });
 });
@@ -503,58 +644,145 @@ const signedIn = async (role: Role) => {
   return { ...session, acting };
 };
 
+/**
+ * The Desk App sealed and current with its screen approved, opened by its
+ * builder, and that screen following the builder's preferences, once the
+ * first push came.
+ */
+const followingDesk = async () => {
+  const admin = await signedIn("admin");
+  const builder = await signedIn("builder");
+  const desk = await sealedDesk(filesWith(declared), builder.acting);
+  const review = await admin.api.screenTrust.review(desk.app);
+  await admin.api.screenTrust.approve(desk.app, {
+    version: review.version,
+    generation: review.generation,
+    artifacts: builtArtifacts(review.screens),
+  });
+  const bundle = await builder.api.screens.open(desk.app, "desk");
+  await builder.api.screens.present(desk.app, bundle.lease);
+  const follower = pageFollower();
+  const subscription = await builder.api.screens.watchQuery(
+    desk.app,
+    bundle.lease,
+    JSON.stringify({
+      reference: await referenceTo(desk.release, "get"),
+      input: {},
+    }),
+    follower.callback
+  );
+  const latest = () => {
+    const last = follower.received.at(-1)?.result;
+    return last?.ok === true ? last.value : undefined;
+  };
+  await vi.waitFor(
+    () => {
+      expect(latest()).toStrictEqual({
+        compact: false,
+        theme: "light",
+        _rev: 0,
+      });
+    },
+    { timeout: 30_000, interval: 50 }
+  );
+  return { admin, builder, desk, bundle, follower, subscription, latest };
+};
+
+/** What `person`'s screen gets calling `get` through core's function route. */
+const routedGet = async (
+  caller: Awaited<ReturnType<typeof signedIn>>,
+  desk: Sealed,
+  lease: string
+): Promise<string> => {
+  const response = await routed(`${appFunctionPath}/${desk.app}`, {
+    method: "POST",
+    headers: {
+      origin: clientOrigin,
+      "content-type": "application/json",
+      cookie: caller.session,
+      [screenPersonHeader]: caller.userId,
+      [screenLeaseHeader]: lease,
+    },
+    body: JSON.stringify({
+      reference: await referenceTo(desk.release, "get"),
+      input: {},
+    }),
+  });
+  const answer: unknown = await response.json();
+  if (!response.ok) {
+    return errorPayloadSchema.parse(answer).code;
+  }
+  const { result } = z
+    .object({
+      result: z.union([
+        z.object({ ok: z.literal(true) }),
+        z.object({
+          ok: z.literal(false),
+          error: z.object({ code: z.string() }),
+        }),
+      ]),
+    })
+    .parse(answer);
+  return result.ok ? "ok" : result.error.code;
+};
+
 describe(
   "a screen following its person's preferences",
   { timeout: 120_000 },
   () => {
     it("shows each update they make, pushed to the same subscription", async () => {
-      const admin = await signedIn("admin");
-      const builder = await signedIn("builder");
-      const desk = await sealedDesk(filesWith(declared), builder.acting);
-      const review = await admin.api.screenTrust.review(desk.app);
-      await admin.api.screenTrust.approve(desk.app, {
-        version: review.version,
-        generation: review.generation,
-        artifacts: builtArtifacts(review.screens),
-      });
-      const { lease } = await builder.api.screens.open(desk.app, "desk");
-      await builder.api.screens.present(desk.app, lease);
-      const release = await loadRelease(env, desk.app, 1);
-      const follower = pageFollower();
-      const subscription = await builder.api.screens.watchQuery(
-        desk.app,
-        lease,
-        JSON.stringify({
-          reference: await referenceTo(release, "get"),
-          input: {},
-        }),
-        follower.callback
+      const { builder, desk, subscription, latest } = await followingDesk();
+      await update(desk, builder.acting, 0, { compact: true });
+      await vi.waitFor(() => {
+        expect(latest()).toStrictEqual({
+          compact: true,
+          theme: "light",
+          _rev: 1,
+        });
+      }, pushWait);
+      await subscription.release();
+    });
+
+    it("hears nothing of anyone else's writes: no push, nothing read again", async () => {
+      const { builder, desk, follower, subscription, latest } =
+        await followingDesk();
+      const colleague = await person("user");
+      await share(desk, colleague);
+      await update(desk, colleague, 0, { compact: true });
+      await update(desk, colleague, 1, { theme: "dark" });
+      // Their own write after: by the time its push arrives, any push the
+      // colleague's writes made would have arrived before it.
+      await update(desk, builder.acting, 0, { theme: "dark" });
+      await vi.waitFor(() => {
+        expect(latest()).toMatchObject({ theme: "dark", _rev: 1 });
+      }, pushWait);
+      expect(follower.received).toHaveLength(2);
+      await subscription.release();
+    });
+
+    it("stops at the screen's revocation: its calls, and its subscription's next push", async () => {
+      const { admin, builder, desk, bundle, follower, subscription } =
+        await followingDesk();
+      await expect(routedGet(builder, desk, bundle.lease)).resolves.toBe("ok");
+      await admin.api.screenTrust.revoke(desk.app, bundle.artifact);
+      await expect(routedGet(builder, desk, bundle.lease)).resolves.toBe(
+        "screen.revoked"
       );
-      const latest = () => {
+      // Their write from elsewhere reaches the revoked screen as the
+      // refusal, never as their preferences.
+      await update(desk, builder.acting, 0, { compact: true });
+      await vi.waitFor(() => {
         const last = follower.received.at(-1)?.result;
-        return last?.ok === true ? last.value : undefined;
-      };
-      await vi.waitFor(
-        () => {
-          expect(latest()).toStrictEqual({
-            compact: false,
-            theme: "light",
-            _rev: 0,
-          });
-        },
-        { timeout: 30_000, interval: 50 }
-      );
-      await update({ ...desk, release }, builder.acting, 0, { compact: true });
-      await vi.waitFor(
-        () => {
-          expect(latest()).toStrictEqual({
-            compact: true,
-            theme: "light",
-            _rev: 1,
-          });
-        },
-        { timeout: 30_000, interval: 50 }
-      );
+        expect(last?.ok === false ? last.error.code : "ok").toBe(
+          "screen.revoked"
+        );
+      }, pushWait);
+      expect(
+        follower.received.some(
+          ({ result }) =>
+            result.ok && JSON.stringify(result.value).includes('"_rev":1')
+        )
+      ).toBeFalsy();
       await subscription.release();
     });
   }

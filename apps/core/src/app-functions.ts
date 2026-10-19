@@ -881,7 +881,8 @@ const answeredPreferences = async (
         ...(observeReads === undefined ? {} : { observeReads }),
       },
       preference,
-      call.input
+      call.input,
+      call.idempotencyKey
     );
     return {
       result,

@@ -345,14 +345,57 @@ const sweepBudgetMs = 20_000;
 const purgePage = 1000;
 
 /**
- * The name a live read of preferences watches, as if a table's: its
- * generation is `sdk_store.preferences_generation`. `~` starts no table
- * name an author can give (`tableNameSchema`), so it never names one.
+ * What a live read of one person's preferences watches, as if a table:
+ * `~preferences/<person>`, whose generation is that person's revision
+ * (`sdk_preferences.revision`, 0 for none). Per person, so one person's
+ * write tells only the reads of their own preferences: nobody else's
+ * screen hears of it, or spends its budget reading again. `~` starts no
+ * table name an author can give (`tableNameSchema`), so it never names one.
  */
-export const preferencesTable = "~preferences";
+const preferencesWatchPrefix = "~preferences/";
+
+/** What a live read of `personId`'s preferences watches. */
+export const preferencesWatch = (personId: string): string =>
+  `${preferencesWatchPrefix}${personId}`;
+
+/** Most people's preferences one read set watches: a read watches one. */
+const preferencesWatchMax = 4;
 
 /** Whose preferences: a person's ID as core's sessions name them. */
-const personIdOf = z.string().min(1).max(256);
+const personIdOf = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(/^[\w-]+$/u);
+
+/** A person's preferences as stored (`readPreferences`). */
+export interface StoredPreferences {
+  readonly valueJson: string | null;
+  readonly revision: number;
+  readonly lastKey: string | null;
+  readonly lastInputHash: string | null;
+  readonly lastAnswerJson: string | null;
+}
+
+/** What a keyed preferences write keeps for a resend of it. */
+export interface PreferencesReceipt {
+  readonly key: string;
+  readonly inputHash: string;
+  readonly answerJson: string;
+}
+
+const preferencesReceiptSchema = z.strictObject({
+  key: z.string().min(1).max(128),
+  inputHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  answerJson: z.string(),
+});
+
+/** What a preferences write did (`writePreferences`). */
+export type PreferencesWritten =
+  | { readonly revision: number }
+  | { readonly replay: string }
+  | { readonly keyConflict: true }
+  | { readonly conflict: true };
 
 /** How long one alarm goes on purging before the next one continues. */
 const purgeBudgetMs = 10_000;
@@ -2324,13 +2367,19 @@ export class StoreHost {
     storeId: StoreId,
     names: readonly string[]
   ): Record<string, number> {
-    // The preferences' generation answers as a table's would
-    // (`preferencesTable`); every other name is a table's.
-    const withPreferences = names.includes(preferencesTable);
+    // A person's preferences answer their revision as a table would its
+    // generation (`preferencesWatch`); every other name is a table's.
+    const people = dataErrors.parse(
+      "data.invalid",
+      z.array(personIdOf).max(preferencesWatchMax),
+      names
+        .filter((name) => name.startsWith(preferencesWatchPrefix))
+        .map((name) => name.slice(preferencesWatchPrefix.length))
+    );
     const parsed = dataErrors.parse(
       "data.invalid",
       z.array(tableNameSchema).max(storeMaxTables),
-      names.filter((name) => name !== preferencesTable)
+      names.filter((name) => !name.startsWith(preferencesWatchPrefix))
     );
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
@@ -2342,49 +2391,49 @@ export class StoreHost {
       const answer: Record<string, number> = Object.fromEntries(
         rows.map(({ name, generation }) => [name, generation])
       );
-      if (withPreferences) {
-        answer[preferencesTable] = this.#preferencesGeneration();
+      if (people.length > 0) {
+        const revisions = new Map(
+          this.#db
+            .select({
+              personId: preferences.personId,
+              revision: preferences.revision,
+            })
+            .from(preferences)
+            .where(inArray(preferences.personId, people))
+            .all()
+            .map(({ personId, revision }) => [personId, revision])
+        );
+        for (const person of people) {
+          answer[preferencesWatch(person)] = revisions.get(person) ?? 0;
+        }
       }
       return answer;
     });
   }
 
-  /** How many writes have changed anyone's preferences, now. */
-  #preferencesGeneration(): number {
-    return (
-      this.#db
-        .select({ generation: store.preferencesGeneration })
-        .from(store)
-        .get()?.generation ?? 0
-    );
-  }
-
   /**
-   * The preferences `personId` last wrote, as written, and their revision;
-   * null and 0 for a person who never wrote any. With the preferences'
-   * generation at the moment it read them, which a live read watches as a
-   * table's (`preferencesTable`). Only core calls it, for the signed-in
-   * person (app-preferences.ts): this object never chooses whose.
+   * What `personId` chose of their preferences, as written, and its
+   * revision (null and 0 for a person who never wrote any), which a live
+   * read watches (`preferencesWatch`); with the last write's idempotency
+   * key, input hash and answer, for a resend of it. Only core calls it,
+   * for the signed-in person (app-preferences.ts): this object never
+   * chooses whose.
    */
-  readPreferences(
-    storeId: StoreId,
-    personId: string
-  ): { valueJson: string | null; revision: number; generation: number } {
+  readPreferences(storeId: StoreId, personId: string): StoredPreferences {
     const person = dataErrors.parse("data.invalid", personIdOf, personId);
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
       const row = this.#db
-        .select({
-          valueJson: preferences.valueJson,
-          revision: preferences.revision,
-        })
+        .select()
         .from(preferences)
         .where(eq(preferences.personId, person))
         .get();
       return {
         valueJson: row?.valueJson ?? null,
         revision: row?.revision ?? 0,
-        generation: this.#preferencesGeneration(),
+        lastKey: row?.lastKey ?? null,
+        lastInputHash: row?.lastInputHash ?? null,
+        lastAnswerJson: row?.lastAnswerJson ?? null,
       };
     });
   }
@@ -2392,73 +2441,89 @@ export class StoreHost {
   /**
    * Writes `valueJson` as `personId`'s preferences, if their revision is
    * still `expectedRevision`, in one transaction: so of two writes from
-   * the same revision, one commits. The first creates revision 1.
-   * Answers the new revision, or that the revision had moved on
-   * (`conflict`), which is an answer, not a failure. Moves the
-   * preferences' generation on, and tells the live reads watching it
-   * once the write is over. Core checked the value against the App's
-   * preferences; this checks only its size.
+   * the same revision, one commits. The first creates revision 1. With
+   * `receipt`, a write under the key the last write used answers that
+   * write's answer when its input is the same (`replay`: a resend of a
+   * write whose answer was lost), and refuses when it isn't
+   * (`keyConflict`), whatever the revision now; the new row keeps the
+   * key, hash and answer. Each outcome is an answer, not a failure. Tells
+   * the live reads of `personId`'s preferences, and only theirs, once the
+   * write is over. Core checked the value against the App's preferences;
+   * this checks only sizes.
    */
   writePreferences(
     storeId: StoreId,
     personId: string,
     expectedRevision: number,
-    valueJson: string
-  ): { revision: number } | { conflict: true } {
+    valueJson: string,
+    receipt?: PreferencesReceipt
+  ): PreferencesWritten {
     const person = dataErrors.parse("data.invalid", personIdOf, personId);
     const expected = dataErrors.parse(
       "data.invalid",
       z.int().min(0),
       expectedRevision
     );
+    const kept = dataErrors.parse(
+      "data.invalid",
+      preferencesReceiptSchema.optional(),
+      receipt
+    );
     if (
       typeof valueJson !== "string" ||
-      new TextEncoder().encode(valueJson).byteLength > documentMaxBytes
+      encoder.encode(valueJson).byteLength > documentMaxBytes ||
+      (kept !== undefined &&
+        encoder.encode(kept.answerJson).byteLength > documentMaxBytes)
     ) {
       throw dataErrors.create("data.invalid");
     }
-    const written = this.ctx.storage.transactionSync(() => {
+    const written = this.ctx.storage.transactionSync((): PreferencesWritten => {
       this.#bind(storeId, false);
-      const current =
-        this.#db
-          .select({ revision: preferences.revision })
-          .from(preferences)
-          .where(eq(preferences.personId, person))
-          .get()?.revision ?? 0;
+      const row = this.#db
+        .select()
+        .from(preferences)
+        .where(eq(preferences.personId, person))
+        .get();
+      if (kept !== undefined && row?.lastKey === kept.key) {
+        return row.lastInputHash === kept.inputHash &&
+          row.lastAnswerJson !== null
+          ? { replay: row.lastAnswerJson }
+          : { keyConflict: true };
+      }
+      const current = row?.revision ?? 0;
       if (current !== expected) {
-        return null;
+        return { conflict: true };
       }
       const revision = current + 1;
-      const updatedAt = Date.now();
+      const values = {
+        revision,
+        valueJson,
+        updatedAt: Date.now(),
+        lastKey: kept?.key ?? null,
+        lastInputHash: kept?.inputHash ?? null,
+        lastAnswerJson: kept?.answerJson ?? null,
+      };
       this.#db
         .insert(preferences)
-        .values({ personId: person, revision, valueJson, updatedAt })
-        .onConflictDoUpdate({
-          target: preferences.personId,
-          set: { revision, valueJson, updatedAt },
-        })
+        .values({ personId: person, ...values })
+        .onConflictDoUpdate({ target: preferences.personId, set: values })
         .run();
-      this.#db
-        .update(store)
-        .set({
-          preferencesGeneration: sql`${store.preferencesGeneration} + 1`,
-        })
-        .run();
-      return { revision, generation: this.#preferencesGeneration() };
+      return { revision };
     });
-    if (written === null) {
-      return { conflict: true };
+    if ("revision" in written) {
+      // Told once the transaction is over, as a table's move is
+      // (`#tellMoved`): a watch is told only of a revision past its own.
+      queueMicrotask(() => {
+        try {
+          this.onTablesMoved?.({
+            [preferencesWatch(person)]: written.revision,
+          });
+        } catch (error) {
+          log.error("store.tell_failed", errorFields(error));
+        }
+      });
     }
-    // Told once the transaction is over, as a table's move is
-    // (`#tellMoved`): a watch is told only of a generation past its own.
-    queueMicrotask(() => {
-      try {
-        this.onTablesMoved?.({ [preferencesTable]: written.generation });
-      } catch (error) {
-        log.error("store.tell_failed", errorFields(error));
-      }
-    });
-    return { revision: written.revision };
+    return written;
   }
 
   /** The generations of tables `names` of the pinned schema, now. */

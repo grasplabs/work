@@ -59,14 +59,6 @@ export const store = sqliteTable(
      */
     contractHash: text("contract_hash"),
     contractManifest: text("contract_manifest"),
-    /**
-     * How many writes have changed anyone's preferences (`sdk_preferences`):
-     * what a live read of them depends on, as a table's generation is for
-     * its records (store-host.ts, `preferencesTable`).
-     */
-    preferencesGeneration: integer("preferences_generation")
-      .notNull()
-      .default(0),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );
@@ -735,12 +727,19 @@ export const fileRefs = sqliteTable(
  * query, export or migration of the App's ever reads or writes them; only
  * core does, for the signed-in person (app-preferences.ts). `value_json`
  * holds only the fields the person chose, never a default, checked by the
- * App's preferences when written; `revision` counts the writes, from 1. A
- * person with no row has the App's defaults, at revision 0.
+ * App's preferences when written; `revision` counts the writes, from 1,
+ * and is also what a live read of them watches (store-host.ts,
+ * `preferencesWatch`). A person with no row has the App's defaults, at
+ * revision 0. The last write's idempotency key, the hash of its input and
+ * its answer let a resend of that write get the same answer, never a
+ * conflict with itself (app-preferences.ts).
  */
 export const preferences = sqliteTable("sdk_preferences", {
   personId: text("person_id").primaryKey(),
   revision: integer().notNull(),
   valueJson: text("value_json").notNull(),
   updatedAt: integer("updated_at").notNull(),
+  lastKey: text("last_key"),
+  lastInputHash: text("last_input_hash"),
+  lastAnswerJson: text("last_answer_json"),
 });

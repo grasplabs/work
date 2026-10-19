@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c215d795-0690-45cf-800e-75d1eb2fd4bd",
+  "id": "e605510b-894b-4236-8ae3-59f4c03157e8",
   "prevId": "abc7a692-3211-4e24-a419-a686e8f3b7ba",
   "tables": {
     "sdk_abandoned_targets": {
@@ -1035,6 +1035,27 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "last_key": {
+          "name": "last_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_input_hash": {
+          "name": "last_input_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_answer_json": {
+          "name": "last_answer_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -1614,14 +1635,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "preferences_generation": {
-          "name": "preferences_generation",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
         }
       },
       "indexes": {},
