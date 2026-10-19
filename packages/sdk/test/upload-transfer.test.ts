@@ -283,8 +283,8 @@ describe("an upload's transfer", () => {
       },
     });
     const told: string[] = [];
-    const stop = clientInternals(client).onFileDeleted((key) => {
-      told.push(key);
+    const stop = clientInternals(client).onFileDeleted((deleted) => {
+      told.push(deleted);
     });
     const files = { ...resource, operations: ["delete"] } as const;
     const id = crypto.randomUUID();
@@ -292,7 +292,7 @@ describe("an upload's transfer", () => {
     const toldAfterRefusal = [...told];
     await client.files.delete(files, { id });
     // A deletion whose caller stopped waiting goes through all the same:
-    // its views read it again once core recorded it, never before.
+    // its views hear of it once core recorded it, never before.
     const other = crypto.randomUUID();
     const stopping = new AbortController();
     const stopped = codeOf(
@@ -308,13 +308,13 @@ describe("an upload's transfer", () => {
     stop();
     expect({ stoppedCode, toldWhileRunning, sentSignal }).toStrictEqual({
       stoppedCode: "file.stopped",
-      toldWhileRunning: [`attachments/${id}`],
+      toldWhileRunning: [id],
       sentSignal: [undefined],
     });
     expect({ refused, toldAfterRefusal, told }).toStrictEqual({
       refused: "file.referenced",
       toldAfterRefusal: [],
-      told: [`attachments/${id}`, `attachments/${other}`],
+      told: [id, other],
     });
   });
 
@@ -338,14 +338,14 @@ describe("an upload's transfer", () => {
     const stopFailing = internals.onFileDeleted(() => {
       throw new Error("This view failed.");
     });
-    const stopTelling = internals.onFileDeleted((key) => {
-      told.push(key);
+    const stopTelling = internals.onFileDeleted((deleted) => {
+      told.push(deleted);
     });
     const id = crypto.randomUUID();
     const files = { ...resource, operations: ["delete"] } as const;
     await expect(client.files.delete(files, { id })).resolves.toBeUndefined();
     stopFailing();
     stopTelling();
-    expect(told).toStrictEqual([`attachments/${id}`]);
+    expect(told).toStrictEqual([id]);
   });
 });

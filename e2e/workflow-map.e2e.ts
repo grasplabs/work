@@ -1,17 +1,15 @@
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
-import { revokeOtherCopies } from "./playbook.ts";
 
 // The workflow map, the built-in App, end to end: an admin creates an App
-// from it, approves the Playbook permission it asks for, draws a workflow
-// with numbers and sees its totals, then designs it and sees the gain;
-// someone it's shared with who can't change the Playbook reads it only.
-// And the editor keeps what is typed: numbers that would pass the
-// Playbook's limits say so instead of failing the save, nothing can be
+// from it, draws a workflow with numbers and sees its totals, then designs
+// it and sees the gain; someone it's shared with who isn't one of its
+// builders reads it only. And the editor keeps what is typed: numbers past
+// the map's limits say so instead of failing the save, nothing can be
 // typed while a save is on its way (the saved version replaces the editor
 // once it is open), and linking or going back never drops unsaved edits
 // unseen. An answer to an earlier open, arriving late, never replaces the
@@ -25,7 +23,7 @@ const workflowMap = "workflow-map";
  */
 const installedMs = 30_000;
 
-/** An App `admin` created from the workflow map, its Playbook approved. */
+/** An App `admin` created from the workflow map, current. */
 const mapFor = async (admin: Person): Promise<string> => {
   const { core, api } = apiOf(admin);
   try {
@@ -41,25 +39,8 @@ const mapFor = async (admin: Person): Promise<string> => {
     const created = await api.apps.blueprints.create(workflowMap, {
       name: `Workflow map ${crypto.randomUUID().slice(0, 8)}`,
     });
-    expect(
-      created.permissions.map(({ object, actions, binding }) => ({
-        object,
-        actions,
-        binding,
-      }))
-    ).toStrictEqual([
-      {
-        object: { type: "collection", collectionId: "playbook" },
-        actions: ["read", "write"],
-        binding: "PLAYBOOK",
-      },
-    ]);
-    await revokeOtherCopies(api, workflowMap, created.app.id);
-    for (const { id } of created.permissions) {
-      // Reviewed before a version of the copy is current.
-      // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-      await api.permissions.grant(id, { version: null });
-    }
+    // It asks for nothing: its workflows are in its own store.
+    expect(created.permissions).toStrictEqual([]);
     await api.apps.versions.setCurrent(created.app.id, 1);
     const { generation } = await api.screenTrust.review(created.app.id);
     await api.screenTrust.classify(created.app.id, "ordinary", generation);
@@ -80,11 +61,22 @@ const openMap = async (page: Page, app: string) => {
   return screen;
 };
 
-test("an admin copies the workflow map, approves its Playbook, draws a workflow and sees its totals, then its expected gain", async ({
+/** Draws a workflow called `title` with no steps, and goes back to the list. */
+const draw = async (screen: FrameLocator, title: string): Promise<void> => {
+  await screen.getByRole("button", { name: "Draw a workflow" }).click();
+  await screen.getByLabel("Title", { exact: true }).fill(title);
+  await screen.getByRole("button", { name: "Save" }).click();
+  await expect(screen.getByText("Version 1")).toBeVisible();
+  await screen.getByRole("button", { name: "All workflows" }).click();
+  await expect(
+    screen.getByRole("button", { name: title, exact: true })
+  ).toBeVisible();
+};
+
+test("an admin copies the workflow map, draws a workflow and sees its totals, then its expected gain", async ({
   pageOf,
 }) => {
   const { admin, reader } = peopleIn("workflowMap");
-  // The Playbook is the deployment's: other runs' workflows are in it too.
   const title = `Pay supplier invoices ${crypto.randomUUID().slice(0, 8)}`;
   const app = await mapFor(admin);
   const page = await pageOf(admin);
@@ -134,8 +126,8 @@ test("an admin copies the workflow map, approves its Playbook, draws a workflow 
     screen.getByRole("row").filter({ hasText: title }).getByRole("cell")
   ).toHaveText([title, "designed", "1 h", "1", "1", "9 h"]);
 
-  // Shared with someone who isn't an admin: they read it, and are offered
-  // no change the Playbook would refuse.
+  // Shared with someone who isn't one of its builders: they read it, and
+  // are offered no change the map would refuse.
   const { core, api } = apiOf(admin);
   try {
     await api.apps.members.add(app, {
@@ -174,7 +166,7 @@ test("an admin copies the workflow map, approves its Playbook, draws a workflow 
   );
 });
 
-test("keeps numbers within the Playbook's limits, and never drops what is typed while saving, linking or going back", async ({
+test("keeps numbers within the map's limits, and never drops what is typed while saving, linking or going back", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("workflowMap");
@@ -205,7 +197,7 @@ test("keeps numbers within the Playbook's limits, and never drops what is typed 
   await screen.getByRole("button", { name: "Add a step" }).click();
   await screen.getByLabel("Name, step 1").fill("Match the invoice");
   await screen.getByLabel("Times a week, step 1").fill("10000");
-  // A number the Playbook doesn't take says so, and isn't sent.
+  // A number the map doesn't take says so, and isn't sent.
   await screen.getByLabel("Minutes, step 1").fill("20000");
   await expect(why).toHaveText("Each number is between 0 and 10,000.");
   await expect(save).toBeDisabled();
@@ -228,13 +220,13 @@ test("keeps numbers within the Playbook's limits, and never drops what is typed 
   await expect(screen.getByText("Version 1")).toBeVisible();
   await expect(screen.getByLabel("Title", { exact: true })).toBeEnabled();
 
-  // Designed with no time left, it would save more than the Playbook
-  // takes: it says so instead of failing the save.
+  // Designed with no time left, it would save more than the map takes: it
+  // says so instead of failing the save.
   await screen.getByRole("button", { name: "Design it" }).click();
   await expect(screen.getByText("Version 2")).toBeVisible();
   await screen.getByLabel("Minutes, step 1").fill("0");
   await expect(why).toHaveText(
-    "The expected gain is over 100,000 hours a week, more than the Playbook takes: check the numbers."
+    "The expected gain is over 100,000 hours a week, more than the map takes: check the numbers."
   );
   await expect(save).toBeDisabled();
 
@@ -265,60 +257,37 @@ test("an answer to an earlier open, arriving late, never replaces the workflow o
   const app = await mapFor(admin);
   const run = crypto.randomUUID().slice(0, 8);
   const [first, second] = [`Slow ${run}`, `Quick ${run}`];
-  const { core, api } = apiOf(admin);
-  try {
-    for (const title of [first, second]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after the other
-      await api.screens.call(app, "save", [
-        {
-          ifVersion: 0,
-          record: {
-            type: "workflow",
-            title,
-            state: "drawn",
-            steps: [],
-            parameters: [],
-          },
-          body: "",
-        },
-      ]);
-    }
-  } finally {
-    core[Symbol.dispose]();
-  }
   const page = await pageOf(admin);
-  // Core's answers that name `slow` wait until the test lets them through:
-  // the listing has come by then, so only the first workflow's opening.
-  let slow: string | undefined;
+  // While `holding`, an opening's call to core waits until the test lets
+  // it through: only the first workflow's, as the test opens it.
+  let holding = false;
   const held: (() => void)[] = [];
-  await page.routeWebSocket("**/rpc", (socket) => {
-    const toCore = socket.connectToServer();
-    toCore.onMessage((message) => {
-      if (slow !== undefined && String(message).includes(slow)) {
-        held.push(() => {
-          socket.send(message);
-        });
-        return;
-      }
-      socket.send(message);
-    });
+  await page.route("**/api/app-functions/**", async (route) => {
+    const body = route.request().postData() ?? "";
+    if (holding && body.includes('"map.open"')) {
+      const { promise, resolve } = Promise.withResolvers<null>();
+      held.push(() => {
+        resolve(null);
+      });
+      await promise;
+    }
+    await route.continue();
   });
   const screen = await openMap(page, app);
-  await expect(
-    screen.getByRole("button", { name: first, exact: true })
-  ).toBeVisible();
+  await draw(screen, first);
+  await draw(screen, second);
 
-  slow = first;
+  holding = true;
   await screen.getByRole("button", { name: first, exact: true }).click();
   await expect.poll(() => held.length).toBeGreaterThan(0);
+  holding = false;
   await screen.getByRole("button", { name: second, exact: true }).click();
   await expect(screen.getByLabel("Title", { exact: true })).toHaveValue(second);
 
   // The first answer lands, then one to a call after it: by then the map
   // has had the first, and still shows the second workflow.
-  slow = undefined;
-  for (const answer of held.splice(0)) {
-    answer();
+  for (const release of held.splice(0)) {
+    release();
   }
   const team = `Team ${run}`;
   await screen.getByLabel("New team").fill(team);
@@ -328,81 +297,6 @@ test("an answer to an earlier open, arriving late, never replaces the workflow o
     team
   );
   await expect(screen.getByLabel("Title", { exact: true })).toHaveValue(second);
-  const check = apiOf(admin);
-  try {
-    const overview: unknown = await check.api.screens.call(app, "overview", []);
-    expect(JSON.stringify(overview).split(`"title":"${team}"`).length - 1).toBe(
-      1
-    );
-  } finally {
-    check.core[Symbol.dispose]();
-  }
-});
-
-test("a failed overview shows only with the list, and goes once an overview comes", async ({
-  pageOf,
-}) => {
-  const { admin } = peopleIn("workflowMap");
-  const app = await mapFor(admin);
-  const title = `Failing ${crypto.randomUUID().slice(0, 8)}`;
-  const { core, api } = apiOf(admin);
-  try {
-    await api.screens.call(app, "save", [
-      {
-        ifVersion: 0,
-        record: {
-          type: "workflow",
-          title,
-          state: "drawn",
-          steps: [],
-          parameters: [],
-        },
-        body: "",
-      },
-    ]);
-  } finally {
-    core[Symbol.dispose]();
-  }
-  const page = await pageOf(admin);
-  // While `failing`, the page asks core for a method the map doesn't have
-  // in place of its overview, which core refuses.
-  let failing = false;
-  await page.routeWebSocket("**/rpc", (socket) => {
-    const toCore = socket.connectToServer();
-    socket.onMessage((message) => {
-      const text = String(message);
-      toCore.send(
-        failing ? text.replaceAll('"overview"', '"overviewGone"') : text
-      );
-    });
-  });
-  const screen = await openMap(page, app);
-  const alert = screen.getByRole("alert");
-  await screen.getByRole("button", { name: title, exact: true }).click();
-  await expect(screen.getByLabel("Title", { exact: true })).toHaveValue(title);
-
-  // The save's overview fails: the editor it reopened shows no alert.
-  failing = true;
-  await screen.getByLabel("Title", { exact: true }).fill(`${title} again`);
-  await screen.getByRole("button", { name: "Save" }).click();
-  await expect(screen.getByText("Version 2")).toBeVisible();
-  await expect(alert).toHaveCount(0);
-
-  // It shows with the list (the one it last had, under the old title),
-  // and not with a workflow opened from it.
-  await screen.getByRole("button", { name: "All workflows" }).click();
-  await expect(alert).toHaveCount(1);
-  await screen.getByRole("button", { name: title, exact: true }).click();
-  await expect(screen.getByLabel("Title", { exact: true })).toHaveValue(
-    `${title} again`
-  );
-  await expect(alert).toHaveCount(0);
-
-  // The next overview comes: the alert goes.
-  failing = false;
-  await screen.getByRole("button", { name: "All workflows" }).click();
-  await expect(
-    screen.getByRole("button", { name: `${title} again`, exact: true })
-  ).toBeVisible();
-  await expect(alert).toHaveCount(0);
+  await screen.getByRole("combobox", { name: "Team" }).click();
+  await expect(screen.getByRole("option", { name: team })).toHaveCount(1);
 });

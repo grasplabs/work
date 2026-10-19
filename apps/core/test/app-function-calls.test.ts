@@ -58,7 +58,11 @@ import { signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 /** The CRM: notes each person keeps, and a function only it calls. */
-const crmFiles = (mineReturns = "v.array(v.string())") => ({
+const crmFiles = (
+  mineReturns = "v.array(v.string())",
+  // What `mine` answers, as its contract (`mineReturns`) types it.
+  mineAnswer = '(await ctx.db.query("notes").take(100)).map(({ text }) => text)'
+) => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({ notes: defineTable({ text: v.string() }) });
@@ -122,7 +126,7 @@ export const later = action({
 export const mine = query({
   args: {},
   returns: ${mineReturns},
-  handler: async (ctx) => (await ctx.db.query("notes").take(100)).map(({ text }) => text),
+  handler: async (ctx) => ${mineAnswer},
 });
 
 export const shout = action({
@@ -150,7 +154,7 @@ export default app({
 });
 
 /** What a call answered, as JSON, or why it failed: its code and the App's. */
-const attempt = `const attempt = async (work) => {
+const attempt = `const attempt = async (work: () => Promise<unknown>): Promise<string> => {
   try {
     return JSON.stringify(await work());
   } catch (error) {
@@ -433,11 +437,11 @@ export default app({
 
 /** A workflow `id` whose one step calls its App's `asker.go`. */
 const askingWorkflow = (id: string): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { workflow, z } from "@grasp-os/sdk/workflow";
+  [`workflows/${id}.ts`]: `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("ask", { description: "Ask", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    await env.APP.callFunction(${JSON.stringify({ contractId: "asker.go", kind: "action" })}, {})
+    (await env.APP.callFunction(${JSON.stringify({ contractId: "asker.go", kind: "action" })}, {})) as Json
   )
 );
 `,
@@ -841,7 +845,11 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
     const binding = await bind(admin, desk, crm.app);
     const before = await call(admin, desk, "desk.shout", { text: "hi" });
     // The CRM's `notes.mine` answers another shape now.
-    await nextVersion(crm, crmFiles("v.number()"), 2);
+    await nextVersion(
+      crm,
+      crmFiles("v.number()", '(await ctx.db.query("notes").take(100)).length'),
+      2
+    );
     const drifted = await call(admin, desk, "desk.shout", { text: "hi" });
     const { resources } = await reviewResourceBindings(env, admin, desk.app);
     const state = resources.find(({ alias }) => alias === "crm")?.state;
@@ -1127,12 +1135,12 @@ describe("a run calling another App's functions", { timeout: 90_000 }, () => {
     const { id } = await builder.api.apps.create({ name: "Kicking desk" });
     await release(builder, id, {
       ...deskFiles(),
-      "workflows/kicker.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/kicker.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("kicker", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("kick", { description: "Kick", sideEffect: true, input: null, retries: { limit: 0 } }, async () => ({
-    now: await env.APP.callFunction(${kick}, {}),
-    later: await env.APP.callFunction(${later}, {}),
+    now: (await env.APP.callFunction(${kick}, {})) as Json,
+    later: (await env.APP.callFunction(${later}, {})) as Json,
   }))
 );
 `,
@@ -1462,11 +1470,11 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
     const { id } = await builder.api.apps.create({ name: "Run desk" });
     await release(builder, id, {
       ...deskFiles(),
-      "workflows/noter.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/noter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("noter", { params: {}, input: z.unknown() }, async (step, { env }) =>
   await step.do("note", { description: "Note", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    await env.APP.callFunction(${reference}, { text: "from the run" })
+    (await env.APP.callFunction(${reference}, { text: "from the run" })) as Json
   )
 );
 `,

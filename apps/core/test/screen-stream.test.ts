@@ -1307,6 +1307,15 @@ const invocationOf = async (
   };
 };
 
+/** `bottom` inside `levels` arrays: past `levels` 32, deeper than a value reads. */
+const tooDeep = (bottom: string, levels: number): Json => {
+  let value: Json = bottom;
+  for (let level = 0; level < levels; level += 1) {
+    value = [value];
+  }
+  return value;
+};
+
 /** The code a stream of frames ends with, or "ok". */
 const endOf = async (frames: ReadableStream<Uint8Array>): Promise<string> => {
   const text = await new Response(frames).text();
@@ -1398,6 +1407,39 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
       end: "operation.action_limit",
       ended: new Set(["operation.cancelled"]),
       again: "ok",
+    });
+  });
+
+  it("refuses input too deep to read, so two such inputs never share a key's run", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const ends = async (
+      reference: typeof api.draft | typeof api.echo,
+      key: string,
+      streaming: boolean,
+      readable: Json
+    ) => {
+      const endFor = async (input: Json): Promise<string> => {
+        const call = requestFor(reference, input, key);
+        const { open } = await invocationOf(opened, call, key, streaming);
+        return await endOf(await open());
+      };
+      return [
+        await endFor({ topic: tooDeep("a", 40) }),
+        await endFor({ topic: tooDeep("b", 40) }),
+        // Nothing was recorded under the key: readable input runs.
+        await endFor(readable),
+      ];
+    };
+    expect({
+      streaming: await ends(api.draft, "deep-stream", true, {
+        topic: "readable",
+        pauseMs: 0,
+      }),
+      plain: await ends(api.echo, "deep-plain", false, { word: "readable" }),
+    }).toStrictEqual({
+      streaming: ["contract.invalid_request", "contract.invalid_request", "ok"],
+      plain: ["contract.invalid_request", "contract.invalid_request", "ok"],
     });
   });
 

@@ -26,6 +26,14 @@ import type {
 } from "./engine.ts";
 import { currencySchema, paramValueSchemas } from "./params.ts";
 import type { ParamDefault, ParamKind, ParamValue } from "./params.ts";
+import type {
+  AppErrorPayload,
+  ArgsOf,
+  Callable,
+  ReferenceKind,
+  ReturnOf,
+  StreamingFunction,
+} from "./references.ts";
 import { namePattern, nameRule, stepOptionSchemas } from "./steps.ts";
 
 /**
@@ -51,6 +59,9 @@ import { namePattern, nameRule, stepOptionSchemas } from "./steps.ts";
 // Workflow code imports only this module, so it gets Zod from here too.
 export { z } from "zod";
 export type { ParamKind, ParamValue } from "./params.ts";
+// What a step records and a binding is handed: a workflow's code names it
+// to narrow what a binding answers (`unknown`) into a step's result.
+export type { Json } from "@grasp-os/shared/json";
 // The input schemas of runs an email trigger (`input: emailMessage`) and an
 // event trigger (`input: connectorEvent`) start, and what they parse to.
 export {
@@ -298,7 +309,7 @@ export interface DoOptions<Input extends StepInput = StepInput>
  * no output:
  *
  *   try {
- *     return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
+ *     return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
  *   } catch (error) {
  *     if (error.code === resolvedDone) return { sent: true };
  *     throw error;
@@ -461,7 +472,8 @@ export interface WorkflowContext<P extends Params, Input> {
   /**
    * The App's connections and other permissions, and its own server
    * methods, by binding name; call them in a step's own function, each
-   * written out as `env.NAME.method(…)`, `appServer(env).method(…)` or
+   * written out as `env.NAME.method(…)`, `appServer(env).method(…)`,
+   * `appFunctions(env).query(…)` (or `mutation`, `action`) or
    * `appExports(env.NAME).method(…)` (see `WorkflowEnv`).
    */
   env: WorkflowEnv;
@@ -717,6 +729,149 @@ export const appExports = <Exports = Record<string, (input: Json) => unknown>>(
   // checks the name again, and refuses one the App doesn't export.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return methodsOf(isExportName, method) as AppExportsStub<Exports>;
+};
+
+export type { AppErrorPayload } from "./references.ts";
+
+/**
+ * What a call of one of the App's functions answers, as the host answers
+ * it (spec 32.6): its value, or why it failed.
+ */
+export type FunctionResult<Value> =
+  | { readonly ok: true; readonly value: Value }
+  | { readonly ok: false; readonly error: AppErrorPayload };
+
+/** How deep `FunctionPaths` reads groups of functions. */
+type GroupDepth = [never, 0, 1, 2, 3];
+
+/**
+ * The registered paths (`drafts.propose`) of the public functions of kind
+ * `Kind` in `Tree`, the App's functions grouped as its `operations`
+ * registers them: a definition by its path, a group by the paths in it.
+ * Never a streaming action's: it runs only for a screen following it
+ * (spec 10.7.6), and a workflow's call answers once, so the host refuses
+ * it (`operation.mode_mismatch`).
+ */
+export type FunctionPaths<
+  Tree,
+  Kind extends ReferenceKind,
+  Prefix extends string = "",
+  Depth extends number = 4,
+> = [Depth] extends [never]
+  ? never
+  : {
+      [Key in keyof Tree & string]: Tree[Key] extends Callable
+        ? Tree[Key] extends Callable<Kind, "public">
+          ? Tree[Key] extends StreamingFunction
+            ? never
+            : `${Prefix}${Key}`
+          : never
+        : Tree[Key] extends object
+          ? FunctionPaths<
+              Tree[Key],
+              Kind,
+              `${Prefix}${Key}.`,
+              GroupDepth[Depth]
+            >
+          : never;
+    }[keyof Tree & string];
+
+/** The function of `Tree` at registered path `Path`. */
+export type FunctionAt<
+  Tree,
+  Path extends string,
+> = Path extends `${infer Group}.${infer Rest}`
+  ? Group extends keyof Tree
+    ? FunctionAt<Tree[Group], Rest>
+    : never
+  : Path extends keyof Tree
+    ? Tree[Path]
+    : never;
+
+/** A call of one of `Tree`'s public functions of kind `Kind`, by its path. */
+type FunctionCall<Tree, Kind extends ReferenceKind> = <
+  Path extends FunctionPaths<Tree, Kind>,
+>(
+  contractId: Path,
+  input: ArgsOf<FunctionAt<Tree, Path>>
+) => Promise<FunctionResult<ReturnOf<FunctionAt<Tree, Path>>>>;
+
+/** A call of any of the App's functions, untyped: by path, with JSON. */
+type UntypedFunctionCall = (
+  contractId: string,
+  input: Json
+) => Promise<FunctionResult<Json>>;
+
+/**
+ * The run's own App's public functions as a workflow calls them, one
+ * method per kind; typed by `Tree` when given, untyped otherwise.
+ */
+export type AppFunctionsStub<Tree> = unknown extends Tree
+  ? {
+      readonly query: UntypedFunctionCall;
+      readonly mutation: UntypedFunctionCall;
+      readonly action: UntypedFunctionCall;
+    }
+  : {
+      readonly query: FunctionCall<Tree, "query">;
+      readonly mutation: FunctionCall<Tree, "mutation">;
+      readonly action: FunctionCall<Tree, "action">;
+    };
+
+/**
+ * A typed stub of the run's own App's public functions (spec 8, GRA-711):
+ * `appFunctions<Intake>(env).mutation("drafts.propose", input)` is
+ * `env.APP.callFunction({ contractId: "drafts.propose", kind: "mutation" },
+ * input)`, typed by the App's own definitions, which a workflow imports
+ * as types only, grouped as the App's `operations` registers them:
+ *
+ * ```ts
+ * import type * as drafts from "../operations/drafts.ts";
+ *
+ * type Intake = { drafts: typeof drafts };
+ *
+ * await step.do("propose", { description: "Keep the draft", sideEffect: true }, async () => {
+ *   const answered = await appFunctions<Intake>(env).mutation("drafts.propose", input);
+ *   if (!answered.ok) throw new Error(answered.error.message);
+ *   return answered.value;
+ * });
+ * ```
+ *
+ * Each call answers what the host answers: `{ ok: true, value }`, the
+ * function's answer checked against its contract, or `{ ok: false,
+ * error }`. Like `env.APP`, it works only inside a step and acts for the
+ * person the run acts for; the host calls only a public function of the
+ * release the run is pinned to, of the kind the method names
+ * (`operation.kind_mismatch` otherwise), so the types offer only those.
+ * The review of the workflow's steps reads each call as one of `APP`'s,
+ * as it reads `appServer(env)`.
+ */
+export const appFunctions = <Tree = unknown>(
+  env: WorkflowEnv
+): AppFunctionsStub<Tree> => {
+  const call =
+    (kind: ReferenceKind) =>
+    async (contractId: string, input: Json): Promise<unknown> => {
+      const app = env.APP;
+      if (app?.callFunction === undefined) {
+        throw invalidCall("The run has no App to call (env.APP)");
+      }
+      return await app.callFunction({ contractId, kind }, input ?? null);
+    };
+  // Exactly the three methods, with nothing inherited to reach: any other
+  // name is undefined, and calling it fails.
+  const stub = Object.freeze({
+    __proto__: null,
+    query: call("query"),
+    mutation: call("mutation"),
+    action: call("action"),
+  });
+  // SAFETY: each method calls the App's function of that kind by path,
+  // answering what the host answers, which is `FunctionResult` (spec
+  // 32.6); the paths and inputs the types allow are the App's own public
+  // functions', and the host checks both again.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return stub as AppFunctionsStub<Tree>;
 };
 
 // Definition

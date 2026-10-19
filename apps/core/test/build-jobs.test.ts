@@ -65,10 +65,10 @@ export default function Desk() {
 
 /** A workflow of the draft, with its tests: what a check keeps. */
 const intake = {
-  "workflows/intake.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+  "workflows/intake.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("intake", { params: {}, input: z.unknown() }, async (step, { input }) => {
-  return await step.do("read", { description: "Read the invoice" }, async () => input);
+  return await step.do("read", { description: "Read the invoice" }, async () => input as Json);
 });
 `,
   "workflows/intake.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";

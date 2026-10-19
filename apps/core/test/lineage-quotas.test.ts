@@ -9,14 +9,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { callApp } from "../src/app.ts";
 import {
   admitAttempt,
   admitChild,
   quotaPolicy,
 } from "../src/workflows/quotas.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
-import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
 import { mockIdp } from "./idp.ts";
@@ -29,7 +27,7 @@ import {
   woken,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { appWith, hitCall, hitsOf, workflowFiles } from "./workflow-apps.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
 // how often a step is tried and how long its steps run in all, each held
@@ -120,20 +118,10 @@ const failedWith = async (run: string): Promise<unknown> => {
   )?.detail.error;
 };
 
-/** How many times the App's server counted `name` (its `hits`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
-
 /** A step that takes about `ms`, then returns 1. */
 const working = (name: string, ms: number) =>
   `  await step.do("${name}", { description: "Work" }, async () => {
-    await scheduler.wait(${ms});
+    await new Promise((resolve) => setTimeout(resolve, ${ms}));
     return 1;
   });`;
 
@@ -146,7 +134,7 @@ const hanging = (name: string, retries: "most" | "undeclared" = "most") =>
   workflowFiles(
     name,
     `  return await step.do("hang", { description: "Hang", timeout: "1 second"${retries === "most" ? ', retries: { limit: 4, delay: 1, backoff: "constant" }' : ""} }, async () => {
-    await env.APP.call("hit", "${name}");
+    await ${hitCall(`"${name}"`)};
     await new Promise(() => {});
   });`,
     { hang: null }
@@ -275,7 +263,6 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       ...hanging("undeclared", "undeclared"),
       ...hanging("lowered"),
     });
-    await serverBuilt(app, 1);
 
     const declared = await withQuotas({}, async () => {
       const run = await builder.api.workflows.start(app, "declared");
@@ -299,11 +286,11 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const declaredRun = await builder.api.workflows.status(declared);
     const undeclaredRun = await builder.api.workflows.status(undeclared);
     expect({
-      declared: await hitsOf(app, builder.userId, "declared"),
-      undeclared: await hitsOf(app, builder.userId, "undeclared"),
+      declared: await hitsOf(builder, app, "declared"),
+      undeclared: await hitsOf(builder, app, "undeclared"),
       // Its own error, its fifth attempt's timeout: never a sixth refused.
       undeclaredWith: undeclaredRun.failure?.error.message,
-      lowered: await hitsOf(app, builder.userId, "lowered"),
+      lowered: await hitsOf(builder, app, "lowered"),
       loweredWith: await failedWith(lowered),
       declaredStatus: declaredRun.status,
     }).toStrictEqual({
@@ -479,14 +466,21 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     // Written by hand, past the SDK: the host is the boundary, not the SDK.
     const app = await appWith(builder, {
-      "workflows/wide.ts": `export default {
+      "workflows/wide.ts": `import type { WorkflowDefinition } from "@grasp-os/sdk/workflow";
+
+// Past the SDK: the engine as the host hands it to a run's code.
+type Engine = {
+  do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>;
+};
+
+export default {
   metadata: { id: "wide", params: [] },
-  run: async (engine) => {
-    const outcome = async (name, options) => {
+  run: async (engine: Engine) => {
+    const outcome = async (name: string, options: object) => {
       try {
         return await engine.do(name, options, async () => "ran");
       } catch (error) {
-        return error.code ?? error.message;
+        return (error as { code?: string }).code ?? (error as { message?: string }).message;
       }
     };
     return {
@@ -495,7 +489,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       within: await outcome("within", { timeout: 60_000, retries: { limit: 4 } }),
     };
   },
-};
+} as unknown as WorkflowDefinition<unknown>;
 `,
       "workflows/wide.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
 import definition from "./wide.ts";
@@ -643,7 +637,7 @@ ${working("c", 10)}
       workflowFiles(
         "slow",
         `  await step.do("work", { description: "Work" }, async () => {
-    await scheduler.wait(3000);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     return 1;
   });
   return 1;`,

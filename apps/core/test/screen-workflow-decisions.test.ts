@@ -353,10 +353,19 @@ describe(
         decision: answerOf(
           await ask("decision", { runId: "run-1", decisionId: "decision-1" })
         ),
+        decisionWindow: answerOf(
+          await ask(
+            "decision",
+            { runId: "run-1", decisionId: "decision-1" },
+            20
+          )
+        ),
       }).toStrictEqual({
         inbox: { items: [], nextCursor: null, hasMore: false },
         window: { items: [], hasMore: false },
         decision: "workflow.decision_unavailable",
+        // One decision isn't a list a window reads.
+        decisionWindow: "contract.not_paginated",
       });
     });
 

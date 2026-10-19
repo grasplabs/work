@@ -1,22 +1,7 @@
 {
   "name": "Board page",
-  "description": "Takes dated snapshots of the Playbook and shows one on a page for the board: maturity, where the hours go, before and after, improvement signals and the decision needed. Prints on one page.",
-  "collections": [
-    {
-      "id": "playbook",
-      "name": "Playbook",
-      "description": "The company's Playbook: its teams, its workflows drawn and designed, the sources and statements they rest on, and the snapshots it shows the board."
-    }
-  ],
+  "description": "Takes dated snapshots of the workflow map's numbers and shows one on a page for the board: maturity, where the hours go, before and after, improvement signals and the decision needed. Prints on one page. Its snapshots live in the App's own store: everyone who may open it reads them, and only its builders take them.",
   "permissions": [
-    {
-      "object": {
-        "type": "collection",
-        "collectionId": "playbook"
-      },
-      "actions": ["read", "write"],
-      "binding": "PLAYBOOK"
-    },
     {
       "object": {
         "type": "platform"
