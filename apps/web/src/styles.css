@@ -1155,3 +1155,11 @@
     radial-gradient(50% 100% at 50% 0, #000 96%, transparent) bottom /
       calc(var(--tear) * 2) var(--tear) round;
 }
+
+/*
+ * From the prototype's Landscape (components/landscape/insight.tsx): what
+ * Grasp read about a value, as labels and values side by side.
+ */
+@utility grid-label-value {
+  grid-template-columns: auto 1fr;
+}
