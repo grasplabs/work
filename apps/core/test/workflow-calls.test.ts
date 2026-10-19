@@ -17,6 +17,7 @@ import {
   agentIdSchema,
   appIdSchema,
   chatIdSchema,
+  connectionIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
   workspaceIdSchema,
@@ -31,7 +32,10 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
-import { maxAttemptTimeoutMs } from "@grasp-os/shared/workflows";
+import {
+  maxAttemptTimeoutMs,
+  stepIdempotencyKey,
+} from "@grasp-os/shared/workflows";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -1540,7 +1544,11 @@ const lookUpTasks = [
  * A workflow of an admin's calling App `server`'s export `lookUp`, sealed
  * and approved: in a task of its own, or as `draft` has it.
  */
-const lookingUp = async (server: string, draft?: Omit<Draft, "bindings">) => {
+const lookingUp = async (
+  server: string,
+  draft?: Omit<Draft, "bindings">,
+  { access = "read" }: { access?: "read" | "write" } = {}
+) => {
   const signedIn = await signedInApi(idp, "admin");
   const admin = identityOf(signedIn.userId, "admin");
   const input = descriptorOf(v.object({ who: v.string() }));
@@ -1561,7 +1569,7 @@ const lookingUp = async (server: string, draft?: Omit<Draft, "bindings">) => {
     "app/server.ts": server,
     "app/exports.json": JSON.stringify({
       lookUp: {
-        access: "read",
+        access,
         input: shapeOf(input),
         output: shapeOf(output),
       },
@@ -1584,7 +1592,7 @@ const lookingUp = async (server: string, draft?: Omit<Draft, "bindings">) => {
   const permissionId = await granted(admin, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
     object: { type: "app", appId: appIdSchema.parse(app) },
-    actions: ["read"],
+    actions: [access],
     binding: `DESK_${unique().toUpperCase().replaceAll("-", "_")}`,
   });
   await approveWorkflowBinding(env, admin, workflow.id, {
@@ -3978,6 +3986,142 @@ export const greet = action({
       shapedRequests: 1,
       revoked: { status: "failed", code: "workflow.call_denied" },
       revokedRequests: 0,
+    });
+  });
+});
+
+/**
+ * One App's server code: an export that sends a mail through the App's own
+ * `MAIL` connection, under its caller's key, answering once it has, or, for
+ * `catch`, answering all the same when the send is refused.
+ */
+const sendingServer = `import { DurableObject } from "cloudflare:workers";
+
+type Caller = { userId: string; idempotencyKey?: string };
+type Stub = { call: (...args: unknown[]) => Promise<unknown> };
+
+export class App extends DurableObject {
+  async lookUp(caller: Caller, input: { who: string }): Promise<unknown> {
+    const mail = (this.env as unknown as Record<string, Stub>).MAIL;
+    try {
+      await mail.call(caller, "mail.send", { to: input.who, subject: "Hello" }, { idempotencyKey: caller.idempotencyKey });
+    } catch (error) {
+      if (input.who !== "catch") {
+        throw error;
+      }
+    }
+    return { greeting: "Sent to " + input.who, key: caller.idempotencyKey ?? "" };
+  }
+}
+`;
+
+describe("an App's call held as an independent run's step called its export", () => {
+  it("is dropped, audited, as soon as the step settles, failed or answered: confirming it after finds nothing and sends nothing", async () => {
+    const mail = await mailConnection();
+    /**
+     * A restricted run of a workflow calling the sending export with
+     * `who`: the run's end, what connect still holds under its step's key,
+     * and the drop connect recorded.
+     */
+    const runFor = async (who: string) => {
+      const { admin, app, workflowId } = await lookingUp(
+        sendingServer,
+        {
+          tasks: [
+            {
+              look: {
+                call: "grasp.operation",
+                with: { binding: "lookup", arguments: { who } },
+              },
+            },
+            { finish: { set: { status: "called" } } },
+          ],
+        },
+        { access: "write" }
+      );
+      // The App's own send, granted at the version it runs.
+      const asked = await requestPermission(
+        env,
+        admin,
+        {
+          subject: { type: "app", appId: appIdSchema.parse(app) },
+          object: {
+            type: "connection",
+            connectionId: connectionIdSchema.parse(mail.id),
+          },
+          actions: ["mail.send"],
+          binding: "MAIL",
+        },
+        rolesOf(admin)
+      );
+      await grantPermission(env, admin, asked.id, { version: 1 });
+      // Started by a restricted App: the run, and the App it calls, are
+      // restricted, so connect holds the App's send for its person.
+      const starter = await startingApp(admin, admin, workflowId, {
+        restricted: true,
+      });
+      const runId = await starter.start();
+      const end = endOf(await ended(admin, workflowId, runId));
+      const key = stepIdempotencyKey(runId, "task:look");
+      const waitingFor = await env.CONNECT.listPendingActions(
+        await personOf(env, admin)
+      );
+      const events = await allEvents();
+      const dropped = events.filter(
+        ({ action, detail }) =>
+          action === "connection.action.dropped" &&
+          detail.reason === "step.settled" &&
+          detail.onBehalfOf === admin.userId &&
+          detail.subjectId === app
+      );
+      const [first] = dropped;
+      const confirmed =
+        first === undefined
+          ? "nothing dropped"
+          : await settledCode(
+              confirmPendingAction(
+                env,
+                admin,
+                first.detail.pendingActionId,
+                first.detail.inputHash
+              )
+            );
+      return {
+        end,
+        stillHeld: waitingFor.filter(
+          ({ idempotencyKey }) => idempotencyKey === key
+        ).length,
+        dropped: dropped.map(({ detail }) => ({
+          subjectType: detail.subjectType,
+          mode: detail.mode,
+          action: detail.action,
+        })),
+        confirmed,
+      };
+    };
+    const failed = await runFor("Ada");
+    const answered = await runFor("catch");
+    const sent = await mail.did();
+
+    const droppedOnce = [
+      { subjectType: "app", mode: "workflow", action: "mail.send" },
+    ];
+    expect({ failed, answered, sent: sent.calls }).toStrictEqual({
+      failed: {
+        // The App let the refusal through: its own failure.
+        end: { status: "failed", code: "app.failed" },
+        stillHeld: 0,
+        dropped: droppedOnce,
+        confirmed: "connect.pending_not_found",
+      },
+      // App code caught the hold and answered: no step takes the decision.
+      answered: {
+        end: { status: "completed", output: { status: "called" } },
+        stillHeld: 0,
+        dropped: droppedOnce,
+        confirmed: "connect.pending_not_found",
+      },
+      sent: 0,
     });
   });
 });

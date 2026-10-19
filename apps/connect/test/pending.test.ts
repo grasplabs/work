@@ -1297,6 +1297,58 @@ describe("a side effect from chat", () => {
     ).toStrictEqual([other]);
   });
 
+  it("of a step that settled without taking them are dropped, its own person's under its own key only", async () => {
+    const anna = someone();
+    const bob = someone();
+    const [settled, otherStep, otherPerson] = await Promise.all([
+      addConnection(),
+      addConnection(),
+      addConnection(),
+    ]);
+    const run = `run-${crypto.randomUUID()}`;
+    const signed = { restricted: true, origin: runOrigin };
+    const key = `${run}:task:look`;
+    await retried(
+      callAs(
+        appFor(anna.userId, "app-b"),
+        { ...mail(settled), idempotencyKey: key },
+        signed
+      )
+    );
+    // Another step's, and another person's under the same key: not dropped.
+    await retried(
+      callAs(
+        appFor(anna.userId, "app-b"),
+        { ...mail(otherStep), idempotencyKey: `${run}:task:other` },
+        signed
+      )
+    );
+    await retried(
+      callAs(
+        appFor(bob.userId, "app-b"),
+        { ...mail(otherPerson), idempotencyKey: key },
+        signed
+      )
+    );
+    await exports.default.dropForSettledStep({
+      onBehalfOf: anna.userId,
+      idempotencyKey: key,
+    });
+    await exports.default.dropForSettledStep({
+      onBehalfOf: anna.userId,
+      idempotencyKey: key,
+    });
+    const [annas, bobs] = await Promise.all([
+      waitingFor(anna),
+      waitingFor(bob),
+    ]);
+    expect({
+      anna: annas.map(({ connectionId }) => connectionId),
+      bob: bobs.map(({ connectionId }) => connectionId),
+      ran: server.ran,
+    }).toStrictEqual({ anna: [otherStep], bob: [otherPerson], ran: [] });
+  });
+
   it("keeps the inputs of calls an ended run didn't make, whatever their key, and drops its own", async () => {
     const anna = someone();
     const run = `run-${crypto.randomUUID()}`;

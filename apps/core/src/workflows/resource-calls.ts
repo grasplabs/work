@@ -490,6 +490,37 @@ const callStoreOperation = async (
 };
 
 /**
+ * Drops whatever connect still holds under an export call's key `key` for
+ * the run's person, once the App's method settled (GRA-748): a connection
+ * call of the App's own that connect held for them. The call's step is
+ * tried once and never runs the method again to take their decision
+ * (resource-host.ts, `triedOnce`: untrusted App code can't be relied on to
+ * do it twice to the same effect), so confirming the held action would
+ * send what no step collects. Settled either way, failed or answered
+ * (App code may catch the hold and answer all the same), the action goes,
+ * audited by connect (`step.settled`). A drop that fails is logged and
+ * changes nothing of the call: confirming the action still finds its run
+ * isn't its App's, and drops it then (pending-actions.ts, `runEnded`).
+ */
+const dropUncollected = async (
+  env: Env,
+  run: CallingRun,
+  key: string
+): Promise<void> => {
+  try {
+    await env.CONNECT.dropForSettledStep({
+      onBehalfOf: run.principal,
+      idempotencyKey: key,
+    });
+  } catch (error) {
+    log.warn("workflow.export_hold_drop_failed", {
+      runId: run.runId,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
  * Calls the export `binding`'s operation target names, at the App version
  * it pins, with `args`, for the run's principal, under the effect's key:
  * its answer, as the contract has it. Refused
@@ -625,6 +656,8 @@ const callOperation = async (
       throw releaseNotCurrent();
     }
     throw error;
+  } finally {
+    await dropUncollected(env, run, effect.key);
   }
   // The App may have read restricted data as it answered: withheld from
   // a run that isn't restricted itself.
