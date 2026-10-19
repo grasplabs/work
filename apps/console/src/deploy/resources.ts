@@ -26,7 +26,7 @@ export interface AccountResources {
 }
 
 /** Every D1 database the release's Workers bind, by name, once each. */
-const databaseNames = (manifest: ReleaseManifest): string[] => [
+export const databaseNames = (manifest: ReleaseManifest): string[] => [
   ...new Set(
     Object.values(manifest.workers).flatMap((worker) =>
       worker.d1Databases.map((database) => database.databaseName)
@@ -39,7 +39,7 @@ const databaseNames = (manifest: ReleaseManifest): string[] => [
  * manifest only lets EU buckets through, and this checks it again: a
  * bucket's jurisdiction is set when it's created.
  */
-const bucketNames = (manifest: ReleaseManifest): string[] => {
+export const bucketNames = (manifest: ReleaseManifest): string[] => {
   const names = new Set<string>();
   for (const worker of Object.values(manifest.workers)) {
     for (const binding of worker.bindings) {
