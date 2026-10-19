@@ -26,6 +26,7 @@ import { activePermissions, authorizeExport } from "./permissions.ts";
 import type { AppStatisticsBinding } from "./statistics-binding.ts";
 import { requireAttemptHolds } from "./workflows/attempt-fence.ts";
 import type { AttemptFence } from "./workflows/attempt-fence.ts";
+import { requireRunCallAllowed } from "./workflows/resource-authority.ts";
 
 /** What App code passes as the caller: the one its method was called with. */
 const callerSchema = z.object({ token: z.string().min(1).max(100) });
@@ -66,6 +67,8 @@ const requireStillAdmitted = async (
       // oxlint-disable-next-line no-use-before-define -- each App's admission checks the one above it
       await callerOf(env, from.app, { token: from.token }, "read");
     }
+  } else if (admission?.type === "workflowRun") {
+    await requireRunCallAllowed(env, admission);
   }
 };
 

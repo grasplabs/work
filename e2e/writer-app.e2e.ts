@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import { writerAppFiles } from "./writer-app.ts";
 
 // A streaming action end to end (spec 10.7.6): a screen in its sandboxed
@@ -12,7 +12,7 @@ import { writerAppFiles } from "./writer-app.ts";
 // (apps/core/test/screen-stream.test.ts).
 
 test("a person watches a draft stream in, then cancels a slow one", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("writerApp");
   const name = `Writer ${crypto.randomUUID().slice(0, 8)}`;
@@ -25,7 +25,7 @@ test("a person watches a draft stream in, then cancels a slow one", async ({
   } finally {
     core[Symbol.dispose]();
   }
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(`/engines/${app}/apps/writer/full`);
   const screen = page.frameLocator('iframe[title="writer app"]');
   await expect(screen.getByRole("heading", { name: "Writer" })).toBeVisible({

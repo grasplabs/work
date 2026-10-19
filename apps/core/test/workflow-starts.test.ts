@@ -9,7 +9,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appFor } from "../src/apps.ts";
 import { createStore } from "../src/data-stores.ts";
@@ -41,6 +41,7 @@ import type {
   StartAuthorization,
   StartInvoker,
 } from "../src/workflow-starts.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
@@ -521,6 +522,20 @@ describe("authority changing under a start", () => {
       id: crypto.randomUUID(),
     });
     const sameShare = await outcome(admitWorkflowStart(env, unchanged));
+    // Its run, sent by the same start sent again, has ended before the
+    // workflow is deleted: a run that hasn't keeps it.
+    const { runId } = await startWorkflow(env, personOf(ada), workflow.id, {
+      version: 1,
+      input: { who: "Ada" },
+      key: unchanged.key,
+    });
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, ada, workflow.id, runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
     const decided = await decide(personOf(ada), workflow.id, 1);
     await deleteWorkflowResource(env, ada, workflow.id);
     expect({

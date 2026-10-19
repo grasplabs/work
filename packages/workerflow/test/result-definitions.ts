@@ -52,6 +52,35 @@ const digestOf = async (
   return { sha256: await sha256(bytes), length: bytes.byteLength, fresh };
 };
 
+/** How many bytes each BYOB read of "byob-streamed" asks for. */
+export const byobViewBytes = 64 * 1024;
+
+/**
+ * Reads a stream to its end with a BYOB reader, into views of
+ * `byobViewBytes`: its hash and length, and the most one read filled.
+ */
+const byobDigestOf = async (
+  body: unknown
+): Promise<{ sha256: string; length: number; largestRead: number }> => {
+  if (!(body instanceof ReadableStream)) {
+    throw new TypeError("the step didn't return a stream");
+  }
+  const reader = body.getReader({ mode: "byob" });
+  const parts: Uint8Array[] = [];
+  let largestRead = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is read in order
+    const { done, value } = await reader.read(new Uint8Array(byobViewBytes));
+    if (done) {
+      break;
+    }
+    largestRead = Math.max(largestRead, value.byteLength);
+    parts.push(value);
+  }
+  const bytes = new Uint8Array(await new Blob(parts).arrayBuffer());
+  return { sha256: await sha256(bytes), length: bytes.byteLength, largestRead };
+};
+
 /** Streams a step can't keep, by the name a test asks for. */
 const invalidStreams: Record<string, () => unknown> = {
   locked: () => {
@@ -416,6 +445,25 @@ export const resultDefinitions: Record<string, WorkflowDefinition> = {
       });
       return await step.do("digest", async (context) => {
         const digest = await digestOf(body);
+        await effect(event.instanceId, "digest", context);
+        return digest;
+      });
+    },
+  },
+  // "streamed", read back with a BYOB reader.
+  "byob-streamed": {
+    run: async (event, step) => {
+      const sizes = sizesOf(event.payload);
+      const content = patterned(
+        sizes.reduce((sum, size) => sum + size, 0),
+        sizes.length
+      );
+      const body = await step.do("export", async (context) => {
+        await effect(event.instanceId, "export", context);
+        return chunkStream(pieces(content, sizes));
+      });
+      return await step.do("digest", async (context) => {
+        const digest = await byobDigestOf(body);
         await effect(event.instanceId, "digest", context);
         return digest;
       });

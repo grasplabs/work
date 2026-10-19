@@ -42,25 +42,30 @@ const redactedAssignment = (...args: unknown[]): string => {
   return `${part("name")}${part("between")}${quote}[redacted]${close}`;
 };
 
+/**
+ * Known credential formats, each recognisable by its shape alone: the
+ * entries of {@link credentials} that don't depend on a name before them.
+ */
+const credentialFormats: readonly RegExp[] = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/gu,
+  /\b(?:bearer|basic)\s+[\w\-.~+/]{16,}=*/giu,
+  /\b(?:sk|pk|rk)_(?:live|test)_[0-9A-Za-z]{10,}/gu,
+  /\b(?:sk|pk|rk)-[\w-]{16,}/gu,
+  /\b(?:ghp|gho|ghs|ghu|ghr)_[0-9A-Za-z]{20,}/gu,
+  /\bgithub_pat_[0-9A-Za-z_]{20,}/gu,
+  /\bxox[abpr]-[0-9A-Za-z-]{10,}/gu,
+  /\bAIza[0-9A-Za-z_-]{35}/gu,
+  // Not a word boundary: between "-" and "e" one holds at every step of a
+  // flood like "eyJ-eyJ-…", which made the match quadratic.
+  /(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu,
+  /\bAKIA[0-9A-Z]{16}\b/gu,
+];
+
 const credentials: readonly (readonly [
   RegExp,
   string | ((...args: unknown[]) => string),
 ])[] = [
-  [
-    /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/gu,
-    "[redacted]",
-  ],
-  [/\b(?:bearer|basic)\s+[\w\-.~+/]{16,}=*/giu, "[redacted]"],
-  [/\b(?:sk|pk|rk)_(?:live|test)_[0-9A-Za-z]{10,}/gu, "[redacted]"],
-  [/\b(?:sk|pk|rk)-[\w-]{16,}/gu, "[redacted]"],
-  [/\b(?:ghp|gho|ghs|ghu|ghr)_[0-9A-Za-z]{20,}/gu, "[redacted]"],
-  [/\bgithub_pat_[0-9A-Za-z_]{20,}/gu, "[redacted]"],
-  [/\bxox[abpr]-[0-9A-Za-z-]{10,}/gu, "[redacted]"],
-  [/\bAIza[0-9A-Za-z_-]{35}/gu, "[redacted]"],
-  // Not a word boundary: between "-" and "e" one holds at every step of a
-  // flood like "eyJ-eyJ-…", which made the match quadratic.
-  [/(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu, "[redacted]"],
-  [/\bAKIA[0-9A-Z]{16}\b/gu, "[redacted]"],
+  ...credentialFormats.map((pattern) => [pattern, "[redacted]"] as const),
   // Each character of a quoted value is taken by one alternative only
   // (an escape, or anything but the quote, a backslash or a newline), and
   // an escaped quote's value ends at the next escaped quote: it stays
@@ -83,3 +88,11 @@ export const redact = (text: string): string => {
   }
   return redacted;
 };
+
+/**
+ * Whether `text` holds a credential in one of the known formats
+ * ({@link credentialFormats}), whatever names it: a scan for secrets
+ * written into source, never a guarantee that there are none.
+ */
+export const holdsKnownCredential = (text: string): boolean =>
+  credentialFormats.some((pattern) => text.search(pattern) !== -1);

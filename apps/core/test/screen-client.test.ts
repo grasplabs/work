@@ -17,18 +17,32 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { actionInvocation, invocationName } from "../src/action-invocation.ts";
+import { readFunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { versionFiles } from "../src/apps.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
+import { appHost, inJurisdiction } from "../src/durable-objects.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
 import { buildScreens } from "../src/screens.ts";
+import { sessionRecheckMs } from "../src/session-check.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeMaxWatches } from "../src/store-watches.ts";
-import { pastAccessRecheck } from "./apps.ts";
+import { pastAccessRecheck, requestGranted } from "./apps.ts";
+import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { newTeam, readCollection } from "./knowledge.ts";
 import { apiOf, notesFiles as files, referenceTo } from "./notes-client-app.ts";
+import { person as sealedPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
+import {
+  callAuth,
+  openRpc,
+  outcome,
+  routed,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 
 // The session client a screen's queries, mutations and actions go through
 // (spec 10.1, 10.7.1), against core's real function route, as an approved
@@ -36,8 +50,10 @@ import { openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
 // deleted; a lost response recovered from its receipt, never saved twice;
 // a cancelled save that still commits and can't be duplicated; caller
 // keys reused for other input or past their receipt refused; an action's
-// lost response never repeated; and arguments the operation can't take
-// refused before anything is sent.
+// lost response recovered from its receipt and a resend joining it while
+// it runs, never run twice, its receipt kept from another person and from
+// its own person once their role narrowed; and arguments the operation
+// can't take refused before anything is sent.
 
 const idp = mockIdp();
 
@@ -66,6 +82,7 @@ const openedApp = async (appFiles: Record<string, string> = files) => {
   const { lease } = await builder.api.screens.open(id, "notes");
   // The frame's connection presents its build, as the page does.
   await builder.api.screens.present(id, lease);
+  const { lease: adminLease } = await admin.api.screens.open(id, "notes");
   const release = await loadRelease(env, id, version);
   return {
     app: id,
@@ -75,6 +92,8 @@ const openedApp = async (appFiles: Record<string, string> = files) => {
     release,
     builder,
     screens: builder.api.screens,
+    builderId: builder.userId,
+    admin: { ...admin, lease: adminLease, cookie: admin.session },
   };
 };
 
@@ -152,6 +171,7 @@ const pageTransport = (
 /** The network between page and core, which can drop answers on the way back. */
 const network = (transport: ClientTransport) => {
   let dropping = 0;
+  let meanwhile: (() => Promise<unknown>) | undefined;
   let sent = 0;
   return {
     transport: {
@@ -161,24 +181,41 @@ const network = (transport: ClientTransport) => {
         const answer = await transport.call(request, app);
         if (dropping > 0) {
           dropping -= 1;
+          await meanwhile?.();
           // The request reached core; its answer didn't come back.
           throw new Error("The connection was reset.");
         }
         return answer;
       },
     } satisfies ClientTransport,
-    /** Drops the next `count` answers. */
-    drop: (count: number) => {
+    /** Drops the next `count` answers, doing `then` before each is lost. */
+    drop: (count: number, then?: () => Promise<unknown>) => {
       dropping = count;
+      meanwhile = then;
     },
     /** How many requests reached core so far. */
     sent: () => sent,
   };
 };
 
-/** A client over the page's transport, as the frame's runtime mounts it. */
-const clientFor = (opened: Opened, screens: Screens = opened.screens) => {
-  const net = network(pageTransport(opened, screens));
+/**
+ * A client over the page's transport, as the frame's runtime mounts it:
+ * the builder's, or the admin's with `asAdmin`.
+ */
+const clientFor = (
+  opened: Opened,
+  screens: Screens = opened.screens,
+  asAdmin = false
+) => {
+  const seat = asAdmin
+    ? {
+        app: opened.app,
+        lease: opened.admin.lease,
+        cookie: opened.admin.cookie,
+        userId: opened.admin.userId,
+      }
+    : opened;
+  const net = network(pageTransport(seat, screens));
   return { client: new GraspClient(net.transport), net };
 };
 
@@ -384,26 +421,276 @@ describe("the session client", { timeout: 120_000 }, () => {
     });
   });
 
-  it("never sends an action again when its answer is lost, and recovers it by its key", async () => {
+  it("recovers an action whose answer was lost from its receipt, running it once", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client, net } = clientFor(opened);
     // The empty input may be left out: its default applies.
     await expect(client.action(api.echo)).resolves.toBe("hello");
+    // The action committed its note, then its answer was lost on the way
+    // back: the resend under its key answers the receipt.
     net.drop(1);
     const before = net.sent();
-    const lost = await failureOf(client.action(api.echo, { word: "once" }));
-    expect(lost).toMatchObject({
+    const keyed = { idempotencyKey: "stamp-once" };
+    const first = await client.action(api.stamp, { title: "Once" }, keyed);
+    expect(net.sent()).toBe(before + 2);
+    // A deliberate call under the same key answers it again.
+    await expect(
+      client.action(api.stamp, { title: "Once" }, keyed)
+    ).resolves.toStrictEqual(first);
+    await expect(titles(client, api)).resolves.toStrictEqual(["Once"]);
+    await expect(
+      failureOf(client.action(api.stamp, { title: "Other" }, keyed))
+    ).resolves.toMatchObject({ code: "submission.key_conflict" });
+  });
+
+  it("joins an action still running when it is sent again under its key", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    // Two tabs, so neither client joins the other's call on its own side.
+    const one = clientFor(opened).client;
+    const two = clientFor(opened).client;
+    const keyed = { idempotencyKey: "stamp-slowly" };
+    const input = { title: "Joined", pauseMs: 1500 };
+    const first = one.action(api.stamp, input, keyed);
+    await scheduler.wait(300);
+    const [started, joined] = await Promise.all([
+      first,
+      two.action(api.stamp, input, keyed),
+    ]);
+    expect(joined).toStrictEqual(started);
+    await expect(titles(one, api)).resolves.toStrictEqual(["Joined"]);
+  });
+
+  it("keeps an action's receipt from another person under the same key", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const keyed = { idempotencyKey: "everyones-key" };
+    const input = { title: "Mine" };
+    const mine = await clientFor(opened).client.action(api.stamp, input, keyed);
+    // From the admin's own screen: an invocation of theirs, run for them.
+    const { client: theirs } = clientFor(
+      opened,
+      opened.admin.api.screens,
+      true
+    );
+    const their = await theirs.action(api.stamp, input, keyed);
+    expect(their.token).not.toBe(mine.token);
+    // The builder's invocation itself, reached in the admin's name.
+    const request = JSON.stringify({
+      reference: {
+        resourceId: api.stamp.resourceId,
+        resourceVersion: api.stamp.resourceVersion,
+        contractId: api.stamp.contractId,
+        fingerprint: api.stamp.fingerprint,
+        kind: "action",
+      },
+      input: { title: "Mine", pauseMs: 0 },
+      idempotencyKey: keyed.idempotencyKey,
+    });
+    const app = appIdSchema.parse(opened.app);
+    const call = readFunctionRequest(request);
+    const name = await invocationName(
+      opened.builderId,
+      app,
+      call,
+      keyed.idempotencyKey,
+      false
+    );
+    const frames = await actionInvocation(env, name).open({
+      by: { userId: opened.admin.userId, role: "admin", teams: [] },
+      access: "the admin's",
+      app,
+      name,
+      call,
+      streaming: false,
+      attach: false,
+    });
+    const refused = z
+      .object({ result: z.object({ error: z.object({ code: z.string() }) }) })
+      .parse(JSON.parse(await new Response(frames).text()));
+    expect(refused.result.error.code).toBe("operation.not_found");
+  });
+
+  it("withholds an action's receipt from its person once their role narrowed", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "before-demotion" };
+    await client.action(api.stamp, { title: "Budget" }, keyed);
+    await opened.admin.api.members.setRole(opened.builderId, "user");
+    // Withheld, never told as a refusal: the action ran under that key.
+    await expect(
+      failureOf(client.action(api.stamp, { title: "Budget" }, keyed))
+    ).resolves.toMatchObject({
       code: "submission.outcome_unknown",
       category: "uncertain",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "operation.access_changed",
+      },
     });
-    expect(net.sent()).toBe(before + 1);
-    const { idempotencyKey } = z
-      .object({ idempotencyKey: z.string() })
-      .parse(lost.details);
+    await expect(titles(client, api)).resolves.toStrictEqual(["Budget"]);
+  });
+
+  it("keeps an action's outcome unknown when its resend after a lost answer is refused", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client, net } = clientFor(opened);
+    const keyed = { idempotencyKey: "lost-then-signed-out" };
+    // Its answer is lost, and the person was removed before the resend.
+    net.drop(1, async () => {
+      await opened.admin.api.members.remove(opened.builderId);
+    });
     await expect(
-      client.action(api.echo, { word: "once" }, { idempotencyKey })
-    ).resolves.toBe("once");
+      failureOf(client.action(api.stamp, { title: "Ran" }, keyed))
+    ).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      category: "uncertain",
+      details: { idempotencyKey: keyed.idempotencyKey },
+    });
+  });
+
+  it("withholds an action's answer from its person whose role narrowed while it ran", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "demoted-while-running" };
+    const running = failureOf(
+      client.action(api.stamp, { title: "Ran", pauseMs: 1500 }, keyed)
+    );
+    await scheduler.wait(300);
+    await opened.admin.api.members.setRole(opened.builderId, "user");
+    await expect(running).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "operation.access_changed",
+      },
+    });
+  });
+
+  it("withholds an action's answer from its person removed while it ran, as an outcome unknown on its first answer", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "removed-while-running" };
+    const running = failureOf(
+      client.action(api.stamp, { title: "Ran", pauseMs: 1500 }, keyed)
+    );
+    await scheduler.wait(300);
+    await opened.admin.api.members.remove(opened.builderId);
+    await expect(running).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      category: "uncertain",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "auth.unauthenticated",
+      },
+    });
+  });
+
+  it("keeps an action's outcome unknown, with its key, when it is sent again past its receipt", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "kept-too-long" };
+    const input = { title: "Ran" };
+    await client.action(api.stamp, input, keyed);
+    const request = JSON.stringify({
+      reference: {
+        resourceId: api.stamp.resourceId,
+        resourceVersion: api.stamp.resourceVersion,
+        contractId: api.stamp.contractId,
+        fingerprint: api.stamp.fingerprint,
+        kind: "action",
+      },
+      input: { ...input, pauseMs: 0 },
+      idempotencyKey: keyed.idempotencyKey,
+    });
+    const name = await invocationName(
+      opened.builderId,
+      appIdSchema.parse(opened.app),
+      readFunctionRequest(request),
+      keyed.idempotencyKey,
+      false
+    );
+    const stub = actionInvocation(env, name);
+    // Its receipt kept past its time, so only its tombstone is left.
+    await runInDurableObject(stub, (_instance, state) => {
+      const record = z
+        .object({ settledAt: z.number() })
+        .loose()
+        .parse(state.storage.kv.get("invocation"));
+      state.storage.kv.put("invocation", {
+        ...record,
+        settledAt: Date.now() - 16 * 60_000,
+      });
+    });
+    await runDurableObjectAlarm(stub);
+    // A form that stayed uncertain that long sends it again: it ran, so
+    // its outcome is unknown, never a failure a fresh key would repeat.
+    await expect(
+      failureOf(client.action(api.stamp, input, keyed))
+    ).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      category: "uncertain",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "submission.expired",
+      },
+    });
+    await expect(titles(client, api)).resolves.toStrictEqual(["Ran"]);
+  });
+
+  it("withholds an action's answer made under a release revoked while it ran, its outcome unknown with its key", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "made-under-v1" };
+    // It saves at once, then takes a while before it answers.
+    const running = failureOf(
+      client.action(api.stamp, { title: "Ran", thenMs: 2500 }, keyed)
+    );
+    await expect
+      .poll(async () => await titles(client, api))
+      .toStrictEqual(["Ran"]);
+    // Version 2 published, and version 1 revoked, while it runs.
+    const { version } = await opened.builder.api.apps.files.commit(
+      opened.app,
+      {
+        ...files,
+        "app.ts": `${files["app.ts"] ?? ""}\n// The second version.\n`,
+      },
+      "Second"
+    );
+    await opened.builder.api.apps.versions.setCurrent(opened.app, version);
+    await revokeRelease(
+      env,
+      await sealedPerson("admin"),
+      { app: appIdSchema.parse(opened.app), version: 1 },
+      "Leaks data"
+    );
+    await expect(running).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      category: "uncertain",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "version.revoked",
+      },
+    });
+  });
+
+  it("answers an action whose receipt is larger than a screen takes as uncertain, with its key", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const failure = await failureOf(client.action(api.big));
+    expect(failure).toMatchObject({
+      code: "screen.answer_too_large",
+      category: "uncertain",
+    });
+    expect(failure.details).toHaveProperty("idempotencyKey");
   });
 
   it("saves from two tabs that read more at once than the person's request budget holds", async () => {
@@ -554,7 +841,8 @@ describe("a screen's build", { timeout: 120_000 }, () => {
         appIdSchema.parse(id),
         version,
         await versionFiles(env, appIdSchema.parse(id), version)
-      )
+      ),
+      "app-test"
     );
     return build.diagnostics
       .filter(({ severity }) => severity === "error")
@@ -574,7 +862,8 @@ describe("a screen's build", { timeout: 120_000 }, () => {
           appIdSchema.parse(opened.app),
           opened.release.manifest.resourceVersion
         )
-      )
+      ),
+      "app-test"
     );
     if (!build.ok) {
       throw new Error("The screen didn't build");
@@ -1469,10 +1758,20 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
         return handle;
       },
     });
-    const list = reading(client, api.list, { pagination: {} });
-    await scheduler.wait(6000);
-    list.stop();
+    // The wait before each follow is fully jittered (client-core.ts), so
+    // how many fit in a window is chance: some draws stay near the 250 ms
+    // floor. Taking the middle of every draw makes the waits 0.5, 1, 2 and
+    // 4 s; a wall clock slowed by load only fits fewer.
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    try {
+      const list = reading(client, api.list, { pagination: {} });
+      await scheduler.wait(6000);
+      list.stop();
+    } finally {
+      random.mockRestore();
+    }
 
+    expect(follows).toBeGreaterThan(1);
     expect(follows).toBeLessThanOrEqual(5);
   });
 });
@@ -1709,16 +2008,16 @@ export const tell = mutation({
 `,
     "app.ts": app
       .replace(
-        "import { create, echo, get, list, remove, update }",
-        "import { create, echo, get, list, remove, secrets, tell, update }"
+        "import { big, create, echo, get, list, remove, stamp, update }",
+        "import { big, create, echo, get, list, remove, secrets, stamp, tell, update }"
       )
       .replace(
         'access: { tables: { notes: { read: "owner", write: "owner" } } }',
         'access: { tables: { notes: { read: "owner", write: "owner" }, secrets: { read: "appBuilders", write: "appBuilders" } } }'
       )
       .replace(
-        "operations: { notes: { list, get, create, update, remove, echo } }",
-        "operations: { notes: { list, get, create, update, remove, echo, secrets, tell } }"
+        "operations: { notes: { list, get, create, update, remove, echo, stamp, big } }",
+        "operations: { notes: { list, get, create, update, remove, echo, stamp, big, secrets, tell } }"
       ),
   };
 };
@@ -1994,3 +2293,1199 @@ describe(
     });
   }
 );
+
+// Revocation (spec 11.4): when a write takes a person's role in an App
+// away, their open screens are cleared without waiting for anything to
+// commit to what they read, on every tab, and nothing more reaches them;
+// anyone whose access holds keeps their screen, whatever the event says.
+
+/**
+ * How long a screen may take to be cleared once access is gone: shorter
+ * than the window a connection's session reading holds, so what clears it
+ * is the event, never that reading running out.
+ */
+const deliveryWait = { timeout: sessionRecheckMs - 1000, interval: 50 };
+
+/** A raw subscription to the notes list over `screens`, once its first result arrived. */
+const followedList = async (
+  opened: Opened,
+  screens: Screens,
+  lease: string
+) => {
+  const follower = pageFollower();
+  await screens.watchQuery(
+    opened.app,
+    lease,
+    requestOf(apiOf(opened.release).list, { pagination: {} }),
+    follower.callback
+  );
+  await eventually(() => {
+    expect(follower.received.at(-1)?.result.ok).toBeTruthy();
+  });
+  return follower;
+};
+
+type Follower = Awaited<ReturnType<typeof followedList>>;
+
+/** Statements that read whom an App is shared with. */
+const sharedWithQueries = /from "app_members"/u;
+
+/** The look at an App by its ID (apps.ts `findApp`). */
+const appLookup = /^select "id", "name", "description"/u;
+
+/**
+ * Core's database for a connection of its own, which fails the
+ * statements `failing` matches once `fail` is called, as D1 does when it
+ * is away for a moment.
+ */
+const flakyDb = (failing: RegExp) => {
+  const state = { failing: false };
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      if (property === "prepare") {
+        return (query: string) => {
+          if (state.failing && failing.test(query)) {
+            throw new Error("D1 is away for a moment.");
+          }
+          return target.prepare(query);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+  return {
+    env: { ...env, DB: db },
+    fail: () => {
+      state.failing = true;
+    },
+  };
+};
+
+/** Fails as D1 does while it is away. */
+const refuse = (): never => {
+  throw new Error("D1 is away.");
+};
+
+/**
+ * Core's database for a connection of its own that goes away right after
+ * the first batch it commits, as D1 can: every statement after it fails.
+ */
+const awayAfterTheChange = (): D1Database => {
+  const state = { away: false };
+  return new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      if (property === "prepare") {
+        return (query: string) =>
+          state.away ? refuse() : target.prepare(query);
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          if (state.away) {
+            refuse();
+          }
+          const results = await target.batch(statements);
+          state.away = true;
+          return results;
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+};
+
+/**
+ * Core's database for a connection of its own on which `userId` is made
+ * an admin just before its first batch, as a promotion landing between a
+ * change's reads and its batch would.
+ */
+const promotedBeforeTheChange = (userId: string): D1Database => {
+  const state = { promoted: false };
+  return new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          if (!state.promoted) {
+            state.promoted = true;
+            await target
+              .prepare("update members set role = 'admin' where user_id = ?")
+              .bind(userId)
+              .run();
+          }
+          return await target.batch(statements);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+};
+
+/**
+ * The App hosts' namespace as a connection that can't reach them to tell
+ * of a revocation sees it: every `accessRevoked` fails, anything else
+ * goes through.
+ */
+const unreachableRevocations = (namespace: Env["APPS"]): Env["APPS"] =>
+  new Proxy(namespace, {
+    get: (target, property): unknown => {
+      if (property === "getByName") {
+        return (name: string) =>
+          new Proxy(target.getByName(name), {
+            get: (stub, method): unknown => {
+              if (method === "accessRevoked") {
+                return async () => {
+                  await Promise.resolve();
+                  throw new Error("The App's host can't be reached.");
+                };
+              }
+              const value: unknown = Reflect.get(stub, method);
+              if (typeof value !== "function") {
+                return value;
+              }
+              // A stub's method answers any property as another method,
+              // `bind` included: called through, never bound.
+              return (...args: unknown[]): unknown =>
+                Reflect.apply(value, stub, args);
+            },
+          });
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+
+/** A cleared screen: its last push a refusal, and core let go of it. */
+const refusedAndLetGo = { last: "app.not_found", released: true };
+
+/**
+ * What `follower` was last sent once core let go of it, which it must
+ * within `deliveryWait`.
+ */
+const whenLetGo = async (follower: Follower) => {
+  await vi.waitFor(() => {
+    expect(follower.state.released).toBeTruthy();
+  }, deliveryWait);
+  return {
+    last: titlesOf(follower.received.at(-1)),
+    released: follower.state.released,
+  };
+};
+
+/** How long `slowToFollow` holds each connection the App's host takes on. */
+const followDelayMs = 2000;
+
+/** Undoes nothing. */
+const nothingToUndo = (): void => {
+  // Nothing done yet.
+};
+
+/**
+ * Has the opened App's host take each connection on as followers of its
+ * revocations only `followDelayMs` late, as a busy host would. Answers
+ * how to undo it.
+ */
+const slowToFollow = async (opened: Opened) => {
+  let undo = nothingToUndo;
+  await runInDurableObject(appHost(env, opened.app), (instance) => {
+    // SAFETY: an App's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >;
+    const original = methods.followAccess;
+    if (original === undefined) {
+      throw new Error("An App's object follows access");
+    }
+    methods.followAccess = async function followAccess(this: unknown, ...args) {
+      await scheduler.wait(followDelayMs);
+      return await original.apply(this, args);
+    };
+    undo = () => {
+      methods.followAccess = original;
+    };
+  });
+  return undo;
+};
+
+/**
+ * Has the opened App's host let go of the first connection it takes on
+ * as a follower of its revocations right away, as a host that restarted
+ * would, and take the next one on only `followDelayMs` late. Answers how
+ * to undo it.
+ */
+const lettingGoEarly = async (opened: Opened) => {
+  let undo = nothingToUndo;
+  await runInDurableObject(appHost(env, opened.app), (instance) => {
+    // SAFETY: an App's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >;
+    const original = methods.followAccess;
+    const letGo = methods.unfollowAccess;
+    if (original === undefined || letGo === undefined) {
+      throw new Error("An App's object follows access");
+    }
+    let calls = 0;
+    methods.followAccess = async function followAccess(this: unknown, ...args) {
+      calls += 1;
+      if (calls > 1) {
+        await scheduler.wait(followDelayMs);
+        return await original.apply(this, args);
+      }
+      const id = await original.apply(this, args);
+      await Reflect.apply(letGo, this, [id]);
+      return id;
+    };
+    undo = () => {
+      methods.followAccess = original;
+    };
+  });
+  return undo;
+};
+
+/**
+ * Counts the opened App's store's reads of a page of `pageSize` records
+ * from now on, holding the first until `release`.
+ */
+const holdPageReads = async (opened: Opened, pageSize: number) => {
+  const storeId = opened.release.store?.storeId;
+  const counted = { reads: 0 };
+  const held = Promise.withResolvers<null>();
+  let undo = nothingToUndo;
+  const pageOfSize = z.object({
+    kind: z.literal("query"),
+    query: z.object({
+      terminal: z.object({
+        kind: z.literal("paginate"),
+        pageSize: z.literal(pageSize),
+      }),
+    }),
+  });
+  await runInDurableObject(storeObjectOf(opened), (instance) => {
+    // SAFETY: a store's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as {
+      read: (...args: unknown[]) => Promise<string>;
+    };
+    const original: unknown = Reflect.get(methods, "read");
+    if (typeof original !== "function") {
+      throw new TypeError("A store's object reads");
+    }
+    methods.read = async function read(
+      this: unknown,
+      ...args: unknown[]
+    ): Promise<string> {
+      if (args[0] === storeId && pageOfSize.safeParse(args[2]).success) {
+        counted.reads += 1;
+        if (counted.reads === 1) {
+          await held.promise;
+        }
+      }
+      const answer: unknown = await Reflect.apply(original, this, args);
+      return String(answer);
+    };
+    undo = () => {
+      Reflect.set(methods, "read", original);
+    };
+  });
+  return {
+    count: () => counted.reads,
+    release: () => {
+      held.resolve(null);
+    },
+    restore: () => {
+      held.resolve(null);
+      undo();
+    },
+  };
+};
+
+/** What reaches `follower` once someone commits to what it read. */
+const afterACommit = async (opened: Opened, follower: Follower) => {
+  const before = follower.received.length;
+  await clientFor(opened).client.mutation(apiOf(opened.release).create, {
+    title: "Committed after",
+  });
+  await scheduler.wait(1500);
+  return follower.received.slice(before);
+};
+
+describe("live queries when access is revoked", { timeout: 180_000 }, () => {
+  it("clears a screen as soon as the person is unshared, with no commit after, and sends nothing more", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+    await expect(afterACommit(opened, follower)).resolves.toStrictEqual([]);
+  });
+
+  it("clears the screen of someone who leaves the team the App is shared with", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const member = await personApi("user");
+    const team = await newTeam(admin, [member]);
+    await admin.api.apps.members.add(opened.app, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId: team,
+      userId: member.userId,
+    });
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears the screen of someone whose team, the App's way to them, is deleted", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const member = await personApi("user");
+    const team = await newTeam(admin, [member]);
+    await admin.api.apps.members.add(opened.app, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, member.api.screens, lease);
+    // The organization keeps a team: this one is never its last.
+    await newTeam(admin, []);
+
+    const removed = await callAuth("/organization/remove-team", admin.session, {
+      teamId: team,
+    });
+    expect(removed.status).toBe(200);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears the screen of someone the App was shared with directly, once leaving a team leaves them unable to read what it read", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const member = await personApi("user");
+    const team = await newTeam(admin, [member]);
+    const { id: collection } = await admin.api.knowledge.createCollection({
+      name: `HR ${unique()}`,
+      access: "teams",
+      teams: [team],
+      sensitive: false,
+    });
+    await requestGranted(
+      idp,
+      opened.builder,
+      readCollection(
+        { type: "app", appId: opened.app },
+        collection,
+        `HR_${unique().toUpperCase()}`
+      )
+    );
+    // Shared with them as a person, never with the team.
+    await opened.builder.api.apps.members.add(opened.app, {
+      type: "person",
+      id: member.userId,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId: team,
+      userId: member.userId,
+    });
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears an admin's screen once they are demoted out of the App, on a session read just before", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const demoted = await personApi("admin");
+    const { lease } = await demoted.api.screens.open(opened.app, "notes");
+    await demoted.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, demoted.api.screens, lease);
+
+    await admin.api.members.setRole(demoted.userId, "user");
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("keeps the screens of everyone whose access holds, when others of the App lose theirs", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const leaving = await personApi("user");
+    const team = await newTeam(admin, [leaving]);
+    const unshared = { type: "team", id: team } as const;
+    await admin.api.apps.members.add(opened.app, { ...unshared, role: "user" });
+    const { lease } = await leaving.api.screens.open(opened.app, "notes");
+    await leaving.api.screens.present(opened.app, lease);
+    const theirs = await followedList(opened, leaving.api.screens, lease);
+    const staying = await memberOf(opened);
+    const kept = await followedList(
+      opened,
+      staying.member.api.screens,
+      staying.lease
+    );
+
+    // Everyone the App's host knows of looks again.
+    await admin.api.apps.members.remove(opened.app, unshared);
+    await expect(whenLetGo(theirs)).resolves.toStrictEqual(refusedAndLetGo);
+    await staying.client.mutation(apiOf(opened.release).create, {
+      title: "Still mine",
+    });
+
+    await eventually(() => {
+      expect(titlesOf(kept.received.at(-1))).toStrictEqual(["Still mine"]);
+    });
+    expect({
+      released: kept.state.released,
+      refused: kept.received.some(({ result }) => !result.ok),
+    }).toStrictEqual({ released: false, refused: false });
+  });
+
+  it("changes nothing for someone whose access holds, whoever says it was revoked", async () => {
+    const opened = await openedApp();
+    const { lease, member, client } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await appHost(env, opened.app).accessRevoked([member.userId]);
+    await appHost(env, opened.app).accessRevoked(null);
+    await scheduler.wait(1500);
+    await client.mutation(apiOf(opened.release).create, { title: "Mine" });
+
+    await eventually(() => {
+      expect(titlesOf(follower.received.at(-1))).toStrictEqual(["Mine"]);
+    });
+    expect({
+      released: follower.state.released,
+      refused: follower.received.some(({ result }) => !result.ok),
+    }).toStrictEqual({ released: false, refused: false });
+  });
+
+  it("clears every tab of the person, each on its own connection", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const { core } = await openRpc(member.session);
+    const otherTab = core.authenticate().screens;
+    await otherTab.present(opened.app, lease);
+    const first = await followedList(opened, member.api.screens, lease);
+    const second = await followedList(opened, otherTab, lease);
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    await expect(whenLetGo(first)).resolves.toStrictEqual(refusedAndLetGo);
+    await expect(whenLetGo(second)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears what a frame of the tab follows through its own handle", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const frame = await member.api.screens.frame(opened.app, lease);
+    const follower = pageFollower();
+    await frame.watchQuery(
+      requestOf(apiOf(opened.release).list, { pagination: {} }),
+      follower.callback
+    );
+    await eventually(() => {
+      expect(follower.received.at(-1)?.result.ok).toBeTruthy();
+    });
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("never shows a query followed right after the revocation, on a session read before it", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const demoted = await personApi("admin");
+    const { lease } = await demoted.api.screens.open(opened.app, "notes");
+    // A tab that reads the session now, and follows nothing of the App yet.
+    const { core } = await openRpc(demoted.session);
+    const tab = core.authenticate().screens;
+    await tab.present(opened.app, lease);
+
+    await admin.api.members.setRole(demoted.userId, "user");
+    // The App's host is slow to take the tab on: the event went out
+    // before, and the tab's reads must wait for it either way.
+    const undo = await slowToFollow(opened);
+    try {
+      const follower = pageFollower();
+      await tab.watchQuery(
+        opened.app,
+        lease,
+        requestOf(apiOf(opened.release).list, { pagination: {} }),
+        follower.callback
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(follower.state.released).toBeTruthy();
+        },
+        { ...deliveryWait, timeout: deliveryWait.timeout + followDelayMs }
+      );
+      expect(follower.received.map(({ result }) => result.ok)).toStrictEqual([
+        false,
+      ]);
+    } finally {
+      undo();
+    }
+  });
+
+  it("follows again once the App's host restarted, so a revocation after still clears the screen", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const demoted = await personApi("admin");
+    const { lease } = await demoted.api.screens.open(opened.app, "notes");
+    await demoted.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, demoted.api.screens, lease);
+    await runInDurableObject(appHost(env, opened.app), (_app, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    // Once the connection follows the new host: the event below must reach
+    // it there. (Telling it, while its access holds, changes nothing.)
+    await vi.waitFor(
+      async () => {
+        await expect(
+          appHost(env, opened.app).accessRevoked([demoted.userId])
+        ).resolves.toBeGreaterThan(0);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+
+    // A demotion tells the host and restarts nothing.
+    await admin.api.members.setRole(demoted.userId, "user");
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears the screen of someone removed from the organization", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const { lease, member } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await admin.api.members.remove(member.userId);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+      last: "auth.unauthenticated",
+      released: true,
+    });
+  });
+
+  it("clears what a query kept while it waits to follow again, once the person is only a user", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const page = pageTransport(
+      { ...opened, lease, cookie: member.session, userId: member.userId },
+      member.api.screens
+    );
+    const isSecrets = (request: string): boolean =>
+      z
+        .object({ reference: z.object({ contractId: z.string() }) })
+        .parse(JSON.parse(request)).reference.contractId === secrets.contractId;
+    // The secrets are followed once, then lost after their first push, and
+    // followed again only once the test is over: meanwhile the query
+    // waits to follow again, showing what it kept.
+    const held = Promise.withResolvers<null>();
+    let secretsFollows = 0;
+    const client = new GraspClient({
+      call: page.call,
+      watch: async (request, onSnapshot, onLost) => {
+        if (!isSecrets(request)) {
+          return await page.watch(request, onSnapshot, onLost);
+        }
+        secretsFollows += 1;
+        if (secretsFollows > 1) {
+          await held.promise;
+          return await page.watch(request, onSnapshot, onLost);
+        }
+        const handle: { release: (() => void) | undefined } = {
+          release: undefined,
+        };
+        let pushed = false;
+        const followed = await page.watch(
+          request,
+          (push) => {
+            onSnapshot(push);
+            if (!pushed) {
+              pushed = true;
+              setTimeout(() => {
+                handle.release?.();
+                onLost();
+              }, 100);
+            }
+          },
+          () => {
+            // Told by the test.
+          }
+        );
+        handle.release = followed.release;
+        return followed;
+      },
+    });
+    const waiting = reading(client, secrets, {});
+    const followed = reading(client, apiOf(opened.release).list, {
+      pagination: {},
+    });
+    await eventually(() => {
+      expect({
+        secrets: JSON.stringify(waiting.now().value).includes("Builders only"),
+        lost: secretsFollows > 1,
+        list: shown(followed.now()),
+      }).toStrictEqual({ secrets: true, lost: true, list: [] });
+    });
+
+    try {
+      await opened.builder.api.apps.members.add(opened.app, {
+        ...them,
+        role: "user",
+      });
+
+      await vi.waitFor(() => {
+        expect(followed.now().error?.code).toBe("screen.access_changed");
+      }, deliveryWait);
+      expect(waiting.now().value).toBeUndefined();
+    } finally {
+      held.resolve(null);
+    }
+  });
+
+  it("refuses as a failure to try again, not a lost role, when the role can't be read for a moment", async () => {
+    const opened = await openedApp();
+    const { lease, member } = await memberOf(opened);
+    const flaky = flakyDb(sharedWithQueries);
+    const { core } = await openRpc(member.session, { coreEnv: flaky.env });
+    const tab = core.authenticate().screens;
+    await tab.present(opened.app, lease);
+    const follower = await followedList(opened, tab, lease);
+
+    flaky.fail();
+    await appHost(env, opened.app).accessRevoked([member.userId]);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+      last: "internal.unexpected",
+      released: true,
+    });
+  });
+
+  it("reads one App's query once, though another App's access is looked at again while it is read", async () => {
+    const opened = await openedApp();
+    const other = await openedApp();
+    const { lease, member } = await memberOf(opened);
+    await other.builder.api.apps.members.add(other.app, {
+      type: "person",
+      id: member.userId,
+      role: "user",
+    });
+    const { lease: otherLease } = await member.api.screens.open(
+      other.app,
+      "notes"
+    );
+    await member.api.screens.present(other.app, otherLease);
+    await followedList(other, member.api.screens, otherLease);
+    const pageSize = 7;
+    const reads = await holdPageReads(opened, pageSize);
+    try {
+      const follower = pageFollower();
+      await member.api.screens.watchQuery(
+        opened.app,
+        lease,
+        requestOf(apiOf(opened.release).list, { pagination: { pageSize } }),
+        follower.callback
+      );
+      await eventually(() => {
+        expect(reads.count()).toBe(1);
+      });
+
+      // While this App's query is read, the other App's host tells the
+      // connection to look again: only the other App's queries look.
+      await expect(
+        appHost(env, other.app).accessRevoked([member.userId])
+      ).resolves.toBe(1);
+      await scheduler.wait(500);
+      reads.release();
+
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result.ok).toBeTruthy();
+      });
+      await scheduler.wait(1000);
+      expect({
+        reads: reads.count(),
+        pushes: follower.received.length,
+      }).toStrictEqual({ reads: 1, pushes: 1 });
+    } finally {
+      reads.restore();
+    }
+  });
+
+  it("reads nothing of an App until the host that let go of it early takes the connection on again", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const demoted = await personApi("admin");
+    const { lease } = await demoted.api.screens.open(opened.app, "notes");
+    const { core } = await openRpc(demoted.session);
+    const tab = core.authenticate().screens;
+    await tab.present(opened.app, lease);
+    // The host lets go of the connection's first following at once, and
+    // takes the next one on only `followDelayMs` later.
+    const undo = await lettingGoEarly(opened);
+    try {
+      const follower = pageFollower();
+      await tab.watchQuery(
+        opened.app,
+        lease,
+        requestOf(apiOf(opened.release).list, { pagination: {} }),
+        follower.callback
+      );
+      await scheduler.wait(500);
+      // Before the next following: no host tells the connection of this.
+      await admin.api.members.setRole(demoted.userId, "user");
+
+      await vi.waitFor(
+        () => {
+          expect(follower.state.released).toBeTruthy();
+        },
+        { ...deliveryWait, timeout: deliveryWait.timeout + followDelayMs }
+      );
+      expect(follower.received.map(({ result }) => result.ok)).toStrictEqual([
+        false,
+      ]);
+    } finally {
+      undo();
+    }
+  });
+
+  it("refuses as a failure to try again, not a lost role, when the App can't be looked up for a moment", async () => {
+    const opened = await openedApp();
+    const { lease, member } = await memberOf(opened);
+    const flaky = flakyDb(appLookup);
+    const { core } = await openRpc(member.session, { coreEnv: flaky.env });
+    const tab = core.authenticate().screens;
+    await tab.present(opened.app, lease);
+    const follower = await followedList(opened, tab, lease);
+
+    flaky.fail();
+    await appHost(env, opened.app).accessRevoked([member.userId]);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+      last: "internal.unexpected",
+      released: true,
+    });
+  });
+
+  it("tells an App's host later, from the cron trigger, when it can't be reached when access drops", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+    // The builder's own connection, whose word to the App's host that
+    // access dropped never arrives.
+    const { core } = await openRpc(opened.cookie, {
+      coreEnv: { ...env, APPS: unreachableRevocations(env.APPS) },
+    });
+
+    await core.authenticate().apps.members.remove(opened.app, them);
+    await scheduler.wait(1500);
+    const before = follower.state.released;
+    await runCron();
+
+    expect(before).toBeFalsy();
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("drops a kept revocation once it is a day old, however many others the cron trigger tells first", async () => {
+    const opened = await openedApp();
+    const now = Date.now();
+    const keep = env.DB.prepare(
+      "insert into access_revocations (id, app_id, user_ids, attempts, created_at) values (?, ?, null, ?, ?)"
+    );
+    const expired = crypto.randomUUID();
+    // More than one run tells, none tried yet: each run reaches them
+    // before the old one, which was tried once.
+    const fresh = Array.from({ length: 101 }, () =>
+      keep.bind(crypto.randomUUID(), opened.app, 0, now)
+    );
+    await env.DB.batch([
+      ...fresh,
+      keep.bind(expired, opened.app, 1, now - 25 * 60 * 60 * 1000),
+    ]);
+
+    await runCron();
+
+    const left = await env.DB.prepare(
+      "select id from access_revocations where id = ?"
+    )
+      .bind(expired)
+      .first();
+    expect(left).toBeNull();
+  });
+
+  it("clears the screen from the cron trigger when the database goes away right after an unsharing commits", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+    // The builder's own connection: nothing after the unsharing's batch
+    // reaches the database, and the App's host can't be told.
+    const { core } = await openRpc(opened.cookie, {
+      coreEnv: {
+        ...env,
+        DB: awayAfterTheChange(),
+        APPS: unreachableRevocations(env.APPS),
+      },
+    });
+
+    await outcome(core.authenticate().apps.members.remove(opened.app, them));
+    await scheduler.wait(1500);
+    const before = follower.state.released;
+    await runCron();
+
+    expect(before).toBeFalsy();
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears the screen of someone removed who reached the App through a team, from the cron trigger when the database goes away right after", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const member = await personApi("user");
+    const team = await newTeam(admin, [member]);
+    await admin.api.apps.members.add(opened.app, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, member.api.screens, lease);
+    // The admin's own connection: nothing after the removal's batch, which
+    // takes their teams away too, reaches the database, and the App's host
+    // can't be told.
+    const { core } = await openRpc(admin.session, {
+      coreEnv: {
+        ...env,
+        DB: awayAfterTheChange(),
+        APPS: unreachableRevocations(env.APPS),
+      },
+    });
+
+    await outcome(core.authenticate().members.remove(member.userId));
+    await scheduler.wait(1500);
+    const before = follower.state.released;
+    await runCron();
+
+    expect(before).toBeFalsy();
+    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+      last: "auth.unauthenticated",
+      released: true,
+    });
+  });
+
+  it("clears the screen of someone removed who was made an admin after the removal read their role, of an App only admins reach", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const removed = await personApi("admin");
+    const { lease } = await removed.api.screens.open(opened.app, "notes");
+    await removed.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, removed.api.screens, lease);
+    // A user as the removal reads them first; an admin again by its batch.
+    await env.DB.prepare("update members set role = 'user' where user_id = ?")
+      .bind(removed.userId)
+      .run();
+    const { core } = await openRpc(admin.session, {
+      coreEnv: { ...env, DB: promotedBeforeTheChange(removed.userId) },
+    });
+
+    await core.authenticate().members.remove(removed.userId);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+      last: "auth.unauthenticated",
+      released: true,
+    });
+  });
+
+  it("stops showing builders' data to someone lowered to user, from the cron trigger when the database goes away right after", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const admin = await personApi("admin");
+    const member = await personApi("builder");
+    await opened.builder.api.apps.members.add(opened.app, {
+      type: "person",
+      id: member.userId,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = pageFollower();
+    await member.api.screens.watchQuery(
+      opened.app,
+      lease,
+      requestOf(secrets, {}),
+      follower.callback
+    );
+    const showsSecret = () =>
+      JSON.stringify(follower.received.at(-1)?.result).includes(
+        "Builders only"
+      );
+    await eventually(() => {
+      expect(showsSecret()).toBeTruthy();
+    });
+    // The admin's own connection: nothing after the change's batch
+    // reaches the database, and the App's host can't be told.
+    const { core } = await openRpc(admin.session, {
+      coreEnv: {
+        ...env,
+        DB: awayAfterTheChange(),
+        APPS: unreachableRevocations(env.APPS),
+      },
+    });
+
+    await outcome(core.authenticate().members.setRole(member.userId, "user"));
+    await scheduler.wait(1500);
+    const before = showsSecret();
+    await runCron();
+
+    expect(before).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(showsSecret()).toBeFalsy();
+    }, deliveryWait);
+  });
+
+  it("keeps no revocation once the App's host is told, nor for a sharing that changed nothing", async () => {
+    const opened = await openedApp();
+    const { them } = await memberOf(opened);
+    const keptFor = async () =>
+      await env.DB.prepare(
+        "select count(*) as kept from access_revocations where app_id = ?"
+      )
+        .bind(opened.app)
+        .first<number>("kept");
+    // A connection that can't tell the App's host: whatever it keeps
+    // stays for the cron trigger.
+    const { core } = await openRpc(opened.cookie, {
+      coreEnv: { ...env, APPS: unreachableRevocations(env.APPS) },
+    });
+
+    // Shared again in the role it has: nothing changes.
+    await core.authenticate().apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+    const keptForNothing = await keptFor();
+    // Unshared over a connection that tells the App's host at once.
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    expect({ keptForNothing, keptOnceTold: await keptFor() }).toStrictEqual({
+      keptForNothing: 0,
+      keptOnceTold: 0,
+    });
+  });
+
+  it("reads again for someone who is now only a user, rather than keep showing what builders read", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = pageFollower();
+    await member.api.screens.watchQuery(
+      opened.app,
+      lease,
+      requestOf(secrets, {}),
+      follower.callback
+    );
+    const showsSecret = () =>
+      JSON.stringify(follower.received.at(-1)?.result).includes(
+        "Builders only"
+      );
+    await eventually(() => {
+      expect(showsSecret()).toBeTruthy();
+    });
+
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+
+    await vi.waitFor(() => {
+      expect(showsSecret()).toBeFalsy();
+    }, deliveryWait);
+  });
+
+  it("drops what a screen kept from before the person became only a user, while the query it follows shows nothing yet", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const { client } = clientFor(
+      { ...opened, lease, cookie: member.session, userId: member.userId },
+      member.api.screens
+    );
+    const kept = reading(client, secrets, {});
+    await eventually(() => {
+      expect(JSON.stringify(kept.now().value)).toContain("Builders only");
+    });
+    // No longer shown: the client keeps it for a while.
+    kept.stop();
+    const pageSize = 9;
+    const reads = await holdPageReads(opened, pageSize);
+    try {
+      // Followed, its first read held: it has shown nothing yet.
+      const pending = reading(client, apiOf(opened.release).list, {
+        pagination: { pageSize },
+      });
+      await eventually(() => {
+        expect(reads.count()).toBe(1);
+      });
+
+      await opened.builder.api.apps.members.add(opened.app, {
+        ...them,
+        role: "user",
+      });
+
+      await vi.waitFor(() => {
+        expect(pending.now().error?.code).toBe("screen.access_changed");
+      }, deliveryWait);
+      expect(kept.now().value).toBeUndefined();
+    } finally {
+      reads.restore();
+    }
+  });
+
+  it("shows nothing a screen kept from before the person became only a user, followed or not", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const { client } = clientFor(
+      { ...opened, lease, cookie: member.session, userId: member.userId },
+      member.api.screens
+    );
+    const followed = reading(client, secrets, {});
+    // Read once, then no longer shown: the client keeps it for a while.
+    const kept = reading(client, apiOf(opened.release).list, {
+      pagination: {},
+    });
+    await eventually(() => {
+      expect({
+        followed: JSON.stringify(followed.now().value).includes(
+          "Builders only"
+        ),
+        kept: shown(kept.now()),
+      }).toStrictEqual({ followed: true, kept: [] });
+    });
+    kept.stop();
+
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+
+    await vi.waitFor(() => {
+      expect(followed.now().error?.code).toBe("screen.access_changed");
+    }, deliveryWait);
+    expect(kept.now()).toMatchObject({ value: undefined });
+    // Read again, it is read afresh, under the roles they have now.
+    const again = reading(client, apiOf(opened.release).list, {
+      pagination: {},
+    });
+    await eventually(() => {
+      expect(shown(again.now())).toStrictEqual([]);
+    });
+  });
+});

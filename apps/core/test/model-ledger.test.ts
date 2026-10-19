@@ -83,6 +83,24 @@ const budget = (limit: number, key = "ada"): LedgerScope => ({
   names: { user: key },
 });
 
+/**
+ * Ada's shares of the requests in flight, room enough that none fills in
+ * these tests, for a call of its own (fair-model-admission.test.ts tests
+ * the shares).
+ */
+const roomyFair = (): Admission["fair"] => ({
+  place: crypto.randomUUID(),
+  subject: "ada",
+  resource: null,
+  shares: {
+    client: 1000,
+    person: 1000,
+    app: 1000,
+    queuedPerPerson: 1000,
+    queuedPerApp: 1000,
+  },
+});
+
 /** How long after its deadline the gateway has a request come due (models.ts). */
 const graceMs = 5 * 60_000;
 
@@ -105,6 +123,7 @@ const admission = (
     reservedMicros,
     actor,
     deadline: reconcileAt - graceMs,
+    fair: roomyFair(),
     ...more,
     reconcileAt,
   };

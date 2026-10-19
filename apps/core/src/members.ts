@@ -1,5 +1,5 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import {
   disconnectPersonalMaxOwners,
   oauthFlowLifetimeMs,
@@ -9,7 +9,12 @@ import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type { Invitation, Member, MembersApi } from "@grasp-os/shared/members";
-import { isAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
+import {
+  canBuild,
+  isAdmin,
+  roleErrors,
+  roleSchema,
+} from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
@@ -17,7 +22,15 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { revocationsOf, tellKept } from "./access-revocations.ts";
+import type { KeptRevocation } from "./access-revocations.ts";
+import { appsOwnedOrSharedNow } from "./app-access.ts";
+import {
+  auditedBatch,
+  outboxedEventWhere,
+  outboxedIfChanged,
+  storedEvent,
+} from "./audit-outbox.ts";
 import {
   activeAdminExists,
   activeMember,
@@ -107,6 +120,34 @@ const membershipOf = async (
   return membership;
 };
 
+/**
+ * The Apps `userId` has a role in as a member in role `role`, with the
+ * teams they are in when the statement runs, as a condition on `apps`
+ * (`revocationsOf`): what lowering their role can take away, for those
+ * Apps' hosts to tell their open screens (access-revocations.ts). Every
+ * App for an admin; a role that isn't ours reaches nothing.
+ */
+const reachedAs = (userId: string, role: string): SQL | undefined => {
+  const known = roleSchema.safeParse(role);
+  if (!known.success) {
+    return sql`0`;
+  }
+  return isAdmin(known.data) ? undefined : appsOwnedOrSharedNow(userId);
+};
+
+/**
+ * The Apps `userId` has a role in as the member they are when the
+ * statement runs, in the role and teams they have then, as a condition on
+ * `apps`: what removing them takes away. Read in the removal's own
+ * statement, so a role changed since it was read before can't narrow it.
+ */
+const reachedNow = (userId: string): SQL =>
+  sql`(${activeMember(userId, ["admin"])} OR (${activeMember(userId)} AND ${appsOwnedOrSharedNow(userId)}))`;
+
+/** Whether going from role `from` to `to` can take a role in an App away. */
+const lowers = (from: string, to: Role): boolean =>
+  (isAdmin(from) && !isAdmin(to)) || (canBuild(from) && !canBuild(to));
+
 /** That `userId` is an admin of the organization now, as a SQL condition. */
 const isActiveAdmin = (userId: string): SQL => activeMember(userId, ["admin"]);
 
@@ -167,23 +208,29 @@ const listMembers = async (env: Env, by: Identity): Promise<Member[]> => {
  * still is one, checked in the same statement, so a removal racing any
  * other change of membership or role (see `setMemberRole`) never leaves
  * the organization without an admin: the admin making it is never the one
- * removed. Everything after it runs only once the marker is there.
- * Returns whether this call removed them.
+ * removed. Everything after it runs only once the marker is there. Before
+ * it, under the same condition, a revocation is kept for every App they
+ * reached, in the role and through the teams they had then.
+ * Returns whether this call removed them, and the revocations it kept.
  */
 const recordRemoval = async (
   env: Env,
   by: Identity,
   userId: string,
   memberId: string
-): Promise<boolean> => {
+): Promise<{ removed: boolean; kept: KeptRevocation[] }> => {
   const db = drizzle(env.DB);
   const removed = sql`NOT ${notRemoved(userId)}`;
-  const [inserted] = await auditedBatch(env, db, [
+  const removing = sql`${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`;
+  const [kept, inserted] = await auditedBatch(env, db, [
+    // First, under the marker's own condition, while their membership and
+    // teams are still there to say what they reached.
+    revocationsOf(db, reachedNow(userId), [userId], removing),
     db
       .insert(memberRemovals)
       .select(
         sql`SELECT ${organizationId}, ${userId}, ${Date.now()}, NULL
-          WHERE ${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`
+          WHERE ${removing}`
       )
       .onConflictDoNothing()
       .returning({ userId: memberRemovals.userId }),
@@ -203,7 +250,7 @@ const recordRemoval = async (
       .delete(notifications)
       .where(and(eq(notifications.personId, userId), removed)),
   ]);
-  return inserted.length > 0;
+  return { removed: inserted.length > 0, kept };
 };
 
 /**
@@ -278,12 +325,18 @@ const removeMember = async (
   const target = targetOf(by, userId);
   const membership = await membershipOf(env, target);
   if (membership) {
-    const removedNow = await recordRemoval(env, by, target, membership.id);
+    const { removed, kept } = await recordRemoval(
+      env,
+      by,
+      target,
+      membership.id
+    );
     // Someone else's removal of them may have landed first; otherwise the
     // admin stopped being one since their session was checked.
-    if (!(removedNow || (await isRemoved(env, target)))) {
+    if (!(removed || (await isRemoved(env, target)))) {
       throw refusal(by, roleErrors.create("role.forbidden"));
     }
+    await tellKept(env, kept);
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
@@ -362,7 +415,26 @@ const setMemberRole = async (
   const db = drizzle(env.DB);
   const keepsAnAdmin =
     newRole === "admin" ? sql`1` : activeAdminExists(target.data);
-  const [[changed]] = await auditedBatch(env, db, [
+  const event = createAuditEvent(
+    {
+      actor: actorOf(by),
+      action: "member.role.updated",
+      target: { type: "member", id: membership.id },
+      detail: {
+        userId: target.data,
+        previousRole: membership.role,
+        role: newRole,
+      },
+    },
+    "core"
+  );
+  // The Apps they reached in the role they had, kept in the change's
+  // batch so that a database away after it loses none of them; none when
+  // the new role takes nothing away.
+  const reached = lowers(membership.role, newRole)
+    ? reachedAs(target.data, membership.role)
+    : sql`0`;
+  const [[changed], , kept] = await auditedBatch(env, db, [
     db
       .update(members)
       .set({ role: newRole })
@@ -375,18 +447,11 @@ const setMemberRole = async (
         )
       )
       .returning({ id: members.id }),
-    outboxedIfChanged(db, {
-      actor: actorOf(by),
-      action: "member.role.updated",
-      target: { type: "member", id: membership.id },
-      detail: {
-        userId: target.data,
-        previousRole: membership.role,
-        role: newRole,
-      },
-    }),
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+    revocationsOf(db, reached, [target.data], storedEvent(event.id)),
   ]);
   if (changed) {
+    await tellKept(env, kept);
     return;
   }
   const now = await membershipOf(env, target.data);

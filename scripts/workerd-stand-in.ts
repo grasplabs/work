@@ -32,6 +32,11 @@ export const bundle = (out: string, worker: string): string[] => {
       compatibility_date: "2026-09-15",
       compatibility_flags: ["nodejs_compat"],
       alias: { "#version": path.join(out, "version.js") },
+      // As core's own wrangler.jsonc: migrations and Grasp skills (a guests
+      // resource's chats are guided by one) come along as text modules.
+      rules: [
+        { type: "Text", globs: ["**/*.sql", "**/SKILL.md"], fallthrough: true },
+      ],
     })
   );
   const bundled = path.join(out, "bundle");
@@ -41,11 +46,11 @@ export const bundle = (out: string, worker: string): string[] => {
     { cwd: core, stdio: "ignore" }
   );
   const main = worker.replace(/\.ts$/u, ".js");
-  // Durable Object migrations come along as text modules.
+  // Durable Object migrations and Grasp skills come along as text modules.
   return [
     `(name = "worker.js", esModule = embed "bundle/${main}")`,
     ...readdirSync(bundled)
-      .filter((file) => file.endsWith(".sql"))
+      .filter((file) => file.endsWith(".sql") || file.endsWith(".md"))
       .map((file) => `(name = "${file}", text = embed "bundle/${file}")`),
   ];
 };

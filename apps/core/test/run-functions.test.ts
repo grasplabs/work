@@ -6,7 +6,9 @@ import {
 } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -14,22 +16,31 @@ import { z } from "zod";
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
 import type { RunCaller } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
+import { appFor } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { budgetMonth } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import {
+  createWorkflowResource,
+  publishWorkflowVersion,
+} from "../src/workflow-resources.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns, finished, liveStatus, sleeping, woken } from "./runs.ts";
+import { isolationFiles } from "./isolation-app.ts";
+import { endLiveRuns, finished, runObject, sleeping, woken } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
-import { runEvents } from "./workflow-apps.ts";
+import { hitsOf, runEvents, sampleApp } from "./workflow-apps.ts";
 
 // A workflow run calls a public function of its own App's sealed release
 // (`env.APP.callFunction`), and the function's `ctx.resources` resolve
@@ -51,6 +62,8 @@ const personApi = async (role: Role): Promise<Person> =>
 
 /** The model the tests' deployment allows. */
 const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** Hosted in the EU, as the tests' config says: its provider's EU region. */
+const euModel = "openai/gpt-5.4";
 
 /** A step of a workflow that calls one of its App's functions. */
 interface CallingStep {
@@ -69,7 +82,7 @@ const callsOf = ({ reference, input, more = [] }: CallingStep): string =>
   [{ reference, input }, ...more]
     .map(
       (call) =>
-        `    answered.push(await env.APP.callFunction(${JSON.stringify(call.reference)}, ${JSON.stringify(call.input)}));\n`
+        `    answered.push((await env.APP.callFunction(${JSON.stringify(call.reference)}, ${JSON.stringify(call.input)})) as Json);\n`
     )
     .join("");
 
@@ -84,7 +97,7 @@ const callingWorkflow = (
   steps: readonly CallingStep[],
   { between = "", options = "retries: { limit: 0 }" } = {}
 ): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { workflow, z } from "@grasp-os/sdk/workflow";
+  [`workflows/${id}.ts`]: `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env }) => {
   const answers = [];
@@ -92,7 +105,7 @@ ${steps
   .map(
     (calling, index) =>
       `${index === 0 ? "" : between}  answers.push(await step.do("${calling.name}", { description: "Call a function", sideEffect: true, input: null, ${options} }, async () => {
-    const answered = [];
+    const answered: Json[] = [];
 ${callsOf(calling)}    ${calling.after ?? ""}
     return answered.length === 1 ? answered[0] : answered;
   }));
@@ -197,6 +210,130 @@ export default app({
 });
 
 /**
+ * An App whose action starts the workflow it declares, and whose mutation
+ * stages its start for after its commit (workflow-start-intents.ts).
+ */
+const startingFiles = (): Record<string, string> => ({
+  "schema.ts": schemaFile,
+  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action, mutation } from "#grasp/server";
+
+export const followUp = resource.workflow("followUp", {
+  input: v.object({ who: v.string() }),
+  output: v.object({ status: v.string() }),
+});
+
+export const kickOff = action({
+  args: { who: v.string() },
+  returns: v.string(),
+  uses: [followUp],
+  handler: async (ctx, args) => {
+    const started = await ctx.startWorkflow(followUp, { who: args.who });
+    return started.startId;
+  },
+});
+
+export const submit = mutation({
+  args: { who: v.string() },
+  returns: v.id("notes"),
+  uses: [followUp],
+  handler: async (ctx, args) => {
+    const id = await ctx.db.insert("notes", { title: args.who });
+    await ctx.afterCommit.start(followUp, { who: args.who });
+    return id;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { followUp, kickOff, submit } from "./operations/desk.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { desk: { kickOff, submit } },
+  screens: [],
+  uses: [followUp],
+});
+`,
+});
+
+/** A JSON object's schema descriptor, all of `properties` required. */
+const objectSchemaOf = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/**
+ * A workflow of `owner`'s, bound to App `app` as `followUp`, with the
+ * App's `start` on it granted by an admin, for version 1.
+ */
+const deskWorkflowBound = async (owner: string, app: string) => {
+  const by = {
+    userId: owner,
+    role: "builder" as const,
+    teams: [],
+    staff: false,
+  };
+  const admin = await person("admin");
+  const workflow = await createWorkflowResource(
+    env,
+    by,
+    `desk-${crypto.randomUUID()}`
+  );
+  await publishWorkflowVersion(env, by, workflow.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: workflow.name,
+        version: "1.0.0",
+        title: workflow.name,
+        metadata: {
+          grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+        },
+      },
+      input: { schema: objectSchemaOf({ who: { type: "string" } }) },
+      output: { schema: objectSchemaOf({ status: { type: "string" } }) },
+      do: [{ greet: { set: { status: "done" } } }],
+    }),
+    basedOn: null,
+  });
+  await bindWorkflowToApp(env, by, workflow.id, {
+    app,
+    alias: "followUp",
+    version: 1,
+  });
+  const asked = await requestPermission(
+    env,
+    by,
+    {
+      subject: { type: "app", appId: app },
+      object: { type: "workflow", workflowId: workflow.id },
+      actions: ["start"],
+      binding: "FOLLOW_UP",
+    },
+    {
+      app: async (named: string, role: "user" | "builder") =>
+        await appFor(env, by, named, role),
+      resource: async (
+        ref: Parameters<typeof requireResourceRole>[2],
+        needed: Parameters<typeof requireResourceRole>[3]
+      ) => {
+        await requireResourceRole(env, by, ref, needed);
+      },
+    }
+  );
+  await grantPermission(env, admin, asked.id, { version: 1 });
+};
+
+/**
  * An App whose actions send mail through Microsoft 365, with a mutation
  * that keeps a note and a query that counts the caller's notes.
  */
@@ -277,6 +414,111 @@ export default app({
 `,
 });
 
+/**
+ * The Mailer, with an action that asks a text model (`assist.draft`): an
+ * App that keeps notes, sends mail and asks a model.
+ */
+const draftingMailFiles = (): Record<string, string> => ({
+  ...mailFiles(),
+  "operations/assist.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const writer = resource.model("writer", { maxOutputTokens: 300 });
+
+export const draft = action({
+  args: { prompt: v.string().min(1) },
+  returns: v.string(),
+  uses: [writer],
+  handler: async (ctx, args) => await ctx.resources.writer.generate({ prompt: args.prompt }),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { draft, writer } from "./operations/assist.ts";
+import { count, mail, note, send, sendMany } from "./operations/mail.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Mailer",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { mail: { send, sendMany, note, count }, assist: { draft } },
+  internalOperations: {},
+  screens: [],
+  uses: [mail, writer],
+});
+`,
+});
+
+/**
+ * An App that asks the Assistant's `assist.draft` through its `assistant`
+ * app resource: straight away (`relay.ask`), or after reading the team
+ * inbox through its `mail` connector (`relay.readThenAsk`). Each answers
+ * the draft, or `error:` and why it was refused.
+ */
+const relayingFiles = (): Record<string, string> => ({
+  "schema.ts": schemaFile,
+  "operations/relay.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const assistant = resource.app("assistant", {
+  functions: {
+    "assist.draft": { kind: "action", args: { prompt: v.string().min(1) }, returns: v.string() },
+  },
+});
+
+export const mail = resource.connector("mail", {
+  contract: "microsoft-365.mail@1",
+  actions: ["list"],
+});
+
+const attempt = async <T,>(work: () => Promise<T>): Promise<T | string> => {
+  try {
+    return await work();
+  } catch (error) {
+    const details = Object(Reflect.get(Object(error), "details"));
+    return ["error", Reflect.get(Object(error), "code"), Reflect.get(details, "code")]
+      .filter((part) => part !== undefined)
+      .map(String)
+      .join(":");
+  }
+};
+
+export const ask = action({
+  args: {},
+  returns: v.string(),
+  uses: [assistant],
+  handler: async (ctx) =>
+    await attempt(() => ctx.resources.assistant.call("assist.draft", { prompt: "Hi" })),
+});
+
+export const readThenAsk = action({
+  args: {},
+  returns: v.string(),
+  uses: [assistant, mail],
+  handler: async (ctx) => {
+    const listed = await ctx.resources.mail.call("list", { mailbox: "team@acme.test" });
+    return await attempt(() =>
+      ctx.resources.assistant.call("assist.draft", { prompt: JSON.stringify(listed) })
+    );
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { ask, assistant, mail, readThenAsk } from "./operations/relay.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Relay",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { relay: { ask, readThenAsk } },
+  internalOperations: {},
+  screens: [],
+  uses: [assistant, mail],
+});
+`,
+});
+
 /** The Mailer's `send`, as a step names it. */
 const send = { contractId: "mail.send", kind: "action" };
 
@@ -349,6 +591,32 @@ const connectShared = async (admin: Person): Promise<string> => {
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
 
+/**
+ * Where run `run` stands in its journal: its status, how many steps it
+ * has, and the wait it waits in, if any. The same twice means nothing
+ * happened in between.
+ */
+const journalOf = async (run: string) =>
+  await runInDurableObject(runObject(run), (_object, state) => {
+    const { sql } = state.storage;
+    const [current] = sql
+      .exec<{ status: string }>("SELECT status FROM run")
+      .toArray();
+    const [steps] = sql
+      .exec<{ count: number }>("SELECT count(*) AS count FROM steps")
+      .toArray();
+    const [waiting] = sql
+      .exec<{ name: string }>(
+        "SELECT name FROM steps WHERE type = 'waitForEvent' AND state = 'waiting'"
+      )
+      .toArray();
+    return {
+      status: current?.status,
+      steps: steps?.count ?? 0,
+      waiting: waiting?.name,
+    };
+  });
+
 /** How many messages Graph sent with `subject` (each test's own). */
 const sentCount = async (subject: string): Promise<number> => {
   const providers = testBinding("CONNECT_PROVIDERS");
@@ -392,15 +660,21 @@ const mailerApp = async (workflow: Record<string, string>) => {
 };
 
 /**
- * What `who`'s screen gets calling the query `contractId` of the App's
- * current version, as a screen calls it.
+ * What `who`'s screen gets calling the function `contractId` of the App's
+ * `version` (its first unless named), current, with `input`, as a screen
+ * calls it.
  */
-const queryAs = async (
+const callAs = async (
   who: Person,
   app: string,
-  { contractId }: { contractId: string }
+  {
+    contractId,
+    kind = "query",
+    version = 1,
+  }: { contractId: string; kind?: string; version?: number },
+  input: unknown = {}
 ): Promise<OperationResult> => {
-  const released = await loadRelease(env, appIdSchema.parse(app), 1);
+  const released = await loadRelease(env, appIdSchema.parse(app), version);
   const answered = await callAppFunction(
     env,
     await who.api.whoami(),
@@ -408,12 +682,12 @@ const queryAs = async (
     JSON.stringify({
       reference: {
         resourceId: app,
-        resourceVersion: 1,
+        resourceVersion: version,
         contractId,
         fingerprint: released.fingerprints[contractId] ?? "",
-        kind: "query",
+        kind,
       },
-      input: {},
+      input,
     })
   );
   return answered.result;
@@ -464,6 +738,7 @@ const stepOf = (
     workflow: workflowIdSchema.parse("sleeper"),
     runId: runIdSchema.parse(runId),
     version: 1,
+    shareSubject: builder.userId,
     authority: {
       subject: { type: "app", appId: appIdSchema.parse(app) },
       onBehalfOf: builder.userId,
@@ -488,6 +763,26 @@ const stepOf = (
     throw new Error("Nothing is held here");
   },
 });
+
+/**
+ * `caller`, whose call's start is admitted, every other check of the
+ * gate passed, only once `meanwhile` has happened: what lands while a
+ * call runs, made certain.
+ */
+const startedBefore = (
+  caller: RunCaller,
+  meanwhile: () => Promise<void>
+): RunCaller => {
+  let happened: Promise<void> | undefined;
+  return {
+    ...caller,
+    stillCurrent: async () => {
+      happened ??= meanwhile();
+      await happened;
+      await caller.stillCurrent();
+    },
+  };
+};
 
 /**
  * Core's env with AI Gateway answering `replies` behind the AI binding,
@@ -591,6 +886,29 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     await endLiveRuns();
   });
 
+  it("give each run of a step's code its own effects, two at once under the step's key too, as the run tests' counter relies on", async () => {
+    // The run tests count how often a step's code ran with the sample
+    // App's counter (workflow-apps.ts): each run names itself, and its
+    // bump, a nested mutation, takes a key derived from that input.
+    const asleep = await sleepingRun(sampleApp());
+    const step = stepOf(asleep, { holds: true });
+    const key = `step:${crypto.randomUUID()}`;
+    const hit = async () =>
+      await callRunFunction(
+        env,
+        { ...step, requestId: crypto.randomUUID() },
+        { contractId: "counter.hit", kind: "action" },
+        { name: "overlap", execution: crypto.randomUUID() },
+        key
+      );
+    const [first, second] = await Promise.all([hit(), hit()]);
+    const third = await hit();
+    expect({
+      answered: [first.ok, second.ok, third.ok],
+      hits: await hitsOf(asleep.builder, asleep.app, "overlap"),
+    }).toStrictEqual({ answered: [true, true, true], hits: 3 });
+  });
+
   it("reach a model through the App's binding as the run, counted against the binding's caps and the run's budgets", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
@@ -650,6 +968,61 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
   });
 
+  it("start no workflow, from an action or after a mutation's commit, so no run's step opens a lineage of its own", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, {
+      ...startingFiles(),
+      ...callingWorkflow("desk", [
+        {
+          name: "start",
+          reference: { contractId: "desk.kickOff", kind: "action" },
+          input: { who: "Ada" },
+          more: [
+            {
+              reference: { contractId: "desk.submit", kind: "mutation" },
+              input: { who: "Ada" },
+            },
+          ],
+        },
+      ]),
+    });
+    // Bound and granted, as a person's start from a screen needs: what
+    // refuses the run's start is that a run makes it, nothing else.
+    await deskWorkflowBound(builder.userId, app);
+    const run = await builder.api.workflows.start(app, "desk");
+    const ended = await endedRun(builder, run.id);
+    const receipts = await env.DB.prepare(
+      "SELECT count(*) AS count FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ?"
+    )
+      .bind(app)
+      .first<{ count: number }>();
+    // Its mutation failed, so its store saved nothing: not its note either.
+    const { store } = await loadRelease(env, appIdSchema.parse(app), 1);
+    if (store === null) {
+      throw new Error("The release has no store");
+    }
+    const commits = await runInDurableObject(
+      env.DATA_STORES.getByName(store.storeId),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ commits: number }>("SELECT commits FROM sdk_store")
+          .one().commits
+    );
+    expect({ ended, receipts: receipts?.count, commits }).toMatchObject({
+      ended: {
+        status: "completed",
+        output: [
+          [
+            { ok: false, error: { code: "resource.unavailable" } },
+            { ok: false, error: { code: "resource.unavailable" } },
+          ],
+        ],
+      },
+      receipts: 0,
+      commits: 0,
+    });
+  });
+
   it("stop serving a binding revoked between two steps of a run", async () => {
     const { admin, builder, app, binding } = await twoStepApp();
     const ended = await changedBetween(admin, builder, app, async () => {
@@ -703,6 +1076,104 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         { ok: false, error: { code: "version.revoked" } },
       ],
       asked: 1,
+    });
+  });
+
+  it("refuse a run on a version no admin approved, even its App's own data, and record the refusal", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const title = `Unapproved ${crypto.randomUUID()}`;
+    const count = { contractId: "mail.count", kind: "query" };
+    const note = { contractId: "mail.note", kind: "mutation" };
+    // Each version the same functions, told apart by a mark: the run waits
+    // a day between counting and keeping a note in the App's own store,
+    // which no connector permission covers.
+    const version = (mark: string) => ({
+      ...mailFiles(),
+      ...callingWorkflow(
+        "noter",
+        [
+          { name: "count", reference: count, input: {} },
+          {
+            name: "note",
+            reference: note,
+            input: { title },
+            // Then how many notes there are: the attacked run's too, had it
+            // written one.
+            more: [{ reference: count, input: {} }],
+            after: `// ${mark}`,
+          },
+        ],
+        { between: aDay }
+      ),
+    });
+    const app = await appWith(builder, version("First."));
+    const connectionId = await connectShared(admin);
+    const permission = await builder.api.permissions.request({
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    });
+    await admin.api.permissions.grant(permission.id, { version: 1 });
+    // The attack: the builder's own version, which an admin's run starts
+    // on and waits in; then a harmless one, which the admin grants again
+    // for, so the App holds a permission that changes things once more.
+    await release(builder, app, version("Writes whatever it likes."));
+    const run = await admin.api.workflows.start(app, "noter");
+    await sleeping(run.id, "go");
+    await release(builder, app, version("Harmless."));
+    await admin.api.permissions.grant(permission.id, { version: 3 });
+    await woken(run.id);
+    const attacked = await endedRun(admin, run.id);
+    // A run on the version the admin granted for writes.
+    const approved = await admin.api.workflows.start(app, "noter");
+    await sleeping(approved.id, "go");
+    await woken(approved.id);
+    const events = await allEvents();
+    const refusals = events.filter(
+      ({ action, target }) =>
+        action === "workflow.call.refused" && target?.id === run.id
+    );
+    expect({
+      attacked,
+      approved: await endedRun(admin, approved.id),
+      refusals: refusals.map(({ actor, detail }) => ({ actor, detail })),
+      // The call's input never reaches the log.
+      leaked: JSON.stringify(refusals).includes(title),
+    }).toMatchObject({
+      attacked: {
+        version: 2,
+        status: "completed",
+        output: [
+          { ok: true, value: 0 },
+          [
+            { ok: false, error: { code: "permission.denied" } },
+            { ok: false, error: { code: "permission.denied" } },
+          ],
+        ],
+      },
+      // Only its own note: the attacked run wrote none.
+      approved: {
+        version: 3,
+        status: "completed",
+        output: [
+          { ok: true, value: 0 },
+          [{ ok: true }, { ok: true, value: 1 }],
+        ],
+      },
+      // Once for each call refused.
+      refusals: ["mail.note", "mail.count"].map((call) => ({
+        actor: { type: "workflow", appId: app, runId: run.id },
+        detail: {
+          app,
+          version: 2,
+          call,
+          errorCode: "permission.denied",
+          reason: "version.unapproved",
+        },
+      })),
+      leaked: false,
     });
   });
 
@@ -861,7 +1332,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         .map(({ detail }) => String(detail.outcome))
         .toSorted((one, other) => one.localeCompare(other)),
       keys: new Set(calls.map(({ detail }) => detail.idempotencyKeyHash)).size,
-      notes: await queryAs(builder, app, { contractId: "mail.count" }),
+      notes: await callAs(builder, app, { contractId: "mail.count" }),
     }).toStrictEqual({
       status: "failed",
       sent: 2,
@@ -937,14 +1408,25 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await pending.confirm(action.id, action.inputHash);
     }
+    // The run checks again on its own timer, and on each wake: its status
+    // is read only while it provably sits in one wait whose check ran
+    // after every confirmation, so the read can't land in a check.
+    const { waiting: confirmedIn } = await journalOf(run.id);
+    let whileOneWaits: string | undefined;
     await vi.waitFor(
       async () => {
-        await expect(liveStatus(run.id)).resolves.toBe("waiting");
+        const before = await journalOf(run.id);
+        expect(before.status).toBe("waiting");
+        expect(before.waiting).toBeDefined();
+        expect(before.waiting).not.toBe(confirmedIn);
+        const { status } = await builder.api.workflows.status(run.id);
+        await expect(journalOf(run.id)).resolves.toStrictEqual(before);
+        // A wake that replays to the same wait leaves the journal as it was:
+        // a read in it may say running, so it reads again.
+        expect(status).toBe("waiting");
+        whileOneWaits = status;
       },
-      { timeout: 20_000, interval: 100 }
-    );
-    const { status: whileOneWaits } = await builder.api.workflows.status(
-      run.id
+      { timeout: 30_000, interval: 50 }
     );
     if (last !== undefined) {
       await pending.confirm(last.id, last.inputHash);
@@ -1187,7 +1669,8 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
             reference: { contractId: "assist.flaky", kind: "action" },
             input: {},
             // As the SDK says to: the answer's error, thrown as it is.
-            after: "if (!answered[0].ok) throw answered[0].error;",
+            after:
+              "const [first] = answered as { ok: boolean; error?: unknown }[]; if (!first.ok) throw first.error;",
           },
         ],
         { options: `retries: { limit: 1, delay: "1 second" }` }
@@ -1207,5 +1690,401 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       code: "internal.unexpected",
       asked: 2,
     });
+  });
+});
+
+describe(
+  "a workflow run's calls of its App's functions, beside other callers'",
+  { timeout: 120_000 },
+  () => {
+    afterEach(async () => {
+      await endLiveRuns();
+    });
+
+    /** The functions of the App of `isolationFiles`, as callers name them. */
+    const notes = {
+      create: { contractId: "notes.create", kind: "mutation" },
+      titles: { contractId: "notes.titles", kind: "query" },
+      hold: { contractId: "notes.hold", kind: "action" },
+      useKept: { contractId: "notes.useKept", kind: "mutation" },
+      keepAfter: { contractId: "notes.keepAfter", kind: "action" },
+      late: { contractId: "notes.late", kind: "action" },
+    };
+
+    /**
+     * The App of `isolationFiles`, a builder's, with a workflow for each
+     * function a run calls in these tests, and another person who uses it.
+     */
+    const isolatedApp = async () => {
+      const builder = await personApi("builder");
+      const other = await personApi("user");
+      const app = await appWith(builder, {
+        ...isolationFiles,
+        ...callingWorkflow("holder", [
+          { name: "hold", reference: notes.hold, input: {} },
+        ]),
+        ...callingWorkflow("user", [
+          { name: "use", reference: notes.useKept, input: {} },
+        ]),
+        ...callingWorkflow("keeper", [
+          { name: "keep", reference: notes.keepAfter, input: {} },
+        ]),
+        // Its step's attempt has 2 seconds; the function waits 4.
+        ...callingWorkflow(
+          "hurried",
+          [{ name: "late", reference: notes.late, input: {} }],
+          { options: 'retries: { limit: 0 }, timeout: "2 seconds"' }
+        ),
+      });
+      await builder.api.apps.members.add(app, {
+        type: "person",
+        id: other.userId,
+        role: "user",
+      });
+      return { builder, other, app };
+    };
+
+    it("never hand what a run's held call keeps to another person's run or screen", async () => {
+      const { builder, other, app } = await isolatedApp();
+      // GRA-383's held call, made by a run: A keeps its channel in module
+      // state and holds its call open until a "release" note appears.
+      const holding = await builder.api.workflows.start(app, "holder");
+      await vi.waitFor(
+        async () => {
+          await expect(
+            callAs(builder, app, notes.titles)
+          ).resolves.toStrictEqual({ ok: true, value: ["A holding"] });
+        },
+        { timeout: 20_000, interval: 100 }
+      );
+      // B, another person, calls while A holds: from a run, and from a screen.
+      const using = await other.api.workflows.start(app, "user");
+      const fromRun = await endedRun(other, using.id);
+      const fromScreen = await callAs(other, app, notes.useKept);
+      // Only now is A let go.
+      await callAs(builder, app, notes.create, { title: "release" });
+      expect({
+        fromRun,
+        fromScreen,
+        held: await endedRun(builder, holding.id),
+        titles: await callAs(builder, app, notes.titles),
+      }).toMatchObject({
+        fromRun: {
+          status: "completed",
+          output: [{ ok: true, value: "nothing kept" }],
+        },
+        fromScreen: { ok: true, value: "nothing kept" },
+        held: { status: "completed", output: [{ ok: true, value: null }] },
+        titles: { ok: true, value: ["A holding", "release"] },
+      });
+    });
+
+    it("end a run's call with it: work its code schedules past it never runs", async () => {
+      const { builder, app } = await isolatedApp();
+      const keeping = await builder.api.workflows.start(app, "keeper");
+      await expect(endedRun(builder, keeping.id)).resolves.toMatchObject({
+        status: "completed",
+        output: [{ ok: true, value: null }],
+      });
+      await scheduler.wait(1000);
+      await expect(callAs(builder, app, notes.titles)).resolves.toStrictEqual({
+        ok: true,
+        value: [],
+      });
+    });
+
+    it("cut a run's call short at its step's deadline, after which it writes nothing", async () => {
+      const { builder, app } = await isolatedApp();
+      const hurried = await builder.api.workflows.start(app, "hurried");
+      const ended = await endedRun(builder, hurried.id);
+      // Past the function's own wait, had it gone on.
+      await scheduler.wait(4000);
+      expect({
+        status: ended.status,
+        titles: await callAs(builder, app, notes.titles),
+      }).toStrictEqual({ status: "failed", titles: { ok: true, value: [] } });
+    });
+
+    it("hold a step's call to its attempt's deadline, while the attempt still holds its lease", async () => {
+      const asleep = await sleepingRun(isolationFiles);
+      const late = await callRunFunction(
+        env,
+        { ...stepOf(asleep, { holds: true }), deadline: Date.now() + 2000 },
+        notes.late,
+        {},
+        `step:${crypto.randomUUID()}`
+      );
+      // Past the function's own wait, had it gone on.
+      await scheduler.wait(4000);
+      expect({
+        late,
+        titles: await callAs(asleep.builder, asleep.app, notes.titles),
+      }).toMatchObject({
+        late: { ok: false, error: { code: "operation.deadline_exceeded" } },
+        titles: { ok: true, value: [] },
+      });
+    });
+  }
+);
+
+describe(
+  "a workflow run's call on a version no admin approved",
+  { timeout: 120_000 },
+  () => {
+    afterEach(async () => {
+      await endLiveRuns();
+    });
+
+    /**
+     * A run asleep in its builder's App of `draftingMailFiles`, its first
+     * version current and unapproved, with its model bound and a permission
+     * on mail the builder asked for but nobody granted yet: nothing changes
+     * things, so the version runs. `grant` makes it change things again: the
+     * builder's second version, and an admin's grant for it.
+     */
+    const unapprovedRun = async () => {
+      const asleep = await sleepingRun(draftingMailFiles());
+      await bindWriter(asleep.admin, asleep.app);
+      const connectionId = await connectShared(asleep.admin);
+      const permission = await asleep.builder.api.permissions.request({
+        subject: { type: "app", appId: asleep.app },
+        object: { type: "connection", connectionId },
+        actions: ["mail.send"],
+        binding: "MAIL",
+      });
+      const files = draftingMailFiles();
+      await release(asleep.builder, asleep.app, {
+        ...files,
+        ...sleeper,
+        "operations/assist.ts": `${files["operations/assist.ts"] ?? ""}// The second version.\n`,
+      });
+      const grant = async () => {
+        await asleep.admin.api.permissions.grant(permission.id, { version: 2 });
+      };
+      return { asleep, grant };
+    };
+
+    it("refuse the commit of a call started before an admin granted for a later version", async () => {
+      const { asleep, grant } = await unapprovedRun();
+      const result = await callRunFunction(
+        env,
+        startedBefore(stepOf(asleep, { holds: true }), grant),
+        { contractId: "mail.note", kind: "mutation" },
+        { title: "Too late" },
+        `step:${crypto.randomUUID()}`
+      );
+      expect({
+        failed: result.ok ? null : result.error.code,
+        notes: await callAs(asleep.builder, asleep.app, {
+          contractId: "mail.count",
+          version: 2,
+        }),
+      }).toStrictEqual({
+        failed: "permission.denied",
+        notes: { ok: true, value: 0 },
+      });
+    });
+
+    it("refuse the resource request of a call started before an admin granted for a later version", async () => {
+      const { asleep, grant } = await unapprovedRun();
+      const { gateway, env: calling } = callEnv([answer("Never sent.")]);
+      const result = await callRunFunction(
+        calling,
+        startedBefore(stepOf(asleep, { holds: true }), grant),
+        draft,
+        { prompt: "Hi" },
+        `step:${crypto.randomUUID()}`
+      );
+      expect({
+        failed: result.ok ? null : result.error.code,
+        asked: gateway.requests.length,
+      }).toStrictEqual({ failed: "permission.denied", asked: 0 });
+    });
+  }
+);
+
+/** `admin`'s binding of `app`'s `assistant` to the Assistant `assistant`. */
+const bindAssistant = async (admin: Person, app: string, assistant: string) =>
+  await admin.api.resourceBindings.approve({
+    app,
+    alias: "assistant",
+    target: { kind: "app", appId: assistant },
+    reviewed: { version: 1 },
+  });
+
+/** What `who`'s screen gets calling the action `contractId` of `app`, in `on`. */
+const screenCall = async (
+  on: Env,
+  who: Person,
+  app: string,
+  contractId: string
+): Promise<OperationResult> => {
+  const appId = appIdSchema.parse(app);
+  const released = await loadRelease(env, appId, 1);
+  const answered = await callAppFunction(
+    on,
+    await who.api.whoami(),
+    appId,
+    JSON.stringify({
+      reference: {
+        resourceId: appId,
+        resourceVersion: 1,
+        contractId,
+        fingerprint: released.fingerprints[contractId] ?? "",
+        kind: "action",
+      },
+      input: {},
+    })
+  );
+  return answered.result;
+};
+
+describe("another App's functions an App calls", { timeout: 120_000 }, () => {
+  afterEach(async () => {
+    await endLiveRuns();
+  });
+
+  it("count a run's model requests through another App against the run lineage's budget, which a screen's don't", async () => {
+    const asleep = await sleepingRun(relayingFiles());
+    const assistant = await appWith(asleep.builder, modelFiles());
+    await bindWriter(asleep.admin, assistant);
+    await bindAssistant(asleep.admin, asleep.app, assistant);
+    // The first answer costs far more than the run lineage may spend.
+    const { gateway, env: budgeted } = callEnv(
+      [
+        { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
+        // The run's second request never reaches it: the screen's does.
+        answer("For the screen."),
+      ],
+      { rules: { budgets: { run: { limit: 0.01 } } } }
+    );
+    const step = stepOf(asleep, { holds: true });
+    const ask = async () =>
+      await callRunFunction(
+        budgeted,
+        { ...step, requestId: crypto.randomUUID() },
+        { contractId: "relay.ask", kind: "action" },
+        {},
+        `step:${crypto.randomUUID()}`
+      );
+    const first = await ask();
+    const second = await ask();
+    const screen = await screenCall(
+      budgeted,
+      asleep.builder,
+      asleep.app,
+      "relay.ask"
+    );
+    expect({
+      first,
+      second,
+      screen,
+      asked: gateway.requests.length,
+    }).toStrictEqual({
+      first: { ok: true, value: "Costly." },
+      second: {
+        ok: true,
+        value: "error:resource.operation_failed:resource.budget_exhausted",
+      },
+      screen: { ok: true, value: "For the screen." },
+      asked: 2,
+    });
+    // Each request named as the run's, with the Assistant's binding it
+    // went through, so the log tells it from the Relay's own.
+    const events = await allEvents();
+    const models = events
+      .filter(
+        ({ action, actor }) =>
+          (action === "model.call" || action === "model.refused") &&
+          actor?.type === "workflow" &&
+          actor.runId === asleep.runId
+      )
+      .map(({ action, actor, detail }) => ({
+        action,
+        actor,
+        binding: detail.binding,
+        bindingApp: detail.bindingApp,
+      }));
+    const run = {
+      type: "workflow",
+      appId: asleep.app,
+      workflowId: "sleeper",
+      runId: asleep.runId,
+    };
+    expect(models).toStrictEqual([
+      {
+        action: "model.call",
+        actor: run,
+        binding: "writer",
+        bindingApp: assistant,
+      },
+      {
+        action: "model.refused",
+        actor: run,
+        binding: "writer",
+        bindingApp: assistant,
+      },
+    ]);
+  });
+
+  it("hold another App's model requests to the rules for what the calling App read, an EU-only connection's included", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const relay = await appWith(builder, relayingFiles());
+    const assistant = await appWith(builder, modelFiles());
+    await bindWriter(admin, assistant);
+    await bindAssistant(admin, relay, assistant);
+    const connectionId = await connectShared(admin);
+    const requested = await builder.api.permissions.request({
+      subject: { type: "app", appId: relay },
+      object: { type: "connection", connectionId },
+      actions: ["mail.list"],
+      binding: "MAIL",
+    });
+    await admin.api.permissions.grant(requested.id, { version: 1 });
+    await admin.api.resourceBindings.approve({
+      app: relay,
+      alias: "mail",
+      target: { kind: "connector", permissionId: requested.id },
+      reviewed: { version: 1 },
+    });
+    // The connection's data must stay with a model hosted in the EU; the
+    // Assistant's writer isn't one.
+    const { gateway, env: euOnly } = callEnv(
+      [answer("Nothing read."), answer("Never sent.")],
+      {
+        rules: {
+          models: [allowedModel, euModel],
+          eu: { models: [euModel], connections: [connectionId] },
+        },
+      }
+    );
+    const plain = await screenCall(euOnly, builder, relay, "relay.ask");
+    const afterReading = await screenCall(
+      euOnly,
+      builder,
+      relay,
+      "relay.readThenAsk"
+    );
+    expect({
+      plain,
+      afterReading,
+      asked: gateway.requests.length,
+    }).toStrictEqual({
+      plain: { ok: true, value: "Nothing read." },
+      afterReading: { ok: true, value: "error:resource.unavailable" },
+      asked: 1,
+    });
+    // Refused for the connection the calling App read, as the Assistant.
+    const events = await allEvents();
+    const refused = events.filter(
+      ({ action, actor }) =>
+        action === "model.refused" &&
+        actor?.type === "app" &&
+        actor.appId === assistant
+    );
+    expect(refused).toMatchObject([
+      { detail: { reason: "model.eu_only", because: "connection" } },
+    ]);
   });
 });

@@ -3,12 +3,14 @@ import {
   invalidCode,
   ToolError,
 } from "@grasp-os/connector-kit/connector";
+import type { Effect } from "@grasp-os/connector-kit/connector";
 import {
   checkReadable,
   contentAs,
   fromBase64,
   readAsSchema,
 } from "@grasp-os/connector-kit/content";
+import { stampHeader } from "@grasp-os/connector-kit/manifest";
 import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
 import { z } from "zod";
 
@@ -506,7 +508,13 @@ const draftFields = [
 const recipients = (addresses: string[] | undefined) =>
   (addresses ?? []).map((address) => ({ emailAddress: { address } }));
 
-/** A message as Graph takes it, tagged with the call's effect key if any. */
+/**
+ * A message as Graph takes it, tagged with the call's effect key if any,
+ * and carrying its stamp as a header if any: Graph keeps the header on
+ * every copy it delivers, so the copy a watched mailbox receives names the
+ * run that sent it (core's workflows/mail-stamps.ts), whatever new ID it
+ * gets there.
+ */
 const graphDraft = (
   {
     subject,
@@ -517,7 +525,7 @@ const graphDraft = (
     bcc,
     replyTo,
   }: z.output<typeof draftInput>,
-  effectKey: string | null
+  { key: effectKey, stamp }: Effect
 ) => ({
   subject,
   body: { contentType: bodyType ?? "text", content: body },
@@ -525,6 +533,9 @@ const graphDraft = (
   ccRecipients: recipients(cc),
   bccRecipients: recipients(bcc),
   replyTo: recipients(replyTo),
+  ...(stamp === null
+    ? {}
+    : { internetMessageHeaders: [{ name: stampHeader, value: stamp }] }),
   ...(effectKey === null
     ? {}
     : {
@@ -586,7 +597,7 @@ const sendMail = defineTool({
     const response = await graphFetch(
       graphUrl(`/users/${segment(input.mailbox)}/sendMail`),
       jsonBody({
-        message: graphDraft(input, effect.key),
+        message: graphDraft(input, effect),
         saveToSentItems: true,
       })
     );
@@ -615,7 +626,7 @@ const createDraft = defineTool({
     const draft = await graphJson(
       graphUrl(`/users/${segment(input.mailbox)}/messages`),
       graphMessage,
-      jsonBody(graphDraft(input, effect.key))
+      jsonBody(graphDraft(input, effect))
     );
     return {
       output: {

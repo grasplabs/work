@@ -31,6 +31,7 @@ export const familyNamespaces = [
   "error_report",
   "execution",
   "expression",
+  "file",
   "guest",
   "internal",
   "interview",

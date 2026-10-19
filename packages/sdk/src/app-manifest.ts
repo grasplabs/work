@@ -14,9 +14,10 @@ import type { Migration } from "./migration.ts";
 import {
   isBrowserResource,
   isResource,
+  isWorkflowResource,
   readResourceDeclaration,
 } from "./resources.ts";
-import type { AnyResource, BrowserResource } from "./resources.ts";
+import type { AnyResource, WorkflowResource } from "./resources.ts";
 import { readSchemaManifest } from "./schema-manifest.ts";
 import type { TableAccess } from "./schema-manifest.ts";
 import { serverModule } from "./server.ts";
@@ -127,7 +128,8 @@ const useFrom = (
   use: unknown,
   path: string,
   operations: Readonly<Record<string, unknown>>,
-  resources: ReadonlyMap<string, AnyResource>
+  resources: ReadonlyMap<string, AnyResource>,
+  workflows: ReadonlyMap<string, WorkflowResource>
 ): unknown => {
   if (hasExactly(use, ["type", "path", "kind"]) && use.type === "function") {
     const target =
@@ -147,6 +149,14 @@ const useFrom = (
     }
     return declared;
   }
+  if (hasExactly(use, ["type", "alias"]) && use.type === "workflow") {
+    const declared =
+      typeof use.alias === "string" ? workflows.get(use.alias) : undefined;
+    if (declared === undefined) {
+      return refuse(`\`${path}\` starts a workflow the App doesn't declare.`);
+    }
+    return declared;
+  }
   return refuse(`\`${path}\`'s \`uses\` holds an entry no declaration makes.`);
 };
 
@@ -155,7 +165,8 @@ const functionFrom = (
   path: string,
   input: unknown,
   operations: Readonly<Record<string, unknown>>,
-  resources: ReadonlyMap<string, AnyResource>
+  resources: ReadonlyMap<string, AnyResource>,
+  workflows: ReadonlyMap<string, WorkflowResource>
 ): ReadFunction => {
   if (
     !hasExactly(input, [
@@ -193,7 +204,7 @@ const functionFrom = (
   // refuse, as it would in code.
   if (kind !== "query" || listed.length > 0) {
     declaration.uses = listed.map((use) =>
-      useFrom(use, path, operations, resources)
+      useFrom(use, path, operations, resources, workflows)
     );
   }
   if (stream !== null) {
@@ -314,6 +325,29 @@ const migrationsFrom = (input: unknown): Migration[] =>
     } as Parameters<typeof migration>[0]);
   });
 
+/**
+ * The declarations map `input` (the manifest's `what`) files, each read
+ * back through `resource`: of the kind `is` accepts (`kind`, as a refusal
+ * names it) and filed under its own alias, or refused.
+ */
+const declaredFrom = <Declaration extends { readonly alias: string }>(
+  input: unknown,
+  what: string,
+  is: (value: unknown) => value is Declaration,
+  kind: string
+): Map<string, Declaration> => {
+  const declarations = new Map<string, Declaration>();
+  for (const [alias, entry] of entriesOf(input, what)) {
+    const declared = readResourceDeclaration(entry);
+    if (!is(declared) || declared.alias !== alias) {
+      refuse(`Resource \`${alias}\` isn't ${kind} filed under its alias.`);
+    } else {
+      declarations.set(alias, declared);
+    }
+  }
+  return declarations;
+};
+
 /** Whether two verb maps grant the same verbs on every table. */
 const sameVerbs = (
   one: Readonly<Record<string, TableVerbs>>,
@@ -347,44 +381,38 @@ export const readAppManifest = (text: string): AppManifest => {
       "operations",
       "resources",
       "browserResources",
+      "workflows",
       "screens",
       "preferences",
       "migrations",
     ])
   ) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, resources, browserResources, screens, preferences, migrations }`."
+      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, preferences, migrations }`."
     );
   }
   const { schema, manifest: schemaManifest } = readSchemaManifest(
     JSON.stringify(data.schema)
   );
 
-  const resources = new Map<string, AnyResource>();
-  const browser = new Map<string, BrowserResource>();
-  for (const [alias, input] of entriesOf(data.resources, "resources")) {
-    const declared = readResourceDeclaration(input);
-    if (!isResource(declared) || declared.alias !== alias) {
-      refuse(
-        `Resource \`${alias}\` isn't an action's resource filed under its alias.`
-      );
-    } else {
-      resources.set(alias, declared);
-    }
-  }
-  for (const [alias, input] of entriesOf(
+  const resources = declaredFrom(
+    data.resources,
+    "resources",
+    isResource,
+    "an action's resource"
+  );
+  const browser = declaredFrom(
     data.browserResources,
-    "browser resources"
-  )) {
-    const declared = readResourceDeclaration(input);
-    if (!isBrowserResource(declared) || declared.alias !== alias) {
-      refuse(
-        `Resource \`${alias}\` isn't a screens' resource filed under its alias.`
-      );
-    } else {
-      browser.set(alias, declared);
-    }
-  }
+    "browser resources",
+    isBrowserResource,
+    "a screens' resource"
+  );
+  const workflows = declaredFrom(
+    data.workflows,
+    "workflows",
+    isWorkflowResource,
+    "a workflow"
+  );
 
   const operationEntries = entriesOf(data.operations, "operations");
   // Counted before any is read.
@@ -393,7 +421,7 @@ export const readAppManifest = (text: string): AppManifest => {
   }
   const operationData = Object.fromEntries(operationEntries);
   const functions = operationEntries.map(([path, input]) =>
-    functionFrom(path, input, operationData, resources)
+    functionFrom(path, input, operationData, resources, workflows)
   );
   // Each constructor checks the declaration it is given at run time, as
   // it checks one in code; its types describe declarations in code, so it
@@ -438,7 +466,7 @@ export const readAppManifest = (text: string): AppManifest => {
       ...(data.preferences === null
         ? {}
         : { preferences: schemaFrom(data.preferences) }),
-      uses: [...resources.values(), ...browser.values()],
+      uses: [...resources.values(), ...browser.values(), ...workflows.values()],
       migrations: migrationsFrom(data.migrations),
     } as Parameters<typeof app>[0];
     return inspectApp(app(definition)).manifest;

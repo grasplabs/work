@@ -22,10 +22,12 @@ import {
   ActivityIcon,
   BellIcon,
   BuildingIcon,
+  CircleHelpIcon,
   CoinsIcon,
   CreditCardIcon,
   HistoryIcon,
   KeyRoundIcon,
+  PackageIcon,
   SparklesIcon,
   UserRoundIcon,
   UsersIcon,
@@ -36,10 +38,12 @@ import { SiteHeader } from "../frame/site-header.tsx";
 
 // Settings, as in the prototype (`routes/settings.tsx`): the workspace and
 // who may do what in it, then one's own account, one section at a time.
-// The workspace's sections are for admins (Members and roles never for
-// Grasp staff); the account's for everyone. Core checks the role on every
-// call whatever is listed. The prototype's Onboarding section is not here:
-// in Grasp OS the onboarding is Grasp staff's own area (`/onboarding`).
+// The workspace's sections are for admins (Members and roles, and calls of
+// unknown outcome, never for Grasp staff); Packages for all but Grasp staff
+// (its list is for who may approve packages); the account's for everyone.
+// Core checks the role on every call whatever is listed. The prototype's
+// Onboarding section is not here: in Grasp OS the onboarding is Grasp
+// staff's own area (`/onboarding`).
 
 type SettingsPath =
   | "/settings/workspace"
@@ -48,7 +52,9 @@ type SettingsPath =
   | "/settings/spend"
   | "/settings/pulse"
   | "/settings/audit"
+  | "/settings/outcomes"
   | "/settings/billing"
+  | "/settings/packages"
   | "/settings/profile"
   | "/settings/notifications"
   | "/settings/security";
@@ -74,6 +80,11 @@ const groupsFor = ({
   admin: boolean;
   staff: boolean;
 }): SettingsGroup[] => {
+  // Packages for everyone but Grasp staff: what it lists is for whoever
+  // may approve packages, a permission no role implies, so core says.
+  const packages: SettingsItem[] = staff
+    ? []
+    : [{ label: msg`Packages`, to: "/settings/packages", icon: PackageIcon }];
   const workspace: SettingsItem[] = admin
     ? [
         {
@@ -94,9 +105,19 @@ const groupsFor = ({
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
         { label: "Pulse", to: "/settings/pulse", icon: ActivityIcon },
         { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
+        ...(staff
+          ? []
+          : [
+              {
+                label: msg`Unknown outcomes`,
+                to: "/settings/outcomes" as const,
+                icon: CircleHelpIcon,
+              },
+            ]),
         { label: msg`Billing`, to: "/settings/billing", icon: CreditCardIcon },
+        ...packages,
       ]
-    : [];
+    : packages;
   return [
     ...(workspace.length === 0
       ? []

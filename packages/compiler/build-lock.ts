@@ -200,7 +200,7 @@ export const withBuildLock = async <T>(
       if (heldByLiveBuild(lock)) {
         if (!told) {
           told = true;
-          console.error("Waiting for another build of the screen compiler.");
+          console.error("Waiting for another build of the App compiler.");
         }
         // oxlint-disable-next-line no-await-in-loop -- one look at a time
         await wait(retryMs);

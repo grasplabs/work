@@ -9,7 +9,7 @@
  * the missing-table warning (platform-updates.test.ts), which only that
  * file may trip.
  */
-import { applyD1Migrations, reset } from "cloudflare:test";
+import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -17,6 +17,7 @@ import { z } from "zod";
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
 import { closeOpenSockets } from "./open-sockets.ts";
+import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 /** Migrations, read by vite.config.ts into bindings. */
@@ -28,7 +29,9 @@ const migrationsSchema = z.array(
 const startEmpty = async (): Promise<void> => {
   // Every Durable Object's storage, and with it every D1 database, R2 bucket
   // and workflow, connect's included: they are all Durable Objects locally.
-  await reset();
+  // Objects that went quiet are woken first, or the reset misses them
+  // (reset-storage.ts).
+  await resetStorage();
 
   // What a test changed in the env and didn't put back: restore it.
   for (const name of Object.keys(env)) {

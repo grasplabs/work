@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // An App's screen and its approval, end to end in a real browser: a
 // screen whose code nobody approved isn't started, an admin finds it on
@@ -12,23 +12,42 @@ import { apiOf, pageOf, peopleIn } from "./people.ts";
 
 const secret = "Acme owes 4,200";
 
-const serverCode = `import { DurableObject } from "cloudflare:workers";
+const schema = `import { defineSchema } from "@grasp-os/sdk";
 
-export class App extends DurableObject {
-  notes(): string[] {
-    return [${JSON.stringify(secret)}];
-  }
-}
+export default defineSchema({});
 `;
 
-const screenCode = `import { callServer } from "@grasp-os/sdk/screen";
+const operations = `import { v } from "@grasp-os/sdk";
+import { query } from "#grasp/server";
+
+export const notes = query({ args: {}, returns: v.array(v.string()), handler: () => [${JSON.stringify(secret)}] });
+`;
+
+const registration = `import { app } from "@grasp-os/sdk";
+import { notes } from "./operations/ledger.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Ledger",
+  schema,
+  access: { tables: {} },
+  operations: { ledger: { notes } },
+  internalOperations: {},
+  screens: [{ name: "ledger", path: "/", source: "screens/ledger.tsx" }],
+  uses: [],
+});
+`;
+
+const screenCode = `import { useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
+import { api } from "#grasp";
 
 export default function Ledger() {
+  const client = useClient();
   const [notes, setNotes] = useState<string[]>([]);
   const load = async () => {
-    setNotes(await callServer<string[]>("notes"));
+    setNotes(await client.query(api.ledger.notes, {}));
   };
   useEffect(() => {
     void load();
@@ -48,7 +67,7 @@ export default function Ledger() {
 `;
 
 test("a screen gets its engine's data only while an admin's approval of its code stands", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, admin } = peopleIn("screenApproval");
   const name = `Ledger ${crypto.randomUUID().slice(0, 8)}`;
@@ -58,7 +77,12 @@ test("a screen gets its engine's data only while an admin's approval of its code
     ({ id: app } = await api.apps.create({ name }));
     const { version } = await api.apps.files.commit(
       app,
-      { "app/server.ts": serverCode, "screens/ledger.tsx": screenCode },
+      {
+        "schema.ts": schema,
+        "operations/ledger.ts": operations,
+        "app.ts": registration,
+        "screens/ledger.tsx": screenCode,
+      },
       name
     );
     await api.apps.versions.setCurrent(app, version);
@@ -67,7 +91,7 @@ test("a screen gets its engine's data only while an admin's approval of its code
   }
 
   // Nobody approved its code: the screen isn't started, and says why.
-  const using = await pageOf(browser, builder);
+  const using = await pageOf(builder);
   await using.goto(`/domains/${app}/apps/ledger/full`);
   const frame = using.locator('iframe[title="ledger app"]');
   await expect(
@@ -79,7 +103,7 @@ test("a screen gets its engine's data only while an admin's approval of its code
 
   // A current version nobody approved is in front of the admins, who read
   // its code and approve it on the engine's page.
-  const deciding = await pageOf(browser, admin);
+  const deciding = await pageOf(admin);
   await deciding.goto("/dashboard");
   await deciding
     .getByRole("region", { name: "Waiting elsewhere" })

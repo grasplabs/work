@@ -10,6 +10,10 @@ import { msg } from "@lingui/core/macro";
 
 const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "connection.call", text: msg`Used a connected tool` },
+  {
+    action: "connection.call.unknown_listed",
+    text: msg`Read everyone's calls of unknown outcome`,
+  },
   { action: "connection.connect", text: msg`Connected an account` },
   {
     action: "connection.reconnected",
@@ -144,6 +148,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   {
     action: "dependency.superseded",
     text: msg`Replaced a request for packages`,
+  },
+  {
+    action: "dependency.withdrawn",
+    text: msg`Withdrew a request for packages`,
   },
   {
     action: "dependency.admission_refused",

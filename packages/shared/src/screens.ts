@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import type { DecisionAnswerInput, DecisionView } from "./decisions.ts";
+import type {
+  DecisionAnswerInput,
+  DecisionConfirmation,
+  DecisionReview,
+  DecisionView,
+} from "./decisions.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { AppId } from "./ids.ts";
 import {
@@ -25,13 +30,15 @@ export {
   screenFrameMounted,
   screenFramePath,
   screenFrameReady,
+  screenLanguageOf,
+  screenLanguages,
   screenLeaseHeader,
   screenLimits,
   screenModulePath,
   screenPersonHeader,
   streamCallActions,
 } from "./screen-limits.ts";
-export type { StreamCallAction } from "./screen-limits.ts";
+export type { ScreenLanguage, StreamCallAction } from "./screen-limits.ts";
 
 /** A value the page or core made up: never longer than a hash in hex. */
 const stageValue = z.string().min(1).max(128);
@@ -259,6 +266,61 @@ export interface RunSubscriptionApi {
 }
 
 /**
+ * One frame's way to its App, on the connection all of a tab's frames
+ * share (`ScreensApi.frame`): bound to the App, the build core leased the
+ * frame and the person it was opened for. Each call is decided on that
+ * build alone, never on what another frame of the App on the connection
+ * runs, and is refused as `ScreensApi`'s same call would be otherwise.
+ * `close` (or letting go of the stub) releases everything the frame
+ * follows through it, its live queries, its runs' updates and the
+ * callbacks its server calls passed, at once; a closed frame is refused
+ * every call (`screen.invalid`).
+ */
+export interface ScreenFrameApi {
+  /** Whether the frame's build gets the App's data now. */
+  delivery: () => Promise<ScreenDelivery>;
+  call: (method: string, args: unknown[]) => Promise<unknown>;
+  startRun: (workflow: string, input?: unknown) => Promise<WorkflowRun>;
+  runs: (workflow: string) => Promise<ScreenRun[]>;
+  run: (run: string) => Promise<ScreenRun>;
+  summary: (run: string) => Promise<RunSummary>;
+  /** `ScreensApi.reviewDecision`, for this frame's App. */
+  reviewDecision: (
+    run: string,
+    decision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionReview>;
+  /**
+   * `ScreensApi.confirmDecision`, for this frame's App: the page's alone,
+   * once the person confirmed the answer in its own dialog, never reached
+   * from the frame.
+   */
+  confirmDecision: (
+    run: string,
+    decision: string,
+    revision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionConfirmation>;
+  /** `ScreensApi.decide`, for this frame's App, with the confirmation. */
+  decide: (
+    run: string,
+    decision: string,
+    answer: DecisionAnswerInput,
+    confirmation?: string
+  ) => Promise<DecisionView>;
+  control: (run: string, kind: RunControl["kind"]) => Promise<RunControl>;
+  watchRuns: (
+    workflow: string,
+    onChange: (change: RunChange) => void
+  ) => Promise<RunSubscriptionApi>;
+  watchQuery: (
+    request: string,
+    onSnapshot: (snapshot: QuerySnapshotPush) => void
+  ) => Promise<RunSubscriptionApi>;
+  close: () => Promise<void>;
+}
+
+/**
  * A signed-in person's way to an App's screens: for anyone with a role in
  * the App (`AppsApi`); its error log for its builders only.
  */
@@ -280,6 +342,14 @@ export interface ScreensApi {
    * presented nothing runs a build nobody approved, as far as core knows.
    */
   present: (app: string, lease: string) => Promise<ScreenDelivery>;
+  /**
+   * One frame's own way to the App (`ScreenFrameApi`), for the build the
+   * lease `open` gave it: how frames that share a connection each get
+   * their App's data on their own build, and let go of all they follow
+   * when they close. A lease core didn't sign for this person and App
+   * runs a build nobody approved, as with `present`.
+   */
+  frame: (app: string, lease: string) => Promise<ScreenFrameApi>;
   /**
    * Calls `method` of the App's server with `args`, as the person. Plain
    * data, and functions (callbacks the server may keep and call later
@@ -326,16 +396,43 @@ export interface ScreensApi {
    */
   summary: (app: string, run: string) => Promise<RunSummary>;
   /**
+   * What the trusted host decision UI shows the person before they
+   * confirm the screen's answer to the decision `decision` (its name in
+   * the workflow) of one of the App's runs (`DecisionsApi.review`).
+   */
+  reviewDecision: (
+    app: string,
+    run: string,
+    decision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionReview>;
+  /**
+   * Mints the person's one-use confirmation of the screen's answer, as
+   * reviewed at `revision` (`DecisionsApi.confirm`), once they confirmed it
+   * in the page's own dialog: the page's alone, never the screen's.
+   * Audited as confirmed for a screen.
+   */
+  confirmDecision: (
+    app: string,
+    run: string,
+    decision: string,
+    revision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionConfirmation>;
+  /**
    * Answers the decision `decision` (its name in the workflow) of one of
    * the App's runs, as the person, by the decision's own rules: only
    * someone it is from, and never the run's starter unless it names
-   * exactly them. Audited as answered on a screen (`via: "screen"`).
+   * exactly them, with the one-use confirmation the page minted once the
+   * person confirmed exactly this answer (`DecisionsApi.confirm`); the
+   * screen never has it. Audited as answered on a screen (`via: "screen"`).
    */
   decide: (
     app: string,
     run: string,
     decision: string,
-    answer: DecisionAnswerInput
+    answer: DecisionAnswerInput,
+    confirmation?: string
   ) => Promise<DecisionView>;
   /**
    * Pauses, resumes or cancels one of the App's runs, for a builder of the
@@ -356,7 +453,7 @@ export interface ScreensApi {
    * waits for a decision, has it answered or closed, or ends, for as long
    * as the person may use the App and until the screen releases the
    * subscription it answers. Core lets go of `onChange` when it stops
-   * calling it, which tells the screen to follow again. One screen's
+   * calling it, which tells the screen to follow again. One tab's
    * connection holds at most 20 subscriptions at once.
    */
   watchRuns: (
@@ -396,7 +493,7 @@ export const screenErrors = defineErrorFamily({
     "The app's screens are still building. Try again in a moment.",
   "screen.invalid": "That isn't a valid request for a screen.",
   "screen.too_many_subscriptions":
-    "A screen follows at most 20 workflows' runs at a time.",
+    "This page follows at most 20 workflows' runs at once. Close a screen, then try again.",
   "screen.too_many_queries":
     "This page follows too many live queries at once. Close a screen, then try again.",
   "screen.rate_limited":
@@ -412,6 +509,8 @@ export const screenErrors = defineErrorFamily({
     "The app or its approvals changed since they were reviewed. Review them again.",
   "screen.not_approved": "That build of the app isn't approved.",
   "screen.reload_required": "This page is out of date. Reload it to go on.",
+  "screen.access_changed":
+    "Your access to this app changed. What it shows is being read again.",
 });
 
 /**

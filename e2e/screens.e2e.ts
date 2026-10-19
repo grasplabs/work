@@ -2,15 +2,16 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 
 // An App's screen in its sandboxed frame, end to end: the page, the frame,
-// core and the App's server, in a real browser. The screen reads and writes
-// through its server, sees another person's changes live, and reports its
-// errors. What it does as code nobody reviewed line by line, to get
-// anywhere else, is in screen-attacks.e2e.ts, in every browser.
+// core and the App's sealed release, in a real browser. The screen reads
+// and writes through its App's functions, sees another person's changes
+// live, and reports its errors. What it does as code nobody reviewed line
+// by line, to get anywhere else, is in screen-attacks.e2e.ts, in every
+// browser.
 
 declare global {
   interface Window {
@@ -24,9 +25,9 @@ declare global {
 
 /**
  * How long no further connection may open once the page has reconnected.
- * A second round of attempts would have tried at the same moment as the
- * one that held (both wait 2 s after the refused attempt), so it shows
- * well within this.
+ * A second round of attempts would have tried about when the one that held
+ * did (each waits up to 2 s after the refused attempt), so it shows within
+ * this.
  */
 const noMoreConnectionsMs = 2000;
 
@@ -89,12 +90,9 @@ test.afterAll(() => {
 });
 
 test("two people see each other's notes live, in their theme, and a failing screen lands in the App's error log", async ({
-  browser,
+  pageOf,
 }) => {
-  const [first, second] = await Promise.all([
-    pageOf(browser, one),
-    pageOf(browser, two),
-  ]);
+  const [first, second] = await Promise.all([pageOf(one), pageOf(two)]);
   await first.emulateMedia({ colorScheme: "light" });
   const [firstScreen, secondScreen] = await Promise.all([
     openScreen(first, app),
@@ -139,9 +137,9 @@ test("two people see each other's notes live, in their theme, and a failing scre
 });
 
 test("a screen opens through core failing at first, subscribes again after its connection drops, and tries one connection at a time", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   let drop: (() => Promise<void>) | undefined;
   let dropped = false;
   let connections = 0;
@@ -187,17 +185,14 @@ test("a screen opens through core failing at first, subscribes again after its c
   expect(connections).toBe(3);
   await drop?.();
 
-  // Only a new subscription, on the page's new connection, can bring it.
-  const { core, api } = apiOf(two);
-  try {
-    await api.screens.call(app, "addNote", ["After the drop"]);
-  } finally {
-    core[Symbol.dispose]();
-  }
+  // Only a new subscription, on the page's new connection, can bring it:
+  // the note the other person adds on their own screen after the drop.
+  const other = await openScreen(await pageOf(two), app);
+  await other.getByRole("button", { name: "Add a note" }).click();
   await expect(
     screen
       .getByRole("list", { name: "Notes" })
-      .getByText(`After the drop by ${two.userId}`)
+      .getByText(`Call Acme by ${two.userId}`)
   ).toBeVisible({ timeout: 20_000 });
   // One refused attempt, then one that holds, and none beside or after it:
   // a failed attempt doesn't start another round of attempts of its own.
@@ -207,9 +202,9 @@ test("a screen opens through core failing at first, subscribes again after its c
 });
 
 test("a screen whose open core never answers is given up on in its time, and opens when tried again", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   await page.clock.install();
   let stall = true;
   const stalled = Promise.withResolvers<boolean>();
@@ -243,10 +238,10 @@ test("a screen whose open core never answers is given up on in its time, and ope
 });
 
 test("moving to another App's screen never shows the App it left in the chrome", async ({
-  browser,
+  pageOf,
 }) => {
   const other = await releaseApp(one, attacker.url, "Tasks");
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   await openScreen(page, app);
   await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible();
 
@@ -300,10 +295,61 @@ test("moving to another App's screen never shows the App it left in the chrome",
   });
 });
 
-test("a new current version is offered while the screen is open", async ({
-  browser,
+test("a tab holds one connection to core for its shell and every App frame it opens", async ({
+  pageOf,
 }) => {
-  const page = await pageOf(browser, one);
+  const other = await releaseApp(one, attacker.url, "Board");
+  const page = await pageOf(one);
+  const sockets: string[] = [];
+  page.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname === "/rpc") {
+      sockets.push(socket.url());
+    }
+  });
+  /** Moves within the page, as a link would: a new document starts afresh. */
+  const moveTo = async (path: string): Promise<void> => {
+    await page.evaluate((to) => {
+      history.pushState(null, "", to);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, path);
+  };
+  /** The App frame on the page, once its screen shows `name`. */
+  const shows = async (name: string) => {
+    const screen = page.frameLocator('iframe[title="notes app"]');
+    await expect(page.getByRole("heading", { exact: true, name })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
+      timeout: 20_000,
+    });
+    return screen;
+  };
+
+  // The shell, then one App's frame after another, and back to the first.
+  await page.goto("/dashboard");
+  await expect(page.getByRole("navigation").first()).toBeVisible();
+  await moveTo(`/domains/${app}/apps/notes`);
+  await shows("Notes");
+  await moveTo(`/domains/${other}/apps/notes`);
+  await shows("Board");
+  await moveTo(`/domains/${app}/apps/notes`);
+  const screen = await shows("Notes");
+
+  // The frame reads and writes through that same connection.
+  await screen.getByRole("button", { name: "Add a note" }).click();
+  await expect(
+    screen
+      .getByRole("list", { name: "Notes" })
+      .getByText(`Call Acme by ${one.userId}`)
+      .first()
+  ).toBeVisible();
+  expect(sockets).toHaveLength(1);
+});
+
+test("a new current version is offered while the screen is open", async ({
+  pageOf,
+}) => {
+  const page = await pageOf(one);
   await page.clock.install();
   await openScreen(page, app);
   const { core, api } = apiOf(one);

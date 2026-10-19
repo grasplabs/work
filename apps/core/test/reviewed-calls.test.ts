@@ -23,12 +23,15 @@ import { mailConnection } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
+import { v1AppWith } from "./v1-app-server.ts";
 import {
-  server,
   appWith,
   grantMail,
+  hitCall,
+  hitsOf,
   invoiceMail,
   mailer,
+  sampleApp,
   workflowFiles,
 } from "./workflow-apps.ts";
 
@@ -47,8 +50,8 @@ const idp = mockIdp();
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
-/** How often the App counted `name` (its server's `hit`). */
-const hitsOf = async (app: string, userId: string, name: string) =>
+/** How often the v1 App counted `name` (its server's `hit`). */
+const v1HitsOf = async (app: string, userId: string, name: string) =>
   await callApp(
     env,
     appIdSchema.parse(app),
@@ -115,8 +118,9 @@ const outcomeOf = async (
 };
 
 /**
- * A host for a run of a new App held to `calls`, whose App method calls
- * are counted in `appCalls`, with a permission on another App's exports
+ * A host for a run of a new App held to `calls`, whose v1 App method calls
+ * (`callApp`, which goes with the v1 server, GRA-645) are counted in
+ * `appCalls`, with a permission on another App's exports
  * as `CRM`; what it says fails the run as tampering is in `tampered`.
  */
 const hostHeldTo = async (
@@ -188,6 +192,7 @@ const hostHeldTo = async (
       workflow: workflowIdSchema.parse("tidy"),
       version: 1,
       runId,
+      shareSubject: `trigger:${app}`,
       authority,
       collections: {},
       connections,
@@ -257,7 +262,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": server, ...mailer("") },
+      { ...sampleApp(), ...mailer("") },
       "Mailer"
     );
     const reviewedKept = await admin.api.apps.versions.review(app, version);
@@ -307,7 +312,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
       "send",
       { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)} },
       async ({ idempotencyKey, input: mail }) =>
-        JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output)
+        JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output)
     );
   } catch (error) {
     throw error;
@@ -317,7 +322,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": server, ...files },
+      { ...sampleApp(), ...files },
       "Guarded"
     );
     const { workflows } = await admin.api.apps.versions.review(app, version);
@@ -343,24 +348,20 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const admin = await personApi("admin");
     const files = workflowFiles(
       "tidy",
-      `  let app;
+      `  let app!: typeof env.APP;
   await step.do("prepare", { description: "Prepare" }, async () => {
-    app = appServer(env);
+    app = env.APP;
   });
   return await step.do("tidy-up", { description: "Tidy" }, async () => {
-    await app.hit("tidied");
+    await app.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "tidied", execution: crypto.randomUUID() });
     return "tidied";
   });`,
       { prepare: null, "tidy-up": null }
     );
-    const source = (files["workflows/tidy.ts"] ?? "").replace(
-      "import { workflow, z }",
-      "import { appServer, workflow, z }"
-    );
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": server, ...files, "workflows/tidy.ts": source },
+      { ...sampleApp(), ...files },
       "Tidy"
     );
     const { workflows } = await admin.api.apps.versions.review(app, version);
@@ -373,7 +374,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
       kept: await storedCalls(app),
       run: await outcomeOf(admin, run.id, 'Step "tidy-up" called APP'),
       audited: await refusals(run.id),
-      hits: await hitsOf(app, admin.userId, "tidied"),
+      hits: await hitsOf(admin, app, "tidied"),
     }).toMatchObject({
       // The reader refuses a stub kept in a variable: the review shows the
       // workflow's steps as unreadable, calling none of the App's bindings.
@@ -401,7 +402,7 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
     const files = workflowFiles(
       "tidy",
       `  return await step.do("tidy", { description: "Tidy" }, async () => {
-    await appServer(env).hit("tidied");
+    await ${hitCall(`"tidied"`)};
     return "tidied";
   });`,
       { tidy: null }
@@ -414,8 +415,8 @@ describe("a run's binding calls", { timeout: 60_000 }, () => {
 queueMicrotask(() => {
   try {
     Object.assign(me, {
-      run: async (engine) => {
-        await engine.do("tidy:x1", {}, async () => await engine.env.APP.call("hit", "swapped"));
+      run: async (engine: { do: <T>(name: string, options: object, fn: () => Promise<T>) => Promise<T>; env: { APP: { callFunction: (...args: object[]) => Promise<unknown> } } }) => {
+        await engine.do("tidy:x1", {}, async () => await engine.env.APP.callFunction({ contractId: "counter.hit", kind: "action" }, { name: "swapped", execution: "swapped" }));
         return "swapped";
       },
     });
@@ -423,8 +424,8 @@ queueMicrotask(() => {
 });
 `;
     const source = (files["workflows/tidy.ts"] ?? "").replace(
-      'import { workflow, z } from "@grasp-os/sdk/workflow";\n',
-      `import { appServer, workflow, z } from "@grasp-os/sdk/workflow";\n${swaps}`
+      '} from "@grasp-os/sdk/workflow";\n',
+      `} from "@grasp-os/sdk/workflow";\n${swaps}`
     );
     const app = await appWith(admin, {
       ...files,
@@ -437,8 +438,8 @@ queueMicrotask(() => {
     expect({
       kept: await storedCalls(app),
       run: await outcomeOf(admin, run.id),
-      tidied: await hitsOf(app, admin.userId, "tidied"),
-      swapped: await hitsOf(app, admin.userId, "swapped"),
+      tidied: await hitsOf(admin, app, "tidied"),
+      swapped: await hitsOf(admin, app, "swapped"),
     }).toMatchObject({
       kept: { tidy: { steps: { tidy: ["APP"] }, all: ["APP"] } },
       run: { status: "completed", output: "tidied" },
@@ -447,6 +448,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse a call made through a step attempt's host once that attempt is over, while another step runs, and a step whose name the review doesn't show", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: [], send: ["APP"] },
@@ -491,9 +495,12 @@ queueMicrotask(() => {
     });
   });
 
+  // The v1 App server's own fence on its methods: it goes with the server
+  // (GRA-645); a sealed function's calls hold to the step's lease
+  // (run-functions.test.ts).
   it("start no App method, nor an export, for a step attempt that no longer holds by the time the App would start it", async () => {
     const admin = await personApi("admin");
-    const app = await appWith(admin, {});
+    const app = await v1AppWith(admin, {});
     // An attempt the engine let go of (or never had): its run holds no
     // lease for it, as when it was let go during the App's reads.
     const fence = {
@@ -514,7 +521,7 @@ queueMicrotask(() => {
 
     expect({
       refused,
-      ran: await hitsOf(app, admin.userId, "late"),
+      ran: await v1HitsOf(app, admin.userId, "late"),
     }).toStrictEqual({ refused: "execution.stale_attempt", ran: 0 });
   });
 
@@ -574,6 +581,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse a call unless the step running now and the step whose host it came through both call it, failing both", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: ["APP"], send: [] },
@@ -608,6 +618,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse, as stale, an attempt's calls of every kind once the engine gave up on it, and audit the first", async () => {
     const { host, runId, appCalls, leases, userId } = await hostHeldTo({
       steps: { tidy: ["APP", "CRM", "HANDBOOK"] },
@@ -662,6 +675,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse, as stale, a call whose attempt the engine gave up on while the host read what the call needs", async () => {
     let giveUp: (() => void) | undefined;
     // Core's database, giving the attempt up as the host reads it, after
@@ -701,6 +717,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse, as stale, every call of an attempt the engine gave up on while its code ran on, and audit the first", async () => {
     const { host, runId, appCalls, leases } = await hostHeldTo({
       steps: { tidy: ["APP"] },
@@ -726,6 +745,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("audit only an attempt's first refused call, and refuse every later one of it at once, one its review shows too", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { tidy: ["APP"] },
@@ -767,7 +789,7 @@ queueMicrotask(() => {
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const { version } = await admin.api.apps.files.commit(
       app,
-      { "app/server.ts": server, ...mailer("") },
+      { ...sampleApp(), ...mailer("") },
       "Mailer"
     );
     // Its source reads as one step, `send`, calling MAIL.
@@ -829,7 +851,7 @@ queueMicrotask(() => {
     const admin = await personApi("admin");
     const { id: app } = await admin.api.apps.create({ name: "Invoices" });
     const files: Record<string, string> = {
-      "app/server.ts": server,
+      ...sampleApp(),
       ...mailer(""),
     };
     const { version: first } = await admin.api.apps.files.commit(
@@ -908,7 +930,7 @@ queueMicrotask(() => {
   let later = "carried on";
   try {
     later = await step.do("tidy", { description: "Tidy" }, async () => {
-      await appServer(env).hit("tidied");
+      await ${hitCall(`"tidied"`)};
       return "tidied";
     });
   } catch (error) {
@@ -917,11 +939,7 @@ queueMicrotask(() => {
   return later;`,
       { evil: "evil", tidy: "tidied" }
     );
-    const source = (files["workflows/tidy.ts"] ?? "").replace(
-      "import { workflow, z }",
-      "import { appServer, workflow, z }"
-    );
-    const app = await appWith(admin, { ...files, "workflows/tidy.ts": source });
+    const app = await appWith(admin, files);
     // Its review shows `tidy` alone, as a describer that missed `evil`
     // would have kept it.
     await describedAs(app, {
@@ -934,7 +952,7 @@ queueMicrotask(() => {
     expect({
       run: await outcomeOf(admin, run.id),
       audited: await refusals(run.id),
-      tidied: await hitsOf(app, admin.userId, "tidied"),
+      tidied: await hitsOf(admin, app, "tidied"),
     }).toMatchObject({
       run: { status: "failed", code: "workflow.step_not_reviewed" },
       audited: [
@@ -944,6 +962,9 @@ queueMicrotask(() => {
     });
   });
 
+  // Through the v1 App server's method calls (`callApp`), which go with it
+  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
+  // the step's lease and review.
   it("refuse an attempt's model, attachment and decision calls once it had a call refused", async () => {
     const { host, userId } = await hostHeldTo({ steps: { tidy: [] }, all: [] });
     const codes: string[] = [];

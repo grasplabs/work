@@ -12,6 +12,7 @@ import type {
   ArgsOf,
   MutationCtx,
   QueryCtx,
+  RunHandle,
 } from "../src/server.ts";
 import {
   defineSchema,
@@ -21,6 +22,7 @@ import {
   v,
 } from "../src/values.ts";
 import type { Id } from "../src/values.ts";
+import type { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 
 const noteFields = {
   title: v.string().trim().min(1).max(200),
@@ -307,6 +309,136 @@ action({
   stream: v.object({ done: v.number() }),
   handler: () => null,
 });
+
+// Workflows (spec 7.4, 9.5): an action starts one it lists, and a mutation
+// stages a start of one it lists for after it commits. Neither reaches the
+// engine, and neither starts what it doesn't list.
+const followUp = resource.workflow("followUp", {
+  input: v.object({
+    noteId: v.id("notes"),
+    reason: v.string().default("new"),
+  }),
+  output: v.null(),
+});
+const unlisted = resource.workflow("unlisted", {
+  input: v.object({}),
+  output: v.null(),
+});
+declare const engineWorkflow: ReturnType<typeof invoiceWorkflow>;
+
+action({
+  args: { noteId: v.id("notes") },
+  returns: v.null(),
+  uses: [followUp, get, mail],
+  handler: async (ctx, args) => {
+    // Its input as a caller passes it: the default may be left out.
+    const handle = await ctx.startWorkflow(followUp, { noteId: args.noteId });
+    expectTypeOf(handle).toEqualTypeOf<RunHandle>();
+    // @ts-expect-error -- input the declaration doesn't take
+    await ctx.startWorkflow(followUp, { note: args.noteId });
+    // @ts-expect-error -- a workflow the action doesn't list in `uses`
+    await ctx.startWorkflow(unlisted, {});
+    // @ts-expect-error -- a query is no workflow
+    await ctx.startWorkflow(get, { id: args.noteId });
+    // @ts-expect-error -- nor is a connector
+    await ctx.startWorkflow(mail, {});
+    // @ts-expect-error -- nor an engine workflow of the App's
+    await ctx.startWorkflow(engineWorkflow, {});
+    // A workflow is no resource client, and there is no engine.
+    expectTypeOf(ctx.resources).not.toHaveProperty("followUp");
+    expectTypeOf(ctx).not.toHaveProperty("engine");
+    expectTypeOf(ctx).not.toHaveProperty("afterCommit");
+    return null;
+  },
+});
+action({
+  args: { noteId: v.id("notes") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    // @ts-expect-error -- it lists no workflow
+    await ctx.startWorkflow(followUp, { noteId: args.noteId });
+    return null;
+  },
+});
+action({
+  args: {},
+  returns: v.null(),
+  // @ts-expect-error -- an engine workflow can't be listed
+  uses: [engineWorkflow],
+  handler: () => null,
+});
+
+mutation({
+  args: { title: noteFields.title },
+  returns: v.id("notes"),
+  uses: [followUp, get],
+  handler: async (ctx, args) => {
+    const id = await ctx.db.insert("notes", { title: args.title });
+    // Staged with the insert, started once both have committed.
+    expectTypeOf(
+      ctx.afterCommit.start(followUp, { noteId: id })
+    ).resolves.toBeVoid();
+    // @ts-expect-error -- input the declaration doesn't take
+    await ctx.afterCommit.start(followUp, { noteId: 1 });
+    // @ts-expect-error -- a workflow the mutation doesn't list in `uses`
+    await ctx.afterCommit.start(unlisted, {});
+    // @ts-expect-error -- a query is no workflow
+    await ctx.afterCommit.start(get, { id });
+    // A mutation never starts anything while it runs.
+    expectTypeOf(ctx).not.toHaveProperty("startWorkflow");
+    return id;
+  },
+});
+mutation({
+  args: { noteId: v.id("notes") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    // @ts-expect-error -- it lists no workflow
+    await ctx.afterCommit.start(followUp, { noteId: args.noteId });
+    return null;
+  },
+});
+// A choice of workflows keeps each one's input: never another's, and
+// optional only for one that takes none.
+const counted = resource.workflow("counted", {
+  input: v.number(),
+  output: v.null(),
+});
+const optional = resource.workflow("optional", {
+  input: v.string().default("ready"),
+  output: v.null(),
+});
+declare const pick: boolean;
+action({
+  args: {},
+  returns: v.null(),
+  uses: [counted, optional],
+  handler: async (ctx) => {
+    await ctx.startWorkflow(optional);
+    // @ts-expect-error -- `counted` needs a number, which "text" isn't
+    await ctx.startWorkflow(pick ? counted : optional, "text");
+    // @ts-expect-error -- `counted` needs its input
+    await ctx.startWorkflow(pick ? counted : optional);
+    return null;
+  },
+});
+mutation({
+  args: {},
+  returns: v.null(),
+  uses: [counted, optional],
+  handler: async (ctx) => {
+    await ctx.afterCommit.start(optional);
+    // @ts-expect-error -- `counted` needs a number, which "text" isn't
+    await ctx.afterCommit.start(pick ? counted : optional, "text");
+    // @ts-expect-error -- `counted` needs its input
+    await ctx.afterCommit.start(pick ? counted : optional);
+    return null;
+  },
+});
+
+// A query starts nothing, now or after.
+expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("afterCommit");
+expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("startWorkflow");
 
 // `doc` is a whole record of the pinned schema.
 expectTypeOf(doc("notes").shape._rev).toExtend<unknown>();

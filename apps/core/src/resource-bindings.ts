@@ -7,7 +7,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { identifierMaxLength } from "@grasp-os/shared/ids";
+import { appIdSchema, identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -68,18 +68,32 @@ import type {
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
+import {
+  appAdapter,
+  currentReleaseOf,
+  declaredFingerprints,
+  servedIn,
+} from "./resource-apps.ts";
 import { connectorAdapter, contractReader } from "./resource-connector.ts";
 import type {
   ConnectionGrantRow,
   ContractReader,
 } from "./resource-connector.ts";
+import { guestsAdapter } from "./resource-guests.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter, modelAnswers, tokensOfBound } from "./resource-model.ts";
+import { platformGrantsOf } from "./resource-platform.ts";
+import type { PlatformAction } from "./resource-platform.ts";
+import { statisticsAdapter } from "./resource-statistics.ts";
+import { appStoreGrant, grantServes, storeAdapter } from "./resource-store.ts";
 import { templateAdapter, templateVersionsOf } from "./resource-templates.ts";
+import { auditStoreRefusal } from "./store-operations.ts";
+import type { StoreGrant } from "./store-operations.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
-// an App of spec 8's layout reach a model, a connection, knowledge or a
-// template through `ctx.resources.<alias>`. Threat model, and how each is
+// an App of spec 8's layout reach a model, a connection, knowledge, a
+// template, another store or the platform's statistics through
+// `ctx.resources.<alias>`. Threat model, and how each is
 // closed:
 //
 // - A declaration self-grants: a declaration is App code's requirement and
@@ -128,6 +142,10 @@ const adapters: {
   knowledge: knowledgeAdapter,
   connector: connectorAdapter,
   template: templateAdapter,
+  store: storeAdapter,
+  statistics: statisticsAdapter,
+  guests: guestsAdapter,
+  app: appAdapter,
 };
 
 /** The SHA-256 of `declaration`, canonical, as a release sealed it. */
@@ -275,7 +293,7 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
   if (target.kind === "model") {
     return { model: target.model };
   }
-  if (target.kind === "connector") {
+  if (target.kind === "connector" || target.kind === "store") {
     return { permissionId: target.permissionId };
   }
   if (target.kind === "knowledge") {
@@ -286,6 +304,17 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
     return joined.length <= identifierMaxLength
       ? { permissionIds: joined }
       : { permissionCount: ids.length };
+  }
+  if (target.kind === "guests") {
+    return { permissionId: target.permissionId };
+  }
+  if (target.kind === "app") {
+    return { appId: target.appId };
+  }
+  if (target.kind === "statistics") {
+    return target.permissionId === undefined
+      ? {}
+      : { permissionId: target.permissionId };
   }
   return { templateId: target.templateId, templateVersion: target.version };
 };
@@ -648,6 +677,26 @@ const choicesMax = 100;
  */
 const reviewContractAsksMax = 50;
 
+/**
+ * The most other Apps one review considers as an app resource's choices,
+ * newest first: each one's current release is read once for the whole
+ * review, `reviewAppChecksAtOnce` at a time, and checked against each
+ * app resource's declaration in memory. An App past it can
+ * still be bound by its ID (`approve` checks any App the same way); the
+ * review says some were left out.
+ */
+const reviewAppCandidatesMax = 100;
+
+/** How many of a review's candidate Apps' releases are read at once. */
+const reviewAppChecksAtOnce = 10;
+
+/**
+ * The most distinct store permissions one review resolves for choices,
+ * across all its store resources: each reads the grant, the store and its
+ * App's current release.
+ */
+const reviewStoreChecksMax = 20;
+
 const actionListSchema = z.array(z.string());
 
 /**
@@ -657,7 +706,7 @@ const actionListSchema = z.array(z.string());
 const appGrants = async (
   env: Env,
   app: AppId,
-  objectType: "connection" | "collection"
+  objectType: "connection" | "collection" | "store"
 ): Promise<{ rows: ConnectionGrantRow[]; truncated: boolean }> => {
   const rows = await drizzle(env.DB)
     .select({
@@ -688,10 +737,83 @@ const appGrants = async (
 interface ReviewGrants {
   readonly connections: Awaited<ReturnType<typeof appGrants>>;
   readonly collections: Awaited<ReturnType<typeof appGrants>>;
+  readonly stores: Awaited<ReturnType<typeof appGrants>>;
   /** The collections' names, by ID. */
   readonly names: ReadonlyMap<string, string>;
   readonly contracts: ContractReader;
+  /**
+   * The App's store permission `permissionId` as it stands now, resolved
+   * once per review for every store resource's choices; `unchecked` past
+   * the review's bound on distinct permissions (`reviewStoreChecksMax`).
+   * Every resource lists the App's permissions in the same order, so each
+   * is offered the same checked ones.
+   */
+  readonly storeGrant: (
+    permissionId: string
+  ) => Promise<StoreGrant | undefined | typeof unchecked>;
+  /**
+   * The App's own active `{ type: "platform" }` permissions of `action`,
+   * newest first, at most `choicesMax`: read once for each action, when a
+   * statistics or guests resource asks.
+   */
+  readonly platform: (
+    action: PlatformAction
+  ) => Promise<{ ids: string[]; truncated: boolean }>;
+  /**
+   * The other Apps an app resource may be bound to, newest first, at most
+   * `reviewAppCandidatesMax`, each with its current release (undefined
+   * once it has none), read once for the review; and whether there were
+   * more.
+   */
+  readonly apps: () => Promise<{
+    apps: ReviewedApp[];
+    truncated: boolean;
+  }>;
 }
+
+/** Another App a review considers for an app resource, with its current release. */
+interface ReviewedApp {
+  readonly appId: AppId;
+  readonly name: string;
+  readonly release: Release | undefined;
+}
+
+/**
+ * The other Apps `app`'s app resources may be bound to, newest first, at
+ * most `reviewAppCandidatesMax`, each with its current release, read
+ * `reviewAppChecksAtOnce` at a time; and whether there were more.
+ */
+const reviewedApps = async (
+  env: Env,
+  app: AppId
+): Promise<{ apps: ReviewedApp[]; truncated: boolean }> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id, name: apps.name })
+    .from(apps)
+    .where(sql`${apps.id} <> ${app} AND ${apps.currentVersion} IS NOT NULL`)
+    .orderBy(desc(apps.createdAt))
+    .limit(reviewAppCandidatesMax + 1);
+  const candidates = rows
+    .slice(0, reviewAppCandidatesMax)
+    .map(({ id, name }) => ({ appId: appIdSchema.parse(id), name }));
+  const reviewed: ReviewedApp[] = [];
+  for (
+    let start = 0;
+    start < candidates.length;
+    start += reviewAppChecksAtOnce
+  ) {
+    const batch = candidates.slice(start, start + reviewAppChecksAtOnce);
+    // oxlint-disable-next-line no-await-in-loop -- a few at a time, bounded
+    const read = await Promise.all(
+      batch.map(async (candidate) => ({
+        ...candidate,
+        release: await currentReleaseOf(env, candidate.appId),
+      }))
+    );
+    reviewed.push(...read);
+  }
+  return { apps: reviewed, truncated: rows.length > reviewAppCandidatesMax };
+};
 
 /** The App's grants and their collections' names, read once for a review. */
 const reviewGrants = async (
@@ -699,9 +821,10 @@ const reviewGrants = async (
   app: AppId,
   contracts: ContractReader
 ): Promise<ReviewGrants> => {
-  const [connections, collectionGrants] = await Promise.all([
+  const [connections, collectionGrants, stores] = await Promise.all([
     appGrants(env, app, "connection"),
     appGrants(env, app, "collection"),
+    appGrants(env, app, "store"),
   ]);
   const readable = collectionGrants.rows.filter(
     ({ actions }) =>
@@ -709,6 +832,7 @@ const reviewGrants = async (
       true
   );
   const ids = [...new Set(readable.map(({ objectId }) => objectId))];
+  const storeGrants = new Map<string, Promise<StoreGrant | undefined>>();
   const named =
     ids.length === 0
       ? []
@@ -716,11 +840,41 @@ const reviewGrants = async (
           .select({ id: collections.id, name: collections.name })
           .from(collections)
           .where(inList(collections.id, ids));
+  const platform = new Map<PlatformAction, Promise<string[]>>();
+  let others: Promise<{ apps: ReviewedApp[]; truncated: boolean }> | undefined;
   return {
+    apps: async () => {
+      others ??= reviewedApps(env, app);
+      return await others;
+    },
+    platform: async (action) => {
+      const reading =
+        platform.get(action) ??
+        platformGrantsOf(env, app, action, choicesMax + 1);
+      platform.set(action, reading);
+      const granted = await reading;
+      return {
+        ids: granted.slice(0, choicesMax),
+        truncated: granted.length > choicesMax,
+      };
+    },
     connections,
     collections: { rows: readable, truncated: collectionGrants.truncated },
+    stores,
     names: new Map(named.map(({ id, name }) => [id, name])),
     contracts,
+    storeGrant: async (permissionId) => {
+      const known = storeGrants.get(permissionId);
+      if (known !== undefined) {
+        return await known;
+      }
+      if (storeGrants.size >= reviewStoreChecksMax) {
+        return unchecked;
+      }
+      const resolving = appStoreGrant(env, app, permissionId);
+      storeGrants.set(permissionId, resolving);
+      return await resolving;
+    },
   };
 };
 
@@ -775,6 +929,67 @@ const choicesFor = async (
         })),
       truncated:
         truncated || serving.some(([, serves]) => serves === undefined),
+    };
+  }
+  if (declaration["~resource"] === "statistics") {
+    const platform = declaration.platform.length > 0;
+    const granted = platform
+      ? await grants.platform("statistics")
+      : { ids: [], truncated: false };
+    return {
+      kind: "statistics",
+      platform,
+      permissions: granted.ids.map((permissionId) => ({ permissionId })),
+      truncated: granted.truncated,
+    };
+  }
+  if (declaration["~resource"] === "guests") {
+    const granted = await grants.platform("guests");
+    return {
+      kind: "guests",
+      permissions: granted.ids.map((permissionId) => ({ permissionId })),
+      truncated: granted.truncated,
+    };
+  }
+  if (declaration["~resource"] === "app") {
+    // Every candidate's release, read once for the review, checked in
+    // memory: an older App that serves the declaration is offered as a
+    // newer one is, however many app resources the App declares.
+    const [others, declared] = await Promise.all([
+      grants.apps(),
+      declaredFingerprints(declaration),
+    ]);
+    const serving = others.apps
+      .filter(
+        ({ release }) =>
+          release !== undefined &&
+          servedIn(release, declaration, declared) !== undefined
+      )
+      .map(({ appId, name }) => ({ appId, name }));
+    return { kind: "app", apps: serving, truncated: others.truncated };
+  }
+  if (declaration["~resource"] === "store") {
+    const { rows, truncated } = grants.stores;
+    // Only those approving accepts: the store serves every declared
+    // operation, exactly, and the permission allows each. Each permission
+    // is resolved once for the whole review (`storeGrant`), and matched
+    // with each declaration in memory.
+    const serving = await Promise.all(
+      rows.map(async (row) => {
+        const grant = await grants.storeGrant(row.id);
+        if (grant === unchecked || grant === undefined) {
+          return [row, grant] as const;
+        }
+        return [row, await grantServes(grant, declaration)] as const;
+      })
+    );
+    return {
+      kind: "store",
+      permissions: serving
+        .filter(([, serves]) => serves === true)
+        .map(([row]) => ({ permissionId: row.id, storeId: row.objectId })),
+      truncated:
+        truncated || serving.some(([, serves]) => serves === unchecked),
     };
   }
   return {
@@ -936,6 +1151,26 @@ const targetLabels = async (
   };
 };
 
+/**
+ * Knowledge's, statistics' or guests' declared operations, or a store's paths; none
+ * for other kinds.
+ */
+const operationsOf = (declaration: AnyResource): string[] => {
+  if (
+    declaration["~resource"] === "knowledge" ||
+    declaration["~resource"] === "statistics" ||
+    declaration["~resource"] === "guests"
+  ) {
+    return [...declaration.operations];
+  }
+  if (declaration["~resource"] === "app") {
+    return Object.keys(declaration.functions).toSorted();
+  }
+  return declaration["~resource"] === "store"
+    ? Object.keys(declaration.operations).toSorted()
+    : [];
+};
+
 /** What a review says of `declaration`, apart from how it is bound. */
 const declaredOf = (declaration: AnyResource) => {
   const kind = declaration["~resource"];
@@ -945,8 +1180,9 @@ const declaredOf = (declaration: AnyResource) => {
     contract:
       kind === "connector" || kind === "template" ? declaration.contract : null,
     actions: kind === "connector" ? [...declaration.actions] : [],
-    operations: kind === "knowledge" ? [...declaration.operations] : [],
+    operations: operationsOf(declaration),
     collections: kind === "knowledge" ? [...declaration.collections] : [],
+    measures: kind === "statistics" ? [...declaration.platform] : [],
     maxOutputTokens: kind === "model" ? declaration.maxOutputTokens : null,
     structuredOutput: kind === "model" && declaration.structuredOutput !== null,
   };
@@ -1039,9 +1275,19 @@ export const reviewResourceBindings = async (
  * serves exactly the contract it served then; undefined otherwise, which
  * the operation host answers as `resource.unavailable`.
  */
-export const resourceBindingsFor =
-  (env: Env, caller: BindingCaller): ResourceBindings =>
-  async (declaration: AnyResource): Promise<BoundResource | undefined> => {
+export const resourceBindingsFor = (
+  env: Env,
+  given: BindingCaller
+): ResourceBindings => {
+  // One count of what the invocation used, across all its requests.
+  const caller: BindingCaller = {
+    ...given,
+    counts: given.counts ?? new Map<string, number>(),
+    appCalls: given.appCalls ?? { used: 0 },
+  };
+  return async (
+    declaration: AnyResource
+  ): Promise<BoundResource | undefined> => {
     const row = await activeRow(env, caller.app, declaration.alias);
     if (row === undefined) {
       return undefined;
@@ -1058,6 +1304,27 @@ export const resourceBindingsFor =
           binding: row.id,
           contractId: row.contractId,
           state: resolution.state,
+        });
+      }
+      // A shared store's binding that no longer serves (its grant lost, the
+      // store's contract changed, an operation gone or no longer public):
+      // recorded, with the consumer and the binding, as its refused calls
+      // are (store-operations.ts).
+      if (declaration["~resource"] === "store") {
+        const target = bindingTargetSchema.safeParse(
+          jsonOrUndefined(row.target)
+        );
+        await auditStoreRefusal(env, {
+          actor: caller.actor,
+          consumer: {
+            subject: { type: "app", id: caller.app },
+            version: caller.authority.appVersion ?? 0,
+            permissionId:
+              target.data?.kind === "store" ? target.data.permissionId : row.id,
+          },
+          operation: `binding:${declaration.alias}`,
+          storeId: null,
+          reason: resolution.state,
         });
       }
       return undefined;
@@ -1084,6 +1351,7 @@ export const resourceBindingsFor =
         ),
     };
   };
+};
 
 /** A held call its binding no longer serves. */
 const notServed = () => operationErrors.create("resource.unavailable");

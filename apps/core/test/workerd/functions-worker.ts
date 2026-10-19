@@ -3,9 +3,9 @@ import { app, defineSchema, defineTable, v } from "@grasp-os/sdk";
 import { inspectApp } from "@grasp-os/sdk/host";
 import { serverModule } from "@grasp-os/sdk/server";
 
-import { releaseRunner } from "../../src/app-functions.ts";
 import type { OpenStore } from "../../src/data-stores.ts";
 import { callOperation } from "../../src/operations.ts";
+import { releaseRunner } from "../../src/release-runner.ts";
 
 // An App's functions on plain workerd (scripts/workerd-sandbox-functions.test.ts):
 // a call goes through core's operation host as any does, to the runner core

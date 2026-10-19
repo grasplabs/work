@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema } from "./ids.ts";
+import { isPlatformMeasure, platformMeasures } from "./platform-measures.ts";
 
 // Statistics: named measures an App records from its server code, with a
 // few dimensions, and reads back as aggregates over the last days, by the
@@ -127,27 +128,6 @@ export const statisticMaxApps = 100;
 
 /** Furthest into a read's groups a page starts (`offset`). */
 export const statisticMaxOffset = 10_000;
-
-/** The measures the platform publishes, and the dimensions of each. */
-export const platformMeasures = {
-  /**
-   * Each run of an App's workflow started, by its App and workflow: a
-   * point of value 1, on the day it started.
-   */
-  "platform.workflow_runs": ["app", "workflow"],
-  /**
-   * Each improvement signal of the latest daily computation, by its App,
-   * workflow and kind: its value (`@grasp-os/shared/signals`), on the day
-   * it was computed. Its subject and evidence stay with who may read them.
-   */
-  "platform.improvement_signals": ["app", "workflow", "kind"],
-} as const satisfies Record<string, readonly string[]>;
-export type PlatformMeasure = keyof typeof platformMeasures;
-
-/** Whether `measure` is one the platform publishes. */
-export const isPlatformMeasure = (
-  measure: string
-): measure is PlatformMeasure => Object.hasOwn(platformMeasures, measure);
 
 /**
  * What to read: a measure, over the last `days` UTC days up to `until`

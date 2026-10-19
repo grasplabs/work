@@ -57,7 +57,7 @@ const readHeld = async (
 };
 
 /** The input an action runs with, laid out to read. */
-const inputOf = (input: string): string => {
+export const inputOf = (input: string): string => {
   try {
     return JSON.stringify(JSON.parse(input), null, 2);
   } catch {
@@ -152,7 +152,7 @@ const FieldValue = ({
  * The parts of the input its tool shows, each under its label; `onShowAll`
  * names a value cut short once it is shown in full.
  */
-const Described = ({
+export const Described = ({
   description,
   onShowAll,
 }: {
@@ -177,20 +177,31 @@ const Described = ({
 /**
  * The exact input the write runs with, behind a disclosure: open from the
  * start unless the card already shows all of it (`shown`). `onOpen` says
- * it was opened.
+ * it was opened. `sent`: it went out already (a call of unknown outcome),
+ * so it is what was sent, not what will be.
  */
-const ExactInput = ({
+export const ExactInput = ({
   input,
   shown,
   onOpen,
+  sent = false,
 }: {
   input: string;
   shown: boolean;
   onOpen: () => void;
+  sent?: boolean;
 }) => {
   const [open, setOpen] = useState(!shown);
   const id = useId();
   const { t } = useLingui();
+  let label = open
+    ? t`Hide exactly what will be sent`
+    : t`Show exactly what will be sent`;
+  if (sent) {
+    label = open
+      ? t`Hide exactly what was sent`
+      : t`Show exactly what was sent`;
+  }
   return (
     <div className="flex flex-col items-start gap-2">
       <Button
@@ -205,9 +216,7 @@ const ExactInput = ({
         size="sm"
         variant="ghost"
       >
-        {open
-          ? t`Hide exactly what will be sent`
-          : t`Show exactly what will be sent`}
+        {label}
       </Button>
       {open ? (
         <pre
@@ -237,8 +246,9 @@ export interface Shown {
  * been opened, Confirm waits. The exact input starts open unless the
  * description shows every property of the input.
  */
-export const useShown = (action: PendingAction): Shown => {
-  const { description } = action;
+export const useShown = ({
+  description,
+}: Pick<PendingAction, "description">): Shown => {
   const complete = description?.complete === true;
   const [inputSeen, setInputSeen] = useState(!complete);
   const [seen, setSeen] = useState<string[]>([]);

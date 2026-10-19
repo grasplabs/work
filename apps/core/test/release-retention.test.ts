@@ -3,11 +3,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  callAppFunction,
-  hostedRelease,
-  invocationFor,
-} from "../src/app-functions.ts";
+import { callAppFunction, invocationFor } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
@@ -31,6 +27,7 @@ import {
   sweepReleases,
   unpinRelease,
 } from "../src/release-retention.ts";
+import { hostedRelease } from "../src/release-runner.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,

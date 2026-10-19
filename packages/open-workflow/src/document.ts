@@ -596,7 +596,19 @@ const checkUse = (
   }
   for (const [name, timeout] of named("timeouts", profileLimits.maxReusable)) {
     checker.reusableTimeouts.add(name);
-    checkTimeout(checker, timeout, pointerJoin("/use/timeouts", name), site);
+    const timeoutPointer = pointerJoin("/use/timeouts", name);
+    // Upstream's `use.timeouts` holds timeouts, never names: only a task
+    // names one, so there is no chain to follow, and no cycle.
+    if (typeof timeout === "string") {
+      checker.report.error(
+        "profile.invalid_value",
+        at(site, timeoutPointer),
+        "Give a reusable timeout its own duration, { after: ... }: only a task names a reusable timeout.",
+        { reason: "timeout alias" }
+      );
+      continue;
+    }
+    checkTimeout(checker, timeout, timeoutPointer, site);
   }
   const functions = named("functions", profileLimits.maxFunctions);
   // Every name first, so a function may call one declared after it.

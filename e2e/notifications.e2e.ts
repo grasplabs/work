@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 
 // A failed run, end to end: the person it acted for finds it counted in
 // the nav, reads it on the dashboard, and asks the agent to fix
@@ -33,7 +33,7 @@ export default workflowTests(careless, [
 const pageRead = { timeout: 20_000 };
 
 test("the person a run acted for is told it failed, and asks the agent to fix it", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("notifications");
   const name = `Customers ${crypto.randomUUID()}`;
@@ -58,7 +58,7 @@ test("the person a run acted for is told it failed, and asks the agent to fix it
     core[Symbol.dispose]();
   }
 
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Dashboard 1 thing waiting" }).click();

@@ -1,0 +1,2 @@
+CREATE INDEX `idempotent_calls_person_state_idx` ON `idempotent_calls` (`on_behalf_of`,`state`);--> statement-breakpoint
+CREATE INDEX `idempotent_calls_kept_input_idx` ON `idempotent_calls` (`created_at`) WHERE "idempotent_calls"."input" IS NOT NULL;

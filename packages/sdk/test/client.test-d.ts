@@ -10,7 +10,13 @@ import { expectTypeOf } from "vite-plus/test";
 
 import type { GraspClient } from "../src/client.ts";
 import type { Id } from "../src/index.ts";
-import { useAction, useClient, useMutation, useQuery } from "../src/react.ts";
+import {
+  useAction,
+  useClient,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from "../src/react.ts";
 import type { GraspError } from "../src/react.ts";
 import { api } from "./notes/.grasp/references.ts";
 import { internal } from "./notes/.grasp/server-references.ts";
@@ -45,6 +51,33 @@ export const useChecks = (): void => {
   void useQuery(api.notes.create, { title: "x" });
   // @ts-expect-error -- an internal reference isn't callable from a screen
   void useQuery(internal.notes.count, {});
+
+  // A paginated list: its records inferred from the query's pages, its
+  // arguments the query's own without `pagination`, which it supplies.
+  const list = usePaginatedQuery(api.notes.list, {}, { initialPageSize: 50 });
+  expectTypeOf(list.items).toEqualTypeOf<Note[]>();
+  expectTypeOf(list.hasMore).toEqualTypeOf<boolean>();
+  expectTypeOf(list.isLoading).toEqualTypeOf<boolean>();
+  expectTypeOf(list.loadMore).toEqualTypeOf<
+    (pageSize?: number) => Promise<void>
+  >();
+  expectTypeOf(
+    usePaginatedQuery(api.notes.list, "skip", { initialPageSize: 10 }).items
+  ).toEqualTypeOf<Note[]>();
+  void usePaginatedQuery(
+    api.notes.list,
+    // @ts-expect-error -- pagination is the list's to supply
+    { pagination: { pageSize: 5 } },
+    { initialPageSize: 5 }
+  );
+  // @ts-expect-error -- a query that doesn't answer pages isn't a list
+  void usePaginatedQuery(api.notes.get, { id: noteId }, { initialPageSize: 5 });
+  // @ts-expect-error -- a mutation isn't a list
+  void usePaginatedQuery(api.notes.create, {}, { initialPageSize: 5 });
+  // @ts-expect-error -- the first page's size is required
+  void usePaginatedQuery(api.notes.list, {}, {});
+  // @ts-expect-error -- the option is initialPageSize, not pageSize
+  void usePaginatedQuery(api.notes.list, {}, { pageSize: 5 });
 
   // Mutations and actions: stable callables answering the declared value.
   const create = useMutation(api.notes.create);
