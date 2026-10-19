@@ -153,7 +153,7 @@ test("the dashboard counts the programme's weeks from the plan, and exports its 
 
   await expect(page.getByText("Week 1 of 8 · Under way")).toBeVisible();
   await expect(
-    page.getByText(/^Report on week 1 ready in [1-7] days?$/u)
+    page.getByText(/^Your next report is ready (?:tomorrow|in [2-7] days)$/u)
   ).toBeVisible();
   await page.getByRole("button", { name: "Export report" }).click();
 
@@ -170,5 +170,117 @@ test("the dashboard counts the programme's weeks from the plan, and exports its 
     `grasp-report-week-1-${today()}.md`
   );
   await expect(dialog).toBeHidden();
+  expect(cspViolations).toStrictEqual([]);
+});
+
+test("the company's admin goes through their onboarding: the staff list, the leads and the day the interviews start", async ({
+  page,
+  cspViolations,
+}) => {
+  // Last of the serial run: what it keeps replaces the roster and the plan
+  // the tests before it read.
+  const admin = await signInStaff();
+  await signInTo(page.context(), admin);
+  // The story on "How this works" is told at once.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/setup?step=welcome");
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
+  ).toBeFocused();
+  await page.getByRole("button", { name: "English" }).click();
+  await page.getByRole("button", { name: "Let’s start" }).click();
+
+  // The story told at once: the plan, summed up.
+  await expect(
+    page.getByText(/^Your people, documents and tools first\./u)
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // Who works where, from a staff list read in the browser.
+  await expect(
+    page.getByRole("heading", { name: "Who’s who at your company?" })
+  ).toBeVisible();
+  const run = crypto.randomUUID().slice(0, 8);
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "staff.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      [
+        "Name,Email,Team,Job title,Team lead",
+        `Lea Bakker,lea.${run}@acme.test,Sales,Head of sales,yes`,
+        `Sam Visser,sam.${run}@acme.test,Sales,Account manager,`,
+        `Ona Smit,ona.${run}@acme.test,Ops,Planner,`,
+      ].join("\n")
+    ),
+  });
+  await expect(
+    page.getByText(
+      "Thank you. From your staff list I can see 3 people in 2 teams."
+    )
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // Where the documents live and Pulse: core keeps nothing of them yet, so both are skipped.
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Do you have anything that explains how you work?",
+    })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Which tools do people actually use?" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Skip for now" }).click();
+
+  // The leads as the list said them; Ops gets Ona as its lead.
+  await expect(
+    page.getByRole("heading", {
+      name: "Almost done: is this your organization?",
+    })
+  ).toBeVisible();
+  await page.getByRole("combobox", { name: "Lead of Ops" }).click();
+  await page.getByRole("option", { name: "Ona Smit" }).click();
+  await page.getByRole("button", { name: "This is right" }).click();
+  await expect(
+    page.getByText("Thank you. I’ll start with these 2 leads.")
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // The message to send, and the day the first links go out.
+  await expect(
+    page.getByRole("heading", {
+      name: "Before I reach out, let your team know",
+    })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "The day after" }).click();
+  const start = await page.getByLabel("Another day").inputValue();
+  await page.getByRole("button", { name: "I sent it" }).click();
+
+  await expect(
+    page.getByRole("heading", {
+      name: "That’s everything from you. Now I’ll talk to your team.",
+    })
+  ).toBeVisible();
+  await expect(page.getByText(/^Starts /u)).toBeVisible();
+
+  // Core keeps what was set: the leads, and the plan from that day.
+  const { core, api } = apiOf(admin);
+  try {
+    const { roster, plan } = await api.onboarding.view();
+    const leadOf = (name: string) =>
+      roster?.people.find(
+        (person) =>
+          person.id === roster.teams.find((team) => team.name === name)?.lead
+      )?.name;
+    expect([leadOf("Sales"), leadOf("Ops")]).toStrictEqual([
+      "Lea Bakker",
+      "Ona Smit",
+    ]);
+    expect(plan?.start).toBe(start);
+  } finally {
+    core[Symbol.dispose]();
+  }
   expect(cspViolations).toStrictEqual([]);
 });

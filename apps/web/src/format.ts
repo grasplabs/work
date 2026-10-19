@@ -66,3 +66,11 @@ export const formatDayMonth = (value: string | number | Date): string =>
     day: "numeric",
     month: "short",
   }).format(new Date(value));
+
+/** An amount in whole euros, as the page's language writes it, such as "€1,240". */
+export const formatEuro = (value: number): string =>
+  new Intl.NumberFormat(i18n.locale, {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(value);
