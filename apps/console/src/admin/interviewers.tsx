@@ -25,10 +25,11 @@ import { BarList, Empty, Figure, Panel } from "./interview-parts.tsx";
 import { noInterviewsYet } from "./interviews.tsx";
 import { interviewerNames, interviewPhaseWords } from "./words.ts";
 
-/** The parts of an interview someone can stop in: the hello has no question yet, and the read-back is the end. */
-const stopPhases: Phase[] = PHASES.filter(
-  (phase) => phase !== "open" && phase !== "readback"
-);
+/**
+ * The parts of an interview someone can stop in: the hello has no question
+ * yet, and the read-back still waits for them to agree, so it is one.
+ */
+const stopPhases: Phase[] = PHASES.filter((phase) => phase !== "open");
 
 const oneDecimal = new Intl.NumberFormat("en", {
   minimumFractionDigits: 1,

@@ -318,6 +318,28 @@ describe("an organization's interviews", () => {
     ]).toStrictEqual([true, true, true]);
   });
 
+  it("counts someone who left at the read-back, before agreeing, where people stop", async () => {
+    const acme = await liveClient();
+    const snapshot = interviewingSnapshot();
+    acme.account.admin = {
+      ...snapshot,
+      interviews: snapshot.interviews.map((interview) =>
+        interview.person === "p-ben"
+          ? { ...interview, phase: "readback", stoppedAt: "readback" }
+          : interview
+      ),
+    };
+
+    const { html } = await page(
+      `/admin/organizations/${acme.clientId}/interviews?tab=interviewers`
+    );
+    const start = html.indexOf('aria-label="Where people stop"');
+    const stops =
+      start === -1 ? "" : html.slice(start, html.indexOf("</ul>", start));
+
+    expect(stops.includes("Reading it back")).toBeTruthy();
+  });
+
   it("gives no share of voice or of what was left in while no interview is finished", async () => {
     const acme = await liveClient();
     const snapshot = interviewingSnapshot();

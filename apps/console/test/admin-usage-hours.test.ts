@@ -207,6 +207,33 @@ describe("an organization's AI use and hours", () => {
     }).toStrictEqual({ status: 200, nothing: true, way: true, figures: false });
   });
 
+  it("shows the use of a model without a price, though it cost nothing", async () => {
+    const empty = emptyAdminSnapshot("Acme");
+    const base = await liveClient({
+      ...empty,
+      usage: [
+        {
+          day: empty.now.slice(0, 10),
+          use: {
+            interviews: {
+              "@cf/meta/llama-3.3-70b-instruct-fp8-fast": calls(
+                500_000,
+                100_000
+              ),
+            },
+          },
+        },
+      ],
+    });
+
+    const { html } = await page(`${base}/ai-use`);
+
+    expect({
+      nothing: html.includes("Nothing used yet"),
+      figures: html.includes("In all, so far"),
+    }).toStrictEqual({ nothing: false, figures: true });
+  });
+
   it("knows no hours while core sends no drawn work, saying why", async () => {
     const untold = await liveClient(emptyAdminSnapshot("Acme"));
     const empty = emptyAdminSnapshot("Acme");

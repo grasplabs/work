@@ -220,6 +220,26 @@ describe("an organization's brain", () => {
     });
   });
 
+  it("warns of the teams not heard once the interviews have closed", async () => {
+    const acme = await liveClient();
+    const heard = heardSnapshot("Acme");
+    // Two weeks from January: long closed, before anyone talked.
+    acme.account.admin = {
+      ...heard,
+      plan: { start: "2026-01-05", days: 14, at: "2026-01-05T07:00:00.000Z" },
+    };
+
+    const { html } = await page(`/admin/organizations/${acme.clientId}/brain`);
+    const numbers = html.slice(
+      html.indexOf('aria-label="The brain in numbers"'),
+      html.indexOf("</section>", html.indexOf("The brain in numbers"))
+    );
+
+    expect(
+      numbers.includes("2 teams not heard before the interviews closed")
+    ).toBeTruthy();
+  });
+
   it("says a company without teams yet has none, with nothing counted", async () => {
     const acme = await liveClient();
     acme.account.admin = emptyAdminSnapshot("Acme");
