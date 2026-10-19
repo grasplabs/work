@@ -1,9 +1,10 @@
 /**
  * Composio's REST API as the connect Worker reaches it in core's tests:
  * part of the `connect-providers` Worker (test/connect-providers.ts), so
- * the real connect runs unchanged behind core. It lists one toolkit,
- * HubSpot, and an admin's auth at its link succeeds at once: the link it
- * gives is the callback connect asked it to send the browser back to.
+ * the real connect runs unchanged behind core. It lists two toolkits,
+ * HubSpot and one it holds no app for, and an admin's auth at its link
+ * succeeds at once: the link it gives is the callback connect asked it to
+ * send the browser back to.
  * Imported by vite.config.ts (Node) and the tests (workerd), so it only
  * holds data.
  */
@@ -22,6 +23,13 @@ export const composioToolkits = [
         "HubSpot is a CRM platform for marketing, sales and service. It brings teams together.",
       logo: "https://logos.composio.dev/api/hubspot",
     },
+  },
+  // Composio holds no app for it: connecting it takes the organization's own.
+  {
+    slug: "acme_erp",
+    name: "Acme ERP",
+    composio_managed_auth_schemes: [],
+    meta: { categories: [{ id: "erp", name: "ERP" }], tools_count: 1 },
   },
 ];
 

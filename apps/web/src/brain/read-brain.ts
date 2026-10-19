@@ -6,10 +6,10 @@ import type { Loaded } from "../load-from-core.tsx";
 
 /**
  * What the brain is built from (`buildBrain`), as core assembles it for
- * the signed-in person (`brain.read`): the onboarding for an admin, the
- * Playbook's records as they may read them, and the connections. Built
- * into notes by the brain's layout as it loads (routes/_shell.brain.tsx),
- * in the person's language. Not sent once the page was `left`.
+ * the signed-in person (`brain.read`): the onboarding for an admin and
+ * the connections. Built into notes by the brain's layout as it loads
+ * (routes/_shell.brain.tsx), in the person's language. Not sent once the
+ * page was `left`.
  */
 export const readBrain = async (
   core: Pick<CoreConnection, "withSession">,

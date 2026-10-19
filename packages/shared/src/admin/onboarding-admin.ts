@@ -312,7 +312,7 @@ export interface OrgState {
   research: "none" | "done";
   agreed: Agreed;
   client: ClientStep;
-  /** Days since the team was told, 0 to 14. */
+  /** Days since the team was told, from 0 to how many days its interviews run (`listenDays`). */
   day: number;
   rules: OrgRules;
   /** How each team gets its links, by team; a team not here keeps its own way. */
@@ -339,7 +339,7 @@ export interface OrgState {
   opened: number | null;
   /** Workflows Grasp counts as known by hand, before the rules say so. */
   counted: string[];
-  /** People who are away these two weeks: they get no link, and nothing waits for them. */
+  /** People who are away for the interviews: they get no link, and nothing waits for them. */
   away: string[];
   /** Teams that do not take part: nobody in them gets a link, and nothing waits for them. One can be asked in later. */
   left: string[];
@@ -465,6 +465,11 @@ export interface Org {
   sponsor: string;
   /** The day the team is told, and the team leads get their link. */
   start: string;
+  /**
+   * How many days its interviews run, as its plan has it: from five days to six weeks. The samples
+   * leave it out and run the fourteen days they were written for (`listenDays`).
+   */
+  days?: number;
   teams: OrgTeam[];
   works: Work[];
   /** What the library expects of a team that turns out not to be done there. */
@@ -573,6 +578,13 @@ export const unit = (key: string): number => {
 };
 /* oxlint-enable no-bitwise, unicorn/prefer-code-point, operator-assignment */
 
+/**
+ * How many days an organization's interviews run: its own plan's length, or the samples' fourteen.
+ * Everything that asks when the links close, or how far the weeks are, asks this and never
+ * `LISTEN_DAYS` itself, so a six-week plan does not close after two.
+ */
+export const listenDays = (org: Org): number => org.days ?? LISTEN_DAYS;
+
 /** The date `day` days after the team was told. */
 export const dateOn = (org: Org, day: number): string => {
   const date = new Date(`${org.start}T12:00:00Z`);
@@ -605,11 +617,15 @@ export const REMIND_AFTER = 3;
 const leadAt = (team: DirectoryTeam, index: number): number =>
   0.05 + index * 0.025 + (team.pace < 0.4 ? 0.28 : 0);
 
-/** The day a team's lead talks: their team's links go out the same day, to everyone on the lead's list. */
+/**
+ * The day a team's lead talks: their team's links go out the same day, to everyone on the lead's
+ * list. Played for the samples only, over their fourteen days; a real organization's days come
+ * from what really happened (`RealHappened`).
+ */
 export const leadDay = (team: DirectoryTeam, index: number): number =>
   Math.max(1, Math.ceil(leadAt(team, index) * LISTEN_DAYS - 1e-9));
 
-/** How many of a team, the lead aside, have finished their interview by `day`. */
+/** How many of a team, the lead aside, have finished their interview by `day`. Played for the samples only, like `leadDay`. */
 export const membersTalked = (
   team: DirectoryTeam,
   index: number,
@@ -890,7 +906,7 @@ export const peopleOf = (org: Org): Person[] => {
   return roster;
 };
 
-/** What happens to one person's link over the two weeks, in days since the team was told. */
+/** What happens to one person's link over the interviews, in days since the team was told. */
 export interface Timeline {
   sent: number;
   opened: number | null;
@@ -942,6 +958,7 @@ export const timelinesOf = (org: Org): Map<string, Timeline> => {
   }
   const all = new Map<string, Timeline>();
   const roster = peopleOf(org);
+  // Only the samples are played, and they run the fourteen days their curve was written for.
   const last = LISTEN_DAYS - 1;
   const reminded = (sent: number, completed: number | null) => {
     const on = workingDaysAfter(org, sent, REMIND_AFTER);
@@ -1093,7 +1110,8 @@ export interface PersonView {
 const stateOn = (
   timeline: Timeline,
   day: number,
-  talking: boolean
+  talking: boolean,
+  days: number
 ): LinkState => {
   if (day < timeline.sent) {
     return "waiting";
@@ -1101,7 +1119,7 @@ const stateOn = (
   if (timeline.completed !== null && timeline.completed <= day) {
     return "completed";
   }
-  if (day >= LISTEN_DAYS) {
+  if (day >= days) {
     return timeline.stopped ? "incomplete" : "expired";
   }
   if (talking) {
@@ -1646,8 +1664,9 @@ export const evidenceAt = (
     const talked = doers
       .filter(
         (person) =>
-          (lines.get(person.id)?.completed ?? LISTEN_DAYS + 1) <= day &&
-          !deleted.includes(person.id)
+          // Someone who has not finished never counts, however long the interviews run.
+          (lines.get(person.id)?.completed ?? Number.POSITIVE_INFINITY) <=
+            day && !deleted.includes(person.id)
       )
       .toSorted(
         (a, b) =>
@@ -1954,7 +1973,10 @@ const noCounts = (): Record<LinkState, number> => ({
   away: 0,
 });
 
-/** A team counts as quiet when the link closes within this many days and fewer than this share has talked. */
+/**
+ * A team counts as quiet when the link closes within this many days of the samples' fourteen and
+ * fewer than this share has talked. A shorter plan has a window as much shorter (`quietDays`).
+ */
 const QUIET_DAYS = 4;
 const QUIET_SHARE = 0.3;
 
@@ -2100,10 +2122,10 @@ const stagesOf = ({
 // oxlint-disable-next-line complexity -- ported as the prototype has it: the whole organization on one day, worked out in one place; every admin test pins it
 export const viewOf = (org: Org, state: OrgState): OrgView => {
   const told = state.client === "told" && !org.made;
-  const day = told
-    ? Math.min(Math.max(Math.round(state.day), 0), LISTEN_DAYS)
-    : 0;
-  const closed = told && day >= LISTEN_DAYS;
+  // The links close when the organization's own plan ends, not after the samples' two weeks.
+  const days = listenDays(org);
+  const day = told ? Math.min(Math.max(Math.round(state.day), 0), days) : 0;
+  const closed = told && day >= days;
   const known = state.client !== "none" && !org.made;
   const leadsKnown = state.client === "leads" || state.client === "told";
   const lines = timelinesOf(org);
@@ -2111,7 +2133,8 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
   // A team that does not take part is not waited for, like someone away. What one of its people agreed to before stays said.
   const left = new Set(state.left);
   const talkedBy = (person: Person) =>
-    told && (lines.get(person.id)?.completed ?? LISTEN_DAYS + 1) <= day;
+    told &&
+    (lines.get(person.id)?.completed ?? Number.POSITIVE_INFINITY) <= day;
   const out = new Set(
     roster
       .filter((person) => left.has(person.team) && !talkedBy(person))
@@ -2134,7 +2157,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
       talkingNow = mine
         .filter((person) => org.real?.talking.has(person.id) === true)
         .map((person) => person.id);
-    } else if (told && day < LISTEN_DAYS) {
+    } else if (told && day < days) {
       talkingNow = mine
         .filter((person) => lines.get(person.id)?.completed === day + 1)
         .toSorted(
@@ -2170,7 +2193,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
       // Whoever is away is not waited for, whatever their link would have done.
       const current = away
         ? "away"
-        : stateOn(timeline, day, talking.has(person.id));
+        : stateOn(timeline, day, talking.has(person.id), days);
       // One reminder a person: sent by hand first, it does not go again by itself.
       const hand = state.reminded[person.id];
       const first =
@@ -2208,7 +2231,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
         reminded,
         byHand,
         mayRemind:
-          day < LISTEN_DAYS &&
+          day < days &&
           reminded === null &&
           (current === "invited" ||
             current === "opened" ||
@@ -2365,6 +2388,12 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     }
   }
   if (told && !closed) {
+    // The quiet window shrinks with a shorter plan, so a five-day plan's team is not quiet on its
+    // first day; fourteen days and more keep the samples' four.
+    const quietDays = Math.min(
+      QUIET_DAYS,
+      Math.ceil((days * QUIET_DAYS) / LISTEN_DAYS)
+    );
     for (const team of taking) {
       // A lead who is late holds up their whole team: from the reminder on, that needs a word.
       if (
@@ -2382,7 +2411,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
       const asked = team.people.length - team.counts.away;
       if (
         team.sent !== null &&
-        LISTEN_DAYS - day <= QUIET_DAYS &&
+        days - day <= quietDays &&
         asked > 0 &&
         talked / asked < QUIET_SHARE
       ) {
@@ -2390,7 +2419,7 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
           kind: "quiet",
           team: team.team,
           talked,
-          left: LISTEN_DAYS - day,
+          left: days - day,
         });
       }
     }

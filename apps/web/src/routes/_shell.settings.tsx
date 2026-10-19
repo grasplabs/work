@@ -9,6 +9,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import {
+  BellIcon,
   CircleHelpIcon,
   CoinsIcon,
   HistoryIcon,
@@ -24,14 +25,15 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // Settings, as in the prototype (`routes/settings.tsx`): the workspace and
 // who may do what in it, then one's own account, one section at a time.
 // Only the sections core has something behind are here, and only those
-// the person may open are listed: Profile for everyone; Packages for all
-// but Grasp staff (its list is for who may approve packages); Members and roles,
-// Models, AI spend, the audit trail and calls of unknown outcome for admins
+// the person may open are listed: Profile and Notifications for everyone;
+// Packages for all but Grasp staff (its list is for who may approve packages);
+// Members and roles, Models, AI spend, the audit trail and calls of unknown outcome for admins
 // (Members and roles, and unknown outcomes, never for Grasp staff). Core checks the role on every call
 // whatever is listed.
 
 type SettingsPath =
   | "/settings/profile"
+  | "/settings/notifications"
   | "/settings/members"
   | "/settings/models"
   | "/settings/spend"
@@ -99,6 +101,11 @@ const groupsFor = ({
       title: msg`Your account`,
       items: [
         { label: msg`Profile`, to: "/settings/profile", icon: UserRoundIcon },
+        {
+          label: msg`Notifications`,
+          to: "/settings/notifications",
+          icon: BellIcon,
+        },
       ],
     },
   ];

@@ -152,6 +152,26 @@ export const staffMayStay = async (
 };
 
 /**
+ * Whether the company's admin ended Grasp's staff access and no window
+ * the console opened since has given it back, as `staffMayStay` counts a
+ * window opened after the end.
+ */
+export const staffAccessEnded = async (
+  env: Pick<Env, "DB">,
+  windowOpened: string | undefined
+): Promise<boolean> => {
+  const [row] = await drizzle(env.DB)
+    .select({ staffEndedAt: onboardingGate.staffEndedAt })
+    .from(onboardingGate)
+    .where(eq(onboardingGate.id, gateRow));
+  const ended = row?.staffEndedAt?.getTime();
+  if (ended === undefined) {
+    return false;
+  }
+  return windowOpened === undefined || Date.parse(windowOpened) <= ended;
+};
+
+/**
  * When staff access ends: the console's window, or, for the onboarding
  * scope, 7 days after Grasp's go when that comes first.
  */

@@ -28,6 +28,7 @@ export const familyNamespaces = [
   "dependency",
   "document",
   "effect",
+  "email_preferences",
   "error_report",
   "execution",
   "expression",

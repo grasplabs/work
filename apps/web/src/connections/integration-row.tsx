@@ -227,6 +227,11 @@ export const IntegrationRow = ({
             <Trans>Not offered</Trans>
           </Badge>
         ) : null}
+        {integration.auth === "own" ? (
+          <Badge variant="outline">
+            <Trans>Needs your own sign-in app</Trans>
+          </Badge>
+        ) : null}
       </span>
     </div>
     <IntegrationButton identity={identity} integration={integration} />
