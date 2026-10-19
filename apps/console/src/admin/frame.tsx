@@ -7,12 +7,12 @@
  * icons, so inside one organization that organization's own column of
  * sections has the room.
  *
- * Not yet here, as the prototype has them: how many integrations wait on
- * Grasp, how many companies' platforms need a look, and how many things
- * need Grasp in each organization. The console has no source for the first
- * two yet, and the third needs the admin's model of what needs Grasp
- * (`adminViewOf`) worked out from a client's snapshot, which the overview
- * brings. Until then an entry shows no number rather than a made-up one.
+ * Beside each organization, as the prototype has it, how many things need
+ * Grasp there, as the admin's model works it out of what its core answered
+ * (src/admin/views.ts). Not yet here: how many integrations wait on Grasp
+ * and how many companies' platforms need a look, for the console has no
+ * source for them yet; those places show no number rather than a made-up
+ * one.
  */
 import {
   Sidebar,
@@ -54,6 +54,8 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { GraspMark } from "./grasp-mark.tsx";
+import { organizationsOf, unreadWords } from "./views.ts";
+import type { Organization } from "./views.ts";
 
 /** One of the admin's own places, down the top of its sidebar. */
 interface Place {
@@ -92,9 +94,25 @@ const unreadOf = (
   if (admin.state === "answered") {
     return null;
   }
-  return admin.error === "not_deployed"
-    ? { words: "not deployed", Mark: HourglassIcon }
-    : { words: "unreachable", Mark: UnplugIcon };
+  return {
+    words: unreadWords(admin),
+    Mark: admin.error === "not_deployed" ? HourglassIcon : UnplugIcon,
+  };
+};
+
+/** The tooltip of an organization's entry: its name, and what its mark or count says. */
+const tooltipOf = (
+  name: string,
+  unread: { words: string } | null,
+  needs: number
+): string => {
+  if (unread !== null) {
+    return `${name}: ${unread.words}`;
+  }
+  if (needs === 0) {
+    return name;
+  }
+  return `${name}: ${needs} ${needs === 1 ? "thing needs" : "things need"} Grasp`;
 };
 
 const PlaceItem = ({ place }: { place: Place }) => {
@@ -116,11 +134,16 @@ const PlaceItem = ({ place }: { place: Place }) => {
   );
 };
 
-/** An organization: its name, and when its core isn't read now, why. */
-const OrganizationItem = ({ admin }: { admin: ClientAdmin }) => {
+/**
+ * An organization: its name, and how many things need Grasp there, or when
+ * its core isn't read now, why.
+ */
+const OrganizationItem = ({ organization }: { organization: Organization }) => {
   const matchRoute = useMatchRoute();
+  const { admin, view } = organization;
   const { id, name } = admin.client;
   const unread = unreadOf(admin);
+  const needs = view?.needs.length ?? 0;
   const active =
     matchRoute({
       to: "/admin/organizations/$clientId",
@@ -130,13 +153,13 @@ const OrganizationItem = ({ admin }: { admin: ClientAdmin }) => {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        // Room for the mark, so a long name ends before it.
-        className={unread === null ? undefined : "pr-8"}
+        // Room for the mark or count, so a long name ends before it.
+        className={unread === null && needs === 0 ? undefined : "pr-8"}
         isActive={active}
         render={
           <Link params={{ clientId: id }} to="/admin/organizations/$clientId" />
         }
-        tooltip={unread === null ? name : `${name}: ${unread.words}`}
+        tooltip={tooltipOf(name, unread, needs)}
       >
         <BuildingIcon />
         <span>{name}</span>
@@ -154,12 +177,21 @@ const OrganizationItem = ({ admin }: { admin: ClientAdmin }) => {
           <TooltipContent side="right">{unread.words}</TooltipContent>
         </Tooltip>
       )}
+      {needs > 0 ? (
+        <SidebarMenuBadge>
+          {needs}
+          <span className="sr-only">
+            {needs === 1 ? "thing needs Grasp" : "things need Grasp"}
+          </span>
+        </SidebarMenuBadge>
+      ) : null}
     </SidebarMenuItem>
   );
 };
 
 const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
   const router = useRouter();
+  const organizations = organizationsOf(admins);
   const { setOpenMobile } = useSidebar();
   // On a phone the sidebar is a sheet over the page: going anywhere from it
   // closes it, so the page it went to is in view.
@@ -210,8 +242,11 @@ const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
           <SidebarGroupContent>
             <nav aria-label="Organizations">
               <SidebarMenu>
-                {admins.map((admin) => (
-                  <OrganizationItem admin={admin} key={admin.client.id} />
+                {organizations.map((organization) => (
+                  <OrganizationItem
+                    key={organization.admin.client.id}
+                    organization={organization}
+                  />
                 ))}
               </SidebarMenu>
             </nav>
