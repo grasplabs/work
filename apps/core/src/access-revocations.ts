@@ -1,7 +1,18 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -30,6 +41,17 @@ import { appHost } from "./durable-objects.ts";
 // again at once (query-subscriptions.ts): a screen of someone who lost it
 // is cleared within the event's delivery, with no commit and no periodic
 // recheck needed.
+//
+// An admin's role reaches every App, so its loss keeps one revocation for
+// every App (a null `app_id`), not one per App: the change's batch stays
+// one row however many Apps there are, within D1's limits (GRA-650). It is
+// expanded, a page of Apps at a time in ID order, into one row per App,
+// each page with the cursor that moves past it in one batch, and the
+// every-App row goes once the last page is out; each page's rows are told
+// at once and kept like any other until their host takes them. None of
+// this grants anything: what the person may do is decided by the role the
+// change already wrote, which every push checks; the rows only bring the
+// clearing of their open screens forward.
 //
 // The event says only "look again", never who lost what: the connection's
 // own check, read now, decides. So an event that names too many people,
@@ -153,13 +175,15 @@ export type KeptRevocation = typeof accessRevocations.$inferSelect;
 
 /**
  * Keeps, in a change's batch, a revocation for each App `reached` (a
- * condition on `apps`, every App when undefined) once `changed` holds when
- * the statement runs, for `userIds` (everyone, when `null`): so the change
- * and what it must tell commit together, and a database away after the
- * commit loses nothing. The Apps are read at that point of the batch, so
- * put it before anything there that takes away what found them (a
- * removal's team memberships). Only Apps that exist are kept: an App
- * deleted meanwhile gives no row, and never fails the change.
+ * condition on `apps`) once `changed` holds when the statement runs, for
+ * `userIds` (everyone, when `null`): so the change and what it must tell
+ * commit together, and a database away after the commit loses nothing.
+ * The Apps are read at that point of the batch, so put it before anything
+ * there that takes away what found them (a removal's team memberships).
+ * Only Apps that exist are kept: an App deleted meanwhile gives no row,
+ * and never fails the change. Every App, when `reached` is undefined: one
+ * row for all of them, however many there are, expanded later
+ * (`expandPage`).
  *
  * Returns the rows kept, for `tellKept` to tell straight away.
  */
@@ -168,14 +192,73 @@ export const revocationsOf = (
   reached: SQL | undefined,
   userIds: readonly string[] | null,
   changed: SQL
-) =>
-  db
-    .insert(accessRevocations)
-    // The table's columns, in its order.
-    .select(
-      sql`SELECT lower(hex(randomblob(16))), ${apps.id}, ${userIds === null ? null : JSON.stringify(userIds)}, 0, ${Date.now()} FROM ${apps} WHERE ${and(reached, changed)}`
-    )
-    .returning();
+) => {
+  const people = userIds === null ? null : JSON.stringify(userIds);
+  return (
+    db
+      .insert(accessRevocations)
+      // The table's columns, in its order.
+      .select(
+        reached === undefined
+          ? sql`SELECT lower(hex(randomblob(16))), NULL, ${people}, 0, ${Date.now()}, NULL WHERE ${changed}`
+          : sql`SELECT lower(hex(randomblob(16))), ${apps.id}, ${people}, 0, ${Date.now()}, NULL FROM ${apps} WHERE ${and(reached, changed)}`
+      )
+      .returning()
+  );
+};
+
+/** How many Apps one page of an every-App revocation expands to. */
+const expandedAtOnce = 200;
+
+/**
+ * Expands the next page of every-App revocation `row`: one row per App
+ * after its cursor, up to `expandedAtOnce` in App ID order, written in one
+ * batch with the cursor moved past them, or with the row dropped once no
+ * App is left after them. Only while the row is still at the cursor read:
+ * a page another run expanded meanwhile writes nothing again. Returns the
+ * rows written, for `tellKept`.
+ */
+const expandPage = async (
+  env: Env,
+  row: KeptRevocation
+): Promise<KeptRevocation[]> => {
+  const db = drizzle(env.DB);
+  const after = row.afterAppId;
+  const stillAt = and(
+    eq(accessRevocations.id, row.id),
+    isNull(accessRevocations.appId),
+    after === null
+      ? isNull(accessRevocations.afterAppId)
+      : eq(accessRevocations.afterAppId, after)
+  );
+  const page = await db
+    .select({ id: apps.id })
+    .from(apps)
+    .where(after === null ? undefined : gt(apps.id, after))
+    .orderBy(asc(apps.id))
+    .limit(expandedAtOnce);
+  const ids = page.map(({ id }) => id);
+  const last = ids.at(-1);
+  const moved =
+    last === undefined || ids.length < expandedAtOnce
+      ? db.delete(accessRevocations).where(stillAt)
+      : db.update(accessRevocations).set({ afterAppId: last }).where(stillAt);
+  if (ids.length === 0) {
+    await moved;
+    return [];
+  }
+  const people = row.userIds === null ? null : JSON.stringify(row.userIds);
+  const [expanded] = await db.batch([
+    db
+      .insert(accessRevocations)
+      .select(
+        sql`SELECT lower(hex(randomblob(16))), ${apps.id}, ${people}, 0, ${Date.now()}, NULL FROM ${apps} WHERE ${inList(apps.id, ids)} AND EXISTS (SELECT 1 FROM ${accessRevocations} WHERE ${stillAt})`
+      )
+      .returning(),
+    moved,
+  ]);
+  return expanded;
+};
 
 /**
  * Tells the host of one revocation a change kept (`revocationsOf`), and
@@ -192,7 +275,7 @@ const tellKeptOne = async (env: Env, row: KeptRevocation): Promise<void> => {
     });
   } catch (error) {
     log.warn("app.access_revocation_failed", {
-      appId: row.appId,
+      appId: row.appId ?? undefined,
       ...errorFields(error),
     });
     return;
@@ -203,7 +286,7 @@ const tellKeptOne = async (env: Env, row: KeptRevocation): Promise<void> => {
       .where(eq(accessRevocations.id, row.id));
   } catch (error) {
     log.warn("app.access_revocation_keep_failed", {
-      appId: row.appId,
+      appId: row.appId ?? undefined,
       ...errorFields(error),
     });
   }
@@ -219,10 +302,21 @@ export const tellKept = async (
   env: Env,
   kept: readonly KeptRevocation[]
 ): Promise<void> => {
-  for (let at = 0; at < kept.length; at += toldAtOnce) {
+  const ofApps = kept.filter(({ appId }) => appId !== null);
+  // Each every-App revocation's first page, told now; the cron trigger
+  // expands the rest (`retryAccessRevocations`).
+  for (const row of kept.filter(({ appId }) => appId === null)) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one row's page after the other
+      ofApps.push(...(await expandPage(env, row)));
+    } catch (error) {
+      log.warn("app.access_revocation_expand_failed", errorFields(error));
+    }
+  }
+  for (let at = 0; at < ofApps.length; at += toldAtOnce) {
     // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
     await Promise.all(
-      kept.slice(at, at + toldAtOnce).map(async (row) => {
+      ofApps.slice(at, at + toldAtOnce).map(async (row) => {
         await tellKeptOne(env, row);
       })
     );
@@ -250,7 +344,7 @@ const retryOne = async (
     await appHost(env, appIdSchema.parse(row.appId)).accessRevoked(row.userIds);
   } catch (error) {
     log.warn("app.access_revocation_retry_failed", {
-      appId: row.appId,
+      appId: row.appId ?? undefined,
       ...errorFields(error),
     });
     // Told again at a later run, behind those tried less often, until
@@ -265,31 +359,59 @@ const retryOne = async (
 };
 
 /**
- * Drops, logged, every kept revocation a day old, whether or not a run
- * would reach it: one behind many others, or behind a steady stream of
- * new ones, is never kept longer.
+ * Drops, logged, every kept revocation of one App a day old, whether or
+ * not a run would reach it: one behind many others, or behind a steady
+ * stream of new ones, is never kept longer. An every-App revocation is
+ * kept until it is expanded: each run moves it on by a page, and each
+ * App's row it writes is then kept a day of its own.
  */
 const dropExpired = async (env: Env): Promise<void> => {
   const lost = await drizzle(env.DB)
     .delete(accessRevocations)
-    .where(lt(accessRevocations.createdAt, new Date(Date.now() - keptForMs)))
+    .where(
+      and(
+        isNotNull(accessRevocations.appId),
+        lt(accessRevocations.createdAt, new Date(Date.now() - keptForMs))
+      )
+    )
     .returning({ appId: accessRevocations.appId });
   for (const { appId } of lost) {
-    log.error("app.access_revocation_lost", { appId });
+    log.error("app.access_revocation_lost", { appId: appId ?? undefined });
   }
+};
+
+/** Most every-App revocations one run of the cron trigger expands a page of. */
+const expandedRowsAtOnce = 5;
+
+/**
+ * Expands a page of each every-App revocation still kept, oldest first,
+ * and tells the hosts of the rows written (`tellKept`): what isn't told
+ * now is kept, and told by a later run.
+ */
+const expandKept = async (env: Env): Promise<void> => {
+  const everyApp = await drizzle(env.DB)
+    .select()
+    .from(accessRevocations)
+    .where(isNull(accessRevocations.appId))
+    .orderBy(asc(accessRevocations.createdAt))
+    .limit(expandedRowsAtOnce);
+  await tellKept(env, everyApp);
 };
 
 /**
  * Tells the hosts of the revocations still kept: those a change kept that
  * weren't told yet (`revocationsOf`), and those a host couldn't be told of
- * (`keepForLater`), least tried first, once those a day old are dropped.
- * The cron trigger runs it every minute.
+ * (`keepForLater`), least tried first, once those a day old are dropped;
+ * and a page more of each every-App revocation (`expandKept`). The cron
+ * trigger runs it every minute.
  */
 export const retryAccessRevocations = async (env: Env): Promise<void> => {
   await dropExpired(env);
+  await expandKept(env);
   const kept = await drizzle(env.DB)
     .select()
     .from(accessRevocations)
+    .where(isNotNull(accessRevocations.appId))
     // The least tried first: one whose host stays away moves behind
     // those not tried yet, so it never holds them back.
     .orderBy(asc(accessRevocations.attempts), asc(accessRevocations.createdAt))
