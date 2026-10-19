@@ -180,7 +180,8 @@ interface SealRequest {
   readonly version: number;
   /**
    * The store the release reads and writes, which the host chose: needed
-   * when the App declares tables, and never anything App code names.
+   * when the App declares tables or preferences, and never anything App
+   * code names.
    */
   readonly store?: StoreId;
   /** Who seals it: they must manage `store`, if one is given. */
@@ -202,7 +203,7 @@ export interface Release {
    * (`sdk/` artifacts): what it runs with, whatever SDK the host has now.
    */
   readonly sdk: Readonly<Record<string, string>>;
-  /** The store it reads and writes, if it declares tables. */
+  /** The store it reads and writes, if it declares tables or preferences. */
   readonly store: DataStoreBinding | null;
   /**
    * What its seal resolved of each workflow it declares (bound-workflows.ts),
