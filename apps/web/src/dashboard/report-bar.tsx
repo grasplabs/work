@@ -36,7 +36,7 @@ export const ReportBar = ({
 }) => {
   const { inDays, week } = next;
   return (
-    <div className="bg-muted/50 relative flex min-w-0 items-center gap-3 overflow-hidden rounded-xl py-1.5 pr-1.5 pl-4">
+    <div className="bg-muted/50 relative flex min-w-0 items-center gap-3 overflow-hidden rounded-xl py-1.5 pr-1.5 pl-4 text-sm">
       <span
         aria-hidden="true"
         className={cn(
@@ -53,8 +53,8 @@ export const ReportBar = ({
           <Trans>Your report on week {week} is ready</Trans>
         ) : (
           <Plural
-            one={`Report on week ${week} ready in # day`}
-            other={`Report on week ${week} ready in # days`}
+            one="Your next report is ready tomorrow"
+            other="Your next report is ready in # days"
             value={inDays}
           />
         )}

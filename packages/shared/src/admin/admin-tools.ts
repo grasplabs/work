@@ -271,9 +271,53 @@ const percent = (share: number) => `${Math.round(share * 100)}%`;
 const given = (text: string | null | undefined): text is string =>
   text !== null && text !== undefined && text !== "";
 
+type AccountNeed = Extract<
+  Need,
+  { kind: "contract" | "ending" | "signin" | "budget" }
+>;
+
+const ACCOUNT_NEEDS: ReadonlySet<Need["kind"]> = new Set([
+  "contract",
+  "ending",
+  "signin",
+  "budget",
+]);
+
+const isAccountNeed = (need: Need): need is AccountNeed =>
+  ACCOUNT_NEEDS.has(need.kind);
+
+/** What the account, rather than the onboarding, needs from Grasp. */
+const accountNeedText = (need: AccountNeed): string => {
+  switch (need.kind) {
+    case "contract": {
+      return given(need.sent)
+        ? `The contract was sent on ${need.sent} and is not signed.`
+        : "The contract is still being written.";
+    }
+    case "ending": {
+      return `The contract ends on ${need.until}, in ${need.days} days, with nothing agreed after it.`;
+    }
+    case "signin": {
+      return `${need.integration.name} stopped working until someone at the company signs in again.`;
+    }
+    case "budget": {
+      return `More AI than the contract covers in ${need.month}: ${euros(need.spend)} against ${euros(need.included)}.`;
+    }
+    default: {
+      return need satisfies never;
+    }
+  }
+};
+
 /** What needs Grasp, in one sentence a model can say on. */
 export const needText = (need: Need, view: AdminView): string => {
+  if (isAccountNeed(need)) {
+    return accountNeedText(need);
+  }
   switch (need.kind) {
+    case "paused": {
+      return "Grasp paused the interviews: nobody can open or finish theirs until Grasp resumes them.";
+    }
     case "transcript": {
       return view.state.conversation === "in"
         ? "The first conversation is in, and Stephen has not read it yet."
@@ -314,20 +358,6 @@ export const needText = (need: Need, view: AdminView): string => {
     }
     case "short": {
       return `The interviews are over with ${need.percent}% known, under the ${need.threshold}% it opens at: decide whether to open anyway.`;
-    }
-    case "contract": {
-      return given(need.sent)
-        ? `The contract was sent on ${need.sent} and is not signed.`
-        : "The contract is still being written.";
-    }
-    case "ending": {
-      return `The contract ends on ${need.until}, in ${need.days} days, with nothing agreed after it.`;
-    }
-    case "signin": {
-      return `${need.integration.name} stopped working until someone at the company signs in again.`;
-    }
-    case "budget": {
-      return `More AI than the contract covers in ${need.month}: ${euros(need.spend)} against ${euros(need.included)}.`;
     }
     default: {
       return need satisfies never;
