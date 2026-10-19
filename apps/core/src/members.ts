@@ -135,15 +135,6 @@ const reachedAs = (userId: string, role: string): SQL | undefined => {
   return isAdmin(known.data) ? undefined : appsOwnedOrSharedNow(userId);
 };
 
-/**
- * The Apps `userId` has a role in as the member they are when the
- * statement runs, in the role and teams they have then, as a condition on
- * `apps`: what removing them takes away. Read in the removal's own
- * statement, so a role changed since it was read before can't narrow it.
- */
-const reachedNow = (userId: string): SQL =>
-  sql`(${activeMember(userId, ["admin"])} OR (${activeMember(userId)} AND ${appsOwnedOrSharedNow(userId)}))`;
-
 /** Whether going from role `from` to `to` can take a role in an App away. */
 const lowers = (from: string, to: Role): boolean =>
   (isAdmin(from) && !isAdmin(to)) || (canBuild(from) && !canBuild(to));
@@ -231,10 +222,25 @@ const recordRemoval = async (
   const db = drizzle(env.DB);
   const removed = sql`NOT ${notRemoved(userId)}`;
   const removing = sql`${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`;
-  const [kept, inserted] = await auditedBatch(env, db, [
+  const [keptForAll, keptForSome, inserted] = await auditedBatch(env, db, [
     // First, under the marker's own condition, while their membership and
-    // teams are still there to say what they reached.
-    revocationsOf(db, reachedNow(userId), [userId], removing),
+    // teams are still there to say what they reached, in the role they
+    // have as these statements run, so a role changed since it was read
+    // before can't narrow it: every App for an admin, as one row however
+    // many Apps there are (access-revocations.ts); otherwise the Apps
+    // they own or are shared with.
+    revocationsOf(
+      db,
+      undefined,
+      [userId],
+      sql`${removing} AND ${isActiveAdmin(userId)}`
+    ),
+    revocationsOf(
+      db,
+      appsOwnedOrSharedNow(userId),
+      [userId],
+      sql`${removing} AND NOT ${isActiveAdmin(userId)}`
+    ),
     db
       .insert(memberRemovals)
       .select(
@@ -259,7 +265,10 @@ const recordRemoval = async (
       .delete(notifications)
       .where(and(eq(notifications.personId, userId), removed)),
   ]);
-  return { removed: inserted.length > 0, kept };
+  return {
+    removed: inserted.length > 0,
+    kept: [...keptForAll, ...keptForSome],
+  };
 };
 
 /**
