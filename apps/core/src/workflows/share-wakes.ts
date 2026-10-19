@@ -76,14 +76,25 @@ export const wakeQueueFronts = async (env: Env): Promise<void> => {
   }
 };
 
-/** `admission`, whose settling wakes the steps its share may let in. */
+/**
+ * `admission`, whose settling wakes the steps its share may let in: after
+ * the settle, never before it returns. The step's outcome waits on its
+ * settle, and a run whose load is ending (its session stopped, say) must
+ * record that outcome before it ends; the wake is no part of it. `later`
+ * takes the wake's promise (it never rejects): left to run by default,
+ * a wake the isolate drops leaving its step to ask at the end of its
+ * round.
+ */
 export const wakingOnSettle = (
   env: Env,
-  admission: AttemptAdmission
+  admission: AttemptAdmission,
+  later: (wake: Promise<void>) => void = (wake) => {
+    void wake;
+  }
 ): AttemptAdmission => ({
   ...admission,
   settle: async () => {
     await admission.settle();
-    await wakeQueueFronts(env);
+    later(wakeQueueFronts(env));
   },
 });
