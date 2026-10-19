@@ -37,6 +37,9 @@ import type { RunHostCalls, Settled } from "./code.ts";
 //   step, counted against the run's steps and its attempts) or from a
 //   recovery, and each runs within the alarm handler's wall time and the
 //   lineage's age.
+// - A step call landing once the budget is spent but before its timer has
+//   fired (timers run late): each call that closes a gap checks what the
+//   gap used first, and is refused once the budget is spent.
 // - Code going on after the budget is spent: on Cloudflare the isolate's
 //   call can't be killed, only dropped, so every step call it makes after
 //   that is refused (it never settles, as the engine fences a call), and
@@ -152,10 +155,16 @@ export const betweenSteps = (budgetMs: number): BetweenSteps => {
       if (over.signal.aborted) {
         return await neverSettles();
       }
-      out += 1;
-      if (out === 1) {
+      if (out === 0) {
         closeGap();
+        // Spent, though its timer hasn't fired yet (it runs late on a busy
+        // isolate): no step gets in on the time past the budget.
+        if (usedMs >= budgetMs) {
+          spend();
+          return await neverSettles();
+        }
       }
+      out += 1;
       try {
         return await call();
       } finally {
