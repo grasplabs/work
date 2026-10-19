@@ -5,7 +5,7 @@ import type {
   Transcript,
   TranscriptTurn,
   Workspace,
-} from "./workspace.ts";
+} from "@grasp-os/shared/brain";
 
 /**
  * A small made-up company for the brain's tests, in the shape a core adapter fills: a vision with

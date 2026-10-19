@@ -160,6 +160,11 @@ describe("the tab's one connection to core", () => {
   });
 
   it("lets a frame wait out a reconnect as long as it takes, while the shell's call gives up in its seconds", async () => {
+    // Each pause its whole ceiling. The shell's call cuts the first (1 s)
+    // short; the four after it (2, 4, 8 and 16 s) keep core out for 30 s,
+    // longer than the shell waits. Drawn at random, they could add up to
+    // less than its five seconds.
+    vi.spyOn(Math, "random").mockReturnValue(1);
     const { core, opened } = tab([one, "down", "down", "down", "down", one]);
     const before = await core.session();
     const frame = frameOn(core);
@@ -170,7 +175,7 @@ describe("the tab's one connection to core", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     await expect(shell).resolves.toBeInstanceOf(CoreTimeoutError);
 
-    // Core comes back after several attempts, a minute on.
+    // Core comes back after several attempts, half a minute on.
     await vi.advanceTimersByTimeAsync(60_000);
     const after = await waiting;
     expect(after).not.toBe(before);

@@ -18,6 +18,7 @@ import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellActivityRouteImport } from './routes/_shell.activity'
 import { Route as ShellConnectionsRouteImport } from './routes/_shell.connections'
 import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
+import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
 import { Route as ShellMembersRouteImport } from './routes/_shell.members'
 import { Route as ShellModelsRouteImport } from './routes/_shell.models'
 import { Route as ShellNotificationsRouteImport } from './routes/_shell.notifications'
@@ -32,6 +33,8 @@ import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.inte
 import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
 import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
 import { Route as ShellKnowledgeCollectionRouteImport } from './routes/_shell.knowledge.$collection'
+import { Route as ShellLandscapeIndexRouteImport } from './routes/_shell.landscape.index'
+import { Route as ShellLandscapeAppIdRouteImport } from './routes/_shell.landscape.$appId'
 import { Route as ShellOnboardingIndexRouteImport } from './routes/_shell.onboarding.index'
 import { Route as ShellOnboardingAgreementsRouteImport } from './routes/_shell.onboarding.agreements'
 import { Route as ShellOnboardingKickoffRouteImport } from './routes/_shell.onboarding.kickoff'
@@ -39,23 +42,37 @@ import { Route as ShellOnboardingLogRouteImport } from './routes/_shell.onboardi
 import { Route as ShellOnboardingNotesRouteImport } from './routes/_shell.onboarding.notes'
 import { Route as ShellOnboardingOpenRouteImport } from './routes/_shell.onboarding.open'
 import { Route as ShellOnboardingStephenRouteImport } from './routes/_shell.onboarding.stephen'
+import { Route as ShellPoliciesIndexRouteImport } from './routes/_shell.policies.index'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
 import { Route as ShellSettingsApprovalsRouteImport } from './routes/_shell.settings.approvals'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
+import { Route as ShellSettingsNotificationsRouteImport } from './routes/_shell.settings.notifications'
 import { Route as ShellSettingsOutcomesRouteImport } from './routes/_shell.settings.outcomes'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
+import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.workflows.$workflow'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
 import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
 import { Route as ShellDomainsEngineIndexRouteImport } from './routes/_shell.domains.$engine.index'
 import { Route as ShellEnginesEngineIndexRouteImport } from './routes/_shell.engines.$engine.index'
+import { Route as ShellLandscapeAppIdIndexRouteImport } from './routes/_shell.landscape.$appId.index'
+import { Route as ShellLandscapeAppIdAuditRouteImport } from './routes/_shell.landscape.$appId.audit'
+import { Route as ShellLandscapeAppIdConnectionsRouteImport } from './routes/_shell.landscape.$appId.connections'
+import { Route as ShellLandscapeAppIdDataRouteImport } from './routes/_shell.landscape.$appId.data'
+import { Route as ShellLandscapeAppIdOverviewRouteImport } from './routes/_shell.landscape.$appId.overview'
+import { Route as ShellPoliciesDocumentsPolicyIdRouteImport } from './routes/_shell.policies.documents.$policyId'
+import { Route as ShellPoliciesRulesRuleIdRouteImport } from './routes/_shell.policies.rules.$ruleId'
+import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
 import { Route as ShellWorkflowsAppWorkflowRouteImport } from './routes/_shell.workflows.$app.$workflow'
 import { Route as AppsAppScreensScreenRouteImport } from './routes/apps.$app.screens.$screen'
 import { Route as ShellDomainsEngineAppsScreenRouteImport } from './routes/_shell.domains.$engine.apps.$screen'
 import { Route as ShellEnginesEngineAppsScreenRouteImport } from './routes/_shell.engines.$engine.apps.$screen'
+import { Route as ShellLandscapeAppIdUsageIndexRouteImport } from './routes/_shell.landscape.$appId.usage.index'
+import { Route as ShellLandscapeAppIdUsageUserIdRouteImport } from './routes/_shell.landscape.$appId.usage.$userId'
+import { Route as ShellSettingsPackagesWorkflowsWorkflowRouteImport } from './routes/_shell.settings.packages.workflows.$workflow'
 import { Route as DomainsEngineAppsScreenFullRouteImport } from './routes/domains.$engine.apps.$screen.full'
 import { Route as EnginesEngineAppsScreenFullRouteImport } from './routes/engines.$engine.apps.$screen.full'
 import { Route as ShellWorkflowsAppWorkflowRunsRunRouteImport } from './routes/_shell.workflows.$app.$workflow_.runs.$run'
@@ -102,6 +119,11 @@ const ShellConnectionsRoute = ShellConnectionsRouteImport.update({
 const ShellDashboardRoute = ShellDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellInboxRoute = ShellInboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellMembersRoute = ShellMembersRouteImport.update({
@@ -176,6 +198,16 @@ const ShellKnowledgeCollectionRoute =
     path: '/knowledge/$collection',
     getParentRoute: () => ShellRoute,
   } as any)
+const ShellLandscapeIndexRoute = ShellLandscapeIndexRouteImport.update({
+  id: '/landscape/',
+  path: '/landscape/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellLandscapeAppIdRoute = ShellLandscapeAppIdRouteImport.update({
+  id: '/landscape/$appId',
+  path: '/landscape/$appId',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellOnboardingIndexRoute = ShellOnboardingIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -212,6 +244,11 @@ const ShellOnboardingStephenRoute = ShellOnboardingStephenRouteImport.update({
   path: '/stephen',
   getParentRoute: () => ShellOnboardingRoute,
 } as any)
+const ShellPoliciesIndexRoute = ShellPoliciesIndexRouteImport.update({
+  id: '/policies/',
+  path: '/policies/',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -237,6 +274,12 @@ const ShellSettingsModelsRoute = ShellSettingsModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsNotificationsRoute =
+  ShellSettingsNotificationsRouteImport.update({
+    id: '/notifications',
+    path: '/notifications',
+    getParentRoute: () => ShellSettingsRoute,
+  } as any)
 const ShellSettingsOutcomesRoute = ShellSettingsOutcomesRouteImport.update({
   id: '/outcomes',
   path: '/outcomes',
@@ -255,6 +298,11 @@ const ShellSettingsSpendRoute = ShellSettingsSpendRouteImport.update({
 const ShellWorkflowsIndexRoute = ShellWorkflowsIndexRouteImport.update({
   id: '/workflows/',
   path: '/workflows/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellWorkflowsWorkflowRoute = ShellWorkflowsWorkflowRouteImport.update({
+  id: '/workflows/$workflow',
+  path: '/workflows/$workflow',
   getParentRoute: () => ShellRoute,
 } as any)
 const KitComponentsNameRoute = KitComponentsNameRouteImport.update({
@@ -277,6 +325,53 @@ const ShellEnginesEngineIndexRoute = ShellEnginesEngineIndexRouteImport.update({
   path: '/engines/$engine/',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellLandscapeAppIdIndexRoute =
+  ShellLandscapeAppIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => ShellLandscapeAppIdRoute,
+  } as any)
+const ShellLandscapeAppIdAuditRoute =
+  ShellLandscapeAppIdAuditRouteImport.update({
+    id: '/audit',
+    path: '/audit',
+    getParentRoute: () => ShellLandscapeAppIdRoute,
+  } as any)
+const ShellLandscapeAppIdConnectionsRoute =
+  ShellLandscapeAppIdConnectionsRouteImport.update({
+    id: '/connections',
+    path: '/connections',
+    getParentRoute: () => ShellLandscapeAppIdRoute,
+  } as any)
+const ShellLandscapeAppIdDataRoute = ShellLandscapeAppIdDataRouteImport.update({
+  id: '/data',
+  path: '/data',
+  getParentRoute: () => ShellLandscapeAppIdRoute,
+} as any)
+const ShellLandscapeAppIdOverviewRoute =
+  ShellLandscapeAppIdOverviewRouteImport.update({
+    id: '/overview',
+    path: '/overview',
+    getParentRoute: () => ShellLandscapeAppIdRoute,
+  } as any)
+const ShellPoliciesDocumentsPolicyIdRoute =
+  ShellPoliciesDocumentsPolicyIdRouteImport.update({
+    id: '/policies/documents/$policyId',
+    path: '/policies/documents/$policyId',
+    getParentRoute: () => ShellRoute,
+  } as any)
+const ShellPoliciesRulesRuleIdRoute =
+  ShellPoliciesRulesRuleIdRouteImport.update({
+    id: '/policies/rules/$ruleId',
+    path: '/policies/rules/$ruleId',
+    getParentRoute: () => ShellRoute,
+  } as any)
+const ShellSettingsPackagesIndexRoute =
+  ShellSettingsPackagesIndexRouteImport.update({
+    id: '/packages/',
+    path: '/packages/',
+    getParentRoute: () => ShellSettingsRoute,
+  } as any)
 const ShellWorkflowsAppWorkflowRoute =
   ShellWorkflowsAppWorkflowRouteImport.update({
     id: '/workflows/$app/$workflow',
@@ -299,6 +394,24 @@ const ShellEnginesEngineAppsScreenRoute =
     id: '/engines/$engine/apps/$screen',
     path: '/engines/$engine/apps/$screen',
     getParentRoute: () => ShellRoute,
+  } as any)
+const ShellLandscapeAppIdUsageIndexRoute =
+  ShellLandscapeAppIdUsageIndexRouteImport.update({
+    id: '/usage/',
+    path: '/usage/',
+    getParentRoute: () => ShellLandscapeAppIdRoute,
+  } as any)
+const ShellLandscapeAppIdUsageUserIdRoute =
+  ShellLandscapeAppIdUsageUserIdRouteImport.update({
+    id: '/usage/$userId',
+    path: '/usage/$userId',
+    getParentRoute: () => ShellLandscapeAppIdRoute,
+  } as any)
+const ShellSettingsPackagesWorkflowsWorkflowRoute =
+  ShellSettingsPackagesWorkflowsWorkflowRouteImport.update({
+    id: '/packages/workflows/$workflow',
+    path: '/packages/workflows/$workflow',
+    getParentRoute: () => ShellSettingsRoute,
   } as any)
 const DomainsEngineAppsScreenFullRoute =
   DomainsEngineAppsScreenFullRouteImport.update({
@@ -328,6 +441,7 @@ export interface FileRoutesByFullPath {
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
+  '/inbox': typeof ShellInboxRoute
   '/members': typeof ShellMembersRoute
   '/models': typeof ShellModelsRoute
   '/notifications': typeof ShellNotificationsRoute
@@ -337,6 +451,7 @@ export interface FileRoutesByFullPath {
   '/apps/$app': typeof ShellAppsAppRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
+  '/landscape/$appId': typeof ShellLandscapeAppIdRouteWithChildren
   '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
   '/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/onboarding/log': typeof ShellOnboardingLogRoute
@@ -347,9 +462,11 @@ export interface FileRoutesByFullPath {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
+  '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps/': typeof ShellAppsIndexRoute
@@ -357,17 +474,30 @@ export interface FileRoutesByFullPath {
   '/engines/': typeof ShellEnginesIndexRoute
   '/integrations/': typeof ShellIntegrationsIndexRoute
   '/knowledge/': typeof ShellKnowledgeIndexRoute
+  '/landscape/': typeof ShellLandscapeIndexRoute
   '/onboarding/': typeof ShellOnboardingIndexRoute
+  '/policies/': typeof ShellPoliciesIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
+  '/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
+  '/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
+  '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
+  '/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
+  '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
+  '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
   '/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/engines/$engine/': typeof ShellEnginesEngineIndexRoute
+  '/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
+  '/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
+  '/landscape/$appId/usage/$userId': typeof ShellLandscapeAppIdUsageUserIdRoute
+  '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
   '/domains/$engine/apps/$screen/full': typeof DomainsEngineAppsScreenFullRoute
   '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
+  '/landscape/$appId/usage/': typeof ShellLandscapeAppIdUsageIndexRoute
   '/workflows/$app/$workflow/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRoutesByTo {
@@ -378,6 +508,7 @@ export interface FileRoutesByTo {
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
+  '/inbox': typeof ShellInboxRoute
   '/members': typeof ShellMembersRoute
   '/models': typeof ShellModelsRoute
   '/notifications': typeof ShellNotificationsRoute
@@ -396,9 +527,11 @@ export interface FileRoutesByTo {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
+  '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps': typeof ShellAppsIndexRoute
@@ -406,17 +539,30 @@ export interface FileRoutesByTo {
   '/engines': typeof ShellEnginesIndexRoute
   '/integrations': typeof ShellIntegrationsIndexRoute
   '/knowledge': typeof ShellKnowledgeIndexRoute
+  '/landscape': typeof ShellLandscapeIndexRoute
   '/onboarding': typeof ShellOnboardingIndexRoute
+  '/policies': typeof ShellPoliciesIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
+  '/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
+  '/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
+  '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
+  '/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
+  '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
+  '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
   '/domains/$engine': typeof ShellDomainsEngineIndexRoute
   '/engines/$engine': typeof ShellEnginesEngineIndexRoute
+  '/landscape/$appId': typeof ShellLandscapeAppIdIndexRoute
+  '/settings/packages': typeof ShellSettingsPackagesIndexRoute
   '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
+  '/landscape/$appId/usage/$userId': typeof ShellLandscapeAppIdUsageUserIdRoute
+  '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
   '/domains/$engine/apps/$screen/full': typeof DomainsEngineAppsScreenFullRoute
   '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
+  '/landscape/$appId/usage': typeof ShellLandscapeAppIdUsageIndexRoute
   '/workflows/$app/$workflow/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRoutesById {
@@ -429,6 +575,7 @@ export interface FileRoutesById {
   '/_shell/activity': typeof ShellActivityRoute
   '/_shell/connections': typeof ShellConnectionsRoute
   '/_shell/dashboard': typeof ShellDashboardRoute
+  '/_shell/inbox': typeof ShellInboxRoute
   '/_shell/members': typeof ShellMembersRoute
   '/_shell/models': typeof ShellModelsRoute
   '/_shell/notifications': typeof ShellNotificationsRoute
@@ -439,6 +586,7 @@ export interface FileRoutesById {
   '/_shell/apps/$app': typeof ShellAppsAppRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
+  '/_shell/landscape/$appId': typeof ShellLandscapeAppIdRouteWithChildren
   '/_shell/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
   '/_shell/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/_shell/onboarding/log': typeof ShellOnboardingLogRoute
@@ -449,9 +597,11 @@ export interface FileRoutesById {
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
+  '/_shell/settings/notifications': typeof ShellSettingsNotificationsRoute
   '/_shell/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/settings/spend': typeof ShellSettingsSpendRoute
+  '/_shell/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit_/components/$name': typeof KitComponentsNameRoute
   '/kit_/examples/$name': typeof KitExamplesNameRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
@@ -459,17 +609,30 @@ export interface FileRoutesById {
   '/_shell/engines/': typeof ShellEnginesIndexRoute
   '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
   '/_shell/knowledge/': typeof ShellKnowledgeIndexRoute
+  '/_shell/landscape/': typeof ShellLandscapeIndexRoute
   '/_shell/onboarding/': typeof ShellOnboardingIndexRoute
+  '/_shell/policies/': typeof ShellPoliciesIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
+  '/_shell/landscape/$appId/audit': typeof ShellLandscapeAppIdAuditRoute
+  '/_shell/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
+  '/_shell/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
+  '/_shell/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
+  '/_shell/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
+  '/_shell/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
   '/_shell/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/_shell/engines/$engine/': typeof ShellEnginesEngineIndexRoute
+  '/_shell/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
+  '/_shell/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/_shell/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/_shell/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
+  '/_shell/landscape/$appId/usage/$userId': typeof ShellLandscapeAppIdUsageUserIdRoute
+  '/_shell/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
   '/domains/$engine/apps/$screen/full': typeof DomainsEngineAppsScreenFullRoute
   '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
+  '/_shell/landscape/$appId/usage/': typeof ShellLandscapeAppIdUsageIndexRoute
   '/_shell/workflows/$app/$workflow_/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRouteTypes {
@@ -483,6 +646,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/connections'
     | '/dashboard'
+    | '/inbox'
     | '/members'
     | '/models'
     | '/notifications'
@@ -492,6 +656,7 @@ export interface FileRouteTypes {
     | '/apps/$app'
     | '/integrations/$integration'
     | '/knowledge/$collection'
+    | '/landscape/$appId'
     | '/onboarding/agreements'
     | '/onboarding/kickoff'
     | '/onboarding/log'
@@ -502,9 +667,11 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/members'
     | '/settings/models'
+    | '/settings/notifications'
     | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/spend'
+    | '/workflows/$workflow'
     | '/kit/components/$name'
     | '/kit/examples/$name'
     | '/apps/'
@@ -512,17 +679,30 @@ export interface FileRouteTypes {
     | '/engines/'
     | '/integrations/'
     | '/knowledge/'
+    | '/landscape/'
     | '/onboarding/'
+    | '/policies/'
     | '/settings/'
     | '/workflows/'
+    | '/landscape/$appId/audit'
+    | '/landscape/$appId/connections'
+    | '/landscape/$appId/data'
+    | '/landscape/$appId/overview'
+    | '/policies/documents/$policyId'
+    | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
     | '/domains/$engine/'
     | '/engines/$engine/'
+    | '/landscape/$appId/'
+    | '/settings/packages/'
     | '/domains/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen'
+    | '/landscape/$appId/usage/$userId'
+    | '/settings/packages/workflows/$workflow'
     | '/domains/$engine/apps/$screen/full'
     | '/engines/$engine/apps/$screen/full'
+    | '/landscape/$appId/usage/'
     | '/workflows/$app/$workflow/runs/$run'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -533,6 +713,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/connections'
     | '/dashboard'
+    | '/inbox'
     | '/members'
     | '/models'
     | '/notifications'
@@ -551,9 +732,11 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/members'
     | '/settings/models'
+    | '/settings/notifications'
     | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/spend'
+    | '/workflows/$workflow'
     | '/kit/components/$name'
     | '/kit/examples/$name'
     | '/apps'
@@ -561,17 +744,30 @@ export interface FileRouteTypes {
     | '/engines'
     | '/integrations'
     | '/knowledge'
+    | '/landscape'
     | '/onboarding'
+    | '/policies'
     | '/settings'
     | '/workflows'
+    | '/landscape/$appId/audit'
+    | '/landscape/$appId/connections'
+    | '/landscape/$appId/data'
+    | '/landscape/$appId/overview'
+    | '/policies/documents/$policyId'
+    | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
     | '/domains/$engine'
     | '/engines/$engine'
+    | '/landscape/$appId'
+    | '/settings/packages'
     | '/domains/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen'
+    | '/landscape/$appId/usage/$userId'
+    | '/settings/packages/workflows/$workflow'
     | '/domains/$engine/apps/$screen/full'
     | '/engines/$engine/apps/$screen/full'
+    | '/landscape/$appId/usage'
     | '/workflows/$app/$workflow/runs/$run'
   id:
     | '__root__'
@@ -583,6 +779,7 @@ export interface FileRouteTypes {
     | '/_shell/activity'
     | '/_shell/connections'
     | '/_shell/dashboard'
+    | '/_shell/inbox'
     | '/_shell/members'
     | '/_shell/models'
     | '/_shell/notifications'
@@ -593,6 +790,7 @@ export interface FileRouteTypes {
     | '/_shell/apps/$app'
     | '/_shell/integrations/$integration'
     | '/_shell/knowledge/$collection'
+    | '/_shell/landscape/$appId'
     | '/_shell/onboarding/agreements'
     | '/_shell/onboarding/kickoff'
     | '/_shell/onboarding/log'
@@ -603,9 +801,11 @@ export interface FileRouteTypes {
     | '/_shell/settings/audit'
     | '/_shell/settings/members'
     | '/_shell/settings/models'
+    | '/_shell/settings/notifications'
     | '/_shell/settings/outcomes'
     | '/_shell/settings/profile'
     | '/_shell/settings/spend'
+    | '/_shell/workflows/$workflow'
     | '/kit_/components/$name'
     | '/kit_/examples/$name'
     | '/_shell/apps/'
@@ -613,17 +813,30 @@ export interface FileRouteTypes {
     | '/_shell/engines/'
     | '/_shell/integrations/'
     | '/_shell/knowledge/'
+    | '/_shell/landscape/'
     | '/_shell/onboarding/'
+    | '/_shell/policies/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
+    | '/_shell/landscape/$appId/audit'
+    | '/_shell/landscape/$appId/connections'
+    | '/_shell/landscape/$appId/data'
+    | '/_shell/landscape/$appId/overview'
+    | '/_shell/policies/documents/$policyId'
+    | '/_shell/policies/rules/$ruleId'
     | '/_shell/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
     | '/_shell/domains/$engine/'
     | '/_shell/engines/$engine/'
+    | '/_shell/landscape/$appId/'
+    | '/_shell/settings/packages/'
     | '/_shell/domains/$engine/apps/$screen'
     | '/_shell/engines/$engine/apps/$screen'
+    | '/_shell/landscape/$appId/usage/$userId'
+    | '/_shell/settings/packages/workflows/$workflow'
     | '/domains/$engine/apps/$screen/full'
     | '/engines/$engine/apps/$screen/full'
+    | '/_shell/landscape/$appId/usage/'
     | '/_shell/workflows/$app/$workflow_/runs/$run'
   fileRoutesById: FileRoutesById
 }
@@ -703,6 +916,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof ShellDashboardRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/inbox': {
+      id: '/_shell/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof ShellInboxRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/members': {
@@ -803,6 +1023,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellKnowledgeCollectionRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/landscape/': {
+      id: '/_shell/landscape/'
+      path: '/landscape'
+      fullPath: '/landscape/'
+      preLoaderRoute: typeof ShellLandscapeIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/landscape/$appId': {
+      id: '/_shell/landscape/$appId'
+      path: '/landscape/$appId'
+      fullPath: '/landscape/$appId'
+      preLoaderRoute: typeof ShellLandscapeAppIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/onboarding/': {
       id: '/_shell/onboarding/'
       path: '/'
@@ -852,6 +1086,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellOnboardingStephenRouteImport
       parentRoute: typeof ShellOnboardingRoute
     }
+    '/_shell/policies/': {
+      id: '/_shell/policies/'
+      path: '/policies'
+      fullPath: '/policies/'
+      preLoaderRoute: typeof ShellPoliciesIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/settings/': {
       id: '/_shell/settings/'
       path: '/'
@@ -887,6 +1128,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsModelsRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/settings/notifications': {
+      id: '/_shell/settings/notifications'
+      path: '/notifications'
+      fullPath: '/settings/notifications'
+      preLoaderRoute: typeof ShellSettingsNotificationsRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/settings/outcomes': {
       id: '/_shell/settings/outcomes'
       path: '/outcomes'
@@ -913,6 +1161,13 @@ declare module '@tanstack/react-router' {
       path: '/workflows'
       fullPath: '/workflows/'
       preLoaderRoute: typeof ShellWorkflowsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/workflows/$workflow': {
+      id: '/_shell/workflows/$workflow'
+      path: '/workflows/$workflow'
+      fullPath: '/workflows/$workflow'
+      preLoaderRoute: typeof ShellWorkflowsWorkflowRouteImport
       parentRoute: typeof ShellRoute
     }
     '/kit_/components/$name': {
@@ -943,6 +1198,62 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellEnginesEngineIndexRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/landscape/$appId/': {
+      id: '/_shell/landscape/$appId/'
+      path: '/'
+      fullPath: '/landscape/$appId/'
+      preLoaderRoute: typeof ShellLandscapeAppIdIndexRouteImport
+      parentRoute: typeof ShellLandscapeAppIdRoute
+    }
+    '/_shell/landscape/$appId/audit': {
+      id: '/_shell/landscape/$appId/audit'
+      path: '/audit'
+      fullPath: '/landscape/$appId/audit'
+      preLoaderRoute: typeof ShellLandscapeAppIdAuditRouteImport
+      parentRoute: typeof ShellLandscapeAppIdRoute
+    }
+    '/_shell/landscape/$appId/connections': {
+      id: '/_shell/landscape/$appId/connections'
+      path: '/connections'
+      fullPath: '/landscape/$appId/connections'
+      preLoaderRoute: typeof ShellLandscapeAppIdConnectionsRouteImport
+      parentRoute: typeof ShellLandscapeAppIdRoute
+    }
+    '/_shell/landscape/$appId/data': {
+      id: '/_shell/landscape/$appId/data'
+      path: '/data'
+      fullPath: '/landscape/$appId/data'
+      preLoaderRoute: typeof ShellLandscapeAppIdDataRouteImport
+      parentRoute: typeof ShellLandscapeAppIdRoute
+    }
+    '/_shell/landscape/$appId/overview': {
+      id: '/_shell/landscape/$appId/overview'
+      path: '/overview'
+      fullPath: '/landscape/$appId/overview'
+      preLoaderRoute: typeof ShellLandscapeAppIdOverviewRouteImport
+      parentRoute: typeof ShellLandscapeAppIdRoute
+    }
+    '/_shell/policies/documents/$policyId': {
+      id: '/_shell/policies/documents/$policyId'
+      path: '/policies/documents/$policyId'
+      fullPath: '/policies/documents/$policyId'
+      preLoaderRoute: typeof ShellPoliciesDocumentsPolicyIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/policies/rules/$ruleId': {
+      id: '/_shell/policies/rules/$ruleId'
+      path: '/policies/rules/$ruleId'
+      fullPath: '/policies/rules/$ruleId'
+      preLoaderRoute: typeof ShellPoliciesRulesRuleIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/settings/packages/': {
+      id: '/_shell/settings/packages/'
+      path: '/packages'
+      fullPath: '/settings/packages/'
+      preLoaderRoute: typeof ShellSettingsPackagesIndexRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/workflows/$app/$workflow': {
       id: '/_shell/workflows/$app/$workflow'
       path: '/workflows/$app/$workflow'
@@ -970,6 +1281,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/engines/$engine/apps/$screen'
       preLoaderRoute: typeof ShellEnginesEngineAppsScreenRouteImport
       parentRoute: typeof ShellRoute
+    }
+    '/_shell/landscape/$appId/usage/': {
+      id: '/_shell/landscape/$appId/usage/'
+      path: '/usage'
+      fullPath: '/landscape/$appId/usage/'
+      preLoaderRoute: typeof ShellLandscapeAppIdUsageIndexRouteImport
+      parentRoute: typeof ShellLandscapeAppIdRoute
+    }
+    '/_shell/landscape/$appId/usage/$userId': {
+      id: '/_shell/landscape/$appId/usage/$userId'
+      path: '/usage/$userId'
+      fullPath: '/landscape/$appId/usage/$userId'
+      preLoaderRoute: typeof ShellLandscapeAppIdUsageUserIdRouteImport
+      parentRoute: typeof ShellLandscapeAppIdRoute
+    }
+    '/_shell/settings/packages/workflows/$workflow': {
+      id: '/_shell/settings/packages/workflows/$workflow'
+      path: '/packages/workflows/$workflow'
+      fullPath: '/settings/packages/workflows/$workflow'
+      preLoaderRoute: typeof ShellSettingsPackagesWorkflowsWorkflowRouteImport
+      parentRoute: typeof ShellSettingsRoute
     }
     '/domains/$engine/apps/$screen/full': {
       id: '/domains/$engine/apps/$screen/full'
@@ -1024,10 +1356,13 @@ interface ShellSettingsRouteChildren {
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
+  ShellSettingsNotificationsRoute: typeof ShellSettingsNotificationsRoute
   ShellSettingsOutcomesRoute: typeof ShellSettingsOutcomesRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
   ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
   ShellSettingsIndexRoute: typeof ShellSettingsIndexRoute
+  ShellSettingsPackagesIndexRoute: typeof ShellSettingsPackagesIndexRoute
+  ShellSettingsPackagesWorkflowsWorkflowRoute: typeof ShellSettingsPackagesWorkflowsWorkflowRoute
 }
 
 const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
@@ -1035,21 +1370,49 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsModelsRoute: ShellSettingsModelsRoute,
+  ShellSettingsNotificationsRoute: ShellSettingsNotificationsRoute,
   ShellSettingsOutcomesRoute: ShellSettingsOutcomesRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
   ShellSettingsSpendRoute: ShellSettingsSpendRoute,
   ShellSettingsIndexRoute: ShellSettingsIndexRoute,
+  ShellSettingsPackagesIndexRoute: ShellSettingsPackagesIndexRoute,
+  ShellSettingsPackagesWorkflowsWorkflowRoute:
+    ShellSettingsPackagesWorkflowsWorkflowRoute,
 }
 
 const ShellSettingsRouteWithChildren = ShellSettingsRoute._addFileChildren(
   ShellSettingsRouteChildren,
 )
 
+interface ShellLandscapeAppIdRouteChildren {
+  ShellLandscapeAppIdAuditRoute: typeof ShellLandscapeAppIdAuditRoute
+  ShellLandscapeAppIdConnectionsRoute: typeof ShellLandscapeAppIdConnectionsRoute
+  ShellLandscapeAppIdDataRoute: typeof ShellLandscapeAppIdDataRoute
+  ShellLandscapeAppIdOverviewRoute: typeof ShellLandscapeAppIdOverviewRoute
+  ShellLandscapeAppIdIndexRoute: typeof ShellLandscapeAppIdIndexRoute
+  ShellLandscapeAppIdUsageUserIdRoute: typeof ShellLandscapeAppIdUsageUserIdRoute
+  ShellLandscapeAppIdUsageIndexRoute: typeof ShellLandscapeAppIdUsageIndexRoute
+}
+
+const ShellLandscapeAppIdRouteChildren: ShellLandscapeAppIdRouteChildren = {
+  ShellLandscapeAppIdAuditRoute: ShellLandscapeAppIdAuditRoute,
+  ShellLandscapeAppIdConnectionsRoute: ShellLandscapeAppIdConnectionsRoute,
+  ShellLandscapeAppIdDataRoute: ShellLandscapeAppIdDataRoute,
+  ShellLandscapeAppIdOverviewRoute: ShellLandscapeAppIdOverviewRoute,
+  ShellLandscapeAppIdIndexRoute: ShellLandscapeAppIdIndexRoute,
+  ShellLandscapeAppIdUsageUserIdRoute: ShellLandscapeAppIdUsageUserIdRoute,
+  ShellLandscapeAppIdUsageIndexRoute: ShellLandscapeAppIdUsageIndexRoute,
+}
+
+const ShellLandscapeAppIdRouteWithChildren =
+  ShellLandscapeAppIdRoute._addFileChildren(ShellLandscapeAppIdRouteChildren)
+
 interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellActivityRoute: typeof ShellActivityRoute
   ShellConnectionsRoute: typeof ShellConnectionsRoute
   ShellDashboardRoute: typeof ShellDashboardRoute
+  ShellInboxRoute: typeof ShellInboxRoute
   ShellMembersRoute: typeof ShellMembersRoute
   ShellModelsRoute: typeof ShellModelsRoute
   ShellNotificationsRoute: typeof ShellNotificationsRoute
@@ -1059,12 +1422,18 @@ interface ShellRouteChildren {
   ShellAppsAppRoute: typeof ShellAppsAppRoute
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
+  ShellLandscapeAppIdRoute: typeof ShellLandscapeAppIdRouteWithChildren
+  ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellDomainsIndexRoute: typeof ShellDomainsIndexRoute
   ShellEnginesIndexRoute: typeof ShellEnginesIndexRoute
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
   ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
+  ShellLandscapeIndexRoute: typeof ShellLandscapeIndexRoute
+  ShellPoliciesIndexRoute: typeof ShellPoliciesIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
+  ShellPoliciesDocumentsPolicyIdRoute: typeof ShellPoliciesDocumentsPolicyIdRoute
+  ShellPoliciesRulesRuleIdRoute: typeof ShellPoliciesRulesRuleIdRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
   ShellDomainsEngineIndexRoute: typeof ShellDomainsEngineIndexRoute
   ShellEnginesEngineIndexRoute: typeof ShellEnginesEngineIndexRoute
@@ -1078,6 +1447,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellActivityRoute: ShellActivityRoute,
   ShellConnectionsRoute: ShellConnectionsRoute,
   ShellDashboardRoute: ShellDashboardRoute,
+  ShellInboxRoute: ShellInboxRoute,
   ShellMembersRoute: ShellMembersRoute,
   ShellModelsRoute: ShellModelsRoute,
   ShellNotificationsRoute: ShellNotificationsRoute,
@@ -1087,12 +1457,18 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellAppsAppRoute: ShellAppsAppRoute,
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
+  ShellLandscapeAppIdRoute: ShellLandscapeAppIdRouteWithChildren,
+  ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellDomainsIndexRoute: ShellDomainsIndexRoute,
   ShellEnginesIndexRoute: ShellEnginesIndexRoute,
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
   ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
+  ShellLandscapeIndexRoute: ShellLandscapeIndexRoute,
+  ShellPoliciesIndexRoute: ShellPoliciesIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
+  ShellPoliciesDocumentsPolicyIdRoute: ShellPoliciesDocumentsPolicyIdRoute,
+  ShellPoliciesRulesRuleIdRoute: ShellPoliciesRulesRuleIdRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,
   ShellDomainsEngineIndexRoute: ShellDomainsEngineIndexRoute,
   ShellEnginesEngineIndexRoute: ShellEnginesEngineIndexRoute,

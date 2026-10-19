@@ -63,7 +63,7 @@ const testStepLimit = 60;
 const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
 
 /**
- * The tests that run the compiler on whole Apps: the screen compiler's,
+ * The tests that run the compiler on whole Apps: the App compiler's,
  * and the App sandbox's, which builds each App's server code. They run as
  * their own project (vite.screens.config.ts), after the others, so their
  * long compiles don't starve the light tests of CPU.
@@ -87,6 +87,8 @@ export const screenTests = [
   "test/resource-connectors.test.ts",
   "test/store-operations.test.ts",
   "test/sealed-workflow-starts.test.ts",
+  "test/definition-export.test.ts",
+  "test/workflow-query-subscriptions.test.ts",
   "test/run-functions.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
@@ -118,6 +120,8 @@ export const screenTests = [
   "test/rpc-targets.test.ts",
   "test/statistics.test.ts",
   "test/guests.test.ts",
+  "test/app-function-calls.test.ts",
+  "test/workflow-type-check.test.ts",
 ];
 
 /** Core's Worker test setup, shared by each of core's test projects. */
@@ -210,6 +214,7 @@ export const coreProject = (
               graphExtractedBytes: 2 * 1024 * 1024,
               artifactBytes: 256 * 1024,
               appLocks: 3,
+              workflowPackageChars: 64 * 1024,
             },
             // The gateway runs call the model through; tests fake the AI binding.
             MODEL_GATEWAY: {
@@ -258,7 +263,7 @@ export const coreProject = (
                   },
                 }),
           },
-          // A stand-in frontend and the screen compiler, written by the
+          // A stand-in frontend and the App compiler, written by the
           // global setup.
           assets: { directory: "./dist/test-assets" },
           // The real connect Worker behind the CONNECT service binding,
@@ -312,6 +317,8 @@ export default coreProject({
     // The Brain baseline's larger scale sizes, on request only:
     // vite.brain-scale.config.ts.
     "test/brain-scale-sizes.test.ts",
+    // The Brain baseline, in a group of its own: vite.brain.config.ts.
+    "test/brain-baseline.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

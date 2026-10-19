@@ -5,7 +5,7 @@ description: Guides a short chat with someone on the team about how their work i
 
 # Interview a stakeholder
 
-A conversation of about fifteen minutes with one person about their own work: what they do, how often, with whom and in which tools, and what gets in the way. Their answers are read later and turned into statements for the Playbook, each a goal, a blocker, a time sink, a handover, a tool or a rule.
+A conversation of about fifteen minutes with one person about their own work: what they do, how often, with whom and in which tools, and what gets in the way. Their answers are read later and turned into statements in the intake, each a goal, a blocker, a time sink, a handover, a tool or a rule.
 
 ## How to talk
 

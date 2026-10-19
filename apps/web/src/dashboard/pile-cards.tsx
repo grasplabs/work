@@ -7,7 +7,6 @@ import {
   askedAgain,
   grantReviewed,
   objectOf,
-  RecordTypeClaims,
   reviewedVersion,
   reviewedVersionText,
   subjectOf,
@@ -114,6 +113,51 @@ export const HeldCard = ({
 };
 
 /**
+ * What has to be read of a permission request before deciding it: as
+ * which binding, the version of its App the grant trusts, and who asked.
+ * On the dashboard's pile and in the inbox.
+ */
+export const RequestDetails = ({
+  request,
+  directory,
+}: {
+  request: Permission;
+  directory: PendingRequests["directory"];
+}) => {
+  const { binding } = request;
+  const version = reviewedVersionText(request, directory);
+  const again = askedAgain(request, directory);
+  const requester = personName(directory, request.requestedBy);
+  const date = formatTime(request.requestedAt);
+  return (
+    <div className="text-muted-foreground flex flex-col gap-1">
+      <p>
+        <Trans>as {binding}</Trans>
+      </p>
+      {request.chat === null ? null : (
+        <p>
+          <Trans>In one chat only, for {requester}</Trans>
+        </p>
+      )}
+      <p>
+        <Trans>Version to review: {version}</Trans>
+      </p>
+      <p>
+        <Trans>
+          Asked by {requester} on {date}
+        </Trans>
+      </p>
+      {request.requestedVia === null ? null : (
+        <p>
+          <Trans>asked for by the agent, in their chat</Trans>
+        </p>
+      )}
+      {again === undefined ? null : <p>{again}</p>}
+    </div>
+  );
+};
+
+/**
  * A permission request: what asks for what, as which binding, the version
  * of its App the grant trusts, and who asked. Approving grants it for that
  * version; core refuses once another is current, and the card shows that
@@ -135,11 +179,6 @@ export const RequestCard = ({
   const object = objectOf(request, directory, exports);
   const actions = formatList(request.actions);
   const who = t`${subject}: ${actions} on ${object}`;
-  const { binding } = request;
-  const version = reviewedVersionText(request, directory);
-  const again = askedAgain(request, directory);
-  const requester = personName(directory, request.requestedBy);
-  const date = formatTime(request.requestedAt);
   const decide = async (
     change: (permissions: Session["permissions"]) => Promise<unknown>,
     said: string
@@ -160,33 +199,7 @@ export const RequestCard = ({
   return (
     <PileCard
       busy={busy}
-      details={
-        <div className="text-muted-foreground flex flex-col gap-1">
-          <p>
-            <Trans>as {binding}</Trans>
-          </p>
-          {request.chat === null ? null : (
-            <p>
-              <Trans>In one chat only, for {requester}</Trans>
-            </p>
-          )}
-          <RecordTypeClaims directory={directory} request={request} />
-          <p>
-            <Trans>Version to review: {version}</Trans>
-          </p>
-          <p>
-            <Trans>
-              Asked by {requester} on {date}
-            </Trans>
-          </p>
-          {request.requestedVia === null ? null : (
-            <p>
-              <Trans>asked for by the agent, in their chat</Trans>
-            </p>
-          )}
-          {again === undefined ? null : <p>{again}</p>}
-        </div>
-      }
+      details={<RequestDetails directory={directory} request={request} />}
       failure={failure}
       name={who}
       no={{
