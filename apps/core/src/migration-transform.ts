@@ -12,7 +12,7 @@ import type { StoreFields } from "@grasp-os/shared/stores";
 
 import type { Release } from "./app-releases.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
-import type { SandboxedEnv } from "./sandboxed.ts";
+import type { SandboxedEnv, SandboxedWorker } from "./sandboxed.ts";
 
 // Running an App's explicit migration (spec 17.2) on a batch of records:
 // the transform is App code, so it runs only in an isolate with no env and
@@ -70,6 +70,19 @@ import type { SandboxedEnv } from "./sandboxed.ts";
 //   the host, never reported by App code. Not a boundary against a
 //   transform written to tell fixtures from records (it sees their IDs and
 //   fields): every output on records is still validated as above.
+// - The transform writes a record's values to the logs (`console.log(row)`).
+//   On Cloudflare a loaded isolate's console output is dropped when it
+//   ends, as no Tail Worker is attached (no `tails`), and the loader's own
+//   Workers Logs never hold it. Plain workerd prints it to its process's
+//   stdout and stderr, and the on-prem sandbox host's processes inherit
+//   the supervisor's (scripts/workerd-sandbox.ts), so on-prem it would
+//   reach the deployment's logs, whoever's records the batch holds. The
+//   isolate's first module (`quietModule`) replaces every console method
+//   with one that does nothing, before any App or kit module loads, so no
+//   module of the isolate holds the original: logging, `node:console`'s
+//   default and an App's own replacement print nothing, on either
+//   profile. (An exception left uncaught in a microtask is printed by
+//   workerd only when served `--verbose`, which the supervisor isn't.)
 
 /** Rows one batch transforms, at most (spec 17.2's bounded batches). */
 export const transformBatchMaxRows = 100;
@@ -149,16 +162,33 @@ export type TransformOutcome =
 /** What a transform needs of a sealed release. */
 export type TransformRelease = Pick<Release, "app" | "modules" | "sdk">;
 
-/** The isolate's main module, and the module its request is in. */
+/**
+ * The isolate's main module, the module its request is in, and the one
+ * that silences its console, loaded first (see the header).
+ */
 const migrateModule = "grasp-migrate.js";
 const requestModule = "grasp-migrate-request.js";
+const quietModule = "grasp-migrate-quiet.js";
+
+/**
+ * Every console method replaced by one that does nothing. Evaluated before
+ * any other module of the isolate, as the main module imports it first.
+ */
+const quietMain = `const silent = () => undefined;
+for (const name of Object.getOwnPropertyNames(console)) {
+  if (typeof console[name] === "function") {
+    console[name] = silent;
+  }
+}
+`;
 
 /**
  * The transform isolate's main module: the batch through the SDK's
  * runner, its answer as bounded JSON text. Untrusted like everything in
  * the isolate; it only bounds what it hands back.
  */
-const migrateMain = `import { WorkerEntrypoint } from "cloudflare:workers";
+const migrateMain = `import ${JSON.stringify(quietModule)};
+import { WorkerEntrypoint } from "cloudflare:workers";
 import { runMigration } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
 import registered from ${JSON.stringify(appModuleName("app.ts"))};
 import request from ${JSON.stringify(requestModule)};
@@ -173,6 +203,30 @@ export class Migrate extends WorkerEntrypoint {
   }
 }
 `;
+
+/**
+ * The isolate that runs `request` (a migration's name and its rows, their
+ * owners left out) on `release`'s modules and kit: its console silenced
+ * first (`quietModule`), then the batch through the SDK's runner.
+ */
+export const transformIsolate = (
+  release: Pick<TransformRelease, "modules" | "sdk">,
+  request: {
+    readonly name: string;
+    readonly rows: readonly { id: string; fields: StoreFields }[];
+  }
+): SandboxedWorker => ({
+  mainModule: migrateModule,
+  // The platform's modules last: no App module takes one's name.
+  modules: {
+    ...release.modules,
+    ...release.sdk,
+    // JSON is a JavaScript expression: the request as data.
+    [requestModule]: `export default ${JSON.stringify(request)};\n`,
+    [quietModule]: quietMain,
+    [migrateModule]: migrateMain,
+  },
+});
 
 /** Issues as a failure says them: `path: message`, never a value. */
 const issuesOf = (
@@ -408,21 +462,10 @@ export const transformBatch = async (
   try {
     text = await callSandboxed(
       env,
-      {
-        mainModule: migrateModule,
-        // The platform's modules last: no App module takes one's name.
-        modules: {
-          ...release.modules,
-          ...release.sdk,
-          // JSON is a JavaScript expression: the request as data, its
-          // owners left out.
-          [requestModule]: `export default ${JSON.stringify({
-            name,
-            rows: handed.rows.map(({ id, fields }) => ({ id, fields })),
-          })};\n`,
-          [migrateModule]: migrateMain,
-        },
-      },
+      transformIsolate(release, {
+        name,
+        rows: handed.rows.map(({ id, fields }) => ({ id, fields })),
+      }),
       "Migrate",
       "run"
     );
