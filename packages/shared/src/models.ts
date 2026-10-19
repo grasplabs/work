@@ -15,7 +15,7 @@ export const modelErrors = defineErrorFamily({
   "model.run_limit":
     "This workflow run, with the runs it started, has reached the most model calls or model spend one run may have: spent, or held for calls whose cost isn't settled yet. No more model calls can be made in it.",
   "model.budget_busy":
-    "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+    "Model calls still under way hold what's left of a model budget this call counts against. Try again once they finish.",
   "model.queued":
     "Other model calls running now fill this share of the model requests that may run at once, so this one waits its turn. Try again after the wait it names: it isn't a fault, and it goes on once a share comes free.",
   "model.rate_limited":
@@ -109,6 +109,38 @@ export const overBudgetMessage = (because: unknown): string =>
   isModelBudgetCap(because)
     ? overBudgetMessages[because]
     : modelErrors.create("model.over_budget").message;
+
+/**
+ * What a `model.budget_busy` refusal says, by the cap held: which budget
+ * calls under way hold, never whose calls, how many or how long.
+ */
+const busyBudgetMessages: Readonly<
+  Record<Exclude<ModelBudgetCap, "binding_request">, string>
+> = {
+  deployment:
+    "Model calls still under way hold what's left of this deployment's model budget for the month. Try again once they finish.",
+  workflow:
+    "Model calls still under way hold what's left of this workflow's model budget for the month. Try again once they finish.",
+  user: "Model calls still under way hold what's left of the model budget for the month of the person this call is made for. Try again once they finish.",
+  run: "Model calls still under way hold what's left of the model budget this workflow run, with the runs it started, may spend. Try again once they finish.",
+  binding:
+    "Model calls still under way hold what's left of this model binding's budget for the month. Try again once they finish.",
+  binding_day:
+    "Model calls still under way hold what's left of this model binding's budget for the day. Try again once they finish.",
+};
+
+/** Whether `value` names a cap a `model.budget_busy` refusal can hold. */
+const isBusyCap = (value: unknown): value is keyof typeof busyBudgetMessages =>
+  typeof value === "string" && Object.hasOwn(busyBudgetMessages, value);
+
+/**
+ * What a `model.budget_busy` refusal says when the cap held, `because`,
+ * may be told: that cap's own message, or the family's, which names none.
+ */
+export const busyBudgetMessage = (because: unknown): string =>
+  isBusyCap(because)
+    ? busyBudgetMessages[because]
+    : modelErrors.create("model.budget_busy").message;
 
 /** What spent part of a budget this month, with its name where core has one. */
 export type ModelSpender =

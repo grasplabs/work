@@ -55,6 +55,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   defaultModelEffort,
   modelEfforts,
+  busyBudgetMessage,
   modelErrors,
   overBudgetMessage,
 } from "@grasp-os/shared/models";
@@ -2199,6 +2200,10 @@ const refuse = async (
   // told only that a budget is used up.
   if (code === "model.over_budget" && capUntold !== true) {
     error.message = overBudgetMessage(because);
+  }
+  // Which budget calls under way hold, and nothing of those calls.
+  if (code === "model.budget_busy" && capUntold !== true) {
+    error.message = busyBudgetMessage(because);
   }
   throw error;
 };
