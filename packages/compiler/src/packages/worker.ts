@@ -21,6 +21,7 @@ import type {
 } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
+import { assertNoBindings } from "../authority.ts";
 import { buildTarget } from "./build.ts";
 import type { BuildRequest } from "./build.ts";
 import esbuildWasm from "./esbuild.wasm";
@@ -78,11 +79,11 @@ export default class PackageBuilder extends WorkerEntrypoint {
    * any of it: what each says it needs, and why it can't be used.
    */
   // RPC exposes prototype methods only, so these can't be static.
-  // oxlint-disable-next-line class-methods-use-this
   async inspect({
     limits,
     packages,
   }: InspectRequest): Promise<PackageInspection[]> {
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
     const inspected: PackageInspection[] = [];
     for (const tarball of packages) {
       // One at a time: each holds its unpacked files in memory.
@@ -93,8 +94,8 @@ export default class PackageBuilder extends WorkerEntrypoint {
   }
 
   /** Builds one target of an approved lock (build.ts). */
-  // oxlint-disable-next-line class-methods-use-this
   async build(request: BuildRequest): Promise<PackageBuildAnswer> {
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
     return await buildTarget(request, esbuildWasm);
   }
 
@@ -108,6 +109,8 @@ export default class PackageBuilder extends WorkerEntrypoint {
     headers: TarballHeader[],
     read: ChunkRead
   ): Promise<PackageInspection[]> {
+    // Before a tarball is read: the isolate is checked as it is called.
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
     return await this.inspect({
       limits,
       packages: await readTarballs(headers, read),
@@ -125,6 +128,8 @@ export default class PackageBuilder extends WorkerEntrypoint {
     read: ChunkRead,
     write: WriteChunk
   ): Promise<PackageBuildAnswer> {
+    // Before a tarball is read: the isolate is checked as it is called.
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
     const answer = await this.build({
       ...request,
       packages: await readTarballs(request.packages, read),
