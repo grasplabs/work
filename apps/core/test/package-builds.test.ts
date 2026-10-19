@@ -84,7 +84,9 @@ const buildOf = async (
   { builder, app, request }: Resolved,
   target: PackageBuild["artifact"]["target"]
 ): Promise<PackageBuild> => {
-  const { policyGeneration } = await builder.api.dependencies.status(app);
+  const { policyGeneration } = await builder.api.dependencies.status({
+    app,
+  });
   return await builder.api.dependencies.build({
     app,
     graphHash: request.graphHash,
@@ -96,7 +98,7 @@ const buildOf = async (
 /** The App's lock, as core stores it. */
 const storedLock = async ({ app, request }: Resolved): Promise<GraspLock> => {
   const row = await env.DB.prepare(
-    "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    "SELECT lock FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
   )
     .bind(app, request.graphHash)
     .first<{ lock: string }>();
@@ -109,7 +111,7 @@ const storeLock = async (
   lock: GraspLock
 ): Promise<void> => {
   await env.DB.prepare(
-    "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+    "UPDATE dependency_locks SET lock = ? WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
   )
     .bind(JSON.stringify(lock), app, request.graphHash)
     .run();
@@ -345,7 +347,7 @@ describe("what a build may use", () => {
       },
     };
     await env.DB.prepare(
-      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+      "UPDATE dependency_locks SET lock = ? WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
     )
       .bind(JSON.stringify(changed), app.app, app.request.graphHash)
       .run();
@@ -797,9 +799,9 @@ describe("a build's durability", () => {
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const admin = await personApi("admin");
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     // As the builder starts, who approves dependencies changes: the
     // policy the build was admitted under is no longer the one in force.
     let changed = false;
@@ -827,7 +829,7 @@ describe("a build's durability", () => {
       })
     );
     const row = await env.DB.prepare(
-      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+      "SELECT lock FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
     )
       .bind(app.app, app.request.graphHash)
       .first<{ lock: string }>();
@@ -1288,9 +1290,9 @@ describe("what a build names and keeps", () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     // Just before the build pins, a resolve sets other entries.
     let raced = false;
     const files = new Proxy(env.FILES, {
@@ -1343,9 +1345,9 @@ describe("what a build names and keeps", () => {
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const first = await buildOf(app, "browser");
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     // As the kept artifact's description is read, a resolve sets other
     // entries for the target.
     let raced = false;
@@ -1392,9 +1394,9 @@ describe("what a build names and keeps", () => {
     // The kept artifact can't be read, so the build makes it again.
     await env.FILES.put(`package-builds/${first.hash}.json`, "{not json");
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     let raced = false;
     const files = new Proxy(env.FILES, {
       get: (target, property): unknown =>
@@ -1446,12 +1448,12 @@ describe("what a pin keeps and records", () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     const lockText = async (): Promise<string | null> =>
       await env.DB.prepare(
-        "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+        "SELECT lock FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
       )
         .bind(app.app, app.request.graphHash)
         .first<string>("lock");
@@ -1548,9 +1550,9 @@ describe("one build of an App's packages at a time", () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     const asked = {
       app: app.app,
       graphHash: app.request.graphHash,
@@ -1637,16 +1639,16 @@ describe("waiting for another build", () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     const built = await buildOf(app, "browser");
     const pinned = await storedLock(app);
     await storeLock(app, { ...pinned, artifacts: {} });
     // Another build holds the lease for minutes yet: it pins the artifact
     // while this one waits, and dies without giving the lease back.
     await env.DB.prepare(
-      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, 'browser', 'died', ?)"
+      "INSERT INTO dependency_build_leases (subject_type, subject_id, graph_hash, target, holder, expires_at) VALUES ('app', ?, ?, 'browser', 'died', ?)"
     )
       .bind(app.app, app.request.graphHash, Date.now() + 5 * 60 * 1000)
       .run();
@@ -1692,9 +1694,9 @@ describe("waiting for another build", () => {
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const admin = await personApi("admin");
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     // Built and pinned once; the pin taken out again, as if no build had
     // pinned it yet.
     await buildOf(app, "browser");
@@ -1702,7 +1704,7 @@ describe("waiting for another build", () => {
     await storeLock(app, { ...pinned, artifacts: {} });
     // Another build holds the lease for a moment.
     await env.DB.prepare(
-      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, 'browser', 'another', ?)"
+      "INSERT INTO dependency_build_leases (subject_type, subject_id, graph_hash, target, holder, expires_at) VALUES ('app', ?, ?, 'browser', 'another', ?)"
     )
       .bind(app.app, app.request.graphHash, Date.now() + 1500)
       .run();
@@ -1750,7 +1752,7 @@ describe("what a build leaves behind", () => {
     // A build of a graph nobody asks for again died holding its lease;
     // another build holds its lease now.
     const lease = env.DB.prepare(
-      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO dependency_build_leases (subject_type, subject_id, graph_hash, target, holder, expires_at) VALUES ('app', ?, ?, ?, ?, ?)"
     );
     await env.DB.batch([
       lease.bind(app.app, hashOf("a"), "browser", "died", now - 1000),
@@ -1758,7 +1760,7 @@ describe("what a build leaves behind", () => {
     ]);
     await sweepPackageFiles(env, new Date(now));
     const { results } = await env.DB.prepare(
-      "SELECT holder FROM dependency_build_leases WHERE app_id = ?"
+      "SELECT holder FROM dependency_build_leases WHERE subject_type = 'app' AND subject_id = ?"
     )
       .bind(app.app)
       .all<{ holder: string }>();
@@ -1787,12 +1789,12 @@ describe("what a build leaves behind", () => {
     await publish(plain(name, "1.0.0"));
     const app = await approvedApp({ [name]: "1.0.0" }, { targets: ["server"] });
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     const lockText = async (): Promise<string | null> =>
       await env.DB.prepare(
-        "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+        "SELECT lock FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
       )
         .bind(app.app, app.request.graphHash)
         .first<string>("lock");
@@ -1820,7 +1822,7 @@ describe("what a build leaves behind", () => {
                     .bind(evicted ?? "", Date.now()),
                   target
                     .prepare(
-                      "DELETE FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+                      "DELETE FROM dependency_locks WHERE subject_type = 'app' AND subject_id = ? AND graph_hash = ?"
                     )
                     .bind(app.app, app.request.graphHash),
                 ]);
@@ -1859,9 +1861,9 @@ describe("what a build leaves behind", () => {
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const admin = await personApi("admin");
     const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
     // As the build writes its description, the policy moves on: its pin
     // is refused, and its files are left.
     let written: string | undefined;

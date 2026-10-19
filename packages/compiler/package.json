@@ -1,7 +1,7 @@
 {
   "name": "@grasp-os/compiler",
   "private": true,
-  "description": "Screen compiler: builds an App's screens into ES modules and CSS, in its own isolate",
+  "description": "App compiler: builds an App's screens into ES modules and CSS, in its own isolate",
   "license": "AGPL-3.0-only",
   "type": "module",
   "imports": {

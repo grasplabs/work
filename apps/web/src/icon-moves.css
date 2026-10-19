@@ -2957,3 +2957,76 @@
   --icon-time: 0.4s;
   --icon-wait: 0.26s;
 }
+
+/* The business processes (the prototype's components/process-icon.tsx; no
+   page here draws one yet). Each `data-moves` is the process's id, and
+   parts are counted in the order that file draws them. */
+
+/* Cash lands in the till: the coin drops in. */
+[data-moves="o2c"] > :nth-child(1) {
+  --icon-move: icon-land;
+  --icon-y: -4px;
+  --icon-fade: 0;
+}
+
+/* A bill that is paid: the lines of the receipt are written. */
+[data-moves="p2p"] > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+}
+[data-moves="p2p"] > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+  --icon-wait: 0.1s;
+}
+
+/* A message that is solved, and a shield that is checked: the check is
+   drawn. */
+[data-moves="i2r"] > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 11 100;
+  --icon-from: 12.5;
+  --icon-time: 0.4s;
+}
+[data-moves="r2c"] > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.4s;
+}
+
+/* The report: its bars rise one by one. */
+[data-moves="r2r"] > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+  --icon-time: 0.35s;
+}
+[data-moves="r2r"] > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+  --icon-time: 0.35s;
+  --icon-wait: 0.08s;
+}
+[data-moves="r2r"] > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+  --icon-time: 0.35s;
+  --icon-wait: 0.16s;
+}
+
+/* A person who comes and goes: the head hops and the arrow takes a step. */
+[data-moves="h2r"] > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-y: -1.5px;
+}
+[data-moves="h2r"] > :is(:nth-child(3), :nth-child(4)) {
+  --icon-move: icon-hop;
+  --icon-x: 2px;
+}

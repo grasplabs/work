@@ -1941,9 +1941,18 @@ const keepingProvenance = (
   return entryKeeping(kept);
 };
 
-/** The App's model binding a call is made through, for its audit events. */
-const bindingOf = ({ binding }: Session): { binding?: string } =>
-  binding === undefined ? {} : { binding: binding.alias };
+/**
+ * The App's model binding a call is made through, for its audit events:
+ * its alias and its App, which a call made, through other Apps, from a
+ * workflow run's doesn't name otherwise (its trigger is the run, of the
+ * first App: resource-model.ts).
+ */
+const bindingOf = ({
+  binding,
+}: Session): { binding?: string; bindingApp?: string } =>
+  binding === undefined
+    ? {}
+    : { binding: binding.alias, bindingApp: binding.app };
 
 const auditEntry = (
   { call, ref, judged }: Admitted,

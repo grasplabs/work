@@ -691,6 +691,26 @@ const refusedInPreview = async (): Promise<never> => {
   throw appErrors.create("app.preview_side_effect");
 };
 
+/** Whether `frame` is a stream's last: its result, a refusal, or the end. */
+const isLastFrame = (frame: unknown): boolean =>
+  typeof frame === "object" &&
+  frame !== null &&
+  "type" in frame &&
+  (frame.type === "result" ||
+    frame.type === "refused" ||
+    frame.type === "closed");
+
+/** Tells the frame its stream's connection ended. Never throws. */
+const handedClosed = async (
+  onFrame: (frame: unknown) => Promise<unknown>
+): Promise<void> => {
+  try {
+    await onFrame({ type: "closed" });
+  } catch {
+    // The frame is gone.
+  }
+};
+
 /**
  * A preview of the chat's draft: its server calls go to the draft's
  * preview, what its screen reports to the chat's agent; it starts no
@@ -698,7 +718,7 @@ const refusedInPreview = async (): Promise<never> => {
  * runs on its draft release (core's sealed-previews.ts): its function
  * calls and live queries go there, on a store of the preview's own.
  */
-const previewTarget = (
+export const previewTarget = (
   link: FrameLink,
   chatId: string,
   bundle: PreviewBundle
@@ -717,10 +737,64 @@ const previewTarget = (
         async ({ chats }) =>
           await chats.previewFunction(chatId, app, revision, request)
       ),
-    // A streaming action runs in an object of its own, which a preview
-    // has none of (yet): refused, as it starts nothing.
-    streamFunction: refusedInPreview,
-    cancelStream: refusedInPreview,
+    // A streaming action runs in the draft's preview too, on its draft
+    // release and store (core's sealed-previews.ts), relayed over the
+    // page's connection while the person may still have it.
+    streamFunction: async (what, request, onFrame, onEnded) =>
+      await on(link, async ({ chats }) => {
+        let ended = false;
+        // A last frame came, even if the frame hasn't taken it yet: no
+        // `closed` goes after it.
+        let lastCame = false;
+        const end = (): void => {
+          if (!ended) {
+            ended = true;
+            onEnded();
+          }
+        };
+        const subscription = await chats.previewStream(
+          chatId,
+          app,
+          revision,
+          what,
+          request,
+          forCore(async (frame: unknown) => {
+            const last = isLastFrame(frame);
+            lastCame ||= last;
+            try {
+              return await onFrame(frame);
+            } finally {
+              if (last) {
+                end();
+              }
+            }
+          })
+        );
+        // The connection dropped before the last frame: the frame hears
+        // `closed`, as a live screen's stream does when its request ends,
+        // so it attaches again (on the next connection) rather than wait.
+        const stub: unknown = subscription;
+        if (stub instanceof RpcStub) {
+          stub.onRpcBroken(() => {
+            if (!(ended || lastCame)) {
+              end();
+              void handedClosed(onFrame);
+            }
+          });
+        }
+        return {
+          release: () => {
+            end();
+            void subscription.release();
+          },
+        };
+      }),
+    cancelStream: async (request) =>
+      await on(
+        link,
+        async ({ chats }) =>
+          await chats.previewCancelStream(chatId, app, revision, request)
+      ),
     report: async (problem) => {
       await on(link, async ({ chats }) => {
         await chats.previewReport(chatId, app, revision, screen, problem);

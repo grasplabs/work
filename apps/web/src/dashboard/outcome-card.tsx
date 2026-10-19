@@ -37,11 +37,14 @@ const useOutcomeName = (outcome: UnknownOutcome): string => {
  * where it came from isn't known, or an App's call names no version
  * (`resolutionCapability` in core refuses both).
  */
-const isUnresolvable = ({ key, origin }: UnknownOutcome): boolean =>
+export const isUnresolvable = ({ key, origin }: UnknownOutcome): boolean =>
   origin === null || (key.subject.type === "app" && origin.appVersion === null);
 
-/** Where it acted and when it was sent, and what was sent, while kept. */
-const OutcomeDetails = ({
+/**
+ * Where it acted and when it was sent, and what was sent, while kept. On
+ * the dashboard's pile and in the inbox.
+ */
+export const OutcomeDetails = ({
   outcome,
   shown,
   unresolvableId,

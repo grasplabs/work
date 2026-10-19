@@ -2,11 +2,12 @@
  * The internet, as connect's tests see it: every request that leaves
  * connect lands in `answer`, and tests read back what was sent. OAuth
  * requests, and the lookup of a connecting account's own addresses, go on
- * to the fake providers (test/oauth-provider.ts), whose spy on fetch must
- * be registered first.
+ * to the fake providers (test/oauth-provider.ts, and test/app-provider.ts
+ * for the apps), whose spies on fetch must be registered first.
  */
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 
+import { appProviderUrls } from "./app-provider.ts";
 import { profileUrls } from "./oauth-provider.ts";
 
 /** One request that left connect. */
@@ -40,7 +41,8 @@ export const fakeInternet = (
       const url = new URL(request.url);
       if (
         oauthHosts.has(url.hostname) ||
-        profileUrls.has(url.origin + url.pathname)
+        profileUrls.has(url.origin + url.pathname) ||
+        appProviderUrls.has(url.origin + url.pathname)
       ) {
         return await passThrough(input, init);
       }

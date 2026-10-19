@@ -133,7 +133,7 @@
     { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
     { "tag": "v7", "new_sqlite_classes": ["ActionInvocation"] },
   ],
-  // Runs App sandboxes and the screen compiler.
+  // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],
   "d1_databases": [
     {

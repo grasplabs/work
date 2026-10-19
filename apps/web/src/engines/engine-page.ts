@@ -60,7 +60,7 @@ export const engineReaders = (
   approvals: async () =>
     await loadFromCore(
       core,
-      async (session) => await session.dependencies.approvals(engine)
+      async (session) => await session.dependencies.approvals({ app: engine })
     ),
 });
 

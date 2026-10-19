@@ -1,8 +1,9 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import { storeIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, StoreId, WorkflowId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   categoryOf,
@@ -19,6 +20,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { liveWindowMaxItems } from "@grasp-os/shared/store-limits";
 import { coreStepPrefix, stepIdempotencyKey } from "@grasp-os/shared/workflows";
+import { waitUntil } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -36,17 +38,27 @@ import type {
   Invocation,
   ProgressSink,
   ResourceBindings,
+  UseRefusal,
 } from "./operations.ts";
 import { requireApprovedVersion } from "./permissions.ts";
 import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
+  AppFunctionCall,
   BindingCaller,
   InvocationProvenance,
   InvocationSources,
+  RunOrigin,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
+import {
+  callWorkflowQuery,
+  isWorkflowQueryPath,
+  readWorkflowWindow,
+  workflowQueryOf,
+} from "./workflow-reference-queries.ts";
+import type { ResolvedWorkflowQuery } from "./workflow-reference-queries.ts";
 import { appWorkflowStarts } from "./workflow-start-intents.ts";
 import type { CallingAgent } from "./workflow-start-intents.ts";
 
@@ -74,7 +86,106 @@ interface FunctionCaller {
    * it stages needs again when it is dispatched.
    */
   readonly agent?: CallingAgent;
+  /**
+   * The Apps whose calls this one was made through (resource-apps.ts),
+   * the first App's first: none for a screen's or an agent's own call.
+   */
+  readonly chain?: readonly AppId[] | undefined;
+  /**
+   * How the invocation's app resources call another App's function
+   * (`BindingCaller.callApp`): as a screen's call of it runs. None, and
+   * they call nothing.
+   */
+  readonly callApp?: AppFunctionCall;
+  /** Called from a workflow run's chain: it starts no workflows (`BindingCaller.fromRun`). */
+  readonly fromRun?: boolean | undefined;
+  /** The whole call's count of calls between Apps (`BindingCaller.appCalls`). */
+  readonly appCalls?: { used: number } | undefined;
+  /**
+   * For a call from a workflow run's chain: its step's lease, checked
+   * just before each commit and resource request, with nothing awaited
+   * between that and it.
+   */
+  readonly requireHolds?: (() => void) | undefined;
+  /** For a call from a workflow run's chain: the run (`BindingCaller.runOrigin`). */
+  readonly runOrigin?: RunOrigin | undefined;
+  /** Aborted once the call is cancelled (`BindingCaller.cancelled`). */
+  readonly cancelled?: AbortSignal | undefined;
 }
+
+/**
+ * `store`, its commits made only while the attempt still holds its lease,
+ * checked with nothing awaited between that and the commit.
+ */
+const fencedStore = (
+  store: OpenStore,
+  requireHolds: () => void
+): OpenStore => ({
+  ...store,
+  commit: async (commit) => {
+    requireHolds();
+    return await store.commit(commit);
+  },
+});
+
+/** Whose call a refused use's evidence names (`keptUseRefusals`). */
+interface UseRefusalContext {
+  readonly app: AppId;
+  readonly version: number;
+  readonly principal: string;
+  readonly requestId: string;
+  readonly runId: string | null;
+}
+
+/** Writes `refusal` as `app.use.refused` for `context`; never throws. */
+const writeUseRefusal = async (
+  env: Env,
+  { app, version, principal, requestId, runId }: UseRefusalContext,
+  refusal: UseRefusal
+): Promise<void> => {
+  try {
+    await keepAuditEvent(env, drizzle(env.DB), {
+      actor: { type: "app", appId: app, part: "server" },
+      action: "app.use.refused",
+      target: { type: "app", id: app },
+      requestId,
+      detail: {
+        version,
+        person: principal,
+        runId,
+        function: refusal.function,
+        useKind: refusal.use.kind,
+        useName: refusal.use.name,
+        reason: refusal.reason,
+        errorCode: refusal.errorCode,
+      },
+    });
+  } catch (error) {
+    log.error("app.use.audit_failed", {
+      requestId,
+      errorCode: refusal.errorCode,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * How a real call of App `app`'s version `version` keeps the evidence of a
+ * use its code asked for that its sealed manifest doesn't allow
+ * (operations.ts, `Invocation.refusedUse`; GRA-279): `app.use.refused`, as
+ * the App's server code acting for `principal`, every field core's own.
+ * The write is the request's own work until it is kept: the host waits for
+ * it only so long (`useEvidenceWaitMs`), and one it stopped waiting for
+ * still finishes rather than ending with the call. One that can't be kept
+ * is logged; the refusal stands either way.
+ */
+const keptUseRefusals =
+  (env: Env, context: UseRefusalContext) =>
+  async (refusal: UseRefusal): Promise<void> => {
+    const writing = writeUseRefusal(env, context, refusal);
+    waitUntil(writing);
+    await writing;
+  };
 
 /**
  * The invocation of `release` for `caller`: the store from the release
@@ -91,6 +202,13 @@ export const invocationFor = async (
     stillAllowed,
     sources = invocationSources(),
     agent,
+    chain = [],
+    callApp,
+    fromRun = false,
+    appCalls,
+    requireHolds,
+    runOrigin,
+    cancelled,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -118,21 +236,40 @@ export const invocationFor = async (
     sources,
     actor: delegateActorOf(authority),
     admit: authorize,
+    chain: [...chain, app],
+    ...(callApp === undefined ? {} : { callApp }),
+    fromRun,
+    ...(agent === undefined ? {} : { agent }),
+    ...(appCalls === undefined ? {} : { appCalls }),
+    ...(requireHolds === undefined ? {} : { requireHolds }),
+    ...(runOrigin === undefined ? {} : { runOrigin }),
+    ...(cancelled === undefined ? {} : { cancelled }),
   });
+  const store =
+    release.store === null
+      ? noStore()
+      : await openStore(env, release.store.storeId);
   return {
     principal: by.userId,
     consumer: {
       resourceId: app,
       resourceVersion: release.manifest.resourceVersion,
     },
+    // Called from a run's chain: its commits only while the run's step
+    // still holds its lease.
     store:
-      release.store === null
-        ? noStore()
-        : await openStore(env, release.store.storeId),
+      requireHolds === undefined ? store : fencedStore(store, requireHolds),
     requestId,
     deadline,
     runId: null,
     authorize,
+    refusedUse: keptUseRefusals(env, {
+      app,
+      version: release.manifest.resourceVersion,
+      principal: by.userId,
+      requestId,
+      runId: null,
+    }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
     // operation host admits each request through `authorize` first, as it
@@ -140,8 +277,12 @@ export const invocationFor = async (
     resources: bindings,
     // The workflows the App binds, started as the App for the person
     // calling: each start admitted on the App's own grant and the
-    // person's role in the App, read again as it is admitted.
-    workflows: appWorkflowStarts(env, authority, agent ?? null),
+    // person's role in the App, read again as it is admitted. None for a
+    // call from a workflow run's chain, as for the run's own call: a run
+    // starting another is a child run, within its lineage's limits.
+    ...(fromRun
+      ? {}
+      : { workflows: appWorkflowStarts(env, authority, agent ?? null) }),
   };
 };
 
@@ -219,21 +360,6 @@ const keyedUnderRun =
   };
 
 /**
- * `store`, its commits made only while the attempt still holds its lease,
- * checked with nothing awaited between that and the commit.
- */
-const fencedStore = (
-  store: OpenStore,
-  requireHolds: () => void
-): OpenStore => ({
-  ...store,
-  commit: async (commit) => {
-    requireHolds();
-    return await store.commit(commit);
-  },
-});
-
-/**
  * The invocation of `release` (the run's own App, at the version the run
  * is pinned to) for a step of `caller`'s run: as the person the run acts
  * for, in workflow mode, with the run as its work context, and with the
@@ -254,7 +380,8 @@ export const runInvocationFor = async (
     held,
     step,
   }: RunCaller,
-  operation: string
+  operation: string,
+  callApp?: AppFunctionCall
 ): Promise<Invocation> => {
   const { app, runId, version, authority } = run;
   // A version nobody approved refused, recorded once for the call, as the
@@ -318,6 +445,9 @@ export const runInvocationFor = async (
     requireHolds,
     admit: authorize,
     ...(step === undefined ? {} : { step }),
+    chain: [app],
+    ...(callApp === undefined ? {} : { callApp }),
+    fromRun: true,
   });
   return {
     principal: authority.onBehalfOf,
@@ -333,6 +463,15 @@ export const runInvocationFor = async (
     deadline,
     runId,
     authorize,
+    refusedUse: keptUseRefusals(env, {
+      app,
+      version,
+      principal: authority.onBehalfOf,
+      requestId,
+      runId,
+    }),
+    // No `workflows`: a run's call starts no workflow (operations.ts,
+    // `Invocation.workflows`), so its step can't open a lineage of its own.
     resources: keyedUnderRun(bindings, runId, requireHolds),
   };
 };
@@ -507,7 +646,145 @@ interface FunctionCallOptions {
   ) => void;
   /** The agent whose call this is (`FunctionCaller.agent`). */
   readonly agent?: CallingAgent;
+  /** The Apps whose calls this one was made through (`FunctionCaller.chain`). */
+  readonly chain?: readonly AppId[];
+  /** Called from a workflow run's chain (`FunctionCaller.fromRun`). */
+  readonly fromRun?: boolean;
+  /** The whole call's count of calls between Apps (`FunctionCaller.appCalls`). */
+  readonly appCalls?: { used: number };
+  /** A run's lease, for a call from its chain (`FunctionCaller.requireHolds`). */
+  readonly requireHolds?: () => void;
+  /** The run a call from its chain started from (`FunctionCaller.runOrigin`). */
+  readonly runOrigin?: RunOrigin;
+  /** Aborted once the calling screen's call is cancelled (`FunctionCaller.cancelled`). */
+  readonly cancelled?: AbortSignal;
+  /**
+   * The calling invocation's sources, for a call from another App's
+   * function (`AppFunctionCall`): the call reads into them. None, and it
+   * starts with its own.
+   */
+  readonly sources?: InvocationSources;
 }
+
+/**
+ * The call `request`, refused as `contract.invalid_request` when it isn't
+ * of `kind` (when given), or reads a window but isn't a query of a caller
+ * that may (`windowed`).
+ */
+const callAllowed = (
+  request: unknown,
+  {
+    kind,
+    windowed,
+  }: {
+    kind: FunctionRequest["reference"]["kind"] | undefined;
+    windowed: boolean;
+  }
+): FunctionRequest => {
+  const call = readFunctionRequest(request);
+  if (kind !== undefined && call.reference.kind !== kind) {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  // A window is a screen's, and a query's only.
+  if (
+    call.window !== undefined &&
+    (!windowed || call.reference.kind !== "query")
+  ) {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  return call;
+};
+
+/**
+ * What `reference` names in `release`: a public function's path, or a
+ * workflow reference's query, which is core's to answer, never the App's
+ * (workflow-reference-queries.ts). No App function shadows one: the SDK
+ * keeps the top-level `workflows` segment for the platform, so a release
+ * that registers a function there never seals.
+ */
+const referenceIn = async (
+  release: Release,
+  reference: FunctionRequest["reference"]
+): Promise<{
+  path: string;
+  workflowQuery: ResolvedWorkflowQuery | undefined;
+}> =>
+  isWorkflowQueryPath(reference.contractId)
+    ? {
+        path: reference.contractId,
+        workflowQuery: await workflowQueryOf(release, reference),
+      }
+    : { path: publicOperationOf(release, reference), workflowQuery: undefined };
+
+/** A workflow reference's query, answered as `callFunction` answers a call. */
+const answeredWorkflowQuery = async (
+  env: Env,
+  {
+    by,
+    caller,
+    query,
+    call,
+    release,
+    refused,
+    stillAllowed,
+    chargeWindow,
+    deadline,
+  }: {
+    by: Pick<Identity, "userId" | "role">;
+    deadline: number;
+    caller: { app: string; userId: string };
+    query: ResolvedWorkflowQuery;
+    call: FunctionRequest;
+    release: Release;
+    refused: (error: unknown) => FunctionAnswer;
+    stillAllowed: FunctionCallOptions["stillAllowed"];
+    chargeWindow: FunctionCallOptions["chargeWindow"];
+  }
+): Promise<FunctionAnswer> => {
+  try {
+    // The gate every call's invocation passes before it reads, as late as
+    // it can be: the caller's own check (an agent's permission, say), the
+    // release not revoked, the person's role in the App, read again now,
+    // so a revocation or a role lost since the call began reads nothing;
+    // and the call's deadline, as its invocation would hold it. A window
+    // passes it again before each page it reads.
+    const gate = async (): Promise<void> => {
+      await stillAllowed?.();
+      await requireNotRevoked(
+        env,
+        appIdSchema.parse(caller.app),
+        release.manifest.resourceVersion
+      );
+      await operationRoles(env, by, appIdSchema.parse(caller.app));
+      if (Date.now() >= deadline) {
+        throw operationErrors.create("operation.deadline_exceeded");
+      }
+    };
+    await gate();
+    const result =
+      call.window === undefined
+        ? await callWorkflowQuery(env, caller, query, call.input)
+        : await readWorkflowWindow(env, caller, query, call.input, {
+            extent: call.window.extent,
+            gate,
+            charge:
+              chargeWindow ??
+              (async () => {
+                await Promise.reject(
+                  operationErrors.create("contract.invalid_request")
+                );
+              }),
+          });
+    return {
+      result,
+      provenance: null,
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
 
 /** `callAppFunction`, with all of its options. */
 const callFunction = async (
@@ -525,6 +802,13 @@ const callFunction = async (
     observeReads,
     chargeWindow,
     agent,
+    chain,
+    fromRun,
+    appCalls,
+    requireHolds,
+    runOrigin,
+    cancelled,
+    sources = invocationSources(),
   } = options;
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
@@ -535,37 +819,42 @@ const callFunction = async (
   });
   let call: FunctionRequest;
   try {
-    call = readFunctionRequest(request);
-    if (kind !== undefined && call.reference.kind !== kind) {
-      throw operationErrors.create("contract.invalid_request");
-    }
-    // A window is a screen's, and a query's only.
-    if (
-      call.window !== undefined &&
-      (chargeWindow === undefined || call.reference.kind !== "query")
-    ) {
-      throw operationErrors.create("contract.invalid_request");
-    }
+    call = callAllowed(request, { kind, windowed: chargeWindow !== undefined });
   } catch (error) {
     return refused(error);
   }
   let release: Release;
   let path: string;
+  let appId: string;
+  let workflowQuery: ResolvedWorkflowQuery | undefined;
   try {
     // Anyone without a role in the App learns nothing of it.
     const found = await appFor(env, by, app, "user");
     if (found.currentVersion === null) {
       throw versionErrors.create("version.not_sealed");
     }
+    appId = found.id;
     // The release of the App's current version: its manifest names the
     // App and the version the reference must name.
     release = await loadRelease(env, found.id, found.currentVersion);
-    path = publicOperationOf(release, call.reference);
+    ({ path, workflowQuery } = await referenceIn(release, call.reference));
   } catch (error) {
     return refused(error);
   }
+  if (workflowQuery !== undefined) {
+    return await answeredWorkflowQuery(env, {
+      by,
+      caller: { app: appId, userId: by.userId },
+      query: workflowQuery,
+      call,
+      release,
+      refused,
+      stillAllowed,
+      chargeWindow,
+      deadline,
+    });
+  }
   try {
-    const sources = invocationSources();
     const invocation = await invocationFor(env, release, {
       by,
       requestId,
@@ -573,6 +862,16 @@ const callFunction = async (
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       ...(agent === undefined ? {} : { agent }),
       sources,
+      chain,
+      fromRun,
+      appCalls,
+      requireHolds,
+      runOrigin,
+      cancelled,
+      // Another App's function, as this call of one runs: its role
+      // checked, the chain carried on.
+      callApp: async (person, called, appRequest, appOptions) =>
+        await callFunction(env, person, called, appRequest, appOptions),
     });
     const { store } = release;
     const observe =
@@ -594,6 +893,7 @@ const callFunction = async (
               ? {}
               : { idempotencyKey: call.idempotencyKey }),
             ...(parentSession === undefined ? {} : { parentSession }),
+            ...(cancelled === undefined ? {} : { cancelled }),
           })
         : await readWindow(
             {
@@ -679,6 +979,21 @@ export const windowExtentOf = (request: unknown): number | undefined => {
   }
 };
 
+/**
+ * Whether `request` calls one of a workflow reference's queries
+ * (workflow-reference-queries.ts): they read no store, so a live one is
+ * read again when the person's runs of the App change, not on a write.
+ */
+export const callsWorkflowQuery = (request: unknown): boolean => {
+  try {
+    return isWorkflowQueryPath(
+      readFunctionRequest(request).reference.contractId
+    );
+  } catch {
+    return false;
+  }
+};
+
 /** What a live query's evaluation answered, and what it read. */
 export interface EvaluatedQuery {
   readonly answer: FunctionAnswer;
@@ -761,6 +1076,10 @@ export const invokeAppAction = async (
       by,
       requestId,
       deadline,
+      cancelled,
+      // Another App's function, as a screen's call of it runs.
+      callApp: async (person, called, appRequest, appOptions) =>
+        await callFunction(env, person, called, appRequest, appOptions),
     });
     reached = true;
     const result = await callOperation(
@@ -849,7 +1168,11 @@ export const callRunFunction = async (
           // No longer than the step's attempt, nor than any call of an App's.
           deadline: Math.min(caller.deadline, Date.now() + callTimeoutMs(env)),
         },
-        operation.path
+        operation.path,
+        // Another App's function, as a screen's call of it runs, for the
+        // person the run acts for.
+        async (person, called, request, options) =>
+          await callFunction(env, person, called, request, options)
       ),
       { path: operation.path, kind: operation.kind },
       input,

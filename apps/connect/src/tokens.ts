@@ -1,8 +1,4 @@
-import {
-  connectErrors,
-  connectionErrors,
-  oauthProviderSchema,
-} from "@grasp-os/shared/connect";
+import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, exists, isNull, like, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -13,22 +9,39 @@ import { recordEventIf } from "./audit.ts";
 import { connections, connectionTokens } from "./db/schema.ts";
 import { isInvalidGrant, refreshTokens, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
-import { providers } from "./providers.ts";
-import type { OAuthClientCredentials, ProviderConfig } from "./providers.ts";
+import { bearer, providerFor } from "./providers.ts";
+import type {
+  Credential,
+  OAuthClientCredentials,
+  OAuthProviderConfig,
+} from "./providers.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
-// The token vault: each OAuth connection's tokens, sealed (src/vault.ts),
-// in connect's D1. Nothing here is reachable over RPC: tokens never leave
-// connect, except, later, as a short-lived access token handed to a
-// connector's egress handler for one call (threat model R1).
+// The token vault: each connection's tokens, or its API key, sealed
+// (src/vault.ts), in connect's D1. Nothing here is reachable over RPC:
+// tokens and keys never leave connect, except as the credential of one
+// call, which a connector's egress handler adds to the call's requests
+// (threat model R1). A refresh token never leaves at all: only its token
+// endpoint sees it.
 
-/** What a connection's sealed value holds. */
-const storedTokensSchema = z.strictObject({
-  accessToken: z.string().min(1),
-  refreshToken: z.string().min(1),
-});
+/** What a connection's sealed value holds: OAuth tokens, or an API key. */
+const storedTokensSchema = z.union([
+  z.strictObject({
+    accessToken: z.string().min(1),
+    refreshToken: z.string().min(1),
+  }),
+  z.strictObject({ apiKey: z.string().min(1) }),
+]);
 type StoredTokens = z.infer<typeof storedTokensSchema>;
+type StoredOAuthTokens = Extract<StoredTokens, { refreshToken: string }>;
+
+/**
+ * When an API key's "access" expires: never, as far as connect goes. A key
+ * the app stopped taking fails the call, until the person gives the
+ * connection a new one (`connectWithKey`).
+ */
+export const apiKeyExpiresAt = Date.UTC(9999, 11, 31);
 
 /** A connection's tokens are sealed for that connection only. */
 const sealContext = (connectionId: string): string => `token:${connectionId}`;
@@ -60,11 +73,23 @@ const openTokens = async (
     JSON.parse(await vault.open(row.sealed, sealContext(row.connectionId)))
   );
 
+/** The OAuth tokens a row holds; an API key's row has none. */
+const openOAuthTokens = async (
+  vault: Vault,
+  row: Pick<TokenRow, "connectionId" | "sealed">
+): Promise<StoredOAuthTokens> => {
+  const tokens = await openTokens(vault, row);
+  if (!("refreshToken" in tokens)) {
+    throw connectErrors.create("connect.connection_inactive");
+  }
+  return tokens;
+};
+
 const accessTokenOf = async (
   vault: Vault,
   row: Pick<TokenRow, "connectionId" | "sealed">
 ): Promise<string> => {
-  const { accessToken } = await openTokens(vault, row);
+  const { accessToken } = await openOAuthTokens(vault, row);
   return accessToken;
 };
 
@@ -81,10 +106,13 @@ export const firstTokens = async (
   now: Date
 ): Promise<TokenRow> => ({
   connectionId,
-  sealed: await sealTokens(vault, connectionId, {
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-  }),
+  sealed: await sealTokens(
+    vault,
+    connectionId,
+    "apiKey" in tokens
+      ? { apiKey: tokens.apiKey }
+      : { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken }
+  ),
   accessExpiresAt: new Date(tokens.expiresAt),
   generation: now.getTime(),
   refreshUntil: null,
@@ -99,7 +127,7 @@ export const firstTokens = async (
  * logged, never thrown.
  */
 export const discardMint = async (
-  provider: ProviderConfig,
+  provider: OAuthProviderConfig,
   client: OAuthClientCredentials,
   tokens: Pick<TokenSet, "accessToken" | "refreshToken">
 ): Promise<void> => {
@@ -206,7 +234,7 @@ const markDead = async (
 interface RefreshContext {
   env: Env;
   vault: Vault;
-  provider: ProviderConfig;
+  provider: OAuthProviderConfig;
   client: OAuthClientCredentials;
   tenant: string;
 }
@@ -220,10 +248,10 @@ interface RefreshContext {
 const storeRefreshed = async (
   { env, vault, provider, client }: RefreshContext,
   row: TokenRow,
-  current: StoredTokens,
+  current: StoredOAuthTokens,
   minted: TokenSet
 ): Promise<string | undefined> => {
-  const next: StoredTokens = {
+  const next: StoredOAuthTokens = {
     accessToken: minted.accessToken,
     refreshToken: minted.refreshToken ?? current.refreshToken,
   };
@@ -258,7 +286,7 @@ const refreshUnderLease = async (
 ): Promise<string | undefined> => {
   const { env, vault, provider, client, tenant } = context;
   try {
-    const current = await openTokens(vault, row);
+    const current = await openOAuthTokens(vault, row);
     let minted: TokenSet;
     try {
       minted = await refreshTokens(
@@ -325,44 +353,87 @@ const refreshed = async (
   throw connectionErrors.create("connection.refresh_failed");
 };
 
-/**
- * The access token of an active OAuth connection, fresh for at least a
- * minute. Only for connect itself: a connector's egress handler gets it for
- * one call. Throws `connect.connection_inactive` when the connection has
- * no usable grant.
- */
-export const accessTokenFor = async (
-  env: Env,
-  connectionId: string
-): Promise<string> => {
+/** An active connection, its provider, its tokens' row and the vault. */
+const activeConnection = async (env: Env, connectionId: string) => {
   const connection = await drizzle(env.DB)
     .select()
     .from(connections)
     .where(eq(connections.id, connectionId))
     .get();
-  const providerId = oauthProviderSchema.safeParse(connection?.provider);
+  const provider =
+    connection === undefined ? undefined : providerFor(connection.provider);
   const row = await readRow(env.DB, connectionId);
   if (
     connection?.status !== "active" ||
-    connection.tenant === null ||
-    !providerId.success ||
+    provider === undefined ||
     row === undefined
   ) {
     throw connectErrors.create("connect.connection_inactive");
   }
-  const provider = providers[providerId.data];
   const vault = await vaultFor(env);
+  if (vault === undefined) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  return { connection, provider, row, vault };
+};
+
+type Active = Awaited<ReturnType<typeof activeConnection>>;
+
+/** An active OAuth connection's access token, refreshed if it must be. */
+const freshAccessToken = async (
+  env: Env,
+  { connection, provider, row, vault }: Active
+): Promise<string> => {
+  // A suite's connection is pinned to its tenant; an app's has none.
+  const tenant =
+    provider.kind === "oauth" && provider.pinned ? connection.tenant : "";
+  if (provider.kind !== "oauth" || tenant === null) {
+    throw connectErrors.create("connect.connection_inactive");
+  }
   const client = provider.client(env);
-  if (vault === undefined || client === undefined) {
+  if (client === undefined) {
     throw connectionErrors.create("connection.provider_unavailable");
   }
   if (isFresh(row, Date.now())) {
     return await accessTokenOf(vault, row);
   }
   return await refreshed(
-    { env, vault, provider, client, tenant: connection.tenant },
-    connectionId
+    { env, vault, provider, client, tenant },
+    connection.id
   );
+};
+
+/**
+ * The access token of an active OAuth connection, fresh for at least a
+ * minute. Only for connect itself: a connector's egress handler gets it for
+ * one call. Throws `connect.connection_inactive` when the connection has
+ * no usable grant, or isn't an OAuth one.
+ */
+export const accessTokenFor = async (
+  env: Env,
+  connectionId: string
+): Promise<string> =>
+  await freshAccessToken(env, await activeConnection(env, connectionId));
+
+/**
+ * What one call of an active connection's connector sends its requests
+ * with: a fresh access token, or the API key, in the header the provider
+ * takes it in. Only for connect's egress handler, for that call.
+ */
+export const credentialFor = async (
+  env: Env,
+  connectionId: string
+): Promise<Credential> => {
+  const active = await activeConnection(env, connectionId);
+  const { provider, row, vault } = active;
+  if (provider.kind === "oauth") {
+    return bearer(await freshAccessToken(env, active));
+  }
+  const tokens = await openTokens(vault, row);
+  if (!("apiKey" in tokens)) {
+    throw connectErrors.create("connect.connection_inactive");
+  }
+  return provider.credential(tokens.apiKey);
 };
 
 /**
@@ -379,8 +450,8 @@ export const revocableToken = async (
     return undefined;
   }
   try {
-    const { refreshToken } = await openTokens(vault, row);
-    return refreshToken;
+    const tokens = await openTokens(vault, row);
+    return "refreshToken" in tokens ? tokens.refreshToken : undefined;
   } catch (error) {
     log.error("vault.open_failed", errorFields(error));
     return undefined;

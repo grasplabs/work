@@ -61,8 +61,12 @@ const secret = "Acme owes 4,200";
 const maxLooks = callMaxNested - 2;
 
 /**
- * The longest a held action waits between looks: its looks, backed off up
- * to this, all fit in a screen call's 30 seconds.
+ * The longest a held action waits between looks, backed off up to this:
+ * time for the test to do what it does meanwhile and let it go. One that
+ * nobody will let go (`patient: false`) looks without waiting, so it spends
+ * its looks on nested calls alone and ends with its own error long before
+ * a screen call's 30 seconds, however slow the runner: waited out, its
+ * looks would take 24 of them.
  */
 const lookCapMs = 400;
 
@@ -81,13 +85,17 @@ const pause = async (ms: number) => await new Promise((resolve) => setTimeout(re
 
 // Waits until \`released\` says so, looking at most \`maxLooks\` times, each
 // look one nested call of the action's: a test that never lets go fails it,
-// well within the call's nested calls and its deadline.
-const until = async (released: () => Promise<boolean>) => {
+// within the call's nested calls. Between looks it waits for the test to
+// do what it does meanwhile, unless it isn't \`patient\`: nobody will let
+// it go, so waiting would only spend the call's deadline.
+const until = async (released: () => Promise<boolean>, patient = true) => {
   for (let look = 0; look < ${maxLooks}; look += 1) {
     if (await released()) {
       return;
     }
-    await pause(Math.min(${lookCapMs}, 50 * 2 ** look));
+    if (patient) {
+      await pause(Math.min(${lookCapMs}, 50 * 2 ** look));
+    }
   }
   throw new AppError("notes.never_released", "The test never let this step go.");
 };
@@ -124,14 +132,14 @@ export const released = query({
 
 // Reads, says so, waits if held, says it answers, then answers what it read.
 export const slow = action({
-  args: { step: v.string().min(1).max(90), held: v.boolean() },
+  args: { step: v.string().min(1).max(90), held: v.boolean(), patient: v.boolean().optional() },
   returns: v.array(v.string()),
   uses: [mark, released],
   handler: async (ctx, args) => {
     const notes = [secret];
     await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
     if (args.held) {
-      await until(async () => await ctx.runQuery(released, { step: args.step }));
+      await until(async () => await ctx.runQuery(released, { step: args.step }), args.patient);
     }
     await ctx.runMutation(mark, { step: \`\${args.step}: answered\` });
     return notes;
@@ -1243,12 +1251,14 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const bundle = await openFrame(builder, app);
 
     // Every look spent, never let go: the action's own error, never the
-    // platform's limit on nested calls or the call's deadline.
+    // platform's limit on nested calls or the call's deadline. Nobody lets
+    // it go, so it looks without waiting between looks (`patient: false`):
+    // it ends on its looks, not on the time a runner takes.
     const failed = await failureOf(
       called(builder, app, {
         lease: bundle.lease,
         contractId: "notes.slow",
-        input: { step: "never", held: true },
+        input: { step: "never", held: true, patient: false },
       })
     );
 

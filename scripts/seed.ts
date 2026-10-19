@@ -1,34 +1,38 @@
 /**
- * `vp run seed`: fills the local stack `vp run dev` runs with a demo
- * company (scripts/seed/company.ts), so every page has something to show:
- * people in teams and roles, engines with released workflows, 30 days of
- * their runs and apps over them (scripts/seed/screens.ts), Knowledge, and
+ * `vp run seed`: fills the local stack `vp run dev` runs with the
+ * prototype's demo company, Noordkade Finance (scripts/seed/company.ts),
+ * so every page has something to show and shows what the prototype does:
+ * people in teams and roles, the onboarding's roster and plan, the
+ * prototype's domains with the workflows core can run, 30 days of their
+ * runs and apps over them (scripts/seed/screens.ts), Knowledge, and
  * chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
  * in through the local fake IdP; only what no API does is written into the
  * local state directly: people's full names and when they joined, the
- * runs' times (scripts/seed/runs.ts), and chat transcripts
- * (scripts/seed/chats.ts).
+ * runs' times (scripts/seed/runs.ts), when the onboarding's plan began,
+ * and chat transcripts (scripts/seed/chats.ts).
  *
  * It only ever reaches localhost, and stops unless core there signs people
  * in through the fake IdP, which only a local stack does
  * (scripts/seed/local.ts). It can run again: it adds what is missing and
- * leaves the rest, and gives an engine runs only while it has none. To
+ * leaves the rest, and gives a domain runs only while it has none. To
  * start over, stop `vp run dev`, delete `apps/core/.wrangler/state`, and
  * start it again.
  */
 import { appErrors } from "@grasp-os/shared/apps";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
+import { workflowErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { chats, writeTranscript } from "./seed/chats.ts";
-import { people, teamNames } from "./seed/company.ts";
+import { people, roster, teamNames } from "./seed/company.ts";
 import type { Person, PersonKey, TeamName } from "./seed/company.ts";
 import { engines } from "./seed/engines.ts";
-import type { EngineSeed } from "./seed/engines.ts";
+import type { EngineSeed, WorkflowSeed } from "./seed/engines.ts";
 import { collections } from "./seed/knowledge.ts";
 import type { CollectionSeed } from "./seed/knowledge.ts";
 import {
@@ -307,11 +311,35 @@ const upgradeScreens = async (
   await adminSession.api.apps.versions.setCurrent(app.id, version);
 };
 
+/** Each workflow's owner, as the prototype names them, where it isn't so yet. */
+const setOwners = async (
+  owner: Session,
+  app: string,
+  workflows: readonly WorkflowSeed[],
+  sessions: ReadonlyMap<PersonKey, Session>
+): Promise<void> => {
+  const overview = await owner.api.workflows.overview();
+  for (const { id: workflow, owner: key } of workflows) {
+    const userId = key === undefined ? undefined : sessions.get(key)?.userId;
+    const summary = overview.find(
+      (listed) => listed.app === app && listed.workflow === workflow
+    );
+    if (
+      userId !== undefined &&
+      summary !== undefined &&
+      summary.owner.userId !== userId
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one change at a time
+      await owner.api.workflows.setOwner(app, workflow, userId);
+    }
+  }
+};
+
 /**
  * An engine: created by its owner with its workflows and apps, its version
  * made current by an admin, its apps approved where the seed says so,
- * shared with its teams, its deciders set, and, while it has none, its
- * runs. Returns its ID, and how many runs it got.
+ * shared with its teams, its workflows' owners and deciders set, and,
+ * while it has none, its runs. Returns its ID, and how many runs it got.
  */
 const seedEngine = async (
   seed: EngineSeed,
@@ -366,6 +394,7 @@ const seedEngine = async (
       await owner.api.apps.members.add(app.id, { type: "team", id, role });
     }
   }
+  await setOwners(owner, app.id, seed.workflows, sessions);
   for (const { id: workflow, deciders = {} } of seed.workflows) {
     for (const [param, team] of Object.entries(deciders)) {
       const teamId = teams.get(team);
@@ -406,14 +435,14 @@ const seedPermissions = async (
   const adminSession = sessionFor(sessions, admin.key);
   const wanted = [
     {
-      engine: "Service desk",
+      engine: "Issue-to-Resolution",
       by: "lisa",
       collection: "Procedures",
       binding: "PROCEDURES",
       grant: true,
     },
     {
-      engine: "Finance",
+      engine: "Purchase-to-Pay",
       by: "eva",
       collection: "Finance",
       binding: "HANDBOOK",
@@ -453,6 +482,64 @@ const seedPermissions = async (
   }
 };
 
+/**
+ * How many whole weeks before this one the programme began: the
+ * prototype's dashboard is in its fifth week of eight.
+ */
+const programmeWeeksAgo = 4;
+
+/** The Monday (UTC) `weeks` before this week's, as `YYYY-MM-DD`. */
+const mondayWeeksAgo = (weeks: number): string => {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const sinceMonday = (today.getUTCDay() + 6) % 7;
+  return new Date(today.getTime() - (sinceMonday + weeks * 7) * dayMs)
+    .toISOString()
+    .slice(0, 10);
+};
+
+/**
+ * The onboarding, as an admin sets it up: who works where, and the plan
+ * for the interviews. Core plans them from today on, so a plan the seed
+ * saves is then moved back in the Onboarding object's state, to the
+ * programme's week the prototype shows. Without the agreements, which
+ * only Grasp's staff record, no link opens or goes out. Returns whether
+ * it set anything up.
+ */
+const seedOnboarding = async (adminSession: Session): Promise<boolean> => {
+  const { onboarding } = adminSession.api;
+  const view = await onboarding.view();
+  if (view.roster === null) {
+    await onboarding.saveRoster(roster());
+  }
+  if (view.plan !== null) {
+    return view.roster === null;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  await onboarding.savePlan({ start: today });
+  // A plan is never moved once saved, a developer's own included, so a
+  // move that fails says so rather than leaving week one unnoticed.
+  try {
+    const state = localObject("Onboarding", "onboarding", "1");
+    try {
+      state.prepare("UPDATE onboarding SET plan = ? WHERE id = 1").run(
+        JSON.stringify({
+          start: mondayWeeksAgo(programmeWeeksAgo),
+          days: planDays.usual,
+        })
+      );
+    } finally {
+      state.close();
+    }
+  } catch (error) {
+    throw new Error(
+      `The onboarding's plan was saved from today, but couldn't be moved back to the programme's fifth week; start over to try again (${error instanceof Error ? error.message : String(error)})`,
+      { cause: error }
+    );
+  }
+  return true;
+};
+
 /** The chats, each in its person's Workspace object. */
 const seedChats = async (
   sessions: ReadonlyMap<PersonKey, Session>
@@ -485,6 +572,13 @@ const main = async (): Promise<void> => {
   try {
     console.info(`${people.length} people in ${teams.size} teams`);
 
+    const planned = await seedOnboarding(sessionFor(sessions, admin.key));
+    console.info(
+      planned
+        ? "The onboarding's roster and plan"
+        : "The onboarding has its roster and plan already"
+    );
+
     const collectionIds = new Map<string, string>();
     for (const seed of collections) {
       // oxlint-disable-next-line no-await-in-loop -- one collection at a time
@@ -498,18 +592,20 @@ const main = async (): Promise<void> => {
       // oxlint-disable-next-line no-await-in-loop -- one engine at a time
       const { id, runs } = await seedEngine(seed, sessions, teams);
       engineIds.set(seed.name, id);
-      console.info(
-        runs === 0
-          ? `Engine ${seed.name}: has its runs already`
-          : `Engine ${seed.name}: ${runs} runs over the last 30 days`
-      );
+      let ran = `${runs} runs over the last 30 days`;
+      if (seed.workflows.length === 0) {
+        ran = "no workflows yet";
+      } else if (runs === 0) {
+        ran = "has its runs already";
+      }
+      console.info(`Domain ${seed.name}: ${ran}`);
     }
     await seedPermissions(sessions, engineIds, collectionIds);
 
     const created = await seedChats(sessions);
     console.info(`${created} new chats`);
     console.info(
-      `Done. Sign in at http://localhost:5173 as ${admin.email} (${admin.name}), or as anyone in scripts/seed/company.ts.`
+      `Done. Sign in at http://localhost:5173 as ${admin.email} (${admin.name}), or as any of its members (people in scripts/seed/company.ts).`
     );
   } finally {
     for (const session of sessions.values()) {
@@ -523,7 +619,11 @@ try {
   await main();
 } catch (error) {
   // An App or Knowledge error says what core refused, in its own words.
-  const coded = appErrors.codeOf(error) ?? knowledgeErrors.codeOf(error);
+  const coded =
+    appErrors.codeOf(error) ??
+    knowledgeErrors.codeOf(error) ??
+    onboardingErrors.codeOf(error) ??
+    workflowErrors.codeOf(error);
   console.error(
     `The seed stopped${coded === undefined ? "" : ` (${coded})`}: ${error instanceof Error ? error.message : String(error)}`
   );
