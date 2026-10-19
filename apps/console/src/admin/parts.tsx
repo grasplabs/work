@@ -4,12 +4,16 @@
  */
 import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
+  LinkState,
   OrgKnowledge,
+  PersonView,
   Stage,
   StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Progress } from "@grasp-os/ui/components/progress";
 import { cn } from "@grasp-os/ui/lib/utils";
+import { CheckIcon } from "lucide-react";
 import { Fragment } from "react";
 import type { ReactNode } from "react";
 
@@ -96,6 +100,14 @@ export const KnowledgeDots = ({
   );
 };
 
+/** Something that is in place: a check and a word, in the colour of agreed. */
+export const Done = ({ children }: { children: ReactNode }) => (
+  <span className="text-muted-foreground flex items-center gap-1.5">
+    <CheckIcon aria-hidden className="text-status-agreed size-4 flex-none" />
+    {children}
+  </span>
+);
+
 /**
  * A titled panel of a section: its title, what it shows under it, and
  * beside them what can be done there (`action`); where there is no room
@@ -125,6 +137,27 @@ export const Panel = ({
     </div>
     {children}
   </section>
+);
+
+/** One row of a panel: what it is and why on the left, where it stands on the right. */
+export const PanelRow = ({
+  label,
+  description,
+  children,
+}: {
+  label: string;
+  description?: string;
+  children: ReactNode;
+}) => (
+  <div className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <span>{label}</span>
+      {description === undefined ? null : (
+        <p className="text-muted-foreground">{description}</p>
+      )}
+    </div>
+    <div className="flex flex-none sm:w-64 sm:justify-end">{children}</div>
+  </div>
 );
 
 /**
@@ -187,7 +220,7 @@ export const Figure = ({
 }: {
   label: string;
   value: ReactNode;
-  sub?: string;
+  sub?: ReactNode;
   ring?: { value: number; of: number };
   attention?: boolean;
   /** Where it stands in its grid. */
@@ -223,6 +256,95 @@ export const Figure = ({
       </span>
     )}
   </div>
+);
+
+/** The first letters of a name's capitalised words, at most two: "Anna de Vries" is "AV". */
+const initialsOf = (name: string): string =>
+  name
+    .split(" ")
+    .filter(
+      (part) => part !== "" && part.startsWith(part.charAt(0).toUpperCase())
+    )
+    .map((part) => part.charAt(0))
+    .slice(0, 2)
+    .join("");
+
+/** Someone as the first letters of their name, in a circle. */
+export const Initials = ({ name }: { name: string }) => (
+  <Avatar size="sm">
+    <AvatarFallback>
+      {initialsOf(name) || name.charAt(0).toUpperCase()}
+    </AvatarFallback>
+  </Avatar>
+);
+
+/** How a person shows as a dot: talked, started, has not talked, or has no link yet. */
+export type DotMark = "talked" | "started" | "not" | "none";
+
+export const markOf = (state: LinkState): DotMark => {
+  if (state === "completed") {
+    return "talked";
+  }
+  if (state === "progress" || state === "incomplete") {
+    return "started";
+  }
+  return state === "waiting" ? "none" : "not";
+};
+
+const dot: Record<DotMark, string> = {
+  talked: "bg-foreground",
+  started: "bg-muted-foreground/60",
+  not: "bg-border",
+  none: "border border-border",
+};
+
+export const Dot = ({ mark }: { mark: DotMark }) => (
+  <span
+    aria-hidden
+    className={cn("size-2 flex-none rounded-full", dot[mark])}
+  />
+);
+
+const dotOrder: readonly DotMark[] = ["talked", "started", "not", "none"];
+
+/** A team as dots, one a person: who talked, who started, who has not, who has no link yet. */
+export const PeopleDots = ({
+  people,
+  label,
+}: {
+  people: readonly PersonView[];
+  label: string;
+}) => (
+  <span className="flex flex-wrap gap-1">
+    <span className="sr-only">{label}</span>
+    {people
+      .toSorted(
+        (a, b) =>
+          dotOrder.indexOf(markOf(a.state)) - dotOrder.indexOf(markOf(b.state))
+      )
+      .map((each) => (
+        <Dot key={each.person.id} mark={markOf(each.state)} />
+      ))}
+  </span>
+);
+
+const dotLegend: readonly [DotMark, string][] = [
+  ["talked", "Talked"],
+  ["started", "Started"],
+  ["not", "Has not talked"],
+  ["none", "No link yet"],
+];
+
+/** What the dots mean, in the same marks. */
+export const DotLegend = () => (
+  <ul className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+    {dotLegend.map(([mark, label]) => (
+      <li className="flex items-center gap-1.5" key={mark}>
+        <Dot mark={mark} />
+        {label}
+      </li>
+    ))}
+  </ul>
 );
 
 /**
