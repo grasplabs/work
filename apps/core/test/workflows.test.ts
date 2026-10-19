@@ -587,9 +587,9 @@ ${mailStep("after")}`,
         { extract: 1 }
       ),
     });
-    // Options that may replace the binding can't be read either, and a
+    // Options that may replace the binding can't be read either; a
     // workflow whose context can't be read (\`env\` kept outside a step)
-    // has steps no one can read.
+    // is still read by its runner.
     const spread = await activating({
       ...own,
       ...workflowFiles(
@@ -612,7 +612,7 @@ ${mailStep("after")}`,
         `  const kept = env.MAIL;
   return await step.llm("extract", {
     description: "Read the total",
-    binding: "extractor",
+    binding: "missing",
     instructions: String(kept),
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -690,7 +690,7 @@ ${mailStep("after")}`,
       unreadable: {
         code: "workflow.model_undeclared",
         steps: [
-          'workflows/reader.ts:5 An AI step of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
+          'workflows/reader.ts:5 AI step "extract" of workflow "reader" goes through "missing"',
         ],
       },
       mentioned: { code: "ok", steps: [] },

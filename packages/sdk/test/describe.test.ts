@@ -872,7 +872,7 @@ describe(aiStepCalls, () => {
     });
   });
 
-  it("counts each llm call of a workflow whose context it can't read, and no mention in text", () => {
+  it("reads a workflow whose context it can't read by its runner, its first parameter, and nothing else of the name", () => {
     expect({
       calls: bindings(
         workflowSource(`const kept = env; ${llm("reader")}`, "step, { env }")
@@ -883,17 +883,25 @@ describe(aiStepCalls, () => {
           "step, { env }"
         )
       ),
-      text: bindings(
+      // Data of that name, and text, are no AI step.
+      data: bindings(
         workflowSource(
-          'const kept = env; // llm\nawait step.do("x", { description: "llm" }, async () => 1);',
-          "step, { env }"
+          'await step.do("x", { description: "llm" }, async () => context.input.llm); // llm',
+          "step, context"
+        )
+      ),
+      // The switch expression is the runner's, though a case declares one.
+      discriminant: bindings(
+        workflowSource(
+          `switch (await step.llm("read", { binding: "first" })) { default: let step = 1; void step; }`
         )
       ),
       unparsed: aiStepCalls("export default ("),
     }).toStrictEqual({
-      calls: ["null:null"],
+      calls: ["read:reader"],
       kept: ["null:null", "null:null"],
-      text: [],
+      data: [],
+      discriminant: ["read:first"],
       unparsed: null,
     });
   });

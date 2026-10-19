@@ -1506,36 +1506,35 @@ const aiStepCallOf = (
 };
 
 /**
- * Each read of an `llm` member in `source` (called, optionally called, or
- * kept to call later), as an AI step whose model can't be read: what is
- * left to go by when the workflow's context can't be read. Comments and
- * strings aren't reads. Null when it doesn't parse.
+ * The workflow function of `source` and the name it takes its runner by
+ * (`step`), read as leniently as the code allows: when its context can't
+ * be read (`env` kept outside a step, say), from its first parameter.
+ * Undefined when there is no such name to go by: code that doesn't parse,
+ * isn't written with the SDK's `workflow`, or destructures its runner.
  */
-const llmCallsIn = (source: string): AiStepCall[] | null => {
-  let file: Node;
+const runnerOf = (
+  source: string
+): { run: ArrowFunctionExpression; step: string } | undefined => {
   try {
-    file = parseModule(source);
+    const { run, bindings } = readContext(source);
+    return bindings.step === undefined
+      ? undefined
+      : { run, step: bindings.step };
+  } catch (error) {
+    if (!(error instanceof WorkflowError)) {
+      throw error;
+    }
+  }
+  try {
+    const { run } = findWorkflowFunction(parseModule(source));
+    const [first] = run.params;
+    return first?.type === "Identifier" ? { run, step: first.name } : undefined;
   } catch (error) {
     if (error instanceof WorkflowError) {
-      return null;
+      return undefined;
     }
     throw error;
   }
-  const calls: AiStepCall[] = [];
-  visit(file, (node) => {
-    if (
-      (node.type === "MemberExpression" ||
-        node.type === "OptionalMemberExpression") &&
-      nameOf(node.property) === "llm"
-    ) {
-      calls.push({
-        name: null,
-        binding: null,
-        line: node.loc?.start.line ?? 0,
-      });
-    }
-  });
-  return calls;
 };
 
 /**
@@ -1545,25 +1544,16 @@ const llmCallsIn = (source: string): AiStepCall[] | null => {
  * in a variable, passed on, a computed method) may take one too, through
  * a model no one can read: it counts as an AI step with no `binding`.
  * When the workflow's context can't be read (`env` kept outside a step,
- * say), each call of an `llm` method in its code counts as such a step;
- * code that hides even that name is refused on each attempt by the host.
- * Null when the code doesn't parse, which its build refuses.
+ * say), its runner is still its first parameter (`runnerOf`). Null when
+ * there is no runner to go by: code that hides it is refused on each
+ * attempt by the host, whatever this reads.
  */
 export const aiStepCalls = (source: string): AiStepCall[] | null => {
-  let context: ReturnType<typeof readContext>;
-  try {
-    context = readContext(source);
-  } catch (error) {
-    if (error instanceof WorkflowError) {
-      return llmCallsIn(source);
-    }
-    throw error;
+  const runner = runnerOf(source);
+  if (runner === undefined) {
+    return null;
   }
-  const { run, bindings } = context;
-  const { step } = bindings;
-  if (step === undefined) {
-    return [];
-  }
+  const { run, step } = runner;
   const shadowing = scopesDeclaring(run.body, step);
   const calls: AiStepCall[] = [];
   visit(run.body, (node, ancestors) => {
@@ -1577,8 +1567,11 @@ export const aiStepCalls = (source: string): AiStepCall[] | null => {
     // The nearest scope around it that declares the name decides what it
     // is: one inside the workflow function is another variable; the
     // function's own body declaring it again is one no one can read.
-    const scope = ancestors.findLast(({ node: above }) =>
-      shadowing.has(above)
+    // A case's declarations are the cases', not the switch expression's.
+    const scope = ancestors.findLast(
+      ({ node: above, key }) =>
+        shadowing.has(above) &&
+        !(above.type === "SwitchStatement" && key === "discriminant")
     )?.node;
     if (scope !== undefined && scope !== run.body) {
       return;
