@@ -98,7 +98,13 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.resource_unavailable":
     "This workflow doesn't exist or was deleted.",
   "workflow.name_taken":
-    "A workflow already has this name, or had it: names aren't reused.",
+    "A workflow already has this name, or had it and an admin hasn't released it.",
+  "workflow.name_unreleasable":
+    "Only the name of a deleted workflow can be released.",
+  "workflow.name_pinned":
+    "Something still names a version of the deleted workflow: another workflow, a trigger, an App binding or a run that hasn't ended. Its name can be released once nothing does.",
+  "workflow.version_taken":
+    "A workflow that had this name before published this version, and its callers may still name it: publish another version.",
   "workflow.definition_invalid":
     "The workflow definition doesn't pass the grasp-open-workflow/1 profile.",
   "workflow.identity_mismatch":
@@ -849,6 +855,13 @@ export interface WorkflowResourcesApi {
   unshare: (id: string, input: unknown) => Promise<void>;
   members: (id: string) => Promise<WorkflowMember[]>;
   delete: (id: string) => Promise<void>;
+  /**
+   * Releases the name of a deleted workflow, so a new workflow may take
+   * it; for the organization's admins. Refused while anything still names
+   * a version of it (`workflow.name_pinned`). Its old contract keys stay
+   * unanswered: no workflow publishes a version it published.
+   */
+  releaseName: (name: string) => Promise<void>;
   /**
    * Starts an exact version of a workflow the caller has a role in, acting
    * for them (`workflowStartSchema`): its admitted receipt.

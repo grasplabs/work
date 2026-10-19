@@ -8,13 +8,22 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import {
+  bindWorkflowToApp,
+  unbindWorkflowFromApp,
+} from "../src/app-workflow-bindings.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import {
+  createTriggerResource,
+  deleteTriggerResource,
+} from "../src/trigger-resources.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
   getWorkflowResource,
   listWorkflowResources,
   publishWorkflowVersion,
+  releaseWorkflowName,
   shareWorkflowResource,
   unshareWorkflowResource,
   workflowDefinition,
@@ -1332,5 +1341,264 @@ describe("creating workflows", () => {
         limits: configured.limits,
       };
     }
+  });
+});
+
+/** The audit events about workflow `id` of `action`, by their detail. */
+const eventsOf = async (action: string, id: string): Promise<unknown[]> => {
+  const events = await allEvents();
+  return events
+    .filter((event) => event.action === action && event.target?.id === id)
+    .map(({ detail }) => detail);
+};
+
+/** What writing `statement` for row `id` came to: "ok", or its error. */
+const written = async (statement: string, id: string): Promise<string> =>
+  await outcome(env.DB.prepare(statement).bind(id).run());
+
+/** A deleted workflow of `by`'s that published `versions`, by name. */
+const deletedWorkflow = async (by: Acting, versions = ["1.0.0"]) => {
+  const workflow = await workflowOf(by, "gone");
+  let basedOn: number | null = null;
+  for (const version of versions) {
+    // oxlint-disable-next-line no-await-in-loop -- one publication after another
+    const published = await publish(
+      by,
+      workflow.id,
+      definitionOf({ name: workflow.name, version }),
+      basedOn
+    );
+    basedOn = published.version;
+  }
+  await deleteWorkflowResource(env, by, workflow.id);
+  return workflow;
+};
+
+describe("releasing a deleted workflow's name", () => {
+  it("lets an admin give it to a new workflow, which is another workflow", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const old = await deletedWorkflow(ada);
+    await expect(
+      outcome(createWorkflowResource(env, bob, old.name))
+    ).resolves.toBe("workflow.name_taken");
+    await releaseWorkflowName(env, admin, old.name);
+    const taken = await createWorkflowResource(env, bob, old.name);
+    // Released again once taken: it is a live workflow's now.
+    expect({
+      sameId: taken.id === old.id,
+      old: await outcome(getWorkflowResource(env, ada, old.id)),
+      again: await outcome(releaseWorkflowName(env, admin, old.name)),
+      released: await eventsOf("workflow.name.released", old.id),
+    }).toStrictEqual({
+      sameId: false,
+      old: "workflow.resource_unavailable",
+      again: "workflow.name_unreleasable",
+      released: [{ name: old.name }],
+    });
+  });
+
+  it("records a release once: releasing a released name nobody took changes nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const old = await deletedWorkflow(ada);
+    await releaseWorkflowName(env, admin, old.name);
+    await releaseWorkflowName(env, admin, old.name);
+    await expect(
+      eventsOf("workflow.name.released", old.id)
+    ).resolves.toHaveLength(1);
+  });
+
+  it("releases only a deleted workflow's name", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const live = await workflowOf(ada);
+    expect({
+      live: await outcome(releaseWorkflowName(env, admin, live.name)),
+      none: await outcome(releaseWorkflowName(env, admin, `never-${unique()}`)),
+      invalid: await outcome(releaseWorkflowName(env, admin, "Not A Name")),
+    }).toStrictEqual({
+      live: "workflow.name_unreleasable",
+      none: "workflow.name_unreleasable",
+      invalid: "workflow.name_unreleasable",
+    });
+  });
+
+  it("is for the organization's admins only, never Grasp staff", async () => {
+    const ada = await person("builder");
+    const old = await deletedWorkflow(ada);
+    const tries = await Promise.all(
+      [
+        ada,
+        await person("user"),
+        await person("builder"),
+        await person("admin", [], true),
+      ].map(async (by) => await outcome(releaseWorkflowName(env, by, old.name)))
+    );
+    expect({
+      tries,
+      taken: await outcome(createWorkflowResource(env, ada, old.name)),
+    }).toStrictEqual({
+      tries: [
+        "role.forbidden",
+        "role.forbidden",
+        "role.forbidden",
+        "role.forbidden",
+      ],
+      taken: "workflow.name_taken",
+    });
+  });
+
+  it("leaves the old workflow's contract keys unanswered: no workflow publishes its versions again", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const mallory = await person("builder");
+    const old = await deletedWorkflow(ada, ["1.0.0", "1.1.0"]);
+    await releaseWorkflowName(env, admin, old.name);
+    const taken = await createWorkflowResource(env, mallory, old.name);
+    const again = await Promise.all(
+      ["1.0.0", "1.1.0"].map(
+        async (version) =>
+          await outcome(
+            publish(
+              mallory,
+              taken.id,
+              definitionOf({ name: old.name, version })
+            )
+          )
+      )
+    );
+    await publish(
+      mallory,
+      taken.id,
+      definitionOf({ name: old.name, version: "2.0.0" })
+    );
+    // Shared with Ada, whose draft still names the old workflow's key: it
+    // resolves to nothing, rather than to Mallory's workflow.
+    await shareWorkflowResource(env, mallory, taken.id, {
+      type: "person",
+      id: ada.userId,
+      role: "user",
+    });
+    const binder = await workflowOf(ada, "binder");
+    const codes = await problemCodes(
+      publish(ada, binder.id, bindingDefinition(binder.name, old.name))
+    );
+    expect({
+      again,
+      unresolved:
+        Array.isArray(codes) &&
+        codes.some(
+          (code) => typeof code === "string" && bindingProblem.test(code)
+        ),
+    }).toStrictEqual({
+      again: ["workflow.version_taken", "workflow.version_taken"],
+      unresolved: true,
+    });
+  });
+
+  it("is refused while any version of a live workflow binds it, old ones included, and audited", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    const parent = await workflowOf(ada, "parent");
+    await publish(ada, parent.id, bindingDefinition(parent.name, child.name));
+    // Its current version binds nothing: the child can be deleted, but the
+    // parent's first version still names it.
+    await publish(
+      ada,
+      parent.id,
+      definitionOf({ name: parent.name, version: "2.0.0" }),
+      1
+    );
+    await deleteWorkflowResource(env, ada, child.id);
+    const refused = await detailsOf(
+      releaseWorkflowName(env, admin, child.name)
+    );
+    const events = await eventsOf("workflow.name_release_refused", child.id);
+    await deleteWorkflowResource(env, ada, parent.id);
+    await releaseWorkflowName(env, admin, child.name);
+    expect({ refused, events }).toStrictEqual({
+      refused: { binders: 1, triggers: 0, appBindings: 0, liveRuns: 0 },
+      events: [
+        {
+          name: child.name,
+          reason: "workflow.name_pinned",
+          binders: 1,
+          triggers: 0,
+          appBindings: 0,
+          liveRuns: 0,
+        },
+      ],
+    });
+  });
+
+  it("is refused while an App binds it or a trigger starts it, whatever their grants", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    await publish(ada, workflow.id, definitionOf({ name: workflow.name }));
+    const app = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+    )
+      .bind(app, ada.userId, Date.now())
+      .run();
+    const binding = await bindWorkflowToApp(env, ada, workflow.id, {
+      app,
+      alias: "greet",
+      version: 1,
+    });
+    const trigger = await createTriggerResource(env, ada, {
+      kind: "system",
+      workflowId: workflow.id,
+      version: 1,
+      config: {},
+    });
+    // Neither holds a grant to start it, so neither keeps it from being
+    // deleted; both still name it.
+    await deleteWorkflowResource(env, ada, workflow.id);
+    const both = await detailsOf(
+      releaseWorkflowName(env, admin, workflow.name)
+    );
+    await deleteTriggerResource(env, ada, trigger.id);
+    const app_ = await detailsOf(
+      releaseWorkflowName(env, admin, workflow.name)
+    );
+    await unbindWorkflowFromApp(env, ada, binding.id);
+    await releaseWorkflowName(env, admin, workflow.name);
+    expect({ both, app: app_ }).toStrictEqual({
+      both: { binders: 0, triggers: 1, appBindings: 1, liveRuns: 0 },
+      app: { binders: 0, triggers: 0, appBindings: 1, liveRuns: 0 },
+    });
+  });
+
+  it("never lets a released workflow be live again, nor a live one's name be released, whatever writes it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const old = await deletedWorkflow(ada);
+    const live = await workflowOf(ada);
+    await releaseWorkflowName(env, admin, old.name);
+    const undeleted = await written(
+      "UPDATE workflow_resources SET deleted_at = NULL WHERE id = ?",
+      old.id
+    );
+    const unreleased = await written(
+      "UPDATE workflow_resources SET name_released_at = NULL WHERE id = ?",
+      old.id
+    );
+    const liveReleased = await written(
+      "UPDATE workflow_resources SET name_released_at = 1, name_released_by = 'x' WHERE id = ?",
+      live.id
+    );
+    expect({
+      undeleted: undeleted.includes("a released name stays released"),
+      unreleased: unreleased.includes("a released name stays released"),
+      liveReleased: liveReleased.includes(
+        "only a deleted workflow's name is released"
+      ),
+    }).toStrictEqual({ undeleted: true, unreleased: true, liveReleased: true });
   });
 });

@@ -48,6 +48,7 @@ import {
   eq,
   exists,
   inArray,
+  isNotNull,
   isNull,
   or,
   sql,
@@ -143,9 +144,14 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   publication, by ID, version and contract hash (`sdk_resource_bindings`
 //   and the manifest), so a later version of the target, or a new workflow
 //   given its name, never changes what a published version runs. Names
-//   are never reused, deleted workflows' included, and are global to the
-//   deployment: a builder learns whether a name exists (`workflow.name_taken`),
-//   nothing else of it. Refused creations are audited, and each person may
+//   are global to the deployment and aren't reused, deleted workflows'
+//   included, until an admin releases a deleted one's name
+//   (`releaseWorkflowName`, once nothing names any version of it). Even
+//   then its contract keys stay unanswered: no workflow publishes a
+//   semantic version it published, so a key never names two workflows
+//   and nobody's text binds the newcomer by naming an old key. A builder
+//   learns whether a name is held (`workflow.name_taken`), nothing else
+//   of it. Refused creations are audited, and each person may
 //   create at most the quota policy's `workflowResourcesPerPerson`,
 //   deleted ones included, so names can't be hoarded without trace.
 // - Disclosure through bindings. A binding resolves only to a workflow
@@ -1972,6 +1978,40 @@ const packagesOf = (
         modules: sealed.modules,
       };
 
+/**
+ * Refuses publishing semantic version `version` of a workflow named
+ * `name` when a workflow that held the name before, and whose name was
+ * released, published it (`workflow.version_taken`): the contract key
+ * `workspace/<name>/<version>` its binders named stays unanswered, never
+ * answered by another workflow. Released workflows are deleted, so they
+ * publish nothing more: what this reads can't change under the
+ * publication.
+ */
+const requireUnreleasedVersion = async (
+  env: Env,
+  name: string,
+  version: string
+): Promise<void> => {
+  const taken = await drizzle(env.DB)
+    .select({ id: workflowResources.id })
+    .from(workflowResources)
+    .innerJoin(
+      workflowResourceVersions,
+      eq(workflowResourceVersions.workflowResourceId, workflowResources.id)
+    )
+    .where(
+      and(
+        eq(workflowResources.name, name),
+        isNotNull(workflowResources.nameReleasedAt),
+        eq(workflowResourceVersions.definitionVersion, version)
+      )
+    )
+    .get();
+  if (taken !== undefined) {
+    throw workflowResourceErrors.create("workflow.version_taken");
+  }
+};
+
 /** `publishWorkflowVersion`, answering bindings as pinned. */
 const publish = async (
   env: Env,
@@ -2054,6 +2094,7 @@ const publish = async (
   if (existing !== undefined) {
     return existing;
   }
+  await requireUnreleasedVersion(env, workflow.name, checked.identity.version);
   if (basedOn !== workflow.currentVersion) {
     throw workflowResourceErrors.create("workflow.version_conflict");
   }
@@ -2947,4 +2988,144 @@ export const deleteWorkflowResource = async (
   // Never reached (the last try refuses whatever it finds), and never a
   // success if it were: a deletion only succeeds by its statement.
   throw workflowResourceErrors.create("workflow.resource_busy");
+};
+
+/**
+ * What still names a version of workflow `id`, by kind, as SQL counts: any
+ * version (not only the current one) of another live workflow that binds
+ * it, any live trigger whose current version starts it, any active App
+ * binding to it whatever its grants, and its runs that haven't ended.
+ * Stricter than what keeps it from being deleted (`boundSql`): releasing
+ * its name is about who answers its name, not who may start it.
+ */
+const namedBySql = (id: string) => sql`SELECT
+    (SELECT COUNT(DISTINCT bound.resource_id) FROM sdk_resource_bindings AS bound
+      JOIN workflow_resources AS binder ON binder.id = bound.resource_id
+      WHERE bound.kind = 'workflow' AND bound.target_id = ${id}
+        AND binder.id <> ${id} AND binder.deleted_at IS NULL) AS binders,
+    (SELECT COUNT(*) FROM trigger_resources AS trigger
+      JOIN trigger_resource_versions AS pinned
+        ON pinned.trigger_id = trigger.id AND pinned.version = trigger.current_version
+      WHERE pinned.workflow_resource_id = ${id}
+        AND trigger.deleted_at IS NULL) AS triggers,
+    (SELECT COUNT(*) FROM app_workflow_bindings AS pinned
+      WHERE pinned.workflow_resource_id = ${id}
+        AND pinned.status = 'active') AS app_bindings,
+    ${liveRunsSql(id)} AS live_runs`;
+
+/** What `namedBySql` counts, as a row. */
+const namedBySchema = z.object({
+  binders: z.number(),
+  triggers: z.number(),
+  app_bindings: z.number(),
+  live_runs: z.number(),
+});
+
+/**
+ * Releases `name`, the name of a deleted workflow, for `by`, an admin of
+ * the organization and not Grasp staff, so a new workflow may take it
+ * (GRA-562). Refused, and audited, while anything still names a version of
+ * that workflow (`namedBySql`: `workflow.name_pinned`, with what does,
+ * counted), and for a name no deleted workflow holds, a live one's
+ * included (`workflow.name_unreleasable`, the same for both). A name
+ * released already and taken by nobody since is released: that changes
+ * and records nothing.
+ *
+ * The old workflow keeps its row, its versions and its name in them: only
+ * the unique index skips it (migration 0103). Its contract keys never
+ * resolve again, to it or to another: a workflow may not publish a
+ * semantic version a released workflow of its name published
+ * (`requireUnreleasedVersion`), so `workspace/<name>/<semver>` never
+ * names two workflows, and nobody's draft binds the newcomer by naming an
+ * old key.
+ */
+export const releaseWorkflowName = async (
+  env: Env,
+  by: Acting,
+  name: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  if (!isAdmin(by.role)) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const parsed = workflowNameSchema.safeParse(name);
+  if (!parsed.success) {
+    throw workflowResourceErrors.create("workflow.name_unreleasable");
+  }
+  const db = drizzle(env.DB);
+  const holder = await db
+    .select({
+      id: workflowResources.id,
+      deletedAt: workflowResources.deletedAt,
+    })
+    .from(workflowResources)
+    .where(
+      and(
+        eq(workflowResources.name, parsed.data),
+        isNull(workflowResources.nameReleasedAt)
+      )
+    )
+    .get();
+  if (holder === undefined) {
+    const released = await db
+      .select({ id: workflowResources.id })
+      .from(workflowResources)
+      .where(eq(workflowResources.name, parsed.data))
+      .get();
+    if (released !== undefined) {
+      // Released already, and nobody took it since.
+      return;
+    }
+    throw workflowResourceErrors.create("workflow.name_unreleasable");
+  }
+  if (holder.deletedAt === null) {
+    throw workflowResourceErrors.create("workflow.name_unreleasable");
+  }
+  const releasedAt = new Date();
+  const [released] = await auditedBatch(env, db, [
+    db
+      .update(workflowResources)
+      .set({ nameReleasedAt: releasedAt, nameReleasedBy: by.userId })
+      .where(
+        and(
+          eq(workflowResources.id, holder.id),
+          isNotNull(workflowResources.deletedAt),
+          isNull(workflowResources.nameReleasedAt),
+          // Read as the release lands: a pin made since the check above
+          // keeps the name.
+          sql`(SELECT binders + triggers + app_bindings + live_runs
+            FROM (${namedBySql(holder.id)})) = 0`
+        )
+      )
+      .returning({ id: workflowResources.id }),
+    outboxedIfChanged(
+      db,
+      entry(by, "workflow.name.released", holder.id, { name: parsed.data })
+    ),
+  ]);
+  if (released.length > 0) {
+    return;
+  }
+  const counts = namedBySchema.parse(await db.get(namedBySql(holder.id)));
+  const pinned = {
+    binders: counts.binders,
+    triggers: counts.triggers,
+    appBindings: counts.app_bindings,
+    liveRuns: counts.live_runs,
+  };
+  if (Object.values(pinned).every((count) => count === 0)) {
+    // Released meanwhile by another admin.
+    return;
+  }
+  await auditedBatch(env, db, [
+    outboxed(
+      db,
+      entry(by, "workflow.name_release_refused", holder.id, {
+        name: parsed.data,
+        reason: "workflow.name_pinned",
+        ...pinned,
+      })
+    ),
+  ]);
+  throw workflowResourceErrors.create("workflow.name_pinned", pinned);
 };

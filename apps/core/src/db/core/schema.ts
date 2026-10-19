@@ -2613,15 +2613,16 @@ export const businessStoreMembers = sqliteTable(
  * person who created it, never by an App, so nothing done to an App
  * (sharing, grouping, deleting) reaches it. Its ID is minted at random by
  * the host; its name is fixed at creation and unique among every workflow
- * there has been, deleted ones included. `current_version` is the version
- * published last. A deleted workflow keeps its row, with `deleted_at` set,
- * and is never served again.
+ * there has been, deleted ones included, until an admin releases a deleted
+ * one's name (`name_released_at`, GRA-562): then a new workflow may take
+ * it. `current_version` is the version published last. A deleted workflow
+ * keeps its row, with `deleted_at` set, and is never served again.
  */
 export const workflowResources = sqliteTable(
   "workflow_resources",
   {
     id: text().primaryKey(),
-    name: text().notNull().unique(),
+    name: text().notNull(),
     ownerId: text("owner_id").notNull(),
     currentVersion: integer("current_version"),
     createdAt: timestamp("created_at").notNull(),
@@ -2640,10 +2641,30 @@ export const workflowResources = sqliteTable(
      * is refused if an edit landed in between (workflow-starts.ts).
      */
     configRevision: integer("config_revision").notNull().default(0),
+    /**
+     * When an admin released the name of this deleted workflow, and who: it
+     * no longer holds the name, which a new workflow may take. Set once, on
+     * a deleted row only, and never cleared; the row is never live again
+     * (migration 0103's triggers).
+     */
+    nameReleasedAt: timestamp("name_released_at"),
+    nameReleasedBy: text("name_released_by"),
   },
   (table) => [
     // Listing reads a person's own workflows by owner (`listWorkflowResources`).
     index("workflow_resources_owner_idx").on(table.ownerId),
+    // Unique among the workflows that hold their name: every one but those
+    // whose name was released.
+    uniqueIndex("workflow_resources_name_unique")
+      .on(table.name)
+      .where(sql`name_released_at IS NULL`),
+    // Every read by name, released holders' included
+    // (`requireUnreleasedVersion`, `releaseWorkflowName`): the partial
+    // index above serves only those that say `name_released_at IS NULL`.
+    index("workflow_resources_name_released").on(
+      table.name,
+      table.nameReleasedAt
+    ),
   ]
 );
 
