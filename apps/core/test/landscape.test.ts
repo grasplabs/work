@@ -72,6 +72,10 @@ const connected = async () => {
 
 const guid = (): string => crypto.randomUUID();
 
+/** The UTC day of `time`, as a sync names it. */
+const dayOfTime = (time: number): string =>
+  new Date(time).toISOString().slice(0, 10);
+
 /** An app's service principal, as Graph has it. */
 const appOf = (
   appId: string,
@@ -126,6 +130,77 @@ const syncOf = async (connectionId: string) =>
     .first<{ state: string; reads: number; reason: string | null }>();
 
 describe("the application landscape", () => {
+  it("ends a sync that can't go on, fails one whose reads fail past its day, and counts the last whole sync's grants meanwhile", async () => {
+    const app = appOf("app-steady", "Steady");
+    const people = Array.from({ length: 150 }, (_, at) => ({
+      id: guid(),
+      displayName: `Person ${String(at).padStart(3, "0")}`,
+    }));
+    await tenantHolds({
+      apps: [app],
+      people,
+      grants: people.map(({ id }) => grantOf(app, "User.Read", id)),
+      failing: false,
+    });
+    const { admin, connectionId } = await connected();
+    // Mid-morning, UTC: the steps below stay within their days.
+    const now = new Date();
+    now.setUTCHours(10, 0, 0, 0);
+    await syncLandscapes(env, now);
+    const counted = async () => {
+      const apps = await appsOf(admin.api, connectionId);
+      return apps.map(({ people: count }) => count);
+    };
+    // More people than one query binds: all listed.
+    const listed = await admin.api.landscape.people(connectionId, "app-steady");
+    // The next day Graph fails every read past the first page: tried
+    // again that day, failed the day after, and the last whole sync still
+    // counts meanwhile, not the page the failing one read.
+    await tenantHolds({ failing: "later" });
+    const nextDay = new Date(now.getTime() + dayMs);
+    await syncLandscapes(env, nextDay);
+    const failingSameDay = await syncOf(connectionId);
+    const countedMeanwhile = await counted();
+    await syncLandscapes(env, new Date(nextDay.getTime() + dayMs / 4));
+    await syncLandscapes(env, new Date(nextDay.getTime() + dayMs));
+    const failedNextDay = await syncOf(connectionId);
+    await tenantHolds({ failing: false });
+    // A sync left on a cursor connect won't read on from ends at once.
+    await env.DB.prepare(
+      "UPDATE landscape_syncs SET state = 'running', day = ?, cursor = ?, retry_at = NULL WHERE connection_id = ?"
+    )
+      .bind(
+        dayOfTime(nextDay.getTime() + 2 * dayMs),
+        "https://attacker.example/v1.0/oauth2PermissionGrants",
+        connectionId
+      )
+      .run();
+    await syncLandscapes(env, new Date(nextDay.getTime() + 2 * dayMs));
+    expect({
+      listed: listed.length,
+      failingSameDay,
+      countedMeanwhile,
+      failedNextDay,
+      cursorInvalid: await syncOf(connectionId),
+      countedAfter: await counted(),
+    }).toStrictEqual({
+      listed: 150,
+      failingSameDay: { state: "running", reads: 1, reason: null },
+      countedMeanwhile: [150],
+      failedNextDay: {
+        state: "failed",
+        reads: 1,
+        reason: "landscape.provider_failed",
+      },
+      cursorInvalid: {
+        state: "failed",
+        reads: 1,
+        reason: "landscape.cursor_invalid",
+      },
+      countedAfter: [150],
+    });
+  }, 120_000);
+
   it("keeps every scope a person granted an app across one sync's pages, and only those still granted in the next", async () => {
     const app = appOf("app-paged", "Paged");
     const filler = appOf("app-filler", "Filler");

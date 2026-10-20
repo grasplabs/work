@@ -27,7 +27,9 @@ export const landscapeClient = clients.microsoftLandscape;
  * Where tests set what Graph holds of the tenant's grants, for the
  * landscape's reads: POST `{ grants, apps, people }` as Graph has them
  * (`oauth2PermissionGrants`, `servicePrincipals`, `users`), or
- * `{ throttle: seconds }` to have the next grants read throttled.
+ * `{ throttle: seconds }` to have the next grants read throttled, or
+ * `{ failing: "all" }` to have every grants read fail, or `"later"` every
+ * page but the first, until `false`.
  */
 export const landscapeControlUrl = "https://graph-control.test/landscape";
 
@@ -115,12 +117,15 @@ const losesAnswer = (mailbox) => {
   return true;
 };
 const npm = (${npmRegistryFake.toString()})();
-const landscape = { grants: [], apps: [], people: [], throttle: null };
+const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const landscapeIds = (url) =>
   [...(url.searchParams.get("$filter") ?? "").matchAll(/'([^']*)'/gu)].map((match) => match[1]);
 /** Graph's grants of the tenant, a page at a time, with their apps and people. */
 const landscapeGraph = (url) => {
   if (url.pathname === "/v1.0/oauth2PermissionGrants") {
+    if (landscape.failing === "all" || (landscape.failing === "later" && url.searchParams.has("$skiptoken"))) {
+      return new Response("Unavailable", { status: 500 });
+    }
     if (landscape.throttle !== null) {
       const seconds = landscape.throttle;
       landscape.throttle = null;

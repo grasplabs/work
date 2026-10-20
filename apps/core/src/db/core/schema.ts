@@ -3530,9 +3530,16 @@ export const landscapeSyncs = sqliteTable("landscape_syncs", {
   }).notNull(),
   /** Why it failed, by code. */
   reason: text(),
-  /** Throttled: not read again before. */
+  /** Throttled, or failed for now: not read again before. */
   retryAt: timestamp("retry_at"),
   finishedAt: timestamp("finished_at"),
+  /**
+   * When the last sync that read everything (done, or partial at its
+   * bound) started: what its rows were last seen at counts as current. Kept
+   * through later syncs until one of them reads everything; null before
+   * any did.
+   */
+  currentSince: timestamp("current_since"),
 });
 
 /**

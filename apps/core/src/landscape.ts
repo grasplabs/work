@@ -71,6 +71,8 @@ import type { SessionCheck } from "./session-check.ts";
 //   twice by two cron runs at once.
 
 const dayMs = 24 * 60 * 60_000;
+/** Most IDs one query binds: D1 takes 100 bound parameters. */
+const oidsPerQuery = 90;
 /** How long a throttled sync waits when the provider doesn't say. */
 const defaultRetryMs = 15 * 60_000;
 
@@ -222,25 +224,30 @@ const syncToRun = async (
       ? undefined
       : current;
   }
-  const started: SyncRow = {
-    connectionId: connection.id,
+  const restart = {
     day: dayOf(now),
     startedAt: now,
     cursor: null,
     reads: 0,
-    state: "running",
+    state: "running" as const,
     reason: null,
     retryAt: null,
     finishedAt: null,
   };
-  // Only one cron run starts it: the other finds it running.
+  const started: SyncRow = {
+    ...restart,
+    connectionId: connection.id,
+    currentSince: current?.currentSince ?? null,
+  };
+  // Only one cron run starts it: the other finds it running. What counts
+  // as current stays the last whole sync's until this one ends.
   const inserted = await db
     .insert(landscapeSyncs)
     .values(started)
     .onConflictDoUpdate({
       target: landscapeSyncs.connectionId,
-      set: started,
-      setWhere: sql`${landscapeSyncs.state} <> 'running' AND ${landscapeSyncs.day} <> ${started.day}`,
+      set: restart,
+      setWhere: sql`${landscapeSyncs.state} <> 'running' AND ${landscapeSyncs.day} <> ${restart.day}`,
     })
     .run();
   return inserted.meta.changes > 0 ? started : undefined;
@@ -274,6 +281,52 @@ const syncedEntry = (sync: SyncRow, state: string, grants: number) => ({
 });
 
 /**
+ * What a read that failed leaves of `sync`: a throttled one waits as the
+ * provider says; one that can't go on fails; anything else is tried again
+ * later the same day, and failed once its day is over, so a sync never
+ * stays under way for good.
+ */
+const readFailed = async (
+  db: Db,
+  sync: SyncRow,
+  error: unknown,
+  now: Date
+): Promise<void> => {
+  const code = landscapeErrors.codeOf(error);
+  if (code === "landscape.throttled") {
+    const details = isExpectedError(error) ? error.details : undefined;
+    const wait = z.number().safeParse(details?.retryAfterMs).data;
+    await db
+      .update(landscapeSyncs)
+      .set({ retryAt: new Date(now.getTime() + (wait ?? defaultRetryMs)) })
+      .where(eq(landscapeSyncs.connectionId, sync.connectionId));
+    return;
+  }
+  if (
+    code === "landscape.not_found" ||
+    code === "landscape.inactive" ||
+    code === "landscape.cursor_invalid"
+  ) {
+    await ended(db, sync, "failed", code, now);
+    return;
+  }
+  // Anything else may pass: tried again later the same day, and failed
+  // once its day is over, so a sync never stays under way for good.
+  log.warn("landscape.read_failed", {
+    connectionId: sync.connectionId,
+    ...errorFields(error),
+  });
+  if (sync.day !== dayOf(now)) {
+    await ended(db, sync, "failed", code ?? "landscape.provider_failed", now);
+    return;
+  }
+  await db
+    .update(landscapeSyncs)
+    .set({ retryAt: new Date(now.getTime() + defaultRetryMs) })
+    .where(eq(landscapeSyncs.connectionId, sync.connectionId));
+};
+
+/**
  * Reads and writes one page of `sync`: false once it ended, or must wait.
  * The page and the cursor after it are written together, only if the
  * sync is still where it was read from.
@@ -292,21 +345,8 @@ const readPage = async (
       cursor: sync.cursor,
     });
   } catch (error) {
-    const code = landscapeErrors.codeOf(error);
-    if (code === "landscape.throttled") {
-      const details = isExpectedError(error) ? error.details : undefined;
-      const wait = z.number().safeParse(details?.retryAfterMs).data;
-      await db
-        .update(landscapeSyncs)
-        .set({ retryAt: new Date(now.getTime() + (wait ?? defaultRetryMs)) })
-        .where(eq(landscapeSyncs.connectionId, sync.connectionId));
-      return undefined;
-    }
-    if (code === "landscape.not_found" || code === "landscape.inactive") {
-      await ended(db, sync, "failed", code, now);
-      return undefined;
-    }
-    throw error;
+    await readFailed(db, sync, error, now);
+    return undefined;
   }
   // Another tenant's grants are never kept: the sync fails on them.
   if (tenant === undefined || read.tenant.toLowerCase() !== tenant) {
@@ -335,6 +375,8 @@ const readPage = async (
     state,
     retryAt: null,
     finishedAt: state === "running" ? null : now,
+    // Read whole: its rows are what is current from now on.
+    currentSince: state === "running" ? sync.currentSince : sync.startedAt,
   };
   const moved = db
     .update(landscapeSyncs)
@@ -344,6 +386,7 @@ const readPage = async (
       state,
       retryAt: null,
       finishedAt: next.finishedAt,
+      currentSince: next.currentSince,
     })
     .where(
       and(
@@ -447,19 +490,24 @@ export const syncLandscapes = async (env: Env, now: Date): Promise<void> => {
   }
 };
 
-/** When each connection's grants were last seen whole: what counts as current. */
+/**
+ * When each connection's grants were last read whole: what counts as
+ * current. A sync under way or failed leaves the last whole one's; before
+ * any, everything read so far counts.
+ */
 const currentSince = async (db: Db): Promise<Map<string, Date>> => {
-  const syncs = await db.select().from(landscapeSyncs);
-  const since = new Map<string, Date>();
-  for (const { connectionId, state, startedAt } of syncs) {
-    // A sync under way hasn't seen everything yet: the last one did, as
-    // its rows still say; the first one counts what it has read so far.
-    since.set(
+  const syncs = await db
+    .select({
+      connectionId: landscapeSyncs.connectionId,
+      currentSince: landscapeSyncs.currentSince,
+    })
+    .from(landscapeSyncs);
+  return new Map(
+    syncs.map(({ connectionId, currentSince: since }) => [
       connectionId,
-      state === "running" ? new Date(startedAt.getTime() - dayMs) : startedAt
-    );
-  }
-  return since;
+      since ?? new Date(0),
+    ])
+  );
 };
 
 /** What may need a look at an app, each a reason. */
@@ -595,18 +643,19 @@ export class LandscapeRpc extends CoreRpcTarget implements LandscapeApi {
           )
         );
       const current = rows.filter(({ lastSeen }) => lastSeen >= since);
-      const signIns =
-        current.length === 0
-          ? []
-          : await db
-              .select({ userId: accounts.userId, oid: accounts.oid })
-              .from(accounts)
-              .where(
-                inArray(
-                  accounts.oid,
-                  current.map(({ personId }) => personId)
-                )
-              );
+      // A page of people at a time, within D1's bound parameters.
+      const signIns: { userId: string; oid: string | null }[] = [];
+      for (let start = 0; start < current.length; start += oidsPerQuery) {
+        const page = current
+          .slice(start, start + oidsPerQuery)
+          .map(({ personId }) => personId);
+        // oxlint-disable-next-line no-await-in-loop -- one bounded page after another
+        const found = await db
+          .select({ userId: accounts.userId, oid: accounts.oid })
+          .from(accounts)
+          .where(inArray(accounts.oid, page));
+        signIns.push(...found);
+      }
       const users = new Map(signIns.map(({ oid, userId }) => [oid, userId]));
       return current
         .map((row) => ({
