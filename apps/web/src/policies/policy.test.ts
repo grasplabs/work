@@ -37,6 +37,7 @@ const app = (
   blocked: false,
   flagged: false,
   policySource: null,
+  discovered: null,
   ...patch,
 });
 

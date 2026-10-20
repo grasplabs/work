@@ -1,3 +1,8 @@
+import type {
+  LandscapeAppSummary,
+  LandscapeSyncStatus,
+} from "@grasp-os/shared/landscape";
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { HeldPermissions } from "../connections/connection-list.tsx";
@@ -5,7 +10,9 @@ import { loadIntegrations } from "../connections/integrations-data.ts";
 import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { CoreConnection } from "../core-connection.ts";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { discoveredAppId } from "./landscape.ts";
 import type { AppEngine, LandscapeApp } from "./landscape.ts";
 
 // Where the Landscape's apps come from. The prototype's are V1 demo
@@ -80,7 +87,51 @@ const appOf = (
     blocked: false,
     flagged: false,
     policySource: null,
+    discovered: null,
   };
+};
+
+/**
+ * An app found in the identity provider's grants (core's landscape): its
+ * publisher as its vendor, and the people who granted it access as its
+ * users. Its name is the app's own owner's, shown only as text.
+ */
+export const discoveredAppOf = (app: LandscapeAppSummary): LandscapeApp => ({
+  id: discoveredAppId(app.connectionId, app.appId),
+  name: app.name,
+  vendor: app.publisher,
+  category: null,
+  description: null,
+  aiType: "Unknown",
+  dataExposure: null,
+  dataExposureReason: "",
+  hosting: [],
+  users: app.people,
+  owner: null,
+  firstSeen: app.firstSeen,
+  connectionIds: [],
+  use: { sources: [], engines: [] },
+  blocked: false,
+  flagged: false,
+  policySource: null,
+  discovered: {
+    connectionId: app.connectionId,
+    appId: app.appId,
+    adminConsented: app.adminConsented,
+    scopes: app.scopes,
+    signals: app.signals,
+  },
+});
+
+/** The apps the landscape found, or none while core can't say. */
+export const loadDiscoveredApps = async (
+  core: CoreConnection
+): Promise<LandscapeApp[]> => {
+  const found = await loadFromCore(
+    core,
+    async (session) => await session.landscape.apps()
+  );
+  return found.state === "ready" ? found.data.map(discoveredAppOf) : [];
 };
 
 /** Every app the company uses, as far as Grasp knows: each integration with a connection. */
@@ -95,6 +146,11 @@ export const landscapeAppsOf = (
 /** What the Landscape's pages read: the apps, or why there are none. */
 export interface LandscapeData {
   apps: Loaded<LandscapeApp[]>;
+  /**
+   * The landscape's connections and their syncs, for admins, who connect
+   * one; null for anyone else.
+   */
+  syncs: Loaded<LandscapeSyncStatus[]> | null;
 }
 
 /**
@@ -106,25 +162,36 @@ export const loadLandscape = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<LandscapeData> => {
-  const { catalog, connections, held } = await loadIntegrations(
-    core,
-    identity,
-    { held: true }
+  const [{ catalog, connections, held }, discovered, syncs] = await Promise.all(
+    [
+      loadIntegrations(core, identity, { held: true }),
+      loadDiscoveredApps(core),
+      isAdmin(identity.role)
+        ? loadFromCore(
+            core,
+            async (session) => await session.landscape.status()
+          )
+        : null,
+    ]
   );
   if (connections.state !== "ready") {
-    return { apps: connections };
+    return { apps: connections, syncs };
   }
   const integrations = integrationsOf(
     catalog.state === "ready" ? catalog.data.entries : [],
     connections.data
   );
   return {
+    syncs,
     apps: {
       state: "ready",
-      data: landscapeAppsOf(
-        integrations,
-        held?.state === "ready" ? held.data : undefined
-      ),
+      data: [
+        ...landscapeAppsOf(
+          integrations,
+          held?.state === "ready" ? held.data : undefined
+        ),
+        ...discovered,
+      ],
     },
   };
 };

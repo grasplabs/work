@@ -313,6 +313,10 @@ msgstr "{count, plural, one {# more domain with no workflows to show} other {# m
 msgid "{count, plural, one {# package} other {# packages}}"
 msgstr "{count, plural, one {# package} other {# packages}}"
 
+#: src/landscape/usage-tab.tsx
+msgid "{count, plural, one {# person granted this app access for themselves.} other {# people granted this app access for themselves.}}"
+msgstr "{count, plural, one {# person granted this app access for themselves.} other {# people granted this app access for themselves.}}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# person} other {# people}}"
@@ -2435,6 +2439,10 @@ msgstr "Branch {name}"
 msgid "Breadcrumb"
 msgstr "Breadcrumb"
 
+#: src/landscape/landscape.ts
+msgid "Broad access granted by a person"
+msgstr "Broad access granted by a person"
+
 #: src/knowledge/frame.tsx
 msgid "Browse"
 msgstr "Browse"
@@ -3086,6 +3094,14 @@ msgstr "Connect accounts of their own"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
 msgstr "Connect another account"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra"
+msgstr "Connect Microsoft Entra"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra to read which apps people and admins granted access, once a day. Grasp only reads: no mail, files or sign-ins."
+msgstr "Connect Microsoft Entra to read which apps people and admins granted access, once a day. Grasp only reads: no mail, files or sign-ins."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what engines may do"
@@ -4233,6 +4249,10 @@ msgstr "Finance documents, invoices, billing exports, procurement records or for
 msgid "Financial data"
 msgstr "Financial data"
 
+#: src/landscape/connect-landscape.tsx
+msgid "Find the apps your people use"
+msgstr "Find the apps your people use"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Findings"
@@ -4256,6 +4276,10 @@ msgstr "First I need your staff list."
 #: src/landscape/landscape-overview.ts
 msgid "First seen"
 msgstr "First seen"
+
+#: src/landscape/landscape.ts
+msgid "First seen in the last 7 days."
+msgstr "First seen in the last 7 days."
 
 #: src/brain/atlas-overlays.tsx
 msgid "Fit and center"
@@ -4451,6 +4475,10 @@ msgstr "Google sign-in"
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "Grant {who}?"
+
+#: src/landscape/usage-tab.tsx
+msgid "Granted {scopes}. Last seen {lastSeen}."
+msgstr "Granted {scopes}. Last seen {lastSeen}."
 
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
@@ -5593,6 +5621,10 @@ msgstr "Mentioned"
 msgid "Messages"
 msgstr "Messages"
 
+#: src/landscape/landscape.ts
+msgid "Microsoft hasn't verified who publishes this app."
+msgstr "Microsoft hasn't verified who publishes this app."
+
 #: src/brain/brain.ts
 msgid "Microsoft sign-in"
 msgstr "Microsoft sign-in"
@@ -5826,6 +5858,11 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Never"
 
+#: src/landscape/landscape.ts
+msgctxt "an app first seen this week"
+msgid "New"
+msgstr "New"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -5900,6 +5937,10 @@ msgstr "Next week"
 #: src/routes/_shell.settings.members.tsx
 msgid "No"
 msgstr "No"
+
+#: src/landscape/landscape.ts
+msgid "No admin consent"
+msgstr "No admin consent"
 
 #: src/landscape/landscape.ts
 #: src/policies/policy.ts
@@ -6773,6 +6814,10 @@ msgstr "Online"
 msgid "Only admins can read the audit trail"
 msgstr "Only admins can read the audit trail"
 
+#: src/landscape/usage-tab.tsx
+msgid "Only admins see who they are."
+msgstr "Only admins see who they are."
+
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Only highlighted turns"
@@ -7199,6 +7244,10 @@ msgstr "People rejected {rejected} of {answered, plural, one {# answer} other {#
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
+
+#: src/landscape/landscape.ts
+msgid "People use it, and no admin approved it for everyone."
+msgstr "People use it, and no admin approved it for everyone."
 
 #: src/routes/_shell.policies.index.tsx
 msgid "People using them"
@@ -8683,6 +8732,10 @@ msgstr "Someone else"
 #: src/screens/screen-frame.tsx
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
+
+#: src/landscape/landscape.ts
+msgid "Someone gave it access to their mail, files, chats or the directory on their own."
+msgstr "Someone gave it access to their mail, files, chats or the directory on their own."
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
@@ -10303,6 +10356,10 @@ msgstr "Until this is resolved, no release that changes this store's tables can 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+
+#: src/landscape/landscape.ts
+msgid "Unverified publisher"
+msgstr "Unverified publisher"
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

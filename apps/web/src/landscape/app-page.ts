@@ -10,7 +10,8 @@ import { policyBook, policyToday } from "../policies/policies-data.ts";
 import { applyPolicy, findings } from "../policies/policy.ts";
 import { readAppAudit } from "./landscape-audit.ts";
 import type { AppAuditTrail } from "./landscape-audit.ts";
-import { landscapeAppsOf } from "./landscape-data.ts";
+import { discoveredAppOf, landscapeAppsOf } from "./landscape-data.ts";
+import { discoveredAppOfId } from "./landscape.ts";
 import type { LandscapeApp } from "./landscape.ts";
 
 // What an app's pages read, once for all its tabs: the app, as the
@@ -31,11 +32,55 @@ export interface AppPage {
 
 const adminsOnly: AppAudit = { state: "adminsOnly" };
 
+/**
+ * An app found in the identity provider's grants: its trail is that of the
+ * landscape connection it was read through, its syncs and who looked at
+ * who granted it access.
+ */
+const loadDiscoveredPage = async (
+  core: CoreConnection,
+  identity: Identity,
+  appId: string
+): Promise<AppPage> => {
+  const found = await loadFromCore(
+    core,
+    async (session) => await session.landscape.apps()
+  );
+  if (found.state !== "ready") {
+    return { app: found, audit: Promise.resolve(found) };
+  }
+  const summary = found.data
+    .map(discoveredAppOf)
+    .find(({ id }) => id === appId);
+  if (summary?.discovered === undefined || summary.discovered === null) {
+    return {
+      app: { state: "ready", data: null },
+      audit: Promise.resolve(adminsOnly),
+    };
+  }
+  const [app] = applyPolicy(
+    [summary],
+    findings(policyBook.rules, [summary], policyBook.exceptions, policyToday())
+  );
+  const { connectionId } = summary.discovered;
+  const audit = isAdmin(identity.role)
+    ? loadFromCore(
+        core,
+        async (session) =>
+          await readAppAudit(session, [{ id: connectionId, accountName: null }])
+      )
+    : Promise.resolve(adminsOnly);
+  return { app: { state: "ready", data: app ?? null }, audit };
+};
+
 export const loadAppPage = async (
   core: CoreConnection,
   identity: Identity,
   appId: string
 ): Promise<AppPage> => {
+  if (discoveredAppOfId(appId) !== undefined) {
+    return await loadDiscoveredPage(core, identity, appId);
+  }
   const { catalog, connections, held } = await loadIntegrations(
     core,
     identity,

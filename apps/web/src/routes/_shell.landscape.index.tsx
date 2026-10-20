@@ -34,6 +34,7 @@ import { AppMosaic } from "../landscape/app-mosaic.tsx";
 import { AppTable } from "../landscape/app-table.tsx";
 import type { Density } from "../landscape/app-table.tsx";
 import { ColumnsMenu } from "../landscape/columns-menu.tsx";
+import { ConnectLandscape } from "../landscape/connect-landscape.tsx";
 import { downloadCsv, fileDate } from "../landscape/download.ts";
 import { FilterMenu } from "../landscape/filter-menu.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
@@ -69,7 +70,7 @@ type ToolbarMenu = "filter" | "layout" | "columns";
 
 const LandscapePage = () => {
   const { t } = useLingui();
-  const { apps: loaded } = Route.useLoaderData();
+  const { apps: loaded, syncs } = Route.useLoaderData();
   const navigate = useNavigate();
   const view = Route.useSearch().view ?? "table";
   const [query, setQuery] = useState("");
@@ -112,6 +113,7 @@ const LandscapePage = () => {
           title={t`Landscape`}
         />
         <NotLoaded page={loaded} />
+        <ConnectLandscape syncs={syncs} />
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="w-64">

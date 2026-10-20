@@ -313,6 +313,10 @@ msgstr "{count, plural, one {# dominio más sin flujos de trabajo que mostrar} o
 msgid "{count, plural, one {# package} other {# packages}}"
 msgstr "{count, plural, one {# paquete} other {# paquetes}}"
 
+#: src/landscape/usage-tab.tsx
+msgid "{count, plural, one {# person granted this app access for themselves.} other {# people granted this app access for themselves.}}"
+msgstr "{count, plural, one {# persona dio acceso a esta app por su cuenta.} other {# personas dieron acceso a esta app por su cuenta.}}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# persona} other {# personas}}"
@@ -2435,6 +2439,10 @@ msgstr "Rama {name}"
 msgid "Breadcrumb"
 msgstr "Ruta de navegación"
 
+#: src/landscape/landscape.ts
+msgid "Broad access granted by a person"
+msgstr "Acceso amplio dado por una persona"
+
 #: src/knowledge/frame.tsx
 msgid "Browse"
 msgstr "Explorar"
@@ -3086,6 +3094,14 @@ msgstr "Conectar cuentas propias"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
 msgstr "Conectar otra cuenta"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra"
+msgstr "Conectar Microsoft Entra"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra to read which apps people and admins granted access, once a day. Grasp only reads: no mail, files or sign-ins."
+msgstr "Conecta Microsoft Entra para leer una vez al día a qué apps dieron acceso las personas y los administradores. Grasp solo lee: ni correo, ni archivos, ni inicios de sesión."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what engines may do"
@@ -4233,6 +4249,10 @@ msgstr "Documentos financieros, facturas, exportaciones de facturación, registr
 msgid "Financial data"
 msgstr "Datos financieros"
 
+#: src/landscape/connect-landscape.tsx
+msgid "Find the apps your people use"
+msgstr "Encuentra las apps que usa tu gente"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Hallazgos"
@@ -4256,6 +4276,10 @@ msgstr "Primero necesito tu lista de personal."
 #: src/landscape/landscape-overview.ts
 msgid "First seen"
 msgstr "Primera detección"
+
+#: src/landscape/landscape.ts
+msgid "First seen in the last 7 days."
+msgstr "Vista por primera vez en los últimos 7 días."
 
 #: src/brain/atlas-overlays.tsx
 msgid "Fit and center"
@@ -4451,6 +4475,10 @@ msgstr "Inicio de sesión de Google"
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "¿Conceder {who}?"
+
+#: src/landscape/usage-tab.tsx
+msgid "Granted {scopes}. Last seen {lastSeen}."
+msgstr "Concedido: {scopes}. Visto por última vez el {lastSeen}."
 
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
@@ -5593,6 +5621,10 @@ msgstr "Mencionadas"
 msgid "Messages"
 msgstr "Mensajes"
 
+#: src/landscape/landscape.ts
+msgid "Microsoft hasn't verified who publishes this app."
+msgstr "Microsoft no ha verificado quién publica esta app."
+
 #: src/brain/brain.ts
 msgid "Microsoft sign-in"
 msgstr "Inicio de sesión de Microsoft"
@@ -5826,6 +5858,11 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nunca"
 
+#: src/landscape/landscape.ts
+msgctxt "an app first seen this week"
+msgid "New"
+msgstr "Nueva"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -5900,6 +5937,10 @@ msgstr "La semana que viene"
 #: src/routes/_shell.settings.members.tsx
 msgid "No"
 msgstr "No"
+
+#: src/landscape/landscape.ts
+msgid "No admin consent"
+msgstr "Sin consentimiento de un administrador"
 
 #: src/landscape/landscape.ts
 #: src/policies/policy.ts
@@ -6773,6 +6814,10 @@ msgstr "En línea"
 msgid "Only admins can read the audit trail"
 msgstr "Solo los administradores pueden leer el registro de auditoría"
 
+#: src/landscape/usage-tab.tsx
+msgid "Only admins see who they are."
+msgstr "Solo los administradores ven quiénes son."
+
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Solo intervenciones destacadas"
@@ -7199,6 +7244,10 @@ msgstr "Se rechazaron {rejected} de {answered, plural, one {# respuesta} other {
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "La gente responde mejor cuando sabe por qué me pongo en contacto. He redactado un mensaje que puedes enviar tú mismo. Después elige el día en que empiezan las entrevistas."
+
+#: src/landscape/landscape.ts
+msgid "People use it, and no admin approved it for everyone."
+msgstr "La gente la usa y ningún administrador la aprobó para todos."
 
 #: src/routes/_shell.policies.index.tsx
 msgid "People using them"
@@ -8683,6 +8732,10 @@ msgstr "Otra persona"
 #: src/screens/screen-frame.tsx
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Otra persona inició sesión en este navegador, así que esta aplicación se detuvo. Vuelve a intentarlo para abrirla como la persona que ha iniciado sesión ahora."
+
+#: src/landscape/landscape.ts
+msgid "Someone gave it access to their mail, files, chats or the directory on their own."
+msgstr "Alguien le dio por su cuenta acceso a su correo, archivos, chats o al directorio."
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
@@ -10303,6 +10356,10 @@ msgstr "Hasta que se resuelva, ninguna versión que cambie las tablas de este al
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 msgstr "Hasta que se resuelva, ninguna versión que cambie las tablas de este almacén podrá hacerse actual, ni en este dominio ni en ningún otro que use el almacén. Ningún registro tiene la culpa, así que no hay nada que corregir: abandona el cambio para que el almacén vuelva a aceptar cambios."
+
+#: src/landscape/landscape.ts
+msgid "Unverified publisher"
+msgstr "Editor no verificado"
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

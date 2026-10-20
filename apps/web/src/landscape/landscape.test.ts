@@ -9,9 +9,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { integrationsOf } from "../connections/integrations.ts";
 import { tabOf } from "./landscape-app.ts";
-import { landscapeAppsOf } from "./landscape-data.ts";
+import { discoveredAppOf, landscapeAppsOf } from "./landscape-data.ts";
 import {
   defaultColumns,
+  discoveredAppOfId,
   landscapeCsv,
   matchesLandscape,
   moveColumn,
@@ -44,6 +45,7 @@ const app = (patch: Partial<LandscapeApp> & { id: string }): LandscapeApp => ({
   blocked: false,
   flagged: false,
   policySource: null,
+  discovered: null,
   ...patch,
 });
 
@@ -463,5 +465,59 @@ describe("the landscape's apps", () => {
         landscapeAppsOf(integrations, { permissions: [], appNames: new Map() }),
       ].map(([only]) => only?.use.engines)
     ).toStrictEqual([null, []]);
+  });
+
+  it("include those found in the identity provider's grants, by an address of their connection and client ID that names nothing else", () => {
+    const [found] = [
+      discoveredAppOf({
+        connectionId: "connection-entra",
+        appId: "11111111-2222-4333-8444-555555555555",
+        name: "Contoso CRM",
+        publisher: "Contoso Ltd",
+        verified: true,
+        firstSeen: "2026-10-01T08:00:00.000Z",
+        lastSeen: "2026-10-20T08:00:00.000Z",
+        people: 3,
+        adminConsented: true,
+        scopes: ["User.Read"],
+        signals: ["new_app"],
+      }),
+    ];
+    const id = found?.id ?? "";
+    expect({
+      found: {
+        id,
+        vendor: found?.vendor,
+        users: found?.users,
+        discovered: found?.discovered,
+      },
+      named: discoveredAppOfId(id),
+      tab: tabOf(`/landscape/${encodeURIComponent(id)}/usage`, id),
+      notFound: [
+        "native:microsoft",
+        "entra:connection-entra",
+        "entra::app",
+        "entra:connection:app:more",
+      ].map(discoveredAppOfId),
+    }).toStrictEqual({
+      found: {
+        id: "entra:connection-entra:11111111-2222-4333-8444-555555555555",
+        vendor: "Contoso Ltd",
+        users: 3,
+        discovered: {
+          connectionId: "connection-entra",
+          appId: "11111111-2222-4333-8444-555555555555",
+          adminConsented: true,
+          scopes: ["User.Read"],
+          signals: ["new_app"],
+        },
+      },
+      named: {
+        connectionId: "connection-entra",
+        appId: "11111111-2222-4333-8444-555555555555",
+      },
+      tab: "usage",
+      notFound: [undefined, undefined, undefined, undefined],
+    });
   });
 });

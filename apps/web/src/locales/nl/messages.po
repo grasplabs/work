@@ -313,6 +313,10 @@ msgstr "{count, plural, one {Nog # domein zonder workflows om te tonen} other {N
 msgid "{count, plural, one {# package} other {# packages}}"
 msgstr "{count, plural, one {# pakket} other {# pakketten}}"
 
+#: src/landscape/usage-tab.tsx
+msgid "{count, plural, one {# person granted this app access for themselves.} other {# people granted this app access for themselves.}}"
+msgstr "{count, plural, one {# persoon gaf deze app zelf toegang.} other {# mensen gaven deze app zelf toegang.}}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# persoon} other {# personen}}"
@@ -2435,6 +2439,10 @@ msgstr "Tak {name}"
 msgid "Breadcrumb"
 msgstr "Kruimelpad"
 
+#: src/landscape/landscape.ts
+msgid "Broad access granted by a person"
+msgstr "Ruime toegang gegeven door een persoon"
+
 #: src/knowledge/frame.tsx
 msgid "Browse"
 msgstr "Bladeren"
@@ -3086,6 +3094,14 @@ msgstr "Eigen accounts koppelen"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
 msgstr "Nog een account koppelen"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra"
+msgstr "Microsoft Entra koppelen"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Connect Microsoft Entra to read which apps people and admins granted access, once a day. Grasp only reads: no mail, files or sign-ins."
+msgstr "Koppel Microsoft Entra om eens per dag te lezen welke apps mensen en beheerders toegang gaven. Grasp leest alleen: geen mail, bestanden of aanmeldingen."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what engines may do"
@@ -4233,6 +4249,10 @@ msgstr "Financiële documenten, facturen, factuurexports, inkoopgegevens of prog
 msgid "Financial data"
 msgstr "Financiële gegevens"
 
+#: src/landscape/connect-landscape.tsx
+msgid "Find the apps your people use"
+msgstr "Vind de apps die je mensen gebruiken"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Bevindingen"
@@ -4256,6 +4276,10 @@ msgstr "Eerst heb ik je personeelslijst nodig."
 #: src/landscape/landscape-overview.ts
 msgid "First seen"
 msgstr "Voor het eerst gezien"
+
+#: src/landscape/landscape.ts
+msgid "First seen in the last 7 days."
+msgstr "Voor het eerst gezien in de afgelopen 7 dagen."
 
 #: src/brain/atlas-overlays.tsx
 msgid "Fit and center"
@@ -4451,6 +4475,10 @@ msgstr "Inloggen met Google"
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "{who} verlenen?"
+
+#: src/landscape/usage-tab.tsx
+msgid "Granted {scopes}. Last seen {lastSeen}."
+msgstr "Gegeven: {scopes}. Laatst gezien op {lastSeen}."
 
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
@@ -5593,6 +5621,10 @@ msgstr "Genoemd"
 msgid "Messages"
 msgstr "Berichten"
 
+#: src/landscape/landscape.ts
+msgid "Microsoft hasn't verified who publishes this app."
+msgstr "Microsoft heeft niet geverifieerd wie deze app uitgeeft."
+
 #: src/brain/brain.ts
 msgid "Microsoft sign-in"
 msgstr "Inloggen met Microsoft"
@@ -5826,6 +5858,11 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nooit"
 
+#: src/landscape/landscape.ts
+msgctxt "an app first seen this week"
+msgid "New"
+msgstr "Nieuw"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -5900,6 +5937,10 @@ msgstr "Volgende week"
 #: src/routes/_shell.settings.members.tsx
 msgid "No"
 msgstr "Nee"
+
+#: src/landscape/landscape.ts
+msgid "No admin consent"
+msgstr "Geen toestemming van een beheerder"
 
 #: src/landscape/landscape.ts
 #: src/policies/policy.ts
@@ -6773,6 +6814,10 @@ msgstr "Online"
 msgid "Only admins can read the audit trail"
 msgstr "Alleen beheerders kunnen de audittrail lezen"
 
+#: src/landscape/usage-tab.tsx
+msgid "Only admins see who they are."
+msgstr "Alleen beheerders zien wie dat zijn."
+
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Alleen gemarkeerde beurten"
@@ -7199,6 +7244,10 @@ msgstr "Mensen wezen {days, plural, one {de afgelopen dag} other {de afgelopen #
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "Mensen reageren beter als ze weten waarom ik contact opneem. Ik heb een bericht opgesteld dat je zelf kunt versturen. Kies daarna de dag waarop de gesprekken beginnen."
+
+#: src/landscape/landscape.ts
+msgid "People use it, and no admin approved it for everyone."
+msgstr "Mensen gebruiken hem, en geen beheerder keurde hem voor iedereen goed."
 
 #: src/routes/_shell.policies.index.tsx
 msgid "People using them"
@@ -8683,6 +8732,10 @@ msgstr "Iemand anders"
 #: src/screens/screen-frame.tsx
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Iemand anders heeft zich in deze browser aangemeld, dus deze app is gestopt. Probeer het opnieuw om hem te openen als de persoon die nu is aangemeld."
+
+#: src/landscape/landscape.ts
+msgid "Someone gave it access to their mail, files, chats or the directory on their own."
+msgstr "Iemand gaf hem op eigen houtje toegang tot mail, bestanden, chats of de directory."
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
@@ -10303,6 +10356,10 @@ msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wi
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in dit domein noch in een ander domein dat de opslag gebruikt. Geen enkel record is de oorzaak, dus er valt niets te herstellen: geef de wijziging op, zodat de opslag weer wijzigingen aanneemt."
+
+#: src/landscape/landscape.ts
+msgid "Unverified publisher"
+msgstr "Niet-geverifieerde uitgever"
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

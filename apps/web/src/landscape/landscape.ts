@@ -1,4 +1,5 @@
 import type { CatalogSource } from "@grasp-os/shared/connect";
+import type { LandscapeSignal } from "@grasp-os/shared/landscape";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, t } from "@lingui/core/macro";
@@ -46,6 +47,54 @@ export interface AppUse {
   engines: AppEngine[] | null;
 }
 
+/**
+ * What the identity provider's grants say of an app, as core's landscape
+ * keeps them: the connection they were read through, the app's client ID,
+ * and what may need a look at it.
+ */
+export interface DiscoveredApp {
+  connectionId: string;
+  appId: string;
+  adminConsented: boolean;
+  scopes: string[];
+  signals: LandscapeSignal[];
+}
+
+/** The address of an app found in the identity provider's grants. */
+export const discoveredAppId = (connectionId: string, appId: string): string =>
+  `entra:${connectionId}:${appId}`;
+
+/** The connection and client ID an address names, if it is a found app's. */
+export const discoveredAppOfId = (
+  id: string
+): { connectionId: string; appId: string } | undefined => {
+  const [kind, connectionId, appId, ...rest] = id.split(":");
+  return kind === "entra" &&
+    connectionId !== undefined &&
+    connectionId !== "" &&
+    appId !== undefined &&
+    appId !== "" &&
+    rest.length === 0
+    ? { connectionId, appId }
+    : undefined;
+};
+
+/** What each signal on a found app means, as a short label. */
+export const signalLabel: Record<LandscapeSignal, MessageDescriptor> = {
+  unverified_publisher: msg`Unverified publisher`,
+  person_high_privilege: msg`Broad access granted by a person`,
+  new_app: msg({ message: "New", context: "an app first seen this week" }),
+  no_admin_consent: msg`No admin consent`,
+};
+
+/** Why each signal on a found app is raised, for its row. */
+export const signalDescription: Record<LandscapeSignal, MessageDescriptor> = {
+  unverified_publisher: msg`Microsoft hasn't verified who publishes this app.`,
+  person_high_privilege: msg`Someone gave it access to their mail, files, chats or the directory on their own.`,
+  new_app: msg`First seen in the last 7 days.`,
+  no_admin_consent: msg`People use it, and no admin approved it for everyone.`,
+};
+
 /** One app in the landscape. */
 export interface LandscapeApp {
   /** Its integration's key (`native:microsoft`), as the address names it. */
@@ -75,6 +124,8 @@ export interface LandscapeApp {
   flagged: boolean;
   /** The rule that marked it. */
   policySource: string | null;
+  /** Found in the identity provider's grants; null for an integration. */
+  discovered: DiscoveredApp | null;
 }
 
 /** The two ways to look at the landscape: a table, or a mosaic of apps by category. */
