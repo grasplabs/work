@@ -68,6 +68,9 @@ const pastedFiles = (event: React.ClipboardEvent): File[] =>
     return file === null ? [] : [file];
   });
 
+/** The key code of a key an input method is handling (`keyCode` 229). */
+const imeKeyCode = 229;
+
 /**
  * Sends `form` as its send button would: not while the button is off, nor
  * while an answer is coming and it stops that answer instead; the button
@@ -106,7 +109,11 @@ function PromptInputTextarea({
       event.key === "Enter" &&
       !event.shiftKey &&
       !composing &&
-      !event.nativeEvent.isComposing
+      !event.nativeEvent.isComposing &&
+      // Safari ends the composition before the Enter that confirms it, and
+      // marks that Enter with the input method's key code.
+      // oxlint-disable-next-line typescript/no-deprecated -- the one signal Safari gives
+      event.nativeEvent.keyCode !== imeKeyCode
     ) {
       event.preventDefault();
       send(event.currentTarget.form);
