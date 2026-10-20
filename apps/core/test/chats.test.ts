@@ -658,34 +658,42 @@ describe("chats", () => {
     ]);
   });
 
-  it("show what each reply used as the model gateway counted it: its tokens, its cost and the model's window", async () => {
-    const ann = await person();
-    await answering(ann, says("Hi, Ann."));
-    const chat = await ann.chats.create("Usage");
-    const follower = await follow(ann.chats, chat.id);
+  it.each([
+    ["answered", says("Hi, Ann.")],
+    // Breaks off with its prompt counted and not its answer: the gateway
+    // estimates the answer's tokens, and so does the reply.
+    ["broken off", { ...says("Hi, Ann, here is a longer answer."), cut: 12 }],
+  ])(
+    "show what each reply used as the model gateway counted it, %s: its tokens, its cost and the model's window",
+    async (_case, answer) => {
+      const ann = await person();
+      await answering(ann, answer);
+      const chat = await ann.chats.create("Usage");
+      const follower = await follow(ann.chats, chat.id);
 
-    await ann.chats.send(chat.id, { text: "Hi.", model });
-    await settled(follower);
-    const reply = follower.messages().at(-1);
-    // The gateway's own record of the request.
-    const events = await allEvents();
-    const counted = events.find(
-      ({ action, actor }) =>
-        action === "model.call" &&
-        actor.type === "agent" &&
-        actor.onBehalfOf === ann.userId
-    );
+      await ann.chats.send(chat.id, { text: "Hi.", model });
+      await settled(follower);
+      const reply = follower.messages().at(-1);
+      // The gateway's own record of the request.
+      const events = await allEvents();
+      const counted = events.find(
+        ({ action, actor }) =>
+          action === "model.call" &&
+          actor.type === "agent" &&
+          actor.onBehalfOf === ann.userId
+      );
 
-    expect(
-      reply?.role === "assistant" ? usedOf(reply.usage) : null
-    ).toStrictEqual({
-      prompt: counted?.model?.inputTokens,
-      output: counted?.model?.outputTokens,
-      cost: counted?.cost?.amount,
-      window: true,
-    });
-    expect(counted?.cost?.amount).toBeGreaterThan(0);
-  });
+      expect(
+        reply?.role === "assistant" ? usedOf(reply.usage) : null
+      ).toStrictEqual({
+        prompt: counted?.model?.inputTokens,
+        output: counted?.model?.outputTokens,
+        cost: counted?.cost?.amount,
+        window: true,
+      });
+      expect(counted?.cost?.amount).toBeGreaterThan(0);
+    }
+  );
 
   it("stream a reply as it is written: its code steps, their results, and the answer", async () => {
     const ann = await person();
