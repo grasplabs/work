@@ -10,6 +10,7 @@ import { reviewedCalls } from "@grasp-os/sdk/describe";
 import { paramValueSchemas } from "@grasp-os/sdk/params";
 import type { ParamKind } from "@grasp-os/sdk/params";
 import type { AppFiles } from "@grasp-os/shared/apps";
+import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -639,9 +640,10 @@ const modulesOf = async (
   if (!build.ok) {
     throw workflowErrors.create("workflow.build_failed", {
       version,
-      diagnostics: build.diagnostics.map(({ file, line, message }) => ({
+      diagnostics: build.diagnostics.map(({ file, line, rule, message }) => ({
         file: file ?? null,
         line: line ?? null,
+        category: diagnosticCategory(rule),
         message,
       })),
     });

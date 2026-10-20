@@ -14,6 +14,7 @@ import {
 import type { AppManifest } from "@grasp-os/sdk/host";
 import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
+import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
@@ -60,11 +61,14 @@ const maxFailure = 500;
 
 /** The details of a refused build: where and why, as diagnostics say. */
 const buildDetails = (diagnostics: readonly Diagnostic[]) => ({
-  diagnostics: diagnostics.slice(0, 50).map(({ file, line, message }) => ({
-    file: file ?? null,
-    line: line ?? null,
-    message: message.slice(0, maxFailure),
-  })),
+  diagnostics: diagnostics
+    .slice(0, 50)
+    .map(({ file, line, rule, message }) => ({
+      file: file ?? null,
+      line: line ?? null,
+      category: diagnosticCategory(rule),
+      message: message.slice(0, maxFailure),
+    })),
 });
 
 /**

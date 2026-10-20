@@ -32,6 +32,7 @@ import {
   serverModuleSource,
   symbolicModules,
 } from "@grasp-os/sdk/host";
+import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -620,9 +621,10 @@ export const buildFailed = (
   { diagnostics }: FailedBuild
 ): NonNullable<ErrorPayload["details"]> => ({
   version,
-  diagnostics: diagnostics.map(({ file, line, message }) => ({
+  diagnostics: diagnostics.map(({ file, line, rule, message }) => ({
     file: file ?? null,
     line: line ?? null,
+    category: diagnosticCategory(rule),
     message,
   })),
 });

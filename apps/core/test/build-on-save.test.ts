@@ -497,3 +497,71 @@ export default defineSchema({});
     });
   });
 });
+
+describe("a save's diagnostics", { timeout: 60_000 }, () => {
+  it.each([
+    [
+      "limits",
+      {
+        ...screen("desk"),
+        // More characters together than a build takes, each file within it.
+        ...Object.fromEntries(
+          ["a", "b", "c", "d", "e", "f"].map((name) => [
+            `components/${name}.ts`,
+            `// ${"x".repeat(199_000)}\n`,
+          ])
+        ),
+      },
+    ],
+    [
+      "imports",
+      {
+        "screens/desk.tsx":
+          'import pad from "left-pad";\n\nexport default function Desk() {\n  return <p>{String(pad)}</p>;\n}\n',
+      },
+    ],
+    [
+      "compile",
+      {
+        "screens/desk.tsx":
+          "export default function Desk() {\n  return <p>desk</p\n}\n",
+      },
+    ],
+    [
+      "types",
+      {
+        "screens/desk.tsx":
+          'export default function Desk() {\n  const count: number = "three";\n  return <p>{count}</p>;\n}\n',
+      },
+    ],
+    [
+      "design-system",
+      {
+        "screens/desk.tsx":
+          'export default function Desk() {\n  return <p className="bg-red-500">desk</p>;\n}\n',
+      },
+    ],
+    [
+      "structure",
+      {
+        "components/note.tsx":
+          "export function Note() {\n  return <p>note</p>;\n}\n",
+      },
+    ],
+  ] as const)(
+    "names a problem's category, %s, in a closed set that holds nothing of the App's",
+    async (category, files) => {
+      // Built as a save builds them: past what a commit takes, for limits.
+      const builds = await buildOnSave(env, {
+        app: appIdSchema.parse(crypto.randomUUID()),
+        version: 1,
+        files,
+      });
+      expect(
+        builds.screens.diagnostics
+          .filter(({ severity }) => severity === "error")
+          .map((diagnostic) => diagnostic.category)
+      ).toContain(category);
+    }
+  );
+});
