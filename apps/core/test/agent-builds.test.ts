@@ -486,11 +486,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("stops the repair loop after five failed checks in a row, until the next question", async () => {
+  it("stops the repair loop after four failed checks in a row, until the next question", async () => {
     const checks = `export default async (self, env) => {
       ${findApp}
       const outcomes = [];
-      for (let attempt = 0; attempt < 6; attempt += 1) {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
           const check = await env.build.check(app.id);
           outcomes.push(check.failedInARow);
@@ -520,14 +520,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const results = await codeResults(chat.stub, chat.chat.id);
     const exhausted = appErrors.create("app.checks_exhausted").message;
-    expect(returned(results[1]?.text)).toStrictEqual([
-      1,
-      2,
-      3,
-      4,
-      5,
-      exhausted,
-    ]);
+    // Spec 18.1's four passes: the fourth runs, the fifth is refused.
+    expect(returned(results[1]?.text)).toStrictEqual([1, 2, 3, 4, exhausted]);
     // A new question gives the loop its count back.
     expect(returned(results[2]?.text)).toBe(1);
   });
@@ -549,11 +543,63 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const [result] = await codeResults(chat.stub, chat.chat.id);
     const outcomes = z.array(z.unknown()).parse(returned(result?.text));
     const exhausted = appErrors.create("app.checks_exhausted").message;
-    // Five ran and failed; the other seven were refused before they ran.
+    // Four ran and failed; the other eight were refused before they ran.
     expect({
       ran: outcomes.filter((outcome) => outcome === false).length,
       refused: outcomes.filter((outcome) => outcome === exhausted).length,
-    }).toStrictEqual({ ran: 5, refused: 7 });
+    }).toStrictEqual({ ran: 4, refused: 8 });
+  });
+
+  it("ends a repair session after ten minutes of checks, counted from its first", async () => {
+    const started = Date.parse("2026-10-20T09:00:00Z");
+    const minutes = 60_000;
+    /** A code step whose stream sets the clock to `at` on its way. */
+    const checkAt = (at: number): GatewayReply => ({
+      ...codeStep(`export default async (self, env) => {
+        ${findApp}
+        try {
+          return { failedInARow: (await env.build.check(app.id)).failedInARow };
+        } catch (error) {
+          return { refused: error.message };
+        }
+      };`),
+      text: "Checking again.",
+      pause: {
+        at: 0,
+        until: Promise.resolve(),
+        reached: () => {
+          vi.setSystemTime(at);
+        },
+      },
+    });
+    const { chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
+        return { failedInARow: (await env.build.check(app.id)).failedInARow };
+      };`),
+      checkAt(started + 10 * minutes),
+      checkAt(started + 10 * minutes + 1),
+      says("It still fails: the button is restyled."),
+    ]);
+    await grant();
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(started);
+    try {
+      await chat.ask("Build an invoice desk");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const results = await codeResults(chat.stub, chat.chat.id);
+    // A check exactly ten minutes in still runs; a millisecond past, the
+    // session is over though it has passes left.
+    expect(results.map(({ text }) => returned(text))).toStrictEqual([
+      { failedInARow: 1 },
+      { failedInARow: 2 },
+      { refused: appErrors.create("app.checks_exhausted").message },
+    ]);
   });
 
   it("caps the Apps a turn creates, counting none that wasn't created", async () => {

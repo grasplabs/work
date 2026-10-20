@@ -59,6 +59,7 @@ import {
   permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
@@ -261,12 +262,13 @@ export interface Draft {
 
 /**
  * What a chat's agent spent building Apps this turn (agent-builds.ts):
- * the Apps it created, and for each App's draft the checks that failed in
- * a row and those running now.
+ * the Apps it created, and for each App's draft its repair session: the
+ * checks that failed in a row, those running now, and when the session
+ * began (its first check since the draft last passed one).
  */
 interface TurnBuilds {
   created: number;
-  drafts: Map<string, { failed: number; running: number }>;
+  drafts: Map<string, { failed: number; running: number; startedAt: number }>;
 }
 
 /**
@@ -3218,7 +3220,16 @@ export class Workspace extends DurableObject<Env> {
    */
   takeCheck(chatId: ChatId, appId: string, limit: number): boolean {
     const draft = this.#draftBuilds(chatId, appId);
-    if (draft.failed + draft.running >= limit) {
+    const now = Date.now();
+    // A session begins with the first check since the draft last passed
+    // one, and has spec 18.1's active time in all (`repairActiveMs`).
+    if (draft.failed === 0 && draft.running === 0) {
+      draft.startedAt = now;
+    }
+    if (
+      draft.failed + draft.running >= limit ||
+      now - draft.startedAt > platformLimits.repairActiveMs
+    ) {
       return false;
     }
     draft.running += 1;
@@ -3232,7 +3243,7 @@ export class Workspace extends DurableObject<Env> {
     if (found !== undefined) {
       return found;
     }
-    const made = { failed: 0, running: 0 };
+    const made = { failed: 0, running: 0, startedAt: Date.now() };
     drafts.set(appId, made);
     return made;
   }

@@ -595,7 +595,7 @@ export const appErrors = defineErrorFamily({
   "app.read_only":
     "This call only reads, so nothing it calls may change anything: no writes, no side effects.",
   "app.checks_exhausted":
-    "This draft failed its checks too many times in a row this turn. Stop, and tell the person what still fails.",
+    "This draft failed its checks too many times in a row this turn, or its repairs have taken as long as they may. Stop, and tell the person what still fails.",
   "app.creates_exhausted":
     "This chat created as many Apps as one question may. Tell the person what you made.",
   "app.no_draft": "This chat has no draft of that App to preview.",
