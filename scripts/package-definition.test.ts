@@ -1120,6 +1120,28 @@ describe(
             scratch().out
           )
         ),
+        // A kit package a lock names too, its peer met by the platform at
+        // a version the project doesn't install: refused as for any other.
+        kitPackagePlatformElsewhere: await refusalOf(
+          packaged(
+            withLock(
+              lockOf({ "lucide-react": "1.47.0" }, [
+                {
+                  ...locked("lucide-react", "1.47.0", "ISC"),
+                  integrity: kitIntegrity("lucide-react@1.47.0"),
+                  peers: {
+                    react: {
+                      range: "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0",
+                      resolved: "17.0.2",
+                      by: "platform",
+                    },
+                  },
+                },
+              ])
+            ),
+            scratch().out
+          )
+        ),
       };
       expect({
         dateFns: metFor(withOwn, "@base-ui/react", "date-fns"),
@@ -1133,6 +1155,7 @@ describe(
           outsideRange: "refused",
           resolvedAgainstAnotherPlatform: "refused",
           kitPeerTheLockMet: "refused",
+          kitPackagePlatformElsewhere: "refused",
         },
       });
     });

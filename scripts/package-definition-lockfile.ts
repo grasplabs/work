@@ -297,6 +297,33 @@ const reachable = (
 const isLink = (version: string): boolean => version.startsWith("link:");
 
 /**
+ * Refuses a lock whose package's peer the platform met at a version the
+ * project doesn't install (`kitVersions`), whatever package it is: one
+ * the checkout or an earlier lock already pins too (`addLock` keeps that
+ * package as it is) must still be met as this lock met it.
+ */
+const checkPlatformPeers = (
+  locks: LockfileInput["locks"],
+  kitVersions: ReadonlyMap<string, string>
+): void => {
+  for (const { lock } of locks) {
+    for (const entry of Object.values(lock.packages)) {
+      for (const [name, peer] of Object.entries(entry.peers)) {
+        if (
+          peer.by === "platform" &&
+          peer.resolved !== null &&
+          kitVersions.get(name) !== peer.resolved
+        ) {
+          refuse(
+            `${keyOf(entry.name, entry.version)}'s peer ${name} was met at ${peer.resolved} by the platform, which the project doesn't install.`
+          );
+        }
+      }
+    }
+  }
+};
+
+/**
  * The project's pnpm-lock.yaml, as text: its importers as their manifests
  * name their dependencies, and every package they reach, each with its
  * integrity, its peers met by the project's one version of each.
@@ -340,6 +367,7 @@ export const projectLockfile = (input: LockfileInput): string => {
       }
     }
   }
+  checkPlatformPeers(input.locks, kitVersions);
   const edgesOf = (key: string): Edges => {
     const own = edges.get(key);
     if (own === undefined || !meta.has(key)) {
