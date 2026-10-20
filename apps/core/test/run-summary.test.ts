@@ -336,7 +336,13 @@ export default workflowTests(definition, [
         { name: "fetch", dynamic: undefined, options: {} },
         { name: "review", dynamic: ["from", "timeout"], options: {} },
       ],
-      kept: { routed: { steps: { fetch: [], review: [] }, all: [] } },
+      kept: {
+        routed: {
+          steps: { fetch: [], review: [] },
+          all: [],
+          dynamic: { review: ["from", "timeout"] },
+        },
+      },
       waits: ["review"],
     });
   });

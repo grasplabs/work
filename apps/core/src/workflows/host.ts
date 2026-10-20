@@ -19,6 +19,7 @@ import {
   callReviewed,
   coreStepPrefix,
   executionErrors,
+  reviewerChosenAtRun,
   stepReviewed,
   isRetryable,
   paramsStep,
@@ -2724,6 +2725,9 @@ export class RunHost extends RpcTarget {
         from,
         description,
         timeout,
+        // A reviewer the run's input chose may be its starter's choice of
+        // themselves: they never answer it (R8).
+        starterExcluded: reviewerChosenAtRun(this.#run.calls, step),
       });
     });
   }

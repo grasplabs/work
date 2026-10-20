@@ -478,15 +478,22 @@ const proposerOf = async (
 const stepChanges = (
   before: ReadonlyMap<string, StepOutline>,
   now: ReadonlyMap<string, StepOutline>,
-  shared: boolean
+  { shared, outside }: { shared: boolean; outside: boolean }
 ): NonNullable<VersionReview["workflows"][number]["steps"]> => {
   const usesBindings = [...now.values()].some(
     ({ env }) => (env ?? []).length > 0
   );
+  // A step with options chosen at run time reads them through code its
+  // call doesn't hold, which may sit anywhere in its file (a helper, say).
+  const readsOutside = (step: StepOutline): boolean =>
+    outside && (step.dynamic ?? []).length > 0;
   return differences(
     before,
     now,
-    (one, other) => !shared && sameJson(withoutLine(one), withoutLine(other))
+    (one, other) =>
+      !shared &&
+      !readsOutside(other) &&
+      sameJson(withoutLine(one), withoutLine(other))
   ).map(({ name, change, now: step, before: was }) => {
     const found = step ?? was;
     return {
@@ -502,9 +509,69 @@ const stepChanges = (
       // a call of any other binding from this step is refused
       // (`workflowCallsOf`, workflows/host.ts).
       calls: found?.env ?? [],
-      sharedCode: shared,
+      sharedCode: shared || (found !== undefined && readsOutside(found)),
+      ...(found?.dynamic === undefined ? {} : { dynamic: [...found.dynamic] }),
     };
   });
+};
+
+const whitespace = /\s+/gu;
+
+/**
+ * Whether a workflow's own file changed outside its steps' calls: its
+ * source before and now, each without the calls as written (`code`), and
+ * without whitespace, compared. A helper in the file that an option reads
+ * at run time (`StepOutline.dynamic`), a condition or a loop: any step
+ * may now behave differently, though no call of one changed.
+ */
+const changedOutsideSteps = (
+  before: string | undefined,
+  now: string | undefined,
+  steps: readonly StepOutline[]
+): boolean => {
+  if (before === undefined || now === undefined) {
+    return false;
+  }
+  const calls = [...new Set(steps.map(({ code }) => code))]
+    .filter((code) => code !== "")
+    .toSorted((a, b) => b.length - a.length);
+  const rest = (source: string): string => {
+    let left = source;
+    for (const code of calls) {
+      left = left.replaceAll(code, "");
+    }
+    return left.replaceAll(whitespace, "");
+  };
+  return rest(before) !== rest(now);
+};
+
+/**
+ * A workflow's steps now, and how they differ from before (`stepChanges`):
+ * every step listed as possibly changed when code it may use changed
+ * (`shared`), and every step with options chosen at run time when its own
+ * file changed outside its steps' calls; null when its steps can't be
+ * read, before or now.
+ */
+const stepsChangedIn = (
+  { before, proposed }: { before: VersionAt | undefined; proposed: VersionAt },
+  id: WorkflowId,
+  shared: boolean
+) => {
+  const stepsBefore = stepsOf(before, id);
+  const stepsNow = stepsOf(proposed, id);
+  if (stepsBefore === null || stepsNow === null) {
+    return { stepsNow, steps: null };
+  }
+  const file = workflowPaths(id).workflow;
+  const outside = changedOutsideSteps(
+    before?.files[file],
+    proposed.files[file],
+    [...stepsBefore.values(), ...stepsNow.values()]
+  );
+  return {
+    stepsNow,
+    steps: stepChanges(stepsBefore, stepsNow, { shared, outside }),
+  };
 };
 
 /** A version's workflows that differ from the current version's. */
@@ -548,8 +615,11 @@ const workflowsOf = async (
     if (change === undefined) {
       continue;
     }
-    const stepsBefore = stepsOf(before, id);
-    const stepsNow = stepsOf(proposed, id);
+    const { stepsNow, steps } = stepsChangedIn(
+      { before, proposed },
+      id,
+      shared.length > 0
+    );
     // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
     const paramsBefore = await paramsOf(env, app, before, id);
     // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
@@ -558,10 +628,6 @@ const workflowsOf = async (
     const triggersBefore = await triggersOf(env, app, before, id);
     // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
     const triggersNow = await triggersOf(env, app, proposed, id);
-    const steps =
-      stepsBefore === null || stepsNow === null
-        ? null
-        : stepChanges(stepsBefore, stepsNow, shared.length > 0);
     const heldTo = allCallsOf(proposed, id);
     workflows.push({
       id,

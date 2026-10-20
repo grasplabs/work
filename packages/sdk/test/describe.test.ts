@@ -188,7 +188,7 @@ describe(describeWorkflow, () => {
   });
   await step.decision("sign-off", {
     description: "Sign off",
-    from: "role:admin",
+    from: "role:admin" as Person,
     timeout: "1 day",
     ask: async () => {},
   });
@@ -208,6 +208,7 @@ describe(describeWorkflow, () => {
     expect({
       outline,
       calls: reviewedCalls(source).steps,
+      kept: reviewedCalls(source).dynamic,
     }).toStrictEqual({
       outline: [
         { name: "fetch", options: {}, dynamic: undefined, showsHow: false },
@@ -232,6 +233,8 @@ describe(describeWorkflow, () => {
       ],
       // Every step is still held to the review by name.
       calls: { fetch: [], review: [], "sign-off": [], "cool-off": [] },
+      // What its runs are held to: which steps' options their input chose.
+      kept: { review: ["from", "timeout"], "cool-off": ["duration"] },
     });
   });
 

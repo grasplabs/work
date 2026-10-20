@@ -59,6 +59,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { ChosenAtStart } from "../workflows/chosen-at-start.tsx";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowTriggers } from "../workflows/triggers.tsx";
 
@@ -110,6 +111,7 @@ const StepCard = ({ step, n }: { step: StepOutline; n: number }) => {
             <Trans>Changes something</Trans>
           </Badge>
         ) : null}
+        <ChosenAtStart options={step.dynamic} />
       </span>
       <span className="text-muted-foreground text-xs">
         {key === undefined ? name : t`${name}, per ${key}`}

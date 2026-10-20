@@ -943,6 +943,11 @@ const stepMethodOf = (call: CallExpression): StepMethod => {
 
 /** A literal, or an object of them, as written; undefined for anything else. */
 const staticValueOf = (node: Node): OptionValue | undefined => {
+  // A literal given a type, as a branded one needs (`"role:admin" as
+  // Person`): the same value at run time.
+  if (node.type === "TSAsExpression" || node.type === "TSSatisfiesExpression") {
+    return staticValueOf(node.expression);
+  }
   const literal = literalOf(node);
   if (literal !== undefined || node.type !== "ObjectExpression") {
     return literal;
@@ -1715,16 +1720,18 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
   }
   const { run, bindings } = context;
   const outline = readOutline(source);
+  const steps = outline === null ? [] : outlineSteps(outline.steps);
+  const dynamic = steps.flatMap(({ name, dynamic: options }) =>
+    options === undefined
+      ? []
+      : [[name, [...options]] satisfies [string, string[]]]
+  );
   return {
     steps:
       outline === null
         ? null
-        : Object.fromEntries(
-            outlineSteps(outline.steps).map(({ name, env }) => [
-              name,
-              env ?? [],
-            ])
-          ),
+        : Object.fromEntries(steps.map(({ name, env }) => [name, env ?? []])),
     all: envCallsIn(bindings, [run.body]),
+    ...(dynamic.length === 0 ? {} : { dynamic: Object.fromEntries(dynamic) }),
   };
 };

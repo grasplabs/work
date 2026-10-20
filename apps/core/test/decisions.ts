@@ -94,6 +94,26 @@ ${remember}
 );
 `;
 
+/**
+ * The approval workflow written so its review reads every step: no spread
+ * of options (and so no reminder), its reviewer and deadline still taken
+ * from the run's input (`StepOutline.dynamic`).
+ */
+export const approvalReadable = approval.replace(
+  "      ...(input.remindAfter === undefined ? {} : { remindAfter: input.remindAfter }),\n",
+  ""
+);
+
+/**
+ * `approvalReadable` with its reviewer written in its code, as `deciders`,
+ * not taken from the run's input: the review reads who it is.
+ */
+export const approvalNaming = (deciders: string): string =>
+  approvalReadable.replace(
+    "from: input.from as Person,",
+    `from: ${JSON.stringify(deciders)} as Person,`
+  );
+
 export const approvalTests = `import { workflowTests } from "@grasp-os/sdk/testing";
 
 import approval from "./approval.ts";
@@ -208,9 +228,13 @@ export const linkOf = (ask: Ask | undefined, userId: string) => {
 /** Starts the approval workflow and waits until it has asked. */
 export const asking = async (
   builder: Person,
-  input: { from: string; timeout: number; remindAfter?: number }
+  input: { from: string; timeout: number; remindAfter?: number },
+  source = approval
 ) => {
-  const app = await approvalApp(builder);
+  const app = await approvalAppWith(builder, {
+    "workflows/approval.ts": source,
+    "workflows/approval.workflow-tests.ts": approvalTests,
+  });
   const run = await builder.api.workflows.start(app, "approval", input);
   const [ask] = await asksOf(app);
   if (!ask) {

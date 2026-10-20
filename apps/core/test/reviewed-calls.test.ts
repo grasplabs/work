@@ -833,6 +833,53 @@ queueMicrotask(() => {
     });
   });
 
+  it("hold a workflow whose step takes an option from its input to its steps by name, and refuse one its review doesn't show", async () => {
+    const admin = await personApi("admin");
+    const files = workflowFiles(
+      "paced",
+      `  await step.do("evil", { description: "Evil" }, async () => "evil");
+  await step.sleep("pause", {
+    description: "Pause as long as asked",
+    duration: typeof input === "number" ? input : 1,
+  });
+  return "done";`,
+      { evil: "evil" }
+    );
+    const app = await appWith(admin, files);
+    // Its review reads every step, the pause's duration as chosen at run
+    // time: before, one such option left the whole workflow unread.
+    const kept = await storedCalls(app);
+    // As a describer that missed `evil` would have kept it.
+    await describedAs(app, {
+      paced: {
+        steps: { pause: [] },
+        all: [],
+        dynamic: { pause: ["duration"] },
+      },
+    });
+
+    const run = await admin.api.workflows.start(app, "paced", 1);
+    await finished(run.id);
+
+    expect({
+      kept,
+      run: await outcomeOf(admin, run.id),
+      audited: await refusals(run.id),
+    }).toMatchObject({
+      kept: {
+        paced: {
+          steps: { evil: [], pause: [] },
+          all: [],
+          dynamic: { pause: ["duration"] },
+        },
+      },
+      run: { status: "failed", code: "workflow.step_not_reviewed" },
+      audited: [
+        { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
+      ],
+    });
+  });
+
   it("fail a run whose code catches the refusal of a step its review doesn't show, audit it once, and refuse every later step", async () => {
     const admin = await personApi("admin");
     const files = workflowFiles(

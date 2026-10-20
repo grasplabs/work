@@ -220,7 +220,14 @@ const runUnended = (): SQL => sql`EXISTS (
 export const openDecision = async (
   env: Env,
   run: DecisionRun,
-  request: { step: string; from: string; description: string; timeout: number }
+  request: {
+    step: string;
+    from: string;
+    description: string;
+    timeout: number;
+    /** Never answered by the run's starter (`eligibleMembers`). */
+    starterExcluded: boolean;
+  }
 ): Promise<{ decision: string; deadline: number }> => {
   const db = drizzle(env.DB);
   const now = Date.now();
@@ -229,6 +236,7 @@ export const openDecision = async (
     runId: run.runId,
     step: request.step,
     deciders: request.from,
+    starterExcluded: request.starterExcluded,
     description: request.description.slice(0, maxDescription),
     status: "open",
     openedAt: new Date(now),
@@ -367,23 +375,39 @@ const decidersCondition = (deciders: string): SQL => {
  * active members of the organization its deciders name, but never whoever
  * started its run (R8). A `person:` decision names one person, so it only
  * leaves out its starter by naming someone else; one naming exactly the
- * starter is their own confirmation, and stands. The one place these rules
+ * starter is their own confirmation, and stands, unless the decision
+ * excludes its starter (`starterExcluded`: its reviewer was chosen at run
+ * time, perhaps by the starter themselves). The one place these rules
  * live: who is asked, who counts toward the cap, and who may answer all go
  * by it.
  */
-const eligibleMembers = (deciders: string, runId: string | SQLiteColumn): SQL =>
-  and(
-    eq(members.organizationId, organizationId),
-    notRemoved(members.userId),
-    decidersCondition(deciders),
-    decidersOf(deciders).kind === "person"
-      ? undefined
-      : sql`NOT EXISTS (
-          SELECT 1 FROM ${workflowRuns}
-          WHERE ${workflowRuns.id} = ${runId}
-            AND ${workflowRuns.startedBy} = ${members.userId}
-        )`
-  ) ?? sql`0`;
+const eligibleMembers = (
+  deciders: string,
+  runId: string | SQLiteColumn,
+  starterExcluded: boolean | SQLiteColumn
+): SQL => {
+  const notStarter = sql`NOT EXISTS (
+    SELECT 1 FROM ${workflowRuns}
+    WHERE ${workflowRuns.id} = ${runId}
+      AND ${workflowRuns.startedBy} = ${members.userId}
+  )`;
+  let starter: SQL | undefined = notStarter;
+  if (decidersOf(deciders).kind === "person") {
+    if (typeof starterExcluded === "boolean") {
+      starter = starterExcluded ? notStarter : undefined;
+    } else {
+      starter = sql`(${starterExcluded} = 0 OR ${notStarter})`;
+    }
+  }
+  return (
+    and(
+      eq(members.organizationId, organizationId),
+      notRemoved(members.userId),
+      decidersCondition(deciders),
+      starter
+    ) ?? sql`0`
+  );
+};
 
 /**
  * That `userId` may answer the decision now, as a condition on its row
@@ -403,7 +427,11 @@ const mayAnswer = (
         .where(
           and(
             eq(members.userId, userId),
-            eligibleMembers(deciders, workflowDecisions.runId)
+            eligibleMembers(
+              deciders,
+              workflowDecisions.runId,
+              workflowDecisions.starterExcluded
+            )
           )
         )
     )
@@ -442,7 +470,7 @@ export const decisionRecipients = async (
     .select({ userId: users.id, name: users.name, email: users.email })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
-    .where(eligibleMembers(row.deciders, row.runId))
+    .where(eligibleMembers(row.deciders, row.runId, row.starterExcluded))
     .orderBy(users.name, users.id)
     .limit(maxDeciders + 1);
   if (people.length > maxDeciders) {

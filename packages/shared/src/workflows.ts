@@ -925,6 +925,11 @@ export interface WorkflowCalls {
   steps: Record<string, string[]> | null;
   /** Every binding the workflow's code calls, in any step. */
   all: string[];
+  /**
+   * The options each step reads only at run time (`StepOutline.dynamic`),
+   * by step name: only steps that have any. Absent when none does.
+   */
+  dynamic?: Record<string, string[]>;
 }
 
 /** What ends a step's name in its engine name: a key, or a decision's part. */
@@ -952,6 +957,19 @@ export const stepReviewed = (
   calls.steps === null ||
   engineStep === paramsStep ||
   Object.hasOwn(calls.steps, outlineNameOf(engineStep));
+
+/**
+ * Whether a decision step of engine name `engineStep` takes its reviewer
+ * (`from`) only at run time, so the run's starter may have chosen it: as
+ * its review keeps it, or when the steps can't be read, as nobody can
+ * then say it doesn't.
+ */
+export const reviewerChosenAtRun = (
+  calls: WorkflowCalls,
+  engineStep: string
+): boolean =>
+  calls.steps === null ||
+  (calls.dynamic?.[outlineNameOf(engineStep)]?.includes("from") ?? false);
 
 /**
  * The task a step of engine name `engineStep` is, as `calls` (its

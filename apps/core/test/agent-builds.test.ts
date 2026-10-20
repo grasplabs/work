@@ -1752,6 +1752,50 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     });
   });
 
+  it("lists a step whose option is chosen at run time when its file changed outside the steps' calls, as through a helper it reads", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const paced = workflowFiles(
+      "paced",
+      `  await step.do("fetch", { description: "Fetch it" }, async () => 1);
+  await step.sleep("pause", { description: "Wait a while", duration: wait(2) });
+  return "done";`,
+      { fetch: 1 }
+    );
+    const files = (factor: number) => ({
+      ...paced,
+      "workflows/paced.ts": (paced["workflows/paced.ts"] ?? "").replace(
+        "export default",
+        `const wait = (n: number): number => n * ${factor};\n\nexport default`
+      ),
+    });
+    const app = await appWith(builder, files(1000));
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      files(60_000),
+      "Longer"
+    );
+
+    const review = await builder.api.apps.versions.review(app, version);
+
+    expect(review.workflows).toMatchObject([
+      {
+        id: "paced",
+        change: "modified",
+        shared: [],
+        // Neither call changed; the helper the pause reads at run time
+        // did. `fetch` reads nothing outside its call.
+        steps: [
+          {
+            name: "pause",
+            change: "modified",
+            sharedCode: true,
+            dynamic: ["duration"],
+          },
+        ],
+      },
+    ]);
+  });
+
   it("calls out new triggers, changed exports, and steps it can't read as possibly acting", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Weekly" });

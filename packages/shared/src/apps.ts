@@ -233,9 +233,11 @@ export interface VersionReview {
      * so, or it calls any of the App's bindings), and the App's bindings
      * its code calls (`APP`, a connection, another App's exports). While `shared` code changed, every step is listed
      * (`sharedCode`), as any may now behave differently through it, and
-     * may change things if the workflow calls bindings at all. Null when
-     * the code can't be read as steps. Its runs are held to what each
-     * step calls, by binding, not by method.
+     * may change things if the workflow calls bindings at all; so is
+     * every step while its own file changed outside its steps' calls (a
+     * helper an option reads, say). Null when the code can't be read as
+     * steps. Its runs are held to what each step calls, by binding, not
+     * by method.
      */
     steps:
       | {
@@ -244,6 +246,12 @@ export interface VersionReview {
           sideEffect: boolean;
           calls: string[];
           sharedCode: boolean;
+          /**
+           * Its options chosen when the run starts, not written in its
+           * code (`StepOutline.dynamic`): a decision's reviewer from the
+           * run's input, say. Absent when there are none.
+           */
+          dynamic?: string[];
         }[]
       | null;
     /**
