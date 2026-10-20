@@ -727,12 +727,17 @@ export interface PurgePlan {
   /** Versions of them it deletes or rewrites. */
   versions: number;
   /**
-   * How often a term would still start a longer word in what the purge
-   * leaves of the documents named: every version, the one it saves too
-   * ("Toms", "Tomin", "tomVisser" or
-   * "tom.visser@acme.test.evil" for "Tom" or the address; not "automated"
-   * or "custom", where it is inside or ends one). List the forms to remove
-   * as terms of their own. Always 0 for `personal`.
+   * How often a term is removed from the documents named, in every
+   * version. Always 0 for `personal`, which deletes them whole.
+   */
+  occurrences: number;
+  /**
+   * How often a term is still in what the purge leaves of the documents
+   * named, every version and the one it saves too: inside, at the start
+   * or at the end of a longer word or address ("Toms", "tomVisser",
+   * "automated", "evil.tom.visser@acme.test" for "Tom" or the address),
+   * which a search for part of a word still finds. List the forms to
+   * remove as terms of their own. Always 0 for `personal`.
    */
   inLongerWords: number;
   /**
@@ -754,6 +759,16 @@ export interface PurgeResult {
   purgeId: string;
   documents: number;
   versions: number;
+  /**
+   * Documents named that a search still finds by a term, as whole words,
+   * once purged (`content`): what the purge leaves on purpose but the
+   * index matches by the same tokens, an address or a domain inside a
+   * longer one (which the plan counted, `inLongerWords`), a form spelled
+   * otherwise that folds to the same ("Rene" for "René"), or a term of
+   * several words joined otherwise ("tom-visser" for "tom visser").
+   * Absent for `personal`.
+   */
+  stillFound?: number;
 }
 
 /**
