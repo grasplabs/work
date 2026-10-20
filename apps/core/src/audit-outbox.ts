@@ -313,10 +313,9 @@ const drain = async (
 
 /**
  * Drains an outbox, and logs a drain that fails (`audit.outbox.drain_failed`)
- * instead of throwing: it is drained again later. Returns how many events
- * it appended.
+ * instead of throwing. Returns how many events it appended.
  */
-const drainLogged = async (
+const drainOrLog = async (
   env: AuditLogEnv,
   outbox: Outbox,
   maxBatches: number
@@ -329,6 +328,57 @@ const drainLogged = async (
       ...errorFields(error),
     });
     return 0;
+  }
+};
+
+/** How many drains this isolate has started. */
+let drainsStartedCount = 0;
+
+/** The drains this isolate is running, each by its place in that count. */
+const draining = new Map<number, Promise<number>>();
+
+/**
+ * Drains an outbox, logging a drain that fails instead of throwing: it is
+ * drained again later. Returns how many events it appended.
+ */
+const drainLogged = async (
+  env: AuditLogEnv,
+  outbox: Outbox,
+  maxBatches: number
+): Promise<number> => {
+  const place = drainsStartedCount;
+  drainsStartedCount += 1;
+  const drained = drainOrLog(env, outbox, maxBatches);
+  draining.set(place, drained);
+  try {
+    return await drained;
+  } finally {
+    draining.delete(place);
+  }
+};
+
+/** How many drains this isolate has started, for `drainsSettled`. */
+export const drainsStarted = (): number => drainsStartedCount;
+
+/**
+ * Settles once every drain this isolate started since `from`
+ * (`drainsStarted`) has, including any started meanwhile: most run in the
+ * background (`waitUntil`), after the request that wrote the event.
+ *
+ * For the tests, whose files share an isolate (`isolate: false`): a file
+ * ends only once the drains its tests started have, or Vitest closes the
+ * file's RPC channel under a drain's call to the AuditLog object, which
+ * then fails with an unhandled rejection after every test passed
+ * (GRA-880). A drain in an object a test aborted never settles, hence
+ * `from`: a later file doesn't wait for it.
+ */
+export const drainsSettled = async (from: number): Promise<void> => {
+  let running = [...draining].filter(([place]) => place >= from);
+  while (running.length > 0) {
+    // Each round waits for the drains running when it starts.
+    // oxlint-disable-next-line no-await-in-loop
+    await Promise.all(running.map(async ([, drained]) => await drained));
+    running = [...draining].filter(([place]) => place >= from);
   }
 };
 
