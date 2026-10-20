@@ -672,39 +672,44 @@ describe("model budgets", { timeout: 60_000 }, () => {
     const answering = outcome(
       call(sonnet({ trigger: ada, timeoutMs: 15 * 60_000 }))
     );
-    let mine = await ledgerOf(month, ada.userId);
-    while (mine.reservedMicros === 0) {
-      // oxlint-disable-next-line no-await-in-loop -- until Ada's call is under way
-      await scheduler.wait(10);
-      // oxlint-disable-next-line no-await-in-loop -- until Ada's call is under way
-      mine = await ledgerOf(month, ada.userId);
-    }
-    const retryAfter = async (more: Partial<ModelCall<undefined>>) => {
-      const { code, details } = await toldBy(call(sonnet(more)));
-      return [code, details.because, details.retryAfterSeconds];
-    };
-    const told = {
-      // Her chat: the calls holding her budget are made for her.
-      chat: await retryAfter({
-        trigger: { type: "agent", agentId: "chat", onBehalfOf: ada.userId },
-      }),
-      // A run of an App: its code is told nothing of when her chats' (or
-      // other Apps') calls were sent.
-      run: await retryAfter({
-        purpose: "workflow.step",
-        trigger: runActorOf({ runId: run.id, app, workflow: "idle" }),
-        work: {
-          authority: {
-            subject: { type: "app", appId },
-            onBehalfOf: ada.userId,
-            mode: "workflow",
-            appVersion: 1,
+    // Released however the checks go, so no call is left open.
+    const told: Record<string, unknown[]> = {};
+    try {
+      let mine = await ledgerOf(month, ada.userId);
+      while (mine.reservedMicros === 0) {
+        // oxlint-disable-next-line no-await-in-loop -- until Ada's call is under way
+        await scheduler.wait(10);
+        // oxlint-disable-next-line no-await-in-loop -- until Ada's call is under way
+        mine = await ledgerOf(month, ada.userId);
+      }
+      const retryAfter = async (more: Partial<ModelCall<undefined>>) => {
+        const { code, details } = await toldBy(call(sonnet(more)));
+        return [code, details.because, details.retryAfterSeconds];
+      };
+      Object.assign(told, {
+        // Her chat: the calls holding her budget are made for her.
+        chat: await retryAfter({
+          trigger: { type: "agent", agentId: "chat", onBehalfOf: ada.userId },
+        }),
+        // A run of an App: its code is told nothing of when her chats' (or
+        // other Apps') calls were sent.
+        run: await retryAfter({
+          purpose: "workflow.step",
+          trigger: runActorOf({ runId: run.id, app, workflow: "idle" }),
+          work: {
+            authority: {
+              subject: { type: "app", appId },
+              onBehalfOf: ada.userId,
+              mode: "workflow",
+              appVersion: 1,
+            },
+            context: { type: "run", appId, runId: runIdSchema.parse(run.id) },
           },
-          context: { type: "run", appId, runId: runIdSchema.parse(run.id) },
-        },
-      }),
-    };
-    release.resolve(true);
+        }),
+      });
+    } finally {
+      release.resolve(true);
+    }
 
     expect({ told, answered: await answering }).toStrictEqual({
       told: {

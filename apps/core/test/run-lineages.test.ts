@@ -865,11 +865,17 @@ ${llmStep()}`,
             timeoutMs: 15 * 60_000,
           })
         );
-        await vi.waitFor(() => {
-          expect(fake.requests).toHaveLength(1);
-        });
-        const refusals = { appY: await told(appY), appX: await told(appX) };
-        release.resolve(true);
+        // Released however the checks go, so no call is left open.
+        const refusals: Record<string, unknown[]> = {};
+        try {
+          await vi.waitFor(() => {
+            expect(fake.requests).toHaveLength(1);
+          });
+          refusals.appY = await told(appY);
+          refusals.appX = await told(appX);
+        } finally {
+          release.resolve(true);
+        }
         return { refusals, held: await holding };
       }
     );
