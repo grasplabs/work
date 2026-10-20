@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 
 import { localIdpPort, localSignIn } from "../apps/core/test/sign-in-config.ts";
+import { withNoBackgroundCompile } from "../apps/core/workerd-v8-flags.ts";
 
 const frontend = "http://localhost:5173";
 
@@ -27,11 +28,22 @@ const signInVars = Object.entries(localSignIn(frontend)).flatMap(
  * Each command runs in a process group of its own, so stopping it stops
  * what it started too (wrangler's workerd, Vite's esbuild).
  */
-const start = (command: string, args: string[]): ChildProcess =>
-  spawn(command, args, { stdio: "inherit", detached: true });
+const start = (
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env
+): ChildProcess =>
+  spawn(command, args, { stdio: "inherit", detached: true, env });
 
 const children = [
-  start("vp", ["run", "--filter", "@grasp-os/core", "dev", ...signInVars]),
+  // Core's workerd builds packages in-process, a fresh isolate each, for
+  // as long as the dev server runs (workerd-v8-flags.ts).
+  start("vp", ["run", "--filter", "@grasp-os/core", "dev", ...signInVars], {
+    ...process.env,
+    MINIFLARE_WORKERD_V8_FLAGS: withNoBackgroundCompile(
+      process.env.MINIFLARE_WORKERD_V8_FLAGS
+    ),
+  }),
   start("vp", ["run", "--filter", "@grasp-os/web", "dev"]),
   start("wrangler", [
     "dev",
