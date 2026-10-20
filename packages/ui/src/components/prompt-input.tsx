@@ -149,7 +149,6 @@ function PromptInputTextarea({
 
   return (
     <InputGroupTextarea
-      data-slot="prompt-input-textarea"
       // The text stands as far from the box's edge as the icons in the row under it.
       className={cn(
         "field-sizing-content max-h-48 min-h-16 px-4.5 pt-3.5",
@@ -338,12 +337,11 @@ function PromptInputSubmit({
       data-slot="prompt-input-submit"
       aria-label={stops ? stopLabel : sendLabel}
       onClick={(event) => {
-        if (stops) {
+        onClick?.(event);
+        if (stops && !event.defaultPrevented) {
           event.preventDefault();
           onStop();
-          return;
         }
-        onClick?.(event);
       }}
       size={size}
       type={stops ? "button" : "submit"}
