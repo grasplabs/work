@@ -408,6 +408,39 @@ describe("the application landscape", () => {
     });
   });
 
+  it("keeps what it read when the deployment names no tenant to check against, and tells everyone the list may be incomplete", async () => {
+    const app = appOf("app-untold", "Untold");
+    await tenantHolds({
+      apps: [app],
+      people: [],
+      grants: [grantOf(app, "User.Read")],
+    });
+    const { connectionId } = await connected();
+    const member = await signedInApi(idp, "user");
+    const now = new Date();
+    now.setUTCHours(10, 0, 0, 0);
+    await syncLandscapes(env, now);
+    const whole = await member.api.landscape.incomplete();
+    const { SIGN_IN: _unset, ...unconfigured } = env;
+    await syncLandscapes(
+      { ...unconfigured, SIGN_IN: undefined },
+      new Date(now.getTime() + dayMs)
+    );
+    const kept = await appsOf(member.api, connectionId);
+    const failed = await member.api.landscape.incomplete();
+    expect({
+      kept: kept.length,
+      sync: await syncOf(connectionId),
+      before: whole.includes(connectionId),
+      after: failed.includes(connectionId),
+    }).toStrictEqual({
+      kept: 1,
+      sync: { state: "failed", reads: 0, reason: "landscape.tenant_unknown" },
+      before: false,
+      after: true,
+    });
+  });
+
   it("lets no late write of an older sync change what a newer one wrote", async () => {
     const app = appOf("app-late", "Late");
     const ada = guid();

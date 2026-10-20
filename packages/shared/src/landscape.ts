@@ -185,6 +185,12 @@ export interface LandscapeApi {
   apps: () => Promise<LandscapeAppSummary[]>;
   /** Who granted one app access: admins only, and audited. */
   people: (connectionId: string, appId: string) => Promise<LandscapePerson[]>;
+  /**
+   * The landscape connections whose last sync stopped at its limit or
+   * failed, so the apps found through them may be incomplete: anyone, by
+   * connection ID only (as `apps` names them), never why.
+   */
+  incomplete: () => Promise<string[]>;
   /** The landscape connections' syncs: admins only. */
   status: () => Promise<LandscapeSyncStatus[]>;
   /**

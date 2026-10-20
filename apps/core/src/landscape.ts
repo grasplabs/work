@@ -368,7 +368,19 @@ const readPage = async (
     return undefined;
   }
   // Another tenant's grants are never kept: the sync fails on them.
-  if (tenant === undefined || read.tenant.toLowerCase() !== tenant) {
+  // With no tenant configured, nothing can be checked: the sync fails and
+  // keeps what it had, until the deployment says whose it is.
+  if (tenant === undefined) {
+    await db.batch([
+      ended(db, sync, "failed", "landscape.tenant_unknown", now),
+      outboxed(db, {
+        ...syncedEntry(sync, "failed", 0),
+        detail: { state: "failed", reason: "landscape.tenant_unknown" },
+      }),
+    ]);
+    return undefined;
+  }
+  if (read.tenant.toLowerCase() !== tenant) {
     // Nothing of this connection is kept, from this sync or an earlier one.
     await db.batch([
       ended(db, sync, "failed", "landscape.tenant_mismatch", now),
@@ -709,6 +721,16 @@ export class LandscapeRpc extends CoreRpcTarget implements LandscapeApi {
         .toSorted((one, other) =>
           (one.name ?? one.personId).localeCompare(other.name ?? other.personId)
         );
+    });
+  }
+
+  async incomplete(): Promise<string[]> {
+    return await withPerson(this.#check, async () => {
+      const stopped = await drizzle(this.#env.DB)
+        .select({ connectionId: landscapeSyncs.connectionId })
+        .from(landscapeSyncs)
+        .where(inArray(landscapeSyncs.state, ["partial", "failed"]));
+      return stopped.map(({ connectionId }) => connectionId);
     });
   }
 
