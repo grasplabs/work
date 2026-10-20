@@ -73,11 +73,14 @@ describe("the landscape's freshness", () => {
       member: lineOf(true, null),
       memberWhole: lineOf(false, null),
       admin: lineOf(true, { state: "ready", data: [status({})] }),
+      adminUnread: lineOf(true, { state: "offline" }),
     }).toStrictEqual({
       member:
         "The apps found in Microsoft Entra may be incomplete: its last read didn't finish.",
       memberWhole: "",
       admin: "",
+      adminUnread:
+        "The apps found in Microsoft Entra may be incomplete: its last read didn't finish.",
     });
   });
 
