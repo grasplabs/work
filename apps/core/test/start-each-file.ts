@@ -17,6 +17,7 @@ import { z } from "zod";
 import {
   backgroundCallsQuiet,
   countBackgroundCalls,
+  quietHookMs,
 } from "./background-calls.ts";
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
@@ -79,4 +80,4 @@ afterEach(closeOpenSockets);
 // Setup files' afterAll hooks run last: once the file's tests and their
 // hooks are done, it waits for the calls they left going
 // (background-calls.ts).
-afterAll(backgroundCallsQuiet);
+afterAll(backgroundCallsQuiet, quietHookMs);

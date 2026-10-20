@@ -65,10 +65,18 @@ export const countBackgroundCalls = (): void => {
 
 /**
  * How many rounds of {@link quietMs} a file waits at most for its
- * background calls to go quiet: about 5 seconds, within a hook's 10. A
- * call out longer than that would be a bug of its own.
+ * background calls to go quiet: 5 seconds, when the isolate keeps time. On
+ * a loaded CI runner, work a file left going keeps its isolate busy and
+ * each round's timer fires late, so the hook gets {@link quietHookMs}.
  */
 const quietRounds = 25;
+
+/**
+ * The quiet wait's hook timeout: rounds that each fire over a second late
+ * still end within it (on CI, `orphaned-runs.test.ts` took more than the
+ * default 10 seconds).
+ */
+export const quietHookMs = 30_000;
 
 /**
  * How long no call may start or be out for the file's background work to
