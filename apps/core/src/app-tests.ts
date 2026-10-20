@@ -71,6 +71,7 @@ import {
   startFixtureRun,
   sweepFixtureRuns,
 } from "./workflows/fixture-runs.ts";
+import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 
 // The trusted test runner for an App's tests (spec 28.2): every suite in
 // `tests/**.test.ts` runs whenever a version of the App is made current,
@@ -311,6 +312,17 @@ const fixtureSchema = z.strictObject({
       },
       { message: "A fixture names between 1 and 20 principals." }
     ),
+  /**
+   * The parameter values each workflow the App binds runs with in its
+   * tests, by its alias (`workflowTest`): a parameter not named here takes
+   * its declared default. Never the organization's own values.
+   */
+  workflows: z
+    .record(
+      z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
+      z.strictObject({ params: z.record(z.string(), z.json()) })
+    )
+    .optional(),
 });
 
 type Fixture = z.infer<typeof fixtureSchema>;
@@ -674,7 +686,7 @@ class FixtureSession extends TestTarget {
    * answered (`start`): the test asks of these alone, and `close` removes
    * them.
    */
-  readonly #runs: string[] = [];
+  readonly #runs: FixtureRunStarted[] = [];
   /**
    * The starts admitted against `maxRunsPerTest`, under way or done: one
    * is counted before it awaits anything, so starts at once can't each
@@ -861,26 +873,38 @@ class FixtureSession extends TestTarget {
         throw operationErrors.create("operation.call_limit");
       }
       this.#starts += 1;
-      let runId: string;
+      let recorded = false;
+      let started: FixtureRunStarted;
       try {
-        runId = await startFixtureRun(
+        started = await startFixtureRun(
           this.#env,
           this.#release,
           `fixture-${String(name)}`,
-          request
+          request,
+          {
+            paramsOf: (alias) => this.#fixture.workflows?.[alias]?.params ?? {},
+            deadline: this.#endsAt,
+            recorded: () => {
+              recorded = true;
+            },
+          }
         );
       } catch (error) {
-        // Refused before it ran: its room goes back.
-        this.#starts -= 1;
+        // Refused before it was recorded: its room goes back. One recorded
+        // was a run, removed again (`startFixtureRun`): its room stays
+        // taken, so failing starts can't add up past the limit.
+        if (!recorded) {
+          this.#starts -= 1;
+        }
         throw error;
       }
       // Closed meanwhile: what started goes now, as nothing else would
       // remove it but the sweep.
       if (this.#closed) {
-        await discardFixtureRuns(this.#env, [runId]);
+        await discardFixtureRuns(this.#env, [started.runId]);
         throw sessionEnded();
       }
-      this.#runs.push(runId);
+      this.#runs.push(started);
       result = { ok: true, value: { run: this.#runs.length - 1 } };
     } catch (error) {
       result = { ok: false, error: refusalOf(error, requestId) };
@@ -888,8 +912,8 @@ class FixtureSession extends TestTarget {
     return JSON.stringify(result);
   }
 
-  /** Run `run`'s ID, which `start` answered; throws for any other. */
-  #runOf(run: unknown): string {
+  /** Run `run`, which `start` answered; throws for any other. */
+  #runOf(run: unknown): FixtureRunStarted {
     const id =
       typeof run === "number" && Number.isSafeInteger(run)
         ? this.#runs[run]
@@ -909,11 +933,11 @@ class FixtureSession extends TestTarget {
     if (this.#closed) {
       throw sessionEnded();
     }
-    const outcome = await fixtureRunOutcome(
-      this.#env,
-      this.#runOf(run),
-      this.#endsAt
-    );
+    // Asked until the test's time is up, or its session closes.
+    const outcome = await fixtureRunOutcome(this.#env, this.#runOf(run), {
+      until: this.#endsAt,
+      stopped: () => this.#closed,
+    });
     return JSON.stringify(outcome ?? null);
   }
 
@@ -925,7 +949,11 @@ class FixtureSession extends TestTarget {
     if (this.#closed) {
       throw sessionEnded();
     }
-    return await fixtureTaskCompletions(this.#env, this.#runOf(run), task);
+    return await fixtureTaskCompletions(
+      this.#env,
+      this.#runOf(run).runId,
+      task
+    );
   }
 
   /**
@@ -1052,7 +1080,7 @@ class FixtureSession extends TestTarget {
   async close(): Promise<void> {
     this.#closed = true;
     // Its runs first: nothing of them runs on against a store discarded.
-    const runs = this.#runs.splice(0);
+    const runs = this.#runs.splice(0).map(({ runId }) => runId);
     if (runs.length > 0) {
       await within(discardFixtureRuns(this.#env, runs), this.#cleanupMs).catch(
         (error: unknown) => {
@@ -1708,6 +1736,9 @@ export const requireAppTestsPass = async (
  * any run takes, at most a page at a time. Run every quarter hour.
  */
 export const sweepTestFixtures = async (env: Env, now: Date): Promise<void> => {
+  // The runs dead tests left first, past their tests' deadlines: nothing of
+  // them runs on against a store discarded below, nor waits behind it.
+  await sweepFixtureRuns(env, now);
   const left = await drizzle(env.DB)
     .select({ storeId: appTestFixtures.storeId })
     .from(appTestFixtures)
@@ -1724,6 +1755,4 @@ export const sweepTestFixtures = async (env: Env, now: Date): Promise<void> => {
     // oxlint-disable-next-line no-await-in-loop -- see above
     await discardFixture(env, storeIdSchema.parse(storeId));
   }
-  // The runs test runs left, as old.
-  await sweepFixtureRuns(env, new Date(now.getTime() - fixtureLeftAfterMs));
 };
