@@ -42,6 +42,8 @@ interface Tenant {
   grantsAnswer?: () => Response;
   /** The next link each grants page hands back, instead of Graph's own. */
   nextLink?: string;
+  /** Every grant on one page, whatever `$top` asked, as Graph may. */
+  ignoreTop?: boolean;
 }
 
 const tenant: Tenant = { grants: [], apps: [], people: [] };
@@ -60,7 +62,10 @@ const internet = fakeInternet((request, url) => {
     if (tenant.grantsAnswer !== undefined) {
       return tenant.grantsAnswer();
     }
-    const top = Number(url.searchParams.get("$top") ?? "100");
+    const top =
+      tenant.ignoreTop === true
+        ? tenant.grants.length
+        : Number(url.searchParams.get("$top") ?? "100");
     const from = Number(url.searchParams.get("$skiptoken") ?? "0");
     const next = from + top;
     return Response.json({
@@ -449,6 +454,23 @@ describe("a landscape read", () => {
     const otherPath = await codeOf(
       read(connectionId, "https://graph.microsoft.com/v1.0/me/messages")
     );
+    // A page longer than asked for: read a hundred grants at a time.
+    tenant.ignoreTop = true;
+    const reads = [];
+    let cursor: string | null = null;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- each read goes on from the last
+      const page = await read(connectionId, cursor);
+      reads.push(page.grants.length);
+      cursor = page.next;
+    } while (cursor !== null);
+    tenant.ignoreTop = undefined;
+    const negativeSkip = await codeOf(
+      read(
+        connectionId,
+        "https://graph.microsoft.com/v1.0/oauth2PermissionGrants#skip=-1"
+      )
+    );
     tenant.nextLink = "https://attacker.example/next";
     const handedElsewhere = await codeOf(read(connectionId));
     tenant.nextLink = undefined;
@@ -466,6 +488,8 @@ describe("a landscape read", () => {
     tenant.grantsAnswer = undefined;
     expect({
       firstGrants: first.grants.length,
+      longPage: reads,
+      negativeSkip,
       // A page, its apps, and its people a filter of fifteen at a time.
       firstRequests: firstRequests <= landscapeLimits.requestsPerRead,
       secondGrants: second.grants.length,
@@ -479,6 +503,9 @@ describe("a landscape read", () => {
       },
     }).toStrictEqual({
       firstGrants: landscapeLimits.grantsPerRead,
+      // 350 grants on one page: four reads, none past its budget.
+      longPage: [100, 100, 100, 50],
+      negativeSkip: "landscape.cursor_invalid",
       firstRequests: true,
       secondGrants: landscapeLimits.grantsPerRead,
       readsOn: true,

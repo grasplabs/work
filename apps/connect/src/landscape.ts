@@ -141,6 +141,25 @@ const isGraphLink = (url: string): boolean => {
   }
 };
 
+/** How a cursor names the grant of its page a read starts at. */
+const skipMark = "skip=";
+
+/**
+ * A cursor's link to Graph, never sent its fragment, and where in that
+ * page's grants to start: its fragment's `skip=`, or the first.
+ */
+const cursorOf = (cursor: string): { link: string; skip: number } => {
+  const url = new URL(cursor);
+  const skip = url.hash.startsWith(`#${skipMark}`)
+    ? Number(url.hash.slice(skipMark.length + 1))
+    : 0;
+  url.hash = "";
+  if (!Number.isSafeInteger(skip) || skip < 0) {
+    throw landscapeErrors.create("landscape.cursor_invalid");
+  }
+  return { link: url.href, skip };
+};
+
 /** `ids` in pages Graph's `in` filter takes. */
 const pagesOf = (ids: readonly string[]): string[][] => {
   const pages: string[][] = [];
@@ -323,15 +342,17 @@ export const readLandscape = async (
     budget: requestBudget(landscapeLimits.requestsPerRead),
   };
   try {
-    const page = grantsPageSchema.parse(
-      await graph(
-        access,
-        cursor ??
-          `${v1}/oauth2PermissionGrants?$top=${landscapeLimits.grantsPerRead}`
-      )
+    const { link, skip } = cursorOf(
+      cursor ??
+        `${v1}/oauth2PermissionGrants?$top=${landscapeLimits.grantsPerRead}`
     );
-    // A page Graph sends past `$top` is held by the read's request budget.
-    const grants = page.value;
+    const page = grantsPageSchema.parse(await graph(access, link));
+    // Graph needn't keep to `$top` here: a longer page is read
+    // `grantsPerRead` grants at a time, the cursor naming where in the
+    // page the next read starts, so every read keeps within its budget
+    // and no grant is skipped.
+    const grants = page.value.slice(skip, skip + landscapeLimits.grantsPerRead);
+    const rest = skip + landscapeLimits.grantsPerRead < page.value.length;
     const clientIds = [
       ...new Set(grants.map(({ clientId }) => clientId)),
     ].filter((id) => guidPattern.test(id));
@@ -352,7 +373,9 @@ export const readLandscape = async (
       userSchema,
       personIds
     );
-    const next = page["@odata.nextLink"] ?? null;
+    const next = rest
+      ? `${link}#${skipMark}${String(skip + landscapeLimits.grantsPerRead)}`
+      : (page["@odata.nextLink"] ?? null);
     // A link elsewhere is never kept, nor taken for the end.
     if (
       next !== null &&
