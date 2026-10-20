@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fa215759-873d-4d0e-8cfe-1c855b8e5073",
+  "id": "618d2a6f-795c-4e24-acd8-b39e0d476232",
   "prevId": "3668d988-0737-4f16-985d-2df60c6d2e7f",
   "tables": {
     "sdk_abandoned_targets": {
@@ -353,6 +353,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "root_table_id": {
           "name": "root_table_id",
           "type": "text",
@@ -382,6 +389,14 @@
           "autoincrement": false,
           "default": 0
         },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -391,6 +406,13 @@
         },
         "finished_at": {
           "name": "finished_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "failed_at": {
+          "name": "failed_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

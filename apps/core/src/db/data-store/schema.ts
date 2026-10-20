@@ -763,15 +763,27 @@ export const cascadeJobs = sqliteTable("sdk_cascade_jobs", {
   jobId: text("job_id").primaryKey(),
   receiptId: text("receipt_id").notNull(),
   principal: text().notNull(),
-  /** The App whose release committed the deletion, if one did. */
+  /**
+   * The resource the commit came through (its receipt's scope): the App
+   * whose release committed the deletion, or the consumer that called the
+   * store's public operation.
+   */
   resourceId: text("resource_id"),
+  /** The workflow run the commit was made in, if any. */
+  runId: text("run_id"),
   /** The first record the commit itself deleted: what the job is named by. */
   rootTableId: text("root_table_id").notNull(),
   rootRecordId: text("root_record_id").notNull(),
   planned: integer().notNull(),
   deleted: integer().notNull().default(0),
+  /**
+   * Batches of it that failed: past `cascadeJobMaxAttempts` the job fails
+   * (`failedAt`), and its records are no longer deleting.
+   */
+  attempts: integer().notNull().default(0),
   createdAt: integer("created_at").notNull(),
   finishedAt: integer("finished_at"),
+  failedAt: integer("failed_at"),
 });
 
 /**
@@ -779,6 +791,9 @@ export const cascadeJobs = sqliteTable("sdk_cascade_jobs", {
  * record belongs to one job at most. While it has a row it stays readable,
  * and a write to it or a new reference to it is refused (`data.deleting`);
  * the batch that deletes it removes the row in the same transaction.
+ * Only a commit is refused: the store's own migrations and backfills
+ * (store-migrations.ts, store-backfill.ts) may still rewrite a deleting
+ * record, which the job then deletes as it is.
  */
 export const cascadeMembers = sqliteTable(
   "sdk_cascade_members",

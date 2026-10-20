@@ -3,12 +3,15 @@ CREATE TABLE `sdk_cascade_jobs` (
 	`receipt_id` text NOT NULL,
 	`principal` text NOT NULL,
 	`resource_id` text,
+	`run_id` text,
 	`root_table_id` text NOT NULL,
 	`root_record_id` text NOT NULL,
 	`planned` integer NOT NULL,
 	`deleted` integer DEFAULT 0 NOT NULL,
+	`attempts` integer DEFAULT 0 NOT NULL,
 	`created_at` integer NOT NULL,
-	`finished_at` integer
+	`finished_at` integer,
+	`failed_at` integer
 );
 --> statement-breakpoint
 CREATE TABLE `sdk_cascade_members` (
