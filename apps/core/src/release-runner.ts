@@ -30,7 +30,7 @@ import {
   runInSession,
   sessionEndedError,
 } from "./sandbox-session.ts";
-import type { NestedRun, SessionCall } from "./sandbox-session.ts";
+import type { ConsoleLine, NestedRun, SessionCall } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
 import { sessionHost } from "./sandboxed.ts";
 
@@ -393,6 +393,34 @@ const inSession = async (
 };
 
 /**
+ * Hands `lines`, what a call in a sandbox session wrote (sandbox-session.ts,
+ * `ConsoleLine`), to `tail` as the runtime hands a Loader tail one call's
+ * trace: one event, its logs with their time, level and message.
+ */
+const tailLines = async (
+  tail: Fetcher,
+  lines: readonly ConsoleLine[]
+): Promise<void> => {
+  if (lines.length === 0) {
+    return;
+  }
+  const events = [
+    {
+      event: null,
+      logs: lines.map(({ at, level, message }) => ({
+        timestamp: at,
+        level,
+        message: [message],
+      })),
+    },
+  ];
+  const deliver: unknown = Reflect.get(tail, "tail");
+  if (typeof deliver === "function") {
+    await Reflect.apply(deliver, tail, [events]);
+  }
+};
+
+/**
  * The runner of `release`: each call in a fresh isolate of its own (the
  * loader names none, so none is shared or kept), loaded with the release's
  * verified modules and the SDK modules sealed with it (never the SDK the
@@ -463,6 +491,15 @@ export const releaseRunner =
                 { capability: capability(isolateChannel) },
               ],
               owner,
+              // What a draft's function writes goes to its tail, as the
+              // Loader hands it over on Cloudflare (server-logs.ts).
+              ...(tailOf === undefined
+                ? {}
+                : {
+                    console: async (lines: ConsoleLine[]) => {
+                      await tailLines(tailOf(path), lines);
+                    },
+                  }),
               cpuMs: sandbox.limits.cpuMs,
               // The host's own deadline ends the invocation before this
               // (operations.ts), and frees the process (`signal`); this only

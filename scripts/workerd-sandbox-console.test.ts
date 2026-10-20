@@ -125,6 +125,73 @@ describe("isolates on the on-prem sandbox", () => {
   );
 });
 
+describe("a draft's sealed preview on the on-prem sandbox", () => {
+  let supervisor: ReturnType<typeof supervisorWith>;
+  let coreUrl: string;
+
+  beforeAll(async () => {
+    supervisor = supervisorWith(["--processes=1"]);
+    const socket = await socketOf(supervisor.child, supervisor.output);
+    coreUrl = await serveStandIn("isolate-console-worker.ts", socket);
+  }, 180_000);
+
+  afterAll(async () => {
+    if (supervisor.child.exitCode === null) {
+      supervisor.child.kill("SIGTERM");
+      await once(supervisor.child, "exit");
+    }
+    cleanUp();
+  });
+
+  const previewSchema = z.object({
+    answered: z.unknown(),
+    sunk: z.array(
+      z.array(
+        z.object({ at: z.number(), level: z.string(), message: z.string() })
+      )
+    ),
+    value: z.string(),
+  });
+
+  it.each([
+    ["answers", "preview", false],
+    ["throws", "preview-fails", true],
+  ])(
+    "hands what a function writes to its sink, bounded, when it %s, and prints none of it",
+    async (_case, route, fails) => {
+      const response = await fetch(`${coreUrl}${route}`);
+      const ran = previewSchema.parse(await response.json());
+      await sleep(SETTLE_MS);
+      const [lines = []] = ran.sunk;
+
+      expect({
+        answered: ran.answered,
+        // Once, with the first lines a tail keeps of a call.
+        sinks: ran.sunk.length,
+        count: lines.length,
+        levels: lines.slice(0, 5).map(({ level }) => level),
+        first: lines[0]?.message,
+        // An error with its message, not as JSON's "{}".
+        error: lines[3]?.message.startsWith(`${ran.value} Error: boom`),
+        // `trace` is no level a tail keeps: the next line is the long one.
+        long: lines[5]?.message.length,
+        read: supervisor.output().includes("sandbox.listening"),
+        printed: supervisor.output().includes(ran.value),
+      }).toStrictEqual({
+        answered: fails ? { threw: "The draft's function failed." } : ran.value,
+        sinks: 1,
+        count: 20,
+        levels: ["log", "info", "warn", "error", "debug"],
+        first: `${ran.value} {"n":1}`,
+        error: true,
+        long: 2000,
+        read: true,
+        printed: false,
+      });
+    }
+  );
+});
+
 describe("the on-prem sandbox supervisor", () => {
   it.each([["--verbose"], ["--processes=1", "--verbose"], ["--debug"]])(
     "refuses an option it doesn't take, by name: %s",

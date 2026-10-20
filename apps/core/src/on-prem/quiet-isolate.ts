@@ -18,6 +18,16 @@
  * App puts back can only call the silenced ones), and prevents the
  * default of an unhandled rejection or error, which workerd served
  * `--verbose` would otherwise print with its message.
+ *
+ * One kind of call keeps what it writes, bounded, for whom core says: a
+ * draft's sealed preview, whose lines go to the agent's next check of
+ * that draft, as a Loader tail hands them over on Cloudflare
+ * (server-logs.ts, GRA-689). Its isolate is loaded with the quiet module
+ * recording instead (`capturedModules`): the first `maxCapturedLines`
+ * lines of the call, each held to `maxCapturedMessage` characters, with
+ * their level and time, still printing nothing. A module of the host's
+ * own runs the call's entrypoint and, once it settled, answered or
+ * thrown, hands those lines to the sink core passed with it.
  */
 
 /** The quiet module's name: none an App's or the platform's module has. */
@@ -55,5 +65,119 @@ export const quietModules = <Module>(
     ...modules,
     [mainModule]: `import ${JSON.stringify(quietModule)};\n${main}`,
     [quietModule]: quietSource,
+  };
+};
+
+/** Most lines a captured call keeps, as a tail keeps of one (server-logs.ts). */
+export const maxCapturedLines = 20;
+
+/** Most characters of one captured line, as a tail keeps (server-logs.ts). */
+export const maxCapturedMessage = 2000;
+
+/** The levels a captured line has: those a tail keeps. */
+const capturedLevels = ["debug", "info", "log", "warn", "error"];
+
+/**
+ * The quiet module recording: the levels a tail keeps go to `lines`,
+ * bounded; every other console method does nothing, as does everything
+ * when quiet.
+ */
+const capturingSource = `const silent = () => undefined;
+const lines = [];
+const partOf = (part) => {
+  if (typeof part === "string") {
+    return part;
+  }
+  // An error's own properties aren't enumerable: JSON would say "{}".
+  if (part instanceof Error) {
+    return part.stack ?? \`\${part.name}: \${part.message}\`;
+  }
+  try {
+    return JSON.stringify(part) ?? String(part);
+  } catch {
+    return String(part);
+  }
+};
+const recording = (level) => (...parts) => {
+  if (lines.length < ${maxCapturedLines}) {
+    lines.push({
+      at: Date.now(),
+      level,
+      message: parts.map(partOf).join(" ").slice(0, ${maxCapturedMessage}),
+    });
+  }
+};
+const levels = new Set(${JSON.stringify(capturedLevels)});
+for (const name of Object.getOwnPropertyNames(console)) {
+  if (typeof console[name] === "function") {
+    console[name] = levels.has(name) ? recording(name) : silent;
+  }
+}
+addEventListener("unhandledrejection", (event) => {
+  event.preventDefault();
+});
+addEventListener("error", (event) => {
+  event.preventDefault();
+});
+export const takeLines = () => lines.splice(0);
+`;
+
+/** The host's module that runs a captured call's entrypoint. */
+const captureModule = "grasp-sandbox-capture.js";
+
+/** The entrypoint of `captureModule`, and its method. */
+export const captureEntrypoint = "GraspCaptured";
+export const captureMethod = "call";
+
+/**
+ * Runs `entrypoint`'s `method` of the call's main module with `args`, then
+ * hands what it wrote to `sink`, answered or thrown. A class entrypoint is
+ * made as workerd makes one, with this isolate's context and env.
+ */
+const captureSource = (
+  mainModule: string
+): string => `import { WorkerEntrypoint } from "cloudflare:workers";
+import { takeLines } from ${JSON.stringify(quietModule)};
+import * as main from ${JSON.stringify(mainModule)};
+export class ${captureEntrypoint} extends WorkerEntrypoint {
+  async ${captureMethod}(entrypoint, method, args, sink) {
+    try {
+      const exported = main[entrypoint];
+      const target =
+        typeof exported === "function"
+          ? new exported(this.ctx, this.env)
+          : exported;
+      return await target[method](...args);
+    } finally {
+      try {
+        await sink(takeLines());
+      } catch {
+        // The lines are for a check of the draft: never the call's failure.
+      }
+    }
+  }
+}
+`;
+
+/**
+ * `modules` as a captured call's isolate loads them (see the header): the
+ * quiet module recording, imported first by `captureModule`, the main
+ * module, which then runs the call. A main module that isn't JavaScript
+ * text, or isn't there, is left as it is: the Loader refuses it.
+ */
+export const capturedModules = <Module>(
+  mainModule: string,
+  modules: Readonly<Record<string, Module | string>>
+): { mainModule: string; modules: Record<string, Module | string> } => {
+  if (typeof modules[mainModule] !== "string") {
+    return { mainModule, modules: { ...modules } };
+  }
+  return {
+    mainModule: captureModule,
+    modules: {
+      ...modules,
+      [quietModule]: capturingSource,
+      [captureModule]: `import ${JSON.stringify(quietModule)};\n${captureSource(mainModule)}`,
+    },
   };
 };
