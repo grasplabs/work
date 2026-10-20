@@ -127,31 +127,42 @@ const scopesUnion = (kept: SQL, seen: SQL): SQL =>
     ))`;
 
 /**
- * The statements that stage one page of `sync`: kept apart by the sync's
- * start, each app and person once, their scopes adding up over the
- * sync's pages. A page staged again (two cron runs, a retry) changes
- * nothing. Nobody sees them until the sync is whole (`published`).
+ * That `sync` is still where this run read it from: under way, at its
+ * reads. Every staging statement of a page, and its publishing, holds
+ * only while this does, and runs before the statement that moves the
+ * sync on, so of two runs that read the same page only the one whose
+ * claim wins stages, publishes or drops anything.
+ */
+const claimed = (sync: SyncRow): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${landscapeSyncs}
+    WHERE ${landscapeSyncs.connectionId} = ${sync.connectionId}
+      AND ${landscapeSyncs.startedAt} = ${sync.startedAt.getTime()}
+      AND ${landscapeSyncs.reads} = ${sync.reads}
+      AND ${landscapeSyncs.state} = 'running')`;
+
+/**
+ * The statements that stage one page of `sync`, while its claim holds:
+ * kept apart by the sync's start, each app and person once, their scopes
+ * adding up over the sync's pages. Nobody sees them until the sync is
+ * whole (`published`).
  */
 const pageWrites = (
   db: Db,
   sync: SyncRow,
   grants: readonly LandscapeGrant[]
 ): BatchItem<"sqlite">[] => {
+  const started = sync.startedAt.getTime();
   const writes: BatchItem<"sqlite">[] = [];
   for (const { app, adminScopes, people } of appsOf(grants).values()) {
     writes.push(
       db
         .insert(landscapeStagedApps)
-        .values({
-          connectionId: sync.connectionId,
-          startedAt: sync.startedAt,
-          appId: app.id,
-          name: app.name,
-          publisher: app.publisher,
-          unverifiedPublisher: app.unverifiedPublisher,
-          verified: app.verified,
-          adminScopes,
-        })
+        .select(
+          sql`SELECT ${sync.connectionId}, ${started}, ${app.id}, ${app.name}, ${app.publisher},
+              ${app.unverifiedPublisher}, ${app.verified ? 1 : 0},
+              ${adminScopes === null ? null : JSON.stringify(adminScopes)}
+            WHERE ${claimed(sync)}`
+        )
         .onConflictDoUpdate({
           target: [
             landscapeStagedApps.connectionId,
@@ -159,10 +170,10 @@ const pageWrites = (
             landscapeStagedApps.appId,
           ],
           set: {
-            name: app.name,
-            publisher: app.publisher,
-            unverifiedPublisher: app.unverifiedPublisher,
-            verified: app.verified,
+            name: sql`excluded.name`,
+            publisher: sql`excluded.publisher`,
+            unverifiedPublisher: sql`excluded.unverified_publisher`,
+            verified: sql`excluded.verified`,
             adminScopes: sql`CASE
               WHEN excluded.admin_scopes IS NULL THEN ${landscapeStagedApps.adminScopes}
               WHEN ${landscapeStagedApps.adminScopes} IS NULL THEN excluded.admin_scopes
@@ -175,14 +186,11 @@ const pageWrites = (
       writes.push(
         db
           .insert(landscapeStagedPeople)
-          .values({
-            connectionId: sync.connectionId,
-            startedAt: sync.startedAt,
-            appId: app.id,
-            personId,
-            name,
-            scopes,
-          })
+          .select(
+            sql`SELECT ${sync.connectionId}, ${started}, ${app.id}, ${personId}, ${name},
+                ${JSON.stringify(scopes)}
+              WHERE ${claimed(sync)}`
+          )
           .onConflictDoUpdate({
             target: [
               landscapeStagedPeople.connectionId,
@@ -191,7 +199,7 @@ const pageWrites = (
               landscapeStagedPeople.personId,
             ],
             set: {
-              name,
+              name: sql`excluded.name`,
               scopes: scopesUnion(
                 sql`${landscapeStagedPeople.scopes}`,
                 sql`excluded.scopes`
@@ -218,8 +226,10 @@ const stagedOf = (sync: SyncRow) => ({
 
 /** Drops what `sync` staged: it never becomes what anyone sees. */
 const unstaged = (db: Db, sync: SyncRow): BatchItem<"sqlite">[] => [
-  db.delete(landscapeStagedPeople).where(stagedOf(sync).people),
-  db.delete(landscapeStagedApps).where(stagedOf(sync).apps),
+  db
+    .delete(landscapeStagedPeople)
+    .where(and(stagedOf(sync).people, claimed(sync))),
+  db.delete(landscapeStagedApps).where(and(stagedOf(sync).apps, claimed(sync))),
 ];
 
 /**
@@ -236,7 +246,8 @@ const published = (db: Db, sync: SyncRow): BatchItem<"sqlite">[] => {
         sql`SELECT connection_id, app_id, name, publisher, unverified_publisher, verified, admin_scopes,
             CASE WHEN admin_scopes IS NULL THEN NULL ELSE ${seen} END, ${seen}, ${seen}
           FROM ${landscapeStagedApps}
-          WHERE connection_id = ${sync.connectionId} AND started_at = ${seen}`
+          WHERE connection_id = ${sync.connectionId} AND started_at = ${seen}
+            AND ${claimed(sync)}`
       )
       .onConflictDoUpdate({
         target: [landscapeApps.connectionId, landscapeApps.appId],
@@ -257,7 +268,8 @@ const published = (db: Db, sync: SyncRow): BatchItem<"sqlite">[] => {
       .select(
         sql`SELECT connection_id, app_id, person_id, name, scopes, ${seen}, ${seen}
           FROM ${landscapeStagedPeople}
-          WHERE connection_id = ${sync.connectionId} AND started_at = ${seen}`
+          WHERE connection_id = ${sync.connectionId} AND started_at = ${seen}
+            AND ${claimed(sync)}`
       )
       .onConflictDoUpdate({
         target: [
@@ -339,7 +351,9 @@ const failed = (
   reason: string,
   now: Date,
   retryAt: Date | null = null
-): [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] => [
+): BatchItem<"sqlite">[] => [
+  // Its staging dropped while its claim holds, before it moves on.
+  ...unstaged(db, sync),
   db
     .update(landscapeSyncs)
     .set({ state: "failed", reason, finishedAt: now, retryAt })
@@ -357,8 +371,18 @@ const failed = (
     target: { type: "connection", id: sync.connectionId },
     detail: { state: "failed", reason, reads: sync.reads },
   }),
-  ...unstaged(db, sync),
 ];
+
+/** Runs `statements` as one batch, all or nothing. */
+const batched = async (
+  db: Db,
+  statements: readonly BatchItem<"sqlite">[]
+): Promise<void> => {
+  const [first, ...rest] = statements;
+  if (first !== undefined) {
+    await db.batch([first, ...rest]);
+  }
+};
 
 /** What one sync's audit event says: counts and its outcome, never a name. */
 const syncedEntry = (sync: SyncRow, state: string, grants: number) => ({
@@ -394,7 +418,7 @@ const readFailed = async (
         .where(eq(landscapeSyncs.connectionId, sync.connectionId));
       return;
     }
-    await db.batch(failed(db, sync, code, now, retryAt));
+    await batched(db, failed(db, sync, code, now, retryAt));
     return;
   }
   if (
@@ -402,7 +426,7 @@ const readFailed = async (
     code === "landscape.inactive" ||
     code === "landscape.cursor_invalid"
   ) {
-    await db.batch(failed(db, sync, code, now));
+    await batched(db, failed(db, sync, code, now));
     return;
   }
   // Anything else may pass: tried again later the same day, and failed
@@ -412,7 +436,10 @@ const readFailed = async (
     ...errorFields(error),
   });
   if (sync.day !== dayOf(now)) {
-    await db.batch(failed(db, sync, code ?? "landscape.provider_failed", now));
+    await batched(
+      db,
+      failed(db, sync, code ?? "landscape.provider_failed", now)
+    );
     return;
   }
   await db
@@ -447,12 +474,12 @@ const readPage = async (
   // With no tenant configured, nothing can be checked: the sync fails and
   // keeps what it had, until the deployment says whose it is.
   if (tenant === undefined) {
-    await db.batch(failed(db, sync, "landscape.tenant_unknown", now));
+    await batched(db, failed(db, sync, "landscape.tenant_unknown", now));
     return undefined;
   }
   if (read.tenant.toLowerCase() !== tenant) {
     // Nothing of this connection is kept, from this sync or an earlier one.
-    await db.batch([
+    await batched(db, [
       ...failed(db, sync, "landscape.tenant_mismatch", now),
       db
         .delete(landscapeAppPeople)
@@ -501,11 +528,12 @@ const readPage = async (
         eq(landscapeSyncs.state, "running")
       )
     );
-  // The page is staged with it. Staged again by another cron run that read
-  // the same page, it changes nothing. The cursor moves on only once, and
-  // the sync's end is recorded only by the run whose claim moved it,
-  // right after it. A whole sync publishes what it staged, all at once; one
-  // stopped at its bound publishes nothing, so nobody sees half of one.
+  // The page is staged with it, only by the run whose claim wins: another
+  // cron run that read the same page stages, publishes and drops nothing.
+  // The cursor moves on only once, and the sync's end is recorded only by
+  // that run, right after its claim. A whole sync publishes what it
+  // staged, all at once; one stopped at its bound publishes nothing, so
+  // nobody sees half of one.
   const done: BatchItem<"sqlite">[] =
     state === "running"
       ? []
@@ -517,7 +545,9 @@ const readPage = async (
   } else if (state === "partial") {
     after = unstaged(db, sync);
   }
-  await db.batch([moved, ...done, ...staged, ...after]);
+  // Staging and publishing first, while the claim holds; then the claim
+  // itself, its event right after it.
+  await batched(db, [...staged, ...after, moved, ...done]);
   return state === "running" ? next : undefined;
 };
 
@@ -542,7 +572,7 @@ const syncOne = async (
       )
       .get();
     if (running !== undefined) {
-      await db.batch(failed(db, running, "landscape.inactive", now));
+      await batched(db, failed(db, running, "landscape.inactive", now));
     }
     return;
   }

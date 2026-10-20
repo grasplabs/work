@@ -471,6 +471,46 @@ describe("the application landscape", () => {
     ).toStrictEqual([{ ada: true, scopes: ["Mail.ReadWrite", "User.Read"] }]);
   });
 
+  it("lets only the cron run whose claim wins stage and publish a sync's last page", async () => {
+    const app = appOf("app-raced", "Raced");
+    const filler = appOf("app-raced-filler", "Filler");
+    const ada = guid();
+    await tenantHolds({
+      apps: [app, filler],
+      people: [{ id: ada, displayName: "Ada" }],
+      // Ada's mail grant on the first page, her profile grant on the second.
+      grants: [
+        grantOf(app, "Mail.ReadWrite", ada),
+        ...Array.from({ length: landscapeLimits.grantsPerRead - 1 }, () =>
+          grantOf(filler, "User.Read")
+        ),
+        grantOf(app, "User.Read", ada),
+      ],
+      failing: "later",
+    });
+    const { admin, connectionId } = await connected();
+    const now = new Date();
+    now.setUTCHours(10, 0, 0, 0);
+    // The first page staged; the second fails for now.
+    await syncLandscapes(env, now);
+    await tenantHolds({ failing: false });
+    await env.DB.prepare(
+      "UPDATE landscape_syncs SET retry_at = NULL WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .run();
+    // Two cron runs read the last page at once.
+    await Promise.all([syncLandscapes(env, now), syncLandscapes(env, now)]);
+    const people = await admin.api.landscape.people(connectionId, "app-raced");
+    expect({
+      sync: await syncOf(connectionId),
+      scopes: people.map(({ scopes }) => scopes.toSorted()),
+    }).toStrictEqual({
+      sync: { state: "done", reads: 2, reason: null },
+      scopes: [["Mail.ReadWrite", "User.Read"]],
+    });
+  });
+
   it("forgets every row of a connection no longer connected, however many are", async () => {
     const app = appOf("app-forgotten", "Forgotten");
     await tenantHolds({
