@@ -470,6 +470,23 @@ const checks: Record<Family, () => void> = {
         threwWith(engine, "Workflow instance has invalid id")
       ).toBeTruthy();
     });
+
+    test("create with an ID that exists throws instance.already_exists", async () => {
+      const tag = crypto.randomUUID().slice(0, 8);
+      const params = { fixture: "throws", params: {} };
+      await env.REFERENCE.create({ id: `reference-${tag}`, params });
+      await engineBinding("throws").create({ id: `engine-${tag}` });
+      const reference = await settle(
+        async () =>
+          await env.REFERENCE.create({ id: `reference-${tag}`, params })
+      );
+      const engine = await settle(
+        async () =>
+          await engineBinding("throws").create({ id: `engine-${tag}` })
+      );
+      expect(threwWith(reference, "instance.already_exists")).toBeTruthy();
+      expect(threwWith(engine, "instance.already_exists")).toBeTruthy();
+    });
   },
   "batch-operations": () => {
     test("deleteBatch deletes what exists and reports each missing ID with the reference's code", async () => {
@@ -499,6 +516,7 @@ const checks: Record<Family, () => void> = {
 
     test("createBatch refuses an empty batch", async () => {
       const reference = await settle(
+        // oxlint-disable-next-line typescript/no-deprecated -- the array form the runtime still serves, compared with the engine's
         async () => await env.REFERENCE.createBatch([])
       );
       const engine = await settle(
@@ -507,6 +525,48 @@ const checks: Record<Family, () => void> = {
       const message = "batchCreate should have at least 1 instance";
       expect(threwWith(reference, message)).toBeTruthy();
       expect(threwWith(engine, message)).toBeTruthy();
+    });
+
+    test("createBatch refuses more than 100 instances", async () => {
+      const tag = crypto.randomUUID().slice(0, 8);
+      const params = { fixture: "throws", params: {} };
+      const ids = Array.from({ length: 101 }, (_, index) => `${tag}-${index}`);
+      const reference = await settle(
+        async () =>
+          // oxlint-disable-next-line typescript/no-deprecated -- the array form the runtime still serves, compared with the engine's
+          await env.REFERENCE.createBatch(
+            ids.map((id) => ({ id: `r-${id}`, params }))
+          )
+      );
+      const engine = await settle(
+        async () =>
+          await engineBinding("throws").createBatch(
+            ids.map((id) => ({ id: `e-${id}` }))
+          )
+      );
+      const message = "only supports 100 instances";
+      expect(threwWith(reference, message)).toBeTruthy();
+      expect(threwWith(engine, message)).toBeTruthy();
+    });
+
+    test("createBatch creates an ID once, skips one that exists, and returns only what it created", async () => {
+      const tag = crypto.randomUUID().slice(0, 8);
+      const params = { fixture: "throws", params: {} };
+      await env.REFERENCE.create({ id: `r-existing-${tag}`, params });
+      await engineBinding("throws").create({ id: `e-existing-${tag}` });
+      // oxlint-disable-next-line typescript/no-deprecated -- the array form the runtime still serves, compared with the engine's
+      const reference = await env.REFERENCE.createBatch([
+        { id: `r-twice-${tag}`, params },
+        { id: `r-twice-${tag}`, params },
+        { id: `r-existing-${tag}`, params },
+      ]);
+      const engine = await engineBinding("throws").createBatch([
+        { id: `e-twice-${tag}` },
+        { id: `e-twice-${tag}` },
+        { id: `e-existing-${tag}` },
+      ]);
+      expect(reference.map(({ id }) => id)).toStrictEqual([`r-twice-${tag}`]);
+      expect(engine.map(({ id }) => id)).toStrictEqual([`e-twice-${tag}`]);
     });
   },
   status: () => {
@@ -844,70 +904,6 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
     const text = await ran("text-stream");
     expect(text.engine.error?.name).toBe("WorkflowFatalError");
     expect(text.reference.error?.name).toBe("DataCloneError");
-  },
-  "duplicate-create": async () => {
-    const tag = crypto.randomUUID().slice(0, 8);
-    const params = { fixture: "throws", params: {} };
-    await env.REFERENCE.create({ id: `reference-${tag}`, params });
-    await engineBinding("throws").create({ id: `engine-${tag}` });
-    const reference = await settle(async () => {
-      const instance = await env.REFERENCE.create({
-        id: `reference-${tag}`,
-        params,
-      });
-      return instance.id;
-    });
-    const engine = await settle(
-      async () => await engineBinding("throws").create({ id: `engine-${tag}` })
-    );
-    expect(threwWith(engine, "instance.already_exists")).toBeTruthy();
-    expect(reference).toStrictEqual({ ok: true, value: `reference-${tag}` });
-  },
-  "batch-limit": async () => {
-    const tag = crypto.randomUUID().slice(0, 8);
-    const params = { fixture: "throws", params: {} };
-    const entries = Array.from(
-      { length: 101 },
-      (_, index) => `${tag}-${index}`
-    );
-    const engine = await settle(
-      async () =>
-        await engineBinding("throws").createBatch(
-          entries.map((id) => ({ id: `e-${id}` }))
-        )
-    );
-    const reference = await settle(async () => {
-      const created = await env.REFERENCE.createBatch(
-        entries.map((id) => ({ id: `r-${id}`, params }))
-      );
-      return created.length;
-    });
-    expect(threwWith(engine, "only supports 100 instances")).toBeTruthy();
-    expect(reference).toStrictEqual({ ok: true, value: 101 });
-  },
-  "batch-duplicates": async () => {
-    const tag = crypto.randomUUID().slice(0, 8);
-    const params = { fixture: "throws", params: {} };
-    await env.REFERENCE.create({ id: `r-existing-${tag}`, params });
-    await engineBinding("throws").create({ id: `e-existing-${tag}` });
-    const referenceCreated = await env.REFERENCE.createBatch([
-      { id: `r-twice-${tag}`, params },
-      { id: `r-twice-${tag}`, params },
-      { id: `r-existing-${tag}`, params },
-    ]);
-    const engineCreated = await engineBinding("throws").createBatch([
-      { id: `e-twice-${tag}` },
-      { id: `e-twice-${tag}` },
-      { id: `e-existing-${tag}` },
-    ]);
-    const reference = referenceCreated.map(({ id }) => id);
-    const engine = engineCreated.map(({ id }) => id);
-    expect(engine).toStrictEqual([`e-twice-${tag}`]);
-    expect(reference).toStrictEqual([
-      `r-twice-${tag}`,
-      `r-twice-${tag}`,
-      `r-existing-${tag}`,
-    ]);
   },
   "rolling-back-status": async () => {
     expectTypeOf<"rollingBack">().toExtend<InstanceStatus["status"]>();

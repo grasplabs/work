@@ -126,11 +126,11 @@ export const callStub = async (
     return await call;
   } catch (error) {
     // A call that rejected (the App's code threw, which is routine here)
-    // keeps holding the isolate's session until its promise is disposed or
-    // collected: the isolate's request never completes, and workerd aborts
-    // it as hung while this request goes on (a migration run's next batch).
-    // Fixed in workerd 1.20261010.1 (cloudflare/workerd#7637); until the
-    // runtime here is on it, release the call as soon as it rejected.
+    // is released at once rather than when its promise is collected. Before
+    // workerd 1.20261010.1 (cloudflare/workerd#7637) it held the isolate's
+    // session until then, and workerd aborted the isolate as hung while
+    // this request went on; the runtime is past that now, and disposing a
+    // settled call still frees its pipeline sooner.
     disposeOf(call);
     throw error;
   }
