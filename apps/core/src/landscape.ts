@@ -20,7 +20,15 @@ import type {
 } from "@grasp-os/shared/landscape";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, inArray, lt, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  getTableColumns,
+  inArray,
+  lt,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -591,7 +599,18 @@ export const landscapeAppsOf = async (
   const db = drizzle(env.DB);
   const [apps, people, since] = await Promise.all([
     db.select().from(landscapeApps),
-    db.select().from(landscapeAppPeople),
+    // Only the grants current for their connection, chosen in SQL: the
+    // ones retention keeps after they went aren't read at all.
+    db
+      .select(getTableColumns(landscapeAppPeople))
+      .from(landscapeAppPeople)
+      .leftJoin(
+        landscapeSyncs,
+        eq(landscapeSyncs.connectionId, landscapeAppPeople.connectionId)
+      )
+      .where(
+        sql`${landscapeAppPeople.lastSeen} >= coalesce(${landscapeSyncs.currentSince}, 0)`
+      ),
     currentSince(db),
   ]);
   // Each app's people, grouped once: every app reads only its own.
@@ -602,9 +621,7 @@ export const landscapeAppsOf = async (
   return apps
     .map((app) => {
       const current = since.get(app.connectionId) ?? new Date(0);
-      const grants = (
-        peopleOf.get(`${app.connectionId} ${app.appId}`) ?? []
-      ).filter((person) => person.lastSeen >= current);
+      const grants = peopleOf.get(`${app.connectionId} ${app.appId}`) ?? [];
       const adminConsented =
         app.adminSeenAt !== null && app.adminSeenAt >= current;
       return {
