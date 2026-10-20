@@ -54,6 +54,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
+import { discardPreviewStoresOf } from "./sealed-previews.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -321,7 +322,8 @@ const disconnectPersonal = async (
 /**
  * Removes `userId` from the organization for good (see `recordRemoval`),
  * then revokes what their chats' agent was granted or asked for there and
- * disconnects their personal connections (`disconnectPersonal`). Removing someone already
+ * disconnects their personal connections (`disconnectPersonal`), and
+ * discards their chats' preview stores (`discardPreviewStoresOf`). Removing someone already
  * removed only does the second part again, so a removal whose disconnect
  * failed can also be finished by trying again.
  */
@@ -349,9 +351,12 @@ const removeMember = async (
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
-  return {
-    connectionsDisconnected: await disconnectPersonal(env, by, target),
-  };
+  const connectionsDisconnected = await disconnectPersonal(env, by, target);
+  // What they typed into their chats' previews goes too: they never reach
+  // those again. Never throws; a store it can't discard is left to the
+  // preview stores' sweep, or to this removal tried again.
+  await discardPreviewStoresOf(env, target);
+  return { connectionsDisconnected };
 };
 
 /**
