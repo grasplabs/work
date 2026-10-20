@@ -6,6 +6,10 @@
 // - its words are English props with defaults (`label`, `unknown`), as the
 //   kit's other components have them, since App screens carry no Lingui;
 // - the index reads the carousel as it changes, not through an effect;
+// - the card is a popover that opens on hover, as the prototype's hover
+//   card does, and on a click, a tap or the keyboard too: a preview card's
+//   popup can't be reached by keyboard, touch or a screen reader, and this
+//   one holds buttons;
 // - no hand-written memo: the React Compiler memoises it.
 import { Badge } from "@grasp-os/ui/components/badge";
 import type { CarouselApi } from "@grasp-os/ui/components/carousel";
@@ -15,10 +19,10 @@ import {
   CarouselItem,
 } from "@grasp-os/ui/components/carousel";
 import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@grasp-os/ui/components/hover-card";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@grasp-os/ui/components/popover";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import {
@@ -51,8 +55,8 @@ function InlineCitationText({
   );
 }
 
-function InlineCitationCard(props: React.ComponentProps<typeof HoverCard>) {
-  return <HoverCard {...props} />;
+function InlineCitationCard(props: React.ComponentProps<typeof Popover>) {
+  return <Popover {...props} />;
 }
 
 /** A source is a URL or, for a document without one, its title. */
@@ -77,13 +81,16 @@ function InlineCitationCardTrigger({
 }) {
   const [first] = sources;
   return (
-    <HoverCardTrigger
+    <PopoverTrigger
       closeDelay={0}
       delay={0}
+      openOnHover
       render={
         <Badge
           data-slot="inline-citation-trigger"
           className={cn("ml-1 rounded-full", className)}
+          // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- labelled by the source it names, its children
+          render={<button type="button" />}
           variant="secondary"
           {...props}
         />
@@ -96,18 +103,18 @@ function InlineCitationCardTrigger({
           {sourceLabel(first)} {sources.length > 1 && `+${sources.length - 1}`}
         </>
       )}
-    </HoverCardTrigger>
+    </PopoverTrigger>
   );
 }
 
 function InlineCitationCardBody({
   className,
   ...props
-}: React.ComponentProps<typeof HoverCardContent>) {
+}: React.ComponentProps<typeof PopoverContent>) {
   return (
-    <HoverCardContent
+    <PopoverContent
       data-slot="inline-citation-card"
-      className={cn("relative w-80 p-0", className)}
+      className={cn("relative w-80 gap-0 p-0", className)}
       {...props}
     />
   );
@@ -118,12 +125,20 @@ const CarouselApiContext = createContext<CarouselApi | undefined>(undefined);
 function InlineCitationCarousel({
   className,
   children,
+  setApi: onApi,
   ...props
 }: React.ComponentProps<typeof Carousel>) {
   const [api, setApi] = useState<CarouselApi>();
   return (
     <CarouselApiContext.Provider value={api}>
-      <Carousel className={cn("w-full", className)} setApi={setApi} {...props}>
+      <Carousel
+        className={cn("w-full", className)}
+        setApi={(next) => {
+          setApi(next);
+          onApi?.(next);
+        }}
+        {...props}
+      >
         {children}
       </Carousel>
     </CarouselApiContext.Provider>
@@ -204,6 +219,7 @@ function InlineCitationCarouselIndex({
 function InlineCitationCarouselPrev({
   className,
   label = "Previous",
+  onClick,
   ...props
 }: React.ComponentProps<"button"> & { label?: string }) {
   const api = useContext(CarouselApiContext);
@@ -211,7 +227,12 @@ function InlineCitationCarouselPrev({
     <button
       aria-label={label}
       className={cn("shrink-0", className)}
-      onClick={() => api?.scrollPrev()}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) {
+          api?.scrollPrev();
+        }
+      }}
       type="button"
       {...props}
     >
@@ -223,6 +244,7 @@ function InlineCitationCarouselPrev({
 function InlineCitationCarouselNext({
   className,
   label = "Next",
+  onClick,
   ...props
 }: React.ComponentProps<"button"> & { label?: string }) {
   const api = useContext(CarouselApiContext);
@@ -230,7 +252,12 @@ function InlineCitationCarouselNext({
     <button
       aria-label={label}
       className={cn("shrink-0", className)}
-      onClick={() => api?.scrollNext()}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) {
+          api?.scrollNext();
+        }
+      }}
       type="button"
       {...props}
     >

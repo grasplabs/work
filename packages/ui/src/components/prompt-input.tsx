@@ -71,6 +71,8 @@ const pastedFiles = (event: React.ClipboardEvent): File[] =>
 function PromptInputTextarea({
   onKeyDown,
   onPaste,
+  onCompositionStart,
+  onCompositionEnd,
   className,
   placeholder = "What would you like to know?",
   ...props
@@ -91,11 +93,14 @@ function PromptInputTextarea({
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault();
+      // Only what the send button would do: nothing while it is off, or
+      // while an answer is coming and it stops that answer instead.
       const { form } = event.currentTarget;
-      const submit = form?.querySelector<HTMLButtonElement>(
-        'button[type="submit"]'
-      );
-      if (submit?.disabled !== true) {
+      const submit =
+        form?.querySelector<HTMLButtonElement>(
+          '[data-slot="prompt-input-submit"]'
+        ) ?? form?.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (submit?.disabled !== true && submit?.type !== "button") {
         form?.requestSubmit();
       }
       return;
@@ -132,11 +137,13 @@ function PromptInputTextarea({
         className
       )}
       name="message"
-      onCompositionEnd={() => {
+      onCompositionEnd={(event) => {
         setComposing(false);
+        onCompositionEnd?.(event);
       }}
-      onCompositionStart={() => {
+      onCompositionStart={(event) => {
         setComposing(true);
+        onCompositionStart?.(event);
       }}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
@@ -297,6 +304,7 @@ function PromptInputSubmit({
   const stops = answering && onStop !== undefined;
   return (
     <InputGroupButton
+      data-slot="prompt-input-submit"
       aria-label={stops ? stopLabel : sendLabel}
       onClick={(event) => {
         if (stops) {
