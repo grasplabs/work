@@ -19,6 +19,7 @@ import {
   chatIdSchema,
   connectionIdSchema,
   permissionIdSchema,
+  runIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
   workspaceIdSchema,
@@ -91,6 +92,7 @@ import {
   startDetailsPerSweep,
   sweepRunDetails,
 } from "../src/workflows/retention.ts";
+import { repairWakes } from "../src/workflows/wakes.ts";
 import { answeringGateway, fakeGateway, loggedRunStep } from "./ai-gateway.ts";
 import { release, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -98,7 +100,15 @@ import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import { withQuotas } from "./quota-policies.ts";
-import { admittedFreely, runObject, woken } from "./runs.ts";
+import {
+  admittedFreely,
+  liveStatus,
+  resumed,
+  runObject,
+  stopped,
+  whileEngineRefuses,
+  woken,
+} from "./runs.ts";
 import {
   outcome as resultOf,
   refusal,
@@ -1607,7 +1617,7 @@ const lookingUp = async (
     },
     reviewed: { version: 1 },
   });
-  return { admin, app, workflowId: workflow.id };
+  return { admin, signedIn, app, workflowId: workflow.id };
 };
 
 /** Whether an App took run `runId`'s call, as the audit log has it. */
@@ -4234,6 +4244,363 @@ describe("an App's call held as an independent run's step called its export", ()
       end: { status: "completed", output: { status: "called" } },
       late: "connect.held",
       justAfter: 1,
+      sent: 0,
+    });
+  });
+});
+
+/**
+ * Runs `test` with a held call's timed checks a long way apart: its first
+ * wait outlasts how long a test waits for a run to end, so only a wake
+ * (workflows/wakes.ts) lets a run go on within it.
+ */
+const withSlowChecks = async (test: () => Promise<void>): Promise<void> => {
+  const wait = env.WORKFLOW_OFF_WAIT_MS;
+  env.WORKFLOW_OFF_WAIT_MS = "120000";
+  try {
+    await test();
+  } finally {
+    env.WORKFLOW_OFF_WAIT_MS = wait;
+  }
+};
+
+/** Once the engine has run `runId` waiting: on its held call's wake. */
+const waiting = async (runId: string): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      await expect(liveStatus(runId)).resolves.toBe("waiting");
+    },
+    { timeout: 20_000, interval: 100 }
+  );
+};
+
+describe("runs started by a restricted App, waiting on a held call", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("go on as soon as their person decides it, long before the next timed check: confirmed, it is sent once; declined, the run ends", async () => {
+    await withSlowChecks(async () => {
+      const admin = await person("admin");
+      const signedIn = await signedInApi(idp, "builder");
+      const ada = identityOf(signedIn.userId, "builder");
+      const confirmed = await mailingWorkflow(ada, admin);
+      const declined = await mailingWorkflow(ada, admin);
+      const confirmedStarter = await startingApp(
+        ada,
+        admin,
+        confirmed.workflow.id,
+        { restricted: true }
+      );
+      const declinedStarter = await startingApp(
+        ada,
+        admin,
+        declined.workflow.id,
+        { restricted: true }
+      );
+      const confirmedRun = await confirmedStarter.start(confirmed.serving);
+      const declinedRun = await declinedStarter.start(declined.serving);
+      const toConfirm = await heldFor(ada, confirmedRun);
+      const toDecline = await heldFor(ada, declinedRun);
+      await waiting(confirmedRun);
+      await waiting(declinedRun);
+
+      await signedIn.api.pendingActions.confirm(
+        toConfirm.id,
+        toConfirm.inputHash
+      );
+      await signedIn.api.pendingActions.decline(toDecline.id);
+      const confirmedEnd = await ended(
+        ada,
+        confirmed.workflow.id,
+        confirmedRun
+      );
+      const declinedEnd = await ended(ada, declined.workflow.id, declinedRun);
+      const confirmedMail = await confirmed.mail.did();
+      const declinedMail = await declined.mail.did();
+
+      expect({
+        confirmed: endOf(confirmedEnd),
+        declined: endOf(declinedEnd),
+        sent: [confirmedMail.calls, declinedMail.calls],
+      }).toStrictEqual({
+        confirmed: { status: "completed", output: { status: "message-1" } },
+        declined: { status: "failed", code: "connect.declined" },
+        sent: [1, 0],
+      });
+    });
+  });
+
+  it("go on once their person confirms, though the run was stopped and replayed while it waited", async () => {
+    await withSlowChecks(async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
+      const starter = await startingApp(ada, admin, workflow.id, {
+        restricted: true,
+      });
+      const runId = await starter.start(serving);
+      const held = await heldFor(ada, runId);
+      await waiting(runId);
+      // A crash or a deploy while it waits: resumed, it replays its held
+      // step and its first check from the journal, asking nobody again.
+      await stopped(runId);
+      await resumed(runId);
+      await waiting(runId);
+
+      await confirmPendingAction(env, ada, held.id, held.inputHash);
+      const run = await ended(ada, workflow.id, runId);
+      const sent = await mail.did();
+
+      expect({
+        end: endOf(run),
+        sent: sent.calls,
+      }).toStrictEqual({
+        end: { status: "completed", output: { status: "message-1" } },
+        sent: 1,
+      });
+    });
+  });
+
+  it("go on once their person confirms, though the engine refused the wake: the repair sends it", async () => {
+    await withSlowChecks(async () => {
+      const admin = await person("admin");
+      const ada = await person("builder");
+      const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
+      const starter = await startingApp(ada, admin, workflow.id, {
+        restricted: true,
+      });
+      const runId = await starter.start(serving);
+      const held = await heldFor(ada, runId);
+      await waiting(runId);
+      // Confirmed while the engine takes no event: the wake stays owed.
+      await whileEngineRefuses(
+        (method) => method === "sendEvent",
+        async () => {
+          await confirmPendingAction(env, ada, held.id, held.inputHash);
+        }
+      );
+      const owed = await env.DB.prepare(
+        "SELECT count(*) AS n FROM workflow_run_wakes WHERE resource_run_id = ?"
+      )
+        .bind(runId)
+        .first<{ n: number }>();
+      const stillWaiting = await liveStatus(runId);
+      await repairWakes(env, new Date(Date.now() + 60_000));
+      const run = await ended(ada, workflow.id, runId);
+      const sent = await mail.did();
+
+      expect({
+        owed: owed?.n,
+        stillWaiting,
+        end: endOf(run),
+        sent: sent.calls,
+      }).toStrictEqual({
+        owed: 1,
+        stillWaiting: "waiting",
+        end: { status: "completed", output: { status: "message-1" } },
+        sent: 1,
+      });
+    });
+  });
+});
+
+/**
+ * Holds `by`'s send through workflow `workflowId`'s mail binding, made in
+ * its run `runId` (restricted, so connect holds it), under the key of
+ * step `task:send` of run `keyRun`: a held call whose key names whichever
+ * run the test says.
+ */
+const heldSend = async (
+  by: Identity,
+  sending: { workflowId: string; mailId: string; permissionId: string },
+  runId: string,
+  keyRun: string
+): Promise<PendingAction> => {
+  const workflowId = workflowResourceIdSchema.parse(sending.workflowId);
+  const refused = await settledCode(
+    callConnection(
+      env,
+      {
+        subject: { type: "workflow", workflowId },
+        onBehalfOf: by.userId,
+        mode: "workflow",
+      },
+      { type: "workflowRun", workflowId, runId: runIdSchema.parse(runId) },
+      {
+        type: "connection",
+        connectionId: connectionIdSchema.parse(sending.mailId),
+      },
+      {
+        action: "mail.send",
+        input: { to: "Ada", subject: "Hello" },
+        idempotencyKey: stepIdempotencyKey(keyRun, "task:send"),
+      },
+      permissionIdSchema.parse(sending.permissionId)
+    )
+  );
+  expect(refused).toBe("connect.held");
+  const waitingFor = await env.CONNECT.listPendingActions(
+    await personOf(env, by)
+  );
+  const held = waitingFor.find(
+    ({ idempotencyKey }) =>
+      idempotencyKey === stepIdempotencyKey(keyRun, "task:send")
+  );
+  if (held === undefined) {
+    throw new Error("Nothing held");
+  }
+  return held;
+};
+
+/** The wakes owed to independent run `runId`, still waiting to be sent. */
+const wakesOwed = async (runId: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS n FROM workflow_run_wakes WHERE resource_run_id = ?"
+  )
+    .bind(runId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+};
+
+describe("the wakes a held call's decision owes", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("go to the run its key names only if that run is of the held call's own workflow and hasn't ended", async () => {
+    const admin = await person("admin");
+    const signedIn = await signedInApi(idp, "builder");
+    const ada = identityOf(signedIn.userId, "builder");
+    const own = await mailingWorkflow(ada, admin, { before: [longHold] });
+    const other = await mailingWorkflow(ada, admin, { before: [longHold] });
+    const ownStarter = await startingApp(ada, admin, own.workflow.id, {
+      restricted: true,
+    });
+    const otherStarter = await startingApp(ada, admin, other.workflow.id, {
+      restricted: true,
+    });
+    // Runs asleep before their sends: going, not yet held.
+    const ownRun = await ownStarter.start(own.serving);
+    const endedRun = await ownStarter.start(own.serving);
+    const otherRun = await otherStarter.start(other.serving);
+    const sending = {
+      workflowId: own.workflow.id,
+      mailId: own.mail.id,
+      permissionId: own.permissionId,
+    };
+    const forOwn = await heldSend(ada, sending, ownRun, ownRun);
+    // The own workflow's call, under a key naming another workflow's run.
+    const forOther = await heldSend(ada, sending, ownRun, otherRun);
+    const forEnded = await heldSend(ada, sending, endedRun, endedRun);
+    await terminateResourceRun(env, ada, own.workflow.id, endedRun);
+
+    // Decided while the engine takes no event: what was owed stays owed.
+    await whileEngineRefuses(
+      (method) => method === "sendEvent",
+      async () => {
+        for (const held of [forOwn, forOther, forEnded]) {
+          // oxlint-disable-next-line no-await-in-loop -- one decision at a time
+          await signedIn.api.pendingActions.decline(held.id);
+        }
+      }
+    );
+
+    expect({
+      own: await wakesOwed(ownRun),
+      otherWorkflowsRun: await wakesOwed(otherRun),
+      ended: await wakesOwed(endedRun),
+    }).toStrictEqual({ own: 1, otherWorkflowsRun: 0, ended: 0 });
+  });
+
+  it("go to no run for an App's call held as a run's step called its export, which is dropped on confirmation", async () => {
+    const { admin, signedIn, workflowId } = await lookingUp(appServer, {
+      tasks: [longHold, ...lookUpTasks],
+    });
+    const runId = await started(admin, workflowId);
+    const { app } = await startingApp(admin, admin, workflowId, {
+      restricted: true,
+    });
+    const mail = await mailConnection();
+    const permissionId = await granted(admin, admin, {
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    /** The App's send, held for the admin under the export step's key. */
+    const holdAppSend = async (): Promise<PendingAction> => {
+      const key = stepIdempotencyKey(runId, `task:${unique()}`);
+      const refused = await settledCode(
+        callConnection(
+          env,
+          {
+            subject: { type: "app", appId: app },
+            onBehalfOf: admin.userId,
+            mode: "workflow",
+            appVersion: 1,
+          },
+          { type: "app", appId: app },
+          {
+            type: "connection",
+            connectionId: connectionIdSchema.parse(mail.id),
+          },
+          {
+            action: "mail.send",
+            input: { to: "Ada", subject: "Hello" },
+            idempotencyKey: key,
+          },
+          permissionIdSchema.parse(permissionId)
+        )
+      );
+      expect(refused).toBe("connect.held");
+      const waitingFor = await env.CONNECT.listPendingActions(
+        await personOf(env, admin)
+      );
+      const held = waitingFor.find(
+        ({ idempotencyKey }) => idempotencyKey === key
+      );
+      if (held === undefined) {
+        throw new Error("Nothing held");
+      }
+      return held;
+    };
+    const declined = await holdAppSend();
+    const confirmedHeld = await holdAppSend();
+
+    await whileEngineRefuses(
+      (method) => method === "sendEvent",
+      async () => {
+        await signedIn.api.pendingActions.decline(declined.id);
+      }
+    );
+    const confirmed = await settledCode(
+      confirmPendingAction(
+        env,
+        admin,
+        confirmedHeld.id,
+        confirmedHeld.inputHash
+      )
+    );
+    const sent = await mail.did();
+    // Nor one owed it as though it were an App's run.
+    const appRunWakes = await env.DB.prepare(
+      "SELECT count(*) AS n FROM workflow_run_wakes WHERE run_id = ?"
+    )
+      .bind(runId)
+      .first<{ n: number }>();
+
+    expect({
+      owed: await wakesOwed(runId),
+      appRunWakes: appRunWakes?.n,
+      held: { subject: declined.subject.type, mode: declined.mode },
+      confirmed,
+      sent: sent.calls,
+    }).toStrictEqual({
+      owed: 0,
+      appRunWakes: 0,
+      held: { subject: "app", mode: "workflow" },
+      confirmed: "connect.run_ended",
       sent: 0,
     });
   });

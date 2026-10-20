@@ -190,14 +190,14 @@ const stillHeld = async (
   (await env.CONNECT.pendingAction({ person, id })) !== null;
 
 /**
- * What a held action's run waits on it by (`wakingHeld`): none but a
- * workflow run's, of an App.
+ * What a held action's run waits on it by (`wakingHeld`): a workflow
+ * run's, of an App or of an independent workflow. An App's call made
+ * while an independent run's step called its export owes no wake: that
+ * step is tried once and failed as held, and confirming such a call is
+ * refused as its run's end (`runEnded`), so nothing waits on it.
  */
 const heldWaitOf = (held: PendingAction) => ({
-  appId:
-    held.mode === "workflow" && held.subject.type === "app"
-      ? held.subject.appId
-      : null,
+  subject: held.mode === "workflow" ? held.subject : undefined,
   idempotencyKey: held.idempotencyKey,
 });
 
