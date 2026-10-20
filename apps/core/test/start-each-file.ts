@@ -9,7 +9,7 @@
  * the missing-table warning (platform-updates.test.ts), which only that
  * file may trip.
  */
-import { abortAllDurableObjects, applyD1Migrations } from "cloudflare:test";
+import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterAll, afterEach, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -122,12 +122,7 @@ const drainsQuiet = async (): Promise<void> => {
 // failing a drain still out with "Closing rpc while "resolve" was
 // pending". A file's drains aren't only its tests' own: a workflow run a
 // test left going takes its next steps after the last test, and audits
-// them (GRA-880). So a file waits until its drains have gone quiet, then
-// aborts every object, so no run takes a step, and drains, before Vitest
-// closes the channel. The next file empties storage anyway
-// (`resetStorage`), which brings back each object it reaches. Setup
-// files' afterAll hooks run last.
-afterAll(async () => {
-  await drainsQuiet();
-  await abortAllDurableObjects();
-});
+// each one (GRA-880). So a file waits until its drains have gone quiet.
+// Aborting every object instead stops the pool's own runner object too.
+// Setup files' afterAll hooks run last.
+afterAll(drainsQuiet);
