@@ -48,6 +48,12 @@ import { workflowRunFileChunks, workflowRunFiles } from "../db/core/schema.ts";
 //   it deleted in the same batch (retention.ts), and `sweepRunFiles`
 //   deletes its chunks, then its row, retrying what R2 refused on the
 //   next cron run. A file never finished is swept a day after it opened.
+//   A deleted file's chunks are swept only after `sweepGraceMs`, longer
+//   than any attempt, so an append under way finishes its put first; a
+//   put that still lands after its chunk went deletes its object again
+//   (`store`), so no object outlives every record.
+// - A stale attempt writing: every call, and every put, first checks the
+//   attempt still holds its lease (`requireHolds`).
 // - Bytes that aren't what their type says: finishing checks the type
 //   against the bytes (a binary type by its signature, a text type as
 //   UTF-8 with no NUL and no signature) and the whole file's SHA-256; a
@@ -59,7 +65,12 @@ import { workflowRunFileChunks, workflowRunFiles } from "../db/core/schema.ts";
 //   most `callBytes`, within the step payload and the attempt's 32 calls.
 // - The audit log, kept longer than a run's details, holding a file's
 //   name: receipts carry the file's ID, type, size and SHA-256, never its
-//   name or content.
+//   name or content. A tiny file's SHA-256 can be guessed from a short
+//   list of likely contents, so a receipt's digest says as much of such a
+//   file as its content would; the audit log is read by admins only.
+// - Typing by signature only: a binary type's bytes are checked by their
+//   first bytes alone. Nothing serves a run file yet; before downloads
+//   (phase 2) serve one, check this again (a polyglot file passes).
 
 /** What each call of a files use asks for, as the action's use declares it. */
 export const filesCallOperations = {
@@ -97,6 +108,8 @@ export interface FilesCaller {
   readonly workflowId: string;
   /** The call's effect key: `<step key>:<ordinal>` for an action's. */
   readonly effectKey: string;
+  /** Throws unless the call's attempt still holds its lease. */
+  readonly requireHolds: () => void;
 }
 
 /** What a files call answers, and what its receipt says of the file. */
@@ -142,11 +155,15 @@ const detailOf = (row: FileRow): Record<string, string | number> => ({
   ...(row.sha256 === null ? {} : { sha256: row.sha256 }),
 });
 
-/** File `id` of `caller`'s run, unless deleted; nothing for any other. */
+/**
+ * File `id` of `caller`'s run, unless deleted (`withDeleted` includes
+ * those not yet swept); nothing for any other.
+ */
 const fileOf = async (
   env: Env,
   caller: FilesCaller,
-  id: string
+  id: string,
+  withDeleted = false
 ): Promise<FileRow | undefined> => {
   const row = await drizzle(env.DB)
     .select()
@@ -155,7 +172,7 @@ const fileOf = async (
       and(
         eq(workflowRunFiles.id, id),
         eq(workflowRunFiles.runId, caller.runId),
-        ne(workflowRunFiles.state, "deleted")
+        withDeleted ? undefined : ne(workflowRunFiles.state, "deleted")
       )
     )
     .get();
@@ -211,6 +228,10 @@ const open = async (
     .run();
   const row = await opened();
   if (row !== undefined && row.runId === caller.runId) {
+    // The same open again must ask for the same file.
+    if (row.name !== args.name || row.type !== args.type) {
+      throw workflowResourceErrors.create("workflow.call_invalid");
+    }
     return { output: { file: row.id }, detail: detailOf(row) };
   }
   if (inserted.meta.changes > 0 || row !== undefined) {
@@ -247,18 +268,30 @@ const limitPassed = async (
   return runFileErrors.create("file.workflow_quota");
 };
 
-/** Stores a reserved chunk's bytes, once its reservation is kept. */
+/**
+ * Stores a reserved chunk's bytes, once its reservation is kept, while
+ * the attempt still holds. A chunk swept while its put was under way (its
+ * file deleted past the grace) has its object deleted again, so no
+ * object outlives its record.
+ */
 const store = async (
   env: Env,
+  caller: FilesCaller,
   key: string,
   bytes: Uint8Array,
   sha256: string
 ): Promise<void> => {
+  caller.requireHolds();
   await env.FILES.put(key, bytes, { sha256 });
-  await drizzle(env.DB)
+  const kept = await drizzle(env.DB)
     .update(workflowRunFileChunks)
     .set({ stored: true })
-    .where(eq(workflowRunFileChunks.key, key));
+    .where(eq(workflowRunFileChunks.key, key))
+    .run();
+  if (kept.meta.changes === 0) {
+    await env.FILES.delete(key);
+    throw notFound();
+  }
 };
 
 /**
@@ -267,6 +300,7 @@ const store = async (
  */
 const appendedAgain = async (
   env: Env,
+  caller: FilesCaller,
   row: FileRow,
   chunk: typeof workflowRunFileChunks.$inferSelect,
   bytes: Uint8Array,
@@ -276,7 +310,7 @@ const appendedAgain = async (
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
   if (!chunk.stored) {
-    await store(env, chunk.key, bytes, sha256);
+    await store(env, caller, chunk.key, bytes, sha256);
   }
   const now = await drizzle(env.DB)
     .select({ size: workflowRunFiles.size })
@@ -313,7 +347,7 @@ const append = async (
   // The same append again answers what the first did, even once its file
   // is finished: its effect key is its own task's, so no other writes so.
   if (earlier !== undefined) {
-    return await appendedAgain(env, row, earlier, bytes, sha256);
+    return await appendedAgain(env, caller, row, earlier, bytes, sha256);
   }
   requireWriter(row, caller);
   const key = `run-files/${caller.runId}/${row.id}/${crypto.randomUUID()}`;
@@ -331,7 +365,7 @@ const append = async (
         AND (SELECT coalesce(sum(size), 0) FROM workflow_run_files
           WHERE run_id = ?7 AND state <> 'deleted') + ?4 <= ?8
         AND (SELECT coalesce(sum(size), 0) FROM workflow_run_files
-          WHERE workflow_resource_id = ?9 AND state <> 'deleted') + ?4 <= ?10
+          WHERE workflow_resource_id = ?9) + ?4 <= ?10
       ON CONFLICT(append_key) DO NOTHING`
     ).bind(
       row.id,
@@ -360,9 +394,9 @@ const append = async (
     }
     // The same append, made at once by another of the attempt's calls:
     // stored once, under the chunk it reserved.
-    return await appendedAgain(env, row, raced, bytes, sha256);
+    return await appendedAgain(env, caller, row, raced, bytes, sha256);
   }
-  await store(env, key, bytes, sha256);
+  await store(env, caller, key, bytes, sha256);
   return {
     output: { size: row.size + bytes.length },
     detail: { ...detailOf(row), size: row.size + bytes.length },
@@ -454,15 +488,25 @@ const finish = async (
       .where(eq(workflowRunFiles.id, row.id));
     throw fileErrors.create("file.content_mismatch");
   }
-  await db
+  // Only the file as hashed: no append can have grown it since.
+  const finished = await db
     .update(workflowRunFiles)
     .set({ state: "done", sha256, finishedAt: now })
     .where(
       and(
         eq(workflowRunFiles.id, row.id),
-        eq(workflowRunFiles.state, "writing")
+        eq(workflowRunFiles.state, "writing"),
+        eq(workflowRunFiles.size, row.size)
       )
-    );
+    )
+    .run();
+  if (finished.meta.changes === 0) {
+    const current = await fileOf(env, caller, row.id);
+    if (current?.state === "done") {
+      return { output: refJson(current), detail: detailOf(current) };
+    }
+    throw fileErrors.create("file.incomplete");
+  }
   const done = { ...row, state: "done" as const, sha256, finishedAt: now };
   return { output: refJson(done), detail: detailOf(done) };
 };
@@ -533,9 +577,13 @@ const remove = async (
   caller: FilesCaller,
   args: z.infer<typeof argumentSchemas.delete>
 ): Promise<FilesAnswer> => {
-  const row = await fileOf(env, caller, args.file);
+  const row = await fileOf(env, caller, args.file, true);
   if (row === undefined) {
     throw notFound();
+  }
+  // Deleted already, by this call's first attempt or another: done.
+  if (row.state === "deleted") {
+    return { output: null, detail: detailOf(row) };
   }
   await drizzle(env.DB)
     .update(workflowRunFiles)
@@ -572,6 +620,7 @@ export const callFiles = async (
   operation: FilesCallOperation,
   args: Json
 ): Promise<FilesAnswer> => {
+  caller.requireHolds();
   switch (operation) {
     case "open": {
       return await open(env, caller, parsed(argumentSchemas.open, args));
@@ -602,6 +651,12 @@ export const callFiles = async (
 const chunksPerDelete = 1000;
 /** Most deletes one sweep makes, so a cron run stays bounded. */
 const deletesPerSweep = 10;
+/**
+ * How long a deleted file's chunks stay before the sweep takes them:
+ * longer than any attempt, so an append that reserved a chunk before the
+ * delete has put its bytes by then.
+ */
+export const sweepGraceMs = 60 * 60_000;
 
 /**
  * Marks files of the runs `runIds` deleted: their run's details went
@@ -624,7 +679,8 @@ export const runFilesRemoved = (
 
 /**
  * Sweeps run files: those never finished a day after they opened are
- * deleted, and deleted files' chunks go from R2, then their rows. What
+ * deleted, and the chunks of files deleted longer ago than
+ * `sweepGraceMs` go from R2, then their rows. What
  * R2 refuses stays, for the next cron run to try again.
  */
 export const sweepRunFiles = async (env: Env, now: Date): Promise<void> => {
@@ -641,21 +697,26 @@ export const sweepRunFiles = async (env: Env, now: Date): Promise<void> => {
         )
       )
     );
+  const graceEnded = new Date(now.getTime() - sweepGraceMs);
+  const due = and(
+    eq(workflowRunFiles.state, "deleted"),
+    lt(workflowRunFiles.deletedAt, graceEnded)
+  );
   for (let round = 0; round < deletesPerSweep; round += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one bounded delete after another
-    const due = await db
+    const chunks = await db
       .select({ key: workflowRunFileChunks.key })
       .from(workflowRunFileChunks)
       .innerJoin(
         workflowRunFiles,
         eq(workflowRunFiles.id, workflowRunFileChunks.fileId)
       )
-      .where(eq(workflowRunFiles.state, "deleted"))
+      .where(due)
       .limit(chunksPerDelete);
-    if (due.length === 0) {
+    if (chunks.length === 0) {
       break;
     }
-    const keys = due.map(({ key }) => key);
+    const keys = chunks.map(({ key }) => key);
     // oxlint-disable-next-line no-await-in-loop -- one bounded delete after another
     await env.FILES.delete(keys);
     // oxlint-disable-next-line no-await-in-loop -- one bounded delete after another
@@ -665,7 +726,7 @@ export const sweepRunFiles = async (env: Env, now: Date): Promise<void> => {
   }
   await db.delete(workflowRunFiles).where(
     and(
-      eq(workflowRunFiles.state, "deleted"),
+      due,
       sql`NOT EXISTS (SELECT 1 FROM workflow_run_file_chunks AS chunk
           WHERE chunk.file_id = ${workflowRunFiles.id})`
     )

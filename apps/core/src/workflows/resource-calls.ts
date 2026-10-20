@@ -6,6 +6,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { runFileIdSchema } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
@@ -651,6 +652,21 @@ export const auditAdmissionRefusal = async (
   await writing;
 };
 
+const namesFileSchema = z.object({ file: runFileIdSchema });
+
+/**
+ * What every receipt of a files call says before its answer: the
+ * operation, and the file it names, if it names one as a file ID, so a
+ * refused call's receipt still says which file was asked for.
+ */
+const filesCallDetail = (
+  operation: string,
+  args: Json
+): Record<string, string> => {
+  const named = namesFileSchema.safeParse(args);
+  return { operation, ...(named.success ? { file: named.data.file } : {}) };
+};
+
 /**
  * What `call` of a test run answers: the answer its start gave the call's
  * binding, checked as a real call checks what it sends and what comes back
@@ -776,6 +792,9 @@ export const makeCall = async (
     ) {
       throw workflowResourceErrors.create("workflow.action_restricted");
     }
+    if (call.name === "grasp.files") {
+      fileDetail = filesCallDetail(call.operation, call.arguments);
+    }
     await requireCallAuthority(env, run, binding);
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
@@ -808,11 +827,12 @@ export const makeCall = async (
             runId: run.runId,
             workflowId: run.workflowId,
             effectKey: effect.key,
+            requireHolds: effect.requireHolds,
           },
           call.operation,
           call.arguments
         );
-        fileDetail = answer.detail;
+        fileDetail = { ...fileDetail, ...answer.detail };
         ({ output } = answer);
         break;
       }
