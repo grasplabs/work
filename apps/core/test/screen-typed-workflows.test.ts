@@ -197,7 +197,7 @@ const widerOf = (name: string): string =>
         secret: { type: "string" },
       }),
     },
-    do: [{ greet: { set: { status: "hello", secret: "42" } } }],
+    do: [{ greet: { set: { status: "hello", secret: "ultramarine" } } }],
   });
 
 /**
@@ -1016,7 +1016,7 @@ describe(
       await watched.subscription.release();
       expect({
         shown: watched.received.at(-1)?.outcome,
-        leaks: JSON.stringify(watched.received).includes("42"),
+        leaks: JSON.stringify(watched.received).includes("ultramarine"),
       }).toStrictEqual({ shown: "contract.invalid_return", leaks: false });
     });
 
@@ -1047,24 +1047,32 @@ describe(
       ]);
     });
 
-    it("refuses a run's watch once the alias is rebound, then shows it again once rebound back, to new subscriptions too", async () => {
+    it("refuses a run's watch and offers no start once the alias is rebound, then shows both again once rebound back, with nothing else changing", async () => {
       const fixture = await requestsApp("PT1H");
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
       const watched = await channel.start(read, { who: "Ada" });
-      const other = await channel.start(read, { who: "Bo" });
       const watch = {
         workflow: wireOf(reference),
         watch: "run",
         runId: watched.runId,
       };
       const first = await following(builder, app, lease, watch);
+      const binding = await following(builder, app, lease, {
+        workflow: wireOf(reference),
+        watch: "binding",
+      });
+      const canRun = () =>
+        z
+          .object({ canRun: z.boolean() })
+          .safeParse(binding.received.at(-1)?.outcome).data?.canRun;
       await vi.waitFor(() => {
         expect(stageOf(first.received.at(-1)?.revision)).toBe(2);
+        expect(canRun()).toBeTruthy();
       }, settles);
-      // Rebound away: the next read, which another run's end causes, refuses.
+      // Rebound away: the screen is told at once, nothing else needed.
       await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
         definition: definitionOf(fixture.workflowName, "PT1H", "2.0.0"),
         basedOn: 1,
@@ -1074,25 +1082,19 @@ describe(
         alias: "followUp",
         version: 2,
       });
-      await terminateResourceRun(
-        env,
-        builder.acting,
-        fixture.workflow,
-        other.runId
-      );
       await vi.waitFor(() => {
         expect(first.received.at(-1)?.outcome).toBe("workflow.run_unavailable");
+        expect(canRun()).toBeFalsy();
       }, settles);
-      // Bound back, and read again as a new run starts: the same revision.
+      // Bound back: shown again, at the same stage, and startable again.
       await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
         app,
         alias: "followUp",
         version: 1,
       });
-      await channel.start(read, { who: "Cy" });
       await vi.waitFor(() => {
-        expect(stageOf(first.received.at(-1)?.revision)).toBe(2);
         expect(first.received.at(-1)?.outcome).toBeTypeOf("object");
+        expect(canRun()).toBeTruthy();
       }, settles);
       const second = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
@@ -1100,14 +1102,54 @@ describe(
       }, settles);
       await first.subscription.release();
       await second.subscription.release();
+      await binding.subscription.release();
       expect({
-        first: first.received.map(({ revision, outcome: shown }) =>
-          typeof shown === "string" ? shown : stageOf(revision)
-        ),
+        // What it showed in turn, each read again as the binding changed.
+        first: first.received
+          .map(({ revision, outcome: shown }) =>
+            typeof shown === "string" ? shown : stageOf(revision)
+          )
+          .filter((shown, at, all) => at === 0 || shown !== all[at - 1]),
         second: second.received.map(({ revision }) => stageOf(revision)),
       }).toStrictEqual({
         first: [2, "workflow.run_unavailable", 2],
         second: [2],
+      });
+    });
+
+    it("answers a screen that subscribes after a run's output passed its retention with no output, whatever another screen still shows", async () => {
+      const { builder, app, reference } = await requestsApp();
+      const lease = await screenOf(builder, app);
+      const handle = await workflowChannel(
+        screenClient(builder, app, lease)
+      ).start(readWorkflowReference(reference), { who: "Ada" });
+      const watch = {
+        workflow: wireOf(reference),
+        watch: "run",
+        runId: handle.runId,
+      };
+      const first = await following(builder, app, lease, watch);
+      await vi.waitFor(() => {
+        expect(stageOf(first.received.at(-1)?.revision)).toBe(4);
+      }, settles);
+      // Its details removed, as the retention sweep removes them.
+      await env.DB.prepare(
+        "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
+      )
+        .bind(Date.now(), handle.runId)
+        .run();
+      const second = await following(builder, app, lease, watch);
+      await vi.waitFor(() => {
+        expect(second.received.length).toBeGreaterThan(0);
+      }, settles);
+      await first.subscription.release();
+      await second.subscription.release();
+      expect({
+        second: second.received.map(({ outcome: shown }) => shown),
+        leaks: JSON.stringify(second.received).includes("Hello, Ada"),
+      }).toStrictEqual({
+        second: ["workflow.run_details_removed"],
+        leaks: false,
       });
     });
 

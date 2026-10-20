@@ -262,8 +262,8 @@ interface Evaluation {
   carried: number;
   /**
    * Its latest carried value's push, kept while that is what it shows: a
-   * subscription that has had nothing yet is offered it, and a read again
-   * at the same revision only offers it again.
+   * read again at the same revision and roles only offers it again, to
+   * subscriptions that have had nothing yet, never pushing it twice.
    */
   carriedShown: Snapshot | undefined;
   /** The latest result, while a subscription still needs it. */
@@ -590,7 +590,11 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (this.#reads.revocable && !this.#following.has(app)) {
       this.#follow(by.userId, app);
     }
-    const kept = evaluation.latest ?? evaluation.carriedShown;
+    // Only a result read for another subscription that hasn't taken it
+    // yet: never the carried value a watch last showed, which may have
+    // aged since (a run's output past its retention, say), so a
+    // subscription that has had nothing is answered by a read of its own.
+    const kept = evaluation.latest;
     if (evaluation.window && (evaluation.revision > 0 || evaluation.running)) {
       // A window already read, or being read, for another subscription:
       // this one, a Load
@@ -605,10 +609,8 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       }
     } else if (kept !== undefined) {
       // A result kept for another subscription that hasn't taken it yet
-      // goes to this one too, as does the carried value it shows (kept
-      // fresh as the runs it reads change); otherwise a read on its way
-      // answers it, or a fresh one, admitted as the person's request, so
-      // not charged.
+      // goes to this one too; otherwise a read on its way answers it, or a
+      // fresh one, admitted as the person's request, so not charged.
       this.#offer(evaluation, listener, kept);
     } else if (
       !(evaluation.running || evaluation.queued) &&
