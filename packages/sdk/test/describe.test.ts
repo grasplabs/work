@@ -904,6 +904,15 @@ export default workflow("sample", { params: {} }, async function (step) {
   return await step.llm("read", { binding: "missing" });
 });
 `),
+      // Only the workflow the file exports is what runs.
+      exported: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const helper = workflow("helper", { params: {} }, async (step) => await step.llm("read", { binding: "missing" }));
+void helper;
+
+export default workflow("sample", { params: {} }, async (step) => await step.do("x", { description: "X" }, async () => 1));
+`),
       unparsed: aiStepCalls("export default ("),
     }).toStrictEqual({
       calls: ["read:reader"],
@@ -911,6 +920,7 @@ export default workflow("sample", { params: {} }, async function (step) {
       data: [],
       discriminant: ["read:first"],
       plainFunction: ["read:missing"],
+      exported: [],
       unparsed: null,
     });
   });

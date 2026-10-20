@@ -1534,8 +1534,8 @@ const runnerOf = (source: string): { body: Node; step: string } | undefined => {
     }
     throw error;
   }
-  // Any call of the SDK's `workflow` whose function, an arrow or not,
-  // takes its runner by name.
+  // The call of the SDK's `workflow` the file exports as its default,
+  // what runs, whose function, an arrow or not, takes its runner by name.
   const imports = sdkImportsOf(file);
   let runner: { body: Node; step: string } | undefined;
   visit(file, (node) => {
@@ -1543,7 +1543,8 @@ const runnerOf = (source: string): { body: Node; step: string } | undefined => {
       runner === undefined &&
       node.type === "CallExpression" &&
       node.callee.type === "Identifier" &&
-      imports.get(node.callee.name) === "workflow"
+      imports.get(node.callee.name) === "workflow" &&
+      isDefaultExport(file, node)
     ) {
       const run = node.arguments.at(2);
       const first =
