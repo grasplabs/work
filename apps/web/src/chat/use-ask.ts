@@ -39,7 +39,9 @@ export const useAsk = (
   /** The efforts each of `models` takes (`chats.efforts()`). */
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Where a new chat opens: on the chat page, or where the person is (the dock). */
-  opens: "page" | "here" = "page"
+  opens: "page" | "here" = "page",
+  /** The project a new chat is made in, when it is started from one. */
+  projectId?: string
 ) => {
   const router = useRouter();
   const navigate = useNavigate();
@@ -75,7 +77,10 @@ export const useAsk = (
         chatId ??
         (unsent.current?.question === question ? unsent.current.id : undefined);
       if (id === undefined) {
-        ({ id } = await session.chats.create(titleOf(question)));
+        ({ id } = await session.chats.create(
+          titleOf(question),
+          projectId ?? null
+        ));
         created = id;
       }
       await session.chats.send(id, {
