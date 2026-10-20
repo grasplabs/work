@@ -24,7 +24,7 @@ import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { useCore } from "../use-core.ts";
 import { frameQuestions } from "./frame-questions.ts";
 import type { Asked } from "./frame-questions.ts";
-import { navigationPolicy } from "./navigation-policy.ts";
+import { navigationPolicy, tabBudget } from "./navigation-policy.ts";
 import type { NavigationPolicy, PageState } from "./navigation-policy.ts";
 import { runPreview, runScreen } from "./screen-host.ts";
 import type { FailureReason, ScreenState } from "./screen-host.ts";
@@ -186,6 +186,12 @@ const startAsking = (
 };
 
 /**
+ * The tab's one navigation without the person acting, shared by every
+ * start of every frame in it (navigation-policy.ts).
+ */
+const thisTab = tabBudget();
+
+/**
  * How one start of a frame navigates the page and reports its guard,
  * under that start's policy (navigation-policy.ts): a fresh start is a
  * fresh page for it.
@@ -223,6 +229,7 @@ const policedNavigation = (
       await go(target, replace);
     },
     page,
+    thisTab,
     beside ? "beside" : "page"
   );
   // The leave dialog tells this start's policy when the person stays.

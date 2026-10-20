@@ -761,3 +761,50 @@ export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
       ),
   };
 };
+
+/**
+ * The Notes App with screens that navigate without the person acting
+ * (spec 10.7.7): a start screen that opens the first hop as it mounts, and
+ * a hop screen that opens the next one each time it starts.
+ */
+export const hoppingFiles = (): Record<string, string> => ({
+  ...notesAppFiles(),
+  "app.ts": registration
+    .replace(
+      'import { app, resource } from "@grasp-os/sdk";',
+      'import { app, resource, v } from "@grasp-os/sdk";'
+    )
+    .replace(
+      '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
+      `  screens: [
+    { name: "notes", path: "/", source: "screens/notes.tsx" },
+    { name: "start", path: "/start", source: "screens/takeoff.tsx" },
+    { name: "hop", path: "/hops/:n", source: "screens/hop.tsx", input: v.object({ n: v.string() }) },
+  ],`
+    ),
+  "screens/takeoff.tsx": `import { useEffect } from "react";
+import { useNavigate } from "@grasp-os/sdk/react";
+import { screens } from "#grasp";
+
+export default function Takeoff() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate(screens.hop, { n: "1" }).catch(() => undefined);
+  }, [navigate]);
+  return <main className="p-6"><h1>Takeoff</h1></main>;
+}
+`,
+  "screens/hop.tsx": `import { useEffect } from "react";
+import { useNavigate } from "@grasp-os/sdk/react";
+import type { ScreenProps } from "@grasp-os/sdk/react";
+import { screens } from "#grasp";
+
+export default function Hop({ input }: ScreenProps<typeof screens.hop>) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate(screens.hop, { n: String(Number(input.n) + 1) }).catch(() => undefined);
+  }, [navigate, input.n]);
+  return <main className="p-6"><h1>Hop {input.n}</h1></main>;
+}
+`,
+});

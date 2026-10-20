@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { navigationFiles } from "./notes-app.ts";
+import { hoppingFiles, navigationFiles } from "./notes-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 
 // Moving between an App's screens (spec 10.7.7) in a real browser: a screen
@@ -152,4 +152,49 @@ test("a screen in the chat's side panel opens what it navigates to in the main p
   await expect(page).toHaveURL(new RegExp(`/domains/${app}/apps/note$`, "u"));
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/\\?chat=${chat}`, "u"));
+});
+
+test("screens that navigate as they mount go once in the tab, so they can't fill the history or keep the person from going back", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("screenNavigation");
+  const name = `Hops ${crypto.randomUUID().slice(0, 8)}`;
+  const { core, api } = apiOf(builder);
+  let app: string;
+  try {
+    ({ id: app } = await api.apps.create({ name }));
+    await release(api, app, hoppingFiles(), name);
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(builder);
+  // The person doesn't act at all. This browser reports the activation from
+  // opening the page for as long as the page is open, so the page is told
+  // what a person who never clicked would leave it with.
+  await page.addInitScript(() => {
+    Object.defineProperty(UserActivation.prototype, "isActive", {
+      get: () => false,
+    });
+  });
+  await page.goto(`/domains/${app}/apps/takeoff/full`);
+  // The start goes on its own, once: the hop it opens may not go on.
+  const hop = page.frameLocator('iframe[title="hop app"]');
+  await expect(hop.getByRole("heading", { name: "Hop 1" })).toBeVisible({
+    timeout: 20_000,
+  });
+  // A hop asks as it mounts; give a second one the time it would take.
+  await page.waitForTimeout(3000);
+  await expect(hop.getByRole("heading", { name: "Hop 1" })).toBeVisible();
+  await expect(page).not.toHaveURL(/%5C%222%5C%22/u);
+
+  // Back leaves the hop for good: the start, mounting again and asking
+  // again, stays put.
+  await page.goBack();
+  const takeoff = page.frameLocator('iframe[title="takeoff app"]');
+  await expect(takeoff.getByRole("heading", { name: "Takeoff" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.waitForTimeout(3000);
+  await expect(takeoff.getByRole("heading", { name: "Takeoff" })).toBeVisible();
+  await expect(page).toHaveURL(/\/apps\/takeoff\/full$/u);
 });
