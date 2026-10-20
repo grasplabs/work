@@ -9,6 +9,7 @@ dist/
 .tanstack/
 coverage/
 playwright-report/
+parity-report/
 test-results/
 *.tsbuildinfo
 .DS_Store
