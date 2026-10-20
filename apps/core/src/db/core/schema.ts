@@ -2988,7 +2988,7 @@ export const workflowResourceRunTerminations = sqliteTable(
  * or asked again under another key, answers the same receipt rather than
  * ask twice. `admitted` until the run's stop is asked of the engine, then
  * `applied`, or `superseded` when the run ended otherwise first. Written
- * once and settled once (migration 0107's triggers). Only `cancel` for
+ * once and settled once (migration 0108's triggers). Only `cancel` for
  * now: an independent run can't be paused yet.
  */
 export const workflowResourceRunControls = sqliteTable(
