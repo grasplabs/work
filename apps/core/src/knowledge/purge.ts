@@ -386,7 +386,7 @@ const purgePersonal = async (
 
 /** A character as a pattern: itself. */
 const literalCharacter = (character: string): string =>
-  character.replaceAll(/[$()*+./?[\\\]^{|}-]/gu, "\\$&");
+  character.replaceAll(/[$()*+./?[\\\]^{|}]/gu, "\\$&");
 
 /** Code point ranges as the inside of a character class. */
 const classOf = (ranges: readonly (readonly [number, number])[]): string =>

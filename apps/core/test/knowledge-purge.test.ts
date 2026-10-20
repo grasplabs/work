@@ -1695,6 +1695,28 @@ describe("a purge of content", setUpTime, () => {
     });
   });
 
+  it("removes a name with a hyphen in it", async () => {
+    const admin = await personOf("admin");
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      "# Team\nAnne-Marie left; Anne stays."
+    );
+    await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: ["Anne-Marie"],
+      reason: "offboarding",
+    });
+    const read = await admin.api.knowledge.getDocument(document.id);
+    expect(read.version.text).toBe("# Team\n(removed) left; Anne stays.");
+  });
+
   it("removes a term left joined only by a term removed next to it, and finds nothing when run again", async () => {
     const admin = await personOf("admin");
     const handbook = await admin.api.knowledge.createCollection({
