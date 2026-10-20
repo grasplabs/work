@@ -21,7 +21,8 @@
     "test:durations": "node scripts/test-durations.ts",
     "release:build": "node scripts/release/build-release.ts",
     "release:upload": "node scripts/release/upload-release.ts",
-    "package:definition": "node scripts/package-definition.ts"
+    "package:definition": "node scripts/package-definition.ts",
+    "parity": "node scripts/parity/run.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "catalog:",
