@@ -765,9 +765,8 @@ export const sdkReleaseTombstones = sqliteTable(
 /**
  * What keeps a sealed release past its retention (spec 16.3): an open
  * screen's lease, which lapses 15 minutes after its last renewal, or a
- * run, a compatible migration, a pinned trigger, a workflow binding's
- * approval naming one of its exports (src/workflow-bindings.ts) or a legal
- * hold, held until released.
+ * run, a compatible migration, a pinned trigger or a legal hold, held
+ * until released.
  */
 export const sdkReleasePins = sqliteTable(
   "sdk_release_pins",
@@ -775,7 +774,7 @@ export const sdkReleasePins = sqliteTable(
     appId: text("app_id").notNull(),
     version: integer().notNull(),
     holderKind: text("holder_kind", {
-      enum: ["frame", "run", "migration", "trigger", "hold", "approval"],
+      enum: ["frame", "run", "migration", "trigger", "hold"],
     }).notNull(),
     holderId: text("holder_id").notNull(),
     /** When it lapses, for a frame's lease; null for a held pin. */

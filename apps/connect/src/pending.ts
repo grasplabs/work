@@ -15,7 +15,6 @@ import {
   heldCallRequestSchema,
   heldRequestSchema,
   pendingKeySchema,
-  settledStepSchema,
   refuseConfirmationSchema,
 } from "@grasp-os/shared/connect";
 import type {
@@ -960,32 +959,6 @@ export const dropForEndedRun = async (
 };
 
 /**
- * Drops every held action under the step key core names, acting for the
- * person it names, held for a workflow run: the step settled without
- * taking their decision (core's workflows/resource-host.ts, an export's
- * step), so confirming one would send what no step collects. Only an
- * App's, under that exact key, for that person, in workflow mode: another
- * step's, person's, a chat's or a workflow's own actions stay. Each is recorded as `connection.action.dropped`,
- * reason `step.settled`, by core itself.
- */
-export const dropForSettledStep = async (
-  env: Env,
-  request: unknown
-): Promise<void> => {
-  const parsed = settledStepSchema.safeParse(request);
-  if (!parsed.success) {
-    throw connectErrors.create("connect.invalid");
-  }
-  const { onBehalfOf, idempotencyKey } = parsed.data;
-  await dropPendingActions(
-    env,
-    sql`${pendingActions.idempotencyKey} = ${idempotencyKey} AND ${pendingActions.onBehalfOf} = ${onBehalfOf} AND ${pendingActions.mode} = 'workflow' AND ${pendingActions.subjectType} = 'app'`,
-    "step.settled",
-    null
-  );
-};
-
-/**
  * Drops every held action of the workflow runs core names, whose
  * retention is over (core's src/workflows/retention.ts): a run that ended
  * while a side effect of it was held leaves the action, with its exact
@@ -994,8 +967,8 @@ export const dropForSettledStep = async (
  * run's ID (`stepIdempotencyKey`). An App's run's actions are its App's:
  * one read per App, by the index of its held actions. An independent
  * workflow's run's are its workflow's, and those of every App its calls
- * reached, however many hops on (an export calling another App's carries
- * the run's key on): dropped by the run, whatever their subject, so none
+ * reached, however many hops on (a call into another App's carries the
+ * run's key on): dropped by the run, whatever their subject, so none
  * is missed. Each is recorded as `connection.action.dropped` with reason
  * `run.ended`, by core itself.
  */
