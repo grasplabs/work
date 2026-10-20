@@ -91,8 +91,9 @@ export const compilerLock = (assets: string): string =>
 export const kitModule = "kit.json";
 
 /**
- * What screens import to reach their App's server: the legacy hooks
- * (`callServer`, `useLive`, string `useWorkflow`), which GRA-343 removes.
+ * The legacy workflow hooks screens import (string `useWorkflow`, `useRun`),
+ * which GRA-418 removes. A screen reaches its App's code through the React
+ * SDK only (`screenSdk`).
  */
 export const screenHooks = "@grasp-os/sdk/screen";
 

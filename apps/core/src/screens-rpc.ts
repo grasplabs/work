@@ -50,7 +50,7 @@ import { z } from "zod";
 
 import { windowExtentOf } from "./app-functions.ts";
 import { versionReferenceSource } from "./app-releases.ts";
-import { callApp, isPlainData, plainDataBounds } from "./app.ts";
+import { isPlainData, plainDataBounds } from "./app.ts";
 import type { AppAnswer } from "./app.ts";
 import { appFor, findVersion, getApp, versionFiles } from "./apps.ts";
 import { withReferencesOf } from "./draft-references.ts";
@@ -697,70 +697,6 @@ export const argumentsFor = (
 };
 
 /**
- * How long a screen waits for an App's answer, its turn in the App
- * included: the App's code gets as long from its turn, then is stopped,
- * so a call nobody waits for any more frees the App sooner than the App's
- * own time for a call (`App.call`).
- */
-const screenCallMs = 30_000;
-
-/**
- * Calls a method of the App's server for the person: plain data and a
- * screen's callbacks go in, plain data comes out, whatever it holds. The
- * name must be a string before it goes anywhere near the App, so an object
- * can't turn into a different one between the check and the call.
- */
-const callServer = async (
-  env: Env,
-  by: Identity,
-  { app, method, args }: { app: unknown; method: unknown; args: unknown },
-  frame: Frame
-): Promise<AppAnswer> => {
-  const id = await admitted(env, by, app);
-  if (typeof method !== "string" || !Array.isArray(args)) {
-    throw screenErrors.create("screen.invalid");
-  }
-  const artifact = frame.artifactOf(id);
-  const { passed, callbacks } = argumentsFor(
-    args,
-    frame.stillOpen(by, id, artifact, "call"),
-    frame.held,
-    { frame, by, app: id, artifact }
-  );
-  try {
-    return await delivering(env, by, id, artifact, "call", async () => {
-      // A frame closed while the call was admitted runs nothing.
-      frame.dispatching();
-      return withinAnswer(
-        await callApp(
-          env,
-          id,
-          {
-            userId: by.userId,
-            mode: "interactive",
-            // In on the person's role in the App: each stub call of the
-            // App's code checks it again (app-bindings.ts).
-            admission: {
-              type: "role",
-              person: { userId: by.userId, role: by.role, teams: by.teams },
-            },
-          },
-          method,
-          passed,
-          Date.now() + screenCallMs
-        )
-      );
-    });
-  } catch (error) {
-    // A failed call keeps no callback.
-    for (const callback of callbacks) {
-      callback[Symbol.dispose]();
-    }
-    throw error;
-  }
-};
-
-/**
  * Follows the App's runs of `workflow` for the person (app.ts,
  * `watchRuns`): the screen's callback goes to the App's host as a
  * function it can only call, checked before each push as any callback of
@@ -1171,12 +1107,6 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     await this.#delivered("received", async (by) => {
       await screenSubmissionReceived(env, by, app, request);
     });
-  }
-
-  async call(method: string, args: unknown[]): Promise<unknown> {
-    const by = await this.#person();
-    const { env, app } = this.#connection;
-    return await callServer(env, by, { app, method, args }, this.#frame);
   }
 
   async startRun(workflow: string, input?: unknown): Promise<WorkflowRun> {

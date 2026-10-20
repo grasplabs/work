@@ -36,12 +36,6 @@ export type Theme = "light" | "dark";
  */
 export interface ScreenBridge {
   /**
-   * Calls `method` of the App's server with `args`, for the person using
-   * the screen. Functions among `args` reach the server as callbacks it
-   * can keep and call later.
-   */
-  call: (method: string, args: unknown[]) => Promise<unknown>;
-  /**
    * Calls one of the App's functions (spec 32.6), for the person using the
    * screen: `request` is the call as JSON text (its reference, input and
    * idempotency key), passed to core as it is; the answer is core's

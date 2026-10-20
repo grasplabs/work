@@ -1,92 +1,23 @@
 /**
- * The legacy screen SDK, for Apps whose server is an `app/server.ts`
- * class. An App of spec 8's layout uses `@grasp-os/sdk/react` instead:
- * its queries, mutations and actions through the generated `#grasp`
- * references. GRA-343 removes this module, with `callServer`, `live`,
- * `useLive`, the string `useWorkflow`, `useRun` and `followRuns`.
+ * The legacy screen SDK's workflow hooks: the string `useWorkflow`,
+ * `useRun` and `followRuns`, with which a screen starts and follows its
+ * App's workflow runs through the page around its sandboxed frame. An App
+ * of spec 8's layout uses `@grasp-os/sdk/react` instead: its queries,
+ * mutations, actions and workflows through the generated `#grasp`
+ * references. GRA-418 removes this module. A screen reaches its App's
+ * code through those references only: there is no call of an App's
+ * server from here.
  *
- * What an App's screens use to reach their App's server, from inside their
- * sandboxed frame. A screen has no network: these calls go through the
- * page around it, to core, which checks the person's session and role on
- * every one and runs the method as that person.
- *
- * ```tsx
- * import { callServer, useLive } from "@grasp-os/sdk/screen";
- *
- * export default function Notes() {
- *   const notes = useLive<string[]>("watchNotes", []);
- *   return (
- *     <Button onClick={() => void callServer("addNote", "Call Acme")}>Add</Button>
- *   );
- * }
- * ```
- *
- * Live updates: a server method that takes a callback as its last argument
- * keeps it, calls it with the current value, and calls it again whenever
- * the value changes, for everyone who has the screen open. The callback in
- * the arguments ends with the call, so the server keeps a duplicate, and
- * drops it once calling it fails (the screen is gone, or stopped
- * listening):
- *
- * ```ts
- * export class App extends DurableObject {
- *   #watchers = new Set<Watcher>();
- *
- *   watchNotes(_caller: Caller, onChange: Watcher): void {
- *     const watcher = onChange.dup();
- *     this.#watchers.add(watcher);
- *     void this.#send(watcher, this.notes());
- *   }
- *
- *   addNote(_caller: Caller, note: string): void {
- *     this.ctx.storage.sql.exec("INSERT INTO notes VALUES (?)", note);
- *     for (const watcher of this.#watchers) {
- *       void this.#send(watcher, this.notes());
- *     }
- *   }
- *
- *   async #send(watcher: Watcher, notes: string[]): Promise<void> {
- *     try {
- *       await watcher(notes);
- *     } catch {
- *       this.#watchers.delete(watcher);
- *       watcher[Symbol.dispose]();
- *     }
- *   }
- * }
- * ```
- *
- * A screen subscribes again by itself when its connection drops and comes
- * back, so the server sees a new callback then. Values passed to a
- * callback, like answers, must be plain data.
- *
- * Workflows: `useWorkflow("invoice-intake")` starts runs of the App's
- * workflow, shows them as they change (started, waiting for a decision,
- * ended) and answers their decisions, for the person using the screen;
- * `useRun("invoice-intake", id)` follows one run by its ID, however old. A
- * workflow saves what it finds by calling the App's functions
- * (`appFunctions<Tree>(env)` in `@grasp-os/sdk/workflow`).
+ * `useWorkflow("invoice-intake")` starts runs of the App's workflow,
+ * shows them as they change (started, waiting for a decision, ended) and
+ * answers their decisions, for the person using the screen;
+ * `useRun("invoice-intake", id)` follows one run by its ID, however old.
+ * Core checks the person's session and role on every call.
  */
 import { useEffect, useState } from "react";
 
 import { fences } from "./client-error.ts";
 import { bridge } from "./screen-runtime.ts";
-
-/**
- * Calls `method` of the App's server with `args`, for the person using the
- * screen, and resolves with its answer. Rejects when the server refuses or
- * fails; the error's `code` says why (`app.failed` for the App's own).
- */
-export const callServer = async <Answer = unknown>(
-  method: string,
-  ...args: unknown[]
-): Promise<Answer> => {
-  const answer: unknown = await bridge().call(method, args);
-  // SAFETY: the answer's shape is the App's own contract between its server
-  // and its screens; the platform only guarantees it is plain data.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return answer as Answer;
-};
 
 /** How long to wait before subscribing again, at first and at most. */
 const retryMs = { first: 1000, most: 30_000 };
@@ -211,83 +142,6 @@ const follow = (
     stopped = true;
     clearTimeout(retry);
   };
-};
-
-/**
- * Subscribes to a server method that sends updates (see above): calls
- * `method` with `args` and a callback, which gets every value the server
- * sends. When the connection drops, subscribes again once it is back.
- * Returns a function that stops it.
- *
- * The method must keep its callback (`onChange.dup()`, see above). One
- * that lets it go releases it, which this reads as a dropped connection:
- * it subscribes again and again, backing off to every 30 s.
- *
- * Once core lets go of the callback, `onEnded` runs with nothing: what the
- * screen shows from it must go. When core refuses the person or their
- * build (a role lost, the build's approval taken back), it runs with the
- * refusal; after a refusal that can't lift (`screen.revoked`), it stops
- * subscribing.
- *
- * Once stopped, the callback rejects whatever the server sends it next, so
- * the server drops it (see above).
- */
-export const live = (
-  method: string,
-  args: readonly unknown[],
-  onChange: (value: unknown) => void,
-  onEnded?: (refusal?: unknown) => void
-): (() => void) =>
-  follow(
-    method,
-    async (listener) => await bridge().call(method, [...args, listener]),
-    onChange,
-    undefined,
-    onEnded
-  );
-
-/**
- * The latest value a server method sent (see `live`), in a component:
- * `initial` until the first, and again once core lets go of its
- * subscription, until it sends another. When core refuses the person or
- * their build (`screen.revoked` once the build's approval is taken back),
- * the component throws the refusal, as `useQuery` does, so the screen
- * shows it rather than what it had. `args` are plain data; a change in
- * them subscribes again.
- */
-export const useLive = <Value>(
-  method: string,
-  initial: Value,
-  ...args: unknown[]
-): Value => {
-  const [shown, setShown] = useState<
-    { readonly value: Value } | { readonly refusal: Error } | undefined
-  >();
-  const argsJson = JSON.stringify(args);
-  useEffect(() => {
-    const withArgs: unknown = JSON.parse(argsJson);
-    return live(
-      method,
-      Array.isArray(withArgs) ? withArgs : [],
-      (next) => {
-        // SAFETY: as in `callServer`, the value is the App's own contract.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        setShown({ value: next as Value });
-      },
-      (refusal) => {
-        setShown(
-          refusal === undefined ? undefined : { refusal: asError(refusal) }
-        );
-      }
-    );
-  }, [method, argsJson]);
-  if (shown === undefined) {
-    return initial;
-  }
-  if ("refusal" in shown) {
-    throw shown.refusal;
-  }
-  return shown.value;
 };
 
 // The App's workflows

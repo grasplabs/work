@@ -48,8 +48,8 @@ const nullAnswer = { result: { ok: true, value: null } };
 
 /** What reached core, and what it handed out: `answer` to a function call. */
 const coreStandIn = (answer: unknown = nullAnswer) => {
-  const calls: { method: string; args: unknown[] }[] = [];
   const functionCalls: string[] = [];
+  const runStarts: { workflow: string; input: unknown }[] = [];
   const reports: string[] = [];
   const draftRequests: string[] = [];
   const navigations: ScreenNavigation[] = [];
@@ -63,10 +63,6 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   /** Holds each stream's opening until it resolves, when a test sets it. */
   const opening: { gate: Promise<unknown> | undefined } = { gate: undefined };
   const target: FrameTarget = {
-    call: async (method, args) => {
-      calls.push({ method, args });
-      return await Promise.resolve("answered");
-    },
     callFunction: async (request) => {
       functionCalls.push(request);
       return await Promise.resolve(answer);
@@ -90,7 +86,10 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
       reports.push(problem.message);
       await Promise.resolve();
     },
-    startRun: async () => await Promise.resolve("started"),
+    startRun: async (workflow, input) => {
+      runStarts.push({ workflow, input });
+      return await Promise.resolve("started");
+    },
     runs: async () => await Promise.resolve([]),
     run: async () => await Promise.resolve("a run"),
     decide: async () => await Promise.resolve("decided"),
@@ -129,11 +128,21 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
       return await Promise.resolve(subscription);
     },
   };
+  // What a v1 server call would reach, were the bridge to pass one on: a
+  // target's `call`, which no target has any more.
+  const serverCalls: unknown[] = [];
+  Object.assign(target, {
+    call: async (...args: unknown[]) => {
+      serverCalls.push(args);
+      return await Promise.resolve("answered");
+    },
+  });
   return {
-    calls,
+    serverCalls,
     draftRequests,
     functionCalls,
     received,
+    runStarts,
     guards,
     navigations,
     opening,
@@ -220,12 +229,12 @@ const rawFramed = () => {
   return { ...core, broken, close, push, pull };
 };
 
-/** A call of `notes` with one string, as Cap'n Web writes it. */
+/** A start of a run of `notes` with one string, as Cap'n Web writes it. */
 const notesCall = (text: string): unknown => [
   "pipeline",
   0,
-  ["call"],
-  ["notes", [[text]]],
+  ["startRun"],
+  ["notes", text],
 ];
 
 /**
@@ -246,6 +255,21 @@ const outcome = async (call: Promise<unknown>): Promise<unknown> => {
       ? error.code
       : "refused";
   }
+};
+
+/**
+ * A request of the frame's that core answers: a function call, as the
+ * screen client makes one. `answered` once core's answer reached the
+ * frame, else what refused it.
+ */
+const poke = async (
+  frame: { page: { callFunction: (request: string) => Promise<unknown> } },
+  request = "{}"
+): Promise<unknown> => {
+  const answer = await outcome(frame.page.callFunction(request));
+  return JSON.stringify(answer) === JSON.stringify(nullAnswer)
+    ? "answered"
+    : answer;
 };
 
 /** `value`, however a screen that isn't type-checked would pass it. */
@@ -296,27 +320,6 @@ describe("the page's bridge to a screen", () => {
     expect(frameBridge(coreStandIn().target, [])).toBeInstanceOf(
       FrameRpcTarget
     );
-  });
-
-  it("passes a call on to the screen's own target, named by a string", async () => {
-    const frame = framed();
-    const results = {
-      call: await outcome(frame.page.call("notes", ["a"])),
-      nameObject: await outcome(
-        frame.page.call(unchecked({ toString: () => "notes" }), [])
-      ),
-      noArguments: await outcome(frame.page.call("notes", unchecked("a"))),
-    };
-    frame.close();
-
-    expect({ results, reached: frame.calls }).toStrictEqual({
-      results: {
-        call: "answered",
-        nameObject: "screen.invalid",
-        noArguments: "screen.invalid",
-      },
-      reached: [{ method: "notes", args: ["a"] }],
-    });
   });
 
   it("passes a function call's request on as the text the frame sent, and nothing else", async () => {
@@ -448,15 +451,15 @@ describe("the page's bridge to a screen", () => {
       Array.from({ length: 200 }, async (_value, index) =>
         // Malformed ones count too.
         index % 2 === 0
-          ? await outcome(frame.page.call("notes", []))
+          ? await poke(frame)
           : await outcome(frame.page.runs(unchecked(index)))
       )
     );
-    const reachedInFlood = frame.calls.length;
+    const reachedInFlood = frame.functionCalls.length;
     // 120 a minute: two more after a second.
     vi.setSystemTime(1_001_000);
     const later = await Promise.all(
-      [0, 0, 0].map(async () => await outcome(frame.page.call("notes", [])))
+      [0, 0, 0].map(async () => await poke(frame))
     );
     frame.close();
 
@@ -487,7 +490,7 @@ describe("the page's bridge to a screen", () => {
     void frame.page.saveDraft("draft", null);
     void frame.page.clearDrafts();
     // In order on the one port: once this is answered, so are the rest.
-    await frame.page.call("notes", []);
+    await poke(frame);
     frame.close();
 
     const count = (kind: string) =>
@@ -518,7 +521,7 @@ describe("the page's bridge to a screen", () => {
       void frame.page.report({ kind: "error", message: `Problem ${count}` });
     }
     // In order on the one port: once this is answered, so are the reports.
-    await frame.page.call("notes", []);
+    await poke(frame);
     frame.close();
 
     expect(frame.reports).toStrictEqual(
@@ -531,7 +534,7 @@ describe("the page's bridge to a screen", () => {
     const exact = atLimit.pull(
       atLimit.push(paddedCall(screenLimits.rpc.maxMessageSize))
     );
-    await expect(exact).resolves.toStrictEqual({ answered: "answered" });
+    await expect(exact).resolves.toStrictEqual({ answered: "started" });
     atLimit.close();
 
     const pastLimit = rawFramed();
@@ -541,8 +544,8 @@ describe("the page's bridge to a screen", () => {
     });
     pastLimit.close();
     expect({
-      exactReached: atLimit.calls.length,
-      pastReached: pastLimit.calls.length,
+      exactReached: atLimit.runStarts.length,
+      pastReached: pastLimit.runStarts.length,
     }).toStrictEqual({ exactReached: 1, pastReached: 0 });
   });
 
@@ -566,26 +569,27 @@ describe("the page's bridge to a screen", () => {
 
   it("counts a message's length in code units, not signs", async () => {
     const frame = framed();
-    const fits = await outcome(frame.page.call("notes", ["x".repeat(200_000)]));
+    const fits = await outcome(frame.page.callFunction("x".repeat(200_000)));
     // Half as many signs, each two code units: counted as units, not signs.
     const tooLong = await outcome(
-      frame.page.call("notes", ["😀".repeat(140_000)])
+      frame.page.callFunction("😀".repeat(140_000))
     );
-    const after = await outcome(frame.page.call("notes", []));
+    const after = await poke(frame);
     frame.close();
 
     expect({
       fits,
       tooLong,
       after,
-      reached: frame.calls.length,
+      reached: frame.functionCalls.length,
       // The page is told, once, so it can say the screen stopped.
       broken: frame.broken.times,
     }).toStrictEqual({
-      fits: "answered",
+      // Past what a function call takes, but a message the port takes.
+      fits: "screen.invalid",
       tooLong: "refused",
       after: "refused",
-      reached: 1,
+      reached: 0,
       broken: 1,
     });
   });
@@ -593,23 +597,24 @@ describe("the page's bridge to a screen", () => {
   it("passes on a value as deep as values may be, and ends the session over one level more", async () => {
     const frame = framed();
     const deepest = await outcome(
-      frame.page.call("notes", [nested(valueDepth)])
+      frame.page.startRun("notes", nested(valueDepth + 1))
     );
     const tooDeep = await outcome(
-      frame.page.call("notes", [nested(valueDepth + 1)])
+      frame.page.startRun("notes", nested(valueDepth + 2))
     );
     frame.close();
 
     expect({
       deepest,
       tooDeep,
-      reached: frame.calls,
+      reached: frame.runStarts,
       broken: frame.broken.times,
     }).toStrictEqual({
-      deepest: "answered",
+      deepest: "started",
       tooDeep: "refused",
-      // Whole, every level of it.
-      reached: [{ method: "notes", args: [nested(valueDepth)] }],
+      // Whole, every level of it: an argument passed straight may be one
+      // level deeper than values nest (screen-limits.ts, `rpcArgumentDepth`).
+      reached: [{ workflow: "notes", input: nested(valueDepth + 1) }],
       broken: 1,
     });
   });
@@ -630,13 +635,13 @@ describe("the page's bridge to a screen", () => {
         frame.push([
           "pipeline",
           0,
-          ["call"],
-          ["notes", [[["pipeline", pushed]]]],
+          ["startRun"],
+          ["notes", ["pipeline", pushed]],
         ])
       );
 
-    const deepest = await called(built(valueDepth - 8, 8));
-    const oneMore = await called(built(valueDepth - 8, 9));
+    const deepest = await called(built(valueDepth - 8, 9));
+    const oneMore = await called(built(valueDepth - 8, 10));
     // Thousands of levels: refused as such, not by running out of stack.
     const farDeeper = await called(built(30, 100));
     // Passed as a run's input, straight.
@@ -657,20 +662,47 @@ describe("the page's bridge to a screen", () => {
       farDeeper,
       asInput,
       after,
-      reached: frame.calls,
+      reached: frame.runStarts,
       broken: frame.broken.times,
     }).toStrictEqual({
-      deepest: { answered: "answered" },
+      deepest: { answered: "started" },
       oneMore: "request.too_deep",
       farDeeper: "request.too_deep",
       asInput: "request.too_deep",
-      after: { answered: "answered" },
+      after: { answered: "started" },
       reached: [
-        { method: "notes", args: [nested(valueDepth)] },
-        { method: "notes", args: ["bottom"] },
+        { workflow: "notes", input: nested(valueDepth + 1) },
+        { workflow: "notes", input: "bottom" },
       ],
       // The session goes on.
       broken: 0,
+    });
+  });
+
+  it("serves a frame no call of its App's server, and passes it on nowhere", async () => {
+    const frame = rawFramed();
+    const called = await frame.pull(
+      frame.push(["pipeline", 0, ["call"], ["notes", [["a"]]]])
+    );
+    // The session goes on.
+    const after = await frame.pull(
+      frame.push(["pipeline", 0, ["callFunction"], ["{}"]])
+    );
+    frame.close();
+
+    expect({
+      called:
+        typeof called === "object" && called !== null && "answered" in called,
+      after,
+      reached: {
+        server: frame.serverCalls,
+        runs: frame.runStarts,
+        functions: frame.functionCalls,
+      },
+    }).toStrictEqual({
+      called: false,
+      after: { answered: nullAnswer },
+      reached: { server: [], runs: [], functions: ["{}"] },
     });
   });
 
@@ -686,8 +718,8 @@ describe("the page's bridge to a screen", () => {
         frame.push([
           "pipeline",
           0,
-          ["call"],
-          ["notes", [[{ [key]: ["pipeline", pushed] }]]],
+          ["startRun"],
+          ["notes", { [key]: ["pipeline", pushed] }],
         ])
       );
 
@@ -701,19 +733,15 @@ describe("the page's bridge to a screen", () => {
         frame.push([
           "pipeline",
           0,
-          ["call"],
+          ["startRun"],
           [
             "notes",
             [
-              [
-                [
-                  "error",
-                  "AggregateError",
-                  "m",
-                  null,
-                  { errors: ["pipeline", deep] },
-                ],
-              ],
+              "error",
+              "AggregateError",
+              "m",
+              null,
+              { errors: ["pipeline", deep] },
             ],
           ],
         ])
@@ -721,7 +749,7 @@ describe("the page's bridge to a screen", () => {
     };
     frame.close();
 
-    expect({ outcomes, reached: frame.calls }).toStrictEqual({
+    expect({ outcomes, reached: frame.runStarts }).toStrictEqual({
       outcomes: {
         protoDeep: "request.unsupported_value",
         protoShallow: "request.unsupported_value",
@@ -748,11 +776,11 @@ describe("the page's bridge to a screen", () => {
       ]);
     }
     const held = await frame.pull(
-      frame.push(["pipeline", 0, ["call"], ["notes", [[["pipeline", pushed]]]]])
+      frame.push(["pipeline", 0, ["startRun"], ["notes", ["pipeline", pushed]]])
     );
     frame.close();
 
-    expect({ held, reached: frame.calls }).toStrictEqual({
+    expect({ held, reached: frame.runStarts }).toStrictEqual({
       held: "request.too_large",
       reached: [],
     });
@@ -762,12 +790,12 @@ describe("the page's bridge to a screen", () => {
     const frame = framed();
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a port has no target origin
     frame.port.postMessage({ type: "grasp:screen-mounted", trusted: true });
-    const after = await outcome(frame.page.call("notes", []));
+    const after = await poke(frame);
     frame.close();
 
     expect({
       after,
-      reached: frame.calls,
+      reached: frame.runStarts,
       broken: frame.broken.times,
     }).toStrictEqual({ after: "refused", reached: [], broken: 1 });
   });
@@ -861,7 +889,7 @@ describe("the page's bridge to a screen", () => {
     frame.close();
     // Twice does nothing more.
     frame.close();
-    const after = await outcome(frame.page.call("notes", []));
+    const after = await poke(frame);
 
     await vi.waitFor(() => {
       expect(frame.subscriptions.map(({ released }) => released)).toStrictEqual(
@@ -871,7 +899,7 @@ describe("the page's bridge to a screen", () => {
     expect({
       before,
       after,
-      reached: frame.calls,
+      reached: frame.runStarts,
       // Closed by the page itself: nothing broke.
       broken: frame.broken.times,
     }).toStrictEqual({
@@ -902,7 +930,7 @@ describe("the page's bridge to a screen", () => {
 
     // The tab lives: a fresh bridge still answers a call.
     const fresh = framed();
-    const answered = await outcome(fresh.page.call("notes", []));
+    const answered = await poke(fresh);
     fresh.close();
     expect(answered).toBe("answered");
   });
@@ -922,23 +950,20 @@ describe("the page's bridge to a screen", () => {
     frame.close();
 
     const fresh = framed();
-    const answered = await outcome(fresh.page.call("notes", []));
+    const answered = await poke(fresh);
     fresh.close();
     expect(answered).toBe("answered");
   });
 
-  it("passes a call with the largest input a screen may send, again and again", async () => {
+  it("passes a call with the largest request a screen may send, again and again", async () => {
     const frame = framed();
-    // About 128 KiB of small numbers, each call answered and let go.
-    const largest = Array.from(
-      { length: 40_000 },
-      (_value, index) => index % 10
-    );
+    // As long as a function call's request may be, each answered and let go.
+    const largest = "x".repeat(functionRequestMaxBytes);
     // One after another: each answered, and let go, before the next.
     const answers: unknown[] = [];
     for (let count = 0; count < 5; count += 1) {
       // oxlint-disable-next-line no-await-in-loop -- in turn on purpose: each call must be answered before the next is sent
-      answers.push(await outcome(frame.page.call("notes", [largest])));
+      answers.push(await poke(frame, largest));
     }
     frame.close();
     expect({ answers, broken: frame.broken.times }).toStrictEqual({

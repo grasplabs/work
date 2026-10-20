@@ -45,7 +45,6 @@ import { RpcSession, RpcStub } from "capnweb";
  * screen, or a draft's preview (screen-host.ts).
  */
 export interface FrameTarget {
-  call: (method: string, args: unknown[]) => Promise<unknown>;
   callFunction: (request: string) => Promise<unknown>;
   /**
    * Tells core the frame's client got `request`'s answer (spec 10.7.8),
@@ -185,14 +184,6 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
     if (!taken) {
       throw rateLimited();
     }
-  }
-
-  async call(method: unknown, args: unknown): Promise<unknown> {
-    this.#request();
-    if (typeof method !== "string" || !Array.isArray(args)) {
-      throw screenErrors.create("screen.invalid");
-    }
-    return await this.#target.call(method, args);
   }
 
   /**
