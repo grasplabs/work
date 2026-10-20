@@ -29,7 +29,7 @@ export const landscapeLimits = {
   /** Provider requests one read may send. */
   requestsPerRead: 20,
   /** Reads one sync makes at most: a sync that reaches it is partial. */
-  readsPerSync: 50,
+  readsPerSync: 200,
   /** Reads one cron run makes, so a sync spreads over runs. */
   readsPerRun: 10,
   /** Longest cursor connect hands back. */
@@ -136,7 +136,10 @@ export interface LandscapeAppSummary {
   /** Its client ID at the provider. */
   appId: string;
   name: string;
+  /** As the provider verified it: the only publisher a vendor is. */
   publisher: string | null;
+  /** The name an unverified app gives its publisher: shown as unverified only. */
+  unverifiedPublisher: string | null;
   verified: boolean;
   /** ISO 8601. */
   firstSeen: string;
@@ -169,6 +172,11 @@ export interface LandscapeSyncStatus {
   reason: string | null;
   startedAt: string | null;
   finishedAt: string | null;
+  /**
+   * When the last sync that read everything started: how fresh what the
+   * landscape counts is. Null before any did.
+   */
+  wholeAt: string | null;
 }
 
 /** The application landscape, over `/rpc`. */

@@ -27,7 +27,8 @@ export const landscapeClient = clients.microsoftLandscape;
  * Where tests set what Graph holds of the tenant's grants, for the
  * landscape's reads: POST `{ grants, apps, people }` as Graph has them
  * (`oauth2PermissionGrants`, `servicePrincipals`, `users`), or
- * `{ throttle: seconds }` to have the next grants read throttled, or
+ * `{ throttle: seconds }` to have every grants read throttled until
+ * `{ throttle: null }`, or
  * `{ failing: "all" }` to have every grants read fail, or `"later"` every
  * page but the first, until `false`.
  */
@@ -128,7 +129,6 @@ const landscapeGraph = (url) => {
     }
     if (landscape.throttle !== null) {
       const seconds = landscape.throttle;
-      landscape.throttle = null;
       return new Response("Slow down", { status: 429, headers: { "retry-after": String(seconds) } });
     }
     const top = Number(url.searchParams.get("$top") ?? "100");

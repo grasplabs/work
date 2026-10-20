@@ -52,23 +52,30 @@ import type { SessionCheck } from "./session-check.ts";
 //
 // - Another company's data: a read is kept only if its tenant is this
 //   deployment's own, from its sign-in config; any other is refused and
-//   the sync fails, writing nothing.
+//   the sync fails, and everything kept of that connection is deleted.
 // - Planted names: an app's name and publisher are only data, shown as
 //   text; an app is known by its client ID, and nothing here puts a name
-//   in a prompt.
+//   in a prompt. A vendor is only a publisher the provider verified; an
+//   unverified one's own word is kept apart (`unverified_publisher`).
 // - Personal data: who granted an app is shown to admins only (members see
 //   a count), never to Grasp staff, and every admin read of it is audited
 //   first. A person's grant goes once it wasn't seen for
-//   `landscapeRetentionDays`, and everything of a connection once it is
-//   disconnected.
+//   `landscapeRetentionDays`, and everything of a connection within 15
+//   minutes of its disconnect (the next cron run).
+// - Not read in phase 1: application permissions admins granted apps
+//   (app role assignments), the most dangerous consents (GRA-900).
 // - A flood: a sync makes at most `readsPerSync` reads, each bounded by
-//   connect, and `readsPerRun` per cron run; one that reaches its bound
-//   stops as partial, never loops.
+//   connect, `readsPerRun` per cron run, going on over later runs; one
+//   that reaches its bound stops as partial, never loops, and what counts
+//   as current stays the last whole sync's.
+// - A sync stuck under way: one whose connection needs reconnecting, or
+//   whose day passed while it was throttled or failing, ends as failed.
 // - Replays and crashes: each page is written in one batch with the
 //   cursor after it, and every row as seen at the sync's start, so a page
 //   written again writes the same, and a sync that stopped goes on from
 //   its last page. A batch guarded by the cursor it read can't be written
-//   twice by two cron runs at once.
+//   twice by two cron runs at once. A late write of an older sync changes
+//   nothing: each upsert only moves a row forward.
 
 const dayMs = 24 * 60 * 60_000;
 /** Most IDs one query binds: D1 takes 100 bound parameters. */
@@ -147,6 +154,7 @@ const pageWrites = (
           appId: app.id,
           name: app.name,
           publisher: app.publisher,
+          unverifiedPublisher: app.unverifiedPublisher,
           verified: app.verified,
           adminScopes,
           adminSeenAt: adminScopes === null ? null : seen,
@@ -158,8 +166,9 @@ const pageWrites = (
           set: {
             name: app.name,
             publisher: app.publisher,
+            unverifiedPublisher: app.unverifiedPublisher,
             verified: app.verified,
-            lastSeen: sql`max(${landscapeApps.lastSeen}, excluded.last_seen)`,
+            lastSeen: sql`excluded.last_seen`,
             ...(adminScopes === null
               ? {}
               : {
@@ -171,6 +180,8 @@ const pageWrites = (
                   adminSeenAt: sql`excluded.admin_seen_at`,
                 }),
           },
+          // A late write of an older sync changes nothing.
+          setWhere: sql`excluded.last_seen >= ${landscapeApps.lastSeen}`,
         })
     );
     for (const [personId, { name, scopes }] of people) {
@@ -199,8 +210,9 @@ const pageWrites = (
                 sql`${landscapeAppPeople.scopes}`,
                 sql`excluded.scopes`
               ),
-              lastSeen: sql`max(${landscapeAppPeople.lastSeen}, excluded.last_seen)`,
+              lastSeen: sql`excluded.last_seen`,
             },
+            setWhere: sql`excluded.last_seen >= ${landscapeAppPeople.lastSeen}`,
           })
       );
     }
@@ -293,7 +305,7 @@ const readFailed = async (
   now: Date
 ): Promise<void> => {
   const code = landscapeErrors.codeOf(error);
-  if (code === "landscape.throttled") {
+  if (code === "landscape.throttled" && sync.day === dayOf(now)) {
     const details = isExpectedError(error) ? error.details : undefined;
     const wait = z.number().safeParse(details?.retryAfterMs).data;
     await db
@@ -350,8 +362,15 @@ const readPage = async (
   }
   // Another tenant's grants are never kept: the sync fails on them.
   if (tenant === undefined || read.tenant.toLowerCase() !== tenant) {
+    // Nothing of this connection is kept, from this sync or an earlier one.
     await db.batch([
       ended(db, sync, "failed", "landscape.tenant_mismatch", now),
+      db
+        .delete(landscapeAppPeople)
+        .where(eq(landscapeAppPeople.connectionId, sync.connectionId)),
+      db
+        .delete(landscapeApps)
+        .where(eq(landscapeApps.connectionId, sync.connectionId)),
       outboxed(db, {
         ...syncedEntry(sync, "failed", 0),
         detail: { state: "failed", reason: "landscape.tenant_mismatch" },
@@ -375,8 +394,9 @@ const readPage = async (
     state,
     retryAt: null,
     finishedAt: state === "running" ? null : now,
-    // Read whole: its rows are what is current from now on.
-    currentSince: state === "running" ? sync.currentSince : sync.startedAt,
+    // Read whole: its rows are what is current from now on. One stopped
+    // at its bound didn't read everything: the last whole one stays.
+    currentSince: state === "done" ? sync.startedAt : sync.currentSince,
   };
   const moved = db
     .update(landscapeSyncs)
@@ -418,6 +438,16 @@ const syncOne = async (
 ): Promise<void> => {
   const db = drizzle(env.DB);
   if (connection.status !== "active") {
+    // A sync under way ends: it can't go on until an admin reconnects.
+    await db
+      .update(landscapeSyncs)
+      .set({ state: "failed", reason: "landscape.inactive", finishedAt: now })
+      .where(
+        and(
+          eq(landscapeSyncs.connectionId, connection.id),
+          eq(landscapeSyncs.state, "running")
+        )
+      );
     return;
   }
   let sync = await syncToRun(db, connection, now);
@@ -563,6 +593,7 @@ export const landscapeAppsOf = async (
         appId: app.appId,
         name: app.name,
         publisher: app.publisher,
+        unverifiedPublisher: app.unverifiedPublisher,
         verified: app.verified,
         firstSeen: app.firstSeen.toISOString(),
         lastSeen: app.lastSeen.toISOString(),
@@ -689,6 +720,7 @@ export class LandscapeRpc extends CoreRpcTarget implements LandscapeApi {
           reason: sync?.reason ?? null,
           startedAt: sync?.startedAt.toISOString() ?? null,
           finishedAt: sync?.finishedAt?.toISOString() ?? null,
+          wholeAt: sync?.currentSince?.toISOString() ?? null,
         };
       });
     });

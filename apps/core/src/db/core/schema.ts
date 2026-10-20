@@ -3554,7 +3554,10 @@ export const landscapeApps = sqliteTable(
     connectionId: text("connection_id").notNull(),
     appId: text("app_id").notNull(),
     name: text().notNull(),
+    /** As the provider verified it; null when unverified. */
     publisher: text(),
+    /** The name an unverified app gives its publisher: its word only. */
+    unverifiedPublisher: text("unverified_publisher"),
     verified: integer({ mode: "boolean" }).notNull(),
     adminScopes: text("admin_scopes", { mode: "json" }).$type<string[]>(),
     adminSeenAt: timestamp("admin_seen_at"),
