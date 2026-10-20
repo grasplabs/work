@@ -237,7 +237,7 @@ describe("the client pages", () => {
     }).toStrictEqual({ settingUp: true, deploying: false });
   });
 
-  it("show an active client where it's live", async () => {
+  it("show an active client where it's live, and its quota policy as unknown while its core can't be asked", async () => {
     const client = await recordClient("active");
 
     const { status, html } = await page(`/clients/${client.id}`);
@@ -248,7 +248,17 @@ describe("the client pages", () => {
         `Live at https://${client.id}.grasp.test, and passed its smoke check.`
       ),
       resume: html.includes("Resume"),
-    }).toStrictEqual({ status: 200, live: true, resume: false });
+      quota: html.includes(
+        "The console sets the platform&#x27;s own. Core couldn&#x27;t be asked which it applies."
+      ),
+      inSync: html.includes("In sync"),
+    }).toStrictEqual({
+      status: 200,
+      live: true,
+      resume: false,
+      quota: true,
+      inSync: false,
+    });
   });
 
   it("offer to resume a client whose run is gone", async () => {

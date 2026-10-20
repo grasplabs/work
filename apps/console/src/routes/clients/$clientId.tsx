@@ -16,7 +16,11 @@ import {
 import { useEffect } from "react";
 
 import { ClientSettings } from "../../clients/client-settings.tsx";
-import { fetchClientSettings } from "../../clients/functions.ts";
+import {
+  fetchClientQuotaPolicy,
+  fetchClientSettings,
+} from "../../clients/functions.ts";
+import { QuotaPolicyCard } from "../../clients/quota-policy-card.tsx";
 import {
   confirmClientWorkersPaid,
   fetchNewClientOptions,
@@ -220,7 +224,8 @@ const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
 ]);
 
 const Client = () => {
-  const { view, releases, settings, history } = Route.useLoaderData();
+  const { view, releases, settings, history, quotaPolicy } =
+    Route.useLoaderData();
   const router = useRouter();
   const following = working.has(view.phase);
   useEffect(() => {
@@ -259,6 +264,9 @@ const Client = () => {
           releases={releases}
         />
       ) : null}
+      {view.client?.status === "active" && quotaPolicy !== null ? (
+        <QuotaPolicyCard policy={quotaPolicy} />
+      ) : null}
       {settings === null ? null : (
         <ClientSettings
           clientId={view.clientId}
@@ -289,15 +297,17 @@ export const Route = createFileRoute("/clients/$clientId")({
     if (!newClientIdSchema.safeParse(params.clientId).success) {
       throw notFound();
     }
-    const [view, { releases }, { settings, history }] = await Promise.all([
-      fetchProvisioning({ data: { clientId: params.clientId } }),
-      fetchNewClientOptions(),
-      fetchClientSettings({ data: { clientId: params.clientId } }),
-    ]);
+    const [view, { releases }, { settings, history }, quotaPolicy] =
+      await Promise.all([
+        fetchProvisioning({ data: { clientId: params.clientId } }),
+        fetchNewClientOptions(),
+        fetchClientSettings({ data: { clientId: params.clientId } }),
+        fetchClientQuotaPolicy({ data: { clientId: params.clientId } }),
+      ]);
     if (view === null) {
       throw notFound();
     }
-    return { view, releases, settings, history };
+    return { view, releases, settings, history, quotaPolicy };
   },
   component: Client,
   notFoundComponent: NoSuchClient,
