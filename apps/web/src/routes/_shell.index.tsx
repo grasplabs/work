@@ -1,4 +1,4 @@
-import type { ChatSummary } from "@grasp-os/shared/chat";
+import type { ChatProject, ChatSummary } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
@@ -41,6 +41,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 
 interface ChatPage {
   chats: ChatSummary[];
+  /** The person's projects, newest first. */
+  projects: ChatProject[];
   /** The models a question may name, the default first. */
   models: string[];
   /** The efforts each of them takes (`chats.efforts()`). */
@@ -77,15 +79,21 @@ const readSourceNames = async (
   return names;
 };
 
-/** A new chat: Grasp's buddy, the question, and the box to ask in. */
+/**
+ * A new chat: Grasp's buddy, the question, and the box to ask in; started
+ * from a project, it is made in that project.
+ */
 const NewChat = ({
   models,
   efforts,
+  project,
 }: {
   models: string[];
   efforts: Record<string, ModelEfforts>;
+  project: ChatProject | undefined;
 }) => {
-  const { composer } = useAsk(undefined, models, efforts);
+  const { composer } = useAsk(undefined, models, efforts, "page", project?.id);
+  const projectName = project?.name;
   return (
     <section
       aria-labelledby="new-chat"
@@ -102,6 +110,11 @@ const NewChat = ({
               <Trans>What should we look at today?</Trans>
             </h1>
           </div>
+          {projectName === undefined ? null : (
+            <p className="text-muted-foreground text-center">
+              <Trans>New chat in the project {projectName}</Trans>
+            </p>
+          )}
           <Composer running={false} {...composer} />
           <p className="text-muted-foreground text-center text-xs text-balance">
             <Trans>
@@ -113,6 +126,23 @@ const NewChat = ({
       </div>
     </section>
   );
+};
+
+/** The page's crumbs: Chat, the open chat's project if it is in one, the chat. */
+const crumbsOf = (
+  chatLabel: string,
+  chat: ChatSummary | undefined,
+  projects: readonly ChatProject[]
+) => {
+  if (chat === undefined) {
+    return [{ label: chatLabel }];
+  }
+  const project = projects.find(({ id }) => id === chat.projectId);
+  return [
+    { label: chatLabel, to: "/" as const },
+    ...(project === undefined ? [] : [{ label: project.name }]),
+    { label: chat.title },
+  ];
 };
 
 /** From this width (Tailwind's lg) the side panel sits beside the chat. */
@@ -298,7 +328,7 @@ const OpenChat = ({
 
 const Chat = () => {
   const page = Route.useLoaderData();
-  const { chat: open } = Route.useSearch();
+  const { chat: open, project: startIn } = Route.useSearch();
   const { t } = useLingui();
   const [listOpen, setListOpen] = useState(false);
   // Open from the start where the dock's "Open in chat" asked for it.
@@ -314,7 +344,7 @@ const Chat = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
-  const { chats, models, efforts, sourceNames } = page.data;
+  const { chats, projects, models, efforts, sourceNames } = page.data;
   // One past the list's newest opens too, as core finds it (or says why not).
   const chat =
     chats.find(({ id }) => id === open) ??
@@ -377,11 +407,7 @@ const Chat = () => {
             )}
           </>
         }
-        crumbs={
-          chat === undefined
-            ? [{ label: t`Chat` }]
-            : [{ label: t`Chat`, to: "/" }, { label: chat.title }]
-        }
+        crumbs={crumbsOf(t`Chat`, chat, projects)}
       />
       {/* Held to the window, so a tall box at the bottom makes the thread shorter, never the page longer. */}
       <div className="flex min-h-0 flex-1 text-sm">
@@ -389,9 +415,14 @@ const Chat = () => {
           activeId={chat?.id}
           building={chat !== undefined && building}
           chats={chats}
+          projects={projects}
         />
         {chat === undefined ? (
-          <NewChat efforts={efforts} models={models} />
+          <NewChat
+            efforts={efforts}
+            models={models}
+            project={projects.find(({ id }) => id === startIn)}
+          />
         ) : (
           <OpenChat
             chat={chat}
@@ -416,6 +447,7 @@ const Chat = () => {
             onPick={() => {
               setListOpen(false);
             }}
+            projects={projects}
           />
         </SheetContent>
       </Sheet>
@@ -427,9 +459,11 @@ export const Route = createFileRoute("/_shell/")({
   pendingComponent: PageLoading,
   validateSearch: (
     search: Record<string, unknown>
-  ): { chat?: string; panel?: true } => ({
+  ): { chat?: string; panel?: true; project?: string } => ({
     ...(typeof search.chat === "string" ? { chat: search.chat } : {}),
     ...(search.panel === true ? { panel: true } : {}),
+    // A new chat started from a project.
+    ...(typeof search.project === "string" ? { project: search.project } : {}),
   }),
   // Chat opens on the open chat, the one the dock carries on, whatever led
   // here (the sidebar, the logo); only "New chat" lets go of it first.
@@ -440,20 +474,27 @@ export const Route = createFileRoute("/_shell/")({
       throw redirect({ to: "/onboarding", replace: true });
     }
     const active = activeChat();
-    if (search.chat === undefined && active !== undefined) {
+    if (
+      search.chat === undefined &&
+      search.project === undefined &&
+      active !== undefined
+    ) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/", search: { chat: active }, replace: true });
     }
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<ChatPage> => {
-      const [chats, models, efforts, sourceNames] = await Promise.all([
-        session.chats.list(),
-        session.chats.models(),
-        session.chats.efforts(),
-        readSourceNames(session),
-      ]);
-      return { chats, models, efforts, sourceNames };
+      const [chats, projects, models, efforts, sourceNames] = await Promise.all(
+        [
+          session.chats.list(),
+          session.chats.projects(),
+          session.chats.models(),
+          session.chats.efforts(),
+          readSourceNames(session),
+        ]
+      );
+      return { chats, projects, models, efforts, sourceNames };
     }),
   component: Chat,
 });

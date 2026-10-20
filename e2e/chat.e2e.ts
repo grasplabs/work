@@ -244,6 +244,117 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(waiting).toHaveCount(0);
 });
 
+test("a person groups chats in a project with a goal and a document, moves them in and out, and deletes it", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const tag = crypto.randomUUID().slice(0, 8);
+  const first = `First about ${tag}.`;
+  const second = `Second about ${tag}.`;
+  const projectName = `Board report ${tag}`;
+  await page.goto("/");
+  const chats = page.getByRole("navigation", { name: "Recent chats" });
+  const projects = chats.getByRole("region", { name: "Projects" });
+  const project = projects.getByRole("listitem", { name: projectName });
+  const asked = async (question: string): Promise<void> => {
+    await page.getByLabel("Your question").fill(question);
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page).toHaveURL(/[?&]chat=/u);
+  };
+  await asked(first);
+  await expect(chats.getByRole("link", { name: first })).toBeVisible();
+
+  // A new project, with a goal and a document; a PDF isn't taken.
+  await projects.getByRole("button", { name: "New project" }).click();
+  const dialog = page.getByRole("dialog", { name: "New project" });
+  await dialog.getByLabel("Name").fill(projectName);
+  await dialog.getByLabel("Goal").fill("Get the board report out by Friday.");
+  const documents = dialog.getByLabel("Documents", { exact: true });
+  await documents.setInputFiles({
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.7"),
+  });
+  await expect(dialog).toContainText(
+    "A project takes Markdown, text, CSV and JSON files."
+  );
+  await documents.setInputFiles({
+    name: "brief.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("# Brief\n\nRevenue first."),
+  });
+  await expect(
+    dialog.getByRole("list", { name: "Documents in this project" })
+  ).toHaveText("brief.md");
+  await dialog.getByRole("button", { name: "Create project" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(project).toContainText("No chats yet.");
+
+  // Moved in from the chat's menu, by keyboard.
+  await chats.getByRole("button", { name: `More for ${first}` }).focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("menuitem", { name: "Move to project" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await page.getByRole("menuitem", { name: projectName }).focus();
+  await page.keyboard.press("Enter");
+  await expect(project.getByRole("link", { name: first })).toBeVisible();
+  // The open chat says which project it is in.
+  await expect(
+    page.getByRole("navigation", { name: "Breadcrumb" })
+  ).toContainText(projectName);
+
+  // A chat started from the project is in it.
+  await project
+    .getByRole("button", { name: `More for the project ${projectName}` })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "New chat in this project" })
+    .click();
+  await expect(
+    page.getByText(`New chat in the project ${projectName}`)
+  ).toBeVisible();
+  await asked(second);
+  await expect(project.getByRole("link", { name: second })).toBeVisible();
+
+  // Dragged out onto the chats by date, and back in onto the project.
+  const byDate = chats.getByRole("region", { name: "Chats by date" });
+  await project.getByRole("link", { name: first }).dragTo(byDate);
+  await expect(project.getByRole("link", { name: first })).toHaveCount(0);
+  await expect(byDate.getByRole("link", { name: first })).toBeVisible();
+  await byDate
+    .getByRole("link", { name: first })
+    .dragTo(project.getByRole("button", { name: projectName, exact: true }));
+  await expect(project.getByRole("link", { name: first })).toBeVisible();
+
+  // Its goal and document are kept.
+  await project
+    .getByRole("button", { name: `More for the project ${projectName}` })
+    .click();
+  await page.getByRole("menuitem", { name: "Goal and documents" }).click();
+  const editing = page.getByRole("dialog", { name: "Edit project" });
+  await expect(editing.getByLabel("Goal")).toHaveValue(
+    "Get the board report out by Friday."
+  );
+  await expect(
+    editing.getByRole("list", { name: "Documents in this project" })
+  ).toHaveText("brief.md");
+  await editing.getByRole("button", { name: "Cancel" }).click();
+
+  // Deleted: its chats stay, by date.
+  await project
+    .getByRole("button", { name: `More for the project ${projectName}` })
+    .click();
+  await page.getByRole("menuitem", { name: "Delete project" }).click();
+  await page
+    .getByRole("dialog", { name: `Delete the project “${projectName}”?` })
+    .getByRole("button", { name: "Delete project" })
+    .click();
+  await expect(project).toHaveCount(0);
+  await expect(byDate.getByRole("link", { name: first })).toBeVisible();
+  await expect(byDate.getByRole("link", { name: second })).toBeVisible();
+});
+
 test("a followed chat says core can't be reached when it stays out of reach", async ({
   pageOf,
 }) => {
