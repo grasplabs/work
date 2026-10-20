@@ -102,6 +102,7 @@
     "./rpc": "./src/rpc.ts",
     "./rpc-accounting": "./src/rpc-accounting.ts",
     "./rpc-target": "./src/rpc-target.ts",
+    "./run-files": "./src/run-files.ts",
     "./runtime": "./src/runtime.ts",
     "./screen-limits": "./src/screen-limits.ts",
     "./screen-port": "./src/screen-port.ts",

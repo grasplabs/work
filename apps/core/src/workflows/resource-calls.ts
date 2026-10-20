@@ -39,6 +39,8 @@ import {
   callTemplate,
   requireKnowledgeRequest,
 } from "./resource-reads.ts";
+import { callFiles } from "./run-files.ts";
+import type { FilesCallOperation } from "./run-files.ts";
 
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
@@ -149,6 +151,13 @@ export type BuiltCall =
       /** A pinned template version's content, by an action (GRA-700). */
       readonly name: "grasp.template";
       readonly binding: string;
+    }
+  | {
+      /** One call on the run's own files, by an action (GRA-724). */
+      readonly name: "grasp.files";
+      readonly binding: string;
+      readonly operation: FilesCallOperation;
+      readonly arguments: Json;
     };
 
 /** The binding kind each call goes through. */
@@ -158,6 +167,7 @@ const kindOf = {
   "grasp.model": "model",
   "grasp.knowledge": "knowledge",
   "grasp.template": "template",
+  "grasp.files": "files",
 } as const;
 
 /** Keeps `entry` in the audit log, or fails before anything more. */
@@ -721,6 +731,8 @@ export const makeCall = async (
   if (binding?.kind !== kindOf[call.name]) {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
+  // What a files call's receipts say of its file (GRA-724): never its name.
+  let fileDetail: Readonly<Record<string, string | number>> = {};
   const receipt = (outcome: string): AuditEntry => ({
     actor: { type: "system" },
     action: "workflow.run.called",
@@ -735,6 +747,7 @@ export const makeCall = async (
       key: effect.key,
       person: run.principal,
       outcome,
+      ...fileDetail,
     },
   });
   // The outcome's receipt follows the started one, which is kept before
@@ -786,6 +799,21 @@ export const makeCall = async (
       }
       case "grasp.template": {
         output = await callTemplate(env, binding);
+        break;
+      }
+      case "grasp.files": {
+        const answer = await callFiles(
+          env,
+          {
+            runId: run.runId,
+            workflowId: run.workflowId,
+            effectKey: effect.key,
+          },
+          call.operation,
+          call.arguments
+        );
+        fileDetail = answer.detail;
+        ({ output } = answer);
         break;
       }
       default: {

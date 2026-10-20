@@ -12,8 +12,9 @@ import type { Infer, InferInput, ObjectSchema, ValueShape } from "./values.ts";
 // it declares in `uses`: other bindings of the same workflow, by alias,
 // of a connector only the operations it names (GRA-704), of a model only
 // the shape it declared its answers take, of a knowledge binding (one
-// collection) only the operations it names, and of a template binding its
-// one pinned version (GRA-700).
+// collection) only the operations it names, of a template binding its
+// one pinned version (GRA-700), and of a files binding the run's own
+// files, with only the operations it names (GRA-724).
 //
 // ```ts
 // import { action, resource, v } from "@grasp-os/sdk/action";
@@ -58,7 +59,11 @@ export type UseKind =
   | "operation"
   | "model"
   | "knowledge"
-  | "template";
+  | "template"
+  | "files";
+
+/** What an action may do with its run's own files (GRA-724). */
+export type FilesOperation = "write" | "read" | "list" | "delete";
 
 /** The operations of a Knowledge collection an action may declare. */
 export type KnowledgeOperation = "search" | "read";
@@ -174,6 +179,84 @@ export interface TemplateResource {
   readonly read: () => Promise<TemplateContent>;
 }
 
+/**
+ * The types a run's file may be: each is checked against its bytes when
+ * it is finished.
+ */
+export type RunFileType =
+  | "image/png"
+  | "image/jpeg"
+  | "image/gif"
+  | "image/webp"
+  | "application/pdf"
+  | "text/plain"
+  | "text/csv"
+  | "text/markdown"
+  | "application/json"
+  | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/**
+ * A finished file of the run, as its actions hand it on, in a task's
+ * answer or arguments: holding one grants nothing outside the run.
+ */
+export interface RunFile {
+  readonly file: string;
+  readonly name: string;
+  readonly type: RunFileType;
+  readonly size: number;
+  readonly sha256: string;
+}
+
+/**
+ * A files binding (the run's own files), as an action calls it: only the
+ * operations its use declared. Each call moves at most 512 KiB, so a
+ * large file takes several of an attempt's 32 calls.
+ */
+export type FilesResource<Operation extends FilesOperation> =
+  ("write" extends Operation
+    ? {
+        /**
+         * Writes a file of the run: its name, its type (checked against its
+         * bytes) and its content, text or bytes.
+         */
+        readonly write: (request: {
+          readonly name: string;
+          readonly type: RunFileType;
+          readonly content: string | Uint8Array;
+        }) => Promise<RunFile>;
+      }
+    : unknown) &
+    ("read" extends Operation
+      ? {
+          /** A finished file of the run, as text or as bytes. */
+          readonly read: {
+            (request: {
+              readonly file: string;
+              readonly as: "bytes";
+            }): Promise<Uint8Array>;
+            (request: {
+              readonly file: string;
+              readonly as?: "text";
+            }): Promise<string>;
+          };
+        }
+      : unknown) &
+    ("list" extends Operation
+      ? {
+          /** The run's finished files. */
+          readonly list: () => Promise<RunFile[]>;
+        }
+      : unknown) &
+    ("delete" extends Operation
+      ? {
+          /** Deletes one of the run's files. */
+          readonly delete: (request: {
+            readonly file: string;
+          }) => Promise<void>;
+        }
+      : unknown);
+
 /** What a use gives an action. */
 type ResourceOf<U extends AnyUse> = U["~use"]["kind"] extends "connector"
   ? ConnectorResource<Exclude<U["~operation"], undefined>>
@@ -185,7 +268,11 @@ type ResourceOf<U extends AnyUse> = U["~use"]["kind"] extends "connector"
         >
       : U["~use"]["kind"] extends "template"
         ? TemplateResource
-        : OperationResource;
+        : U["~use"]["kind"] extends "files"
+          ? FilesResource<
+              Extract<Exclude<U["~operation"], undefined>, FilesOperation>
+            >
+          : OperationResource;
 
 /** What an action's handler gets besides its arguments. */
 export interface ActionCtx<Uses extends readonly AnyUse[]> {
@@ -241,6 +328,14 @@ const declaredUses = new WeakMap<object, DeclaredUse>();
 /** The knowledge operations, as `resource.knowledge` takes them. */
 const knowledgeOperations: ReadonlySet<string> = new Set(["search", "read"]);
 
+/** The files operations, as `resource.files` takes them. */
+const filesOperations: ReadonlySet<string> = new Set([
+  "write",
+  "read",
+  "list",
+  "delete",
+]);
+
 /** The most operations one connector use declares. */
 const maxOperations = 64;
 /** The longest operation name. */
@@ -253,10 +348,15 @@ const maxOperationChars = 256;
  */
 const operationsOf = (
   value: unknown,
-  /** Whose operations, as an error names the use: "connector" or "knowledge". */
-  kind: "connector" | "knowledge"
+  /** Whose operations, as an error names the use. */
+  kind: "connector" | "knowledge" | "files"
 ): readonly string[] => {
-  const most = kind === "knowledge" ? knowledgeOperations.size : maxOperations;
+  let most = maxOperations;
+  if (kind === "knowledge") {
+    most = knowledgeOperations.size;
+  } else if (kind === "files") {
+    most = filesOperations.size;
+  }
   const listed = `A ${kind} use's \`operations\` list the 1 to ${most} operations the action calls.`;
   if (!Array.isArray(value)) {
     return refuse(listed);
@@ -296,7 +396,8 @@ const isDeclaredUse = (value: unknown): value is DeclaredUse =>
     value.kind === "operation" ||
     value.kind === "model" ||
     value.kind === "knowledge" ||
-    value.kind === "template") &&
+    value.kind === "template" ||
+    value.kind === "files") &&
   "operations" in value &&
   Array.isArray(value.operations);
 
@@ -339,6 +440,12 @@ export interface ConnectorUseOptions<Operation extends string> {
 /** What a knowledge use declares besides its alias. */
 export interface KnowledgeUseOptions<Operation extends KnowledgeOperation> {
   /** The operations of the binding's collection the action calls. */
+  readonly operations: readonly Operation[];
+}
+
+/** What a files use declares besides its alias. */
+export interface FilesUseOptions<Operation extends FilesOperation> {
+  /** What the action does with its run's own files. */
   readonly operations: readonly Operation[];
 }
 
@@ -424,6 +531,31 @@ export const resource = freeze({
   // One pinned version: nothing more to declare.
   template: <const Alias extends string>(alias: Alias) =>
     declareUse("template", alias, []),
+  files: <const Alias extends string, const Operation extends FilesOperation>(
+    alias: Alias,
+    options: FilesUseOptions<Operation>
+  ): Use<Alias, "files", Operation> => {
+    const property =
+      typeof options === "object" && options !== null
+        ? getOwnPropertyDescriptor(options, "operations")
+        : undefined;
+    if (property === undefined || !("value" in property)) {
+      return refuse(
+        'Declare what a files use does: `{ operations: ["write", "read", "list", "delete"] }`.'
+      );
+    }
+    const operations = operationsOf(property.value, "files");
+    if (operations.some((operation) => !filesOperations.has(operation))) {
+      return refuse(
+        'A files use calls "write", "read", "list", "delete" or some of them.'
+      );
+    }
+    return declareUse<Alias, "files", AnySchema, Operation>(
+      "files",
+      alias,
+      operations
+    );
+  },
 });
 
 /** What `action` is declared with. */
@@ -462,7 +594,12 @@ export type ContractUse =
       readonly kind: "knowledge";
       readonly operations: readonly string[];
     }
-  | { readonly alias: string; readonly kind: "template" };
+  | { readonly alias: string; readonly kind: "template" }
+  | {
+      readonly alias: string;
+      readonly kind: "files";
+      readonly operations: readonly string[];
+    };
 
 /** An action's contract, as the host's manifest records it. */
 export interface ActionContract {
@@ -537,7 +674,7 @@ const usesOf = (value: unknown): ActionContract["uses"] => {
           operations: use.operations,
         });
       }
-      if (use.kind === "knowledge") {
+      if (use.kind === "knowledge" || use.kind === "files") {
         return freeze({
           alias: use.alias,
           kind: use.kind,

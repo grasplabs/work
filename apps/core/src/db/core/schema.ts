@@ -816,6 +816,7 @@ export const sdkResourceBindings = sqliteTable(
         "event",
         "knowledge",
         "template",
+        "files",
       ],
     }).notNull(),
     targetId: text("target_id").notNull(),
@@ -3092,6 +3093,71 @@ export const workflowResourceRuns = sqliteTable(
 );
 
 /**
+ * A workflow run's own files (GRA-724, workflows/run-files.ts): what its
+ * actions write through a `files` binding and read back in later steps of
+ * the same run. Its bytes are in R2 (`FILES`, EU), one object per chunk;
+ * a file is its run's alone, found only with the run's ID, and goes with
+ * the run's details (`sweepWorkflowStartDetails` marks it deleted, then
+ * `sweepRunFiles` deletes its chunks and its row). No name or content of
+ * it reaches the audit log.
+ */
+export const workflowRunFiles = sqliteTable(
+  "workflow_run_files",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id").notNull(),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    /** The step whose task opened it: only that task writes it. */
+    openedBy: text("opened_by").notNull(),
+    /** The open's effect key: opening again with it answers this file. */
+    openKey: text("open_key").notNull().unique(),
+    name: text().notNull(),
+    type: text().notNull(),
+    /** Its bytes so far, reserved before they are stored. */
+    size: integer().notNull().default(0),
+    sha256: text(),
+    state: text({ enum: ["writing", "done", "deleted"] }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    finishedAt: timestamp("finished_at"),
+    deletedAt: timestamp("deleted_at"),
+  },
+  (table) => [
+    index("workflow_run_files_run_idx").on(table.runId, table.state),
+    index("workflow_run_files_workflow_idx").on(
+      table.workflowResourceId,
+      table.state
+    ),
+    // Unfinished files, oldest first, for the sweep.
+    index("workflow_run_files_writing_idx")
+      .on(table.createdAt)
+      .where(sql`${table.state} = 'writing'`),
+    // Deleted files, for the sweep that deletes their chunks.
+    index("workflow_run_files_deleted_idx")
+      .on(table.deletedAt)
+      .where(sql`${table.state} = 'deleted'`),
+  ]
+);
+
+/**
+ * The chunks of a run file, in order: each its own R2 object, written
+ * once with its SHA-256 and reserved (counted against the limits) before
+ * it is stored. The append's effect key makes adding it again answer it.
+ */
+export const workflowRunFileChunks = sqliteTable(
+  "workflow_run_file_chunks",
+  {
+    fileId: text("file_id").notNull(),
+    index: integer().notNull(),
+    key: text().notNull().unique(),
+    appendKey: text("append_key").notNull().unique(),
+    size: integer().notNull(),
+    sha256: text().notNull(),
+    stored: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.fileId, table.index] })]
+);
+
+/**
  * Terminations core owes the engine for runs it ended while they were
  * still starting, cancelled or abandoned (workflows/resource-runs.ts):
  * the run's row ends at once and never changes again, so what is still
@@ -3189,6 +3255,7 @@ export const workflowCatalogContracts = sqliteTable(
         "event",
         "knowledge",
         "template",
+        "files",
       ],
     }).notNull(),
     contract: text().notNull(),
@@ -3225,6 +3292,7 @@ export const workflowBindingApprovals = sqliteTable(
         "event",
         "knowledge",
         "template",
+        "files",
       ],
     }).notNull(),
     contractId: text("contract_id").notNull(),
