@@ -35,6 +35,7 @@ import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
 import {
   claimSchema,
+  receiptLookupSchema,
   commitSchema,
   commitMaxCascade,
   committedSchema,
@@ -58,6 +59,8 @@ import type {
   Committed,
   DefinedTables,
   MigrationFailure,
+  ReceiptLookup,
+  ReceiptStanding,
   SchemaConsumer,
   StagedWrites,
   StoreMigration,
@@ -2964,6 +2967,58 @@ export class StoreHost {
     });
     await this.schedule();
     return claimed;
+  }
+
+  /**
+   * Where the receipt of `input`'s scope and key stands, its outcome left
+   * out (`ReceiptStanding`): a look, never a claim, which changes nothing
+   * and runs nothing (spec 10.7.8). The scope names its principal, so a
+   * receipt is only found by the scope it was claimed under.
+   */
+  async receiptStanding(input: ReceiptLookup): Promise<ReceiptStanding> {
+    const { storeId, scope, key } = dataErrors.parse(
+      "data.invalid",
+      receiptLookupSchema,
+      input
+    );
+    // As `claim` names it.
+    const receiptId = await sha256Hex(
+      canonicalJson({ storeId, scope: { ...scope }, key: [...key] })
+    );
+    try {
+      // Read only: a store nothing bound yet stays unbound.
+      this.#bind(storeId, false);
+    } catch (error) {
+      // Nothing bound: no attempt ever claimed a receipt here.
+      if (dataErrors.codeOf(error) === "data.unknown_schema") {
+        return { state: "none" };
+      }
+      throw error;
+    }
+    const receipt = this.#db
+      .select({
+        expiredAt: receipts.expiredAt,
+        committedAt: receipts.committedAt,
+        deadline: receipts.deadline,
+        fence: receipts.fence,
+      })
+      .from(receipts)
+      .where(eq(receipts.receiptId, receiptId))
+      .get();
+    if (receipt === undefined) {
+      return { state: "none" };
+    }
+    if (receipt.expiredAt !== null) {
+      return { state: "expired" };
+    }
+    if (receipt.committedAt !== null) {
+      return { state: "committed" };
+    }
+    return {
+      state: "claimed",
+      deadline: receipt.deadline,
+      fence: receipt.fence,
+    };
   }
 
   /**

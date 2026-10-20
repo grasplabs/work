@@ -47,6 +47,11 @@ import { RpcSession, RpcStub } from "capnweb";
 export interface FrameTarget {
   call: (method: string, args: unknown[]) => Promise<unknown>;
   callFunction: (request: string) => Promise<unknown>;
+  /**
+   * Tells core the frame's client got `request`'s answer (spec 10.7.8),
+   * best effort.
+   */
+  submissionReceived: (request: string) => Promise<void>;
   /** Follows a streaming action's invocation (screen-stream.ts). */
   streamFunction: (
     what: "stream" | "attach",
@@ -204,6 +209,23 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
       throw screenErrors.create("screen.invalid");
     }
     return await this.#target.callFunction(request);
+  }
+
+  /**
+   * Tells core the frame's client got the answer to `request`, a call it
+   * sent: checked as `callFunction` checks one. Core forgets only the
+   * person's own submission of this App, so the frame can hide no one
+   * else's, nor any other App's.
+   */
+  async submissionReceived(request: unknown): Promise<void> {
+    this.#request();
+    if (
+      typeof request !== "string" ||
+      request.length > functionRequestMaxBytes
+    ) {
+      throw screenErrors.create("screen.invalid");
+    }
+    await this.#target.submissionReceived(request);
   }
 
   /**

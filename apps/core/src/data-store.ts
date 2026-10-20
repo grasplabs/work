@@ -6,6 +6,8 @@ import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import type {
   ClaimInput,
+  ReceiptLookup,
+  ReceiptStanding,
   Commit,
   DefinedTables,
   SchemaConsumer,
@@ -297,6 +299,11 @@ export class DataStore extends DurableObject<Env> {
    */
   async claim(input: ClaimInput): Promise<string> {
     return JSON.stringify(await this.#live().claim(input));
+  }
+
+  /** `StoreHost.receiptStanding`: a look at a receipt, never a claim. */
+  async receiptStanding(input: ReceiptLookup): Promise<ReceiptStanding> {
+    return await this.#live().receiptStanding(input);
   }
 
   /**

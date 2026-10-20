@@ -51,6 +51,13 @@ export interface ScreenBridge {
    */
   callFunction: (request: string) => Promise<unknown>;
   /**
+   * Tells the page the screen's client got the answer to `request`, a
+   * keyed call it sent through `callFunction`, and that the answer says
+   * what the call came to (spec 10.7.8): core forgets it from the
+   * person's recovery index. The transport the screen client builds on.
+   */
+  submissionReceived: (request: string) => Promise<void>;
+  /**
    * Follows one of the App's streaming actions (spec 10.7.6): `what` is
    * `stream` (start it, or join it under the same key) or `attach` (read
    * it again, never starting it), `request` as for `callFunction`.
@@ -170,6 +177,18 @@ const quietly = async (call: () => Promise<unknown>): Promise<void> => {
   }
 };
 
+/** Tells the page the client got `request`'s answer; never throws. */
+const acknowledged = async (
+  page: () => RpcStub<ScreenBridge>,
+  request: string
+): Promise<void> => {
+  try {
+    await page().submissionReceived(request);
+  } catch {
+    // Core keeps the submission, shown once as settled.
+  }
+};
+
 /**
  * The session client's transport over the page's bridge `page`: calls as
  * function calls, queries followed with `watchQuery`. Core's letting go
@@ -182,6 +201,9 @@ export const bridgeTransport = (
   page: () => RpcStub<ScreenBridge>
 ): ClientTransport => ({
   call: async (request) => await page().callFunction(request),
+  received: (request) => {
+    void acknowledged(page, request);
+  },
   watch: async (request, onSnapshot, onLost) => {
     // The subscription's stub, once the page answered, and whether core
     // let go of it first; its stub is let go of once, whichever comes.
