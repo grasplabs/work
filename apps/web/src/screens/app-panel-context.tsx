@@ -25,13 +25,23 @@ export interface OpenedPanel {
 
 /** How the panel is changed: asked first while its screen holds edits. */
 interface PanelActions {
-  /** Shows `panel` in place of what the panel shows. */
-  open: (panel: OpenedPanel) => void;
+  /**
+   * Shows `panel` in place of what the panel shows. Resolves with whether
+   * it does: false when the person chose to stay with the edits of the
+   * screen it shows (or another change took its place first).
+   */
+  open: (panel: OpenedPanel) => Promise<boolean>;
   close: () => void;
   /** Closes it without asking: its App is gone for the person. */
   discard: () => void;
   /** Whether its screen holds edits that closing or replacing would lose. */
   guarded: (guarded: boolean) => void;
+}
+
+/** A change of the panel waiting on the person's answer. */
+interface Pending {
+  next: OpenedPanel | null;
+  settle: (applied: boolean) => void;
 }
 
 /** The shell's panel: what it shows, and how to change it. */
@@ -58,29 +68,45 @@ export const useAppPanel = (): AppPanel | null => {
 /** Holds the shell's panel for everything under it. */
 export const AppPanelProvider = ({ children }: { children: ReactNode }) => {
   const [opened, setOpened] = useState<OpenedPanel | null>(null);
-  // What waits on the person's answer: the panel's next content.
-  const [pending, setPending] = useState<{ next: OpenedPanel | null } | null>(
-    null
-  );
+  // What waits on the person's answer: the panel's next content, and who
+  // asked for it, told whether it came.
+  const [pending, setPending] = useState<Pending | null>(null);
   const holdsEdits = useRef(false);
+  // The same change, read by the actions made once (`pending` is state).
+  const waiting = useRef<Pending | null>(null);
+  /** Ends the wait for an answer, telling who asked whether it came. */
+  const settle = (applied: boolean): void => {
+    waiting.current?.settle(applied);
+    waiting.current = null;
+    setPending(null);
+  };
   // Made once, so the context's value never changes: its functions read
   // the ref and call the setters, which stay the same.
   // oxlint-disable-next-line react/hook-use-state -- made once, never set
   const [actions] = useState<PanelActions>(() => {
-    const change = (next: OpenedPanel | null): void => {
-      if (holdsEdits.current) {
-        setPending({ next });
-        return;
+    const change = async (next: OpenedPanel | null): Promise<boolean> => {
+      if (!holdsEdits.current) {
+        setOpened(next);
+        return true;
       }
-      setOpened(next);
+      // One question at a time: a newer change takes the place of one
+      // still asked, which then didn't come.
+      waiting.current?.settle(false);
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      const asked: Pending = { next, settle: resolve };
+      waiting.current = asked;
+      setPending(asked);
+      return await promise;
     };
     return {
       open: change,
       close: () => {
-        change(null);
+        void change(null);
       },
       discard: () => {
         holdsEdits.current = false;
+        waiting.current?.settle(false);
+        waiting.current = null;
         setPending(null);
         setOpened(null);
       },
@@ -97,10 +123,10 @@ export const AppPanelProvider = ({ children }: { children: ReactNode }) => {
           onLeave={() => {
             holdsEdits.current = false;
             setOpened(pending?.next ?? null);
-            setPending(null);
+            settle(true);
           }}
           onStay={() => {
-            setPending(null);
+            settle(false);
           }}
           open={pending !== null}
         />

@@ -740,14 +740,24 @@ export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
   );
 }
 `,
-    "screens/home.tsx": (files["screens/home.tsx"] ?? "").replace(
-      "    </main>",
-      `      <Button onClick={() => void navigate(screens.note, { id: "n9" }, { surface: "peek" })}>Peek at note n9</Button>
+    "screens/home.tsx": (files["screens/home.tsx"] ?? "")
+      .replace(
+        'import { screens } from "#grasp";',
+        'import { screens } from "#grasp";\nimport { useState } from "react";'
+      )
+      .replace(
+        "  const navigate = useNavigate();",
+        '  const navigate = useNavigate();\n  const [peek, setPeek] = useState("Peek not asked");'
+      )
+      .replace(
+        "    </main>",
+        `      <Button onClick={() => void navigate(screens.note, { id: "n9" }, { surface: "peek" }).then(() => setPeek("Peek opened"), () => setPeek("Peek refused"))}>Peek at note n9</Button>
+      <p>{peek}</p>
       <Button onClick={() => void navigate(screens.prefs, {}, { surface: "prefs" })}>Open preferences</Button>
       <Button onClick={() => void navigate(screens.prefs, { section: "billing" }, { surface: "prefs" })}>Open billing preferences</Button>
       <Button onClick={() => { setTimeout(() => { void navigate(screens.note, { id: "n77" }); }, 1500); }}>Open note n77 later</Button>
       <Button onClick={() => { setTimeout(() => { void navigate(screens.notes); }, 1500); }}>Open the list later</Button>
     </main>`
-    ),
+      ),
   };
 };

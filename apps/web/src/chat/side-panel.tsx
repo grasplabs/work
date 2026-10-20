@@ -87,7 +87,7 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
     const [first] = contents.screens;
     if (surface !== undefined) {
       setOpening(undefined);
-      panel?.open({
+      void panel?.open({
         app: app.id,
         screen: surface.screen,
         title: surface.title,
@@ -97,7 +97,7 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
       });
     } else if (first !== undefined && contents.version !== null) {
       setOpening(undefined);
-      panel?.open({ app: app.id, screen: first, title: app.name });
+      void panel?.open({ app: app.id, screen: first, title: app.name });
     } else {
       const { name } = app;
       setOpening({ state: "ready", data: t`${name} has no app to show.` });

@@ -379,25 +379,43 @@ test("closing the panel, or opening another in its place, asks first while its s
   await home
     .getByRole("button", { name: "Peek at note n9" })
     .click({ timeout: 20_000 });
+  await expect(home.getByText("Peek opened")).toBeVisible();
   const panel = page.getByRole("complementary", { name: "Side panel" });
   const peek = panel.frameLocator('iframe[title="note app"]');
   await peek.getByLabel("Title").fill("Groceries", { timeout: 20_000 });
   const leave = page.getByRole("alertdialog", { name: "Leave this app?" });
+  // The screen tells the page of its edit over its channel, a moment after
+  // the keystroke; a person never closes faster than that.
   await page.waitForTimeout(500);
 
-  // Another panel asked for in its place: asked first; staying keeps it.
+  // Another panel asked for in its place: asked first; staying keeps it,
+  // and the screen that asked is told it didn't open.
   await home.getByRole("button", { name: "Peek at note n9" }).click();
   await expect(leave).toBeVisible();
   await leave.getByRole("button", { name: "Stay" }).click();
+  await expect(home.getByText("Peek refused")).toBeVisible();
   await expect(peek.getByLabel("Title")).toHaveValue("Groceries");
 
-  // On a narrow window it is a sheet: its own close asks too.
+  // The window narrowing doesn't start it again, losing the edit: it stays
+  // beside the page while its screen holds edits.
   await page.setViewportSize({ width: 600, height: 900 });
+  await expect(peek.getByLabel("Title")).toHaveValue("Groceries");
+  await expect(page.getByRole("dialog", { name: "Side panel" })).toHaveCount(0);
+  await panel.getByRole("button", { name: "Close panel" }).click();
+  await expect(leave).toBeVisible();
+  await leave.getByRole("button", { name: "Leave" }).click();
+  await expect(panel).toHaveCount(0);
+
+  // Opened on a narrow window, it is a sheet: its own close asks too.
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto(`/domains/${app}/apps/home`);
+  await page.setViewportSize({ width: 600, height: 900 });
+  await home
+    .getByRole("button", { name: "Peek at note n9" })
+    .click({ timeout: 20_000 });
   const sheet = page.getByRole("dialog", { name: "Side panel" });
   const inSheet = sheet.frameLocator('iframe[title="note app"]');
   await inSheet.getByLabel("Title").fill("Groceries", { timeout: 20_000 });
-  // The screen tells the page of its edit over its channel, a moment after
-  // the keystroke; a person never closes faster than that.
   await page.waitForTimeout(500);
   // The sheet's own close, not the panel's.
   await sheet.getByRole("button", { name: "Close", exact: true }).click();

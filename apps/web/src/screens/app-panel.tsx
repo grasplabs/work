@@ -3,10 +3,11 @@ import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
+import { useState } from "react";
 
 import { useWide } from "../frame/wide.ts";
 import { useAppPanel } from "./app-panel-context.tsx";
-import type { OpenedPanel } from "./app-panel-context.tsx";
+import type { AppPanel, OpenedPanel } from "./app-panel-context.tsx";
 import { ScreenFrame } from "./screen-frame.tsx";
 import type { FailureReason } from "./screen-host.ts";
 import { usePushNavigate } from "./screen-navigate.ts";
@@ -72,8 +73,6 @@ const PanelScreen = ({
         app={opened.app}
         beside
         embedded
-        // Another screen, input or surface is a fresh start.
-        key={`${opened.app}/${opened.screen}/${opened.route ?? ""}/${opened.input ?? ""}/${opened.surface ?? ""}`}
         onEnded={(ended) => {
           // The App is gone for the person, or they are: the panel goes too.
           if (ended.status === "signed-out" || closesPanel.has(ended.reason)) {
@@ -91,24 +90,41 @@ const PanelScreen = ({
   );
 };
 
-/** The slot itself: beside the page on a wide window, a sheet otherwise. */
-export const AppPanelSlot = () => {
-  const panel = useAppPanel();
+/** What tells one opening of the panel from another: a fresh start. */
+const openingKey = (opened: OpenedPanel): string =>
+  `${opened.app}/${opened.screen}/${opened.route ?? ""}/${opened.input ?? ""}/${opened.surface ?? ""}`;
+
+/**
+ * One opening of the panel, beside the page on a wide window, a sheet
+ * otherwise. Changing between them starts its frame again, so while its
+ * screen holds edits it stays where it is, however the window changes,
+ * and follows the window once they are gone.
+ */
+const PlacedPanel = ({
+  panel,
+}: {
+  panel: AppPanel & { opened: OpenedPanel };
+}) => {
+  const { opened, close, discard, guarded } = panel;
   const wide = useWide();
   const { t } = useLingui();
-  if (panel?.opened === undefined || panel.opened === null) {
-    return null;
+  const [held, setHeld] = useState(false);
+  const [beside, setBeside] = useState(wide);
+  if (beside !== wide && !held) {
+    setBeside(wide);
   }
-  const { opened, close, discard, guarded } = panel;
   const screen = (
     <PanelScreen
       onClose={close}
       onDiscard={discard}
-      onGuard={guarded}
+      onGuard={(holds) => {
+        guarded(holds);
+        setHeld(holds);
+      }}
       opened={opened}
     />
   );
-  if (wide) {
+  if (beside) {
     return (
       <aside
         aria-label={t`Side panel`}
@@ -135,4 +151,14 @@ export const AppPanelSlot = () => {
       </SheetContent>
     </Sheet>
   );
+};
+
+/** The slot itself: the panel's opening, when it shows one. */
+export const AppPanelSlot = () => {
+  const panel = useAppPanel();
+  const opened = panel?.opened ?? null;
+  if (panel === null || opened === null) {
+    return null;
+  }
+  return <PlacedPanel key={openingKey(opened)} panel={{ ...panel, opened }} />;
 };

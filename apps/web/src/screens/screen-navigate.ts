@@ -104,8 +104,9 @@ export const useScreenNavigate = (
     const { surface } = target;
     // Outside the shell (a full page) no slot stands: it opens as a route.
     if (surface?.kind === "panel" && panel !== null) {
-      // Beside the page, which stays where it is.
-      panel.open({
+      // Beside the page, which stays where it is; refused as a route is
+      // when the person stays with the edits of the screen the panel shows.
+      const opened = await panel.open({
         app,
         screen: target.screen,
         title: surface.title,
@@ -113,6 +114,9 @@ export const useScreenNavigate = (
         input: JSON.stringify(target.input),
         surface: surface.name,
       });
+      if (!opened) {
+        throw screenErrors.create("screen.navigation_cancelled");
+      }
       return;
     }
     const settings = surface?.kind === "settings";
