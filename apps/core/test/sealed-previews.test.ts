@@ -675,6 +675,58 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     });
   });
 
+  it("is out of date once its preference-only store is swept, then answers on a fresh store from the defaults", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id } = await builder.api.apps.create({ name: "Desk" });
+    await release(builder, id, deskFiles());
+    const app = appIdSchema.parse(id);
+    const { chatId, revision } = await chatWithDraft(builder, app, {
+      "screens/desk.tsx": `export default function Desk() {
+  return <main>Drafted desk</main>;
+}
+`,
+    });
+    const at = { chatId, app, revision };
+    const saved = await preferenceCall(builder, at, "update", {
+      expectedRevision: 0,
+      patch: { compact: true },
+    });
+    const [store] = await previewStores(builder, chatId, app);
+    const sweptId = storeIdSchema.parse(store?.store_id);
+    // What the sweep does to it, while the preview still runs on it.
+    await discardFixtureStore(env, sweptId);
+    await env.DB.prepare(
+      "DELETE FROM preview_fixture_stores WHERE store_id = ?"
+    )
+      .bind(sweptId)
+      .run();
+    const outdated = await preferenceCall(builder, at, "get", {});
+    const fresh = await preferenceCall(builder, at, "get", {});
+    // And with the store discarded while core still records it.
+    const [renewed] = await previewStores(builder, chatId, app);
+    await discardFixtureStore(env, storeIdSchema.parse(renewed?.store_id));
+    const recordedOutdated = await preferenceCall(builder, at, "get", {});
+    const freshAgain = await preferenceCall(builder, at, "get", {});
+    const [last] = await previewStores(builder, chatId, app);
+    expect({
+      saved,
+      outdated,
+      fresh,
+      renewed: renewed?.store_id !== sweptId,
+      recordedOutdated,
+      freshAgain,
+      renewedAgain: last?.store_id !== renewed?.store_id,
+    }).toStrictEqual({
+      saved: { compact: true, theme: "light", _rev: 1 },
+      outdated: "app.preview_outdated",
+      fresh: { compact: false, theme: "light", _rev: 0 },
+      renewed: true,
+      recordedOutdated: "app.preview_outdated",
+      freshAgain: { compact: false, theme: "light", _rev: 0 },
+      renewedAgain: true,
+    });
+  });
+
   it("runs only what was sealed: a kept artifact changed since is refused", async () => {
     const { builder, app, chatId, revision } = await setUp();
     const request = await requestFor(

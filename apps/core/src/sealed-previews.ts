@@ -650,26 +650,41 @@ export class SealedPreviews {
     await authorize();
     const store = await this.#storeOf(chatId, app, running, release);
     let reads: PreviewAnswer["reads"];
-    const result = await answerPreferences(
-      this.#env,
-      {
-        userId: personId,
-        release,
-        previewStore: storeIdSchema.parse(store.id),
-        gate: async () => {
-          await authorize();
-          if (Date.now() >= deadline) {
-            throw operationErrors.create("operation.deadline_exceeded");
-          }
+    let result: OperationResult;
+    try {
+      result = await answerPreferences(
+        this.#env,
+        {
+          userId: personId,
+          release,
+          previewStore: storeIdSchema.parse(store.id),
+          gate: async () => {
+            // The store this call holds still one core records, as every
+            // call's gate checks (`#invocationOf`): the sweep may have
+            // taken it, and then this call is out of date.
+            await this.#requireRecorded(chatId, app, running, store);
+            await authorize();
+            if (Date.now() >= deadline) {
+              throw operationErrors.create("operation.deadline_exceeded");
+            }
+          },
+          observeReads: (storeId, readSet) => {
+            reads = { storeId, readSet };
+          },
         },
-        observeReads: (storeId, readSet) => {
-          reads = { storeId, readSet };
-        },
-      },
-      preference,
-      call.input,
-      call.idempotencyKey
-    );
+        preference,
+        call.input,
+        call.idempotencyKey
+      );
+    } catch (error) {
+      // Discarded while core still recorded it, or while this call ran:
+      // forgotten, and out of date, as any call on it is.
+      if (dataErrors.codeOf(error) === "data.fixture_discarded") {
+        this.#forgetStore(chatId, app, running, store.id);
+        throw appErrors.create("app.preview_outdated");
+      }
+      throw error;
+    }
     return {
       answer: {
         result,
