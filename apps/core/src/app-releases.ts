@@ -827,9 +827,18 @@ const definedPreferences = async (
 
 /**
  * Has `release`'s store's preferences contract take its preferences, once
- * it is sealed: so a seal that failed left nothing there. A failure here
- * leaves the release sealed (it is, and runs), and is logged; sealing the
- * version again applies them again (`resealed`).
+ * it is sealed: so a seal that failed left nothing there. The release is
+ * sealed whatever happens here (D1 committed it; the contract is the
+ * store's), so two cases differ:
+ *
+ * - The contract refuses them (`migration.preference_changed`): another
+ *   version with other preferences was sealed on the store between this
+ *   one's check and now. The seal fails with it, so the version is never
+ *   activated (activation seals first, app-activation.ts), and sealing it
+ *   again fails the same way (`resealed`). It serves no preference call
+ *   either way (store-host.ts, `readPreferences`).
+ * - Anything else (the store unreachable): logged, and the release stands.
+ *   Its first preference call, or sealing it again, applies them.
  */
 const appliedPreferences = async (
   env: Env,
@@ -846,6 +855,9 @@ const appliedPreferences = async (
       true
     );
   } catch (error) {
+    if (migrationErrors.codeOf(error) === "migration.preference_changed") {
+      throw error;
+    }
     log.error("seal.preferences_not_applied", {
       app: release.manifest.resourceId,
       version: release.manifest.resourceVersion,

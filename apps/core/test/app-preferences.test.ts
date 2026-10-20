@@ -729,6 +729,11 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       "migration.preference_changed",
       "migration.preference_changed",
     ]);
+    // Sealing it again fails as its apply is refused, so it is never
+    // activated, rather than standing sealed and quietly unusable.
+    await expect(failure(async () => await seal(desk))).resolves.toBe(
+      "migration.preference_changed"
+    );
     // The contract lost (its apply after the seal never landed): the first
     // call puts this release's preferences back, so a narrowing seal is
     // refused again.
