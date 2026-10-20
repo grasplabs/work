@@ -256,8 +256,21 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.readPreferences`. */
-  readPreferences(storeId: StoreId, personId: string): StoredPreferences {
-    return this.#live().readPreferences(storeId, personId);
+  readPreferences(
+    storeId: StoreId,
+    personId: string,
+    preferencesText: string
+  ): StoredPreferences {
+    return this.#live().readPreferences(storeId, personId, preferencesText);
+  }
+
+  /** `StoreHost.definePreferences`. */
+  definePreferences(
+    storeId: StoreId,
+    preferencesText: string,
+    apply: boolean
+  ): { changed: boolean } {
+    return this.#live().definePreferences(storeId, preferencesText, apply);
   }
 
   /** `StoreHost.writePreferences`. */

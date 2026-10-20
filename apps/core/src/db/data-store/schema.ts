@@ -59,6 +59,13 @@ export const store = sqliteTable(
      */
     contractHash: text("contract_hash"),
     contractManifest: text("contract_manifest"),
+    /**
+     * The store's preferences contract (store-host.ts, `definePreferences`):
+     * every preference any version sealed on it declared, by name, with
+     * its descriptor, as canonical JSON. Null until the first version with
+     * preferences; host-only, never a caller's.
+     */
+    preferencesContract: text("preferences_contract"),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );

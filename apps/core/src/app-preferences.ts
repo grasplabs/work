@@ -70,8 +70,12 @@ import type { StoredPreferences } from "./store-host.ts";
 //   budget for them: a live `get` watches its own person's revision only
 //   (`preferencesWatch`), so a write tells the reads of the person who
 //   made it and nobody else's.
-// - Stored preferences that no longer fit the App's (a later version
-//   changed them): only what the person chose is stored, never a default,
+// - Stored preferences that no longer fit the App's: a seal refuses a
+//   version that changes a preference any version sealed on the store
+//   declared, its default aside (store-host.ts, `definePreferences`), so
+//   no version, a rollback included, reads a stored value in another
+//   shape; what follows is defence in depth. Only what the person chose
+//   is stored, never a default,
 //   so a field they never set is answered with the default in force. A
 //   stored key the App no longer declares is left out of the answer and
 //   kept until the person next writes, which drops it: going back to a
@@ -327,7 +331,13 @@ export const answerPreferences = async (
   );
   await caller.gate();
   const { storeId, stub } = storeOfRelease(env, caller.release);
-  const stored = await stub.readPreferences(storeId, caller.userId);
+  // With the release's preferences, which the store's contract takes in
+  // the same transaction, or refuses (store-host.ts, `readPreferences`).
+  const stored = await stub.readPreferences(
+    storeId,
+    caller.userId,
+    JSON.stringify(operation.preferences)
+  );
   if (operation.name === "get") {
     return answerGet(operation, caller, storeId, stored);
   }

@@ -165,6 +165,12 @@ export {
   preferencePaths,
 } from "./preference-operations.ts";
 export type { PreferenceOperationName } from "./preference-operations.ts";
+export { planPreferenceChange } from "./preference-plan.ts";
+export type {
+  PreferencePlan,
+  PreferenceRefusal,
+  PreferencesContract,
+} from "./preference-plan.ts";
 
 // A descriptor as JSON Schema, for what reads only JSON Schema (a model
 // told its answer's shape); values are still checked by the descriptor.

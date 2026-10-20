@@ -546,6 +546,8 @@ export const compatibleVersionsMax = 100;
 export const migrationErrors = defineErrorFamily({
   "migration.required":
     "This schema change can't be applied on its own: it needs a migration. Add only new tables, optional or defaulted fields and indexes, or keep the fields as they were.",
+  "migration.preference_changed":
+    "This version changes a preference people may already have chosen. Keep each preference as it was (only its default may change), or add a new preference under a new name.",
   "migration.metadata_missing":
     "This store's schema contract is missing and can't be rebuilt from the schemas it recorded, so no schema change can be applied until it is repaired.",
   "migration.busy":

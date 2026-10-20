@@ -1,7 +1,9 @@
 import { ValueDefinitionError } from "@grasp-os/sdk";
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import {
+  descriptorFromText,
   manifestText,
+  planPreferenceChange,
   planSchemaChange,
   readSchemaManifest,
   schemaFromDescriptor,
@@ -11,6 +13,7 @@ import {
 import type {
   AcceptedPlan,
   PlannedField,
+  PreferencesContract,
   ReadManifest,
   ReservedFields,
   SchemaManifest,
@@ -21,7 +24,7 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
@@ -363,6 +366,15 @@ export const preferencesWatch = (personId: string): string =>
 
 /** Most people's preferences one read set watches: a read watches one. */
 const preferencesWatchMax = 4;
+
+/** A release's preferences, from their descriptor's JSON (`data.invalid`). */
+const declaredPreferences = (preferencesText: string): ValueDescriptor => {
+  try {
+    return descriptorFromText(preferencesText);
+  } catch {
+    throw dataErrors.create("data.invalid");
+  }
+};
 
 /** Whose preferences: a person's ID as core's sessions name them. */
 const personIdOf = z
@@ -2454,12 +2466,24 @@ export class StoreHost {
    * read watches (`preferencesWatch`); with the last write's idempotency
    * key, input hash and answer, for a resend of it. Only core calls it,
    * for the signed-in person (app-preferences.ts): this object never
-   * chooses whose.
+   * chooses whose. First, in the same transaction, the release's
+   * `preferencesText` is planned onto the store's preferences contract
+   * and applied (`definePreferences`): a release whose preferences differ
+   * from one the contract holds reads nothing
+   * (`migration.preference_changed`), so the contract always holds what
+   * every release that read or wrote preferences declared, whatever
+   * became of the apply its seal made.
    */
-  readPreferences(storeId: StoreId, personId: string): StoredPreferences {
+  readPreferences(
+    storeId: StoreId,
+    personId: string,
+    preferencesText: string
+  ): StoredPreferences {
     const person = dataErrors.parse("data.invalid", personIdOf, personId);
+    const declared = declaredPreferences(preferencesText);
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
+      this.#planPreferences(declared, true);
       const row = this.#db
         .select()
         .from(preferences)
@@ -2473,6 +2497,85 @@ export class StoreHost {
         lastAnswerJson: row?.lastAnswerJson ?? null,
       };
     });
+  }
+
+  /**
+   * Plans `preferencesText` (a version's preferences, a strict object's
+   * descriptor as JSON) onto the store's preferences contract
+   * (`planPreferenceChange`): refused (`migration.preference_changed`,
+   * listing each preference) when it changes one a version sealed on the
+   * store declared. With `apply`, the contract takes it, in the same
+   * transaction. Core's seal checks first, before the version's tables
+   * are touched, and applies only once the release is sealed, so a seal
+   * that fails leaves nothing in the contract; sealing it again applies
+   * it again, which changes nothing the second time. Answers whether the
+   * contract changed (or would).
+   */
+  definePreferences(
+    storeId: StoreId,
+    preferencesText: string,
+    apply: boolean
+  ): { changed: boolean } {
+    const declared = declaredPreferences(preferencesText);
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId);
+      return this.#planPreferences(declared, apply);
+    });
+  }
+
+  /**
+   * Within a transaction: `declared` planned onto the preferences
+   * contract, refused (`migration.preference_changed`) when it changes a
+   * preference the contract holds; with `apply`, the contract takes it.
+   */
+  #planPreferences(
+    declared: ValueDescriptor,
+    apply: boolean
+  ): { changed: boolean } {
+    const plan = planPreferenceChange(this.#preferencesContract(), declared);
+    if (!plan.accepted) {
+      throw migrationErrors.create("migration.preference_changed", {
+        changes: plan.refused.slice(0, refusalsListed).map((refusal) => ({
+          ...refusal,
+        })),
+      });
+    }
+    if (apply && plan.changed) {
+      this.#db
+        .update(store)
+        .set({ preferencesContract: canonicalText(plan.contract) })
+        .run();
+    }
+    return { changed: plan.changed };
+  }
+
+  /** The store's preferences contract, read back and checked, or null. */
+  #preferencesContract(): PreferencesContract | null {
+    const text = this.#db
+      .select({ contract: store.preferencesContract })
+      .from(store)
+      .get()?.contract;
+    if (text === null || text === undefined) {
+      return null;
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      ) {
+        throw new TypeError("Not an object");
+      }
+      return Object.fromEntries(
+        Object.entries(parsed).map(([name, descriptor]) => [
+          name,
+          descriptorFromText(JSON.stringify(descriptor)),
+        ])
+      );
+    } catch {
+      throw migrationErrors.create("migration.metadata_corrupt");
+    }
   }
 
   /**

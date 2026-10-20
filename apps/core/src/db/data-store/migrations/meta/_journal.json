@@ -120,6 +120,13 @@
       "when": 1792440941818,
       "tag": "0016_app_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792447180572,
+      "tag": "0017_preferences_contract",
+      "breakpoints": true
     }
   ]
 }
