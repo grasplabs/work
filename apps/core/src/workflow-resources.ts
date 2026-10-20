@@ -14,12 +14,7 @@ import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  canBuild,
-  isAdmin,
-  requireBuilder,
-  roleErrors,
-} from "@grasp-os/shared/roles";
+import { isAdmin, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import { actionUsesSchema } from "@grasp-os/shared/workflow-modules";
 import {
   catalogBindingKinds,
@@ -79,9 +74,11 @@ import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
 import { failUnless, lockGuardFailed } from "./packages/locks.ts";
 import {
+  ceilingOf,
   memberEntry,
   requireNotStaff,
   requireSharable,
+  roleFromMembers,
   rowsOf,
   stillMembers,
 } from "./sharing.ts";
@@ -259,41 +256,101 @@ const corrupt = (id: string, version: number) => {
 const definitionHashOf = async (definition: unknown): Promise<string> =>
   await sha256Hex(canonicalJson(z.json().parse(definition)));
 
-/** The highest role `by`'s organization role lets them have in a workflow. */
-const ceilingOf = (by: Acting): WorkflowRole =>
-  canBuild(by.role) ? "builder" : "user";
+/** What a read of live workflows selects: `Live`'s columns. */
+const liveColumns = {
+  id: workflowResources.id,
+  name: workflowResources.name,
+  owner: workflowResources.ownerId,
+  currentVersion: workflowResources.currentVersion,
+  createdAt: workflowResources.createdAt,
+};
+
+/** `values` as an SQL list, bound as one parameter whatever its length. */
+const jsonList = (values: readonly string[]): SQL =>
+  sql`(SELECT value FROM json_each(${JSON.stringify(values)}))`;
 
 /**
- * `by`'s role in `workflow`: builder for the organization's admins; their
- * ceiling for its owner; for whom it is shared with, the highest of the
- * rows that are theirs (their own, their teams'), capped by their ceiling.
- * Undefined when they have none.
+ * `by`'s role in each of `workflows`, by ID, in one read: builder for the
+ * organization's admins; their ceiling for its owner; for whom it is
+ * shared with, the highest of the rows that are theirs (their own, their
+ * teams'), capped by their ceiling (`roleFromMembers`). A workflow they
+ * have no role in has no entry.
  */
+const rolesIn = async (
+  env: Env,
+  by: Acting,
+  workflows: readonly Pick<Live, "id" | "owner">[]
+): Promise<Map<string, WorkflowRole>> => {
+  const roles = new Map<string, WorkflowRole>();
+  if (isAdmin(by.role)) {
+    for (const { id } of workflows) {
+      roles.set(id, "builder");
+    }
+    return roles;
+  }
+  const shared = workflows.filter(({ owner }) => owner !== by.userId);
+  const rows =
+    shared.length === 0
+      ? []
+      : await drizzle(env.DB)
+          .select({
+            id: workflowResourceMembers.workflowResourceId,
+            role: workflowResourceMembers.role,
+          })
+          .from(workflowResourceMembers)
+          .where(
+            and(
+              sql`${workflowResourceMembers.workflowResourceId} IN ${jsonList(
+                shared.map(({ id }) => id)
+              )}`,
+              rowsOf(workflowResourceMembers, by)
+            )
+          );
+  // Grouped once: each workflow then reads only its own rows.
+  const rowRoles = new Map<string, WorkflowRole[]>();
+  for (const row of rows) {
+    const list = rowRoles.get(row.id) ?? [];
+    list.push(row.role);
+    rowRoles.set(row.id, list);
+  }
+  for (const { id, owner } of workflows) {
+    const role =
+      owner === by.userId
+        ? ceilingOf(by)
+        : roleFromMembers(by, rowRoles.get(id) ?? []);
+    if (role !== undefined) {
+      roles.set(id, role);
+    }
+  }
+  return roles;
+};
+
+/** `by`'s role in `workflow` (`rolesIn`), undefined when they have none. */
 const roleIn = async (
   env: Env,
   by: Acting,
   workflow: Pick<Live, "id" | "owner">
 ): Promise<WorkflowRole | undefined> => {
-  if (isAdmin(by.role)) {
-    return "builder";
-  }
-  if (workflow.owner === by.userId) {
-    return ceilingOf(by);
-  }
-  const rows = await drizzle(env.DB)
-    .select({ role: workflowResourceMembers.role })
-    .from(workflowResourceMembers)
-    .where(
-      and(
-        eq(workflowResourceMembers.workflowResourceId, workflow.id),
-        rowsOf(workflowResourceMembers, by)
-      )
-    );
-  if (rows.length === 0) {
-    return undefined;
-  }
-  return rows.some(({ role }) => role === "builder") ? ceilingOf(by) : "user";
+  const roles = await rolesIn(env, by, [workflow]);
+  return roles.get(workflow.id);
 };
+
+/** The live workflows of `ids`, in one read. */
+const liveWorkflows = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<Live[]> =>
+  ids.length === 0
+    ? []
+    : await drizzle(env.DB)
+        .select(liveColumns)
+        .from(workflowResources)
+        .where(
+          and(
+            sql`${workflowResources.id} IN ${jsonList(ids)}`,
+            isNull(workflowResources.deletedAt)
+          )
+        );
 
 /** The live workflow `id`, or undefined. */
 const liveWorkflow = async (
@@ -304,13 +361,7 @@ const liveWorkflow = async (
     return undefined;
   }
   const row = await drizzle(env.DB)
-    .select({
-      id: workflowResources.id,
-      name: workflowResources.name,
-      owner: workflowResources.ownerId,
-      currentVersion: workflowResources.currentVersion,
-      createdAt: workflowResources.createdAt,
-    })
+    .select(liveColumns)
     .from(workflowResources)
     .where(
       and(eq(workflowResources.id, id), isNull(workflowResources.deletedAt))
@@ -455,13 +506,7 @@ export const listWorkflowResources = async (
       )
     );
   const rows = await db
-    .select({
-      id: workflowResources.id,
-      name: workflowResources.name,
-      owner: workflowResources.ownerId,
-      currentVersion: workflowResources.currentVersion,
-      createdAt: workflowResources.createdAt,
-    })
+    .select(liveColumns)
     .from(workflowResources)
     .where(
       and(
@@ -472,15 +517,11 @@ export const listWorkflowResources = async (
       )
     )
     .orderBy(asc(workflowResources.name));
-  const listed: WorkflowResource[] = [];
-  for (const row of rows) {
-    // oxlint-disable-next-line no-await-in-loop -- one role per listed workflow, read as `get` reads it
-    const role = await roleIn(env, by, row);
-    if (role !== undefined) {
-      listed.push(resourceOf(row, role));
-    }
-  }
-  return listed;
+  const roles = await rolesIn(env, by, rows);
+  return rows.flatMap((row) => {
+    const role = roles.get(row.id);
+    return role === undefined ? [] : [resourceOf(row, role)];
+  });
 };
 
 /** `namespace/name/semver`: the only workflow contract key there is. */
@@ -1395,10 +1436,11 @@ const versionOf = async (
   };
 };
 
-/** The bindings of the versions of `id`, by version. */
+/** The bindings of the versions of `id` (only `version`'s, if given), by version. */
 export const bindingsOf = async (
   env: Env,
-  id: string
+  id: string,
+  version?: number
 ): Promise<Map<number, PinnedBinding[]>> => {
   const rows = await drizzle(env.DB)
     .select()
@@ -1406,6 +1448,9 @@ export const bindingsOf = async (
     .where(
       and(
         eq(sdkResourceBindings.resourceId, id),
+        version === undefined
+          ? undefined
+          : eq(sdkResourceBindings.resourceVersion, version),
         inArray(sdkResourceBindings.kind, ["workflow", ...catalogBindingKinds])
       )
     )
@@ -1455,32 +1500,25 @@ const visibleTo = async (
   roleInBinder: WorkflowRole,
   bindings: readonly PinnedBinding[]
 ): Promise<Map<PinnedBinding, WorkflowVersionBinding>> => {
-  const builds = new Map<string, boolean>();
-  for (const { resourceId } of bindings) {
-    if (resourceId !== null && !builds.has(resourceId)) {
-      // oxlint-disable-next-line no-await-in-loop -- one point lookup per bound workflow
-      const target = await liveWorkflow(env, resourceId);
-      const role =
-        // oxlint-disable-next-line no-await-in-loop -- the same lookup's role
-        target === undefined ? undefined : await roleIn(env, by, target);
-      builds.set(resourceId, role === "builder");
-    }
-  }
-  return new Map(
-    bindings.map((binding) => [
-      binding,
-      binding.resourceId === null || builds.get(binding.resourceId) === true
-        ? binding
-        : {
-            alias: binding.alias,
-            kind: binding.kind,
-            resourceId: null,
-            resourceVersion: null,
-            contractId: roleInBinder === "builder" ? binding.contractId : null,
-            fingerprint: binding.fingerprint,
-          },
-    ])
+  const targets = await liveWorkflows(env, [
+    ...new Set(bindings.flatMap(({ resourceId }) => resourceId ?? [])),
+  ]);
+  const roles = await rolesIn(env, by, targets);
+  const builds = new Set(
+    targets.flatMap(({ id }) => (roles.get(id) === "builder" ? [id] : []))
   );
+  const mask = (binding: PinnedBinding): WorkflowVersionBinding =>
+    binding.resourceId === null || builds.has(binding.resourceId)
+      ? binding
+      : {
+          alias: binding.alias,
+          kind: binding.kind,
+          resourceId: null,
+          resourceVersion: null,
+          contractId: roleInBinder === "builder" ? binding.contractId : null,
+          fingerprint: binding.fingerprint,
+        };
+  return new Map(bindings.map((binding) => [binding, mask(binding)]));
 };
 
 /** A version's contract: its input, output and parameters. */
@@ -1615,7 +1653,7 @@ const seenBy = async (
   by: Acting,
   version: WorkflowResourceVersion
 ): Promise<WorkflowResourceVersion> => {
-  const byVersion = await bindingsOf(env, version.resourceId);
+  const byVersion = await bindingsOf(env, version.resourceId, version.version);
   const pinned = byVersion.get(version.version) ?? [];
   // Only a builder of the workflow publishes: its definition is theirs.
   const visible = await visibleTo(env, by, "builder", pinned);
@@ -2486,9 +2524,9 @@ export const shareWorkflowResource = async (
           workflowResourceMembers.memberId,
         ],
         set: { role, addedBy: by.userId, addedAt },
-        setWhere: sql`${workflowResourceMembers.role} <> ${role}
-          AND EXISTS (SELECT 1 FROM workflow_resources
-            WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
+        // Live already: a deleted workflow's ID is NULL above, which
+        // fails the insert before any conflict is looked for.
+        setWhere: sql`${workflowResourceMembers.role} <> ${role}`,
       }),
     // Only when the share changed something (a role the member already
     // has changes nothing): a start decided meanwhile is still good.
@@ -2692,13 +2730,7 @@ const boundSql = (
 /** The live workflows whose current version binds `id`. */
 const bindersOf = async (env: Env, id: string): Promise<Live[]> =>
   await drizzle(env.DB)
-    .selectDistinct({
-      id: workflowResources.id,
-      name: workflowResources.name,
-      owner: workflowResources.ownerId,
-      currentVersion: workflowResources.currentVersion,
-      createdAt: workflowResources.createdAt,
-    })
+    .selectDistinct(liveColumns)
     .from(sdkResourceBindings)
     .innerJoin(
       workflowResources,
@@ -2852,13 +2884,10 @@ const refuseDeletion = async (
   if (!blocked) {
     throw workflowResourceErrors.create("workflow.resource_busy");
   }
-  const visible: WorkflowBinders["binders"] = [];
-  for (const binder of binders) {
-    // oxlint-disable-next-line no-await-in-loop -- one role per binder, as `get` reads it
-    if ((await roleIn(env, by, binder)) !== undefined) {
-      visible.push({ id: binder.id, name: binder.name });
-    }
-  }
+  const roles = await rolesIn(env, by, binders);
+  const visible: WorkflowBinders["binders"] = binders.flatMap((binder) =>
+    roles.has(binder.id) ? [{ id: binder.id, name: binder.name }] : []
+  );
   throw workflowResourceErrors.create("workflow.resource_bound", {
     binders: visible,
     hidden: binders.length - visible.length,
