@@ -1332,6 +1332,10 @@ msgstr "Een nieuwe sjabloon"
 msgid "A new version of this domain is available."
 msgstr "Er is een nieuwe versie van dit domein."
 
+#: src/chat/project-dialog.tsx
+msgid "A picked file couldn't be read. Pick it again."
+msgstr "Een gekozen bestand kon niet worden gelezen. Kies het opnieuw."
+
 #: src/screens/screen-files.ts
 msgid "A preview keeps no files."
 msgstr "Een voorbeeld bewaart geen bestanden."

@@ -76,13 +76,21 @@ const readPicked = async (
   return { read, first };
 };
 
+/** Why a picked file wasn't added: one a project can't take, or can't be read. */
+type FormProblem = DocumentProblem | "unreadable";
+
+/** The set without `key`. */
+const withoutKey = (before: ReadonlySet<string>, key: string): Set<string> =>
+  new Set([...before].filter((each) => each !== key));
+
 /** Why a picked file wasn't added, as the person reads it. */
-const useProblemText = (): Record<DocumentProblem, string> => {
+const useProblemText = (): Record<FormProblem, string> => {
   const { t } = useLingui();
   const most = projectDocumentsMax;
   return {
     type: t`A project takes Markdown, text, CSV and JSON files.`,
     size: t`Each document holds up to 100 KB.`,
+    unreadable: t`A picked file couldn't be read. Pick it again.`,
     count: t`${plural(most, {
       one: "A project holds up to # document.",
       other: "A project holds up to # documents.",
@@ -103,85 +111,114 @@ const ProjectForm = ({
 }) => {
   const { t } = useLingui();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const problemText = useProblemText();
   const ids = useId();
   const picker = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(project?.name ?? "");
   const [goal, setGoal] = useState(project?.goal ?? "");
-  const [kept, setKept] = useState<ProjectDocument[]>(project?.documents ?? []);
+  // What core holds, as far as this form knows: the project (none yet
+  // for a new one), its name and goal, and its documents. A Save that
+  // fails part-way leaves here what it got through, so trying again
+  // takes up from there.
+  const [held, setHeld] = useState<{
+    id: string | undefined;
+    name: string;
+    goal: string;
+  }>({
+    id: project?.id,
+    name: project?.name ?? "",
+    goal: project?.goal ?? "",
+  });
+  const [documents, setDocuments] = useState<ProjectDocument[]>(
+    project?.documents ?? []
+  );
+  // Documents core holds that the person took out, and files picked, not
+  // yet sent.
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const [picked, setPicked] = useState<Picked[]>([]);
-  const [problem, setProblem] = useState<DocumentProblem | null>(null);
+  const [problem, setProblem] = useState<FormProblem | null>(null);
+  // While picked files are read, or a Save runs: nothing changes.
+  const [reading, setReading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const locked = reading || saving;
   const named = projectNameSchema.safeParse(name).success;
 
-  // While picked files are read: nothing more is picked, and nothing is
-  // saved, until they are in the list.
-  const [reading, setReading] = useState(false);
   const add = async (files: readonly File[]): Promise<void> => {
     setReading(true);
-    const { read, first } = await readPicked(
-      files,
-      kept.length + picked.length
-    );
-    setPicked((before) => [...before, ...read]);
-    setProblem(first);
+    try {
+      const { read, first } = await readPicked(
+        files,
+        documents.length - removing.size + picked.length
+      );
+      setPicked((before) => [...before, ...read]);
+      setProblem(first);
+    } catch {
+      setProblem("unreadable");
+    }
     setReading(false);
   };
 
-  // What a Save that failed part-way got through, so trying again takes
-  // up from there: the project it made, and the documents it removed.
-  const created = useRef<string | null>(null);
-  const removed = useRef(new Set<string>());
   const save = async (): Promise<void> => {
+    setSaving(true);
     const saved = await run(async (session) => {
       const trimmedName = name.trim();
       const trimmedGoal = goal.trim();
-      let id = project?.id ?? created.current ?? undefined;
+      let { id } = held;
       if (id === undefined) {
-        ({ id } = await session.chats.createProject(trimmedName));
-        created.current = id;
-      } else if (trimmedName !== (project?.name ?? trimmedName)) {
+        const made = await session.chats.createProject(trimmedName);
+        ({ id } = made);
+        setHeld((before) => ({ ...before, id: made.id, name: made.name }));
+      } else if (trimmedName !== held.name) {
         await session.chats.renameProject(id, trimmedName);
+        setHeld((before) => ({ ...before, name: trimmedName }));
       }
-      if (trimmedGoal !== (project?.goal ?? "")) {
+      if (trimmedGoal !== held.goal) {
         await session.chats.setProjectGoal(id, trimmedGoal);
+        setHeld((before) => ({ ...before, goal: trimmedGoal }));
       }
-      const keptIds = new Set(kept.map((document) => document.id));
-      for (const document of project?.documents ?? []) {
-        if (!keptIds.has(document.id) && !removed.current.has(document.id)) {
-          // oxlint-disable-next-line no-await-in-loop -- in order, so a failure leaves the rest as they were
-          await session.chats.removeProjectDocument(id, document.id);
-          removed.current.add(document.id);
-        }
+      for (const documentId of removing) {
+        // oxlint-disable-next-line no-await-in-loop -- in order, so a failure leaves the rest as they were
+        await session.chats.removeProjectDocument(id, documentId);
+        setDocuments((before) =>
+          before.filter((each) => each.id !== documentId)
+        );
+        setRemoving((before) => withoutKey(before, documentId));
       }
       for (const document of picked) {
         // oxlint-disable-next-line no-await-in-loop -- in order, so a failure leaves the rest as they were
-        await session.chats.addProjectDocument(id, {
+        const added = await session.chats.addProjectDocument(id, {
           name: document.name,
           content: document.content,
         });
-        // Sent: trying again doesn't send it twice.
+        // Sent: it is the project's now, and trying again doesn't send it twice.
         setPicked((before) =>
           before.filter((each) => each.key !== document.key)
         );
+        setDocuments((before) => [...before, added]);
       }
       return id;
     });
     // Whatever went through shows, a refusal included.
     await router.invalidate();
+    setSaving(false);
     if (saved !== undefined) {
       onSaved(saved);
     }
   };
 
-  const documents = [
-    ...kept.map((document) => ({
-      key: document.id,
-      name: document.name,
-      remove: () => {
-        setKept((before) => before.filter((each) => each.id !== document.id));
-      },
-    })),
+  const listed = [
+    ...documents
+      .filter((document) => !removing.has(document.id))
+      .map((document) => ({
+        key: document.id,
+        name: document.name,
+        remove: () => {
+          setRemoving((before) => new Set([...before, document.id]));
+        },
+      })),
     ...picked.map((document) => ({
       key: document.key,
       name: document.name,
@@ -197,7 +234,7 @@ const ProjectForm = ({
       className="flex flex-col gap-5"
       onSubmit={(event) => {
         event.preventDefault();
-        if (named && !busy && !reading) {
+        if (named && !locked) {
           void save();
         }
       }}
@@ -216,6 +253,7 @@ const ProjectForm = ({
           <Trans>Name</Trans>
         </FieldLabel>
         <Input
+          disabled={locked}
           // Not a login: password managers keep out of it.
           autoComplete="off"
           data-1p-ignore
@@ -234,6 +272,7 @@ const ProjectForm = ({
           <Trans>Goal</Trans>
         </FieldLabel>
         <Textarea
+          disabled={locked}
           id={`${ids}-goal`}
           maxLength={projectGoalMaxLength}
           onChange={(event) => {
@@ -257,12 +296,12 @@ const ProjectForm = ({
             up to 100 KB each.
           </Trans>
         </FieldDescription>
-        {documents.length === 0 ? null : (
+        {listed.length === 0 ? null : (
           <ul
             aria-label={t`Documents in this project`}
             className="flex flex-col divide-y rounded-lg border"
           >
-            {documents.map(({ key, name: documentName, remove }) => (
+            {listed.map(({ key, name: documentName, remove }) => (
               <li
                 className="flex items-center gap-2.5 py-1.5 pr-1.5 pl-3"
                 key={key}
@@ -274,6 +313,7 @@ const ProjectForm = ({
                 <span className="min-w-0 flex-1 truncate">{documentName}</span>
                 <Button
                   aria-label={t`Remove ${documentName}`}
+                  disabled={locked}
                   onClick={() => {
                     remove();
                     setProblem(null);
@@ -305,7 +345,7 @@ const ProjectForm = ({
         />
         <div className="flex">
           <Button
-            disabled={reading}
+            disabled={locked}
             onClick={() => {
               picker.current?.click();
             }}
@@ -323,10 +363,13 @@ const ProjectForm = ({
       </Field>
       <ErrorText>{failure}</ErrorText>
       <DialogFooter>
-        <DialogClose render={<Button type="button" variant="outline" />}>
+        <DialogClose
+          disabled={saving}
+          render={<Button type="button" variant="outline" />}
+        >
           <Trans>Cancel</Trans>
         </DialogClose>
-        <Button disabled={!named || busy || reading} type="submit">
+        <Button disabled={!named || locked} type="submit">
           {project === undefined ? (
             <Trans>Create project</Trans>
           ) : (

@@ -1332,6 +1332,10 @@ msgstr "Eine neue Vorlage"
 msgid "A new version of this domain is available."
 msgstr "Eine neue Version dieser Domäne ist verfügbar."
 
+#: src/chat/project-dialog.tsx
+msgid "A picked file couldn't be read. Pick it again."
+msgstr "Eine ausgewählte Datei konnte nicht gelesen werden. Wählen Sie sie erneut aus."
+
 #: src/screens/screen-files.ts
 msgid "A preview keeps no files."
 msgstr "Eine Vorschau behält keine Dateien."
