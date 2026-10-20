@@ -362,9 +362,9 @@ export type PermissionRequest = z.input<typeof permissionRequestSchema>;
 /**
  * A permission a blueprint declares (a built-in's `blueprint.json`, or
  * what its App asked for as it was marked): a request without its
- * subject, which is every App created from it. Only a collection (for a
- * built-in, one it declares: `declaredCollectionSchema` in
- * `@grasp-os/shared/knowledge`), or what the platform offers (its
+ * subject, which is every App created from it. Only a collection (never
+ * for a built-in, which can't name one: build-blueprints.ts in core), or
+ * what the platform offers (its
  * statistics, guest chats): the things that name the same thing for
  * whoever creates from it, where a connection is someone's or set up for
  * one App, and a workflow or exports name an App its creator may not see.

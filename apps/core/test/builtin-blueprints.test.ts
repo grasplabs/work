@@ -3,7 +3,6 @@ import {
   checkWorkflowBindings,
   describeWorkflow,
 } from "@grasp-os/sdk/describe";
-import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import type { DeclaredPermission } from "@grasp-os/shared/permissions";
 import { runInDurableObject } from "cloudflare:test";
@@ -350,54 +349,6 @@ describe("the built-in blueprints", () => {
       listed: [["Hi", "Says hi."]],
       // What it became: with the events before it, what it was.
       audited: [["blueprint.changed", "Hi", "Says hi."]],
-    });
-
-    await reinstall();
-  });
-
-  it("create the collections they declare once, open to everyone and changed by admins only", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const builder = await signedInApi(idp, "builder");
-    const id = collectionIdSchema.parse(`greetings-${unique()}`);
-    const declared = releaseWith({
-      collections: [{ id, name: "Greetings", description: "Said hello." }],
-    });
-    const events = await auditedDuring(async () => {
-      await expect(install(declared)).resolves.toBeTruthy();
-      await expect(install(declared)).resolves.toBeTruthy();
-    });
-    const collection = await env.KNOWLEDGE.prepare(
-      "SELECT name, owner, access, source FROM collections WHERE id = ?"
-    )
-      .bind(id)
-      .first();
-    const save = async (person: typeof admin) =>
-      await outcome(
-        person.api.knowledge.saveDocument({
-          collectionId: id,
-          path: `hello-${unique()}.md`,
-          text: "# Hello",
-          ifVersion: 0,
-        })
-      );
-    expect({
-      collection,
-      created: events.filter(
-        ({ action, target }) =>
-          action === "knowledge.collection.created" && target?.id === id
-      ).length,
-      admin: await save(admin),
-      builder: await save(builder),
-    }).toStrictEqual({
-      collection: {
-        name: "Greetings",
-        owner: "grasp",
-        access: "everyone",
-        source: "here",
-      },
-      created: 1,
-      admin: "ok",
-      builder: "knowledge.forbidden",
     });
 
     await reinstall();

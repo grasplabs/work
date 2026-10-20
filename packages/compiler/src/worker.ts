@@ -12,9 +12,11 @@
  * Tailwind compiles the CSS for the classes in the App's sources and in the
  * kit modules it loads.
  *
- * It also builds an App's server code and workflows, which run in core
- * (see `buildServer` and `buildWorkflows`): the same Babel, stripping
- * types only.
+ * It also builds an App's server code, workflows and a JSON workflow's
+ * compute modules, which run in core (see `buildServer`, `buildAppCode`,
+ * `buildWorkflows` and `buildComputeModules`): the same Babel. Server code
+ * has its types stripped only; workflows and compute modules are
+ * type-checked too.
  */
 import { packageEntrySchema } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -35,7 +37,6 @@ import {
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
-  workflowTypeContext,
 } from "./app-code.ts";
 import { assertNoBindings } from "./authority.ts";
 import { extractCandidates } from "./candidates.ts";
@@ -500,8 +501,8 @@ const compileCodeFile = (
     };
   }
   // What would steer the type check of code whose types are checked
-  // (`buildWorkflows`) rather than be checked by it: a triple-slash
-  // directive reaches the whole program (a workflow's
+  // (`buildWorkflows`, `buildComputeModules`) rather than be checked by it:
+  // a triple-slash directive reaches the whole program (a workflow's
   // `/// <reference lib="dom" />` would give every workflow the DOM), and
   // a suppression switches the check off.
   const steering =
@@ -617,10 +618,9 @@ export type OpenWorkflowBuild =
  * Builds the module the host generated from a JSON workflow
  * (`openWorkflowEntry`): type-checked against the SDK's own declarations,
  * then compiled as workflow code is, importing only
- * `@grasp-os/sdk/open-workflow` (`generatedWorkflowCode`). Generated code
- * is held to the type check that App workflows aren't (spec 19.1): it is
- * the host's own output, so a type error is the generator's, and nothing
- * is sealed that doesn't check.
+ * `@grasp-os/sdk/open-workflow` (`generatedWorkflowCode`). It is the
+ * host's own output, so a type error is the generator's, and nothing is
+ * sealed that doesn't check.
  */
 export const buildOpenWorkflow = (
   files: Record<string, string>
@@ -668,7 +668,6 @@ const computePackagesOf = (
     ? value.filter(
         (entry): entry is string =>
           typeof entry === "string" &&
-          entry.length > 0 &&
           packageEntrySchema.safeParse(entry).success
       )
     : [];
@@ -819,14 +818,8 @@ const compileAppCodeFile = (
   }
 };
 
-/**
- * Builds an App's server code of spec 8's layout: its schema, values,
- * registration and operations, with the modules the host generated for
- * it (`.grasp/`), each held to what its kind may import. Types are
- * stripped, not checked.
- */
-export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
-  const code = appCodeFiles(files);
+/** `buildAppCode` of files already held to what it reads (`appCodeFiles`). */
+const buildAppCodeOf = (code: Record<string, string>): AppCodeBuild => {
   const tooMuch = appCodeLimitErrors(code);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
@@ -889,11 +882,20 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
 };
 
 /**
+ * Builds an App's server code of spec 8's layout: its schema, values,
+ * registration and operations, with the modules the host generated for
+ * it (`.grasp/`), each held to what its kind may import. Types are
+ * stripped, not checked.
+ */
+export const buildAppCode = (files: Record<string, string>): AppCodeBuild =>
+  buildAppCodeOf(appCodeFiles(files));
+
+/**
  * Builds an App's workflows: the TypeScript files under `workflows/`,
  * their tests included, importing only those files and the SDK's
  * workflow modules (`sdkImports`), then type-checked in one program
  * against those modules' declarations (`workflowTarget`), with the App's
- * server code their types may name (`workflowTypeContext`): what they
+ * server code their types may name (`appCodeFiles`): what they
  * build to, or why they fail, their type errors included. Every place a
  * workflow runs builds it here first: as its version is made current,
  * before its tests run; as a run loads it; and as a save is built.
@@ -902,7 +904,7 @@ export const buildWorkflows = (
   files: Record<string, string>
 ): WorkflowBuild => {
   const workflows = workflowFiles(files);
-  const context = workflowTypeContext(files);
+  const context = appCodeFiles(files);
   const tooMuch = appCodeLimitErrors({ ...context, ...workflows });
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
@@ -918,7 +920,7 @@ export const buildWorkflows = (
   // code that doesn't build stays out, and a workflow that names it is
   // told why its types are missing.
   const layout = isAppLayout(context);
-  const serverBuilds = layout && buildAppCode(context).ok;
+  const serverBuilds = layout && buildAppCodeOf(context).ok;
   const diagnostics = typeCheck(
     serverBuilds ? { ...context, ...workflows } : workflows,
     kit.types,

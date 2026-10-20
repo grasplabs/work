@@ -64,6 +64,7 @@ export {
   computePackagesFile,
   kitModuleName,
   packageModuleName,
+  packageModulePrefix,
   screenRuntime,
 } from "./kit.ts";
 export { platformPeers, platformScope } from "./packages/platform.ts";

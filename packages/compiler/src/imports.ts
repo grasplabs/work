@@ -642,8 +642,9 @@ export interface CodeKind {
   /** The modules it may import besides its own files, and their flat names. */
   imports: ReadonlyMap<string, string>;
   /**
-   * Whether its types are checked (`buildWorkflows`): then nothing in it
-   * may steer the check, no directive, suppression or ambient module.
+   * Whether its types are checked (`buildWorkflows`, `buildComputeModules`):
+   * then nothing in it may steer the check, no directive, suppression or
+   * ambient module.
    */
   typeChecked?: boolean;
 }

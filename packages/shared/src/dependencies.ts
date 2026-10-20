@@ -110,14 +110,15 @@ export const packageNameSchema = z
     "an npm package name"
   );
 
-/** One exact version: never a range, a tag or a URL. */
+/** One exact version, of any length: never a range, a tag or a URL. */
+export const exactVersionPattern =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
+
+/** One exact version of a package: never a range, a tag or a URL. */
 export const exactVersionSchema = z
   .string()
   .max(128)
-  .regex(
-    /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u,
-    "an exact version"
-  );
+  .regex(exactVersionPattern, "an exact version");
 
 /**
  * The registry's SHA-512 of a tarball, as npm writes it (Subresource

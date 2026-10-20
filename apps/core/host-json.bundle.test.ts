@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -8,8 +8,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { text } from "node:stream/consumers";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { runInNewContext } from "node:vm";
 
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
@@ -27,49 +27,6 @@ import { hostJsonSource } from "./src/host-json.ts";
 // values with nothing in scope but the language's built-ins.
 
 const here = import.meta.dirname;
-/** Stops every process `run` started that is still running. */
-const stopping = new AbortController();
-/** Each process `run` started, settled once it closed. */
-const closing = new Set<Promise<unknown>>();
-
-/**
- * Runs `args` in Node to its end; failing with its output if it fails,
- * or once `stopping` stops it.
- */
-const run = async (
-  args: string[],
-  options: { cwd: string; env: NodeJS.ProcessEnv }
-): Promise<void> => {
-  const child = spawn(process.execPath, args, {
-    ...options,
-    signal: stopping.signal,
-  });
-  // Settled once it closed, whatever it failed with first (stopped, an
-  // AbortError comes before its close), or once it never started.
-  const closed = Promise.withResolvers<null>();
-  let failure: Error | undefined;
-  child.once("close", () => {
-    closed.resolve(null);
-  });
-  child.once("error", (error) => {
-    failure = error;
-    if (child.pid === undefined) {
-      closed.resolve(null);
-    }
-  });
-  closing.add(closed.promise);
-  const [stdout, stderr] = await Promise.all([
-    text(child.stdout),
-    text(child.stderr),
-  ]);
-  await closed.promise;
-  if (failure !== undefined) {
-    throw failure;
-  }
-  if (child.exitCode !== 0) {
-    throw new Error(`${stdout}${stderr}`);
-  }
-};
 /**
  * How long the two bundles may take together. Each is a cold Wrangler CLI
  * (Node, Wrangler's own bundle, esbuild): about a second on an idle
@@ -77,6 +34,47 @@ const run = async (
  * a test's default five seconds. They run at once, off the event loop.
  */
 const bundlingTimeout = 120_000;
+// oxlint-disable-next-line typescript/strict-void-return -- execFile returns its child, as promisify expects
+const execNode = promisify(execFile);
+/** Stops every process `run` started that is still running. */
+const stopping = new AbortController();
+/** Each process `run` started, settled once it closed. */
+const closing: Promise<unknown>[] = [];
+
+/**
+ * Runs `args` in Node to its end; failing with its output if it fails,
+ * once `stopping` stops it, or past `bundlingTimeout`.
+ */
+const run = async (
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv }
+): Promise<void> => {
+  const running = execNode(process.execPath, args, {
+    ...options,
+    signal: stopping.signal,
+    timeout: bundlingTimeout,
+  });
+  // A stopped run fails as it is told to stop, before it has closed: its
+  // close is what cleanup waits for.
+  const closed = Promise.withResolvers<unknown>();
+  running.child.once("close", closed.resolve);
+  closing.push(closed.promise);
+  try {
+    await running;
+  } catch (error) {
+    // Node's message has the command and its stderr; Wrangler may say why
+    // on stdout instead.
+    const stdout: unknown =
+      typeof error === "object" && error !== null
+        ? Reflect.get(error, "stdout")
+        : undefined;
+    if (error instanceof Error && typeof stdout === "string" && stdout !== "") {
+      throw new Error(`${error.message}\n${stdout}`, { cause: error });
+    }
+    throw error;
+  }
+};
+
 const wrangler = path.join(here, "node_modules/wrangler/bin/wrangler.js");
 
 /** Core's own compatibility settings, from its wrangler.jsonc. */

@@ -2,6 +2,7 @@ import {
   appModuleName,
   compilerVersion,
   openWorkflowEntry,
+  packageModulePrefix,
   workflowSdkModules,
 } from "@grasp-os/compiler";
 import {
@@ -49,7 +50,7 @@ import { releaseReservations } from "./release-retention.ts";
 import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
 import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
-import { sealedPackagesSchema } from "./workflows/package-seal.ts";
+import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
 // its definition, validated at publication, lowered into SDK TypeScript
@@ -729,9 +730,6 @@ export interface LoadedBuild {
   readonly packages: { readonly graphHash: string } | undefined;
 }
 
-/** The prefix of an approved package's module (`packageModuleName`). */
-const packageModulePrefix = "pkg~";
-
 /**
  * Whether a build's compute modules hold exactly the package modules its
  * manifest seals (`entries`, by name): each one, no other (none for a
@@ -757,11 +755,6 @@ const packagesAgree = (
     chars <= packageLimits.workflowPackageChars
   );
 };
-
-/** Where a version's manifest seals the approved packages its modules import. */
-const manifestPackagesSchema = z.object({
-  packages: sealedPackagesSchema.optional(),
-});
 
 /** A version's compute modules, as sealed. */
 export interface LoadedModules {

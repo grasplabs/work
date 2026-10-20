@@ -466,7 +466,7 @@ export const eraseFromSearchIndex = async (
 // Personal purges: a whole collection.
 
 /** How far a personal purge checks a collection's tokens before it rebuilds instead. */
-export const collectionCheckCaps = {
+const collectionCheckCaps = {
   /** The collection's versions, every one of which the index may have held. */
   versions: 2000,
   /** Characters of those versions' text, read and tokenised. */
@@ -589,7 +589,7 @@ interface CheckCounts {
  * that can't be read exactly, frontmatter that doesn't read, a cap
  * reached, with the counts).
  */
-export type CollectionPlan =
+type CollectionPlan =
   | {
       readonly kind: "keys";
       readonly keys: readonly IndexKey[];
@@ -617,7 +617,7 @@ const versionInCollection = (collectionId: string) => sql`v.document_id IN (
  * The values a version of a document at `path` gave the search index, or
  * undefined when that can't be told (`indexedValuesOf`, documents.ts).
  */
-export type IndexedValues = (
+type IndexedValues = (
   path: string,
   text: string
 ) => readonly string[] | undefined;

@@ -47,7 +47,7 @@ import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
 import {
   packagesHoldSql,
-  sealedPackagesSchema,
+  manifestPackagesSchema,
 } from "./workflows/package-seal.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
@@ -299,11 +299,6 @@ const appRoleSql = (
 /** That a permission allowing `start` on `id` for the invoker holds, as SQL. */
 const grantSql = (allowing: SQL): SQL =>
   sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
-
-/** Where a version's manifest seals the approved packages its modules import. */
-const manifestPackagesSchema = z.object({
-  packages: sealedPackagesSchema.optional(),
-});
 
 /**
  * That the approved graph `graphHash` workflow `id`'s version seals still

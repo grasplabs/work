@@ -10,21 +10,18 @@
  * which never changes: renaming the folder makes another blueprint. In it:
  *
  * - `blueprint.json`: `{ "name": …, "description": … }`, as for any App,
- *   and optionally `"collections"`: the collections it keeps documents in,
- *   as `[{ "id": …, "name": …, "description": … }]`, which the install
- *   creates if they aren't there yet (`declaredCollectionSchema`); and
- *   `"permissions"`: what each App created from it asks for, as
- *   `[{ "object": { "type": "collection", "collectionId": … }, "actions":
- *   […], "binding": … }]`, each a request an admin grants on the copy,
- *   and each for one of its collections;
+ *   and optionally `"permissions"`: what each App created from it asks
+ *   for, as `[{ "object": { "type": "platform" }, "actions":
+ *   ["statistics"], "binding": … }]`, each a request an admin grants on
+ *   the copy. Never a collection: a deployment's collections have IDs of
+ *   their own, so a built-in can't name one;
  * - `files/`: the App's files, by path, written against `@grasp-os/sdk`
  *   like any App's.
  *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
- * collections, and its permissions as any request's are checked, each
- * for a collection it declares), and its
- * files as any App's write checks them (paths, no hidden files, each
+ * permissions as any request's are checked), and its files as any App's
+ * write checks them (paths, no hidden files, each
  * file's size and their number), and their total size as any version's.
  */
 import {
@@ -39,7 +36,6 @@ import path from "node:path";
 
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
-import { declaredCollectionSchema } from "@grasp-os/shared/knowledge";
 import { declaredPermissionSchema } from "@grasp-os/shared/permissions";
 import { z } from "zod";
 
@@ -63,26 +59,13 @@ export const testBlueprintsModule = path.join(
 /** Most permissions one built-in declares: each is one install statement. */
 export const declaredMaxPermissions = 16;
 
-/** Most collections one built-in declares. */
-export const declaredMaxCollections = 4;
-
 /**
  * A `blueprint.json`: the App's name and description, as for any App,
- * the collections it declares, and what each copy asks for, each binding
- * name once, as an App's permissions have them, and each for a
- * collection it declares.
+ * and what each copy asks for, each binding name once, as an App's
+ * permissions have them, and none for a collection.
  */
 const manifestSchema = fromBlueprintSchema
   .extend({
-    collections: z
-      .array(declaredCollectionSchema)
-      .max(declaredMaxCollections)
-      .refine(
-        (collections) =>
-          new Set(collections.map(({ id }) => id)).size === collections.length,
-        { message: "Each collection once" }
-      )
-      .default([]),
     permissions: z
       .array(declaredPermissionSchema)
       .max(declaredMaxPermissions)
@@ -95,15 +78,11 @@ const manifestSchema = fromBlueprintSchema
       .default([]),
   })
   .refine(
-    ({ collections, permissions }) =>
-      permissions.every(
-        ({ object }) =>
-          object.type !== "collection" ||
-          collections.some(({ id }) => id === object.collectionId)
-      ),
+    ({ permissions }) =>
+      permissions.every(({ object }) => object.type !== "collection"),
     {
       path: ["permissions"],
-      message: "Each for a collection the blueprint declares",
+      message: "None for a collection, which a built-in can't name",
     }
   );
 

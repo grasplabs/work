@@ -179,35 +179,6 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   return isTestFile(path) ? "test" : undefined;
 };
 
-/**
- * The App's server code a workflow's types may name: its schema, values,
- * registration, operations and the migrations its registration imports,
- * with the host's generated modules, never its tests. A workflow's
- * `appFunctions<Tree>(env)` is typed by the App's operations (`import
- * type * as notes from "../operations/notes.ts"`), so they join its type
- * check; they never join its build.
- */
-export const workflowTypeContext = (
-  files: Readonly<Record<string, string>>
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(([path]) => {
-      const kind = appCodeKind(path);
-      return kind !== undefined && kind !== "test";
-    })
-  );
-
-/**
- * The files a workflow build reads: the App's workflows and their tests,
- * and the server code their types may name (`workflowTypeContext`).
- */
-export const workflowBuildFiles = (
-  files: Readonly<Record<string, string>>
-): Record<string, string> => ({
-  ...workflowTypeContext(files),
-  ...workflowFiles(files),
-});
-
 /** Whether `files` are an App of spec 8's layout: a registration and a schema. */
 export const isAppLayout = (files: Readonly<Record<string, string>>): boolean =>
   Object.hasOwn(files, "app.ts") && Object.hasOwn(files, "schema.ts");
@@ -226,6 +197,20 @@ export const appCodeFiles = (
       return (kind !== undefined && kind !== "test") || isUnderOperations(path);
     })
   );
+
+/**
+ * The files a workflow build reads: the App's workflows and their tests,
+ * and the server code their types may name (`appCodeFiles`). A workflow's
+ * `appFunctions<Tree>(env)` is typed by the App's operations (`import
+ * type * as notes from "../operations/notes.ts"`), so they join its type
+ * check; they never join its build.
+ */
+export const workflowBuildFiles = (
+  files: Readonly<Record<string, string>>
+): Record<string, string> => ({
+  ...appCodeFiles(files),
+  ...workflowFiles(files),
+});
 
 /**
  * The files a build of an App's tests reads: everything under `tests/`
