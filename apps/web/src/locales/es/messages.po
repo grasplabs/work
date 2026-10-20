@@ -4370,7 +4370,7 @@ msgstr "Según los permisos que concedieron las personas y cómo se clasifica la
 
 #: src/frame/surface-nav.tsx
 msgid "From your domains"
-msgstr "De sus dominios"
+msgstr "De tus dominios"
 
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
@@ -9889,7 +9889,7 @@ msgstr "Este es el consentimiento tal como lo redacta Grasp ahora. El registro d
 
 #: src/routes/_shell.links.$app.$surface.tsx
 msgid "This link doesn't open anything you can open"
-msgstr "Este enlace no abre nada que usted pueda abrir"
+msgstr "Este enlace no abre nada que puedas abrir"
 
 #: src/routes/guest.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
