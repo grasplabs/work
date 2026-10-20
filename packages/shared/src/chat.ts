@@ -34,8 +34,15 @@ export interface ChatSummary {
 // documents as data (`env.chat.project()`), never as its instructions.
 // Core enforces every limit here; the page shows them.
 
+/** Longest name a project has, in characters. */
+export const projectNameMaxLength = 100;
+
 /** A project's name. */
-export const projectNameSchema = z.string().trim().min(1).max(100);
+export const projectNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(projectNameMaxLength);
 
 /** Longest goal a project has, in characters. */
 export const projectGoalMaxLength = 4000;
@@ -46,8 +53,11 @@ export const projectGoalSchema = z.string().trim().max(projectGoalMaxLength);
 /** The file types a project document may be, by extension. */
 export const projectDocumentTypes = ["md", "txt", "csv", "json"] as const;
 
+/** Largest project document, in KB (1,024 bytes) of UTF-8. */
+export const projectDocumentMaxKb = 100;
+
 /** Largest project document, in bytes of UTF-8. */
-export const projectDocumentMaxBytes = 100 * 1024;
+export const projectDocumentMaxBytes = projectDocumentMaxKb * 1024;
 
 const projectExtension = /\.(?<extension>[A-Za-z]+)$/u;
 
