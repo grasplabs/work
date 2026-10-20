@@ -483,6 +483,29 @@ describe("what a hook shows", () => {
     expect(page.open("run-1")).toHaveLength(1);
   });
 
+  it("shows a run's snapshot again at the same revision once a refusal that keeps following clears, and no older one", async () => {
+    const page = host();
+    const hook = await showing(page, snapshotOf(), 3);
+    const subscription = page.one("run-1");
+    subscription.refuse(3, "screen.rate_limited", "operational", {
+      retryAfterMs: 1000,
+    });
+    const refused = hook.view();
+    subscription.push(2, snapshotOf({ status: "paused" }));
+    const older = hook.view();
+    subscription.push(3, snapshotOf());
+    const recovered = hook.view();
+    // Shown fresh again: the same revision once more changes nothing.
+    subscription.push(3, snapshotOf({ status: "paused" }));
+    expect({ refused, older, recovered, again: hook.view() }).toMatchObject({
+      refused: { status: "running", canPause: false, canCancel: false },
+      older: { status: "running", canPause: false, canCancel: false },
+      recovered: { status: "running", canPause: true, canCancel: true },
+      again: { status: "running", canPause: true, canCancel: true },
+    });
+    expect(page.commands).toStrictEqual([]);
+  });
+
   it("shows no older revision over a newer one", async () => {
     const page = host();
     const hook = await showing(page, snapshotOf({ status: "paused" }), 5);
