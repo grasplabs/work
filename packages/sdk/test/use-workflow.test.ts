@@ -506,6 +506,20 @@ describe("what a hook shows", () => {
     expect(page.commands).toStrictEqual([]);
   });
 
+  it("hears nothing a lost subscription delivers late, however its revision compares", async () => {
+    const page = host();
+    const hook = await showing(page, snapshotOf(), 3);
+    const lost = page.one("run-1");
+    lost.lose();
+    lost.push(3, snapshotOf());
+    const sameRevision = hook.view();
+    lost.push(4, snapshotOf({ status: "paused" }));
+    expect({ sameRevision, newer: hook.view() }).toMatchObject({
+      sameRevision: { status: "running", canPause: false, canCancel: false },
+      newer: { status: "running", canPause: false, canCancel: false },
+    });
+  });
+
   it("shows no older revision over a newer one", async () => {
     const page = host();
     const hook = await showing(page, snapshotOf({ status: "paused" }), 5);

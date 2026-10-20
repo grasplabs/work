@@ -1164,6 +1164,9 @@ export class WorkflowChannel {
 
   /** Core, or the connection, let go of `live`: follow again, later. */
   #lost(entry: Watched<unknown>, live: Live, atLeastMs = 0): void {
+    // Over: a push it still delivers late is heard no more, so nothing it
+    // sent before it was lost shows as fresh, or as a recovery, again.
+    live.stopped = true;
     live.release = undefined;
     const failures =
       Date.now() - live.since >= steadyMs ? 0 : live.failures + 1;
@@ -1173,7 +1176,7 @@ export class WorkflowChannel {
     clearTimeout(live.retry);
     live.retry = setTimeout(
       () => {
-        if (WorkflowChannel.#current(entry, live) && entry.listeners.size > 0) {
+        if (entry.live === live && entry.listeners.size > 0) {
           this.#subscribe(entry, failures);
         }
       },
