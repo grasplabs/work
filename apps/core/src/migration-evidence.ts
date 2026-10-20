@@ -63,7 +63,7 @@ export const fixturesFailedError = (evidence: MigrationEvidence): Error =>
  * wrote validated against the target, so no failure is left to show. A
  * smaller sample that passes may just have missed the failing record,
  * so it doesn't vouch for the larger one. Later is by rowid: receipts are
- * append-only (0103), so the order they were stored in, whatever two
+ * append-only (0104), so the order they were stored in, whatever two
  * samples' clocks said.
  */
 const standingFailures = (app: AppId, version: number) =>
