@@ -375,6 +375,12 @@ const takeAll = async (
   return pages;
 };
 
+/**
+ * The file that marks a directory as one this tool wrote: the only kind
+ * `--out` may delete, since many a directory holds an `index.html`.
+ */
+const reportMarker = ".parity-report";
+
 const main = async (): Promise<void> => {
   const commit = checkPrototype();
   const out = path.resolve(root, args.out);
@@ -389,7 +395,7 @@ const main = async (): Promise<void> => {
   if (
     existsSync(out) &&
     readdirSync(out).length > 0 &&
-    !existsSync(path.join(out, "index.html"))
+    !existsSync(path.join(out, reportMarker))
   ) {
     throw new Error(
       `--out ${out} holds files that aren't a parity report: refusing to delete them.`
@@ -397,6 +403,7 @@ const main = async (): Promise<void> => {
   }
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
+  writeFileSync(path.join(out, reportMarker), "");
   try {
     await startPrototype();
     await startGrasp();
