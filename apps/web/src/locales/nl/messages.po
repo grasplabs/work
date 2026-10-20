@@ -8025,8 +8025,8 @@ msgid "Run {shortId} of {workflowId} in {domain}, started {started}"
 msgstr "Run {shortId} van {workflowId} in {domain}, gestart {started}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {domain}, started {started}, in the runs run {rootId} started"
-msgstr "Run {shortId} van {workflowId} in {domain}, gestart {started}, binnen de runs die run {rootId} startte"
+msgid "Run {shortId} of {workflowId} in {domain}, started {started}, in the run chain started by run {rootId}"
+msgstr "Run {shortId} van {workflowId} in {domain}, gestart {started}, in de keten van runs die run {rootId} startte"
 
 #: src/workflows/history-view.tsx
 msgid "Run history"

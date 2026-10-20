@@ -140,7 +140,7 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
     if (of.rootRunId !== null) {
       const rootId = of.rootRunId.slice(0, shortRunId);
       return i18n._(
-        msg`Run ${shortId} of ${workflowId} in ${ph({ domain: engine })}, started ${started}, in the runs run ${rootId} started`
+        msg`Run ${shortId} of ${workflowId} in ${ph({ domain: engine })}, started ${started}, in the run chain started by run ${rootId}`
       );
     }
     return i18n._(
