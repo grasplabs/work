@@ -266,7 +266,8 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
 
   it("run the workflow the release binds on the engine, to its end, each task completed once, and leave nothing of the organization's", async () => {
     const { builder, app, workflowId } = await requestsApp(
-      async (by) => await workflowOf(by, greeting()),
+      async (by) =>
+        await workflowOf(by, greeting([{ hold: { wait: "PT1S" } }])),
       {
         "tests/greet.test.ts": suiteOf(`
       const run = await owner.start(workflows.followUp, { who: "Ada" });
@@ -275,6 +276,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
         output: { status: "Hello, Ada" },
       });
       t.equal(await t.effects.completedCount(run, "greet"), 1);
+      t.equal(await t.effects.completedCount(run, "hold"), 1);
       t.equal(await t.effects.completedCount(run, "elsewhere"), 0);`),
       }
     );
