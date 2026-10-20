@@ -175,6 +175,7 @@ describe("a draft's sealed preview on the on-prem sandbox", () => {
         error: lines[3]?.message.startsWith(`${ran.value} Error: boom`),
         // `trace` is no level a tail keeps: the next line is the long one.
         long: lines[5]?.message.length,
+        unprintable: lines[6]?.message,
         read: supervisor.output().includes("sandbox.listening"),
         printed: supervisor.output().includes(ran.value),
       }).toStrictEqual({
@@ -185,6 +186,7 @@ describe("a draft's sealed preview on the on-prem sandbox", () => {
         first: `${ran.value} {"n":1}`,
         error: true,
         long: 2000,
+        unprintable: "[unprintable]",
         read: true,
         printed: false,
       });

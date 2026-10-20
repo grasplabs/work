@@ -80,6 +80,15 @@ export class Run extends WorkerEntrypoint {
     console.debug(value);
     console.trace(value);
     console.log("x".repeat(5000));
+    // Nothing prints it: logging it must not throw.
+    console.log({
+      toJSON() {
+        throw new Error("no JSON");
+      },
+      toString() {
+        throw new Error("no text");
+      },
+    });
     for (let n = 0; n < 30; n += 1) {
       console.log(value, n);
     }

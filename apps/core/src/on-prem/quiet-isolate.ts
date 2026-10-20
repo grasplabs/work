@@ -99,13 +99,18 @@ const partOf = (part) => {
   }
 };
 const recording = (level) => (...parts) => {
-  if (lines.length < ${maxCapturedLines}) {
-    lines.push({
-      at: Date.now(),
-      level,
-      message: parts.map(partOf).join(" ").slice(0, ${maxCapturedMessage}),
-    });
+  if (lines.length >= ${maxCapturedLines}) {
+    return;
   }
+  // Logging never throws into the App's code, as on Cloudflare: a value
+  // that can't be printed (its toString throws) is a placeholder.
+  let message;
+  try {
+    message = parts.map(partOf).join(" ").slice(0, ${maxCapturedMessage});
+  } catch {
+    message = "[unprintable]";
+  }
+  lines.push({ at: Date.now(), level, message });
 };
 const levels = new Set(${JSON.stringify(capturedLevels)});
 for (const name of Object.getOwnPropertyNames(console)) {
