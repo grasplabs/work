@@ -23,6 +23,7 @@ import { sharesReleased } from "./quotas.ts";
 import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { projectResourceRun } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
+import { wakeQueueFronts } from "./share-wakes.ts";
 
 /**
  * Where a run keeps each step's last busy-budget refusal (host.ts): a
@@ -831,6 +832,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       return;
     }
     await sharesReleased(this.env, run, over, { cancelled });
+    // Shares came back: the steps they let in ask now (share-wakes.ts).
+    await wakeQueueFronts(this.env);
     const { sql } = this.ctx.storage;
     sql.exec(
       `CREATE TABLE IF NOT EXISTS ${sharesTable} (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), released INTEGER NOT NULL)`

@@ -175,7 +175,7 @@ const busyWaitsOf = async (run: string): Promise<number> =>
     (_object, state) =>
       state.storage.sql
         .exec<{ waits: number }>(
-          "SELECT count(*) AS waits FROM steps WHERE type = 'sleep' AND name LIKE '%:busy:%'"
+          "SELECT count(*) AS waits FROM steps WHERE type IN ('sleep', 'waitForEvent') AND name LIKE '%:busy:%'"
         )
         .one().waits
   );

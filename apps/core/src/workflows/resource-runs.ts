@@ -66,6 +66,7 @@ import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
+import { wakingOnSettle } from "./share-wakes.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
 // a start's receipt admits its run, under the receipt's own ID, in the
@@ -755,6 +756,11 @@ export const runResourceWorkflow = async (
   let tampered: StepError | undefined;
   // The run's own sandbox session on-prem, its actions' parent.
   let sessionId: string | undefined;
+  // The wakes its attempts' settles sent (share-wakes.ts): awaited once
+  // the run's code is done, never before a step's outcome; none started
+  // after that, by a settle that came too late.
+  const wakes: Promise<void>[] = [];
+  const waking = { open: true };
   const host = new ResourceRunHost(env, step, run, {
     sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
@@ -768,10 +774,18 @@ export const runResourceWorkflow = async (
     },
     // The root of its own lineage: an independent run starts no runs.
     admitAttempt: async (attempt) =>
-      await admitAttempt(
+      wakingOnSettle(
         env,
-        { run: runId, root: runId, subject, resource: ownerOf(pin.workflow) },
-        attempt
+        await admitAttempt(
+          env,
+          { run: runId, root: runId, subject, resource: ownerOf(pin.workflow) },
+          attempt
+        ),
+        (wake) => {
+          if (waking.open) {
+            wakes.push(wake());
+          }
+        }
       ),
   });
   const code = loadRunIsolate<ResourceAttemptHost>(
@@ -802,6 +816,8 @@ export const runResourceWorkflow = async (
       return await afterCpuKill(error, calls);
     }
   });
+  waking.open = false;
+  await Promise.all(wakes);
   if (!result.ok && memory.current?.() === false) {
     throw new Error(`Run ${runId} is no longer this activation's`);
   }

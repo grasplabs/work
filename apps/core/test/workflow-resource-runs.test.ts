@@ -1690,7 +1690,7 @@ const loadWaitsOf = async (id: string | null): Promise<number> =>
     (_object, state) =>
       state.storage.sql
         .exec<{ waits: number }>(
-          "SELECT count(*) AS waits FROM steps WHERE type = 'sleep' AND name LIKE '%:busy:%'"
+          "SELECT count(*) AS waits FROM steps WHERE type IN ('sleep', 'waitForEvent') AND name LIKE '%:busy:%'"
         )
         .one().waits
   );
@@ -2275,16 +2275,17 @@ describe(
           return await withQuotas(
             { workflowPersonAttempts: 1, workflowSteps: 1 },
             async () => {
-              // Recorded first, so each read of it later is one query; the
-              // load reads it for its model calls, then for its step limit,
-              // and that read fails.
+              // Recorded first, so each read of it later is one query. The
+              // holder's share coming back reads it, to wake the run
+              // (share-wakes.ts); the load reads it for its model calls,
+              // then for its step limit, and that read fails.
               await quotaPolicy(env);
               return await withPolicyReadFailingOnce(
                 async () => {
                   await terminateResourceRun(env, by, hanging.id, holder.runId);
                   return await ended(by, workflow.id, runId);
                 },
-                { skip: 1 }
+                { skip: 2 }
               );
             }
           );

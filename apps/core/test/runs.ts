@@ -288,9 +288,13 @@ const seenEnded = new Set<string>();
  * would go on in the background of whatever runs next: a decision's
  * week-long wait, a run paused, or one waiting while a feature was off.
  * Work that outlives its test is how a test file came to wait forever in
- * CI (see apps/core/vite.config.ts), so each test ends its runs.
+ * CI (see apps/core/vite.config.ts), so each test ends its runs. Their
+ * places in the admission queue go first, and again once they are ended:
+ * a share their ending gives back wakes no run of theirs as the test
+ * file closes (share-wakes.ts), only to start work it can't finish.
  */
 export const endLiveRuns = async (): Promise<void> => {
+  await env.DB.prepare("DELETE FROM workflow_admission_queue").run();
   // Only rows that may still have a live run: one that ended otherwise
   // (completed or failed) ended in the engine first. A cancelled one may
   // have a live run left, whose termination failed.
@@ -311,6 +315,7 @@ export const endLiveRuns = async (): Promise<void> => {
         seenEnded.add(id);
       })
   );
+  await env.DB.prepare("DELETE FROM workflow_admission_queue").run();
 };
 
 /** Removes a person from the organization; returns how to bring them back. */
