@@ -244,62 +244,27 @@ const withFailure = (
 
 /**
  * Settles run `row`'s admitted cancel receipt (a screen's,
- * screen-workflows.ts) by how it ended, `applied` when it was cancelled,
- * `superseded` when it ended otherwise first, and audits the stop it asked
- * for with it, once: under the App, naming the person whose screen asked
- * (`onBehalfOf`), whichever request or repair stopped the run. A run that
- * hasn't ended settles none.
+ * screen-workflows.ts) by how it ended: `applied` when it was cancelled,
+ * `superseded` when it ended otherwise first. A run that hasn't ended
+ * settles none. What the receipt asked of the engine was audited as it
+ * asked (`applyCancel`).
  */
 const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
   if (unended.includes(row.status)) {
     return;
   }
-  const db = drizzle(env.DB);
-  const receipt = await db
-    .select({
-      id: workflowResourceRunControls.id,
-      appId: workflowResourceRunControls.appId,
-      principalId: workflowResourceRunControls.principalId,
+  await drizzle(env.DB)
+    .update(workflowResourceRunControls)
+    .set({
+      state: row.status === "cancelled" ? "applied" : "superseded",
+      settledAt: new Date(),
     })
-    .from(workflowResourceRunControls)
     .where(
       and(
         eq(workflowResourceRunControls.runId, row.id),
         eq(workflowResourceRunControls.state, "admitted")
       )
-    )
-    .get();
-  if (receipt === undefined) {
-    return;
-  }
-  const entry = runEntry(row, "workflow.run.terminated");
-  await auditedBatch(env, db, [
-    db
-      .update(workflowResourceRunControls)
-      .set({
-        state: row.status === "cancelled" ? "applied" : "superseded",
-        settledAt: new Date(),
-      })
-      .where(
-        and(
-          eq(workflowResourceRunControls.id, receipt.id),
-          eq(workflowResourceRunControls.state, "admitted")
-        )
-      ),
-    outboxedIfChanged(db, {
-      ...entry,
-      actor: {
-        type: "app",
-        appId: appIdSchema.parse(receipt.appId),
-        part: "screen",
-      },
-      detail: {
-        ...entry.detail,
-        status: row.status,
-        onBehalfOf: receipt.principalId,
-      },
-    }),
-  ]);
+    );
 };
 
 const endActions: Partial<Record<WorkflowRunStatus, string>> = {
@@ -1230,12 +1195,43 @@ export const stopResourceRun = async (
  */
 export const applyCancel = async (
   env: Env,
-  actor: AuditActor,
+  receipt: {
+    readonly id: string;
+    readonly appId: string;
+    readonly principalId: string;
+  },
   runId: string
 ): Promise<void> => {
   const before = await runOf(env, runId);
   if (before !== undefined && unended.includes(before.status)) {
-    // Audited once, as its receipt settles (`settleCancels`).
+    // The stop it asks for audited once, as it is first asked, whichever
+    // request or repair asks it: under the App's screen, naming the person
+    // who asked (`onBehalfOf`). A run that ended on its own first, before
+    // any stop went out, is audited as nothing of the screen's.
+    const db = drizzle(env.DB);
+    const entry = runEntry(before, "workflow.run.terminated");
+    const actor: AuditActor = {
+      type: "app",
+      appId: appIdSchema.parse(receipt.appId),
+      part: "screen",
+    };
+    await auditedBatch(env, db, [
+      db
+        .update(workflowResourceRunControls)
+        .set({ stopRequestedAt: new Date() })
+        .where(
+          and(
+            eq(workflowResourceRunControls.id, receipt.id),
+            eq(workflowResourceRunControls.state, "admitted"),
+            isNull(workflowResourceRunControls.stopRequestedAt)
+          )
+        ),
+      outboxedIfChanged(db, {
+        ...entry,
+        actor,
+        detail: { ...entry.detail, onBehalfOf: receipt.principalId },
+      }),
+    ]);
     await stopResourceRun(env, actor, before, false);
   }
   const after = await runOf(env, runId);
@@ -1271,6 +1267,7 @@ const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
       id: workflowResourceRunControls.id,
       runId: workflowResourceRunControls.runId,
       appId: workflowResourceRunControls.appId,
+      principalId: workflowResourceRunControls.principalId,
       attempts: workflowResourceRunControls.attempts,
     })
     .from(workflowResourceRunControls)
@@ -1282,7 +1279,7 @@ const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
     )
     .orderBy(asc(workflowResourceRunControls.nextAt))
     .limit(cancelsPerRepair);
-  for (const { id, runId, appId, attempts } of due) {
+  for (const { id, runId, appId, principalId, attempts } of due) {
     const backoff = Math.min(repairAfterMs * 2 ** attempts, maxStartBackoffMs);
     // oxlint-disable-next-line no-await-in-loop -- one at a time
     const claimed = await db
@@ -1304,11 +1301,7 @@ const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
     }
     try {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
-      await applyCancel(
-        env,
-        { type: "app", appId: appIdSchema.parse(appId), part: "screen" },
-        runId
-      );
+      await applyCancel(env, { id, appId, principalId }, runId);
     } catch (error) {
       log.error("workflow.resource_run_cancel_failed", {
         runId,

@@ -5,7 +5,6 @@ import {
 } from "@grasp-os/sdk/host";
 import type { BoundWorkflow, WorkflowPin } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
-import { delegateActorOf } from "@grasp-os/shared/audit";
 import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -733,7 +732,7 @@ const controlled = async (
   }
   if (receipt.state === "admitted") {
     try {
-      await applyCancel(env, delegateActorOf(authorityOf(asking)), row.id);
+      await applyCancel(env, receipt, row.id);
       receipt = (await cancelOf(env, row.id)) ?? receipt;
     } catch (error) {
       // Admitted all the same, which is what the screen is answered: the

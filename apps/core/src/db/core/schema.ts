@@ -3014,6 +3014,11 @@ export const workflowResourceRunControls = sqliteTable(
      */
     attempts: integer().notNull().default(0),
     nextAt: timestamp("next_at").notNull(),
+    /**
+     * When its stop was first asked of the engine, set once: what audits
+     * that stop exactly once, however often it is asked again.
+     */
+    stopRequestedAt: timestamp("stop_requested_at"),
   },
   (table) => [
     uniqueIndex("workflow_resource_run_controls_kind_idx").on(

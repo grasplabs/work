@@ -1470,6 +1470,51 @@ describe(
       });
     });
 
+    it("settles a cancel as superseded, auditing no stop, when its run completed before the stop went out", async () => {
+      const { builder, app, reference } = await requestsApp();
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stop = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "completed"
+        );
+      }, settles);
+      stop();
+      // Admitted while it ran, its request ended before it asked the engine.
+      await env.DB.prepare(
+        "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, created_at, next_at) VALUES (?, ?, ?, ?, ?, 'cancel', 'admitted', ?, ?)"
+      )
+        .bind(
+          crypto.randomUUID(),
+          handle.runId,
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000,
+          Date.now() - 60_000
+        )
+        .run();
+      const events = await auditedDuring(async () => {
+        await repairResourceTerminations(env, new Date());
+      });
+      expect({
+        state: await env.DB.prepare(
+          "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
+        )
+          .bind(handle.runId)
+          .first<string>("state"),
+        terminated: events.filter(
+          ({ action, target }) =>
+            action === "workflow.run.terminated" && target?.id === handle.runId
+        ).length,
+      }).toStrictEqual({ state: "superseded", terminated: 0 });
+    });
+
     it("starts one run for a key sent twice at once, and keeps one cancel receipt for a run however many keys ask, never changed after", async () => {
       const { builder, app, reference } = await requestsApp("PT1H");
       const lease = await screenOf(builder, app);
