@@ -987,10 +987,11 @@ export const screenSubmissions = sqliteTable(
  * The workflow runs an App's tests started (workflows/fixture-runs.ts),
  * each recorded before the engine is asked for it and deleted once the
  * engine removed it: a row left behind is a test run that died between
- * the two, whose run the sweep removes. What a run is and runs with is
- * here, never in the organization's runs and receipts: its pinned
- * version and build, the fixture principal it acts for, its input and the
- * parameter values it froze as it started.
+ * the two, whose run the sweep removes past its deadline. What a run is
+ * and runs with is here, never in the organization's runs and receipts:
+ * its pinned version and build, the fixture principal it acts for, its
+ * input and the parameter values its fixture gave it (or their defaults:
+ * never the organization's).
  */
 export const appTestRuns = sqliteTable(
   "app_test_runs",
@@ -1008,8 +1009,13 @@ export const appTestRuns = sqliteTable(
     input: text().notNull(),
     params: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * When its test's time is up: no activation runs it after, and the
+     * sweep removes it once it is past.
+     */
+    deadline: timestamp("deadline").notNull(),
   },
-  (table) => [index("app_test_runs_created_at").on(table.createdAt)]
+  (table) => [index("app_test_runs_deadline").on(table.deadline)]
 );
 
 /**

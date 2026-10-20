@@ -149,7 +149,8 @@ export type TestRunOutcome<Output = unknown> =
   | { readonly status: "completed"; readonly output: Output }
   | {
       readonly status: "failed";
-      readonly code: string | null;
+      /** A code the platform defines, in its own words: never the run's. */
+      readonly code: string;
       readonly message: string;
     }
   | { readonly status: "cancelled" };
@@ -157,8 +158,9 @@ export type TestRunOutcome<Output = unknown> =
 /** What a test asks of the runs it started. */
 export interface TestRuns {
   /**
-   * How `run` ended, once it has: completed with its output, failed with
-   * the error's code and message, or cancelled. Fails the test if it
+   * How `run` ended, once it has: completed with its output as the App
+   * declares it, failed with the platform's code and words for why (never
+   * what the run read), or cancelled. Fails the test if it
    * hasn't ended by the test's own deadline.
    */
   untilTerminal: <Output>(

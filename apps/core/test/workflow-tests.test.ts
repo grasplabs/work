@@ -1,7 +1,8 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import { v } from "@grasp-os/sdk";
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
-import { isExpectedError } from "@grasp-os/shared/errors";
+import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
@@ -16,6 +17,8 @@ import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { actionMainModule } from "../src/workflow-modules.ts";
+import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -24,6 +27,7 @@ import { runEngine } from "../src/workflows/engine.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // Workflow tests of an App (`workflowTest`, spec 28.2): a test principal
 // starts a workflow the release under test binds, and the run is real, on
@@ -50,7 +54,8 @@ const objectSchema = (properties: Record<string, unknown>) => ({
 const definitionOf = (
   name: string,
   tasks: unknown[],
-  bindings: Record<string, unknown> = {}
+  bindings: Record<string, unknown> = {},
+  params: Record<string, unknown> = {}
 ): string =>
   JSON.stringify({
     document: {
@@ -60,7 +65,7 @@ const definitionOf = (
       version: "1.0.0",
       title: name,
       metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
+        grasp: { profile: "grasp-open-workflow/1", params, bindings },
       },
     },
     input: { schema: objectSchema({ who: { type: "string" } }) },
@@ -76,7 +81,9 @@ const greeting = (before: unknown[] = []) => [
 
 /** The App's files: it binds `followUp`, with `tests` as its tests. */
 const filesWith = (
-  tests: Record<string, string> = {}
+  tests: Record<string, string> = {},
+  /** The parameter values the fixture gives each workflow, by alias. */
+  workflows?: Record<string, { params: Record<string, unknown> }>
 ): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
@@ -106,20 +113,47 @@ export default app({
 `,
   "tests/fixtures/desk.json": JSON.stringify({
     principals: { "desk-user": { role: "user" } },
+    ...(workflows === undefined ? {} : { workflows }),
   }),
   ...tests,
 });
+
+/** A connector contract of the catalog `admin` publishes: `mail.send`. */
+const mailContract = async (admin: Identity): Promise<string> => {
+  const key = `mail-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key,
+    kind: "connector",
+    operations: {
+      "mail.send": {
+        input: JSON.stringify(
+          v.object({ to: v.string(), subject: v.string() }).descriptor
+        ),
+        output: JSON.stringify(v.object({ messageId: v.string() }).descriptor),
+      },
+    },
+  });
+  return key;
+};
 
 /** A workflow of `by`'s, its version 1 `tasks`, and `bindings`. */
 const workflowOf = async (
   by: Acting,
   tasks: unknown[],
-  bindings: Record<string, unknown> = {}
+  bindings: Record<string, unknown> = {},
+  {
+    params = {},
+    modules,
+  }: {
+    params?: Record<string, unknown>;
+    modules?: Record<string, string>;
+  } = {}
 ): Promise<string> => {
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name, tasks, bindings),
+    definition: definitionOf(workflow.name, tasks, bindings, params),
     basedOn: null,
+    ...(modules === undefined ? {} : { modules }),
   });
   return workflow.id;
 };
@@ -127,10 +161,15 @@ const workflowOf = async (
 /** The Requests App with `tests`, binding workflow `workflow` as `followUp`. */
 const requestsApp = async (
   workflow: (by: Acting) => Promise<string>,
-  tests: Record<string, string> = {}
+  tests: Record<string, string> = {},
+  workflows?: Record<string, { params: Record<string, unknown> }>
 ) => {
   const builder = await person("builder");
-  const fixture = await appWith(filesWith(tests), "Requests", builder);
+  const fixture = await appWith(
+    filesWith(tests, workflows),
+    "Requests",
+    builder
+  );
   const workflowId = await workflow(builder);
   await bindWorkflowToApp(env, builder, workflowId, {
     app: fixture.app,
@@ -183,12 +222,29 @@ const startedAs = (answer: string): number | string => {
   return result.ok ? result.value.run : result.error.code;
 };
 
-/** A test session on the Requests App's release, for `desk-user`. */
-const sessionOf = async (release: Release) => {
-  const files = filesWith();
-  const host = fixtureHostFor(env, release, files);
+/**
+ * A test session on the Requests App's release, for `desk-user`, its
+ * fixture giving `workflows` their parameters, on `on`.
+ */
+const sessionOf = async (
+  release: Release,
+  {
+    workflows,
+    on = env,
+  }: {
+    workflows?: Record<string, { params: Record<string, unknown> }>;
+    on?: Env;
+  } = {}
+) => {
+  const host = fixtureHostFor(on, release, filesWith({}, workflows));
   return await host.open("desk", `test-${unique()}`);
 };
+
+/** How run `run` of `session` ended, as the test is told. */
+const endOf = async (
+  session: Awaited<ReturnType<typeof sessionOf>>,
+  run: number | string
+): Promise<unknown> => JSON.parse(await session.runOutcome(run));
 
 /** The test runs core still records for `app`. */
 const recordedRuns = async (app: string): Promise<string[]> => {
@@ -230,6 +286,14 @@ const activated = async (
   }
   const found = await findApp(env, app);
   return found.currentVersion === 1 ? "current" : found.currentVersion;
+};
+
+/** The calls connect has a record of, whoever made them. */
+const connectCalls = async (): Promise<number> => {
+  const row = await connectDb()
+    .prepare("SELECT COUNT(*) AS n FROM idempotent_calls")
+    .first<{ n: number }>();
+  return row?.n ?? -1;
 };
 
 /** Whether `work` answered or was refused. */
@@ -494,7 +558,7 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     const [closed] = await recordedRuns(app);
     await ended.close();
 
-    // A test that died: its session never closed.
+    // A test that died: its session never closed. Its time is up.
     const dead = await sessionOf(release);
     startedAs(
       await dead.start("desk-user", await startOf(release, { who: "Bo" }))
@@ -502,21 +566,456 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     const [left = ""] = await recordedRuns(app);
     const before = await runEngine(env).status(left);
     await env.DB.prepare(
+      "UPDATE app_test_runs SET deadline = ? WHERE run_id = ?"
+    )
+      .bind(Date.now() - 1000, left)
+      .run();
+    // One whose test still runs: kept, whenever it started.
+    const live = await sessionOf(release);
+    startedAs(
+      await live.start("desk-user", await startOf(release, { who: "Cy" }))
+    );
+    const both = await recordedRuns(app);
+    const running = both.find((id) => id !== left) ?? "";
+    await env.DB.prepare(
       "UPDATE app_test_runs SET created_at = ? WHERE run_id = ?"
     )
-      .bind(Date.now() - 2 * 60 * 60_000, left)
+      .bind(Date.now() - 2 * 60 * 60_000, running)
       .run();
     await sweepTestFixtures(env, new Date());
+    const kept = await recordedRuns(app);
+    await live.close();
     expect({
       closed: await runEngine(env).status(closed ?? ""),
       before: before !== undefined,
       swept: await runEngine(env).status(left),
+      kept,
       recorded: await recordedRuns(app),
     }).toStrictEqual({
       closed: undefined,
       before: true,
       swept: undefined,
+      kept: [running],
       recorded: [],
+    });
+  });
+
+  it("sweep the runs left longest ago first, a page at a time", async () => {
+    const app = `app_${unique()}`;
+    const now = Date.now();
+    // Recorded oldest last, its deadline the latest: only the order by when
+    // each was recorded puts it first.
+    const rows = Array.from({ length: 51 }, (_, index) => ({
+      runId: `left-${unique()}-${index}`,
+      createdAt: now - 60_000 * (index + 1),
+      deadline: now - 1000 * (51 - index),
+    }));
+    await env.DB.batch(
+      rows.map(({ runId, createdAt, deadline }) =>
+        env.DB.prepare(
+          "INSERT INTO app_test_runs (run_id, app_id, app_version, workflow_resource_id, version, manifest_hash, build_hash, principal, input, params, created_at, deadline) VALUES (?, ?, 1, 'wf', 1, ?, ?, 'fixture-desk-user', '{}', '{}', ?, ?)"
+        ).bind(runId, app, "0".repeat(64), "0".repeat(64), createdAt, deadline)
+      )
+    );
+    await sweepTestFixtures(env, new Date());
+    await expect(recordedRuns(app)).resolves.toStrictEqual([rows[0]?.runId]);
+  });
+
+  it("stop an activation once its test's time is up", async () => {
+    const { release } = await requestsApp(
+      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT2S" } }]))
+    );
+    const session = await sessionOf(release);
+    const run = startedAs(
+      await session.start("desk-user", await startOf(release, { who: "Ada" }))
+    );
+    await env.DB.prepare("UPDATE app_test_runs SET deadline = ?")
+      .bind(Date.now() - 1000)
+      .run();
+    const ended = await endOf(session, run);
+    await session.close();
+    expect(ended).toMatchObject({
+      status: "failed",
+      code: "operation.cancelled",
+    });
+  });
+
+  it("stop waiting for a run's end once its test's session closes", async () => {
+    const { release } = await requestsApp(
+      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
+    );
+    const session = await sessionOf(release);
+    const run = startedAs(
+      await session.start("desk-user", await startOf(release, { who: "Ada" }))
+    );
+    const waiting = session.runOutcome(run);
+    await scheduler.wait(200);
+    await session.close();
+    const answered = await Promise.race([
+      waiting,
+      (async () => {
+        await scheduler.wait(5000);
+        return "still waiting";
+      })(),
+    ]);
+    expect(answered).toBe("null");
+  });
+
+  it("keep a start's room once it was recorded, and remove its run, when the engine fails it", async () => {
+    const { release, app } = await requestsApp(
+      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
+    );
+    let failed = false;
+    const failingStart = <T extends object>(namespace: T): T =>
+      new Proxy(namespace, {
+        get: (target, name): unknown => {
+          const value: unknown = Reflect.get(target, name);
+          if (name === "jurisdiction" && typeof value === "function") {
+            return (...args: unknown[]): unknown => {
+              const scoped: unknown = Reflect.apply(value, target, args);
+              return typeof scoped === "object" && scoped !== null
+                ? failingStart(scoped)
+                : scoped;
+            };
+          }
+          if (name === "get" && typeof value === "function") {
+            return (...args: unknown[]): unknown => {
+              const stub: unknown = Reflect.apply(value, target, args);
+              if (typeof stub !== "object" || stub === null) {
+                return stub;
+              }
+              return new Proxy(stub, {
+                get: (object, method): unknown => {
+                  const member: unknown = Reflect.get(object, method);
+                  if (method === "start" && !failed) {
+                    failed = true;
+                    return async () => {
+                      await Promise.resolve();
+                      throw new Error("The engine couldn't be reached.");
+                    };
+                  }
+                  return typeof member === "function"
+                    ? (...called: unknown[]): unknown =>
+                        Reflect.apply(member, object, called)
+                    : member;
+                },
+              });
+            };
+          }
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      });
+    const session = await sessionOf(release, {
+      on: { ...env, WORKFLOW_RUNS: failingStart(env.WORKFLOW_RUNS) },
+    });
+    const request = await startOf(release, { who: "Ada" });
+    const first = startedAs(await session.start("desk-user", request));
+    const afterFailure = await recordedRuns(app);
+    const rest: (number | string)[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      // One after another: each start's own room.
+      // oxlint-disable-next-line no-await-in-loop
+      rest.push(startedAs(await session.start("desk-user", request)));
+    }
+    await session.close();
+    expect({
+      first: typeof first,
+      afterFailure,
+      started: rest.filter((answer) => typeof answer === "number").length,
+      refused: rest.filter((answer) => typeof answer === "string"),
+    }).toStrictEqual({
+      first: "string",
+      afterFailure: [],
+      // Its room stayed taken: nine more, then the limit.
+      started: 9,
+      refused: ["operation.call_limit"],
+    });
+  });
+
+  it("tell a test and its report of a failed run only the platform's code and words, never a value it read", async () => {
+    const admin = await person("admin");
+    const key = await mailContract(admin);
+    let workflowId = "";
+    const { app, builder } = await requestsApp(
+      async (by) => {
+        workflowId = await workflowOf(
+          by,
+          [
+            {
+              count: {
+                set: { status: "${ $params.word | tonumber | tostring }" },
+              },
+            },
+            {
+              send: {
+                call: "grasp.connector",
+                with: {
+                  binding: "mail",
+                  operation: "mail.send",
+                  arguments: { to: "Ada", subject: "${ $params.token }" },
+                },
+              },
+            },
+          ],
+          { mail: { kind: "connector", contract: key } },
+          {
+            params: {
+              word: {
+                schema: { type: "string", maxLength: 64 },
+                label: "Word",
+                default: "default-word",
+                sensitive: false,
+              },
+              token: {
+                schema: { type: "string", maxLength: 64 },
+                label: "Token",
+                default: "none",
+                sensitive: true,
+              },
+            },
+          }
+        );
+        return workflowId;
+      },
+      {
+        "tests/leak.test.ts": suiteOf(`
+      const run = await owner.start(workflows.followUp, { who: "Ada" });
+      t.equal(JSON.stringify(await t.runs.untilTerminal(run)), "shown");`),
+      },
+      { followUp: { params: { word: "fixture-secret-word" } } }
+    );
+    await setWorkflowParams(env, builder, workflowId, {
+      expectedRevision: 0,
+      values: { word: "org-secret-word", token: "org-secret-token" },
+    });
+    const report = JSON.stringify(await activated(builder, app));
+    expect({
+      // The test failed, quoting how the run ended, in full.
+      failed: report.includes("failed") && report.includes("code"),
+      leaked: /secret/u.test(report),
+    }).toStrictEqual({ failed: true, leaked: false });
+  });
+
+  it("tell a test of a run that failed for a reason of core's own only the platform's words for a step's failure", async () => {
+    const { release, app } = await requestsApp(
+      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1S" } }]))
+    );
+    const session = await sessionOf(release);
+    const run = startedAs(
+      await session.start("desk-user", await startOf(release, { who: "Ada" }))
+    );
+    // Its record changed under it: its next activation fails, as core's
+    // own error, which names the run.
+    await env.DB.prepare(
+      "UPDATE app_test_runs SET manifest_hash = ? WHERE app_id = ?"
+    )
+      .bind("f".repeat(64), app)
+      .run();
+    const ended = await endOf(session, run);
+    await session.close();
+    expect(ended).toStrictEqual({
+      status: "failed",
+      code: "workflow.step_failed",
+      message: expectedMessageOf("workflow.step_failed"),
+    });
+  });
+
+  it("refuse a connector's call and an action's: connect and the action's sandbox are never asked", async () => {
+    const admin = await person("admin");
+    const key = await mailContract(admin);
+    const connectorRun = await requestsApp(
+      async (by) =>
+        await workflowOf(
+          by,
+          [
+            {
+              send: {
+                call: "grasp.connector",
+                with: {
+                  binding: "mail",
+                  operation: "mail.send",
+                  arguments: { to: "Ada", subject: "Hi" },
+                },
+              },
+            },
+            { greet: { set: { status: "sent" } } },
+          ],
+          { mail: { kind: "connector", contract: key } }
+        )
+    );
+    const actionRun = await requestsApp(
+      async (by) =>
+        await workflowOf(
+          by,
+          [
+            {
+              notify: {
+                call: "grasp.operation",
+                with: {
+                  binding: "notify",
+                  arguments: { to: "${ $workflow.input.who }" },
+                },
+              },
+            },
+            { greet: { set: { status: "notified" } } },
+          ],
+          {
+            notify: {
+              kind: "operation",
+              contract: "local:code/notify.ts#notify",
+            },
+          },
+          {
+            modules: {
+              "code/notify.ts": `import { action, v } from "@grasp-os/sdk/action";
+
+export const notify = action({
+  args: { to: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [],
+  handler: async () => ({ status: "notified" }),
+});
+`,
+            },
+          }
+        )
+    );
+    const loaded: string[] = [];
+    const loader = env.LOADER;
+    const get = loader.get.bind(loader);
+    vi.spyOn(loader, "get").mockImplementation((name, code) =>
+      get(name, async () => {
+        const made = await code();
+        loaded.push(made.mainModule);
+        return made;
+      })
+    );
+    const connectBefore = await connectCalls();
+    const endedIn = async (
+      fixture: Awaited<ReturnType<typeof requestsApp>>
+    ): Promise<unknown> => {
+      const session = await sessionOf(fixture.release);
+      const run = startedAs(
+        await session.start(
+          "desk-user",
+          await startOf(fixture.release, { who: "Ada" })
+        )
+      );
+      const outcome = await endOf(session, run);
+      await session.close();
+      return outcome;
+    };
+    expect({
+      connector: await endedIn(connectorRun),
+      action: await endedIn(actionRun),
+      connectAsked: (await connectCalls()) - connectBefore,
+      actionSandboxes: loaded.filter((main) => main === actionMainModule),
+    }).toMatchObject({
+      connector: { status: "failed", code: "resource.unavailable" },
+      action: { status: "failed", code: "resource.unavailable" },
+      connectAsked: 0,
+      actionSandboxes: [],
+    });
+  });
+
+  it("refuse a run's output that is more than the App declares, as a screen is shown it", async () => {
+    const { release } = await requestsApp(async (by) => {
+      const workflow = await createWorkflowResource(
+        env,
+        by,
+        `wider-${unique()}`
+      );
+      await publishWorkflowVersion(env, by, workflow.id, {
+        definition: JSON.stringify({
+          ...JSON.parse(
+            definitionOf(workflow.name, [
+              { greet: { set: { status: "hello", secret: "ultramarine" } } },
+            ])
+          ),
+          output: {
+            schema: objectSchema({
+              status: { type: "string" },
+              secret: { type: "string" },
+            }),
+          },
+        }),
+        basedOn: null,
+      });
+      return workflow.id;
+    });
+    const session = await sessionOf(release);
+    const run = startedAs(
+      await session.start("desk-user", await startOf(release, { who: "Ada" }))
+    );
+    const ended = await endOf(session, run);
+    await session.close();
+    expect({
+      ended,
+      leaks: JSON.stringify(ended).includes("ultramarine"),
+    }).toMatchObject({
+      ended: { status: "failed", code: "contract.invalid_return" },
+      leaks: false,
+    });
+  });
+
+  it("run with the fixture's parameter values or their defaults, never the organization's", async () => {
+    const params = {
+      greeting: {
+        schema: { type: "string", maxLength: 64 },
+        label: "Greeting",
+        default: "Hello",
+        sensitive: false,
+      },
+    };
+    let workflowId = "";
+    let builder: Acting | undefined;
+    const { release } = await requestsApp(async (by) => {
+      builder = by;
+      workflowId = await workflowOf(
+        by,
+        [
+          {
+            greet: {
+              set: {
+                status: '${ $params.greeting + ", " + $workflow.input.who }',
+              },
+            },
+          },
+        ],
+        {},
+        { params }
+      );
+      return workflowId;
+    });
+    if (builder === undefined) {
+      throw new Error("No builder");
+    }
+    await setWorkflowParams(env, builder, workflowId, {
+      expectedRevision: 0,
+      values: { greeting: "Ultramarine" },
+    });
+    const ended = async (
+      workflows?: Record<string, { params: Record<string, unknown> }>
+    ): Promise<unknown> => {
+      const session = await sessionOf(release, { workflows });
+      const run = startedAs(
+        await session.start("desk-user", await startOf(release, { who: "Ada" }))
+      );
+      const outcome = typeof run === "number" ? await endOf(session, run) : run;
+      await session.close();
+      return outcome;
+    };
+    expect({
+      defaults: await ended(),
+      fixture: await ended({ followUp: { params: { greeting: "Fixture" } } }),
+      unknown: await ended({ followUp: { params: { colour: "red" } } }),
+    }).toStrictEqual({
+      defaults: { status: "completed", output: { status: "Hello, Ada" } },
+      fixture: { status: "completed", output: { status: "Fixture, Ada" } },
+      unknown: "workflow.params_invalid",
     });
   });
 });

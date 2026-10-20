@@ -152,6 +152,42 @@ const acceptedValue = (
 };
 
 /**
+ * The parameter values a run an App's test starts (workflows/fixture-runs.ts)
+ * runs version `version` of workflow `id` with: `given`, the values the
+ * test's fixture declares, each normalized, and for every other parameter
+ * its declared default; never a value the organization set
+ * (`workflow.params_invalid`, naming the parameter, for one given that the
+ * version doesn't take or that doesn't fit, and for one with neither).
+ */
+export const fixtureParams = async (
+  env: Env,
+  id: string,
+  version: number,
+  given: Readonly<Record<string, unknown>>
+): Promise<string> => {
+  const contract = await versionContract(env, id, version);
+  if (contract === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  const frozen: Record<string, unknown> = {};
+  for (const name of Object.keys(given)) {
+    if (!Object.hasOwn(contract.params, name)) {
+      throw workflowResourceErrors.create("workflow.params_invalid", {
+        issues: [`${name}: The workflow has no such parameter.`],
+      });
+    }
+  }
+  for (const name of Object.keys(contract.params).toSorted()) {
+    frozen[name] = acceptedValue(
+      contract,
+      name,
+      Object.hasOwn(given, name) ? given[name] : undefined
+    );
+  }
+  return boundedJson(frozen);
+};
+
+/**
  * Every parameter's value at `revision` for version `version` of workflow
  * `id`, as a start freezes it: set, or its default, each checked against
  * that version's declaration, as canonical JSON.
