@@ -1,3 +1,4 @@
+import { landscapeProviderSchema } from "@grasp-os/shared/landscape";
 import type {
   LandscapeAppSummary,
   LandscapeSyncStatus,
@@ -143,7 +144,11 @@ export const landscapeAppsOf = (
   held?: HeldPermissions
 ): LandscapeApp[] =>
   integrations
-    .filter(({ connections }) => connections.length > 0)
+    // The landscape's own connection reads the apps; it isn't one of them.
+    .filter(
+      ({ connections, id }) =>
+        connections.length > 0 && !landscapeProviderSchema.safeParse(id).success
+    )
     .map((integration) => appOf(integration, held));
 
 /** What the Landscape's pages read: the apps, or why there are none. */

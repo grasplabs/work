@@ -14,6 +14,7 @@ import { IncompleteNotice, SyncNotices } from "./sync-notice.tsx";
 
 const status = (patch: Partial<LandscapeSyncStatus>): LandscapeSyncStatus => ({
   connectionId: "connection-entra",
+  connection: "active",
   state: "done",
   reason: null,
   startedAt: "2026-10-20T10:00:00.000Z",

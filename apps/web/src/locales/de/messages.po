@@ -5637,6 +5637,10 @@ msgstr "Microsoft hat auf die Abfragen nicht geantwortet. Grasp versucht es morg
 msgid "Microsoft Entra hasn't been read whole yet."
 msgstr "Microsoft Entra wurde noch nicht vollständig gelesen."
 
+#: src/landscape/connect-landscape.tsx
+msgid "Microsoft Entra needs connecting again"
+msgstr "Microsoft Entra muss neu verbunden werden"
+
 #: src/landscape/landscape.ts
 msgid "Microsoft hasn't verified who publishes this app."
 msgstr "Microsoft hat den Herausgeber dieser App nicht verifiziert."
@@ -7711,6 +7715,10 @@ msgstr "Beleg"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Letzte Chats"
+
+#: src/landscape/connect-landscape.tsx
+msgid "Reconnect Microsoft Entra"
+msgstr "Microsoft Entra neu verbinden"
 
 #: src/landscape/audit-trail.tsx
 msgid "Recorded by"

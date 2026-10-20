@@ -18,16 +18,35 @@ import { useCoreAction } from "../use-core-action.ts";
 // connects the landscape's own read-only connection (core's
 // src/landscape.ts), apart from Microsoft 365's mail, calendar and files,
 // and Grasp reads the grants once a day. Shown to admins while none is
-// connected.
+// connected, and to reconnect one whose access ran out.
 
-/** The offer to connect the landscape, for an admin who hasn't yet. */
+/**
+ * What an admin is offered: to connect the landscape while there is no
+ * connection, to connect it again while one needs it; nothing otherwise.
+ */
+export const landscapeOffer = (
+  syncs: Loaded<LandscapeSyncStatus[]> | null
+): "connect" | "reconnect" | null => {
+  if (syncs?.state !== "ready") {
+    return null;
+  }
+  if (syncs.data.length === 0) {
+    return "connect";
+  }
+  return syncs.data.some(({ connection }) => connection === "needs_reauth")
+    ? "reconnect"
+    : null;
+};
+
+/** The offer to connect the landscape, or to connect it again. */
 export const ConnectLandscape = ({
   syncs,
 }: {
   syncs: Loaded<LandscapeSyncStatus[]> | null;
 }) => {
   const { busy, failure, run } = useCoreAction();
-  if (syncs?.state !== "ready" || syncs.data.length > 0) {
+  const offer = landscapeOffer(syncs);
+  if (offer === null) {
     return null;
   }
   const connect = async (): Promise<void> => {
@@ -42,7 +61,11 @@ export const ConnectLandscape = ({
     <Alert>
       <RadarIcon />
       <AlertTitle>
-        <Trans>Find the apps your people use</Trans>
+        {offer === "connect" ? (
+          <Trans>Find the apps your people use</Trans>
+        ) : (
+          <Trans>Microsoft Entra needs connecting again</Trans>
+        )}
       </AlertTitle>
       <AlertDescription>
         <Trans>
@@ -59,7 +82,11 @@ export const ConnectLandscape = ({
           }}
           size="sm"
         >
-          <Trans>Connect Microsoft Entra</Trans>
+          {offer === "connect" ? (
+            <Trans>Connect Microsoft Entra</Trans>
+          ) : (
+            <Trans>Reconnect Microsoft Entra</Trans>
+          )}
         </Button>
       </AlertAction>
     </Alert>
