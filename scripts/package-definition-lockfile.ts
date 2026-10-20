@@ -347,9 +347,15 @@ export const projectLockfile = (input: LockfileInput): string => {
     }
     return own;
   };
+  /**
+   * The package an edge names: by its name and version, or, for an alias
+   * (`h3-v2: h3@2.0.1-rc.20`), the package its version names.
+   */
+  const keyOfEdge = ([name, version]: readonly [string, string]): string =>
+    meta.has(version) ? version : keyOf(name, version);
   const allEdges = (key: string): string[] =>
     [...edgesOf(key).dependencies, ...edgesOf(key).optionalDependencies].map(
-      ([name, version]) => keyOf(name, version)
+      keyOfEdge
     );
   const roots = importers.flatMap(([, importer]) =>
     registryDependencies(importer).map(([name, version]) =>
@@ -357,9 +363,7 @@ export const projectLockfile = (input: LockfileInput): string => {
     )
   );
   const required = reachable(roots, (key) =>
-    [...edgesOf(key).dependencies].map(([name, version]) =>
-      keyOf(name, version)
-    )
+    [...edgesOf(key).dependencies].map(keyOfEdge)
   );
   const all = reachable(roots, allEdges);
   // The kit's own graph: what the checkout installed for it, which alone

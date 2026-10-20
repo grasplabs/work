@@ -1003,6 +1003,10 @@ export const planProject = async (
       "packages:",
       '  - "vendor/@grasp-os/*"',
       "frozenLockfile: true",
+      // As the lockfile records them: a frozen install refuses a config
+      // that differs, whatever a global config says.
+      "autoInstallPeers: true",
+      "excludeLinksFromLockfile: false",
       `minimumReleaseAge: ${minimumReleaseAgeOf(catalogText)}`,
       "blockExoticSubdeps: true",
       "strictDepBuilds: true",

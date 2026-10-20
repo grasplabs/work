@@ -35,6 +35,7 @@ import {
   PackagingError,
   readCatalog,
 } from "./package-definition-lib.ts";
+import { projectLockfile } from "./package-definition-lockfile.ts";
 
 // Packaging a definition package into a standalone project
 // (package-definition-lib.ts). The package is the SDK's Notes fixture, an
@@ -1333,3 +1334,55 @@ describe(
     });
   }
 );
+
+describe("a packaged project's lockfile", () => {
+  it("follows a checkout package's alias to the package it names, and keeps the alias", () => {
+    const integrity = `sha512-${"A".repeat(86)}==`;
+    const checkoutLock = [
+      "lockfileVersion: '9.0'",
+      "packages:",
+      "  server@1.0.0:",
+      `    resolution: {integrity: ${integrity}}`,
+      "  h3@2.0.1-rc.20:",
+      `    resolution: {integrity: ${integrity}}`,
+      "snapshots:",
+      "  server@1.0.0:",
+      "    dependencies:",
+      "      h3-v2: h3@2.0.1-rc.20",
+      "  h3@2.0.1-rc.20: {}",
+      "",
+    ].join("\n");
+
+    const written = z
+      .object({
+        packages: z.record(z.string(), z.unknown()),
+        snapshots: z.record(
+          z.string(),
+          z.object({ dependencies: z.record(z.string(), z.string()) }).partial()
+        ),
+      })
+      .parse(
+        parse(
+          projectLockfile({
+            checkoutLock,
+            importers: {
+              ".": {
+                dependencies: { server: "1.0.0" },
+                devDependencies: {},
+                peerDependencies: {},
+              },
+            },
+            locks: [],
+          })
+        )
+      );
+
+    expect({
+      packages: Object.keys(written.packages).toSorted(),
+      server: written.snapshots["server@1.0.0"]?.dependencies,
+    }).toStrictEqual({
+      packages: ["h3@2.0.1-rc.20", "server@1.0.0"],
+      server: { "h3-v2": "h3@2.0.1-rc.20" },
+    });
+  });
+});
