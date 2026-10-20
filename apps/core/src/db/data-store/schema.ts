@@ -777,8 +777,9 @@ export const cascadeJobs = sqliteTable("sdk_cascade_jobs", {
   planned: integer().notNull(),
   deleted: integer().notNull().default(0),
   /**
-   * Batches of it that failed: past `cascadeJobMaxAttempts` the job fails
-   * (`failedAt`), and its records are no longer deleting.
+   * Batches of it that failed in a row: past `cascadeJobMaxAttempts` the
+   * job fails (`failedAt`) and is tried again later, its records still
+   * deleting until it finishes.
    */
   attempts: integer().notNull().default(0),
   createdAt: integer("created_at").notNull(),

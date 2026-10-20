@@ -8,6 +8,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
 import { auditProvenanceMaxItems } from "@grasp-os/shared/audit";
+import { auditEventTypeOf } from "@grasp-os/shared/audit-log";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
@@ -2754,6 +2755,66 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
     });
   });
 
+  it("plans every record a diamond reaches, however many of a record's referrers it holds already", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Root",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const [middle = ""] = await insertCascading(store, "subs", { link });
+    // 4,000 subs refer to both the link and the middle sub, and 3,000 more
+    // to the middle sub alone: by the time the plan reaches the middle
+    // sub, most of what refers to it is in the job already.
+    const both = 4000;
+    const only = 3000;
+    await runInDurableObject(objectOf(store.id), (_instance, state) => {
+      const tableOf = (name: string) =>
+        state.storage.sql
+          .exec<{ id: string }>(
+            "SELECT table_id AS id FROM sdk_tables WHERE name = ?",
+            name
+          )
+          .one().id;
+      const subsTable = tableOf("subs");
+      const linksTable = tableOf("links");
+      for (let at = 0; at < both + only; at += 1) {
+        const id = newRecordId();
+        const fields =
+          at < both ? { link, parent: middle } : { parent: middle };
+        state.storage.sql.exec(
+          "INSERT INTO sdk_records (table_id, record_id, owner_id, revision, created_at, updated_at, value_json, schema_hash) VALUES (?, ?, 'ada', 1, 0, 0, ?, ?)",
+          subsTable,
+          id,
+          JSON.stringify(fields),
+          cascadeHash
+        );
+        state.storage.sql.exec(
+          "INSERT INTO sdk_record_refs (table_id, record_id, to_table_id, to_record_id, cascade) VALUES (?, ?, ?, ?, 1)",
+          subsTable,
+          id,
+          subsTable,
+          middle
+        );
+        if (at < both) {
+          state.storage.sql.exec(
+            "INSERT INTO sdk_record_refs (table_id, record_id, to_table_id, to_record_id, cascade) VALUES (?, ?, ?, ?, 1)",
+            subsTable,
+            id,
+            linksTable,
+            link
+          );
+        }
+      }
+    });
+    const committed = await deleteNote(store, note);
+    await cascadeDone(store);
+    expect({
+      members: committed.cascadePending?.members,
+      count: await recordCount(store),
+      dangling: await danglingReferences(store),
+    }).toStrictEqual({ members: both + only + 3, count: 0, dangling: 0 });
+  });
+
   it("deletes a leafless ring far larger than a batch a batch at a time, never all at once", async () => {
     const store = await newCascadeStore();
     const [note = ""] = await insertCascading(store, "notes", {
@@ -3115,6 +3176,8 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
     expect({
       actions: [...new Set(events.map(({ action }) => action))].toSorted(),
       actors: [...new Set(events.map(({ actor }) => JSON.stringify(actor)))],
+      // Filed as actions, so a search or export by type finds them.
+      types: [...new Set(events.map((event) => auditEventTypeOf(event)))],
       started: events.find(({ action }) => action === "store.cascade_started")
         ?.detail,
       batched: batches.flatMap(({ provenance }) => provenance).toSorted(),
@@ -3129,6 +3192,7 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
         "store.cascade_started",
       ],
       actors: [JSON.stringify({ type: "person", userId: ada.userId })],
+      types: ["action"],
       started: {
         job,
         table: "notes",

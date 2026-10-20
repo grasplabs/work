@@ -561,6 +561,9 @@ const cascadeBatchesPerAlarm = 10;
  */
 const cascadeJobMaxAttempts = 3;
 
+/** Most referring records a cascade job's plan reads at a time. */
+const cascadePlanPage = 1000;
+
 /** How long a failed cascade job is set aside before it is tried again. */
 const cascadeFailedRetryMs = dayMs;
 
@@ -3666,26 +3669,43 @@ export class StoreHost {
       throw new Error("A cascade job planned without a deletion");
     }
     for (let gone = pending.pop(); gone !== undefined; gone = pending.pop()) {
-      const referring = this.#db
-        .select({ tableId: recordRefs.tableId, recordId: recordRefs.recordId })
-        .from(recordRefs)
-        .where(
-          and(
-            eq(recordRefs.toTableId, gone.tableId),
-            eq(recordRefs.toRecordId, gone.recordId),
-            eq(recordRefs.cascade, true)
+      // Every record referring to it, a page at a time in the order of
+      // their IDs: records the job has already are skipped, never counted
+      // against a page, so none it still needs is missed. Past the bound,
+      // `add` refuses at once.
+      let after: { tableId: string; recordId: string } | undefined;
+      for (;;) {
+        const referring = this.#db
+          .select({
+            tableId: recordRefs.tableId,
+            recordId: recordRefs.recordId,
+          })
+          .from(recordRefs)
+          .where(
+            and(
+              eq(recordRefs.toTableId, gone.tableId),
+              eq(recordRefs.toRecordId, gone.recordId),
+              eq(recordRefs.cascade, true),
+              after === undefined
+                ? undefined
+                : sql`(${recordRefs.tableId}, ${recordRefs.recordId}) > (${after.tableId}, ${after.recordId})`
+            )
           )
-        )
-        // One more than the bound has room for is enough to refuse.
-        .limit(cascadeJobMaxRecords - members.size + 2)
-        .all();
-      for (const { tableId, recordId } of referring) {
-        // Left to the commit's own write (`#requireCascadeClosed`).
-        const written = staged.get(keyOf(tableId, recordId));
-        if (written !== undefined && written.fields !== null) {
-          continue;
+          .orderBy(asc(recordRefs.tableId), asc(recordRefs.recordId))
+          .limit(cascadePlanPage)
+          .all();
+        for (const { tableId, recordId } of referring) {
+          // Left to the commit's own write (`#requireCascadeClosed`).
+          const written = staged.get(keyOf(tableId, recordId));
+          if (written !== undefined && written.fields !== null) {
+            continue;
+          }
+          add({ tableId, recordId });
         }
-        add({ tableId, recordId });
+        after = referring.at(-1);
+        if (referring.length < cascadePlanPage) {
+          break;
+        }
       }
     }
     return { root, members };
