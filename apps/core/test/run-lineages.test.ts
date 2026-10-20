@@ -10,6 +10,7 @@ import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
@@ -804,6 +805,82 @@ ${llmStep()}`,
       claim: "refused",
       deleted: "refused",
       unset: "changed",
+    });
+  });
+
+  it("tell a run another App started in a lineage nothing of when the lineage's calls under way were sent", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const appX = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    const appY = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    const root = await builder.api.workflows.start(appX, "idle");
+    await finished(root.id);
+    const release = Promise.withResolvers<boolean>();
+    const held = { ...cheapAnswer, pause: { at: 1, until: release.promise } };
+    // A run of App Y in App X's lineage, as a run's own mail starts one
+    // (connector-events.ts), and a run of App X beside it.
+    const inLineage = (app: string) =>
+      runActorOf({
+        runId: `run-${crypto.randomUUID()}`,
+        app,
+        workflow: "idle",
+        rootRunId: root.id,
+      });
+    const told = async (app: string) => {
+      const refused = await models(env)
+        .call(stepCall({ app, person: builder.userId }, inLineage(app), false))
+        .then(
+          () => "admitted",
+          (error: unknown) => error
+        );
+      const { code, details } = z
+        .object({
+          code: z.string(),
+          details: z.record(z.string(), z.unknown()),
+        })
+        .parse(refused);
+      return [code, details.because, details.retryAfterSeconds];
+    };
+
+    // $0.02 a lineage fits one call reserving Llama's whole answer, not a
+    // second beside it.
+    const result = await withGateway(
+      { run: { limit: 0.02 } },
+      [held],
+      async (fake) => {
+        // The root's call may take 15 minutes: a wait derived from it
+        // would be the most, five.
+        const holding = outcome(
+          models(env).call({
+            ...stepCall(
+              { app: appX, person: builder.userId },
+              runActorOf({ runId: root.id, app: appX, workflow: "idle" }),
+              false
+            ),
+            timeoutMs: 15 * 60_000,
+          })
+        );
+        await vi.waitFor(() => {
+          expect(fake.requests).toHaveLength(1);
+        });
+        const refusals = { appY: await told(appY), appX: await told(appX) };
+        release.resolve(true);
+        return { refusals, held: await holding };
+      }
+    );
+
+    // A fixed wait, whichever App: a lineage may hold other Apps' calls.
+    expect(result).toStrictEqual({
+      refusals: {
+        appY: ["model.budget_busy", "run", 60],
+        appX: ["model.budget_busy", "run", 60],
+      },
+      held: "ok",
     });
   });
 
