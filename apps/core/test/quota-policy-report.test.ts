@@ -11,7 +11,7 @@ import {
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { quotaPolicy } from "../src/workflows/quotas.ts";
+import { quotaPolicy, recordGeneration } from "../src/workflows/quotas.ts";
 import { allEvents } from "./audit-events.ts";
 import { lastGeneration, nextPolicy, withQuotas } from "./quota-policies.ts";
 import { routed } from "./sign-in.ts";
@@ -147,6 +147,31 @@ describe("the quota policy core applies", () => {
       recorded: [{ generation: newer.generation, workflowSteps: 7 }],
       // Only the one recording of the newest.
       refused: 1,
+    });
+  });
+
+  it("records nothing, and logs nothing, of a generation an isolate read as newest after a newer one went in", async () => {
+    const configured = env.QUOTA_LIMITS;
+    // A generation never deployed, then a newer one.
+    const skipped = nextPolicy({});
+    const newer = nextPolicy({ workflowSteps: 9 });
+    env.QUOTA_LIMITS = newer;
+    await quotaPolicy(env);
+    // An isolate that read the highest before `newer` was recorded, and
+    // records the generation before it.
+    const stale = { generation: skipped.generation, limits: {} };
+    await recordGeneration(env, stale, "{}", "stale-hash");
+    const row = await env.DB.prepare(
+      "SELECT generation FROM quota_policies WHERE generation = ?"
+    )
+      .bind(stale.generation)
+      .first();
+    const logged = await recordedEvents(stale.generation);
+    env.QUOTA_LIMITS = nextPolicy(quotaLimitsSchema.parse(configured).limits);
+    await quotaPolicy(env);
+    expect({ row, logged: logged.length }).toStrictEqual({
+      row: null,
+      logged: 0,
     });
   });
 });
