@@ -244,8 +244,10 @@ const withFailure = (
 
 /**
  * Settles run `row`'s admitted cancel receipt (a screen's,
- * screen-workflows.ts) by how it ended: `applied` when it was cancelled,
- * `superseded` when it ended otherwise first. A run that hasn't ended
+ * screen-workflows.ts) by how it ended: `applied` when it was cancelled
+ * after the receipt asked its stop, `superseded` when it ended otherwise
+ * first (on its own, or by a builder's terminate before the receipt's
+ * stop went out). A run that hasn't ended
  * settles none. What the receipt asked of the engine was audited as it
  * asked (`applyCancel`).
  */
@@ -256,7 +258,12 @@ const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
   await drizzle(env.DB)
     .update(workflowResourceRunControls)
     .set({
-      state: row.status === "cancelled" ? "applied" : "superseded",
+      // Applied only when it was cancelled and this receipt's stop was
+      // asked: one a builder's terminate, say, ended first is superseded.
+      state:
+        row.status === "cancelled"
+          ? sql`CASE WHEN ${workflowResourceRunControls.stopRequestedAt} IS NOT NULL THEN 'applied' ELSE 'superseded' END`
+          : "superseded",
       settledAt: new Date(),
     })
     .where(
