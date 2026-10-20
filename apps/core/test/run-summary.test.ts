@@ -300,10 +300,9 @@ export default workflowTests(definition, [
     )
       .bind(app)
       .first<{ workflow_calls: string }>();
-    const { id: run } = await builder.api.screens.startRun(app, "routed", {
-      reviewer: "role:admin",
-      days: 7,
-    });
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("routed", { reviewer: "role:admin", days: 7 });
 
     const waiting = await summaryWhen(
       builder,

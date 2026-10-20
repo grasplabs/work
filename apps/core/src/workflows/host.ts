@@ -2720,6 +2720,17 @@ export class RunHost extends RpcTarget {
         decisionSchema,
         request
       );
+      // A decision is its own step's, as the SDK opens it: one opened
+      // under another step's name would be held to that step's review,
+      // its reviewer read as that step's (`reviewerChosenAtRun`).
+      if (step !== attempt.step) {
+        const error = workflowErrors.create("workflow.invalid");
+        error.message = `A decision opens only in the step that asks it: step "${attempt.step}" can't open one for "${step}".`;
+        await this.#refuseTampering(error, {
+          step: attempt.step,
+          call: "decision",
+        });
+      }
       return await openDecision(this.#env, this.#run, {
         step,
         from,

@@ -924,6 +924,38 @@ queueMicrotask(() => {
     });
   });
 
+  it("refuse a decision a step opens under another step's name, whose reviewer the review read as fixed", async () => {
+    const { host, userId, runId, tampered } = await hostHeldTo({
+      steps: { ask: [], "sign-off": [] },
+      all: [],
+      // `ask` takes its reviewer from the run's input; `sign-off` names it.
+      dynamic: { ask: ["from"] },
+    });
+    let opened: Settled<unknown> = { ok: true, value: null };
+    await host.do("ask", {}, async (attempt) => {
+      opened = await attempt.openDecision({
+        step: "sign-off",
+        from: `person:${userId}`,
+        description: "Approve the invoice",
+        timeout: 60_000,
+      });
+      return { ok: true, value: null };
+    });
+
+    expect({
+      opened: codeOf(opened),
+      // Caught or not, it ends the run (`#refuseTampering`).
+      tampered,
+      audited: await refusals(runId),
+    }).toStrictEqual({
+      opened: "workflow.invalid",
+      tampered: ["workflow.invalid"],
+      audited: [
+        { step: "ask", call: "decision", errorCode: "workflow.invalid" },
+      ],
+    });
+  });
+
   it("refuse an attempt's model, attachment and decision calls once it had a call refused", async () => {
     const { host, userId } = await hostHeldTo({ steps: { tidy: [] }, all: [] });
     const codes: string[] = [];
