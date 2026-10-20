@@ -456,6 +456,39 @@ export const screenTypeImportError = (
     : `"${specifier}" is outside the kit. Screens can import the App's own files and ${packagesOf(kit)}.`;
 };
 
+/**
+ * Why a screen's value import of `specifier` names a declaration file
+ * among `declarations` (`declarationFile`), or undefined when it names
+ * none: a declaration holds types alone and is never a module, so a value
+ * import of one would be undefined at run time. Resolved among `files`
+ * and `declarations` together, in TypeScript's order (`x.tsx` before
+ * `x.d.ts`, `x.d.ts` before `x/index.ts`), so the file the type check
+ * reads is the file the screen runs, or the import is refused.
+ */
+export const declarationValueImportError = (
+  { specifier, typeOnly }: Pick<ImportSite, "specifier" | "typeOnly">,
+  file: string,
+  {
+    files,
+    declarations,
+  }: {
+    readonly files: ReadonlySet<string>;
+    readonly declarations: ReadonlySet<string>;
+  }
+): string | undefined => {
+  if (typeOnly || specifier === undefined || !isRelative(specifier)) {
+    return undefined;
+  }
+  const resolved = resolveTypeFile(
+    file,
+    specifier,
+    new Set([...files, ...declarations])
+  );
+  return resolved !== undefined && declarations.has(resolved)
+    ? `"${specifier}" is ${resolved}, a declaration file: it holds only types, so import it with import type.`
+    : undefined;
+};
+
 /** Why a screen's import isn't allowed, or undefined when it is. */
 export const importError = (
   { specifier, names, typeOnly, ambient }: ImportSite,
