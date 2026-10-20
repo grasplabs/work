@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_decisions` ADD `starter_excluded` integer DEFAULT false NOT NULL;
