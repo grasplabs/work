@@ -448,6 +448,31 @@ describe("an App's functions", { timeout: 120_000 }, () => {
     ).toBeNull();
   });
 
+  it("run an operation kept in a folder whose name has a dot", async () => {
+    const {
+      "operations/notes.ts": operations = "",
+      "app.ts": registration = "",
+      ...rest
+    } = notesFiles();
+    const notes = await sealedNotes({
+      ...rest,
+      "operations/v1.0/notes.ts": operations.replace(
+        'from "../schema.ts"',
+        'from "../../schema.ts"'
+      ),
+      "app.ts": registration.replace(
+        'from "./operations/notes.ts"',
+        'from "./operations/v1.0/notes.ts"'
+      ),
+    });
+    const id = valueOf(
+      await call(notes, notes.owner, "notes.create", { title: "Dotted" })
+    );
+    expect(
+      valueOf(await call(notes, notes.owner, "notes.get", { id }))
+    ).toMatchObject({ _id: id, title: "Dotted" });
+  });
+
   it("answer what the store refused, and the App's own failures, as their callers may see them", async () => {
     const notes = await sealedNotes();
     const id = valueOf(
