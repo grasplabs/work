@@ -8,7 +8,7 @@ import { buildWorkflows } from "../src/screens.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished } from "./runs.ts";
-import { refusal, signedInApi } from "./sign-in.ts";
+import { outcome as codeOf, refusal, signedInApi } from "./sign-in.ts";
 import { steeringCases } from "./steering-cases.ts";
 import { sampleApp, workflowFiles } from "./workflow-apps.ts";
 
@@ -366,6 +366,70 @@ describe(
         { ok: true, files: [], warned: [] },
         { ok: false, files: ["workflows/typed.ts"], warned: [] },
       ]);
+    });
+
+    it("import code the workflows share from a folder whose name has a dot", async () => {
+      const files = checked("    return twice(21);");
+      const workflow = files["workflows/checked.ts"] ?? "";
+      await expect(
+        built({
+          ...sampleApp(),
+          ...files,
+          "workflows/checked.ts": `import { twice } from "./lib.v2/twice.ts";\n${workflow}`,
+          "workflows/lib.v2/twice.ts":
+            "export const twice = (value: number): number => value * 2;\n",
+        })
+      ).resolves.toStrictEqual({ ok: true, files: [], warned: [] });
+    });
+
+    it("never make a workflow of a file in a folder, dotted or not, even one that default-exports a workflow", async () => {
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Nested" });
+      const nested = checked("    return 1;")["workflows/checked.ts"] ?? "";
+      const { version } = await builder.api.apps.files.commit(
+        app,
+        {
+          ...sampleApp(),
+          ...checked("    return 1;"),
+          "workflows/lib.v2/nested.ts": nested.replace(
+            'workflow("checked"',
+            'workflow("nested"'
+          ),
+        },
+        "Nested"
+      );
+      await builder.api.apps.versions.setCurrent(app, version);
+      await expect(
+        Promise.all(
+          ["checked", "nested"].map(
+            async (workflow) =>
+              await codeOf(builder.api.workflows.start(app, workflow))
+          )
+        )
+      ).resolves.toStrictEqual(["ok", "workflow.not_found"]);
+    });
+
+    it("refuse, by name, anything under workflows/ that isn't workflow code", async () => {
+      const strays = [
+        "workflows/notes.md",
+        "workflows/flow.json",
+        "workflows/types.d.ts",
+        // Never saved (a save refuses each), never workflow code.
+        "workflows/.hidden/x.ts",
+        "workflows/../app.ts",
+        "workflows//x.ts",
+      ];
+      await expect(
+        built({
+          ...sampleApp(),
+          ...checked("    return 1;"),
+          ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
+        })
+      ).resolves.toStrictEqual({
+        ok: false,
+        files: strays.toSorted((a, b) => (a < b ? -1 : 1)),
+        warned: [],
+      });
     });
 
     it("leave a stray declaration under operations/ out of a workflow's check, so it gives the workflows nothing", async () => {

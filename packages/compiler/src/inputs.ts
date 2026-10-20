@@ -3,22 +3,79 @@
  * Core uses these before it hashes and sends the files; the compiler again
  * on what it is sent.
  */
-import { appLimits, appManifestMaxBytes } from "@grasp-os/shared/app-limits";
+import {
+  appLimits,
+  appManifestMaxBytes,
+  appPathSegmentPattern,
+} from "@grasp-os/shared/app-limits";
 import { workflowModulesError } from "@grasp-os/shared/workflow-modules";
 
 import type { Diagnostic } from "./diagnostic.ts";
 import { screenReferences } from "./kit.ts";
 
 export const screenFile = /^screens\/[\w-]+\.tsx$/u;
-// Folders are plain names, so a path can't step out of `components/`.
-export const componentFile = /^components\/(?:[\w-]+\/)*[\w.-]+\.tsx?$/u;
 /**
  * Types the App's code can use but that aren't code, e.g. its server's:
- * at its root, or among its components. Never compiled into a module, so
- * only a type import may name one (`declarationValueImportError`).
+ * at its root, or among its components, in folders named as any App
+ * path's may be (`appPathSegmentPattern`). Never compiled into a module,
+ * so only a type import may name one (`declarationValueImportError`).
  */
 export const declarationFile =
-  /^(?:[\w-]+|components\/(?:[\w-]+\/)*[\w.-]+)\.d\.ts$/u;
+  /^(?:[\w-]+|components\/(?:[\w-][\w.-]*\/)*[\w-][\w.-]*)\.d\.ts$/u;
+
+/**
+ * Whether every folder and file name in `path` is one an App's path may
+ * have (`appPathSegmentPattern`, what a save allows): dots, but never
+ * leading, so no `.`, `..`, empty or hidden one, and a path can't step
+ * out of its folder.
+ */
+export const hasAppPathSegments = (path: string): boolean =>
+  path.split("/").every((segment) => appPathSegmentPattern.test(segment));
+
+/**
+ * A folder of an App's files that holds one kind of code only: what a
+ * file in it must be, and what a refusal says it holds. A build of that
+ * code reads the whole folder, so it can refuse what isn't
+ * (`strayFilesIn`), by name: nothing there is ever silently left out.
+ */
+export interface CodeFolder {
+  readonly folder: string;
+  readonly isFile: (path: string) => boolean;
+  readonly holds: string;
+}
+
+/** The files in `code`'s folder that aren't its code. */
+export const strayFilesIn = (
+  files: Readonly<Record<string, string>>,
+  { folder, isFile }: CodeFolder
+): string[] =>
+  Object.keys(files).filter((path) => path.startsWith(folder) && !isFile(path));
+
+/** Why `file`, one of `strayFilesIn(…, code)`, is refused. */
+export const strayFileMessage = (
+  file: string,
+  { folder, holds }: CodeFolder
+): string => `${file} is in ${folder}, which holds only ${holds}.`;
+
+const typeScriptFile = /\.tsx?$/u;
+
+/** A `.ts` file that declares nothing but types isn't code a build runs. */
+const isTypeScriptCode = (path: string): boolean =>
+  path.endsWith(".ts") && !path.endsWith(".d.ts");
+
+/**
+ * The App's components, which its screens import: TypeScript (`.ts`,
+ * `.tsx`, declarations included) anywhere under `components/`.
+ */
+export const componentsFolder: CodeFolder = {
+  folder: "components/",
+  isFile: (path) =>
+    path.startsWith("components/") &&
+    typeScriptFile.test(path) &&
+    hasAppPathSegments(path),
+  holds:
+    "the App's components: TypeScript files (*.ts, *.tsx), in folders whose names don't start with a dot",
+};
 
 /**
  * The files a build reads: screens, components and declarations, and the
@@ -32,38 +89,57 @@ export const buildFiles = (
     Object.entries(files).filter(
       ([path]) =>
         screenFile.test(path) ||
-        componentFile.test(path) ||
+        path.startsWith(componentsFolder.folder) ||
         declarationFile.test(path) ||
         path === screenReferences.path
     )
   );
 
-/** The App's server code: TypeScript under `app/`, declarations aside. */
-const serverFile = /^app\/(?:[\w-]+\/)*[\w.-]+\.ts$/u;
+/**
+ * The App's server code of a server class: TypeScript anywhere under
+ * `app/`, in folders named as any App path's may be. Not all of `app/` is
+ * code (its exports, `app/exports.json`), so nothing else there is
+ * refused.
+ */
+const isServerFile = (path: string): boolean =>
+  path.startsWith("app/") && isTypeScriptCode(path) && hasAppPathSegments(path);
 
 /** The module that exports the server's `App` class. */
 export const serverEntry = "app/server.ts";
 
-/** The files a server build reads: the App's `app/**.ts`. */
+/** The files a server build reads: the App's `app/**.ts` (`isServerFile`). */
 export const serverFiles = (
   files: Record<string, string>
 ): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(files).filter(
-      ([path]) => serverFile.test(path) && !path.endsWith(".d.ts")
-    )
+    Object.entries(files).filter(([path]) => isServerFile(path))
   );
 
-/** The App's workflows and their tests: TypeScript under `workflows/`. */
-const workflowFile = /^workflows\/(?:[\w-]+\/)*[\w.-]+\.ts$/u;
+/**
+ * The App's workflows, their tests and the code they share: TypeScript
+ * anywhere under `workflows/`. Only `workflows/<id>.ts` is a workflow
+ * (`workflowIdOf`); a file in a folder, dotted or not, is shared code.
+ */
+export const workflowsFolder: CodeFolder = {
+  folder: "workflows/",
+  isFile: (path) =>
+    path.startsWith("workflows/") &&
+    isTypeScriptCode(path) &&
+    hasAppPathSegments(path),
+  holds:
+    "the App's workflows, their tests and the code they share: TypeScript files (*.ts, not *.d.ts), in folders whose names don't start with a dot",
+};
 
-/** The files a workflow build reads: the App's `workflows/**.ts`. */
+/**
+ * The files a workflow build reads: everything under `workflows/`, so it
+ * can refuse what isn't workflow code (`workflowsFolder`).
+ */
 export const workflowFiles = (
   files: Record<string, string>
 ): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(files).filter(
-      ([path]) => workflowFile.test(path) && !path.endsWith(".d.ts")
+    Object.entries(files).filter(([path]) =>
+      path.startsWith(workflowsFolder.folder)
     )
   );
 

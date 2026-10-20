@@ -30,7 +30,8 @@
  */
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
 
-import { workflowFiles } from "./inputs.ts";
+import { hasAppPathSegments, workflowFiles } from "./inputs.ts";
+import type { CodeFolder } from "./inputs.ts";
 import { kitModuleName, appModuleName } from "./kit.ts";
 
 /**
@@ -64,43 +65,47 @@ export const generatedModules = {
 } as const;
 
 const schemaFiles: ReadonlySet<string> = new Set(["schema.ts", "values.ts"]);
-const migrationFile = /^migrations\/[\w.-]+\.ts$/u;
 const generatedFile = /^\.grasp\/[\w.-]+\.ts$/u;
 
-/** Where an App's operations are: server code only. */
-const appOperationsFolder = "operations/";
-
-/** Whether `path` is under `operations/`, whatever it is. */
-const isUnderOperations = (path: string): boolean =>
-  path.startsWith(appOperationsFolder);
+/**
+ * The App's operations, its server code: a `.ts` file anywhere under
+ * `operations/`, its folders named as any App path's may be
+ * (`hasAppPathSegments`), dots included but never leading, so no `.`,
+ * `..` or hidden folder is ever server code.
+ */
+export const operationsFolder: CodeFolder = {
+  folder: "operations/",
+  isFile: (path) =>
+    path.startsWith("operations/") &&
+    path.endsWith(".ts") &&
+    !path.endsWith(".d.ts") &&
+    hasAppPathSegments(path),
+  holds:
+    "the App's server code: TypeScript files (*.ts, not *.d.ts), in folders whose names don't start with a dot",
+};
 
 /**
- * Whether `path` is one of the App's operations files: a `.ts` file
- * anywhere under `operations/`, its folders named as any App path's may
- * be (`appPathSegmentPattern`), dots included but never leading, so no
- * `.`, `..` or hidden folder is ever server code.
+ * The App's migrations: each one file, `migrations/<name>.ts`, never in a
+ * folder, so nothing that only helps a migration is ever registered and
+ * run as one.
  */
-const isOperationFile = (path: string): boolean =>
-  isUnderOperations(path) &&
-  path.endsWith(".ts") &&
-  !path.endsWith(".d.ts") &&
-  path.split("/").every((segment) => appPathSegmentPattern.test(segment));
+export const migrationsFolder: CodeFolder = {
+  folder: "migrations/",
+  isFile: (path) =>
+    path.split("/").length === 2 &&
+    path.startsWith("migrations/") &&
+    path.endsWith(".ts") &&
+    !path.endsWith(".d.ts") &&
+    hasAppPathSegments(path),
+  holds:
+    "the App's migrations: one TypeScript file each (migrations/<name>.ts), never in a folder",
+};
 
-/**
- * The files under `operations/` that aren't operations files
- * (`isOperationFile`): a build of the server code refuses each, so
- * nothing there is ever silently left out of it.
- */
-export const strayServerFiles = (
-  files: Readonly<Record<string, string>>
-): string[] =>
-  Object.keys(files).filter(
-    (path) => isUnderOperations(path) && !isOperationFile(path)
-  );
-
-/** Why `file`, one of `strayServerFiles`, is refused. */
-export const strayServerFileMessage = (file: string): string =>
-  `${file} is in operations/, which holds only the App's server code: TypeScript files (*.ts, not *.d.ts), in folders whose names don't start with a dot.`;
+/** The folders of server code whose builds refuse what else is in them. */
+export const serverCodeFolders: readonly CodeFolder[] = [
+  operationsFolder,
+  migrationsFolder,
+];
 
 /** Where an App's tests are: suites, their helpers and their fixtures. */
 export const appTestsFolder = "tests/";
@@ -167,10 +172,10 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   if (schemaFiles.has(path)) {
     return "schema";
   }
-  if (path === "app.ts" || isOperationFile(path)) {
+  if (path === "app.ts" || operationsFolder.isFile(path)) {
     return "server";
   }
-  if (migrationFile.test(path)) {
+  if (migrationsFolder.isFile(path)) {
     return "migration";
   }
   if (generatedFile.test(path)) {
@@ -214,8 +219,8 @@ export const isAppLayout = (files: Readonly<Record<string, string>>): boolean =>
 
 /**
  * The files a build of an App's server code reads: never its tests, and
- * everything under `operations/`, so it can refuse what isn't server code
- * (`strayServerFiles`).
+ * everything under `operations/` and `migrations/`, so it can refuse what
+ * isn't server code there (`serverCodeFolders`).
  */
 export const appCodeFiles = (
   files: Readonly<Record<string, string>>
@@ -223,7 +228,10 @@ export const appCodeFiles = (
   Object.fromEntries(
     Object.entries(files).filter(([path]) => {
       const kind = appCodeKind(path);
-      return (kind !== undefined && kind !== "test") || isUnderOperations(path);
+      return (
+        (kind !== undefined && kind !== "test") ||
+        serverCodeFolders.some(({ folder }) => path.startsWith(folder))
+      );
     })
   );
 
@@ -398,6 +406,7 @@ const serverPath = (
   }
   const path = parts.join("/").replace(/\.tsx?$/u, "");
   return ["schema", "values", "app"].includes(path) ||
+    path.startsWith("app/") ||
     path.startsWith("operations/") ||
     path.startsWith("migrations/") ||
     path.startsWith(".grasp/")
