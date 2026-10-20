@@ -136,6 +136,13 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
     const engine = of.appName ?? of.appId ?? "";
     const started = formatDateTime(of.startedAt);
     const shortId = runId.slice(0, shortRunId);
+    // An account in another run's lineage: never shown as its root.
+    if (of.rootRunId !== null) {
+      const rootId = of.rootRunId.slice(0, shortRunId);
+      return i18n._(
+        msg`Run ${shortId} of ${workflowId} in ${ph({ domain: engine })}, started ${started}, in the run chain started by run ${rootId}`
+      );
+    }
     return i18n._(
       msg`Run ${shortId} of ${workflowId} in ${ph({ domain: engine })}, started ${started}`
     );

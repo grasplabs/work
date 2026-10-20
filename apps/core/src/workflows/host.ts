@@ -122,12 +122,19 @@ export interface HostedRun {
    * run that is its own root.
    */
   rootRunId?: RunId;
+  /**
+   * The run its work is charged to, for a run of another App than its
+   * lineage root's (quotas.ts, `accountClaimed`): from its row, as the
+   * root is. None for a run charged to its lineage's own.
+   */
+  accountRunId?: RunId;
   /** Who the run acts for in this execution. */
   authority: Authority;
   /**
    * Whose person share its workflow attempts and model requests take, from
    * its row (dispatcher.ts, `admissionSubjectOf`): who started it, its
-   * lineage root's, or its App's triggers' (`trigger:<app>`). Not who it
+   * account's (its lineage root's, or its App's first run in the lineage),
+   * or its App's triggers' (`trigger:<app>`). Not who it
    * acts for, which is the App's owner for a run nobody started.
    */
   shareSubject: string;

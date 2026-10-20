@@ -66,6 +66,15 @@ export const auditActorSchema = z.discriminatedUnion("type", [
      * was given. A run that is its own root has none.
      */
     rootRunId: runIdSchema.optional(),
+    /**
+     * The run whose allowances the run's work is charged to, for a run of
+     * another App than its lineage root's (a run's own mail starts other
+     * Apps' runs under it), or of the root's App under another App's run:
+     * the first run of its kind in the lineage, read from the engine's
+     * record of the run, never from what the run was given. None for a
+     * run charged to its lineage's own.
+     */
+    accountRunId: runIdSchema.optional(),
   }),
   z.object({
     type: z.literal("staff"),
@@ -133,11 +142,13 @@ export const runActorOf = ({
   app,
   workflow,
   rootRunId,
+  accountRunId,
 }: {
   runId: string;
   app: string;
   workflow: string;
   rootRunId?: string | null | undefined;
+  accountRunId?: string | null | undefined;
 }): AuditActor => ({
   type: "workflow",
   appId: appIdSchema.parse(app),
@@ -146,6 +157,9 @@ export const runActorOf = ({
   ...(rootRunId === null || rootRunId === undefined || rootRunId === runId
     ? {}
     : { rootRunId: runIdSchema.parse(rootRunId) }),
+  ...(accountRunId === null || accountRunId === undefined
+    ? {}
+    : { accountRunId: runIdSchema.parse(accountRunId) }),
 });
 
 /** The Workers that send audit events. */

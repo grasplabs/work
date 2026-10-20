@@ -39,8 +39,13 @@ const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 /** Costs 519 micros from Llama 3.3: past a $0.01 lineage budget's 1% alert. */
 const pricedAnswer = { text: "Hi.", inputTokens: 1000, outputTokens: 100 };
 
+const dayMs = 24 * 60 * 60 * 1000;
+
 /** Longer ago than the ledger's 90-day retention. */
-const longAgo = () => Date.now() - 91 * 24 * 60 * 60 * 1000;
+const longAgo = () => Date.now() - 91 * dayMs;
+
+/** Longer ago than the oldest a lineage may grow (the platform's year). */
+const pastAge = () => Date.now() - 366 * dayMs;
 
 /** An App of an idle workflow and one that waits a day, for `builder`. */
 const lineageApp = async (builder: Awaited<ReturnType<typeof signedInApi>>) =>
@@ -127,6 +132,16 @@ const endedAt = async (at: number, ...runs: string[]): Promise<void> => {
   }
 };
 
+/** Moves the start of `runs` back to `at` in core's records. */
+const startedAt = async (at: number, ...runs: string[]): Promise<void> => {
+  for (const run of runs) {
+    // oxlint-disable-next-line no-await-in-loop -- one after another
+    await env.DB.prepare("UPDATE workflow_runs SET created_at = ? WHERE id = ?")
+      .bind(at, run)
+      .run();
+  }
+};
+
 /** What the ledger keeps of lineage `root`: its spend rows and alert rows. */
 const keptOf = async (root: string) =>
   await runInDurableObject(modelLedger(env), (_instance, state) => ({
@@ -176,6 +191,7 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     ]);
     const before = await keptOf(old.id);
     await endedAt(longAgo(), old.id, child);
+    await startedAt(pastAge(), old.id, child);
 
     await swept();
 
@@ -200,6 +216,7 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     const root = await builder.api.workflows.start(app, "idle");
     await finished(root.id);
     await endedAt(longAgo(), root.id);
+    await startedAt(pastAge(), root.id);
     // A ledger of its own that holds only the ended lineage's rows, with
     // no alarm set: its last alarm ended, and nothing was admitted since.
     const ledger = env.MODEL_LEDGER.getByName(crypto.randomUUID());
@@ -261,6 +278,66 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     await builder.api.workflows.cancel(child);
   });
 
+  it("prune an App's account in a lineage it joined once every run of the lineage ended, and keep it while any is live", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const appX = await lineageApp(builder);
+    const appY = await lineageApp(builder);
+    const root = await builder.api.workflows.start(appX, "idle");
+    await finished(root.id);
+    // App Y's run in App X's lineage, charged to its own account: itself.
+    const joined = await startChild(appY, "idle", root.id, builder.userId);
+    await finished(joined);
+    const waiting = await startChild(appX, "later", root.id, builder.userId);
+    await sleeping(waiting, "pause");
+    await spendFor(appY, builder.userId, [
+      runActorOf({
+        runId: joined,
+        app: appY,
+        workflow: "idle",
+        rootRunId: root.id,
+        accountRunId: joined,
+      }),
+    ]);
+    await endedAt(longAgo(), root.id, joined);
+    await startedAt(pastAge(), root.id, joined, waiting);
+
+    await swept();
+    const whileLive = await keptOf(joined);
+    await builder.api.workflows.cancel(waiting);
+    await finished(waiting);
+    await endedAt(longAgo(), waiting);
+    await swept();
+
+    expect({ whileLive, ended: await keptOf(joined) }).toStrictEqual({
+      whileLive: { spend: 1, alerts: 1 },
+      ended: { spend: 0, alerts: 0 },
+    });
+  });
+
+  it("keep an ended lineage's spend until it is past the oldest a lineage may grow, so a run started in it late doesn't count from nothing", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await lineageApp(builder);
+    const root = await builder.api.workflows.start(app, "idle");
+    await finished(root.id);
+    await spendFor(app, builder.userId, [
+      runActorOf({ runId: root.id, app, workflow: "idle" }),
+    ]);
+    // Ended a retention ago, but started within the year a lineage may
+    // live: a late delivery of its mail could still start a run in it.
+    await endedAt(longAgo(), root.id);
+    await startedAt(Date.now() - 200 * dayMs, root.id);
+
+    await swept();
+    const young = await keptOf(root.id);
+    await startedAt(pastAge(), root.id);
+    await swept();
+
+    expect({ young, old: await keptOf(root.id) }).toStrictEqual({
+      young: { spend: 1, alerts: 1 },
+      old: { spend: 0, alerts: 0 },
+    });
+  });
+
   it("keep a lineage a request held for a person still reserves against, however long ago its runs ended", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await lineageApp(builder);
@@ -285,6 +362,7 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
       );
     });
     await endedAt(longAgo(), root.id);
+    await startedAt(pastAge(), root.id);
 
     await swept();
     const whileHeld = await keptOf(root.id);
