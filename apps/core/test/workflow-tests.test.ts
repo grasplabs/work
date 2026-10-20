@@ -453,6 +453,34 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     });
   });
 
+  it("start at most ten runs in one test, however many it asks for at once", async () => {
+    const { release, app } = await requestsApp(
+      async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
+    );
+    const session = await sessionOf(release);
+    const request = await startOf(release, { who: "Ada" });
+    const answers = await Promise.all(
+      Array.from(
+        { length: 12 },
+        async () => await session.start("desk-user", request)
+      )
+    );
+    const started = answers.map(startedAs);
+    const recorded = await recordedRuns(app);
+    await session.close();
+    expect({
+      runs: started.filter((answer) => typeof answer === "number").length,
+      refused: started.filter((answer) => typeof answer === "string"),
+      recorded: recorded.length,
+      left: await recordedRuns(app),
+    }).toStrictEqual({
+      runs: 10,
+      refused: ["operation.call_limit", "operation.call_limit"],
+      recorded: 10,
+      left: [],
+    });
+  });
+
   it("remove a test's runs from the engine as it ends, ended or not, and the sweep those a dead test left", async () => {
     const { release, app } = await requestsApp(
       async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
