@@ -4283,7 +4283,7 @@ msgstr "Première détection"
 
 #: src/landscape/landscape.ts
 msgid "First seen in the last 7 days."
-msgstr "Vu pour la première fois ces 7 derniers jours."
+msgstr "Vue pour la première fois ces 7 derniers jours."
 
 #: src/brain/atlas-overlays.tsx
 msgid "Fit and center"
