@@ -331,6 +331,8 @@ const ProjectForm = ({
         <input
           accept={documentAccept}
           className="sr-only"
+          // Its label opens it too: closed while files are read or saved.
+          disabled={locked}
           id={`${ids}-documents`}
           multiple
           onChange={(event) => {
