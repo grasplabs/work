@@ -1,4 +1,8 @@
-import { brainErrors, brainNotesOptionsSchema } from "@grasp-os/shared/brain";
+import {
+  brainErrors,
+  brainNoteMaxLinks,
+  brainNotesOptionsSchema,
+} from "@grasp-os/shared/brain";
 import type { BrainNote, BrainNotePage } from "@grasp-os/shared/brain";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import { documentTypeOf } from "@grasp-os/shared/knowledge";
@@ -32,6 +36,8 @@ import { allowedFor } from "./knowledge/app-entries.ts";
 //   refused.
 // - Content: a note says what a listing says of a document, never its
 //   text; a link, its path and label, which its note's text holds.
+//   A note carries its first `brainNoteMaxLinks` links and counts the
+//   rest (`moreLinks`).
 // - A read the audit log can't hold: a page's notes and their collections
 //   fit in its event's provenance (`brainNotesMaxLimit`). Each note has at
 //   most `documentMaxLinks` links, as its save holds it to.
@@ -92,7 +98,10 @@ export const brainNotes = async (
           .leftJoin(
             target,
             and(
-              // Links name paths in their own note's collection.
+              // Links name paths in their own note's collection, so the
+              // note's collections join decides access to the target too.
+              // A link to another collection would need a collections join
+              // of its own for the access check.
               eq(target.collectionId, documents.collectionId),
               eq(links.toCollectionId, documents.collectionId),
               eq(target.path, links.toPath),
@@ -101,23 +110,27 @@ export const brainNotes = async (
           )
           .where(inArray(links.fromDocumentId, ids))
           .orderBy(asc(links.fromDocumentId), asc(links.toPath));
-  const notes = page.map((row): BrainNote => ({
-    kind: "document",
-    id: documentIdSchema.parse(row.id),
-    collectionId: collectionIdSchema.parse(row.collectionId),
-    path: row.path,
-    title: row.title,
-    type: documentTypeOf(row.type),
-    updatedAt: row.updatedAt.toISOString(),
-    links: linked
-      .filter(({ from }) => from === row.id)
-      .map(({ path, label, documentId }) => ({
-        path,
-        label,
-        documentId:
-          documentId === null ? null : documentIdSchema.parse(documentId),
-      })),
-  }));
+  const notes = page.map((row): BrainNote => {
+    const its = linked.filter(({ from }) => from === row.id);
+    return {
+      kind: "document",
+      id: documentIdSchema.parse(row.id),
+      collectionId: collectionIdSchema.parse(row.collectionId),
+      path: row.path,
+      title: row.title,
+      type: documentTypeOf(row.type),
+      updatedAt: row.updatedAt.toISOString(),
+      links: its
+        .slice(0, brainNoteMaxLinks)
+        .map(({ path, label, documentId }) => ({
+          path,
+          label,
+          documentId:
+            documentId === null ? null : documentIdSchema.parse(documentId),
+        })),
+      moreLinks: Math.max(0, its.length - brainNoteMaxLinks),
+    };
+  });
   await noteProvenance(
     env,
     reader,

@@ -1,5 +1,9 @@
 import type { BrainNote } from "@grasp-os/shared/brain";
-import { brainErrors, brainNotesMaxLimit } from "@grasp-os/shared/brain";
+import {
+  brainErrors,
+  brainNoteMaxLinks,
+  brainNotesMaxLimit,
+} from "@grasp-os/shared/brain";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -151,6 +155,36 @@ describe("the brain's notes", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       owner: [[`${hidden.id}/AGENTS.md`, "resolved"]],
       other: [[`${hidden.id}/AGENTS.md`, "none"]],
+    });
+  });
+
+  it("carry a note's first 50 links, and count the rest", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { id } = await admin.api.knowledge.createCollection({
+      name: `Linked ${unique()}`,
+      access: "everyone",
+    });
+    const spokes = Array.from(
+      { length: brainNoteMaxLinks + 3 },
+      (_, index) => `[[spoke-${String(index).padStart(2, "0")}.md]]`
+    );
+    const hub = await admin.api.knowledge.saveDocument({
+      collectionId: id,
+      path: "hub.md",
+      text: `# Hub\n${spokes.join("\n")}\n`,
+      ifVersion: 0,
+    });
+    const notes = await notesOf(admin);
+    const note = notes.find((each) => each.id === hub.id);
+
+    expect({
+      links: note?.links.length,
+      more: note?.moreLinks,
+      first: note?.links[0]?.path,
+    }).toStrictEqual({
+      links: brainNoteMaxLinks,
+      more: 3,
+      first: "spoke-00.md",
     });
   });
 

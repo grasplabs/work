@@ -400,6 +400,9 @@ export interface BrainChangePage {
  */
 export const brainNotesMaxLimit = 50;
 
+/** Most links of a note one page carries; the rest are counted (`moreLinks`). */
+export const brainNoteMaxLinks = 50;
+
 /** What a call for the brain's notes asks for. */
 export const brainNotesOptionsSchema = z
   .strictObject({
@@ -432,7 +435,10 @@ export interface BrainNote {
   type: DocumentType;
   /** ISO 8601. */
   updatedAt: string;
+  /** Its first `brainNoteMaxLinks` links, by the path each names. */
   links: BrainNoteLink[];
+  /** How many links it has past those. */
+  moreLinks: number;
 }
 
 /** A page of the brain's notes. */
