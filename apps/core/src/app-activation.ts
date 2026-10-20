@@ -107,8 +107,8 @@ const needsStore = (error: unknown): boolean =>
 
 /**
  * Seals `version` of `app` when it is of spec 8's layout: on the App's
- * default store when it has one, and when the App's schema has tables
- * but no default store exists yet, on one created now.
+ * default store when it has one, and when the App needs one (tables or
+ * preferences) but no default store exists yet, on one created now.
  */
 const sealForActivation = async (
   env: Env,

@@ -57,7 +57,6 @@ export type {
   FilesReference,
   LinksReference,
   OperationReference,
-  PreferencesReference,
   ProgressOf,
   ReferenceKind,
   ReferenceVisibility,

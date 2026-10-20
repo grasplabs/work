@@ -584,6 +584,21 @@ const preferencesOf = (preferences: unknown): ValueDescriptor | null => {
   ) {
     return refuse("An App's `preferences` is a required `v.object`.");
   }
+  // Every field has a default: a person who never chose answers them, and
+  // a patch leaves out what it doesn't change. `_rev` is what the host
+  // answers beside them, and `_` names are the platform's.
+  for (const [name, field] of Object.entries(descriptor.fields)) {
+    if (name.startsWith("_")) {
+      return refuse(
+        `An App's preference \`${name}\` starts with \`_\`, which is the platform's.`
+      );
+    }
+    if (field.presence !== "default") {
+      return refuse(
+        `An App's preference \`${name}\` needs a \`.default(…)\`: every preference has one.`
+      );
+    }
+  }
   return descriptor;
 };
 

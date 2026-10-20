@@ -1,3 +1,4 @@
+import { contractFingerprint, preferenceOperations } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { env } from "cloudflare:workers";
@@ -66,7 +67,7 @@ export const holdThenCreate = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "app.ts": `import { app, v } from "@grasp-os/sdk";
 import { create, holdThenCreate, titles } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
@@ -77,6 +78,7 @@ export default app({
   operations: { notes: { create, holdThenCreate, titles } },
   internalOperations: {},
   screens: [],
+  preferences: v.object({ compact: v.boolean().default(false) }),
   uses: [],
 });
 `,
@@ -94,6 +96,32 @@ const callOf = (release: Release, path: string, input: unknown): string =>
     },
     input,
   });
+
+/**
+ * The call of the App's preference operation `name` with `input`, as the
+ * chat's code writes it, naming `kind` (the operation's own unless given).
+ */
+const preferenceCallOf = async (
+  release: Release,
+  name: "get" | "update",
+  input: unknown,
+  kind?: string
+): Promise<string> => {
+  if (release.app.preferences === null) {
+    throw new Error("The App declares no preferences");
+  }
+  const operation = preferenceOperations(release.app.preferences)[name];
+  return JSON.stringify({
+    reference: {
+      resourceId: release.manifest.resourceId,
+      resourceVersion: release.manifest.resourceVersion,
+      contractId: operation.path,
+      fingerprint: await contractFingerprint(operation),
+      kind: kind ?? operation.kind,
+    },
+    input,
+  });
+};
 
 /** Code that makes each call in turn: its result, or the error's code. */
 const tryEach = (calls: Record<string, string>): string =>
@@ -289,6 +317,40 @@ describe(
       expect(writing.titles).toStrictEqual({
         ok: true,
         value: ["From the agent"],
+      });
+    });
+
+    it("reads its person's preferences with a read permission, and changes them only with a write permission", async () => {
+      const notes = await notesApp();
+      const app = JSON.stringify(notes.app);
+      const update = { expectedRevision: 0, patch: { compact: true } };
+      const calls = {
+        get: `env.apps.call(${app}, stream(${JSON.stringify(await preferenceCallOf(notes.release, "get", {}))}))`,
+        update: `env.apps.call(${app}, stream(${JSON.stringify(await preferenceCallOf(notes.release, "update", update))}))`,
+        // The update, named a query so a read permission would let it by.
+        disguised: `env.apps.call(${app}, stream(${JSON.stringify(await preferenceCallOf(notes.release, "update", update, "query"))}))`,
+      };
+
+      const reading = await run(notes, tryEach(calls), ["read"]);
+      expect({
+        get: reading.get,
+        update: reading.update,
+        disguised: z
+          .object({ error: z.object({ code: z.string() }) })
+          .parse(reading.disguised).error.code,
+      }).toStrictEqual({
+        get: { ok: true, value: { compact: false, _rev: 0 } },
+        update: "permission.denied",
+        disguised: "operation.kind_mismatch",
+      });
+
+      const writing = await run(notes, tryEach({ update: calls.update }), [
+        "read",
+        "write",
+      ]);
+      expect(writing.update).toStrictEqual({
+        ok: true,
+        value: { compact: true, _rev: 1 },
       });
     });
 
