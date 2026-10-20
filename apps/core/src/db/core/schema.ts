@@ -1155,7 +1155,7 @@ export const workflowRuns = sqliteTable(
      * depth, age) stays the lineage's. Null for a root and a run of the
      * root's App under its own runs, charged to the lineage's own
      * (src/workflows/quotas.ts). Written once, with the row: never changed
-     * once set (migration 0109's trigger).
+     * once set (migration 0112's trigger).
      */
     accountRunId: text("account_run_id"),
     /**
@@ -1685,7 +1685,7 @@ export const runMailStampRefusals = sqliteTable(
  * in the lineage of `root_run_id`, claimed once, so every run charged to
  * it (`workflow_runs.account_run_id`) is charged to the one account, whose
  * `run_lineages` row counts its attempts and host calls. Never changed
- * or deleted (migration 0109's triggers).
+ * or deleted (migration 0112's triggers).
  */
 export const runLineageAccounts = sqliteTable(
   "run_lineage_accounts",

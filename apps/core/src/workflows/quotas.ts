@@ -316,7 +316,7 @@ const appOf = (id: string): SQL =>
  * however often it goes back and forth. An account has a row of its own
  * (`run_lineages`) whose age is the root's, so a hop never starts a
  * lineage's life afresh. The run's row names its account
- * (`account_run_id`), written once, here (migration 0109's triggers keep
+ * (`account_run_id`), written once, here (migration 0112's triggers keep
  * it).
  *
  * What it closes: one App using up another's allowances in a lineage
