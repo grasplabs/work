@@ -556,6 +556,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw appErrors.create("app.preview_superseded");
       }
       try {
+        // A caller gone while it waited never says so: its place is free
+        // again soon (preview-updates.ts).
+        await chats.confirmPreviewUpdate(
+          chatIdOf(chatId),
+          by.userId,
+          id,
+          token
+        );
         return await this.#loadPreview(by, chatId, id, name, screen);
       } finally {
         // Housekeeping: a place never settled frees itself once its lease

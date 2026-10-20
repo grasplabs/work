@@ -7,7 +7,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { callApp } from "../src/app.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { previewUpdateLeaseMs } from "../src/preview-updates.ts";
+import {
+  previewUpdateConfirmMs,
+  previewUpdateLeaseMs,
+} from "../src/preview-updates.ts";
 import { readStatistics } from "../src/statistics.ts";
 import { openTestRun } from "./agent-chat.ts";
 import {
@@ -746,8 +749,13 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       async (instance) => {
         const take = async () =>
           await instance.takePreviewUpdate(chatId, builder.userId, app);
-        const settle = (token: number | null) => {
-          instance.settlePreviewUpdate(chatId, builder.userId, app, token ?? 0);
+        const settle = (token: string | null) => {
+          instance.settlePreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            token ?? ""
+          );
         };
         const order: string[] = [];
         const loading = await take();
@@ -774,5 +782,145 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       order: ["older superseded", "first settles", "newer loads"],
       free: true,
     });
+  });
+
+  it("frees the place of an update that waited and whose caller never confirms it, soon", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const started = Date.parse("2026-10-20T09:00:00Z");
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(started);
+        try {
+          const first = await take();
+          // Its caller went away while it waited: given the place, it
+          // never confirms it.
+          const abandoned = take();
+          instance.settlePreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            first ?? ""
+          );
+          await abandoned;
+          let next = "waiting";
+          const waiting = take().then((token) => {
+            next = token === null ? "superseded" : "loading";
+            return token;
+          });
+          vi.setSystemTime(started + previewUpdateConfirmMs);
+          await scheduler.wait(50);
+          const atLimit = next;
+          vi.setSystemTime(started + previewUpdateConfirmMs + 1);
+          await waiting;
+          return { atLimit, past: next };
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
+
+    expect(outcome).toStrictEqual({ atLimit: "waiting", past: "loading" });
+  });
+
+  it("keeps a confirmed update's place for its whole lease", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const started = Date.parse("2026-10-20T09:00:00Z");
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(started);
+        try {
+          const first = await take();
+          const waited = take();
+          instance.settlePreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            first ?? ""
+          );
+          instance.confirmPreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            (await waited) ?? ""
+          );
+          let next = "waiting";
+          void take().then((token) => {
+            next = token === null ? "superseded" : "loading";
+            return token;
+          });
+          vi.setSystemTime(started + previewUpdateConfirmMs + 1);
+          await scheduler.wait(50);
+          return next;
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
+
+    expect(outcome).toBe("waiting");
+  });
+
+  it("settles nothing with a token from before the object restarted", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const before = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) =>
+        await instance.takePreviewUpdate(chatId, builder.userId, app)
+    );
+    await runInDurableObject(chatsOf(builder), (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        const loading = await take();
+        // The load from before the restart ends late.
+        instance.settlePreviewUpdate(chatId, builder.userId, app, before ?? "");
+        let next = "waiting";
+        const waiting = take().then((token) => {
+          next = token === null ? "superseded" : "loading";
+          return token;
+        });
+        await scheduler.wait(50);
+        const afterOld = next;
+        instance.settlePreviewUpdate(
+          chatId,
+          builder.userId,
+          app,
+          loading ?? ""
+        );
+        await waiting;
+        return { afterOld, afterOwn: next };
+      }
+    );
+
+    expect(outcome).toStrictEqual({ afterOld: "waiting", afterOwn: "loading" });
   });
 });

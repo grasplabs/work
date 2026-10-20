@@ -2883,9 +2883,23 @@ export class Workspace extends DurableObject<Env> {
     chatId: unknown,
     personId: string,
     appId: string
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     const { id } = this.#ownChat(chatId, personId);
     return await this.#previewUpdates.take(`${id}:${appId}`);
+  }
+
+  /**
+   * Update `token` of `personId`'s own chat's preview of App `appId` is
+   * loading: one that waited keeps its place for the whole lease.
+   */
+  confirmPreviewUpdate(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    token: string
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    this.#previewUpdates.confirm(`${id}:${appId}`, token);
   }
 
   /** Ends update `token` of `personId`'s own chat's preview of App `appId`. */
@@ -2893,7 +2907,7 @@ export class Workspace extends DurableObject<Env> {
     chatId: unknown,
     personId: string,
     appId: string,
-    token: number
+    token: string
   ): void {
     const { id } = this.#ownChat(chatId, personId);
     this.#previewUpdates.settle(`${id}:${appId}`, token);

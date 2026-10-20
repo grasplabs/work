@@ -22,41 +22,51 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
  */
 export const previewUpdateLeaseMs = platformLimits.serverInvocationWallMs;
 
+/**
+ * How long an update that waited holds the place it was given before its
+ * caller confirms it is loading (`confirm`): a caller that went away while
+ * it waited never does, and its place is free again this soon.
+ */
+export const previewUpdateConfirmMs = 5000;
+
 interface Waiting {
-  token: number;
+  token: string;
   go: (taken: boolean) => void;
 }
 
-/** One preview session's updates: those building, by when they began, and those waiting. */
+/** One preview session's updates: those building, by when their place ends, and those waiting. */
 interface Session {
-  running: Map<number, number>;
+  running: Map<string, number>;
   waiting: Waiting[];
 }
 
 /** Frees the places of updates past their lease. */
 const expire = (session: Session): void => {
   const now = Date.now();
-  for (const [token, since] of session.running) {
-    if (now - since > previewUpdateLeaseMs) {
+  for (const [token, until] of session.running) {
+    if (now > until) {
       session.running.delete(token);
     }
   }
 };
 
-/** Milliseconds until the oldest building update's lease has ended. */
+/** Milliseconds until the first building update's place ends. */
 const untilFree = (session: Session): number => {
-  const oldest = Math.min(Date.now(), ...session.running.values());
-  return Math.max(0, oldest + previewUpdateLeaseMs - Date.now()) + 1;
+  const first = Math.min(Date.now(), ...session.running.values());
+  return Math.max(0, first - Date.now()) + 1;
 };
 
-/** Lets waiting updates take the free places, in the order they came. */
+/**
+ * Lets waiting updates take the free places, in the order they came, each
+ * for as long as its caller takes to confirm it.
+ */
 const fill = (session: Session): void => {
   while (session.running.size < platformLimits.previewUpdatesInFlight) {
     const next = session.waiting.shift();
     if (next === undefined) {
       return;
     }
-    session.running.set(next.token, Date.now());
+    session.running.set(next.token, Date.now() + previewUpdateConfirmMs);
     next.go(true);
   }
 };
@@ -64,22 +74,25 @@ const fill = (session: Session): void => {
 /** The preview sessions of one Workspace object's chats, by chat and App. */
 export class PreviewUpdates {
   readonly #sessions = new Map<string, Session>();
+  /** This instance's own: a token from before a restart settles nothing. */
+  readonly #instance = crypto.randomUUID();
   #next = 0;
 
   /**
    * A place for an update of the preview `key` names: its token once it
    * may build, after waiting its turn if it must, or null when a newer
-   * update replaced it before its turn came.
+   * update replaced it before its turn came. One that waited holds its
+   * place briefly until `confirm`.
    */
-  async take(key: string): Promise<number | null> {
+  async take(key: string): Promise<string | null> {
     const session = this.#session(key);
     // Ones that waited longer go first, an expired one's place too.
     expire(session);
     fill(session);
     this.#next += 1;
-    const token = this.#next;
+    const token = `${this.#instance}:${this.#next}`;
     if (session.running.size < platformLimits.previewUpdatesInFlight) {
-      session.running.set(token, Date.now());
+      session.running.set(token, Date.now() + previewUpdateLeaseMs);
       return token;
     }
     if (session.waiting.length >= platformLimits.previewUpdatesPending) {
@@ -87,14 +100,22 @@ export class PreviewUpdates {
     }
     const turn = Promise.withResolvers<boolean>();
     session.waiting.push({ token, go: turn.resolve });
-    // Woken by a settled update, or else once the lease of the oldest one
+    // Woken by a settled update, or else once the place of the first one
     // building ends: it never settles when its isolate went away.
     void this.#wakeAfterLease(key, session, token);
     return (await turn.promise) ? token : null;
   }
 
+  /** Update `token` of the preview `key` names is loading: it holds its place for the whole lease. */
+  confirm(key: string, token: string): void {
+    const running = this.#sessions.get(key)?.running;
+    if (running?.has(token) === true) {
+      running.set(token, Date.now() + previewUpdateLeaseMs);
+    }
+  }
+
   /** Ends update `token` of the preview `key` names, and lets the next take its place. */
-  settle(key: string, token: number): void {
+  settle(key: string, token: string): void {
     const session = this.#sessions.get(key);
     if (session?.running.delete(token) !== true) {
       return;
@@ -112,11 +133,11 @@ export class PreviewUpdates {
     return made;
   }
 
-  /** Lets `token` take a place once the lease of each update ahead of it ends, while it still waits. */
+  /** Lets `token` take a place once the place of each update ahead of it ends, while it still waits. */
   async #wakeAfterLease(
     key: string,
     session: Session,
-    token: number
+    token: string
   ): Promise<void> {
     while (session.waiting.some((waiting) => waiting.token === token)) {
       // oxlint-disable-next-line no-await-in-loop -- until its turn comes
