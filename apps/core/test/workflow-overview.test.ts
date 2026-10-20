@@ -786,7 +786,7 @@ describe("the Workflows page", buildTime, () => {
         person.api.workflows.list(app),
         person.api.workflows.overview(),
         person.api.workflows.status(sleeper.id),
-        person.api.screens.runs(app, "remind"),
+        person.api.screens.frame(app, "").runs("remind"),
       ]);
       const byId = byRun(page.runs);
       const listed = byRun(appRuns);

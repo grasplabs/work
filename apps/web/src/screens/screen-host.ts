@@ -78,7 +78,8 @@ import type { FrameLink, Joined } from "./tab-link.ts";
 // screen-trust.ts). So a screen nobody approved isn't started at all
 // (`open` refuses it), and one whose approval is taken back is stopped:
 // the page gives core's lease on the frame's build back on the frame's
-// connection (`present`), core decides every call on that build, and
+// connection when it opens the frame (`frame`), core decides every call
+// on that build, and
 // when it says the build no longer gets the data (as a refused call, or
 // at the page's next check) the frame is emptied, and with it what the
 // screen had been handed. That is all the page can take back; what a

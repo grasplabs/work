@@ -295,27 +295,16 @@ export const confirmedDecide = async (
   name: string,
   answer: Answer
 ) => {
-  const review = await person.api.screens.reviewDecision(
-    app,
-    run,
-    name,
-    answer
-  );
+  const review = await person.api.screens
+    .frame(app, "")
+    .reviewDecision(run, name, answer);
   if (review.state === "recorded") {
     return review.decision;
   }
-  const { confirmation } = await person.api.screens.confirmDecision(
-    app,
-    run,
-    name,
-    review.decision.revision,
-    review.response
-  );
-  return await person.api.screens.decide(
-    app,
-    run,
-    name,
-    review.response,
-    confirmation
-  );
+  const { confirmation } = await person.api.screens
+    .frame(app, "")
+    .confirmDecision(run, name, review.decision.revision, review.response);
+  return await person.api.screens
+    .frame(app, "")
+    .decide(run, name, review.response, confirmation);
 };

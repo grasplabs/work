@@ -80,8 +80,6 @@ const openedApp = async (appFiles: Record<string, string> = files) => {
     artifacts: builtArtifacts(review.screens),
   });
   const { lease } = await builder.api.screens.open(id, "notes");
-  // The frame's connection presents its build, as the page does.
-  await builder.api.screens.present(id, lease);
   const { lease: adminLease } = await admin.api.screens.open(id, "notes");
   const release = await loadRelease(env, id, version);
   return {
@@ -99,7 +97,7 @@ const openedApp = async (appFiles: Record<string, string> = files) => {
 
 type Opened = Awaited<ReturnType<typeof openedApp>>;
 
-/** Where a page's live queries go: one connection's `screens`, presented. */
+/** Where a page's live queries go: one connection's `screens`. */
 type Screens = Opened["screens"];
 
 /**
@@ -126,12 +124,9 @@ const pageTransport = (
       },
       { [Symbol.dispose]: onLost }
     );
-    const subscription = await screens.watchQuery(
-      app,
-      lease,
-      request,
-      callback
-    );
+    const subscription = await screens
+      .frame(app, lease)
+      .watchQuery(request, callback);
     return {
       release: () => {
         void subscription.release().catch(() => {
@@ -1118,7 +1113,6 @@ describe("live queries", { timeout: 120_000 }, () => {
     // Another tab of the same session: its own connection to core.
     const { core } = await openRpc(opened.cookie);
     const otherScreens = core.authenticate().screens;
-    await otherScreens.present(opened.app, opened.lease);
     const other = clientFor(opened, otherScreens).client;
     await other.mutation(api.create, { title: "From the other tab" });
 
@@ -1144,7 +1138,6 @@ describe("live queries", { timeout: 120_000 }, () => {
       role: "user",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const owner = clientFor(opened).client;
     const theirs = clientFor(
       { ...opened, lease, cookie: member.session, userId: member.userId },
@@ -1212,7 +1205,6 @@ describe("live queries", { timeout: 120_000 }, () => {
       role: "user",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const theirs = clientFor(
       { ...opened, lease, cookie: member.session, userId: member.userId },
       member.api.screens
@@ -1344,9 +1336,7 @@ describe("live queries", { timeout: 120_000 }, () => {
         await taken.promise;
       }
     };
-    await opened.screens.watchQuery(
-      opened.app,
-      opened.lease,
+    await opened.screens.frame(opened.app, opened.lease).watchQuery(
       requestOf(api.list, { pagination: { pageSize: 50 } }),
       // Core waits for what a page's callback answers: that is the point.
       // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- see above
@@ -1382,14 +1372,11 @@ describe("live queries", { timeout: 120_000 }, () => {
     const opened = await openedApp();
     const follow = async (n: number) =>
       await outcome(
-        opened.screens.watchQuery(
-          opened.app,
-          opened.lease,
-          JSON.stringify({ n }),
-          () => {
+        opened.screens
+          .frame(opened.app, opened.lease)
+          .watchQuery(JSON.stringify({ n }), () => {
             // Each is refused as a call it can't read, and stays followed.
-          }
-        )
+          })
       );
     const answers: string[] = [];
     // Following counts as a request: twenty a moment, as a screen would.
@@ -1483,7 +1470,6 @@ const memberOf = async (opened: Opened) => {
     role: "user",
   });
   const { lease } = await member.api.screens.open(opened.app, "notes");
-  await member.api.screens.present(opened.app, lease);
   const { client } = clientFor(
     { ...opened, lease, cookie: member.session, userId: member.userId },
     member.api.screens
@@ -1499,7 +1485,6 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
     // A second tab of the owner's: each follows up to its bound.
     const { core } = await openRpc(opened.cookie);
     const otherTab = core.authenticate().screens;
-    await otherTab.present(opened.app, opened.lease);
     const followers = Array.from({ length: 150 }, () => pageFollower());
     for (let batch = 0; batch < followers.length / 15; batch += 1) {
       // Following counts as a request: fifteen a moment.
@@ -1511,12 +1496,12 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
             .map(async (follower, at) => {
               const index = batch * 15 + at;
               const screens = index < 100 ? opened.screens : otherTab;
-              await screens.watchQuery(
-                opened.app,
-                opened.lease,
-                requestOf(api.list, { pagination: { pageSize: index + 1 } }),
-                follower.callback
-              );
+              await screens
+                .frame(opened.app, opened.lease)
+                .watchQuery(
+                  requestOf(api.list, { pagination: { pageSize: index + 1 } }),
+                  follower.callback
+                );
             })
         );
       });
@@ -1602,24 +1587,18 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
     await clientFor(opened).client.mutation(api.create, { title: "Original" });
     const request = requestOf(api.list, { pagination: {} });
     const first = pageFollower();
-    await opened.screens.watchQuery(
-      opened.app,
-      opened.lease,
-      request,
-      first.callback
-    );
+    await opened.screens
+      .frame(opened.app, opened.lease)
+      .watchQuery(request, first.callback);
     await eventually(() => {
       expect(titlesOf(first.received.at(-1))).toStrictEqual(["Original"]);
     });
 
     await silentlyRetitle(opened, "Changed since");
     const joiner = pageFollower();
-    await opened.screens.watchQuery(
-      opened.app,
-      opened.lease,
-      request,
-      joiner.callback
-    );
+    await opened.screens
+      .frame(opened.app, opened.lease)
+      .watchQuery(request, joiner.callback);
 
     await eventually(() => {
       expect(titlesOf(joiner.received[0])).toStrictEqual(["Changed since"]);
@@ -1636,12 +1615,9 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
     });
     try {
       const follower = pageFollower();
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        requestOf(api.list, { pagination: {} }),
-        follower.callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(requestOf(api.list, { pagination: {} }), follower.callback);
       await eventually(() => {
         expect(titlesOf(follower.received.at(-1))).toStrictEqual(["Original"]);
       });
@@ -1681,12 +1657,9 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
         await stalled.refusal.promise;
       }
     };
-    await member.api.screens.watchQuery(
-      opened.app,
-      lease,
-      requestOf(api.list, { pagination: {} }),
-      callback
-    );
+    await member.api.screens
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(api.list, { pagination: {} }), callback);
     await eventually(() => {
       expect(received).toHaveLength(1);
     });
@@ -1721,16 +1694,16 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
   it("checks a subscription against the following frame's own lease", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
-    // The connection presented an approved build's lease; this frame's is
+    // The builder's own lease names an approved build; this frame's is
     // one core never signed.
     await expect(
       outcome(
-        opened.screens.watchQuery(
-          opened.app,
-          "not-a-lease-core-signed",
-          requestOf(api.list, { pagination: {} }),
-          pageFollower().callback
-        )
+        opened.screens
+          .frame(opened.app, "not-a-lease-core-signed")
+          .watchQuery(
+            requestOf(api.list, { pagination: {} }),
+            pageFollower().callback
+          )
       )
     ).resolves.toBe("screen.unreviewed");
   });
@@ -1792,12 +1765,9 @@ describe("live queries: what goes out, and when", { timeout: 180_000 }, () => {
         await first.promise;
       }
     };
-    await member.api.screens.watchQuery(
-      opened.app,
-      lease,
-      requestOf(api.list, { pagination: {} }),
-      callback
-    );
+    await member.api.screens
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(api.list, { pagination: {} }), callback);
     await eventually(() => {
       expect(received).toHaveLength(1);
     });
@@ -1894,12 +1864,12 @@ describe("live queries: what goes out, and when", { timeout: 180_000 }, () => {
     };
     for (let size = 1; size <= 4; size += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one after the other
-      await member.api.screens.watchQuery(
-        opened.app,
-        lease,
-        requestOf(api.list, { pagination: { pageSize: size } }),
-        holding
-      );
+      await member.api.screens
+        .frame(opened.app, lease)
+        .watchQuery(
+          requestOf(api.list, { pagination: { pageSize: size } }),
+          holding
+        );
     }
     await scheduler.wait(1000);
     await opened.builder.api.apps.members.remove(opened.app, them);
@@ -1915,12 +1885,12 @@ describe("live queries: what goes out, and when", { timeout: 180_000 }, () => {
     });
 
     const elsewhere = pageFollower();
-    await member.api.screens.watchQuery(
-      other.app,
-      otherLease,
-      requestOf(otherApi.list, { pagination: {} }),
-      elsewhere.callback
-    );
+    await member.api.screens
+      .frame(other.app, otherLease)
+      .watchQuery(
+        requestOf(otherApi.list, { pagination: {} }),
+        elsewhere.callback
+      );
     await eventually(() => {
       expect(titlesOf(elsewhere.received[0])).toStrictEqual([]);
     });
@@ -1951,12 +1921,12 @@ describe("live queries: what goes out, and when", { timeout: 180_000 }, () => {
     const followers = [followerOf(0), followerOf(1)];
     for (const [index, callback] of followers.entries()) {
       // oxlint-disable-next-line no-await-in-loop -- one after the other
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        requestOf(api.list, { pagination: { pageSize: 10 + index } }),
-        callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(
+          requestOf(api.list, { pagination: { pageSize: 10 + index } }),
+          callback
+        );
     }
     await eventually(() => {
       expect(pushes.map((list) => list.length)).toStrictEqual([1, 1]);
@@ -2050,12 +2020,9 @@ describe("live queries and a person's roles", { timeout: 180_000 }, () => {
         await first.promise;
       }
     };
-    await member.api.screens.watchQuery(
-      opened.app,
-      lease,
-      requestOf(secrets, {}),
-      callback
-    );
+    await member.api.screens
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(secrets, {}), callback);
     await eventually(() => {
       expect(received).toHaveLength(1);
     });
@@ -2103,12 +2070,8 @@ describe(
       const follower = pageFollower();
       await core
         .authenticate()
-        .screens.watchQuery(
-          opened.app,
-          opened.lease,
-          requestOf(api.list, { pagination: {} }),
-          follower.callback
-        );
+        .screens.frame(opened.app, opened.lease)
+        .watchQuery(requestOf(api.list, { pagination: {} }), follower.callback);
 
       await eventually(() => {
         expect(follower.state.released).toBeTruthy();
@@ -2189,23 +2152,23 @@ describe(
       const subscriptions = [];
       for (const pageSize of [10, 11]) {
         // oxlint-disable-next-line no-await-in-loop -- one after the other
-        const subscription = await opened.screens.watchQuery(
-          opened.app,
-          opened.lease,
-          requestOf(api.list, { pagination: { pageSize } }),
-          holding
-        );
+        const subscription = await opened.screens
+          .frame(opened.app, opened.lease)
+          .watchQuery(
+            requestOf(api.list, { pagination: { pageSize } }),
+            holding
+          );
         subscriptions.push(subscription);
       }
       await scheduler.wait(1500);
       // A third: no room left for its first result.
       const third = pageFollower();
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        requestOf(api.list, { pagination: { pageSize: 12 } }),
-        third.callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(
+          requestOf(api.list, { pagination: { pageSize: 12 } }),
+          third.callback
+        );
       await scheduler.wait(1500);
       expect(third.received).toStrictEqual([]);
 
@@ -2237,23 +2200,23 @@ describe(
       };
       for (const pageSize of [10, 11]) {
         // oxlint-disable-next-line no-await-in-loop -- one after the other
-        await opened.screens.watchQuery(
-          opened.app,
-          opened.lease,
-          requestOf(api.list, { pagination: { pageSize } }),
-          holding
-        );
+        await opened.screens
+          .frame(opened.app, opened.lease)
+          .watchQuery(
+            requestOf(api.list, { pagination: { pageSize } }),
+            holding
+          );
       }
       await scheduler.wait(1500);
       // A third list finds no room; a small query of another table is
       // taken at once.
       const third = pageFollower();
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        requestOf(api.list, { pagination: { pageSize: 12 } }),
-        third.callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(
+          requestOf(api.list, { pagination: { pageSize: 12 } }),
+          third.callback
+        );
       const secrets = referenceTo<Record<never, never>, unknown, "query">(
         opened.release,
         "notes.secrets"
@@ -2263,12 +2226,9 @@ describe(
         "notes.tell"
       );
       const small = pageFollower();
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        requestOf(secrets, {}),
-        small.callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(requestOf(secrets, {}), small.callback);
       await scheduler.wait(1500);
 
       // Each small push the page takes leaves no more room for the third.
@@ -2313,12 +2273,12 @@ const followedList = async (
   lease: string
 ) => {
   const follower = pageFollower();
-  await screens.watchQuery(
-    opened.app,
-    lease,
-    requestOf(apiOf(opened.release).list, { pagination: {} }),
-    follower.callback
-  );
+  await screens
+    .frame(opened.app, lease)
+    .watchQuery(
+      requestOf(apiOf(opened.release).list, { pagination: {} }),
+      follower.callback
+    );
   await eventually(() => {
     expect(follower.received.at(-1)?.result.ok).toBeTruthy();
   });
@@ -2654,7 +2614,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "user",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, member.api.screens, lease);
 
     await callAuth("/organization/remove-team-member", admin.session, {
@@ -2676,7 +2635,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "user",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, member.api.screens, lease);
     // The organization keeps a team: this one is never its last.
     await newTeam(admin, []);
@@ -2716,7 +2674,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "user",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, member.api.screens, lease);
 
     await callAuth("/organization/remove-team-member", admin.session, {
@@ -2732,7 +2689,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const admin = await personApi("admin");
     const demoted = await personApi("admin");
     const { lease } = await demoted.api.screens.open(opened.app, "notes");
-    await demoted.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, demoted.api.screens, lease);
 
     await admin.api.members.setRole(demoted.userId, "user");
@@ -2748,7 +2704,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const unshared = { type: "team", id: team } as const;
     await admin.api.apps.members.add(opened.app, { ...unshared, role: "user" });
     const { lease } = await leaving.api.screens.open(opened.app, "notes");
-    await leaving.api.screens.present(opened.app, lease);
     const theirs = await followedList(opened, leaving.api.screens, lease);
     const staying = await memberOf(opened);
     const kept = await followedList(
@@ -2797,7 +2752,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const { them, lease, member } = await memberOf(opened);
     const { core } = await openRpc(member.session);
     const otherTab = core.authenticate().screens;
-    await otherTab.present(opened.app, lease);
     const first = await followedList(opened, member.api.screens, lease);
     const second = await followedList(opened, otherTab, lease);
 
@@ -2830,10 +2784,10 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const admin = await personApi("admin");
     const demoted = await personApi("admin");
     const { lease } = await demoted.api.screens.open(opened.app, "notes");
-    // A tab that reads the session now, and follows nothing of the App yet.
+    // A tab that reads the session now, with the App's frame open, and
+    // follows nothing of the App yet.
     const { core } = await openRpc(demoted.session);
-    const tab = core.authenticate().screens;
-    await tab.present(opened.app, lease);
+    const frame = await core.authenticate().screens.frame(opened.app, lease);
 
     await admin.api.members.setRole(demoted.userId, "user");
     // The App's host is slow to take the tab on: the event went out
@@ -2841,9 +2795,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const undo = await slowToFollow(opened);
     try {
       const follower = pageFollower();
-      await tab.watchQuery(
-        opened.app,
-        lease,
+      await frame.watchQuery(
         requestOf(apiOf(opened.release).list, { pagination: {} }),
         follower.callback
       );
@@ -2867,7 +2819,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const admin = await personApi("admin");
     const demoted = await personApi("admin");
     const { lease } = await demoted.api.screens.open(opened.app, "notes");
-    await demoted.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, demoted.api.screens, lease);
     await runInDurableObject(appHost(env, opened.app), (_app, state) => {
       state.abort("Restarted by the test");
@@ -2923,7 +2874,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "builder",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const page = pageTransport(
       { ...opened, lease, cookie: member.session, userId: member.userId },
       member.api.screens
@@ -3005,7 +2955,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const flaky = flakyDb(sharedWithQueries);
     const { core } = await openRpc(member.session, { coreEnv: flaky.env });
     const tab = core.authenticate().screens;
-    await tab.present(opened.app, lease);
     const follower = await followedList(opened, tab, lease);
 
     flaky.fail();
@@ -3030,18 +2979,17 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       other.app,
       "notes"
     );
-    await member.api.screens.present(other.app, otherLease);
     await followedList(other, member.api.screens, otherLease);
     const pageSize = 7;
     const reads = await holdPageReads(opened, pageSize);
     try {
       const follower = pageFollower();
-      await member.api.screens.watchQuery(
-        opened.app,
-        lease,
-        requestOf(apiOf(opened.release).list, { pagination: { pageSize } }),
-        follower.callback
-      );
+      await member.api.screens
+        .frame(opened.app, lease)
+        .watchQuery(
+          requestOf(apiOf(opened.release).list, { pagination: { pageSize } }),
+          follower.callback
+        );
       await eventually(() => {
         expect(reads.count()).toBe(1);
       });
@@ -3074,18 +3022,17 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const { lease } = await demoted.api.screens.open(opened.app, "notes");
     const { core } = await openRpc(demoted.session);
     const tab = core.authenticate().screens;
-    await tab.present(opened.app, lease);
     // The host lets go of the connection's first following at once, and
     // takes the next one on only `followDelayMs` later.
     const undo = await lettingGoEarly(opened);
     try {
       const follower = pageFollower();
-      await tab.watchQuery(
-        opened.app,
-        lease,
-        requestOf(apiOf(opened.release).list, { pagination: {} }),
-        follower.callback
-      );
+      await tab
+        .frame(opened.app, lease)
+        .watchQuery(
+          requestOf(apiOf(opened.release).list, { pagination: {} }),
+          follower.callback
+        );
       await scheduler.wait(500);
       // Before the next following: no host tells the connection of this.
       await admin.api.members.setRole(demoted.userId, "user");
@@ -3110,7 +3057,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const flaky = flakyDb(appLookup);
     const { core } = await openRpc(member.session, { coreEnv: flaky.env });
     const tab = core.authenticate().screens;
-    await tab.present(opened.app, lease);
     const follower = await followedList(opened, tab, lease);
 
     flaky.fail();
@@ -3202,7 +3148,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "user",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, member.api.screens, lease);
     // The admin's own connection: nothing after the removal's batch, which
     // takes their teams away too, reaches the database, and the App's host
@@ -3232,7 +3177,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const admin = await personApi("admin");
     const removed = await personApi("admin");
     const { lease } = await removed.api.screens.open(opened.app, "notes");
-    await removed.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, removed.api.screens, lease);
     // A user as the removal reads them first; an admin again by its batch.
     await env.DB.prepare("update members set role = 'user' where user_id = ?")
@@ -3269,14 +3213,10 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "builder",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const follower = pageFollower();
-    await member.api.screens.watchQuery(
-      opened.app,
-      lease,
-      requestOf(secrets, {}),
-      follower.callback
-    );
+    await member.api.screens
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(secrets, {}), follower.callback);
     const showsSecret = () =>
       JSON.stringify(follower.received.at(-1)?.result).includes(
         "Builders only"
@@ -3353,14 +3293,10 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "builder",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const follower = pageFollower();
-    await member.api.screens.watchQuery(
-      opened.app,
-      lease,
-      requestOf(secrets, {}),
-      follower.callback
-    );
+    await member.api.screens
+      .frame(opened.app, lease)
+      .watchQuery(requestOf(secrets, {}), follower.callback);
     const showsSecret = () =>
       JSON.stringify(follower.received.at(-1)?.result).includes(
         "Builders only"
@@ -3397,7 +3333,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "builder",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const { client } = clientFor(
       { ...opened, lease, cookie: member.session, userId: member.userId },
       member.api.screens
@@ -3451,7 +3386,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       role: "builder",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");
-    await member.api.screens.present(opened.app, lease);
     const { client } = clientFor(
       { ...opened, lease, cookie: member.session, userId: member.userId },
       member.api.screens

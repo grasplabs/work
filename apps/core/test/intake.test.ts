@@ -682,9 +682,11 @@ const extracted = async (
   const ai: AiBinding = env.AI;
   const spied = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
   try {
-    const run = await admin.api.screens.startRun(app, "extract", input);
+    const run = await admin.api.screens
+      .frame(app, "")
+      .startRun("extract", input);
     await runEnded(run.id);
-    return { run: await admin.api.screens.run(app, run.id), gateway };
+    return { run: await admin.api.screens.frame(app, "").run(run.id), gateway };
   } finally {
     spied.mockRestore();
   }
@@ -1081,14 +1083,14 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
       });
       await guest({ action: "finish", token });
       listed = valueOf(await call(admin, app, "chats.overview", "action"));
-      run = await admin.api.screens.startRun(app, "extract", {
+      run = await admin.api.screens.frame(app, "").startRun("extract", {
         chat: invited.chat.id,
       });
       await runEnded(run.id);
     } finally {
       answering.mockRestore();
     }
-    const ran = await admin.api.screens.run(app, run.id);
+    const ran = await admin.api.screens.frame(app, "").run(run.id);
     const { draft: draftId } = z
       .object({ draft: z.string() })
       .parse(ran.output);

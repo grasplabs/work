@@ -458,7 +458,9 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
     ).resolves.toStrictEqual({ status: 403, code: "screen.revoked" });
     // The page asks core on its own connection, and tears the frame down.
     await expect(
-      approved.builder.api.screens.present(approved.app, approved.lease)
+      approved.builder.api.screens
+        .frame(approved.app, approved.lease)
+        .delivery()
     ).resolves.toBe("revoked");
   });
 
