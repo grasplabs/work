@@ -2466,14 +2466,15 @@ const exportedPackagesSchema = z.object({
  * import, and the graph's lock without its build pins, which name this
  * deployment's builds. Never the approval or the artifact the entries
  * were copied from, which are this deployment's: the destination approves
- * the graph again. Undefined for a manifest that doesn't read as one.
+ * the graph again. Undefined for a manifest, or a stored lock, that
+ * doesn't read as one, JSON or not.
  */
 const exportedPackages = async (
   env: Env,
   workflowId: string,
   manifest: string
 ): Promise<ExportedPackages | null | undefined> => {
-  const parsed = exportedPackagesSchema.safeParse(JSON.parse(manifest));
+  const parsed = exportedPackagesSchema.safeParse(parsedJson(manifest));
   if (!parsed.success) {
     return undefined;
   }
@@ -2494,7 +2495,7 @@ const exportedPackages = async (
     .get();
   let lock: ExportedPackages["lock"] = null;
   if (row !== undefined) {
-    const read = graspLockSchema.safeParse(JSON.parse(row.lock));
+    const read = graspLockSchema.safeParse(parsedJson(row.lock));
     if (!read.success) {
       return undefined;
     }
@@ -2572,7 +2573,7 @@ export const exportedWorkflowVersion = async (
     version,
     row.manifestHash
   );
-  const pinned = pinnedBindingsSchema.safeParse(JSON.parse(row.manifest));
+  const pinned = pinnedBindingsSchema.safeParse(parsedJson(row.manifest));
   const packages = await exportedPackages(env, workflow.id, row.manifest);
   if (!pinned.success || packages === undefined) {
     throw corrupt(workflow.id, version);

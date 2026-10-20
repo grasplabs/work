@@ -643,6 +643,25 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuses as corrupt a version whose stored lock doesn't read as a lock, JSON or not", async () => {
+    const { owner, app, workflow } = await appSealingPackage("MIT");
+    const exportWithLock = async (lock: string) => {
+      await env.DB.prepare(
+        "UPDATE dependency_locks SET lock = ? WHERE subject_type = 'workflow' AND subject_id = ?"
+      )
+        .bind(lock, workflow.id)
+        .run();
+      return await outcome(exportAppDefinition(env, owner, app));
+    };
+    expect({
+      notJson: await exportWithLock("{"),
+      notALock: await exportWithLock(JSON.stringify({ direct: 1 })),
+    }).toStrictEqual({
+      notJson: "workflow.version_corrupt",
+      notALock: "workflow.version_corrupt",
+    });
+  });
+
   it("scans a version's packages for known secret formats like its files, naming the record and never the match", async () => {
     // Built here, so no file of the repository holds one.
     const token = ["ghp", "_", "Q".repeat(36)].join("");
