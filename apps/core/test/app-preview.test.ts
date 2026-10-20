@@ -821,14 +821,25 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
           const atLimit = next;
           vi.setSystemTime(started + previewUpdateConfirmMs + 1);
           await waiting;
-          return { atLimit, past: next };
+          // Its caller, slow and not gone after all, may not load now.
+          const late = instance.confirmPreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            (await abandoned) ?? ""
+          );
+          return { atLimit, past: next, late };
         } finally {
           vi.useRealTimers();
         }
       }
     );
 
-    expect(outcome).toStrictEqual({ atLimit: "waiting", past: "loading" });
+    expect(outcome).toStrictEqual({
+      atLimit: "waiting",
+      past: "loading",
+      late: false,
+    });
   });
 
   it("keeps a confirmed update's place for its whole lease", async () => {
@@ -855,7 +866,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
             app,
             first ?? ""
           );
-          instance.confirmPreviewUpdate(
+          const confirmed = instance.confirmPreviewUpdate(
             chatId,
             builder.userId,
             app,
@@ -868,14 +879,14 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
           });
           vi.setSystemTime(started + previewUpdateConfirmMs + 1);
           await scheduler.wait(50);
-          return next;
+          return { confirmed, next };
         } finally {
           vi.useRealTimers();
         }
       }
     );
 
-    expect(outcome).toBe("waiting");
+    expect(outcome).toStrictEqual({ confirmed: true, next: "waiting" });
   });
 
   it("settles nothing with a token from before the object restarted", async () => {

@@ -50,10 +50,10 @@ const expire = (session: Session): void => {
   }
 };
 
-/** Milliseconds until the first building update's place ends. */
+/** Milliseconds until the first building update's place ends: past it, by a millisecond. */
 const untilFree = (session: Session): number => {
-  const first = Math.min(Date.now(), ...session.running.values());
-  return Math.max(0, first - Date.now()) + 1;
+  const first = Math.min(...session.running.values());
+  return Number.isFinite(first) ? Math.max(0, first - Date.now()) + 1 : 1;
 };
 
 /**
@@ -106,12 +106,18 @@ export class PreviewUpdates {
     return (await turn.promise) ? token : null;
   }
 
-  /** Update `token` of the preview `key` names is loading: it holds its place for the whole lease. */
-  confirm(key: string, token: string): void {
+  /**
+   * Update `token` of the preview `key` names is loading: it holds its
+   * place for the whole lease. False when it no longer has one: its time
+   * to confirm ended and its place went to another.
+   */
+  confirm(key: string, token: string): boolean {
     const running = this.#sessions.get(key)?.running;
-    if (running?.has(token) === true) {
-      running.set(token, Date.now() + previewUpdateLeaseMs);
+    if (running?.has(token) !== true) {
+      return false;
     }
+    running.set(token, Date.now() + previewUpdateLeaseMs);
+    return true;
   }
 
   /** Ends update `token` of the preview `key` names, and lets the next take its place. */

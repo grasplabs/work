@@ -2890,16 +2890,17 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Update `token` of `personId`'s own chat's preview of App `appId` is
-   * loading: one that waited keeps its place for the whole lease.
+   * loading: one that waited keeps its place for the whole lease. False
+   * when its place is gone, as it was too late to confirm.
    */
   confirmPreviewUpdate(
     chatId: unknown,
     personId: string,
     appId: string,
     token: string
-  ): void {
+  ): boolean {
     const { id } = this.#ownChat(chatId, personId);
-    this.#previewUpdates.confirm(`${id}:${appId}`, token);
+    return this.#previewUpdates.confirm(`${id}:${appId}`, token);
   }
 
   /** Ends update `token` of `personId`'s own chat's preview of App `appId`. */
