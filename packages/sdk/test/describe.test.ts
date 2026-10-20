@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  aiStepCalls,
   checkWorkflowBindings,
   checkWorkflowModule,
   describeWorkflow,
@@ -794,5 +795,175 @@ export default workflow("x", { params: {} }, async () => null);`)
     expect(() => describeWorkflow("")).toThrow(
       expect.objectContaining({ code: "workflow.invalid_definition" })
     );
+  });
+});
+
+/** An AI step named `read` through `binding`. */
+const llm = (binding: string): string =>
+  `await step.llm("read", { description: "Read", binding: "${binding}", instructions: "Read", input: "x", schema: {} });`;
+
+/** `source`'s AI steps, as `name:binding`. */
+const bindings = (source: string): string[] | undefined =>
+  aiStepCalls(source)?.map(({ name, binding }) => `${name}:${binding}`);
+
+describe(aiStepCalls, () => {
+  it("reads every AI step's name and binding, wherever it sits, and only the workflow's own step", () => {
+    expect({
+      plain: bindings(workflowSource(llm("reader"))),
+      inTry: bindings(workflowSource(`try { ${llm("reader")} } catch {}`)),
+      // Another variable of that name, by parameter, block or catch.
+      shadowed: bindings(
+        workflowSource(
+          `[1].map((step) => step.llm()); { const step = { llm: () => 1 }; step.llm(); } try {} catch (step) { step.llm(); } ${llm("reader")}`
+        )
+      ),
+      // A \`var\` is the function's: in the workflow function, the parameter again.
+      hoisted: bindings(
+        workflowSource(`if (input) { var step = 1; } ${llm("reader")}`)
+      ),
+      nestedVar: bindings(
+        workflowSource(
+          `const f = () => { if (1) { var step = { llm: () => 1 }; } step.llm(); }; ${llm("reader")}`
+        )
+      ),
+      staticBlock: bindings(
+        workflowSource(
+          `class Counter { static { var step = { llm: () => 1 }; step.llm(); } } ${llm("reader")}`
+        )
+      ),
+      // A case's \`let\` is the switch's, not the function's around it.
+      switchCase: bindings(
+        workflowSource(
+          `const f = async (x) => { switch (x) { default: let step = 1; void step; } await step.llm("late", { binding: "other" }); };`
+        )
+      ),
+      optional: bindings(workflowSource('await step?.llm("read", {});')),
+    }).toStrictEqual({
+      plain: ["read:reader"],
+      inTry: ["read:reader"],
+      shadowed: ["read:reader"],
+      hoisted: ["null:null", "null:null"],
+      nestedVar: ["read:reader"],
+      staticBlock: ["read:reader"],
+      switchCase: ["late:other"],
+      optional: ["null:null"],
+    });
+  });
+
+  it("can't read a step taken any other way, or a binding its options may replace", () => {
+    expect({
+      kept: bindings(workflowSource("const ask = step; await ask.do();")),
+      computed: bindings(workflowSource('await step["llm"]("read", {});')),
+      spread: bindings(
+        workflowSource(
+          `await step.llm("read", { binding: "reader", ...{ binding: "other" } });`
+        )
+      ),
+      last: bindings(
+        workflowSource(
+          `await step.llm("read", { binding: "a", binding: "b" });`
+        )
+      ),
+    }).toStrictEqual({
+      kept: ["null:null"],
+      computed: ["null:null"],
+      spread: ["read:null"],
+      last: ["read:b"],
+    });
+  });
+
+  it("reads a workflow whose context it can't read by its runner, its first parameter, and nothing else of the name", () => {
+    expect({
+      calls: bindings(
+        workflowSource(`const kept = env; ${llm("reader")}`, "step, { env }")
+      ),
+      kept: bindings(
+        workflowSource(
+          'const kept = env; const ask = step.llm; await step.llm?.("read", {});',
+          "step, { env }"
+        )
+      ),
+      // Data of that name, and text, are no AI step.
+      data: bindings(
+        workflowSource(
+          'await step.do("x", { description: "llm" }, async () => context.input.llm); // llm',
+          "step, context"
+        )
+      ),
+      // The switch expression is the runner's, though a case declares one.
+      discriminant: bindings(
+        workflowSource(
+          `switch (await step.llm("read", { binding: "first" })) { default: let step = 1; void step; }`
+        )
+      ),
+      // A \`function\` rather than an arrow is still the SDK's workflow.
+      plainFunction: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+export default workflow("sample", { params: {} }, async function (step) {
+  return await step.llm("read", { binding: "missing" });
+});
+`),
+      // Only the workflow the file exports is what runs.
+      exported: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const helper = workflow("helper", { params: {} }, async (step) => await step.llm("read", { binding: "missing" }));
+void helper;
+
+export default workflow("sample", { params: {} }, async (step) => await step.do("x", { description: "X" }, async () => 1));
+`),
+      // Exported through the variable it's kept in.
+      throughVariable: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const reader = workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" }));
+export default reader;
+`),
+      throughSpecifier: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const reader = workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" }));
+export { reader as default };
+`),
+      // A type around it changes nothing of what runs.
+      asserted: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+export default workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" })) as unknown as object;
+`),
+      assertedVariable: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const reader = (workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" })) satisfies object);
+export default reader;
+`),
+      // Only the module's own variable of that name is what it exports.
+      shadowedExport: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const reader = workflow("sample", { params: {} }, async (step) => await step.do("x", { description: "X" }, async () => 1));
+const helper = () => {
+  const reader = workflow("other", { params: {} }, async (step) => await step.llm("read", { binding: "missing" }));
+  return reader;
+};
+void helper;
+export default reader;
+`),
+      unparsed: aiStepCalls("export default ("),
+    }).toStrictEqual({
+      calls: ["read:reader"],
+      kept: ["null:null", "null:null"],
+      data: [],
+      discriminant: ["read:first"],
+      plainFunction: ["read:missing"],
+      exported: [],
+      throughVariable: ["read:missing"],
+      throughSpecifier: ["read:missing"],
+      asserted: ["read:missing"],
+      assertedVariable: ["read:missing"],
+      shadowedExport: [],
+      unparsed: null,
+    });
   });
 });

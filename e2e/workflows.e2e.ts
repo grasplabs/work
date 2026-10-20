@@ -85,6 +85,34 @@ export default workflow(
 );
 `;
 
+/**
+ * The App's registration, declaring the text model resource `approve`'s
+ * AI step goes through: a version whose AI steps go through one it
+ * doesn't declare isn't made current.
+ */
+const registration = {
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+
+import schema from "./schema.ts";
+
+export const reader = resource.model("reader", { maxOutputTokens: 6000 });
+
+export default app({
+  name: "Invoices",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  internalOperations: {},
+  screens: [],
+  uses: [reader],
+});
+`,
+};
+
 const approveTests = `import { workflowTests } from "@grasp-os/sdk/testing";
 
 import approve from "./approve.ts";
@@ -136,6 +164,7 @@ const appWithWaitingRun = async (
       api,
       id,
       {
+        ...registration,
         "workflows/approval.ts": approval,
         "workflows/approval.workflow-tests.ts": approvalTests,
         "workflows/approve.ts": approve,

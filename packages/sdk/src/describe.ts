@@ -1407,6 +1407,276 @@ export const readOutline = (source: string): WorkflowOutline | null => {
 };
 
 /**
+ * A workflow's AI step call (`step.llm`), wherever it sits: its name and
+ * `binding` when written as literals, null otherwise.
+ */
+export interface AiStepCall {
+  readonly name: string | null;
+  readonly binding: string | null;
+  readonly line: number;
+}
+
+/**
+ * The scopes under `body` (itself included) that declare `name`: a
+ * variable, function or class in a block, a parameter of a nested
+ * function, a catch binding; a `var` in the function (or class static
+ * block) it is written in.
+ */
+const scopesDeclaring = (body: Node, name: string): Set<Node> => {
+  const scopes = new Set<Node>();
+  visit(body, (node, ancestors) => {
+    if (declaredWithin(node).includes(name)) {
+      scopes.add(node);
+    }
+    if (declaredAround(node).includes(name)) {
+      // A `var` is its function's, wherever it is written: in the
+      // workflow function itself, it is the parameter declared again.
+      const declaration = ancestors.at(-1)?.node;
+      const hoisted =
+        declaration?.type === "VariableDeclaration" &&
+        declaration.kind === "var";
+      const scope =
+        ancestors.findLast(({ node: above }) =>
+          hoisted
+            ? isFunctionNode(above) || above.type === "StaticBlock"
+            : isScope(above) || above.type === "SwitchStatement"
+        )?.node ?? body;
+      scopes.add(scope);
+    }
+  });
+  return scopes;
+};
+
+/**
+ * A step call's `binding` option, when written as a string literal that
+ * nothing after it can replace: null when the options are no object
+ * literal, spread anything in, or name a key by a computation.
+ */
+const bindingOption = (options: Node | undefined): string | null => {
+  if (options?.type !== "ObjectExpression") {
+    return null;
+  }
+  let binding: string | null = null;
+  for (const property of options.properties) {
+    if (property.type !== "ObjectProperty" || property.computed) {
+      return null;
+    }
+    if (nameOf(property.key) === "binding") {
+      const value = literalOf(property.value);
+      binding = typeof value === "string" ? value : null;
+    }
+  }
+  return binding;
+};
+
+/**
+ * The AI step a use of `step` (`node`, under `ancestors`) may take, or
+ * undefined for a call of another method (`aiStepCalls`).
+ */
+const aiStepCallOf = (
+  node: Node,
+  ancestors: Ancestor[]
+): AiStepCall | undefined => {
+  const line = node.loc?.start.line ?? 0;
+  const member = ancestors.at(-1);
+  const call = ancestors.at(-2)?.node;
+  const method =
+    member?.node.type === "MemberExpression" &&
+    member.key === "object" &&
+    !member.node.computed
+      ? nameOf(member.node.property)
+      : undefined;
+  const calledNode =
+    call?.type === "CallExpression" && call.callee === member?.node
+      ? call
+      : undefined;
+  if (method === undefined || calledNode === undefined) {
+    return { name: null, binding: null, line };
+  }
+  if (method !== "llm") {
+    return undefined;
+  }
+  const [named, options] = calledNode.arguments;
+  const name = named === undefined ? undefined : literalOf(named);
+  return {
+    name: typeof name === "string" ? name : null,
+    binding: bindingOption(options),
+    line,
+  };
+};
+
+/** `node` without the types around it: `workflow(…) as X` is the call. */
+const unwrapped = (node: Node | null | undefined): Node | undefined => {
+  let current = node ?? undefined;
+  while (
+    current?.type === "TSAsExpression" ||
+    current?.type === "TSSatisfiesExpression" ||
+    current?.type === "TSNonNullExpression" ||
+    current?.type === "TSTypeAssertion" ||
+    current?.type === "ParenthesizedExpression"
+  ) {
+    current = current.expression;
+  }
+  return current;
+};
+
+/**
+ * The call of the SDK's `workflow` that `file` exports as its default:
+ * the export itself, or the variable it names (`export default reader`,
+ * `export { reader as default }`), initialised with that call.
+ */
+const exportedWorkflowCall = (file: Node): CallExpression | undefined => {
+  const imports = sdkImportsOf(file);
+  const isWorkflowCall = (
+    node: Node | null | undefined
+  ): node is CallExpression =>
+    node?.type === "CallExpression" &&
+    node.callee.type === "Identifier" &&
+    imports.get(node.callee.name) === "workflow";
+  let exported: Node | undefined;
+  let named: string | undefined;
+  visit(file, (node) => {
+    if (node.type === "ExportDefaultDeclaration") {
+      exported = unwrapped(node.declaration);
+    }
+    if (node.type === "ExportNamedDeclaration") {
+      for (const specifier of node.specifiers) {
+        if (
+          specifier.type === "ExportSpecifier" &&
+          nameOf(specifier.exported) === "default"
+        ) {
+          named = specifier.local.name;
+        }
+      }
+    }
+  });
+  if (isWorkflowCall(exported)) {
+    return exported;
+  }
+  const name = exported?.type === "Identifier" ? exported.name : named;
+  // The module's own declaration of that name: one in a function or a
+  // block is another variable.
+  let call: CallExpression | undefined;
+  visit(file, (node, ancestors) => {
+    const declaration = ancestors.at(-1)?.node;
+    const scope = ancestors.at(declaration === undefined ? -1 : -2)?.node;
+    const inModule =
+      scope?.type === "Program" ||
+      (scope?.type === "ExportNamedDeclaration" &&
+        ancestors.at(-3)?.node.type === "Program");
+    const init =
+      node.type === "VariableDeclarator" ? unwrapped(node.init) : undefined;
+    if (
+      inModule &&
+      declaration?.type === "VariableDeclaration" &&
+      node.type === "VariableDeclarator" &&
+      node.id.type === "Identifier" &&
+      node.id.name === name &&
+      isWorkflowCall(init)
+    ) {
+      call = init;
+    }
+  });
+  return call;
+};
+
+/**
+ * The workflow function's body in `source` and the name it takes its
+ * runner by (`step`), read as leniently as the code allows: when its
+ * context can't be read (`env` kept outside a step, a \`function\` rather
+ * than an arrow), from the first parameter of the function passed to the
+ * SDK's `workflow`. Undefined when there is no such name to go by: code
+ * that doesn't parse, isn't written with `workflow`, or destructures its
+ * runner.
+ */
+const runnerOf = (source: string): { body: Node; step: string } | undefined => {
+  try {
+    const { run, bindings } = readContext(source);
+    return bindings.step === undefined
+      ? undefined
+      : { body: run.body, step: bindings.step };
+  } catch (error) {
+    if (!(error instanceof WorkflowError)) {
+      throw error;
+    }
+  }
+  let file: Node;
+  try {
+    file = parseModule(source);
+  } catch (error) {
+    if (error instanceof WorkflowError) {
+      return undefined;
+    }
+    throw error;
+  }
+  // The call of the SDK's `workflow` the file exports as its default, what
+  // runs, directly or through the variable it is kept in, and whose
+  // function, an arrow or not, takes its runner by name.
+  const call = exportedWorkflowCall(file);
+  const run = call?.arguments.at(2);
+  if (
+    run?.type !== "ArrowFunctionExpression" &&
+    run?.type !== "FunctionExpression"
+  ) {
+    return undefined;
+  }
+  const [first] = run.params;
+  return first?.type === "Identifier"
+    ? { body: run.body, step: first.name }
+    : undefined;
+};
+
+/**
+ * Every AI step the workflow in `source` may take, read from its code
+ * whether or not its outline can be (`readOutline`): a step in a `try`
+ * runs all the same. Any use of `step` that isn't `step.method(…)` (kept
+ * in a variable, passed on, a computed method) may take one too, through
+ * a model no one can read: it counts as an AI step with no `binding`.
+ * When the workflow's context can't be read (`env` kept outside a step,
+ * say), its runner is still its first parameter (`runnerOf`). Null when
+ * there is no runner to go by: code that hides it is refused on each
+ * attempt by the host, whatever this reads.
+ */
+export const aiStepCalls = (source: string): AiStepCall[] | null => {
+  const runner = runnerOf(source);
+  if (runner === undefined) {
+    return null;
+  }
+  const { body, step } = runner;
+  const shadowing = scopesDeclaring(body, step);
+  const calls: AiStepCall[] = [];
+  visit(body, (node, ancestors) => {
+    if (
+      node.type !== "Identifier" ||
+      node.name !== step ||
+      isNamePosition(ancestors)
+    ) {
+      return;
+    }
+    // The nearest scope around it that declares the name decides what it
+    // is: one inside the workflow function is another variable; the
+    // function's own body declaring it again is one no one can read.
+    // A case's declarations are the cases', not the switch expression's.
+    const scope = ancestors.findLast(
+      ({ node: above, key }) =>
+        shadowing.has(above) &&
+        !(above.type === "SwitchStatement" && key === "discriminant")
+    )?.node;
+    if (scope !== undefined && scope !== body) {
+      return;
+    }
+    const call =
+      scope === body
+        ? { name: null, binding: null, line: node.loc?.start.line ?? 0 }
+        : aiStepCallOf(node, ancestors);
+    if (call !== undefined) {
+      calls.push(call);
+    }
+  });
+  return calls;
+};
+
+/**
  * The App's bindings the workflow in `source` calls, as a review shows
  * them and its runs are held to: by step, as its outline names them, and
  * all together. A workflow whose steps can't be read (a step in a `try`,

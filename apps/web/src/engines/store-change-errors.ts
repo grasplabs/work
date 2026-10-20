@@ -2,6 +2,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { failureText } from "@grasp-os/shared/errors";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { dataErrors, migrationErrors } from "@grasp-os/shared/stores";
+import { workflowErrors } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
@@ -161,6 +162,19 @@ const rollbackIncompatibleText = (error: unknown): string => {
   );
 };
 
+/** One AI step `workflow.model_undeclared` names, as core sends it. */
+const isStepRefusal = (
+  value: unknown
+): value is { file: string; line: number; message: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  "file" in value &&
+  typeof value.file === "string" &&
+  "line" in value &&
+  typeof value.line === "number" &&
+  "message" in value &&
+  typeof value.message === "string";
+
 /**
  * Why a version couldn't be made current and, when a store's failed
  * change holds it back, what to say of the engine's page (`link`), where an
@@ -186,6 +200,25 @@ export const makeCurrentFailure = (
       issues: Array.isArray(issues)
         ? issues
             .filter((issue): issue is string => typeof issue === "string")
+            .slice(0, 20)
+        : [],
+    };
+  }
+  if (workflowErrors.codeOf(error) === "workflow.model_undeclared") {
+    const diagnostics = detailOf(error, "diagnostics");
+    return {
+      text: failureText(error),
+      link: undefined,
+      // Each AI step core refused, at its file and line, and why.
+      issues: Array.isArray(diagnostics)
+        ? diagnostics
+            .flatMap((diagnostic: unknown) =>
+              isStepRefusal(diagnostic)
+                ? [
+                    `${diagnostic.file}:${diagnostic.line}: ${diagnostic.message}`,
+                  ]
+                : []
+            )
             .slice(0, 20)
         : [],
     };
