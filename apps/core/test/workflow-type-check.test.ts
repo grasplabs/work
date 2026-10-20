@@ -426,32 +426,6 @@ describe(
       });
     });
 
-    it("build a version that kept another App's exports as a binding, typing that name as no binding", async () => {
-      const builder = await personApi("builder");
-      const { id: app } = await builder.api.apps.create({ name: "Checked" });
-      const { version } = await builder.api.apps.files.commit(
-        app,
-        {
-          ...sampleApp(),
-          ...checked(
-            '    return (await env.CRM.call("find", {})) === null ? 0 : 1;'
-          ),
-        },
-        "First"
-      );
-      // As a version committed while a run still reached other Apps'
-      // exports kept them.
-      await env.DB.prepare(
-        "UPDATE app_versions SET workflow_bindings = ? WHERE app_id = ? AND version = ?"
-      )
-        .bind(JSON.stringify({ CRM: "app" }), app, version)
-        .run();
-
-      await expect(
-        codeOf(builder.api.apps.versions.setCurrent(app, version))
-      ).resolves.toBe("ok");
-    });
-
     it("type a name by the permission that holds it now over one revoked, whatever their kinds", async () => {
       const builder = await personApi("builder");
       const { id: app } = await builder.api.apps.create({ name: "Checked" });

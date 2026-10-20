@@ -1775,15 +1775,7 @@ export const workflowBindingKinds = async (
     .from(appVersions)
     .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
     .all();
-  // A version committed while a run still reached other Apps' exports
-  // keeps their names as `app`: a run gets no binding of that kind now,
-  // so its workflows are typed as if the App held none, and the version
-  // still builds as it was committed, never rewritten.
-  return Object.fromEntries(
-    Object.entries(committed?.bindings ?? {}).filter(
-      (entry): entry is [string, WorkflowBindingKind] => entry[1] !== "app"
-    )
-  );
+  return committed?.bindings ?? {};
 };
 
 /**
