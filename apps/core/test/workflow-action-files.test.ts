@@ -1116,14 +1116,19 @@ describe("a workflow run's own files", () => {
       objects: await objectsOf(runId),
       rows: await rowsOf(runId),
     };
-    // Its details are past their retention.
+    // Its details are past their retention, swept by a cron run that came
+    // late: two graces after its scheduled time.
     const now = new Date();
-    await sweepWorkflowStartDetails(env, new Date(now.getTime() + 1000), now);
+    await sweepWorkflowStartDetails(
+      env,
+      new Date(now.getTime() + 1000),
+      new Date(now.getTime() - 2 * sweepGraceMs)
+    );
     const marked = await rowsOf(runId);
     const refusing = { ...env, FILES: failingOn("delete") };
     const pastGrace = new Date(now.getTime() + sweepGraceMs + 1000);
-    // Within the grace, nothing is swept.
-    await sweepRunFiles(env, now);
+    // Within the grace from when they really went, nothing is swept.
+    await sweepRunFiles(env);
     const inGrace = {
       objects: await objectsOf(runId),
       rows: await rowsOf(runId),

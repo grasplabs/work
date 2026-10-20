@@ -414,7 +414,7 @@ export const sweepWorkflowStartDetails = async (
     ...attemptsPruned(db, due, now),
     // Its own files go with its details (GRA-724): marked here, their
     // chunks deleted by `sweepRunFiles`.
-    runFilesRemoved(db, due, now),
+    runFilesRemoved(db, due),
     db
       .update(receipts)
       .set({ input: null, params: null, detailsRemovedAt: now })

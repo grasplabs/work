@@ -675,14 +675,12 @@ export const sweepGraceMs = 60 * 60_000;
  * Marks files of the runs `runIds` deleted: their run's details went
  * (retention.ts), so they go too, in the same batch.
  */
-export const runFilesRemoved = (
-  db: ReturnType<typeof drizzle>,
-  runIds: SQL,
-  now: Date
-) =>
+export const runFilesRemoved = (db: ReturnType<typeof drizzle>, runIds: SQL) =>
   db
     .update(workflowRunFiles)
-    .set({ state: "deleted", deletedAt: now })
+    // Stamped by the clock, never a late cron's scheduled time, so the
+    // grace counts from when the file really went.
+    .set({ state: "deleted", deletedAt: new Date() })
     .where(
       and(
         inArray(workflowRunFiles.runId, runIds),
