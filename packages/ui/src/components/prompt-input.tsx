@@ -129,10 +129,15 @@ function PromptInputTextarea({
       return;
     }
     const files = pastedFiles(event);
-    if (files.length > 0) {
-      event.preventDefault();
-      attachments.add(files);
+    if (files.length === 0) {
+      return;
     }
+    // Text pasted with the files is still typed in; a paste of files alone
+    // types nothing.
+    if (event.clipboardData.getData("text/plain") === "") {
+      event.preventDefault();
+    }
+    attachments.add(files);
   };
 
   return (
