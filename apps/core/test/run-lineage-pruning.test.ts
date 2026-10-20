@@ -261,6 +261,41 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     await builder.api.workflows.cancel(child);
   });
 
+  it("prune an App's account in a lineage it joined once every run of the lineage ended, and keep it while any is live", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const appX = await lineageApp(builder);
+    const appY = await lineageApp(builder);
+    const root = await builder.api.workflows.start(appX, "idle");
+    await finished(root.id);
+    // App Y's run in App X's lineage, charged to its own account: itself.
+    const joined = await startChild(appY, "idle", root.id, builder.userId);
+    await finished(joined);
+    const waiting = await startChild(appX, "later", root.id, builder.userId);
+    await sleeping(waiting, "pause");
+    await spendFor(appY, builder.userId, [
+      runActorOf({
+        runId: joined,
+        app: appY,
+        workflow: "idle",
+        rootRunId: root.id,
+        accountRunId: joined,
+      }),
+    ]);
+    await endedAt(longAgo(), root.id, joined);
+
+    await swept();
+    const whileLive = await keptOf(joined);
+    await builder.api.workflows.cancel(waiting);
+    await finished(waiting);
+    await endedAt(longAgo(), waiting);
+    await swept();
+
+    expect({ whileLive, ended: await keptOf(joined) }).toStrictEqual({
+      whileLive: { spend: 1, alerts: 1 },
+      ended: { spend: 0, alerts: 0 },
+    });
+  });
+
   it("keep a lineage a request held for a person still reserves against, however long ago its runs ended", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await lineageApp(builder);

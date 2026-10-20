@@ -41,7 +41,12 @@ import { microsPerDollar } from "./model-prices.ts";
 // audit actor, which the engine's record of the run gives it, never its
 // input). It is counted across all their steps, retries, restarts and
 // children, for the lineage's whole life (the ledger never resets it by
-// month), so none of them starts afresh. It has a budget only where the
+// month), so none of them starts afresh. A run of another App than the
+// root's (a run's own mail starts other Apps' runs under it) counts under
+// its App's account in the lineage instead (`accountRunId` on its actor,
+// from its row too, workflows/quotas.ts `accountClaimed`): every run of
+// that App in the lineage together, so one App never spends another's
+// budget, and hopping between Apps gives each one budget per lineage. It has a budget only where the
 // deployment sets `run`; whatever it sets, a lineage makes at most the
 // provider requests the deployment's quota policy allows
 // (`lineageModelRequests`, @grasp-os/shared/quota-policy): the platform's
@@ -157,7 +162,7 @@ const workflowScopes = (
   if (trigger.type !== "workflow") {
     return [];
   }
-  const lineage = trigger.rootRunId ?? trigger.runId;
+  const lineage = trigger.accountRunId ?? trigger.rootRunId ?? trigger.runId;
   return [
     {
       scope: "workflow",

@@ -20,6 +20,7 @@ import { z } from "zod";
 
 import {
   quotaPolicies,
+  runLineageAccounts,
   runLineageAttempts,
   runLineageChildren,
   runLineages,
@@ -291,6 +292,70 @@ const limitReached = (limit: LineageLimit, policy: QuotaPolicy) =>
     max: policy.limits[lineageLimits[limit]],
     generation: policy.generation,
   });
+
+/**
+ * The statements that charge `run`, started under another in the lineage
+ * of `root`, to its App's account there, after the statement that writes
+ * its row (nothing for a row that wasn't written). A run of the root's
+ * App has none: it is charged to the lineage's own row. A run of another
+ * App (a run's own mail starts other Apps' runs under it) is charged to
+ * its App's first run in the lineage: claimed once, by the lineage and the
+ * App (`run_lineage_accounts`), so starts at once agree on one, and given
+ * a row of its own (`run_lineages`) whose age is the root's, so a hop to
+ * another App never starts a lineage's life afresh. The run's row names
+ * it (`account_run_id`), written once, here.
+ *
+ * What it closes: one App using up another's allowances in a lineage it
+ * joined (its attempts' active time, its host calls, its model spend,
+ * keyed by its account, model-budgets.ts) and taking the share of a
+ * person who never used it (dispatcher.ts, `admissionSubjectOf`). Its
+ * place stays the lineage's: it takes one of the lineage's descendant
+ * runs and sits a level deeper (`admitChild`), which bound runs mailing
+ * each other back and forth, whichever Apps they are of.
+ */
+export const accountClaimed = (
+  db: DrizzleD1Database,
+  run: { id: string; appId: string; createdAt: Date },
+  root: string
+) => {
+  const accounts = runLineageAccounts;
+  const ofApp = and(
+    eq(accounts.rootRunId, root),
+    eq(accounts.appId, run.appId)
+  );
+  return [
+    db
+      .insert(accounts)
+      .select(
+        sql`SELECT ${root}, ${run.appId}, ${run.id}, ${run.createdAt.getTime()} WHERE EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.id}) AND ${run.appId} IS NOT (SELECT ${workflowRuns.appId} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root})`
+      )
+      .onConflictDoNothing(),
+    // Its row, when this run is the account: aged as the lineage is.
+    db
+      .insert(runLineages)
+      .select(
+        sql`SELECT ${accounts.accountRunId}, (SELECT ${runLineages.createdAt} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root}), 0, 0, 0, 0, 0 FROM ${accounts} WHERE ${ofApp} AND ${accounts.accountRunId} = ${run.id}`
+      )
+      .onConflictDoNothing(),
+    db
+      .update(workflowRuns)
+      .set({
+        accountRunId: sql`(SELECT ${accounts.accountRunId} FROM ${accounts} WHERE ${ofApp})`,
+      })
+      .where(eq(workflowRuns.id, run.id)),
+  ] as const;
+};
+
+/**
+ * The run whose allowances `run`'s work is charged to: its App's account
+ * in its lineage (`accountClaimed`), or else its lineage's root, or the
+ * run itself for a root.
+ */
+export const accountOf = (run: {
+  id: string;
+  rootRunId: string | null;
+  accountRunId: string | null;
+}): string => run.accountRunId ?? run.rootRunId ?? run.id;
 
 /**
  * The statement that creates the lineage of `root` (a root run's ID) from

@@ -56,7 +56,7 @@ import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
 import { ownerOf } from "./owners.ts";
-import { admitChild, lineageCreated } from "./quotas.ts";
+import { accountClaimed, admitChild, lineageCreated } from "./quotas.ts";
 import type { ChildPlace } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
@@ -726,8 +726,11 @@ export const startRun = async (
       })
     ),
     // A root's lineage, its age counting from now: nothing for a trigger's
-    // key a run has. A run started under another joins its parent's.
-    ...(rootRunId === null ? [lineageCreated(db, row.id)] : []),
+    // key a run has. A run started under another joins its parent's, and
+    // is charged to its App's account there.
+    ...(rootRunId === null
+      ? [lineageCreated(db, row.id)]
+      : accountClaimed(db, row, rootRunId)),
   ]);
   if (inserted.length === 0) {
     return await deliveredBefore(env, row.triggerKey ?? "", row.id);

@@ -39,7 +39,7 @@ import type {
   RunStep,
 } from "./host.ts";
 import { paramValues } from "./param-values.ts";
-import { admitAttempt } from "./quotas.ts";
+import { accountOf, admitAttempt } from "./quotas.ts";
 import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
@@ -77,9 +77,12 @@ import { wakingOnSettle } from "./share-wakes.ts";
 /**
  * Whose person share of the attempts running at once a run's attempts
  * take (admission.ts): the person who started it; for a run nobody
- * started, its lineage root's (a run started under another, by mail or a
- * connector event its parent's step caused, keeps its parent's), or, for a
- * root nobody started (a trigger, mail, a connector event), its App's
+ * started, its account's (quotas.ts, `accountOf`): its lineage root's for
+ * a run of the root's App (a run started under another, by mail or a
+ * connector event its parent's step caused, keeps its parent's), and its
+ * App's first run in the lineage for a run of another App, so one App's
+ * runs never take the share of a person who never used it; or, for an
+ * account nobody started (a trigger, mail, a connector event), its App's
  * triggers', `trigger:<app>`, a person share of their own. It is not who
  * the run acts for: those runs act for the App's owner, but outsiders who
  * can send mail or events never take the owner's own share.
@@ -88,11 +91,11 @@ const admissionSubjectOf = async (env: Env, row: RunRow): Promise<string> => {
   if (row.startedBy !== null) {
     return row.startedBy;
   }
-  const root =
-    row.rootRunId === null
-      ? undefined
-      : await findRun(env, runIdSchema.parse(row.rootRunId));
-  const origin = root ?? row;
+  const account = accountOf(row);
+  const origin =
+    account === row.id
+      ? row
+      : ((await findRun(env, runIdSchema.parse(account))) ?? row);
   return origin.startedBy ?? `trigger:${origin.appId}`;
 };
 
@@ -290,6 +293,9 @@ const runWorkflow = async (
       ...(row.rootRunId === null
         ? {}
         : { rootRunId: runIdSchema.parse(row.rootRunId) }),
+      ...(row.accountRunId === null
+        ? {}
+        : { accountRunId: runIdSchema.parse(row.accountRunId) }),
       authority,
       // Its lineage, its person and its App from its row and its root's,
       // never from its input: whose shares its attempts and model requests
@@ -343,7 +349,8 @@ const runWorkflow = async (
             env,
             {
               run: runId,
-              root: row.rootRunId ?? runId,
+              // Its account: its App's in the lineage, which it joined.
+              root: accountOf(row),
               subject: run.shareSubject,
               resource: run.app,
             },

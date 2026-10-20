@@ -1146,6 +1146,17 @@ export const workflowRuns = sqliteTable(
      */
     rootRunId: text("root_run_id"),
     /**
+     * For a run of another App than its lineage root's (a run's own mail
+     * starts other Apps' runs under it, src/workflows/connector-events.ts):
+     * the run whose allowances its work is charged to, that App's first
+     * run in the lineage (`run_lineage_accounts`). Its attempts, host
+     * calls, model spend and share count there; its place (descendants,
+     * depth, age) stays the lineage's. Null for a root and a run of the
+     * root's App, charged to the lineage's own (src/workflows/quotas.ts).
+     * Written once, with the row.
+     */
+    accountRunId: text("account_run_id"),
+    /**
      * The sequence of the engine's latest status notification this row
      * took (src/workflows/projection.ts): one at or below it is late, and
      * changes nothing. The engine alone decides a run's status; this row
@@ -1664,6 +1675,26 @@ export const runMailStampRefusals = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [index("run_mail_stamp_refusals_stamp_idx").on(table.stamp)]
+);
+
+/**
+ * Each App's account in a run lineage it didn't start (src/workflows/
+ * quotas.ts, `accountClaimed`): the first run of `app_id` in the lineage
+ * of `root_run_id`, claimed once, so every run of that App in the lineage
+ * is charged to the one account (`workflow_runs.account_run_id`), whose
+ * `run_lineages` row counts its attempts and host calls.
+ */
+export const runLineageAccounts = sqliteTable(
+  "run_lineage_accounts",
+  {
+    rootRunId: text("root_run_id")
+      .notNull()
+      .references(() => runLineages.rootRunId),
+    appId: text("app_id").notNull(),
+    accountRunId: text("account_run_id").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.rootRunId, table.appId] })]
 );
 
 /**

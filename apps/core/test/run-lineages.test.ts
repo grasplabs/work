@@ -253,6 +253,35 @@ const startChild = async (
 };
 
 /**
+ * Starts a run of `workflow` of `app` under `parent` that nobody started,
+ * as a run's own mail to a mailbox `app` watches starts one
+ * (connector-events.ts): `app` may be another App than the parent's.
+ */
+const startedByMail = async (
+  app: string,
+  workflow: string,
+  parent: string
+): Promise<string> => {
+  const run = await startRun(env, {
+    app: appIdSchema.parse(app),
+    workflow: workflowIdSchema.parse(workflow),
+    input: null,
+    startedBy: null,
+    actor: { type: "system" },
+    parent: runIdSchema.parse(parent),
+  });
+  return run.id;
+};
+
+/** What core's database holds of `query`'s rows, with `binds`. */
+const rowsOf = async <Row>(query: string, ...binds: unknown[]) => {
+  const { results } = await env.DB.prepare(query)
+    .bind(...binds)
+    .all<Row>();
+  return results;
+};
+
+/**
  * A call to Llama for the workflow run `trigger`, in the context of `app`
  * for `person`: capped at 100 tokens unless `capped` is false, when it
  * reserves as much as a step's (Llama's whole 24,000-token answer).
@@ -462,6 +491,154 @@ ${llmStep()}`,
       child: "model.budget_busy",
       refused: [["model.budget_busy", "run"]],
     });
+  });
+
+  it("charge a run another App's mail starts in a lineage to that App's account there: its spend, its time and its share, while its place counts in the lineage", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const appX = await appWith(builder, {
+      ...workflowFiles("idle", "  return null;"),
+      ...workflowFiles("reader", llmStep("retries: { limit: 0 },"), {
+        extract: { total: 1234 },
+      }),
+    });
+    const appY = await appWith(
+      builder,
+      workflowFiles("reader", llmStep("retries: { limit: 0 },"), {
+        extract: { total: 1234 },
+      })
+    );
+    const root = await builder.api.workflows.start(appX, "idle");
+    await finished(root.id);
+
+    // $0.30 a lineage's account: one dear answer ($0.293) leaves no room
+    // for a second step's request (some $0.014) beside it.
+    const result = await withGateway(
+      { run: { limit: 0.3 } },
+      times(2, dearTotal),
+      async (fake) => {
+        const first = await startedByMail(appY, "reader", root.id);
+        await finished(first);
+        const second = await startedByMail(appY, "reader", root.id);
+        await finished(second);
+        // App X's own run under its root: App Y spent none of its budget.
+        const own = await startChild(appX, "reader", root.id, builder.userId);
+        await finished(own);
+        const events = await eventsNow();
+        const accounts = events
+          .filter(
+            ({ action, actor }) =>
+              action.startsWith("model.") &&
+              actor.type === "workflow" &&
+              actor.appId === appY
+          )
+          .map(({ actor }) =>
+            actor.type === "workflow" ? actor.accountRunId : undefined
+          );
+        return {
+          sent: fake.requests.length,
+          first: await statusOf(builder, first),
+          second: await failedWith(second),
+          own: await statusOf(builder, own),
+          // Every model event of App Y's runs names its account: its first run.
+          accounts: [...new Set(accounts)],
+          firstId: first,
+          // App Y's runs take App Y's triggers' share, not the root's
+          // person's, and their attempts count on its account.
+          attempts: await rowsOf<{ subject: string; account: string }>(
+            "SELECT DISTINCT subject, root_run_id AS account FROM run_lineage_attempts WHERE run_id IN (?, ?)",
+            first,
+            second
+          ),
+          lineages: await rowsOf<{
+            id: string;
+            createdAt: number;
+            descendants: number;
+            used: number;
+          }>(
+            "SELECT root_run_id AS id, created_at AS createdAt, descendants, active_used_ms AS used FROM run_lineages WHERE root_run_id IN (?, ?)",
+            root.id,
+            first
+          ),
+        };
+      }
+    );
+    const rootRow = result.lineages.find(({ id }) => id === root.id);
+    const accountRow = result.lineages.find(({ id }) => id === result.firstId);
+
+    expect({
+      ...result,
+      accounts: result.accounts.map((id) =>
+        id === result.firstId ? "first" : id
+      ),
+      attempts: result.attempts.map(({ subject, account }) => [
+        subject,
+        account === result.firstId ? "first" : account,
+      ]),
+      lineages: {
+        // All three runs took the lineage's places.
+        descendants: rootRow?.descendants,
+        // The account's age is the lineage's: no hop starts it afresh.
+        sameAge: accountRow?.createdAt === rootRow?.createdAt,
+        accountUsed: (accountRow?.used ?? 0) > 0,
+        accountPlaces: accountRow?.descendants,
+      },
+      firstId: undefined,
+    }).toStrictEqual({
+      sent: 2,
+      first: "completed",
+      second: "model.run_limit",
+      own: "completed",
+      accounts: ["first"],
+      firstId: undefined,
+      attempts: [[`trigger:${appY}`, "first"]],
+      lineages: {
+        descendants: 3,
+        sameAge: true,
+        accountUsed: true,
+        accountPlaces: 0,
+      },
+    });
+  });
+
+  it("charge an App's runs started in a lineage at once to one account", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const appX = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    const appY = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    const root = await builder.api.workflows.start(appX, "idle");
+    await finished(root.id);
+
+    const started = await Promise.all(
+      times(3, appY).map(
+        async (app) => await startedByMail(app, "idle", root.id)
+      )
+    );
+    // And App X's own run under the root is charged to the lineage's own.
+    const own = await startedByMail(appX, "idle", root.id);
+    await Promise.all(
+      [...started, own].map(async (run) => {
+        await finished(run);
+      })
+    );
+    const accounts = await rowsOf<{ id: string; account: string | null }>(
+      "SELECT id, account_run_id AS account FROM workflow_runs WHERE id IN (?, ?, ?, ?)",
+      ...started,
+      own
+    );
+    const ofY = new Set(
+      accounts.filter(({ id }) => id !== own).map(({ account }) => account)
+    );
+
+    expect({
+      ofY: ofY.size,
+      oneOfThem: started.some((run) => ofY.has(run)),
+      own: accounts.find(({ id }) => id === own)?.account,
+    }).toStrictEqual({ ofY: 1, oneOfThem: true, own: null });
   });
 
   it("count a retried step's requests on top of its lineage's, so its retry can't start the count afresh", async () => {
