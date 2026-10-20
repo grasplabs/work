@@ -2533,10 +2533,12 @@ const failedAnswer = (
 });
 
 /**
- * `answer` with its cost as the gateway counted it towards the budgets
- * (`pricedCost`, at the request's pinned prices), in place of pi's own:
- * what a chat shows of a reply is what was charged. Its counts are the
- * provider's, as recorded.
+ * `answer` with its cost at the gateway's prices (`pricedCost`, the
+ * request's pinned ones), in place of pi's own: what a chat shows of a
+ * reply, answered or failed, is priced as the budgets are charged. Its
+ * counts are the provider's. A failed request whose provider counted
+ * less than came of it is charged an estimate on top (`usedBy`), which
+ * the reply doesn't show; nor does a reply stored before this.
  */
 const pricedAnswer = (
   { price }: Pick<Route, "price">,
@@ -2616,7 +2618,7 @@ const relayEvents = async (
       out.push({
         ...event,
         error: {
-          ...event.error,
+          ...pricedAnswer(route, event.error),
           errorMessage: rateLimited ?? failureMessage(failure),
         },
       });
@@ -2645,7 +2647,11 @@ const relayEvents = async (
     usage: partial?.usage ?? noUsage,
   };
   await record(env, route, { answer, ...response }, 1, "failed");
-  out.push({ type: "error", reason: "error", error: answer });
+  out.push({
+    type: "error",
+    reason: "error",
+    error: pricedAnswer(route, answer),
+  });
 };
 
 /**
