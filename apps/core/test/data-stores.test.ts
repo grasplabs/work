@@ -7,6 +7,7 @@ import {
   schemaManifest,
 } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
+import { auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
@@ -2645,6 +2646,56 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
       details: { limit: cascadeJobMaxRecords },
     });
     await expect(cascadeJobsOf(store)).resolves.toStrictEqual([]);
+  });
+
+  it("deletes a cycle larger than a batch at once, audited a hundred records an event at most", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Root",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const size = commitMaxCascade + 50;
+    const subs = await insertMany(
+      store,
+      "subs",
+      Array.from({ length: size }, () => ({ link }))
+    );
+    // Each sub refers to the next, the last to the first: a cycle whose
+    // members always have one referring to them.
+    for (let at = 0; at < size; at += commitMaxWrites) {
+      // oxlint-disable-next-line no-await-in-loop -- a commit's writes at a time
+      await commitIn(store, {
+        principal: ada,
+        schemaHash: cascadeHash,
+        writes: subs.slice(at, at + commitMaxWrites).map((id, offset) => ({
+          op: "patch" as const,
+          table: "subs",
+          id,
+          expectedRevision: 1,
+          fields: { parent: subs[(at + offset + 1) % size] ?? "" },
+        })),
+      });
+    }
+    const before = await recordCount(store);
+    const committed = await deleteNote(store, note);
+    await cascadeDone(store);
+    const logged = await allEvents();
+    const batches = logged.filter(
+      ({ action, detail }) =>
+        action === "store.cascade_batch" &&
+        detail.job === committed.cascadePending?.job
+    );
+    expect({
+      count: await recordCount(store),
+      dangling: await danglingReferences(store),
+      named: batches.flatMap(({ provenance }) => provenance).length,
+      largest: Math.max(...batches.map(({ provenance }) => provenance.length)),
+    }).toStrictEqual({
+      count: before - size - 2,
+      dangling: 0,
+      named: size + 2,
+      largest: auditProvenanceMaxItems,
+    });
   });
 
   it("audits who started it, each batch's records with their owners, and its end", async () => {

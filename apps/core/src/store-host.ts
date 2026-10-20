@@ -19,7 +19,11 @@ import type {
   SchemaManifest,
   SchemaPlan,
 } from "@grasp-os/sdk/host";
-import { auditActorSchema, auditEventSchema } from "@grasp-os/shared/audit";
+import {
+  auditActorSchema,
+  auditEventSchema,
+  auditProvenanceMaxItems,
+} from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
@@ -3683,8 +3687,8 @@ export class StoreHost {
    * record that's gone. Members that only refer to each other in a cycle
    * go together, whatever their number (at most the job's). Each goes as
    * a commit's deletion goes (`#flush`, its references, its files), its
-   * member row with it; one `store.cascade_batch` event per table and
-   * owner names them. The job finishes with its last member. Answers
+   * member row with it; `store.cascade_batch` events name them, per table
+   * and owner, at most `auditProvenanceMaxItems` an event. The job finishes with its last member. Answers
    * whether there is more to do.
    */
   #deleteCascadeBatch(): boolean {
@@ -3785,13 +3789,18 @@ export class StoreHost {
         group.ids.push(recordId);
         groups.set(key, group);
       }
+      // An event names at most `auditProvenanceMaxItems` records: a cycle
+      // deleted at once can hold more of one table and owner.
       for (const { table, owner, ids } of groups.values()) {
-        this.#cascadeEvent(
-          "store.cascade_batch",
-          job.principal,
-          { job: job.jobId, table, owner, count: ids.length },
-          ids
-        );
+        for (let at = 0; at < ids.length; at += auditProvenanceMaxItems) {
+          const named = ids.slice(at, at + auditProvenanceMaxItems);
+          this.#cascadeEvent(
+            "store.cascade_batch",
+            job.principal,
+            { job: job.jobId, table, owner, count: named.length },
+            named
+          );
+        }
       }
       const done = job.deleted + deleted.length;
       const left = this.#db
