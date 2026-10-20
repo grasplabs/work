@@ -14,7 +14,10 @@ import { env } from "cloudflare:workers";
 import { afterAll, afterEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { drainsSettled, drainsStarted } from "../src/audit-outbox.ts";
+import {
+  backgroundCallsQuiet,
+  countBackgroundCalls,
+} from "./background-calls.ts";
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
 import { closeOpenSockets } from "./open-sockets.ts";
@@ -64,6 +67,7 @@ const startEmpty = async (): Promise<void> => {
   );
 };
 
+countBackgroundCalls();
 await startEmpty();
 // The built-ins' install, once per runtime, then empty storage again.
 if (await installBuiltinsFirst()) {
@@ -72,57 +76,7 @@ if (await installBuiltinsFirst()) {
 
 afterEach(closeOpenSockets);
 
-/**
- * How many rounds a file waits for its audit drains to go quiet: each
- * {@link quietMs} or two, so about 5 seconds at most, within a hook's 10. A drain in an object a test aborted
- * (`abortAllDurableObjects`, an eviction) never settles, and never calls
- * anything again either: its request is gone. So the wait gives up on
- * those, as a reset gives up on a wake (reset-storage.ts). A live drain
- * takes milliseconds; one taking this long would be a bug of its own.
- */
-const quietRounds = 12;
-
-/**
- * How long no drain may start for the file's background work to count as
- * quiet: a run a test left going takes its next step within it.
- */
-const quietMs = 200;
-
-/** The drains this file starts: those from here on. */
-const firstDrain = drainsStarted();
-
-/**
- * Waits, at most {@link quietRounds} rounds, until the drains the file
- * started have settled and none started for {@link quietMs}. On
- * `scheduler.wait`, which a test's fake timers leave alone.
- */
-const drainsQuiet = async (): Promise<void> => {
-  for (let round = 0; round < quietRounds; round += 1) {
-    const started = drainsStarted();
-    // Rounds one after another: each waits for what the last one left.
-    // oxlint-disable-next-line no-await-in-loop
-    const settled = await Promise.race([
-      drainsSettled(firstDrain).then(() => true),
-      scheduler.wait(quietMs).then(() => false),
-    ]);
-    if (settled) {
-      // oxlint-disable-next-line no-await-in-loop
-      await scheduler.wait(quietMs);
-      if (drainsStarted() === started) {
-        return;
-      }
-    }
-  }
-};
-
-// A change drains its audit outbox in the background, and each drain calls
-// the AuditLog object, which in this pool goes through Vitest's RPC
-// channel (every call into a Durable Object imports the Worker's module
-// through it). Vitest closes the file's channel once its tests end,
-// failing a drain still out with "Closing rpc while "resolve" was
-// pending". A file's drains aren't only its tests' own: a workflow run a
-// test left going takes its next steps after the last test, and audits
-// each one (GRA-880). So a file waits until its drains have gone quiet.
-// Aborting every object instead stops the pool's own runner object too.
-// Setup files' afterAll hooks run last.
-afterAll(drainsQuiet);
+// Setup files' afterAll hooks run last: once the file's tests and their
+// hooks are done, it waits for the calls they left going
+// (background-calls.ts).
+afterAll(backgroundCallsQuiet);
