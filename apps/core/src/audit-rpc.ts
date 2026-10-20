@@ -57,8 +57,9 @@ const searchPageSize = 100;
 const exportPageSize = 500;
 
 /**
- * Pages of open obligations a JSON export reads (`openObligations`), each
- * of `unknownOutcomeListLimit`: past them it says it isn't complete.
+ * Pages of open obligations a JSON export holds (`openObligations`), each
+ * of `unknownOutcomeListLimit`: 1,000 at most. One more is read to tell
+ * whether that was all of them.
  */
 const obligationPagesPerExport = 5;
 
@@ -105,6 +106,14 @@ const openObligations = async (
       complete = true;
       break;
     }
+  }
+  if (!complete) {
+    // Exactly full: whether any is left past the last one held.
+    const past = await env.CONNECT.listAllUnknownOutcomes(
+      connectPerson,
+      before
+    );
+    complete = past.length === 0;
   }
   await appendAuditEvent(env, {
     actor: actorOf(person),

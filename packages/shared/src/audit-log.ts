@@ -359,11 +359,12 @@ export interface AuditApi {
    * that is not a verification of the whole chain, which
    * `lastFullVerification` (the last full `verify` pass, or `null`)
    * reports. `openObligations` is every person's calls of unknown outcome
-   * as the export ends, whatever the filter, `{ listedAt, complete,
-   * obligations }`, each as `UnknownOutcomesApi.listAll` lists it without
-   * its `id` and `cursor`; its `effectKeyHash` is the one the call's events
-   * and its resolution's carry. `complete` is false past 1,000; `null` for
-   * Grasp staff, who see no one's.
+   * as the export ends, `{ listedAt, complete, obligations }`: the
+   * export's filter doesn't apply to it, only to `records`. Each obligation
+   * is as `UnknownOutcomesApi.listAll` lists it, without its `id` and
+   * `cursor`; its `effectKeyHash` is the one the call's events and its
+   * resolution's carry. It holds at most 1,000, and `complete` says whether
+   * that is all of them; it is `null` for Grasp staff, who see no one's.
    *
    * `csv`: a header and a row per record; its `verified`, `prev_hash` and
    * `hash` columns are the record check. A cell that a spreadsheet would

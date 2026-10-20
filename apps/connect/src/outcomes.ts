@@ -248,15 +248,16 @@ const listingOf = async ({
     connection
   )?.title;
   return {
-    // The receipt the audit log names the call by, as its events do: the
-    // admin reads the same hash there, with the key's own.
+    // The receipt the audit log names the call by, as its events do: a
+    // digest derived from the key, so an admin who can guess a key (App
+    // code chooses keys, and may put data in them) can confirm the guess,
+    // exactly as with the log's `idempotencyKeyHash`, which they read
+    // already, and no more.
     effectKeyHash: await effectKeyHashOfRow(row),
     // Only tells rows apart, of what the admin is shown anyway and the
-    // row's random list ID, and never of its key: App code chooses keys and
-    // may put data in them, and a digest of a key a reader can guess would
-    // confirm the guess. The list ID makes it unique across every page,
-    // even for two calls alike in all the rest, claimed in the same
-    // millisecond.
+    // row's random list ID, and of nothing derived from its key. The list
+    // ID makes it unique across every page, even for two calls alike in
+    // all the rest, claimed in the same millisecond.
     id: await sha256Hex(
       JSON.stringify([
         row.subjectType,

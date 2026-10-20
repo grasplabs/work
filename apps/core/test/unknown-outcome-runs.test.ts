@@ -545,6 +545,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       stillListed: 1,
       live: "waiting",
       sent: 1,
+      // None names the call's receipt (`resolutions` keeps it only where
+      // an event has one): the stranger's names a key of no call of
+      // theirs, and the others were refused before the call was read.
       resolutions: [
         {
           action: "connection.call.resolve_refused",
@@ -763,14 +766,17 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     await finished(run.id);
     const listed = await admin.api.unknownOutcomes.list();
     const [receipt] = await receiptsFrom(mailbox);
+    const receiptRow = async () =>
+      await connectDb()
+        .prepare(
+          "SELECT state, input_hash AS inputHash, origin FROM idempotent_calls WHERE idempotency_key = ?"
+        )
+        .bind(unknown.key.idempotencyKey)
+        .first<{ state: string; inputHash: string; origin: string }>();
+    const before = await receiptRow();
     // Past the run's retention its input goes; the obligation stays.
     await runQuarterHourCron({}, new Date(Date.now() + 31 * day));
-    const row = await connectDb()
-      .prepare(
-        "SELECT state, input_hash AS inputHash, origin FROM idempotent_calls WHERE idempotency_key = ?"
-      )
-      .bind(unknown.key.idempotencyKey)
-      .first<{ state: string; inputHash: string; origin: string }>();
+    const row = await receiptRow();
     const origin = z
       .object({
         mode: z.enum(["interactive", "workflow"]),
@@ -820,6 +826,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       listed,
       afterRetention: await admin.api.unknownOutcomes.list(),
       receiptKept: row?.state,
+      // What a repeat is checked against: the input's hash outlives it.
+      inputHashKept:
+        row?.inputHash !== undefined && row.inputHash === before?.inputHash,
       repeated,
       sent: await sentFrom(mailbox),
       // The call's event, and the repeat's, by the receipt Graph's message
@@ -836,6 +845,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       listed: [unknown],
       afterRetention: [{ key: unknown.key, input: null }],
       receiptKept: "unknown",
+      inputHashKept: true,
       repeated: "connect.outcome_unknown",
       sent: 1,
       calls: [

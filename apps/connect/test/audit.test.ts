@@ -54,6 +54,9 @@ const server = fakeMcpServer(serverUrl, [
 
 const audit = auditEvents();
 
+/** A SHA-256, as hex. */
+const digest = /^[0-9a-f]{64}$/u;
+
 const anna = agentFor("user-anna");
 
 /** A call of `action` with a fresh idempotency key. */
@@ -246,6 +249,49 @@ describe("the audit log", () => {
       },
     ]);
     expect(server.ran).toStrictEqual([]);
+  });
+
+  it("names a side effect's receipt, the same for its repeat and another's for another key, and none for a read, a keyless call or read-only work", async () => {
+    // `mail.list` marked read by the admin: no side effect, so no receipt.
+    const connectionId = await addConnection({
+      tools: JSON.stringify([{ name: "mail.list", read: true }, "mail.send"]),
+    });
+    const send = write(connectionId, "mail.send");
+    await callAs(anna, send);
+    await callAs(anna, send);
+    await callAs(anna, write(connectionId, "mail.send"));
+    await callAs(anna, write(connectionId, "mail.list"));
+    const { idempotencyKey: _key, ...keyless } = send;
+    await outcome(callAs(anna, keyless));
+    await outcome(
+      callAs(anna, write(connectionId, "mail.send"), { readOnly: true })
+    );
+    const events = await audit.events();
+    const receipts = events
+      .filter(({ action }) => action === "connection.call")
+      .map(({ detail }) => ({
+        action: detail.action,
+        outcome: detail.outcome,
+        receipt: detail.effectKeyHash,
+      }));
+    const [first, repeat, other, ...rest] = receipts;
+    expect({
+      first: digest.test(String(first?.receipt)),
+      repeat: repeat?.receipt === first?.receipt,
+      other: digest.test(String(other?.receipt)),
+      rest: rest.map(({ action, receipt }) => ({ action, receipt })),
+    }).toStrictEqual({
+      first: true,
+      repeat: true,
+      other: true,
+      rest: [
+        { action: "mail.list", receipt: undefined },
+        { action: "mail.send", receipt: undefined },
+        { action: "mail.send", receipt: undefined },
+      ],
+    });
+    // Another key, another receipt.
+    expect(other?.receipt).not.toBe(first?.receipt);
   });
 
   it("records what a failed call touched", async () => {

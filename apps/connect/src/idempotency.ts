@@ -141,6 +141,9 @@ import { idempotentCalls } from "./db/schema.ts";
 // - Someone who may not see obligations reads them: the audit export and
 //   the admin listing are an admin's only, staff refused, and each read
 //   of everyone's is recorded; neither shows input, key, claim or origin.
+//   Both show the receipt, a digest derived from the key: a reader who
+//   can guess a key can confirm the guess with it, exactly as with the
+//   log's `idempotencyKeyHash`, which admins read already, and no more.
 // - Retention erases the evidence: a run's sweep leaves its receipts, its
 //   unknown keys and their events, and a call repeated after it is still
 //   refused, never sent again.
@@ -433,8 +436,8 @@ const effectKeyFrom = async (scope: EffectScope): Promise<string> =>
 /**
  * The effect key of the call `scope` names (`effectKeyMetaKey`): a SHA-256
  * over its whole scope, so it is the same for every attempt of one call,
- * differs between any two, and gives away neither the caller's key nor
- * who called.
+ * differs between any two, and shows neither the caller's key nor who
+ * called (though, derived from them, it confirms a guess of both).
  */
 export const effectKeyOf = async (scope: IdempotencyScope): Promise<string> =>
   await effectKeyFrom({ ...scope, ...subjectColumns(scope.subject) });
