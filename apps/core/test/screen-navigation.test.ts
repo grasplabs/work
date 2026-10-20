@@ -260,6 +260,23 @@ describe("navigating between an App's screens", () => {
     }).toStrictEqual({ some: true, refused: true, nothingElse: true });
   });
 
+  it("refuses a sealed release that fails its checks as itself, rather than opening it with no routes", async () => {
+    const { app, builder } = await routedApp();
+    // The sealed manifest no longer matches its hash.
+    await env.DB.prepare(
+      "UPDATE sdk_release_manifests SET manifest = manifest || ' ' WHERE app_id = ?"
+    )
+      .bind(app)
+      .run();
+    expect({
+      navigate: await navigated(builder, app, "note", { id: "n1" }),
+      open: await outcome(builder.api.screens.open(app, "notes")),
+    }).toStrictEqual({
+      navigate: "version.manifest_corrupt",
+      open: "version.manifest_corrupt",
+    });
+  });
+
   it("fails, rather than routing nothing, when reading the version's routes fails for another reason than the version", async () => {
     const { app, builder } = await routedApp();
     // Core's own store failing under the read: not an answer about the

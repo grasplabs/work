@@ -1,6 +1,7 @@
 // oxlint-disable max-classes-per-file -- a connection's screens, and each frame's own way to its App on that connection, which shares its checks
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { AppManifest } from "@grasp-os/sdk/host";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors, appVersionSchema } from "@grasp-os/shared/apps";
 import type { App } from "@grasp-os/shared/apps";
 import type {
@@ -368,6 +369,13 @@ const routedOpen = (
   throw refusal;
 };
 
+/** Why a version's server code yields no manifest to route by. */
+const unroutedCodes: ReadonlySet<string> = new Set([
+  "version.build_failed",
+  "version.inspection_failed",
+  "version.invalid_manifest",
+]);
+
 /**
  * What a version's screens route by and generate their references from:
  * its manifest and bound workflows (`versionReferenceSource`); undefined
@@ -383,7 +391,9 @@ const routeSourceOf = async (
   try {
     return await versionReferenceSource(env, app, version, files);
   } catch (error) {
-    if (isExpectedError(error)) {
+    // Only server code that doesn't build or inspect routes nothing; a
+    // sealed release that fails its checks is refused as itself.
+    if (unroutedCodes.has(versionErrors.codeOf(error) ?? "")) {
       return undefined;
     }
     throw error;
