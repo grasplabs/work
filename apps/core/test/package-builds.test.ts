@@ -21,6 +21,7 @@ import {
   plain,
   publish,
   refusalsOf,
+  tarballBytes,
 } from "./npm.ts";
 import type { Published } from "./npm.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
@@ -790,6 +791,48 @@ describe("what an artifact may carry", () => {
     await expect(refusalsOf(buildOf(app, "browser"))).resolves.toStrictEqual([
       `the entries ${theme}/style.css and ${theme}/style would both be the module ${theme}~style`,
     ]);
+  });
+});
+
+describe("a build's limits", () => {
+  it("holds each tarball of an approved lock to the per-package limit as it builds, at it and a byte past it", async () => {
+    const name = named("bulky");
+    // Noise doesn't compress: its tarball is about as large as it.
+    await publish(
+      esm(name, {
+        "index.js": "export const n = 1;",
+        "data.txt": noise(200 * 1024),
+      })
+    );
+    const app = await approvedApp({ [name]: "1" });
+    const bytes = await tarballBytes(name, "1.0.0");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
+    // A lock resolved under a limit since lowered: the build reads the
+    // tarballs again, and holds each to the limit in force.
+    const limits = z.record(z.string(), z.number()).parse(env.PACKAGE_LIMITS);
+    const buildUnder = async (archiveBytes: number) =>
+      await buildDependencies(
+        { ...env, PACKAGE_LIMITS: { ...limits, archiveBytes } },
+        identity,
+        {
+          app: app.app,
+          graphHash: app.request.graphHash,
+          target: "browser",
+          policyGeneration,
+        }
+      );
+    const past = await failure(buildUnder(bytes - 1));
+    const at = await buildUnder(bytes);
+    expect({ past, built: at.artifact.target }).toStrictEqual({
+      past: {
+        code: "package.quota",
+        details: { quota: "archiveBytes", limit: bytes - 1 },
+      },
+      built: "browser",
+    });
   });
 });
 

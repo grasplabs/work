@@ -15,6 +15,7 @@ import type {
   PackageBuild,
   PackageBuildRequest,
 } from "./packages.ts";
+import { platformLimits } from "./platform-limits.ts";
 
 // npm packages an App wants to use, and a person's approval of them. An
 // agent or a builder asks core to resolve what the App's package.json
@@ -80,8 +81,8 @@ export type DependencyTarget = z.infer<typeof dependencyTargetSchema>;
 /** The one registry packages come from. No git, file or tarball sources. */
 export const npmRegistryOrigin = "https://registry.npmjs.org";
 
-/** Most packages one graph names. */
-export const dependencyMaxPackages = 1000;
+/** Most packages one graph names (spec 18.1). */
+export const dependencyMaxPackages = platformLimits.dependencyPackages;
 
 /**
  * Most bytes of a request's content as core stores it (canonical JSON of
