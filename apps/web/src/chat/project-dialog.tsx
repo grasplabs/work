@@ -119,14 +119,19 @@ const ProjectForm = ({
     setProblem(first);
   };
 
+  // What a Save that failed part-way got through, so trying again takes
+  // up from there: the project it made, and the documents it removed.
+  const created = useRef<string | null>(null);
+  const removed = useRef(new Set<string>());
   const save = async (): Promise<void> => {
     const saved = await run(async (session) => {
       const trimmedName = name.trim();
       const trimmedGoal = goal.trim();
-      let id = project?.id;
+      let id = project?.id ?? created.current ?? undefined;
       if (id === undefined) {
         ({ id } = await session.chats.createProject(trimmedName));
-      } else if (trimmedName !== project?.name) {
+        created.current = id;
+      } else if (trimmedName !== (project?.name ?? trimmedName)) {
         await session.chats.renameProject(id, trimmedName);
       }
       if (trimmedGoal !== (project?.goal ?? "")) {
@@ -134,9 +139,10 @@ const ProjectForm = ({
       }
       const keptIds = new Set(kept.map((document) => document.id));
       for (const document of project?.documents ?? []) {
-        if (!keptIds.has(document.id)) {
+        if (!keptIds.has(document.id) && !removed.current.has(document.id)) {
           // oxlint-disable-next-line no-await-in-loop -- in order, so a failure leaves the rest as they were
           await session.chats.removeProjectDocument(id, document.id);
+          removed.current.add(document.id);
         }
       }
       for (const document of picked) {
@@ -145,6 +151,10 @@ const ProjectForm = ({
           name: document.name,
           content: document.content,
         });
+        // Sent: trying again doesn't send it twice.
+        setPicked((before) =>
+          before.filter((each) => each.key !== document.key)
+        );
       }
       return id;
     });
