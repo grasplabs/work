@@ -7,13 +7,14 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 // A migration's transform logging a record's values on the on-prem sandbox
 // (scripts/workerd-sandbox-migration-console.test.ts): the isolate core
 // runs a batch in (migration-transform.ts, `transformIsolate`), with
-// `SANDBOX_HOST` bound to the sandbox supervisor as on-prem binds it, and,
-// to show the logs are read at all, an isolate of its own that logs.
+// `SANDBOX_HOST` bound to the sandbox supervisor as on-prem binds it, and
+// an isolate of its own that logs, which the sandbox host silences too
+// (GRA-776, on-prem/quiet-isolate.ts).
 
 /** The value a record holds that no log may carry. */
 const recordValue = "record-value-7f3a";
 
-/** What the control isolate logs, which the logs must carry. */
+/** What another isolate logs, which the logs don't carry either. */
 const controlValue = "control-value-91c2";
 
 /**
@@ -50,7 +51,7 @@ const runner = `export const runMigration = (registered, request) => ({
 });
 `;
 
-/** An isolate that logs `controlValue`, nothing silencing it. */
+/** An isolate that logs `controlValue`, with nothing of its own silencing it. */
 const control = `import { WorkerEntrypoint } from "cloudflare:workers";
 export class Control extends WorkerEntrypoint {
   run() {

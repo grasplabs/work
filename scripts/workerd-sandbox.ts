@@ -45,6 +45,13 @@
  *   together (GRA-367). `RLIMIT_AS` can't stand in for it: V8 reserves far
  *   more address space than it uses, and macOS doesn't enforce it.
  *
+ * - An isolate prints what it holds (a record, a caller's input) to the
+ *   deployment's logs, which its processes' output shares. The sandbox
+ *   host silences every isolate it loads (apps/core/src/on-prem/
+ *   quiet-isolate.ts), as Cloudflare drops their output; and this
+ *   supervisor starts workerd one way only, never `--verbose`, refusing
+ *   any option of its own it doesn't know.
+ *
  * Every answer meant for the App's code is a 200 with a well-formed body:
  * any other status (its own refusals, a proxy's 504) is the sandbox being
  * unavailable to core (apps/core/src/sandboxed.ts), never the App's fault.
@@ -109,6 +116,7 @@ const capabilitySource = path.join(
   repo,
   "apps/core/src/on-prem/sandbox-capability.ts"
 );
+const quietSource = path.join(repo, "apps/core/src/on-prem/quiet-isolate.ts");
 const callLimitsSource = path.join(repo, "apps/core/src/call-limits.ts");
 /** capnweb, as workerd loads it: one module importing only the runtime's. */
 const capnwebSource = path.join(
@@ -304,6 +312,7 @@ const sandbox :Workerd.Worker = (
     (name = "on-prem/sandbox-session.ts", esModule = embed "sandbox-session.js"),
     (name = "on-prem/sandbox-capability.ts", esModule = embed "sandbox-capability.js"),
     (name = "on-prem/sandbox-settings.ts", esModule = embed "sandbox-settings.js"),
+    (name = "on-prem/quiet-isolate.ts", esModule = embed "quiet-isolate.js"),
     (name = "call-limits.ts", esModule = embed "call-limits.js"),
     # workerd resolves a bare specifier beside its importer.
     (name = "on-prem/capnweb", esModule = embed "capnweb.js"),
@@ -335,6 +344,10 @@ const writeSandboxHost = (dir: string): string => {
   writeFileSync(
     path.join(dir, "sandbox-settings.js"),
     stripTypeScriptTypes(readFileSync(settingsSource, "utf-8"))
+  );
+  writeFileSync(
+    path.join(dir, "quiet-isolate.js"),
+    stripTypeScriptTypes(readFileSync(quietSource, "utf-8"))
   );
   writeFileSync(
     path.join(dir, "call-limits.js"),
@@ -2470,13 +2483,30 @@ export const startSandboxSupervisor = async (
 // Run on its own, as on-prem runs it beside core: says where it listens,
 // and stops its processes on SIGTERM and SIGINT.
 if (import.meta.main) {
-  const { values } = parseArgs({
-    options: {
-      workerd: { type: "string", default: nativeWorkerd },
-      parent: { type: "string" },
-      processes: { type: "string" },
-    },
-  });
+  // Only these options, refused otherwise by name: its workerd command line
+  // is fixed, so nothing (`--verbose` included, which makes workerd print
+  // an isolate's uncaught errors) brings an isolate's output to its logs.
+  let parsed;
+  try {
+    parsed = parseArgs({
+      strict: true,
+      allowPositionals: false,
+      options: {
+        workerd: { type: "string", default: nativeWorkerd },
+        parent: { type: "string" },
+        processes: { type: "string" },
+      },
+    });
+  } catch (error) {
+    process.stderr.write(
+      `${JSON.stringify({
+        event: "sandbox.failed_to_start",
+        error: `${String(error)} The supervisor takes only --workerd, --parent and --processes: its workerd command line is fixed.`,
+      })}\n`
+    );
+    process.exit(1);
+  }
+  const { values } = parsed;
   // Digits only: "1e1", "0x2" or " 2" are refused, not read as numbers.
   const given = values.processes;
   let processes: number | undefined;

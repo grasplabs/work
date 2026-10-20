@@ -5,8 +5,10 @@
  * with `SANDBOX_HOST` bound to the supervisor, run on its own as on-prem
  * runs it (workerd-sandbox.ts). Its processes print an isolate's console to
  * the supervisor's own output, the deployment's logs, so that is what is
- * read here: no record value may reach it, and an isolate that isn't a
- * transform's still does, so the output is read at all.
+ * read here: no record value may reach it. Since GRA-776 the sandbox host
+ * silences every isolate, so another isolate's log doesn't reach it
+ * either; the supervisor's own lines show the output is read at all
+ * (workerd-sandbox-console.test.ts has the rest).
  */
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
@@ -103,12 +105,14 @@ describe("a migration's transform on the on-prem sandbox", () => {
     expect({
       answered: ran.transformed.includes(ran.recordValue),
       logged: ran.logged,
+      read: output.includes("sandbox.listening"),
       control: output.includes(ran.controlValue),
       record: output.includes(ran.recordValue),
     }).toStrictEqual({
       answered: true,
       logged: "logged",
-      control: true,
+      read: true,
+      control: false,
       record: false,
     });
   });
