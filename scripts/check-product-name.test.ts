@@ -45,12 +45,19 @@ const linted = async (
       { encoding: "utf-8" }
     );
     const { diagnostics } = lintReport.parse(JSON.parse(stdout));
-    return diagnostics
-      .filter(({ code }) => code === "grasp(no-old-product-name)")
-      .map(({ filename, labels }) => ({
-        file: filename.replace(`planted-${tag}`, "NAME"),
-        line: labels[0]?.span.line ?? 0,
-      }));
+    return (
+      diagnostics
+        .filter(({ code }) => code === "grasp(no-old-product-name)")
+        .map(({ filename, labels }) => ({
+          file: filename.replace(`planted-${tag}`, "NAME"),
+          line: labels[0]?.span.line ?? 0,
+        }))
+        // In file and line order: oxlint reports files as its threads finish.
+        .toSorted(
+          (one, other) =>
+            one.file.localeCompare(other.file) || one.line - other.line
+        )
+    );
   } finally {
     await Promise.all(
       planted.map(async ({ path }) => {
