@@ -913,6 +913,19 @@ void helper;
 
 export default workflow("sample", { params: {} }, async (step) => await step.do("x", { description: "X" }, async () => 1));
 `),
+      // Exported through the variable it's kept in.
+      throughVariable: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const reader = workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" }));
+export default reader;
+`),
+      throughSpecifier: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const reader = workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" }));
+export { reader as default };
+`),
       unparsed: aiStepCalls("export default ("),
     }).toStrictEqual({
       calls: ["read:reader"],
@@ -921,6 +934,8 @@ export default workflow("sample", { params: {} }, async (step) => await step.do(
       discriminant: ["read:first"],
       plainFunction: ["read:missing"],
       exported: [],
+      throughVariable: ["read:missing"],
+      throughSpecifier: ["read:missing"],
       unparsed: null,
     });
   });

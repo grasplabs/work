@@ -1506,6 +1506,54 @@ const aiStepCallOf = (
 };
 
 /**
+ * The call of the SDK's `workflow` that `file` exports as its default:
+ * the export itself, or the variable it names (`export default reader`,
+ * `export { reader as default }`), initialised with that call.
+ */
+const exportedWorkflowCall = (file: Node): CallExpression | undefined => {
+  const imports = sdkImportsOf(file);
+  const isWorkflowCall = (
+    node: Node | null | undefined
+  ): node is CallExpression =>
+    node?.type === "CallExpression" &&
+    node.callee.type === "Identifier" &&
+    imports.get(node.callee.name) === "workflow";
+  let exported: Node | undefined;
+  let named: string | undefined;
+  visit(file, (node) => {
+    if (node.type === "ExportDefaultDeclaration") {
+      exported = node.declaration;
+    }
+    if (node.type === "ExportNamedDeclaration") {
+      for (const specifier of node.specifiers) {
+        if (
+          specifier.type === "ExportSpecifier" &&
+          nameOf(specifier.exported) === "default"
+        ) {
+          named = specifier.local.name;
+        }
+      }
+    }
+  });
+  if (isWorkflowCall(exported)) {
+    return exported;
+  }
+  const name = exported?.type === "Identifier" ? exported.name : named;
+  let call: CallExpression | undefined;
+  visit(file, (node) => {
+    if (
+      node.type === "VariableDeclarator" &&
+      node.id.type === "Identifier" &&
+      node.id.name === name &&
+      isWorkflowCall(node.init)
+    ) {
+      call = node.init;
+    }
+  });
+  return call;
+};
+
+/**
  * The workflow function's body in `source` and the name it takes its
  * runner by (`step`), read as leniently as the code allows: when its
  * context can't be read (`env` kept outside a step, a \`function\` rather
@@ -1534,34 +1582,21 @@ const runnerOf = (source: string): { body: Node; step: string } | undefined => {
     }
     throw error;
   }
-  // The call of the SDK's `workflow` the file exports as its default,
-  // what runs, whose function, an arrow or not, takes its runner by name.
-  const imports = sdkImportsOf(file);
-  let runner: { body: Node; step: string } | undefined;
-  visit(file, (node) => {
-    if (
-      runner === undefined &&
-      node.type === "CallExpression" &&
-      node.callee.type === "Identifier" &&
-      imports.get(node.callee.name) === "workflow" &&
-      isDefaultExport(file, node)
-    ) {
-      const run = node.arguments.at(2);
-      const first =
-        run?.type === "ArrowFunctionExpression" ||
-        run?.type === "FunctionExpression"
-          ? run.params[0]
-          : undefined;
-      if (
-        first?.type === "Identifier" &&
-        (run?.type === "ArrowFunctionExpression" ||
-          run?.type === "FunctionExpression")
-      ) {
-        runner = { body: run.body, step: first.name };
-      }
-    }
-  });
-  return runner;
+  // The call of the SDK's `workflow` the file exports as its default, what
+  // runs, directly or through the variable it is kept in, and whose
+  // function, an arrow or not, takes its runner by name.
+  const call = exportedWorkflowCall(file);
+  const run = call?.arguments.at(2);
+  if (
+    run?.type !== "ArrowFunctionExpression" &&
+    run?.type !== "FunctionExpression"
+  ) {
+    return undefined;
+  }
+  const [first] = run.params;
+  return first?.type === "Identifier"
+    ? { body: run.body, step: first.name }
+    : undefined;
 };
 
 /**
