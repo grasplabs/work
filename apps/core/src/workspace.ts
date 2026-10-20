@@ -138,6 +138,7 @@ import {
   serverProblem,
 } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
+import { PreviewUpdates } from "./preview-updates.ts";
 import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
@@ -633,6 +634,7 @@ export class Workspace extends DurableObject<Env> {
 
   /** What those previews ran into (preview-reports.ts). */
   readonly #previewReports = new PreviewReports();
+  readonly #previewUpdates = new PreviewUpdates();
 
   /**
    * Bumped whenever a chat's agent writes or drops a draft, so its
@@ -2870,6 +2872,31 @@ export class Workspace extends DurableObject<Env> {
     const { id, draft } = this.#draftToPreview(chatId, personId, appId);
     this.#previewReports.opened(id, appId);
     return draft;
+  }
+
+  /**
+   * A place for an update of `personId`'s own chat's preview of App
+   * `appId` (preview-updates.ts): its token once it may load, or null when
+   * a newer update replaced it while it waited.
+   */
+  async takePreviewUpdate(
+    chatId: unknown,
+    personId: string,
+    appId: string
+  ): Promise<number | null> {
+    const { id } = this.#ownChat(chatId, personId);
+    return await this.#previewUpdates.take(`${id}:${appId}`);
+  }
+
+  /** Ends update `token` of `personId`'s own chat's preview of App `appId`. */
+  settlePreviewUpdate(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    token: number
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    this.#previewUpdates.settle(`${id}:${appId}`, token);
   }
 
   /** `personId`'s own chat's draft of App `appId`: `app.no_draft` while it changes nothing. */

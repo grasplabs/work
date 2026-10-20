@@ -544,48 +544,74 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   ): Promise<PreviewBundle> {
     return await withPerson(this.#check, async (by) => {
       const { id, name } = await appFor(this.#env, by, app, "builder");
-      const draft = await this.#chatsOf(by.userId).previewDraft(
+      // One update of the preview loads at a time, and one waits, the
+      // newest (preview-updates.ts).
+      const chats = this.#chatsOf(by.userId);
+      const token = await chats.takePreviewUpdate(
         chatIdOf(chatId),
         by.userId,
         id
       );
-      const files = await draftFiles(this.#env, id, draft);
-      const screens = screensIn(files);
-      if (screens.length === 0) {
-        throw screenErrors.create("screen.not_found");
+      if (token === null) {
+        throw appErrors.create("app.preview_superseded");
       }
-      // A draft of spec 8's layout: its screens import the references its
-      // draft release generates, the very release their calls run on.
-      const withReferences = await withReferencesText(
-        Object.fromEntries(files),
-        async () =>
-          (await this.#chatsOf(by.userId).previewReferences(
-            chatIdOf(chatId),
-            by.userId,
-            id,
-            draft.revision
-          )) ?? undefined
-      );
-      const built = await screenCode(
-        this.#env,
-        withReferences,
-        screen ?? screens[0],
-        null,
-        id
-      );
-      // A preview reads no real data, so no approval decides it; its
-      // frame still runs exactly this build and nothing else.
-      await stageFrame(this.#env, built.artifact, built.code);
-      return {
-        app: id,
-        name,
-        revision: draft.revision,
-        screens,
-        screen: built.screen,
-        artifact: built.artifact,
-        frameToken: await frameAccess(this.#env, built.artifact),
-      };
+      try {
+        return await this.#loadPreview(by, chatId, id, name, screen);
+      } finally {
+        await chats.settlePreviewUpdate(chatIdOf(chatId), by.userId, id, token);
+      }
     });
+  }
+
+  /** The bundle of `chatId`'s preview of App `id`, built from its draft now. */
+  async #loadPreview(
+    by: Identity,
+    chatId: string,
+    id: AppId,
+    name: string,
+    screen: string | undefined
+  ): Promise<PreviewBundle> {
+    const draft = await this.#chatsOf(by.userId).previewDraft(
+      chatIdOf(chatId),
+      by.userId,
+      id
+    );
+    const files = await draftFiles(this.#env, id, draft);
+    const screens = screensIn(files);
+    if (screens.length === 0) {
+      throw screenErrors.create("screen.not_found");
+    }
+    // A draft of spec 8's layout: its screens import the references its
+    // draft release generates, the very release their calls run on.
+    const withReferences = await withReferencesText(
+      Object.fromEntries(files),
+      async () =>
+        (await this.#chatsOf(by.userId).previewReferences(
+          chatIdOf(chatId),
+          by.userId,
+          id,
+          draft.revision
+        )) ?? undefined
+    );
+    const built = await screenCode(
+      this.#env,
+      withReferences,
+      screen ?? screens[0],
+      null,
+      id
+    );
+    // A preview reads no real data, so no approval decides it; its
+    // frame still runs exactly this build and nothing else.
+    await stageFrame(this.#env, built.artifact, built.code);
+    return {
+      app: id,
+      name,
+      revision: draft.revision,
+      screens,
+      screen: built.screen,
+      artifact: built.artifact,
+      frameToken: await frameAccess(this.#env, built.artifact),
+    };
   }
 
   /**

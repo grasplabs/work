@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { callApp } from "../src/app.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { previewUpdateLeaseMs } from "../src/preview-updates.ts";
 import { readStatistics } from "../src/statistics.ts";
 import { openTestRun } from "./agent-chat.ts";
 import {
@@ -296,6 +297,34 @@ const answer = async (promise: Promise<unknown>): Promise<unknown> => {
     return typeof error === "object" && error !== null && "code" in error
       ? error.code
       : String(error);
+  }
+};
+
+/**
+ * Runs `during` with every read of core's files a second and a half slow:
+ * a preview's load (which reads the draft's base version) outlives the
+ * loads started next to it. Set back however it ends.
+ */
+const slowReadsDuring = async <T>(during: () => Promise<T>): Promise<T> => {
+  const { FILES: files } = env;
+  env.FILES = new Proxy(files, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "get" && typeof value === "function") {
+        return async (...args: unknown[]): Promise<unknown> => {
+          await scheduler.wait(1500);
+          return await Reflect.apply(value, target, args);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  try {
+    return await during();
+  } finally {
+    env.FILES = files;
   }
 };
 
@@ -632,5 +661,91 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     // Each push was refused by core, as a screen's is once its person may
     // no longer use the App.
     expect(unshared).toBe("app.not_found");
+  });
+
+  it("loads one update of a preview at a time, keeping the newest waiting and refusing the one it replaces", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const { chats } = builder.api;
+    const loadedAtOnce = async (count: number): Promise<unknown[]> =>
+      await slowReadsDuring(async () => {
+        const outcomes = await Promise.all(
+          Array.from(
+            { length: count },
+            async () => await answer(chats.preview(chatId, app))
+          )
+        );
+        return outcomes
+          .map((outcome) => (typeof outcome === "string" ? outcome : "loaded"))
+          .toSorted();
+      });
+
+    expect({
+      // One loads and one waits for it: both load.
+      two: await loadedAtOnce(2),
+      // The third replaces the one waiting.
+      three: await loadedAtOnce(3),
+    }).toStrictEqual({
+      two: ["loaded", "loaded"],
+      three: ["app.preview_superseded", "loaded", "loaded"],
+    });
+  });
+
+  it("lets the next update of a preview load once one that never settled is past its lease", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const started = Date.parse("2026-10-20T09:00:00Z");
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(started);
+        try {
+          // Taken, and never settled: its isolate went away mid-load.
+          await take();
+          vi.setSystemTime(started + previewUpdateLeaseMs);
+          let atLease = "waiting";
+          const next = take().then((token) => {
+            atLease = "loading";
+            return token;
+          });
+          await scheduler.wait(50);
+          const exactly = atLease;
+          vi.setSystemTime(started + previewUpdateLeaseMs + 1);
+          const after = take();
+          const loading = await next;
+          instance.settlePreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            loading ?? 0
+          );
+          return {
+            exactly,
+            next: loading !== null,
+            after: (await after) !== null,
+          };
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
+
+    // Exactly at its lease it still holds its place; a millisecond past,
+    // the update waiting takes it, and the one after that loads next.
+    expect(outcome).toStrictEqual({
+      exactly: "waiting",
+      next: true,
+      after: true,
+    });
   });
 });
