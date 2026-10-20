@@ -27,7 +27,7 @@ import { appWith, queryReference, seal } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // A screen's live workflow queries (`workflows.<alias>.queries.runs`,
-// workflow-reference-queries.ts), followed through `screens.watchQuery` as
+// workflow-reference-queries.ts), followed through a frame's `watchQuery` as
 // a page follows any live query (query-subscriptions.ts). They read no
 // store, so no write tells core to read them again: a run the App starts
 // for the person, and each change of its status, does instead
