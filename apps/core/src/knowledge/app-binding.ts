@@ -11,7 +11,7 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { callerOf, handedBack } from "../app-bindings.ts";
+import { callerOf, countedCallerOf, handedBack } from "../app-bindings.ts";
 import type { AttemptFence } from "../workflows/attempt-fence.ts";
 import { collectionReads } from "./binding.ts";
 import type { CollectionGrant } from "./binding.ts";
@@ -45,8 +45,13 @@ export class AppCollectionBinding extends WorkerEntrypoint<
   ): Promise<T> {
     const { app } = this.ctx.props;
     let fence: AttemptFence | undefined;
+    // Counted once, as the read first asks who its caller is: a read that
+    // asks again isn't another host call.
+    let counted = false;
     const authorityOf = async (): Promise<Authority> => {
-      const resolved = await callerOf(this.env, app, caller, "read");
+      const admit = counted ? callerOf : countedCallerOf;
+      counted = true;
+      const resolved = await admit(this.env, app, caller, "read");
       ({ fence } = resolved);
       return resolved.authority;
     };

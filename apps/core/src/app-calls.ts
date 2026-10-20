@@ -12,8 +12,13 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { afterEffect, callerOf, tokenOf } from "./app-bindings.ts";
-import type { AppAnswer, CallPath } from "./app.ts";
+import {
+  afterEffect,
+  callerOf,
+  countedCallerOf,
+  tokenOf,
+} from "./app-bindings.ts";
+import type { Admitted, AppAnswer, CallPath } from "./app.ts";
 import { auditedBatch, keepAuditEvent, outboxed } from "./audit-outbox.ts";
 import { forSandbox } from "./bindings.ts";
 import type { ExportGrant } from "./bindings.ts";
@@ -204,6 +209,23 @@ interface CallRecord {
   called: AppId;
   method: string;
 }
+
+/**
+ * Who `caller` is, as App `app`'s host admits them again without counting
+ * (`callerOf`), or undefined once its call is gone: for the record of a
+ * stub call refused past its host-call budget.
+ */
+const knownCallerOf = async (
+  env: Env,
+  app: AppId,
+  caller: unknown
+): Promise<Admitted | undefined> => {
+  try {
+    return await callerOf(env, app, caller, "read");
+  } catch {
+    return undefined;
+  }
+};
 
 /** The calling side's record: `app.call`, and how it ended when refused. */
 const callEntry = (
@@ -481,25 +503,31 @@ export class AppExportBinding extends WorkerEntrypoint<
   ): Promise<AppAnswer> {
     const { caller: app, ...grant } = this.ctx.props;
     try {
-      let known: Awaited<ReturnType<typeof callerOf>>;
+      let known: Awaited<ReturnType<typeof countedCallerOf>>;
       // The caller is read once: its token goes on with the call.
       let token: string;
       try {
         token = tokenOf(caller);
-        known = await callerOf(this.env, app, { token }, "read");
+        known = await countedCallerOf(this.env, app, { token }, "read");
       } catch (error) {
         // A caller this App isn't running a call of: made up, ended, or
         // another App's. Recorded by the App the stub is its, as nobody
-        // else is known: no person, no version.
+        // else is known: no person, no version. A running call refused
+        // past its host-call budget is known: who it is, as the host
+        // admits it again (uncounted), is recorded.
+        const refusedCaller =
+          isExpectedError(error) && error.code === "operation.call_limit"
+            ? await knownCallerOf(this.env, app, caller)
+            : undefined;
         await keepAuditEvent(this.env, drizzle(this.env.DB), {
           actor: { type: "app", appId: app, part: "server" },
           action: "app.call",
           target: { type: "app", id: grant.app },
           detail: {
             method: recordedName(method),
-            version: null,
-            person: null,
-            depth: null,
+            version: refusedCaller?.authority.appVersion ?? null,
+            person: refusedCaller?.authority.onBehalfOf ?? null,
+            depth: refusedCaller?.path.chain.length ?? null,
             outcome: "refused",
             reason: isExpectedError(error) ? error.code : "internal.unexpected",
           },

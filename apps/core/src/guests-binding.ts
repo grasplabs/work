@@ -11,7 +11,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 
 import {
   afterEffect,
-  callerOf,
+  countedCallerOf,
   handedBack,
   stillAdmitted,
   tokenOf,
@@ -96,19 +96,21 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   ): Promise<T> {
     const { app, permissionId } = this.ctx.props;
     try {
+      // Counted first, before anything else is read: a call past its
+      // host-call budget is refused without a database read of its own.
+      const token = tokenOf(caller);
+      const { authority, path, fence } = await countedCallerOf(
+        this.env,
+        app,
+        { token },
+        use
+      );
       // An App whose sealed release declares guests is governed by its
       // binding alone: its v1 server invites, lists, reads and revokes
       // nothing, so no link it sends outlives the binding.
       if (await declaresGuests(this.env, app)) {
         throw permissionErrors.create("permission.denied");
       }
-      const token = tokenOf(caller);
-      const { authority, path, fence } = await callerOf(
-        this.env,
-        app,
-        { token },
-        use
-      );
       const person =
         authority.mode === "interactive" && path.chain.length === 1;
       if (personOnly && !person) {
