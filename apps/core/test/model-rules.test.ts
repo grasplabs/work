@@ -685,7 +685,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         status: "failed",
         error: {
           message:
-            "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+            "Model calls still under way hold what's left of this workflow's model budget for the month. Try again once they finish.",
         },
       },
       onceQuick: true,
