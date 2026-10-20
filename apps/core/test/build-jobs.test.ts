@@ -630,7 +630,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     }
   });
 
-  it("counts job checks with the repair loop, and refuses a sixth once five failed in a row", async () => {
+  it("counts job checks with the repair loop, and refuses a fifth once four failed in a row", async () => {
     const waitForJob = (
       submit: string
     ) => `export default async (self, env) => {
@@ -656,7 +656,6 @@ describe("build jobs", { timeout: 180_000 }, () => {
       codeStep(waitForJob('{ kind: "check" }')),
       codeStep(waitForJob('{ kind: "check" }')),
       codeStep(waitForJob('{ kind: "check" }')),
-      codeStep(waitForJob('{ kind: "check" }')),
       codeStep(`export default async (self, env) => {
         ${findApp}
         const tried = async (call) => { try { await call(); return "done"; } catch (error) { return error.message; } };
@@ -674,7 +673,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     const results = await codeResults(chat.stub, chat.chat.id);
     const exhausted = appErrors.create("app.checks_exhausted").message;
     expect(results.slice(1).map(({ text }) => returned(text))).toStrictEqual([
-      ...[1, 2, 3, 4, 5].map((failedInARow) => ({
+      ...[1, 2, 3, 4].map((failedInARow) => ({
         status: "completed",
         passed: false,
         failedInARow,
