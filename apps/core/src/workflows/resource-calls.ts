@@ -23,7 +23,6 @@ import {
   callApprovedStoreOperation,
 } from "../workflow-bindings.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
-import type { AttemptFence } from "./attempt-fence.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
 import {
   requireCallAuthority,
@@ -104,8 +103,6 @@ export interface Effect {
   readonly key: string;
   /** When its attempt ends: nothing of it acts after. */
   readonly deadline: number;
-  /** Its attempt, which every call it starts beyond core checks. */
-  readonly fence: AttemptFence;
   /** Throws unless its attempt still holds its lease, nothing awaited. */
   readonly requireHolds: () => void;
   /**

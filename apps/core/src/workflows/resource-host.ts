@@ -2328,12 +2328,6 @@ export class ResourceRunHost
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
       key: stepIdempotencyKey(this.#run.runId, `task:${task.id}`),
       deadline: attempt.deadline,
-      fence: {
-        run: this.#run.runId,
-        key: attempt.key,
-        number: attempt.number,
-        generation: attempt.generation,
-      },
       requireHolds: () => {
         this.#requireCurrent(attempt);
       },
@@ -2457,12 +2451,6 @@ export class ResourceRunHost
           return await makeCall(this.#env, this.#run.calling, task.id, built, {
             key: `${stepKey}:${ordinal}`,
             deadline: attempt.deadline,
-            fence: {
-              run: this.#run.runId,
-              key: attempt.key,
-              number: attempt.number,
-              generation: attempt.generation,
-            },
             requireHolds: () => {
               this.#requireCurrent(attempt);
             },

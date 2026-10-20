@@ -601,10 +601,12 @@ export class WorkflowRuns extends WorkflowRun<Env> {
 
   /**
    * Whether the attempt `attempt` of the step whose key is `key` still
-   * holds its lease under `generation`, and its deadline hasn't passed:
-   * what a call an attempt started beyond its host (an App method, an
-   * export, and the stub calls they make) checks before it acts
-   * (attempt-fence.ts). Read from the journal; tells nothing else.
+   * holds its lease under `generation`, and its deadline hasn't passed
+   * (attempt-fence.ts). Read from the journal; tells nothing else. No
+   * workflow run starts a call it fences any more: a run's calls of its
+   * App's code are sealed functions, held by the run host's own lease
+   * checks. What remains asks of v1 App calls, which slice 4 of GRA-789
+   * removes with this.
    */
   attemptHolds(
     key: string,
