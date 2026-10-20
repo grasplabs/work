@@ -11,9 +11,10 @@
  */
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, vi } from "vite-plus/test";
+import { afterAll, afterEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { drainsSettled, drainsStarted } from "../src/audit-outbox.ts";
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
 import { closeOpenSockets } from "./open-sockets.ts";
@@ -70,3 +71,29 @@ if (await installBuiltinsFirst()) {
 }
 
 afterEach(closeOpenSockets);
+
+/**
+ * How long a file waits for its audit drains. One in an object a test
+ * aborted never settles; one still running past this is let go, as a
+ * reset lets go of a wake (reset-storage.ts).
+ */
+const drainsTimeoutMs = 5000;
+
+/** The drains this file starts: those from here on. */
+const firstDrain = drainsStarted();
+
+// A change drains its audit outbox in the background, and each drain calls
+// the AuditLog object, which in this pool goes through Vitest's RPC
+// channel (every call into a Durable Object imports the Worker's module
+// through it). Vitest closes the file's channel once its tests end,
+// failing a drain still out with "Closing rpc while "resolve" was
+// pending", so a file waits for its drains. Setup files' afterAll hooks
+// run last.
+afterAll(async () => {
+  const timeUp = Promise.withResolvers<"time up">();
+  const timer = setTimeout(() => {
+    timeUp.resolve("time up");
+  }, drainsTimeoutMs);
+  await Promise.race([drainsSettled(firstDrain), timeUp.promise]);
+  clearTimeout(timer);
+});
