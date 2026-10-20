@@ -54,6 +54,7 @@ import type {
   LandscapeSort,
   LandscapeView,
 } from "../landscape/landscape.ts";
+import { SyncNotices } from "../landscape/sync-notice.tsx";
 import { hoverDelay, Toolbar, ToolbarLabel } from "../landscape/toolbar.tsx";
 import { policyBook, policyToday } from "../policies/policies-data.ts";
 import { applyPolicy, findings } from "../policies/policy.ts";
@@ -114,6 +115,7 @@ const LandscapePage = () => {
         />
         <LandscapeNotLoaded found={found} integrations={integrations} />
         <ConnectLandscape syncs={syncs} />
+        <SyncNotices syncs={syncs} />
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="w-64">

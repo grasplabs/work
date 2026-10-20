@@ -2105,6 +2105,10 @@ msgstr "Apps nach Kategorie"
 msgid "Apps flagged"
 msgstr "Markierte Apps"
 
+#: src/landscape/sync-notice.tsx
+msgid "Apps found in Microsoft Entra as of {when}."
+msgstr "In Microsoft Entra gefundene Apps, Stand {when}."
+
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Apps it catches"
 msgstr "Erfasste Apps"
@@ -5062,6 +5066,10 @@ msgstr "Sie wurde möglicherweise entfernt."
 msgid "It may have been renamed or removed."
 msgstr "Es wurde vielleicht umbenannt oder entfernt."
 
+#: src/landscape/landscape.ts
+msgid "It names its publisher {publisher} itself, unverified."
+msgstr "Sie nennt als Herausgeber selbst {publisher}, nicht verifiziert."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
 msgstr "Es zählt nicht mehr gegen die Budgets, als hätte es nichts gekostet. Das lässt sich nicht rückgängig machen."
@@ -5621,13 +5629,29 @@ msgstr "Genannt"
 msgid "Messages"
 msgstr "Nachrichten"
 
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft didn't answer the reads. Grasp tries again tomorrow."
+msgstr "Microsoft hat auf die Abfragen nicht geantwortet. Grasp versucht es morgen erneut."
+
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft Entra hasn't been read whole yet."
+msgstr "Microsoft Entra wurde noch nicht vollständig gelesen."
+
 #: src/landscape/landscape.ts
 msgid "Microsoft hasn't verified who publishes this app."
 msgstr "Microsoft hat den Herausgeber dieser App nicht verifiziert."
 
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft kept throttling the reads until the day was over."
+msgstr "Microsoft hat die Abfragen bis zum Ende des Tages gedrosselt."
+
 #: src/brain/brain.ts
 msgid "Microsoft sign-in"
 msgstr "Microsoft-Anmeldung"
+
+#: src/landscape/sync-notice.tsx
+msgid "Microsoft's list changed under the read. It starts over tomorrow."
+msgstr "Die Liste von Microsoft hat sich während des Lesens geändert. Morgen beginnt es von vorn."
 
 #: src/chat/builds.tsx
 msgid "Migrations"
@@ -9565,6 +9589,14 @@ msgstr "Der Kickoff sagte: {text}"
 msgid "The kickoff with the company"
 msgstr "Das Kickoff mit dem Unternehmen"
 
+#: src/landscape/sync-notice.tsx
+msgid "The last read of Microsoft Entra failed"
+msgstr "Das letzte Lesen von Microsoft Entra ist fehlgeschlagen"
+
+#: src/landscape/sync-notice.tsx
+msgid "The last read of Microsoft Entra stopped at its limit"
+msgstr "Das letzte Lesen von Microsoft Entra hat an seiner Grenze aufgehört"
+
 #: src/workflows/resource-runs.tsx
 msgid "The latest runs, newest first."
 msgstr "Die letzten Läufe, die neuesten zuerst."
@@ -9588,6 +9620,14 @@ msgstr "Die Gedächtnisdateien, Skills und hochgeladenen Dateien, die Ihre Agent
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
 msgstr "Die Nachricht"
+
+#: src/landscape/sync-notice.tsx
+msgid "The Microsoft Entra connection is to another organization's tenant, so nothing it read was kept."
+msgstr "Die Verbindung zu Microsoft Entra gehört zum Tenant einer anderen Organisation, daher wurde nichts davon behalten."
+
+#: src/landscape/sync-notice.tsx
+msgid "The Microsoft Entra connection needs an admin to connect it again."
+msgstr "Die Verbindung zu Microsoft Entra muss von einem Admin neu hergestellt werden."
 
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
@@ -11453,6 +11493,10 @@ msgstr "Ihr Onboarding"
 #: src/dashboard/signals.tsx
 msgid "your organization"
 msgstr "Ihre Organisation"
+
+#: src/landscape/sync-notice.tsx
+msgid "Your organization has more grants than one day's read takes, so some apps may be missing."
+msgstr "Ihre Organisation hat mehr Freigaben, als an einem Tag gelesen werden, daher können Apps fehlen."
 
 #: src/connections/connect-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."

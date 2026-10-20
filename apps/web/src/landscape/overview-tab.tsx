@@ -51,7 +51,7 @@ import { InsightPopover, StatusDot } from "./insight.tsx";
 import { appTabs } from "./landscape-app.ts";
 import { appProfile } from "./landscape-overview.ts";
 import type { ProfileFact, ProfileKey } from "./landscape-overview.ts";
-import { signalDescription, signalLabel } from "./landscape.ts";
+import { signalLabel, signalTextOf } from "./landscape.ts";
 import type { LandscapeApp } from "./landscape.ts";
 import { OwnerAvatar } from "./owner.tsx";
 import { Facts, Section } from "./section.tsx";
@@ -167,6 +167,7 @@ const RiskSignalsSection = ({ app }: { app: LandscapeApp }) => {
   const { t, i18n } = useLingui();
   const appId = app.id;
   const signals = app.discovered?.signals ?? [];
+  const unverifiedPublisher = app.discovered?.unverifiedPublisher ?? null;
   return (
     <Section
       action={
@@ -193,7 +194,7 @@ const RiskSignalsSection = ({ app }: { app: LandscapeApp }) => {
               <ItemContent>
                 <ItemTitle>{i18n._(signalLabel[signal])}</ItemTitle>
                 <ItemDescription>
-                  {i18n._(signalDescription[signal])}
+                  {signalTextOf(signal, unverifiedPublisher, i18n)}
                 </ItemDescription>
               </ItemContent>
             </Item>

@@ -17,6 +17,7 @@ const found: LandscapeAppSummary = {
   appId: "app-crm",
   name: "Contoso CRM",
   publisher: "Contoso",
+  unverifiedPublisher: null,
   verified: true,
   firstSeen: "2026-10-01T08:00:00.000Z",
   lastSeen: "2026-10-20T08:00:00.000Z",

@@ -1,7 +1,7 @@
 import type { CatalogSource } from "@grasp-os/shared/connect";
 import type { LandscapeSignal } from "@grasp-os/shared/landscape";
 import { i18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
+import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, t } from "@lingui/core/macro";
 
 import { formatList } from "../format.ts";
@@ -55,6 +55,11 @@ export interface AppUse {
 export interface DiscoveredApp {
   connectionId: string;
   appId: string;
+  /**
+   * The name an unverified app gives its publisher: its owner's word, only
+   * ever shown labelled unverified, and never the app's vendor.
+   */
+  unverifiedPublisher: string | null;
   adminConsented: boolean;
   scopes: string[];
   signals: LandscapeSignal[];
@@ -93,6 +98,24 @@ export const signalDescription: Record<LandscapeSignal, MessageDescriptor> = {
   person_high_privilege: msg`Someone gave it access to their mail, files, chats or the directory on their own.`,
   new_app: msg`First seen in the last 7 days.`,
   no_admin_consent: msg`People use it, and no admin approved it for everyone.`,
+};
+
+const namedPublisher = (publisher: string): MessageDescriptor =>
+  msg`It names its publisher ${publisher} itself, unverified.`;
+
+/**
+ * Why a signal is raised on a found app, in words: for an unverified
+ * publisher, with the name the app gives it, labelled as its own word.
+ */
+export const signalTextOf = (
+  signal: LandscapeSignal,
+  unverifiedPublisher: string | null,
+  translator: I18n = i18n
+): string => {
+  const text = translator._(signalDescription[signal]);
+  return signal === "unverified_publisher" && unverifiedPublisher !== null
+    ? `${text} ${translator._(namedPublisher(unverifiedPublisher))}`
+    : text;
 };
 
 /** One app in the landscape. */

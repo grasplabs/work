@@ -117,6 +117,7 @@ export const discoveredAppOf = (app: LandscapeAppSummary): LandscapeApp => ({
   discovered: {
     connectionId: app.connectionId,
     appId: app.appId,
+    unverifiedPublisher: app.unverifiedPublisher,
     adminConsented: app.adminConsented,
     scopes: app.scopes,
     signals: app.signals,

@@ -486,6 +486,7 @@ describe("the landscape's apps", () => {
         appId: "11111111-2222-4333-8444-555555555555",
         name: "Contoso CRM",
         publisher: "Contoso Ltd",
+        unverifiedPublisher: null,
         verified: true,
         firstSeen: "2026-10-01T08:00:00.000Z",
         lastSeen: "2026-10-20T08:00:00.000Z",
@@ -519,6 +520,7 @@ describe("the landscape's apps", () => {
         discovered: {
           connectionId: "connection-entra",
           appId: "11111111-2222-4333-8444-555555555555",
+          unverifiedPublisher: null,
           adminConsented: true,
           scopes: ["User.Read"],
           signals: ["new_app"],
@@ -539,6 +541,7 @@ describe("the landscape's apps", () => {
       appId: "app-crm",
       name: "Contoso CRM",
       publisher: null,
+      unverifiedPublisher: "Contoso Inc",
       verified: false,
       firstSeen: "2026-10-01T08:00:00.000Z",
       lastSeen: "2026-10-20T08:00:00.000Z",
