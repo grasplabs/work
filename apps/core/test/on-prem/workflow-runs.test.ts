@@ -119,6 +119,27 @@ const oneStep = workflowFiles(
   { only: "done" }
 );
 
+/**
+ * What `run` returns with each activation's budget of time between steps
+ * `ms` (between-steps.ts), the platform's again after it.
+ */
+const withBetweenStepsBudget = async <Result>(
+  ms: number,
+  run: () => Promise<Result>
+): Promise<Result> => {
+  const kept = env.WORKFLOW_BETWEEN_STEPS_MS;
+  env.WORKFLOW_BETWEEN_STEPS_MS = String(ms);
+  try {
+    return await run();
+  } finally {
+    if (kept === undefined) {
+      Reflect.deleteProperty(env, "WORKFLOW_BETWEEN_STEPS_MS");
+    } else {
+      env.WORKFLOW_BETWEEN_STEPS_MS = kept;
+    }
+  }
+};
+
 // Each test builds its App's workflows and runs their tests on the
 // sandbox, then runs them: a minute is room for a slow runner.
 const runTime = { timeout: 90_000 };
@@ -428,20 +449,68 @@ describe("a workflow's runs on-prem", runTime, () => {
     });
   });
 
-  it("waits for a place while the sandbox is full, then loads, rather than failing the run", async () => {
+  it("ends a run whose code waits on a timer between steps past its budget, and lets go of its session", async () => {
+    const { builder, app } = await appWith({
+      ...workflowFiles(
+        "lingers",
+        `  const real = await step.do("before", { description: "Before" }, async () => true);
+  // Its tests mock the step: only a run waits.
+  if (real) {
+    await new Promise((resolve) => setTimeout(resolve, 60_000));
+  }
+  return await step.do("after", { description: "After" }, async () => 1);`,
+        { before: false, after: 1 }
+      ),
+      ...oneStep,
+    });
+    const ended = await withBetweenStepsBudget(3000, async () => {
+      const run = await builder.api.workflows.start(app, "lingers");
+      await finished(run.id);
+      // The App's runs hold one session at a time: this one loads at once
+      // only if the first's session was let go of, its timer still set.
+      const next = await builder.api.workflows.start(app, "single");
+      await finished(next.id);
+      return { run, next };
+    });
+    const { status, failure } = await builder.api.workflows.status(
+      ended.run.id
+    );
+    expect({
+      status,
+      step: failure?.step,
+      code: failure?.error.code,
+      steps: await stepsOf(ended.run.id),
+      next: await builder.api.workflows.status(ended.next.id),
+    }).toMatchObject({
+      status: "failed",
+      step: null,
+      code: "workflow.between_steps_limit",
+      steps: [
+        "workflow.step.completed $params",
+        "workflow.step.completed before",
+      ],
+      next: { status: "completed", output: "done" },
+    });
+  });
+
+  it("waits for a place while the sandbox is full, then loads, rather than failing the run, the wait no time of its code's between steps", async () => {
     const { builder, app } = await appWith(oneStep);
     // Both processes held, by calls of two others.
     const letGo = [holdPlace("app-full-a"), holdPlace("app-full-b")];
-    const run = await builder.api.workflows.start(app, "single");
-    // Long enough for its load to be refused, the pool full, more than once.
-    await scheduler.wait(8000);
-    const whileFull = await liveStatus(run.id);
-    await Promise.all(
-      letGo.map(async (free) => {
-        await free();
-      })
-    );
-    await finished(run.id);
+    // Its wait for a place is longer than its budget between steps.
+    const { run, whileFull } = await withBetweenStepsBudget(3000, async () => {
+      const started = await builder.api.workflows.start(app, "single");
+      // Long enough for its load to be refused, the pool full, more than once.
+      await scheduler.wait(8000);
+      const status = await liveStatus(started.id);
+      await Promise.all(
+        letGo.map(async (free) => {
+          await free();
+        })
+      );
+      await finished(started.id);
+      return { run: started, whileFull: status };
+    });
     expect({
       whileFull,
       after: await builder.api.workflows.status(run.id),

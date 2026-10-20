@@ -41,6 +41,11 @@ import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
 import { attemptCallLabels } from "./attempt-host.ts";
 import type { AttemptHost } from "./attempt-host.ts";
+import {
+  betweenSteps,
+  betweenStepsBudgetOf,
+  BoundedRunHost,
+} from "./between-steps.ts";
 import { collectionMethods, cpuLimitKill, fromIsolate } from "./host.ts";
 
 // An App's workflows are its code, written by the agent: they run as its
@@ -152,8 +157,9 @@ const declaredMetadataSchema = z.object({
  * How workflow code runs: as App server code does, with more CPU. One load
  * runs an activation of the run: the workflow from its start (finished
  * steps replayed) until it suspends, at a wait or a parked retry, or
- * ends. Its code between steps is bounded by no attempt's timeout, only
- * by the CPU limit below; where one App call runs one method.
+ * ends. Its code between steps is bounded by no attempt's timeout: by
+ * the CPU limit below, and by each activation's budget of wall time
+ * between steps (between-steps.ts); where one App call runs one method.
  *
  * Its CPU time is a workflow attempt's (spec 18.1, 30 seconds). Cloudflare
  * documents `limits.cpuMs` as applying "per invocation", without saying
@@ -961,7 +967,12 @@ export interface RunIsolate {
   attemptMethods: readonly string[];
 }
 
-/** A run's isolate, loaded as `loadRun` loads an App's (see there). */
+/**
+ * A run's isolate, loaded as `loadRun` loads an App's (see there). Each
+ * load's code is held to the activation's budget of time between steps
+ * (between-steps.ts): past it, its call fails with
+ * `workflow.between_steps_limit`, and is let go of.
+ */
 export const loadRunIsolate = <Attempt extends object = AttemptHost>(
   env: Env,
   { owner, mainModule, modules, attemptMethods: methods }: RunIsolate,
@@ -973,14 +984,32 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
   ) => Promise<unknown>;
 } => {
   const sandboxHost = sessionHost(env);
+  const budgetMs = betweenStepsBudgetOf(env);
   if (sandboxHost === undefined) {
-    const entrypoint = env.LOADER.get(null, async () => ({
-      ...workflowSandbox,
-      mainModule,
-      modules: await modules(),
-      env: {},
-    })).getEntrypoint<RunEntrypoint>("Run");
-    return { run: async (host, start) => await entrypoint.run(host, start) };
+    return {
+      run: async (host, start) => {
+        // Read before the clock starts: none of the run's code runs yet.
+        const loaded = await modules();
+        const entrypoint = env.LOADER.get(null, () => ({
+          ...workflowSandbox,
+          mainModule,
+          modules: loaded,
+          env: {},
+        })).getEntrypoint<RunEntrypoint>("Run");
+        const clock = betweenSteps(budgetMs);
+        clock.started();
+        try {
+          // Past its budget the isolate's call is dropped: it can't be
+          // killed, and every step call it makes after is refused.
+          return await Promise.race([
+            entrypoint.run(new BoundedRunHost(host, clock), start),
+            clock.spent,
+          ]);
+        } finally {
+          clock.ended();
+        }
+      },
+    };
   }
   return {
     run: async (host, start) => {
@@ -990,6 +1019,7 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
         live: () => sessionLive?.() === true && over?.aborted !== true,
         ended: ended.promise,
       };
+      const clock = betweenSteps(budgetMs);
       const call = {
         mainModule,
         modules: await modules(),
@@ -997,12 +1027,10 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
         method: "run",
         args: [
           {
-            capability: capability(sessionRunHost(host, session, methods), [
-              "do",
-              "sleep",
-              "sleepUntil",
-              "waitForDecision",
-            ]),
+            capability: capability(
+              sessionRunHost(new BoundedRunHost(host, clock), session, methods),
+              ["do", "sleep", "sleepUntil", "waitForDecision"]
+            ),
           },
           { value: start },
         ],
@@ -1012,45 +1040,60 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
       };
       // Let go of once the run is cancelled or taken over, as it runs.
       const letGo = new AbortController();
-      const signal =
+      // Ended once its code spent its time between steps, freeing its
+      // process.
+      const signal = AbortSignal.any(
         over === undefined
-          ? letGo.signal
-          : AbortSignal.any([over, letGo.signal]);
+          ? [letGo.signal, clock.over]
+          : [over, letGo.signal, clock.over]
+      );
+      const loading = async (): Promise<unknown> => {
+        try {
+          const value = await waitingForPlace(
+            async () => {
+              // Nothing awaited since `current` was last looked at.
+              const settled = new AbortController();
+              const watching = watchCurrent(current, letGo, settled.signal);
+              try {
+                return await runInSession(sandboxHost, call, {
+                  signal,
+                  opened: (id, live) => {
+                    sessionLive = live;
+                    // Its code starts now: the wait for a place isn't its.
+                    clock.started();
+                    onSession?.(id);
+                  },
+                });
+              } finally {
+                settled.abort();
+                await watching;
+              }
+            },
+            { over, current }
+          );
+          ended.resolve(null);
+          return value;
+        } catch (error) {
+          ended.resolve(error);
+          if (clock.over.aborted) {
+            return await clock.spent;
+          }
+          if (letGo.signal.aborted) {
+            throw letGoError();
+          }
+          if (over?.aborted === true) {
+            // Let go of once its activation was over: as the engine leaves a
+            // suspended call, it never settles, so nothing of the run acts on
+            // an activation that is over.
+            return await neverSettles();
+          }
+          throw runLoadFailure(error);
+        }
+      };
       try {
-        const value = await waitingForPlace(
-          async () => {
-            // Nothing awaited since `current` was last looked at.
-            const settled = new AbortController();
-            const watching = watchCurrent(current, letGo, settled.signal);
-            try {
-              return await runInSession(sandboxHost, call, {
-                signal,
-                opened: (id, live) => {
-                  sessionLive = live;
-                  onSession?.(id);
-                },
-              });
-            } finally {
-              settled.abort();
-              await watching;
-            }
-          },
-          { over, current }
-        );
-        ended.resolve(null);
-        return value;
-      } catch (error) {
-        ended.resolve(error);
-        if (letGo.signal.aborted) {
-          throw letGoError();
-        }
-        if (over?.aborted === true) {
-          // Let go of once its activation was over: as the engine leaves a
-          // suspended call, it never settles, so nothing of the run acts on
-          // an activation that is over.
-          return await neverSettles();
-        }
-        throw runLoadFailure(error);
+        return await Promise.race([loading(), clock.spent]);
+      } finally {
+        clock.ended();
       }
     },
   };
