@@ -742,7 +742,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     // The App live, with the same server code, and a count of its own.
     await release(builder, app, { "app/server.ts": mailing });
     await buildServer(env, { "app/server.ts": mailing }, "app-test");
-    const live = async () => await builder.api.screens.call(app, "count", []);
+    const live = async () =>
+      await builder.api.screens.frame(app, "").call("count", []);
     const before = [await live(), await live()];
 
     await stub.ask(chatIdSchema.parse(chatId), {

@@ -230,21 +230,20 @@ const followingRuns = async (
     artifacts: builtArtifacts(review.screens),
   });
   const { lease } = await builder.api.screens.open(fixture.app, "desk");
-  await builder.api.screens.present(fixture.app, lease);
   const release = await loadRelease(env, fixture.app, 1);
 
   await beforeFollow?.(fixture.app);
   // The screen follows the person's runs: none yet.
   const follower = pageFollower();
-  const subscription = await builder.api.screens.watchQuery(
-    fixture.app,
-    lease,
-    JSON.stringify({
-      reference: await queryReference(release, "followUp", "runs"),
-      input: { pagination: {} },
-    }),
-    follower.callback
-  );
+  const subscription = await builder.api.screens
+    .frame(fixture.app, lease)
+    .watchQuery(
+      JSON.stringify({
+        reference: await queryReference(release, "followUp", "runs"),
+        input: { pagination: {} },
+      }),
+      follower.callback
+    );
   await vi.waitFor(
     () => {
       expect(follower.received.length).toBeGreaterThan(0);

@@ -291,7 +291,7 @@ describe("run retention", { timeout: 60_000 }, () => {
         detailsRemoved,
       })),
       page: page.map(({ id, detailsRemoved }) => ({ id, detailsRemoved })),
-      screen: await builder.api.screens.run(app, done.id),
+      screen: await builder.api.screens.frame(app, "").run(done.id),
       // The audit log keeps its own events of the run.
       audited: await runEvents(done.id, "workflow.run.completed"),
     }).toStrictEqual({
@@ -570,10 +570,10 @@ describe("run retention", { timeout: 60_000 }, () => {
     const listed = await builder.api.workflows.list(app);
     const { runs: page } = await builder.api.workflows.runs({ app });
     const onScreen = [
-      await builder.api.screens.run(app, done.id),
-      await builder.api.screens.run(app, failed.id),
-      ...(await builder.api.screens.runs(app, "keeps")),
-      ...(await builder.api.screens.runs(app, "fails")),
+      await builder.api.screens.frame(app, "").run(done.id),
+      await builder.api.screens.frame(app, "").run(failed.id),
+      ...(await builder.api.screens.frame(app, "").runs("keeps")),
+      ...(await builder.api.screens.frame(app, "").runs("fails")),
     ];
     const gone = {
       output: undefined,

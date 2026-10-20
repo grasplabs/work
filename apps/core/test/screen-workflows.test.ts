@@ -47,7 +47,7 @@ const waiting = async (
 ): Promise<ScreenRun> =>
   await vi.waitFor(
     async () => {
-      const found = await person.api.screens.run(app, run);
+      const found = await person.api.screens.frame(app, "").run(run);
       if (found.status !== "waiting") {
         throw new Error(`The run is ${found.status}`);
       }
@@ -64,18 +64,18 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
     const admin = await personApi("admin");
     const app = await approvalApp(builder);
 
-    const { id: run } = await builder.api.screens.startRun(
-      app,
-      "approval",
-      byAdmins
-    );
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", byAdmins);
     await waiting(builder, app, run);
     const whileWaiting = {
-      run: await builder.api.screens.run(app, run),
-      runs: await admin.api.screens.runs(app, "approval"),
+      run: await builder.api.screens.frame(app, "").run(run),
+      runs: await admin.api.screens.frame(app, "").runs("approval"),
       // The run's starter doesn't answer a decision of all admins (#87).
       starter: await outcome(
-        builder.api.screens.decide(app, run, "review", { approved: true })
+        builder.api.screens
+          .frame(app, "")
+          .decide(run, "review", { approved: true })
       ),
     };
     const answered = await confirmedDecide(admin, app, run, "review", {
@@ -98,8 +98,8 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
       approved: { actor: approved?.actor, via: approved?.detail.via },
       whileWaiting,
       answered: answered.status,
-      after: await builder.api.screens.run(app, run),
-      runs: await builder.api.screens.runs(app, "approval"),
+      after: await builder.api.screens.frame(app, "").run(run),
+      runs: await builder.api.screens.frame(app, "").runs("approval"),
     }).toMatchObject({
       // Audited under who they were for, and that a screen did it.
       started: {
@@ -151,24 +151,26 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
       role: "user",
     });
 
-    const run = await user.api.screens.startRun(app, "approval", {
+    const run = await user.api.screens.frame(app, "").startRun("approval", {
       from: `person:${builder.userId}`,
       timeout: week,
     });
     await waiting(user, app, run.id);
     // A second run, whose decision asks `other`: listing both takes the
     // answers of more than one set of deciders at once.
-    const second = await builder.api.screens.startRun(app, "approval", {
-      from: `person:${other.userId}`,
-      timeout: week,
-    });
+    const second = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", {
+        from: `person:${other.userId}`,
+        timeout: week,
+      });
     await waiting(builder, app, second.id);
     /** Each run's description, as `person` sees it listed and on its own. */
     const descriptions = async (person: Person) => {
-      const listed = await person.api.screens.runs(app, "approval");
+      const listed = await person.api.screens.frame(app, "").runs("approval");
       return await Promise.all(
         [run.id, second.id].map(async (id) => {
-          const found = await person.api.screens.run(app, id);
+          const found = await person.api.screens.frame(app, "").run(id);
           const inList = listed.find((each) => each.id === id);
           return [inList?.waitingFor, found.waitingFor].map((decisions) =>
             decisions?.map(({ description }) => description ?? "(hidden)")
@@ -189,16 +191,22 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
     expect({
       seen,
       other: await outcome(
-        other.api.screens.decide(app, run.id, "review", { approved: true })
+        other.api.screens
+          .frame(app, "")
+          .decide(run.id, "review", { approved: true })
       ),
       starter: await outcome(
-        user.api.screens.decide(app, run.id, "review", { approved: true })
+        user.api.screens
+          .frame(app, "")
+          .decide(run.id, "review", { approved: true })
       ),
       named: await outcome(
         confirmedDecide(builder, app, run.id, "review", { approved: false })
       ),
       again: await outcome(
-        builder.api.screens.decide(app, run.id, "review", { approved: true })
+        builder.api.screens
+          .frame(app, "")
+          .decide(run.id, "review", { approved: true })
       ),
     }).toStrictEqual({
       seen: {
@@ -221,21 +229,18 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
     const admin = await personApi("admin");
     const otherAdmin = await personApi("admin");
     const app = await approvalApp(builder);
-    const run = await builder.api.screens.startRun(app, "approval", byAdmins);
-    const second = await builder.api.screens.startRun(
-      app,
-      "approval",
-      byAdmins
-    );
+    const run = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", byAdmins);
+    const second = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", byAdmins);
     await waiting(admin, app, run.id);
     await waiting(admin, app, second.id);
     const reviewOf = async (person: Person, of: string, approved: boolean) => {
-      const review = await person.api.screens.reviewDecision(
-        app,
-        of,
-        "review",
-        { approved }
-      );
+      const review = await person.api.screens
+        .frame(app, "")
+        .reviewDecision(of, "review", { approved });
       if (review.state !== "review") {
         throw new Error("Already recorded");
       }
@@ -243,13 +248,9 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
     };
     const confirmed = async (person: Person, of: string, approved: boolean) => {
       const { decision } = await reviewOf(person, of, approved);
-      const { confirmation } = await person.api.screens.confirmDecision(
-        app,
-        of,
-        "review",
-        decision.revision,
-        { approved }
-      );
+      const { confirmation } = await person.api.screens
+        .frame(app, "")
+        .confirmDecision(of, "review", decision.revision, { approved });
       return confirmation;
     };
     const rejecting = await confirmed(admin, run.id, false);
@@ -257,13 +258,9 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
     const otherAdmins = await confirmed(otherAdmin, run.id, true);
     const decide = async (answer: unknown, confirmation?: string) =>
       await outcome(
-        admin.api.screens.decide(
-          app,
-          run.id,
-          "review",
-          unchecked(answer),
-          confirmation
-        )
+        admin.api.screens
+          .frame(app, "")
+          .decide(run.id, "review", unchecked(answer), confirmation)
       );
 
     const refused = {
@@ -279,30 +276,28 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
       otherPerson: await decide({ approved: true }, otherAdmins),
       // Nor confirmed against a review the decision no longer matches.
       staleReview: await outcome(
-        admin.api.screens.confirmDecision(app, run.id, "review", "stale", {
-          approved: true,
-        })
+        admin.api.screens
+          .frame(app, "")
+          .confirmDecision(run.id, "review", "stale", {
+            approved: true,
+          })
       ),
       // Nor reviewed through another App.
       elsewhere: await outcome(
-        admin.api.screens.reviewDecision(
-          await approvalApp(builder),
-          run.id,
-          "review",
-          { approved: true }
-        )
+        admin.api.screens
+          .frame(await approvalApp(builder), "")
+          .reviewDecision(run.id, "review", { approved: true })
       ),
     };
-    const { status: stillWaiting } = await admin.api.screens.run(app, run.id);
+    const { status: stillWaiting } = await admin.api.screens
+      .frame(app, "")
+      .run(run.id);
     const answered = await decide({ approved: false }, rejecting);
     // Asked again after it was recorded, as after a lost answer: nothing
     // more to confirm, and the same answer is given back.
-    const recorded = await admin.api.screens.reviewDecision(
-      app,
-      run.id,
-      "review",
-      { approved: false }
-    );
+    const recorded = await admin.api.screens
+      .frame(app, "")
+      .reviewDecision(run.id, "review", { approved: false });
     const again = await decide({ approved: false });
     await finished(run.id);
     const events = await allEvents();
@@ -372,36 +367,37 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
       approvalApp(builder),
       approvalApp(builder),
     ]);
-    const run = await builder.api.screens.startRun(
-      elsewhere,
-      "approval",
-      byAdmins
-    );
+    const run = await builder.api.screens
+      .frame(elsewhere, "")
+      .startRun("approval", byAdmins);
     await waiting(admin, elsewhere, run.id);
 
     expect({
-      run: await outcome(admin.api.screens.run(app, run.id)),
+      run: await outcome(admin.api.screens.frame(app, "").run(run.id)),
       decide: await outcome(
-        admin.api.screens.decide(app, run.id, "review", { approved: true })
+        admin.api.screens
+          .frame(app, "")
+          .decide(run.id, "review", { approved: true })
       ),
-      runs: await admin.api.screens.runs(app, "approval"),
+      runs: await admin.api.screens.frame(app, "").runs("approval"),
       // Nor a decision the run doesn't have, or a name that isn't one.
       unknown: await outcome(
-        admin.api.screens.decide(elsewhere, run.id, "other", {
+        admin.api.screens.frame(elsewhere, "").decide(run.id, "other", {
           approved: true,
         })
       ),
       invalid: await outcome(
-        admin.api.screens.decide(elsewhere, run.id, unchecked(7), {
+        admin.api.screens.frame(elsewhere, "").decide(run.id, unchecked(7), {
           approved: true,
         })
       ),
       invalidRun: await outcome(
-        admin.api.screens.run(elsewhere, unchecked({ id: run.id }))
+        admin.api.screens.frame(elsewhere, "").run(unchecked({ id: run.id }))
       ),
       // Still waiting: nothing above answered it.
       stillWaiting: await admin.api.screens
-        .run(elsewhere, run.id)
+        .frame(elsewhere, "")
+        .run(run.id)
         .then(({ status }) => status),
     }).toStrictEqual({
       run: "workflow.run_not_found",
@@ -428,18 +424,24 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
   return 1;`
       ),
     });
-    const napping = await builder.api.screens.startRun(app, "napping");
-    const resting = await builder.api.screens.startRun(app, "resting");
+    const napping = await builder.api.screens
+      .frame(app, "")
+      .startRun("napping");
+    const resting = await builder.api.screens
+      .frame(app, "")
+      .startRun("resting");
     await sleeping(napping.id, "nap");
     await sleeping(resting.id, "rest");
     const seen = async (workflow: string, run: string) => ({
       listed: await builder.api.screens
-        .runs(app, workflow)
+        .frame(app, "")
+        .runs(workflow)
         .then((runs) =>
           runs.map(({ id, status, waitingFor }) => ({ id, status, waitingFor }))
         ),
       run: await builder.api.screens
-        .run(app, run)
+        .frame(app, "")
+        .run(run)
         .then(({ status, waitingFor }) => ({ status, waitingFor })),
     });
 
@@ -462,17 +464,21 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const stranger = await personApi("builder");
     const app = await approvalApp(builder);
-    const run = await builder.api.screens.startRun(app, "approval", byAdmins);
+    const run = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", byAdmins);
     await waiting(builder, app, run.id);
 
     expect({
       start: await outcome(
-        stranger.api.screens.startRun(app, "approval", byAdmins)
+        stranger.api.screens.frame(app, "").startRun("approval", byAdmins)
       ),
-      runs: await outcome(stranger.api.screens.runs(app, "approval")),
-      run: await outcome(stranger.api.screens.run(app, run.id)),
+      runs: await outcome(stranger.api.screens.frame(app, "").runs("approval")),
+      run: await outcome(stranger.api.screens.frame(app, "").run(run.id)),
       decide: await outcome(
-        stranger.api.screens.decide(app, run.id, "review", { approved: true })
+        stranger.api.screens
+          .frame(app, "")
+          .decide(run.id, "review", { approved: true })
       ),
     }).toStrictEqual({
       start: "app.not_found",

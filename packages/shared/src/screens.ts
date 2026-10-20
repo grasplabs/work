@@ -140,7 +140,7 @@ export interface ScreenBundle {
   input: Json;
   /**
    * Core's word that it handed this person this build of this App, for
-   * the page to give back on the frame's own connection (`present`):
+   * the page to give back when it opens the frame (`ScreensApi.frame`):
    * opaque to the page, and worth nothing to anyone else.
    */
   lease: string;
@@ -318,7 +318,9 @@ export interface RunSubscriptionApi {
  * share (`ScreensApi.frame`): bound to the App, the build core leased the
  * frame and the person it was opened for. Each call is decided on that
  * build alone, never on what another frame of the App on the connection
- * runs, and is refused as `ScreensApi`'s same call would be otherwise.
+ * runs: every call that reaches the App's data or runs is refused with
+ * `screen.unreviewed` or `screen.revoked` unless that build gets the data
+ * now, read before the call, before its answer and before each push.
  * `close` (or letting go of the stub) releases everything the frame
  * follows through it, its live queries, its runs' updates and the
  * callbacks its server calls passed, at once; a closed frame is refused
@@ -327,21 +329,43 @@ export interface RunSubscriptionApi {
 export interface ScreenFrameApi {
   /** Whether the frame's build gets the App's data now. */
   delivery: () => Promise<ScreenDelivery>;
+  /**
+   * Calls `method` of the App's server with `args`, as the person. Plain
+   * data, and functions (callbacks the server may keep and call later
+   * with plain data). The answer is plain data, whatever it holds.
+   */
   call: (method: string, args: unknown[]) => Promise<unknown>;
+  /**
+   * Starts a run of the App's workflow, for the person: anyone with a role
+   * in the App. Audited as started on a screen (`via: "screen"`).
+   */
   startRun: (workflow: string, input?: unknown) => Promise<WorkflowRun>;
+  /** The App's latest 100 runs of `workflow`, newest first. */
   runs: (workflow: string) => Promise<ScreenRun[]>;
+  /** One of the App's runs as it is now; another App's is not found. */
   run: (run: string) => Promise<ScreenRun>;
+  /**
+   * The summary of one of the App's runs, all of one revision: status,
+   * identity, times, the decisions it waits for, a compensation, and what
+   * the person may do with it now (`control`). Another App's run is not
+   * found.
+   */
   summary: (run: string) => Promise<RunSummary>;
-  /** `ScreensApi.reviewDecision`, for this frame's App. */
+  /**
+   * What the trusted host decision UI shows the person before they
+   * confirm the screen's answer to the decision `decision` (its name in
+   * the workflow) of one of the App's runs (`DecisionsApi.review`).
+   */
   reviewDecision: (
     run: string,
     decision: string,
     answer: DecisionAnswerInput
   ) => Promise<DecisionReview>;
   /**
-   * `ScreensApi.confirmDecision`, for this frame's App: the page's alone,
-   * once the person confirmed the answer in its own dialog, never reached
-   * from the frame.
+   * Mints the person's one-use confirmation of the screen's answer, as
+   * reviewed at `revision` (`DecisionsApi.confirm`), once they confirmed it
+   * in the page's own dialog: the page's alone, never reached from the
+   * frame. Audited as confirmed for a screen.
    */
   confirmDecision: (
     run: string,
@@ -349,18 +373,56 @@ export interface ScreenFrameApi {
     revision: string,
     answer: DecisionAnswerInput
   ) => Promise<DecisionConfirmation>;
-  /** `ScreensApi.decide`, for this frame's App, with the confirmation. */
+  /**
+   * Answers the decision `decision` (its name in the workflow) of one of
+   * the App's runs, as the person, by the decision's own rules: only
+   * someone it is from, and never the run's starter unless it names
+   * exactly them, with the one-use confirmation the page minted once the
+   * person confirmed exactly this answer (`DecisionsApi.confirm`); the
+   * screen never has it. Audited as answered on a screen (`via: "screen"`).
+   */
   decide: (
     run: string,
     decision: string,
     answer: DecisionAnswerInput,
     confirmation?: string
   ) => Promise<DecisionView>;
+  /**
+   * Pauses, resumes or cancels one of the App's runs, for a builder of the
+   * App, and answers the host's receipt once it admitted the request: not
+   * that the run has got there yet, which its status says. The same
+   * request again, while its receipt is unresolved, answers that receipt.
+   * Refused with `workflow.control_conflict` while a cancel, or the other
+   * of pause and resume, is unresolved, and `workflow.control_refused`
+   * once the run has ended. Audited as asked on a screen.
+   */
   control: (run: string, kind: RunControl["kind"]) => Promise<RunControl>;
+  /**
+   * Calls `onChange` each time one of the App's runs of `workflow` starts,
+   * waits for a decision, has it answered or closed, or ends, for as long
+   * as the person may use the App and until the screen releases the
+   * subscription it answers. Core lets go of `onChange` when it stops
+   * calling it, which tells the screen to follow again. One tab's
+   * connection holds at most 20 subscriptions at once.
+   */
   watchRuns: (
     workflow: string,
     onChange: (change: RunChange) => void
   ) => Promise<RunSubscriptionApi>;
+  /**
+   * Follows one of the App's public queries (spec 11): `request` is the
+   * call as a function call sends it (its reference and input, as JSON
+   * text). Core reads it as the person, pushes its result to `onSnapshot`
+   * (`QuerySnapshotPush`), and pushes it again, read afresh, after every
+   * commit that changed what it read, for as long as the person may use
+   * the App and the build gets its data, until the screen releases the
+   * subscription. A refusal that ends the subscription (the person or the
+   * build lost access, the App moved to another version) is pushed as the
+   * last result; core then lets go of `onSnapshot`, as it does when it can
+   * no longer keep the query fresh, which tells the screen to follow
+   * again. One connection follows at most 100 queries at once, and a
+   * person 500 of one App (`screen.too_many_queries`).
+   */
   watchQuery: (
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
@@ -370,7 +432,8 @@ export interface ScreenFrameApi {
 
 /**
  * A signed-in person's way to an App's screens: for anyone with a role in
- * the App (`AppsApi`); its error log for its builders only.
+ * the App (`AppsApi`); its error log for its builders only. What a screen
+ * then asks of its App goes through its frame (`frame`).
  */
 export interface ScreensApi {
   /**
@@ -398,30 +461,13 @@ export interface ScreensApi {
    */
   navigate: (app: string, navigation: ScreenRoute) => Promise<ScreenTarget>;
   /**
-   * Says which build this connection's frame runs for the App, with the
-   * lease `open` gave: what every call below is then decided on. Answers
-   * whether that build gets the App's data now. A connection that
-   * presented nothing runs a build nobody approved, as far as core knows.
-   */
-  present: (app: string, lease: string) => Promise<ScreenDelivery>;
-  /**
    * One frame's own way to the App (`ScreenFrameApi`), for the build the
    * lease `open` gave it: how frames that share a connection each get
    * their App's data on their own build, and let go of all they follow
    * when they close. A lease core didn't sign for this person and App
-   * runs a build nobody approved, as with `present`.
+   * names no build, and the frame runs one nobody approved.
    */
   frame: (app: string, lease: string) => Promise<ScreenFrameApi>;
-  /**
-   * Calls `method` of the App's server with `args`, as the person. Plain
-   * data, and functions (callbacks the server may keep and call later
-   * with plain data). The answer is plain data, whatever it holds. Like
-   * every call below that reaches the App's data or runs, it is refused
-   * with `screen.unreviewed` or `screen.revoked` unless the build the
-   * connection presented gets that data now: read before the call, before
-   * its answer and before each push.
-   */
-  call: (app: string, method: string, args: unknown[]) => Promise<unknown>;
   /** The App's current version; null while it has none. */
   version: (app: string) => Promise<number | null>;
   /**
@@ -436,115 +482,6 @@ export interface ScreensApi {
   ) => Promise<void>;
   /** The App's error log. */
   errors: (app: string) => Promise<AppErrorLog>;
-  /**
-   * Starts a run of the App's workflow, for the person: anyone with a role
-   * in the App. Audited as started on a screen (`via: "screen"`). Behind
-   * `screen_workflows`, as are the calls below.
-   */
-  startRun: (
-    app: string,
-    workflow: string,
-    input?: unknown
-  ) => Promise<WorkflowRun>;
-  /** The App's latest 100 runs of `workflow`, newest first. */
-  runs: (app: string, workflow: string) => Promise<ScreenRun[]>;
-  /** One of the App's runs as it is now; another App's is not found. */
-  run: (app: string, run: string) => Promise<ScreenRun>;
-  /**
-   * The summary of one of the App's runs, all of one revision: status,
-   * identity, times, the decisions it waits for, a compensation, and what
-   * the person may do with it now (`control`). Another App's run is not
-   * found.
-   */
-  summary: (app: string, run: string) => Promise<RunSummary>;
-  /**
-   * What the trusted host decision UI shows the person before they
-   * confirm the screen's answer to the decision `decision` (its name in
-   * the workflow) of one of the App's runs (`DecisionsApi.review`).
-   */
-  reviewDecision: (
-    app: string,
-    run: string,
-    decision: string,
-    answer: DecisionAnswerInput
-  ) => Promise<DecisionReview>;
-  /**
-   * Mints the person's one-use confirmation of the screen's answer, as
-   * reviewed at `revision` (`DecisionsApi.confirm`), once they confirmed it
-   * in the page's own dialog: the page's alone, never the screen's.
-   * Audited as confirmed for a screen.
-   */
-  confirmDecision: (
-    app: string,
-    run: string,
-    decision: string,
-    revision: string,
-    answer: DecisionAnswerInput
-  ) => Promise<DecisionConfirmation>;
-  /**
-   * Answers the decision `decision` (its name in the workflow) of one of
-   * the App's runs, as the person, by the decision's own rules: only
-   * someone it is from, and never the run's starter unless it names
-   * exactly them, with the one-use confirmation the page minted once the
-   * person confirmed exactly this answer (`DecisionsApi.confirm`); the
-   * screen never has it. Audited as answered on a screen (`via: "screen"`).
-   */
-  decide: (
-    app: string,
-    run: string,
-    decision: string,
-    answer: DecisionAnswerInput,
-    confirmation?: string
-  ) => Promise<DecisionView>;
-  /**
-   * Pauses, resumes or cancels one of the App's runs, for a builder of the
-   * App, and answers the host's receipt once it admitted the request: not
-   * that the run has got there yet, which its status says. The same
-   * request again, while its receipt is unresolved, answers that receipt.
-   * Refused with `workflow.control_conflict` while a cancel, or the other
-   * of pause and resume, is unresolved, and `workflow.control_refused`
-   * once the run has ended. Audited as asked on a screen.
-   */
-  control: (
-    app: string,
-    run: string,
-    kind: RunControl["kind"]
-  ) => Promise<RunControl>;
-  /**
-   * Calls `onChange` each time one of the App's runs of `workflow` starts,
-   * waits for a decision, has it answered or closed, or ends, for as long
-   * as the person may use the App and until the screen releases the
-   * subscription it answers. Core lets go of `onChange` when it stops
-   * calling it, which tells the screen to follow again. One tab's
-   * connection holds at most 20 subscriptions at once.
-   */
-  watchRuns: (
-    app: string,
-    workflow: string,
-    onChange: (change: RunChange) => void
-  ) => Promise<RunSubscriptionApi>;
-  /**
-   * Follows one of the App's public queries (spec 11): `request` is the
-   * call as a function call sends it (its reference and input, as JSON
-   * text), for the build `lease` (the following frame's own, from
-   * `open`) names. Core reads it as the
-   * person, pushes its result to `onSnapshot` (`QuerySnapshotPush`), and
-   * pushes it again, read afresh, after every commit that changed what
-   * it read, for as long as the person may use the App and the build
-   * gets its data, until the screen releases the subscription. A refusal
-   * that ends the subscription (the person or the build lost access, the
-   * App moved to another version) is pushed as the last result; core
-   * then lets go of `onSnapshot`, as it does when it can no longer keep
-   * the query fresh, which tells the screen to follow again. One
-   * connection follows at most 100 queries at once, and a person 500 of
-   * one App (`screen.too_many_queries`).
-   */
-  watchQuery: (
-    app: string,
-    lease: string,
-    request: string,
-    onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ) => Promise<RunSubscriptionApi>;
 }
 
 /** Why a call to an App's screens was refused. */

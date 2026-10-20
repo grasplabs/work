@@ -1226,7 +1226,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       await until(() => fake.requests.length === 2);
       const run = await builder.api.workflows.start(app, "reader");
       const summary = async () =>
-        await builder.api.screens.summary(app, run.id);
+        await builder.api.screens.frame(app, "").summary(run.id);
       // A run still starting reads as queued too, with no share to wait
       // for (summary.ts): the step's wait shows once its call joined the
       // queue, in the revision that carries the share and the time.

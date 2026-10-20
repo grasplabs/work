@@ -221,7 +221,7 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
     const notes = await screens.open(app, "notes");
     const other = await screens.open(app, "other");
     const notesFrame = await screens.frame(app, notes.lease);
-    // Made last, as the connection's last `present` would have been.
+    // Made last: the one a connection-wide build would have followed.
     const otherFrame = await screens.frame(app, other.lease);
     const unleased = await screens.frame(app, `${notes.artifact}.forged`);
     const beforeFollower = follower();

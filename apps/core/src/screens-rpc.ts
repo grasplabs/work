@@ -118,8 +118,8 @@ import { runSummary } from "./workflows/summary.ts";
 // call here that reaches the App's data or its runs passes that gate, and
 // so does every push; only a screen's own reports of its problems, the
 // App's version number and its error log, which only its builders read
-// and no frame reaches, don't. Which build a connection's frame runs
-// is the one core leased it (`present`), never what the frame says.
+// and no frame reaches, don't. Which build a frame runs is the one
+// core leased it (`frame`), never what the frame says.
 //
 // A callback the App keeps (a screen's subscription), or its host keeps
 // for the App's run changes (`watchRuns`), outlives the call that passed
@@ -493,9 +493,9 @@ const navigateScreen = async (
   return { screen: built.screen, route: route.name, input };
 };
 
-/** What a connection's calls on an App are decided on. */
+/** What a frame's calls on its App are decided on (`ScreenFrameRpc`). */
 interface Frame {
-  /** The build the connection presented for the App, if it did. */
+  /** The build the frame's lease named for the App, if it named one. */
   artifactOf: (app: AppId) => string | undefined;
   /**
    * Whether the person may still get a callback's pushes from the App:
@@ -507,16 +507,13 @@ interface Frame {
     artifact: string | undefined,
     operation: string
   ) => StillOpen;
-  /**
-   * What one frame keeps through its calls (`ScreenFrameRpc`), let go of
-   * when it closes; none for the connection's own calls.
-   */
-  held?: Holder;
+  /** What the frame keeps through its calls, let go of when it closes. */
+  held: Holder;
   /**
    * Called right before the App runs anything for a call: refuses once
-   * the frame closed (`ScreenFrameRpc`); none for the connection's own.
+   * the frame closed.
    */
-  dispatching?: () => void;
+  dispatching: () => void;
   /**
    * Has `look` called whenever the person's access to `app` may have
    * dropped (`QuerySubscriptions.follow`), until let go of; `lose` when
@@ -732,7 +729,7 @@ const callServer = async (
   try {
     return await delivering(env, by, id, artifact, "call", async () => {
       // A frame closed while the call was admitted runs nothing.
-      frame.dispatching?.();
+      frame.dispatching();
       return withinAnswer(
         await callApp(
           env,
@@ -806,14 +803,14 @@ const watchRuns = async (
     { frame, by, app: id, artifact, operation: "watchRuns", lookNow: true },
     () => {
       subscriptions.delete(callback);
-      frame.held?.forget(callback);
+      frame.held.forget(callback);
       ended?.();
     }
   );
   subscriptions.add(callback);
   // The frame's from now on: one closed while its host answers lets go
   // of it, and its slot, at once.
-  frame.held?.keep(callback);
+  frame.held.keep(callback);
   let watch: string;
   try {
     watch = await appHost(env, id).watchRuns(name, callback);
@@ -994,8 +991,8 @@ interface FrameConnection {
  * (`ScreensApi.frame`). Threat model, and how each is closed:
  *
  * - Frame A decided on frame B's build: every call is decided on the
- *   build this frame's own lease named, never on what the connection
- *   presented (`present`) or another frame of the App runs, so a frame
+ *   build this frame's own lease named, never on what another frame of
+ *   the App runs, so a frame
  *   whose build was revoked is refused while another frame's goes on.
  * - A closed frame following on: what it follows through here (its live
  *   queries, its runs' updates, the callbacks its server calls passed)
@@ -1343,56 +1340,6 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
   /** Whether the person may still use each App, shared by its callbacks. */
   readonly #access = new Map<AppId, StillOpen>();
 
-  /**
-   * Which build this connection's frame runs for each App: the one a
-   * lease of core's own named (`present`), so nothing the page or the
-   * frame makes up gets in here.
-   */
-  readonly #presented = new Map<AppId, string>();
-
-  /** What this connection's calls on an App are decided on. */
-  readonly #frame: Frame = {
-    artifactOf: (app) => this.#presented.get(app),
-    stillOpen: (by, app, artifact, operation) => {
-      const hasRole = this.#stillOpen(app);
-      // Trust is read at every push, never kept: an approval taken back
-      // stops the very next one.
-      return async () =>
-        (await hasRole()) &&
-        (await deliveryOpen(this.#env, by, app, artifact, {
-          operation,
-          stage: "push",
-        }));
-    },
-    follow: (by, app, look, lose) => this.#queries.follow(by, app, look, lose),
-    lookOpen: (by, app, artifact, operation) => {
-      const hasRole = this.#stillOpen(app);
-      return async () => {
-        // Begun before anything is awaited: shared with the other looks
-        // of this revocation, and only with them (`#standingNow`).
-        const read = this.#standingNow(app, artifact);
-        // Handled at once, so a read that fails while the role is still
-        // being read is never left unhandled; `deliveryAt` still hears of
-        // it. Not awaited: the screen never waits for an unneeded read.
-        void handled(read);
-        if (!(await hasRole())) {
-          return false;
-        }
-        return (
-          (await deliveryAt(
-            this.#env,
-            by,
-            app,
-            artifact,
-            { operation, stage: "push" },
-            read
-          )) === "open"
-        );
-      };
-    },
-    kept: this.#kept,
-  };
-
   /** This connection's live queries (query-subscriptions.ts). */
   readonly #queries: QuerySubscriptions;
 
@@ -1471,22 +1418,6 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     );
   }
 
-  async present(app: string, lease: string): Promise<ScreenDelivery> {
-    return await withPerson(this.#check, async (by) => {
-      const { id } = await getApp(this.#env, by, app);
-      const artifact = await leasedArtifact(this.#env, by.userId, id, lease);
-      // A lease core didn't sign for them and this App presents nothing:
-      // what the connection held before is gone too, so it can't keep an
-      // approved build while its frame runs another.
-      if (artifact === undefined) {
-        this.#presented.delete(id);
-      } else {
-        this.#presented.set(id, artifact);
-      }
-      return deliveryOf(await standingOf(this.#env, id, artifact));
-    });
-  }
-
   async frame(app: string, lease: string): Promise<ScreenFrameRpc> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await getApp(this.#env, by, app);
@@ -1508,36 +1439,6 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
           await this.#standingNow(frameApp, build),
       });
     });
-  }
-
-  /**
-   * `run` for the App `app` names, once this request of the person's is
-   * counted (`admitted`), if the build this connection presented gets the
-   * App's data now (`delivering`).
-   */
-  async #delivered<Answer>(
-    by: Identity,
-    app: string,
-    operation: string,
-    run: (id: AppId) => Promise<Answer>
-  ): Promise<Answer> {
-    const id = await admitted(this.#env, by, app);
-    return await delivering(
-      this.#env,
-      by,
-      id,
-      this.#presented.get(id),
-      operation,
-      async () => await run(id)
-    );
-  }
-
-  async call(app: string, method: string, args: unknown[]): Promise<unknown> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await callServer(this.#env, by, { app, method, args }, this.#frame)
-    );
   }
 
   async version(app: string): Promise<number | null> {
@@ -1562,201 +1463,5 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
       this.#check,
       async (by) => await errorLog(this.#env, by, app)
     );
-  }
-
-  async startRun(
-    app: string,
-    workflow: string,
-    input?: unknown
-  ): Promise<WorkflowRun> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await this.#delivered(
-          by,
-          app,
-          "startRun",
-          async (id) => await startScreenRun(this.#env, by, id, workflow, input)
-        )
-    );
-  }
-
-  async runs(app: string, workflow: string): Promise<ScreenRun[]> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await this.#delivered(
-          by,
-          app,
-          "runs",
-          async (id) => await screenRuns(this.#env, by, id, workflow)
-        )
-    );
-  }
-
-  async run(app: string, run: string): Promise<ScreenRun> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await this.#delivered(
-          by,
-          app,
-          "run",
-          async (id) => await screenRun(this.#env, by, id, run)
-        )
-    );
-  }
-
-  async summary(app: string, run: string): Promise<RunSummary> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await this.#delivered(
-          by,
-          app,
-          "summary",
-          async (id) => await runSummary(this.#env, by, id, run)
-        )
-    );
-  }
-
-  async reviewDecision(
-    app: string,
-    run: string,
-    decision: string,
-    answer: unknown
-  ): Promise<DecisionReview> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await this.#delivered(
-          by,
-          app,
-          "reviewDecision",
-          async (id) =>
-            await reviewScreenDecision(this.#env, by, id, run, decision, answer)
-        )
-    );
-  }
-
-  async confirmDecision(
-    app: string,
-    run: string,
-    decision: string,
-    revision: string,
-    answer: unknown
-  ): Promise<DecisionConfirmation> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await this.#delivered(
-          by,
-          app,
-          "confirmDecision",
-          async (id) =>
-            await confirmScreenDecision(
-              this.#env,
-              by,
-              id,
-              run,
-              decision,
-              revision,
-              answer
-            )
-        )
-    );
-  }
-
-  async decide(
-    app: string,
-    run: string,
-    decision: string,
-    answer: unknown,
-    confirmation?: string
-  ): Promise<DecisionView> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await this.#delivered(
-          by,
-          app,
-          "decide",
-          async (id) =>
-            await decideScreenRun(
-              this.#env,
-              by,
-              id,
-              run,
-              decision,
-              answer,
-              confirmation
-            )
-        )
-    );
-  }
-
-  async control(
-    app: string,
-    run: string,
-    kind: RunControl["kind"]
-  ): Promise<RunControl> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await this.#delivered(
-          by,
-          app,
-          "control",
-          async (id) => await controlScreenRun(this.#env, by, id, run, kind)
-        )
-    );
-  }
-
-  async watchRuns(
-    app: string,
-    workflow: string,
-    onChange: (change: RunChange) => void
-  ): Promise<RunSubscription> {
-    return await withPerson(
-      this.#check,
-      async (by) =>
-        await watchRuns(
-          this.#env,
-          by,
-          { app, workflow, onChange },
-          this.#frame,
-          this.#runSubscriptions
-        )
-    );
-  }
-
-  async watchQuery(
-    app: string,
-    lease: string,
-    request: string,
-    onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ): Promise<RunSubscription> {
-    return await withPerson(this.#check, async (by) => {
-      // Following is a request like any other; what core then pushes is
-      // not counted (query-subscriptions.ts bounds it).
-      const id = await admitted(this.#env, by, app);
-      if (
-        typeof request !== "string" ||
-        request.length > functionRequestMaxBytes ||
-        !isStub(onSnapshot)
-      ) {
-        throw screenErrors.create("screen.invalid");
-      }
-      // A window counts as the pages its first read takes.
-      await admitWindow(this.#env, by, id, request);
-      // The build of the frame that follows, by its own lease: never what
-      // another frame of the App on this connection presented last.
-      const artifact = await leasedArtifact(this.#env, by.userId, id, lease);
-      await requireDelivery(this.#env, by, id, artifact, {
-        operation: "watchQuery",
-        stage: "admission",
-      });
-      return this.#queries.subscribe(by, id, artifact, request, onSnapshot);
-    });
   }
 }

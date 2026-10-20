@@ -108,16 +108,18 @@ const readingScreen = async (
         ? String(change.run)
         : "";
     try {
-      const { id, status } = await person.api.screens.run(app, run);
+      const { id, status } = await person.api.screens.frame(app, "").run(run);
       seen.push(`${id} ${status}`);
     } catch {
       seen.push(`${run} unreadable`);
     }
   };
-  await person.api.screens.watchRuns(app, workflow, (change: unknown) => {
-    pushes.push(change);
-    void read(change);
-  });
+  await person.api.screens
+    .frame(app, "")
+    .watchRuns(workflow, (change: unknown) => {
+      pushes.push(change);
+      void read(change);
+    });
   return {
     pushes,
     /** Once a read after a push found `run` in `status`. */
@@ -158,17 +160,15 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     const app = await approvalApp(builder);
     const screen = await readingScreen(admin, app);
 
-    const { id: run } = await builder.api.screens.startRun(
-      app,
-      "approval",
-      byAdmins
-    );
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", byAdmins);
     await screen.saw(run, "waiting");
     await confirmedDecide(admin, app, run, "review", { approved: true });
     await screen.saw(run, "completed");
 
     expect({
-      ended: await admin.api.screens.run(app, run),
+      ended: await admin.api.screens.frame(app, "").run(run),
       // Each push only says which run changed: the screen reads it again,
       // as the person, with what they may see of it.
       pushes: new Set(screen.pushes.map((change) => JSON.stringify(change))),
@@ -192,7 +192,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     );
     const screen = await readingScreen(builder, app, "failing");
 
-    const { id: run } = await builder.api.screens.startRun(app, "failing");
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("failing");
 
     await expect(screen.saw(run, "failed")).resolves.toBeUndefined();
   });
@@ -213,10 +215,14 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     );
     const screen = await readingScreen(builder, app, "expiring");
 
-    const { id: run } = await builder.api.screens.startRun(app, "expiring");
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("expiring");
     await screen.sawAfter(run, "waiting", "running");
 
-    await expect(builder.api.screens.run(app, run)).resolves.toMatchObject({
+    await expect(
+      builder.api.screens.frame(app, "").run(run)
+    ).resolves.toMatchObject({
       status: "running",
       waitingFor: [],
     });
@@ -226,11 +232,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const app = await approvalApp(builder);
     const screen = await readingScreen(builder, app);
-    const { id: run } = await builder.api.screens.startRun(
-      app,
-      "approval",
-      byAdmins
-    );
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", byAdmins);
     await screen.saw(run, "waiting");
 
     await builder.api.workflows.cancel(run);
@@ -245,7 +249,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     const them = { type: "person", id: member.userId } as const;
     await owner.api.apps.members.add(app, { ...them, role: "user" });
     const screen = follower();
-    await member.api.screens.watchRuns(app, "approval", screen.callback);
+    await member.api.screens
+      .frame(app, "")
+      .watchRuns("approval", screen.callback);
     await nudge(app);
     await pushedAfter(screen.received, 0);
 
@@ -270,7 +276,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     expect({
       more: screen.received.length - received,
       again: await outcome(
-        member.api.screens.watchRuns(app, "approval", follower().callback)
+        member.api.screens
+          .frame(app, "")
+          .watchRuns("approval", follower().callback)
       ),
     }).toStrictEqual({ more: 0, again: "app.not_found" });
   });
@@ -279,7 +287,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const app = await approvalApp(builder);
     const before = follower();
-    await builder.api.screens.watchRuns(app, "approval", before.callback);
+    await builder.api.screens
+      .frame(app, "")
+      .watchRuns("approval", before.callback);
 
     // Restarted, as a deploy restarts it: it holds the screen's callback,
     // so the runtime won't just evict it.
@@ -298,7 +308,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     }, pushWait);
     // What the SDK does once its callback is let go.
     const after = follower();
-    await builder.api.screens.watchRuns(app, "approval", after.callback);
+    await builder.api.screens
+      .frame(app, "")
+      .watchRuns("approval", after.callback);
     await nudge(app);
     await pushedAfter(after.received, 0);
 
@@ -316,8 +328,12 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     const app = await approvalApp(builder);
     const gone = follower(true);
     const open = follower();
-    await builder.api.screens.watchRuns(app, "approval", gone.callback);
-    await builder.api.screens.watchRuns(app, "approval", open.callback);
+    await builder.api.screens
+      .frame(app, "")
+      .watchRuns("approval", gone.callback);
+    await builder.api.screens
+      .frame(app, "")
+      .watchRuns("approval", open.callback);
 
     await nudge(app);
     await vi.waitFor(() => {
@@ -346,14 +362,18 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     const subscriptions = await Promise.all(
       screens.map(
         async ({ callback }) =>
-          await builder.api.screens.watchRuns(app, "approval", callback)
+          await builder.api.screens
+            .frame(app, "")
+            .watchRuns("approval", callback)
       )
     );
     const full = await later(
       1,
       async () =>
         await outcome(
-          builder.api.screens.watchRuns(app, "approval", follower().callback)
+          builder.api.screens
+            .frame(app, "")
+            .watchRuns("approval", follower().callback)
         )
     );
     const [released] = screens;
@@ -365,7 +385,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
       2,
       async () =>
         await outcome(
-          builder.api.screens.watchRuns(app, "approval", latest.callback)
+          builder.api.screens
+            .frame(app, "")
+            .watchRuns("approval", latest.callback)
         )
     );
     await nudge(app);
@@ -392,13 +414,19 @@ describe("run status on screens", { timeout: 60_000 }, () => {
     const app = await approvalApp(builder);
 
     const stranded = await outcome(
-      stranger.api.screens.watchRuns(app, "approval", follower().callback)
+      stranger.api.screens
+        .frame(app, "")
+        .watchRuns("approval", follower().callback)
     );
     const invalidName = await outcome(
-      builder.api.screens.watchRuns(app, unchecked(7), follower().callback)
+      builder.api.screens
+        .frame(app, "")
+        .watchRuns(unchecked(7), follower().callback)
     );
     const notCallback = await outcome(
-      builder.api.screens.watchRuns(app, "approval", unchecked("callback"))
+      builder.api.screens
+        .frame(app, "")
+        .watchRuns("approval", unchecked("callback"))
     );
     // One connection is one open screen: it follows at most 20 at once.
     const followed = await later(
@@ -409,11 +437,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
             { length: 20 },
             async () =>
               await outcome(
-                builder.api.screens.watchRuns(
-                  app,
-                  "approval",
-                  follower().callback
-                )
+                builder.api.screens
+                  .frame(app, "")
+                  .watchRuns("approval", follower().callback)
               )
           )
         )
@@ -422,7 +448,9 @@ describe("run status on screens", { timeout: 60_000 }, () => {
       2,
       async () =>
         await outcome(
-          builder.api.screens.watchRuns(app, "approval", follower().callback)
+          builder.api.screens
+            .frame(app, "")
+            .watchRuns("approval", follower().callback)
         )
     );
 

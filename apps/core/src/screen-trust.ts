@@ -103,7 +103,7 @@ const leased = (userId: string, app: AppId, artifact: string): Uint8Array =>
 /**
  * Core's word that it handed `artifact` of `app` to `userId`: the build's
  * hash and a MAC only core can make (a key derived from its auth secret).
- * The page gives it back on its frame's connection (`ScreensApi.present`);
+ * The page gives it back when it opens the frame (`ScreensApi.frame`);
  * it says which build, never that the build is approved.
  */
 export const leaseFor = async (
@@ -368,7 +368,7 @@ export interface Standing {
 
 /**
  * What core holds now for `artifact` of `app`; a build it has no row for,
- * or none at all (a connection that presented no lease), is `unreviewed`.
+ * or none at all (a frame whose lease named none), is `unreviewed`.
  */
 export const standingOf = async (
   env: Env,
