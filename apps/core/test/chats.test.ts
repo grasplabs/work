@@ -703,6 +703,22 @@ describe("chats", () => {
     }
   );
 
+  it("show no usage for a reply that used nothing: the provider refused it", async () => {
+    const ann = await person();
+    await answering(ann, { status: 400, errorType: "invalid_request_error" });
+    const chat = await ann.chats.create("Refused");
+    const follower = await follow(ann.chats, chat.id);
+
+    await ann.chats.send(chat.id, { text: "Hi.", model });
+    await settled(follower);
+
+    const reply = follower.messages().at(-1);
+    expect({
+      end: reply?.role === "assistant" ? reply.end : null,
+      usage: reply !== undefined && "usage" in reply,
+    }).toStrictEqual({ end: "failed", usage: false });
+  });
+
   it("stream a reply as it is written: its code steps, their results, and the answer", async () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Two plus two is four."), 9);

@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 import type {
   ChatCode,
   ChatMessage,
@@ -61,16 +61,21 @@ export const partialOf = (message: AssistantMessage): ChatPartial => ({
 /** The provider core names its own messages by (workspace.ts). */
 const coreProvider = "grasp";
 
+/** Whether `usage` counts nothing at all: a request that used nothing. */
+const usedNothing = ({ input, output, cacheRead, cacheWrite, cost }: Usage) =>
+  input + output + cacheRead + cacheWrite === 0 && cost.total === 0;
+
 /**
  * What a reply used, as the gateway counted it (models.ts prices its cost
- * as the budgets are charged); none for core's own words.
+ * as the budgets are charged); none for core's own words, nor for a reply
+ * that used nothing (refused or failed before the provider took it).
  */
 const usageOf = ({
   provider,
   model,
   usage,
 }: AssistantMessage): ChatReplyUsage | undefined =>
-  provider === coreProvider
+  provider === coreProvider || usedNothing(usage)
     ? undefined
     : {
         input: usage.input,
