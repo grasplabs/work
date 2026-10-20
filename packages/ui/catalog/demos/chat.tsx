@@ -14,6 +14,23 @@ import {
   BubbleGroup,
 } from "@grasp-os/ui/components/bubble";
 import {
+  InlineCitation,
+  InlineCitationCard,
+  InlineCitationCardBody,
+  InlineCitationCardTrigger,
+  InlineCitationCarousel,
+  InlineCitationCarouselContent,
+  InlineCitationCarouselHeader,
+  InlineCitationCarouselIndex,
+  InlineCitationCarouselItem,
+  InlineCitationCarouselNext,
+  InlineCitationCarouselPrev,
+  InlineCitationQuote,
+  InlineCitationSource,
+  InlineCitationText,
+} from "@grasp-os/ui/components/inline-citation";
+import { InputGroup } from "@grasp-os/ui/components/input-group";
+import {
   Marker,
   MarkerContent,
   MarkerIcon,
@@ -33,6 +50,18 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@grasp-os/ui/components/message-scroller";
+import {
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuItem,
+  PromptInputActionMenuTrigger,
+  PromptInputBody,
+  PromptInputButton,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+} from "@grasp-os/ui/components/prompt-input";
 import {
   Questionnaire,
   QuestionnaireActions,
@@ -159,6 +188,74 @@ const QuestionnaireDemo = () => (
   </Questionnaire>
 );
 
+const InlineCitationDemo = () => (
+  <p className="text-sm">
+    <InlineCitation>
+      <InlineCitationText>
+        Invoices are approved within two days
+      </InlineCitationText>
+      <InlineCitationCard>
+        <InlineCitationCardTrigger
+          sources={["https://handbook.example.com/finance", "Approval policy"]}
+        />
+        <InlineCitationCardBody>
+          <InlineCitationCarousel>
+            <InlineCitationCarouselHeader>
+              <InlineCitationCarouselPrev />
+              <InlineCitationCarouselNext />
+              <InlineCitationCarouselIndex />
+            </InlineCitationCarouselHeader>
+            <InlineCitationCarouselContent>
+              <InlineCitationCarouselItem>
+                <InlineCitationSource
+                  title="Finance handbook"
+                  url="https://handbook.example.com/finance"
+                  description="How invoices move from received to paid."
+                />
+                <InlineCitationQuote>
+                  Every invoice is approved within two working days.
+                </InlineCitationQuote>
+              </InlineCitationCarouselItem>
+              <InlineCitationCarouselItem>
+                <InlineCitationSource title="Approval policy" />
+              </InlineCitationCarouselItem>
+            </InlineCitationCarouselContent>
+          </InlineCitationCarousel>
+        </InlineCitationCardBody>
+      </InlineCitationCard>
+    </InlineCitation>
+    .
+  </p>
+);
+
+const PromptInputDemo = () => (
+  <form
+    onSubmit={(event) => {
+      event.preventDefault();
+    }}
+  >
+    <InputGroup>
+      <PromptInputBody>
+        <PromptInputTextarea aria-label="Message" />
+      </PromptInputBody>
+      <PromptInputFooter>
+        <PromptInputTools>
+          <PromptInputActionMenu>
+            <PromptInputActionMenuTrigger aria-label="More actions" />
+            <PromptInputActionMenuContent>
+              <PromptInputActionMenuItem>
+                Attach a file
+              </PromptInputActionMenuItem>
+            </PromptInputActionMenuContent>
+          </PromptInputActionMenu>
+          <PromptInputButton tooltip="Search the web">Search</PromptInputButton>
+        </PromptInputTools>
+        <PromptInputSubmit />
+      </PromptInputFooter>
+    </InputGroup>
+  </form>
+);
+
 const ShimmerDemo = () => (
   <Shimmer aria-live="polite">Thinking about your question…</Shimmer>
 );
@@ -166,9 +263,11 @@ const ShimmerDemo = () => (
 export const chatDemos = {
   attachment: AttachmentDemo,
   bubble: BubbleDemo,
+  "inline-citation": InlineCitationDemo,
   marker: MarkerDemo,
   message: MessageDemo,
   "message-scroller": MessageScrollerDemo,
+  "prompt-input": PromptInputDemo,
   questionnaire: QuestionnaireDemo,
   shimmer: ShimmerDemo,
 };

@@ -798,6 +798,27 @@ export const graspComponents = {
       "Equal columns that wrap: one on a phone, up to `columns` on a wide screen.",
     exports: ["Grid", "gridVariants"],
   },
+  "inline-citation": {
+    status: "supported",
+    summary:
+      "A citation in running text: a badge naming its source, and a card on hover that pages through the sources and their quotes.",
+    exports: [
+      "InlineCitation",
+      "InlineCitationCard",
+      "InlineCitationCardBody",
+      "InlineCitationCardTrigger",
+      "InlineCitationCarousel",
+      "InlineCitationCarouselContent",
+      "InlineCitationCarouselHeader",
+      "InlineCitationCarouselIndex",
+      "InlineCitationCarouselItem",
+      "InlineCitationCarouselNext",
+      "InlineCitationCarouselPrev",
+      "InlineCitationQuote",
+      "InlineCitationSource",
+      "InlineCitationText",
+    ],
+  },
   inline: {
     status: "supported",
     summary: "Children in a row that wraps, such as actions or tags.",
@@ -812,6 +833,25 @@ export const graspComponents = {
       "PageHeaderContent",
       "PageHeaderDescription",
       "PageHeaderTitle",
+    ],
+  },
+  "prompt-input": {
+    status: "supported",
+    summary:
+      "The parts of a message composer: a textarea that sends on Enter, header and footer rows, tool buttons with tooltips, an actions menu and the send button.",
+    exports: [
+      "PromptInputActionMenu",
+      "PromptInputActionMenuContent",
+      "PromptInputActionMenuItem",
+      "PromptInputActionMenuTrigger",
+      "PromptInputAttachmentsContext",
+      "PromptInputBody",
+      "PromptInputButton",
+      "PromptInputFooter",
+      "PromptInputHeader",
+      "PromptInputSubmit",
+      "PromptInputTextarea",
+      "PromptInputTools",
     ],
   },
   shimmer: {
