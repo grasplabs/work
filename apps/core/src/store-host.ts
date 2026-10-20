@@ -105,6 +105,7 @@ import {
 import { FileHost } from "./file-host.ts";
 import type { FileHolder, FileReader } from "./file-host.ts";
 import { liveRuns } from "./live-runs.ts";
+import { transformBatchMaxRows } from "./migration-transform.ts";
 import {
   assertTimeout,
   backoffMs,
@@ -134,6 +135,8 @@ import {
   outputRefusal,
   pendingMigrationsSchema,
   queueWork,
+  sampleRows,
+  scanOf,
   scanPositionSchema,
   scanRangeIds,
 } from "./store-migrations.ts";
@@ -898,6 +901,40 @@ const releaseCandidatesSchema = z
     })
   )
   .max(compatibleVersionsMax);
+
+/** What a migration's dry run asks the store to sample (`sampleMigration`). */
+const migrationSampleSchema = z.strictObject({
+  table: tableNameSchema,
+  migration: z.string().min(1).max(128),
+  consumer: z.strictObject({
+    resourceId: z.string().min(1),
+    resourceVersion: z.number().int().min(1),
+  }),
+  limit: z.number().int().min(1).max(transformBatchMaxRows),
+});
+
+/**
+ * A migration's dry-run outputs, as core asks the store to check them
+ * (`checkSampleOutputs`): each sampled record's ID, the revision it was
+ * sampled at, and its transform's output.
+ */
+const sampleOutputsSchema = z.strictObject({
+  table: tableNameSchema,
+  migration: z.string().min(1).max(128),
+  consumer: z.strictObject({
+    resourceId: z.string().min(1),
+    resourceVersion: z.number().int().min(1),
+  }),
+  outputs: z
+    .array(
+      z.strictObject({
+        id: recordIdSchema,
+        revision: z.number().int().min(1),
+        fields: storedFieldsSchema,
+      })
+    )
+    .max(transformBatchMaxRows),
+});
 
 /** One batch of a backfill, as its run asks for it (`fillMissing`). */
 const backfillStepSchema = z.strictObject({
@@ -3606,6 +3643,154 @@ export class StoreHost {
         .run();
       this.#moved(changed);
     }
+  }
+
+  /**
+   * A sample of the records `migration` of `consumer`'s release still has
+   * to transform in `table`, at most `limit`, for its dry run
+   * (migration-samples.ts, `sampleRows`): from where its pending target's
+   * backfill stands, read in a transaction that writes nothing, so
+   * neither a record nor the backfill moves. Empty when no change is
+   * pending (its migration done); `migration.not_pending` when another
+   * release's is.
+   */
+  sampleMigration(
+    storeId: StoreId,
+    sample: {
+      table: string;
+      migration: string;
+      consumer: { resourceId: string; resourceVersion: number };
+      limit: number;
+    }
+  ): MigrationRow[] {
+    const { table, migration, consumer, limit } = dataErrors.parse(
+      "data.invalid",
+      migrationSampleSchema,
+      sample
+    );
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const pending = this.#pendingTarget();
+      if (pending === null) {
+        return [];
+      }
+      // Another release's change is pending here: this one's migration
+      // hasn't run, so "nothing left" would be false.
+      const [resourceId, resourceVersion] = pending.migrations?.consumer ?? [];
+      if (
+        resourceId !== consumer.resourceId ||
+        resourceVersion !== consumer.resourceVersion
+      ) {
+        throw migrationErrors.create("migration.not_pending");
+      }
+      const migrated = this.#migratedTables(pending).find(
+        (found) => found.table === table && found.migration === migration
+      );
+      const row = this.#db
+        .select()
+        .from(backfills)
+        .where(eq(backfills.targetHash, pending.hash))
+        .get();
+      if (migrated === undefined || row === undefined) {
+        return [];
+      }
+      const cursor =
+        row.phase !== "scan" ||
+        row.cursorTable === null ||
+        row.cursorRecord === null ||
+        row.cursorOwner === null ||
+        row.cursorCreatedAt === null
+          ? null
+          : {
+              tableId: row.cursorTable,
+              ownerId: row.cursorOwner,
+              createdAt: row.cursorCreatedAt,
+              recordId: row.cursorRecord,
+            };
+      return sampleRows(
+        this.#db,
+        migrated,
+        pending.hash,
+        scanOf(migrated, row.phase, cursor),
+        limit
+      );
+    });
+  }
+
+  /**
+   * Why the backfill of `consumer`'s pending migration would refuse one
+   * of a dry run's `outputs` (migration-samples.ts), as it refuses a
+   * batch's (`#checkedWrites`): an output that doesn't fit the target or
+   * the contract in force, changes a field that refers to records, or is
+   * too large; null when it would write them all. Read in a transaction
+   * that writes nothing. A record gone or edited since it was sampled is
+   * skipped, as a batch drops or queues it.
+   */
+  checkSampleOutputs(
+    storeId: StoreId,
+    sample: unknown
+  ): (Pick<MigrationFailure, "reason" | "issues"> & { id: string }) | null {
+    const { table, migration, consumer, outputs } = dataErrors.parse(
+      "data.invalid",
+      sampleOutputsSchema,
+      sample
+    );
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const pending = this.#pendingTarget();
+      const [resourceId, resourceVersion] = pending?.migrations?.consumer ?? [];
+      if (
+        pending === null ||
+        resourceId !== consumer.resourceId ||
+        resourceVersion !== consumer.resourceVersion
+      ) {
+        throw migrationErrors.create("migration.not_pending");
+      }
+      const migrated = this.#migratedTables(pending).find(
+        (found) => found.table === table && found.migration === migration
+      );
+      const contract = this.#contractNow();
+      if (migrated === undefined || contract === undefined) {
+        throw migrationErrors.create("migration.metadata_corrupt");
+      }
+      const targetFields = tableFieldsOf(pending.manifest, table);
+      const contractFields = tableFieldsOf(contract, table);
+      for (const output of outputs) {
+        const record = this.#db
+          .select()
+          .from(records)
+          .where(
+            and(
+              eq(records.tableId, migrated.tableId),
+              eq(records.recordId, output.id)
+            )
+          )
+          .get();
+        // Gone, or edited since it was sampled: a batch drops or queues
+        // it rather than judge an output of what it no longer holds.
+        if (record === undefined || record.revision !== output.revision) {
+          continue;
+        }
+        const refusal =
+          outputRefusal(
+            targetFields,
+            contractFields,
+            fieldsOf(record),
+            output.fields
+          ) ??
+          (encoder.encode(storedText(output.fields)).byteLength >
+          documentMaxBytes
+            ? {
+                reason: "too_large" as const,
+                issues: [`A record holds at most ${documentMaxBytes} bytes`],
+              }
+            : undefined);
+        if (refusal !== undefined) {
+          return { id: output.id, ...refusal };
+        }
+      }
+      return null;
+    });
   }
 
   /**

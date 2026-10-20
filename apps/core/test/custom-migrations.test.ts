@@ -11,6 +11,7 @@ import type { Member } from "../src/auth/identity.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { abandonStoreBackfill, storeBackfill } from "../src/store-abandon.ts";
 import type { BackfillOutcome, TransformedBatch } from "../src/store-host.ts";
+import { scanOf } from "../src/store-migrations.ts";
 import {
   codeOf,
   commit,
@@ -1149,6 +1150,35 @@ describe("an explicit migration on a store", () => {
       notes: { categories: new Set(["general", undefined]) },
       write: "ok",
       redefined: "migration.required",
+    });
+  });
+});
+
+/** A scan cursor in table `tableId`. */
+const at = (tableId: string) => ({
+  tableId,
+  ownerId: "ada",
+  createdAt: 1,
+  recordId: "r1",
+});
+
+describe("a migration sample's place in the scan", () => {
+  // Tables are scanned in table ID order: a sample of one reads where the
+  // scan stands for it, never records an earlier table's scan transformed.
+  it("reads a table from its cursor while scanned, from its start before, and its work after", () => {
+    const table = { tableId: "t2" };
+    expect({
+      notStarted: scanOf(table, "scan", null),
+      earlierTable: scanOf(table, "scan", at("t1")),
+      thisTable: scanOf(table, "scan", at("t2")),
+      laterTable: scanOf(table, "scan", at("t3")),
+      scanThrough: scanOf(table, "work", null),
+    }).toStrictEqual({
+      notStarted: { cursor: null },
+      earlierTable: { cursor: null },
+      thisTable: { cursor: at("t2") },
+      laterTable: null,
+      scanThrough: null,
     });
   });
 });
