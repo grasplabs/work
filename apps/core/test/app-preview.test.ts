@@ -311,15 +311,21 @@ const answer = async (promise: Promise<unknown>): Promise<unknown> => {
  * Runs `during` with every read of core's files held until it calls
  * `release`: a preview's load (which reads the draft's base version) waits
  * there for as long as the test needs. `calls` names each call to core's
- * files made since the release. Set back however it ends.
+ * files made since the release, and `held` counts the reads held before
+ * it. Set back however it ends.
  */
 const heldReadsDuring = async <T>(
-  during: (letGo: () => void, calls: string[]) => Promise<T>
+  during: (
+    letGo: () => void,
+    calls: string[],
+    held: { reads: number }
+  ) => Promise<T>
 ): Promise<T> => {
   const { FILES: files } = env;
   const gate = Promise.withResolvers<boolean>();
   let open = false;
   const calls: string[] = [];
+  const held = { reads: 0 };
   env.FILES = new Proxy(files, {
     get: (target, property) => {
       const value: unknown = Reflect.get(target, property);
@@ -328,6 +334,7 @@ const heldReadsDuring = async <T>(
           if (open) {
             calls.push(property);
           } else if (property === "get") {
+            held.reads += 1;
             await gate.promise;
           }
           return await Reflect.apply(value, target, args);
@@ -341,7 +348,7 @@ const heldReadsDuring = async <T>(
     gate.resolve(true);
   };
   try {
-    return await during(letGo, calls);
+    return await during(letGo, calls, held);
   } finally {
     letGo();
     env.FILES = files;
@@ -990,6 +997,37 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       }).toStrictEqual({
         stalled: "screen.build_slow",
         after: [],
+        next: "loaded",
+      });
+    } finally {
+      delete env.PREVIEW_LOAD_MS;
+    }
+  });
+
+  it("keeps the place of a load refused as slow until it stops", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const { chats } = builder.api;
+
+    env.PREVIEW_LOAD_MS = "500";
+    try {
+      const outcome = await heldReadsDuring(async (letGo, _calls, held) => {
+        const stalled = await answer(chats.preview(chatId, app));
+        // Refused, it still reads: the next load waits for its place,
+        // reading nothing yet.
+        const readsBefore = held.reads;
+        const next = answer(chats.preview(chatId, app));
+        await scheduler.wait(500);
+        const nextRead = held.reads > readsBefore;
+        letGo();
+        return { stalled, nextRead, next: named(await next) };
+      });
+      expect(outcome).toStrictEqual({
+        stalled: "screen.build_slow",
+        nextRead: false,
         next: "loaded",
       });
     } finally {

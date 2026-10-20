@@ -245,6 +245,15 @@ const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
   },
 });
 
+/** Settles once `promise` does, however it does. */
+const settledOf = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch {
+    // Its own caller hears how it failed.
+  }
+};
+
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
@@ -557,6 +566,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       if (token === null) {
         throw appErrors.create("app.preview_superseded");
       }
+      // Given back once the load itself has stopped, however long after
+      // its caller heard it was too slow: no two build at once.
+      let stopped: Promise<unknown> = Promise.resolve();
       try {
         // A caller gone while it waited never says so: its place is free
         // again soon (preview-updates.ts).
@@ -569,50 +581,59 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         if (!confirmed) {
           throw appErrors.create("app.preview_superseded");
         }
-        return await this.#loadPreviewInTime(by, chatId, id, name, screen);
-      } finally {
-        // Housekeeping: a place never settled frees itself once its lease
-        // ends, so a failure here never replaces how the load ended.
+        // Ends before its place does (preview-updates.ts): a load that
+        // stalls stops at its next step.
+        const limit = timeLimit(previewLoadMsOf(this.#env));
+        const loading = this.#loadPreview(
+          by,
+          chatId,
+          id,
+          name,
+          screen,
+          limit.signal
+        );
+        stopped = settledOf(loading);
         try {
-          await chats.settlePreviewUpdate(
-            chatIdOf(chatId),
-            by.userId,
-            id,
-            token
-          );
+          return await Promise.race([loading, whenAborted(limit.signal)]);
         } catch (error) {
-          log.warn("app.preview_settle_failed", {
-            app: id,
-            ...errorFields(error),
-          });
+          if (limit.signal.aborted) {
+            throw screenErrors.create("screen.build_slow");
+          }
+          throw error;
+        } finally {
+          limit.clear();
         }
+      } finally {
+        void this.#settleOnceStopped(stopped, by, chatId, id, token);
       }
     });
   }
 
-  /** `#loadPreview`, refused as slow once a load may take no longer. */
-  async #loadPreviewInTime(
+  /**
+   * Gives back place `token` of `chatId`'s preview of App `id` once its
+   * load has `stopped`. Housekeeping: a place never given back frees
+   * itself once its lease ends, so a failure here is only logged.
+   */
+  async #settleOnceStopped(
+    stopped: Promise<unknown>,
     by: Identity,
     chatId: string,
     id: AppId,
-    name: string,
-    screen: string | undefined
-  ): Promise<PreviewBundle> {
-    // Ends before its place does (preview-updates.ts): a load that stalls
-    // stops at its next step, so it never builds alongside the next one.
-    const limit = timeLimit(previewLoadMsOf(this.#env));
+    token: string
+  ): Promise<void> {
+    await stopped;
     try {
-      return await Promise.race([
-        this.#loadPreview(by, chatId, id, name, screen, limit.signal),
-        whenAborted(limit.signal),
-      ]);
+      await this.#chatsOf(by.userId).settlePreviewUpdate(
+        chatIdOf(chatId),
+        by.userId,
+        id,
+        token
+      );
     } catch (error) {
-      if (limit.signal.aborted) {
-        throw screenErrors.create("screen.build_slow");
-      }
-      throw error;
-    } finally {
-      limit.clear();
+      log.warn("app.preview_settle_failed", {
+        app: id,
+        ...errorFields(error),
+      });
     }
   }
 
