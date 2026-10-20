@@ -1368,11 +1368,10 @@ const buildDeclaration = `/**
  * calling the App's bindings only in a step's own function (\`step.do\`'s,
  * or an option such as a decision's \`ask\`; not between steps, nor in a
  * function inside it: loop with \`for...of\`), each call
- * written out as \`env.NAME.method(…)\`, \`appServer(env).method(…)\`,
+ * written out as \`env.NAME.method(…)\` or
  * \`appFunctions<Tree>(env).query("notes.list", …)\` (or \`mutation\`,
- * \`action\`: the App's public functions, by \`group.name\`) or
- * \`appExports(env.NAME).method(…)\`, so its review names what each step
- * calls. Type those calls by the operations they reach:
+ * \`action\`: the App's public functions, by \`group.name\`), so its
+ * review names what each step calls. Type those calls by the operations they reach:
  * \`import type * as notes from "../operations/notes.ts"\`, then
  * \`interface Tree { notes: typeof notes }\`. Workflows are type-checked:
  * what a binding answers is \`unknown\`, so narrow it (with \`z\`) before

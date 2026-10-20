@@ -8,7 +8,6 @@ import type {
 } from "@grasp-os/workerflow/contracts";
 
 import { callRunFunction } from "../app-functions.ts";
-import { callApp } from "../app.ts";
 import { callsFor, versionFiles } from "../apps.ts";
 import { runBackfill } from "../backfill-run.ts";
 import { runBindingsFor } from "../bindings.ts";
@@ -215,7 +214,6 @@ export interface RunMemory {
   /** Its AI calls in flight and answers no attempt took (host.ts). */
   aiCalls: AiCalls;
   leaseOf: HostHooks["leaseOf"];
-  revokeAttempt?: HostHooks["revokeAttempt"];
   /**
    * Aborts once the activation running the run is over, however it ended:
    * a wait suspended it, whose call never settles, so the run's isolate,
@@ -280,7 +278,7 @@ const runWorkflow = async (
   const waking = { open: true };
   const result = await settledRun(async () => {
     const authority = await authorityOf(env, row);
-    const { bindings, connections, apps } = await runBindingsFor(
+    const { bindings, connections } = await runBindingsFor(
       env,
       authority,
       contextOf(pinned.app, runId)
@@ -303,7 +301,6 @@ const runWorkflow = async (
       shareSubject: await admissionSubjectOf(env, row),
       collections: bindings,
       connections,
-      apps,
       calls: await callsFor(env, pinned),
     };
     // Read on every load, though only the run's first uses them: after
@@ -329,15 +326,12 @@ const runWorkflow = async (
       busyRefusals: memory.busyRefusals,
       aiCalls: memory.aiCalls,
       leaseOf: memory.leaseOf,
-      revokeAttempt: memory.revokeAttempt,
       tampered: (error) => {
         tampered ??= error;
       },
       waiting: async (why) => {
         await recordWaiting(env, row, why);
       },
-      callApp: async (caller, method, args, ends) =>
-        await callApp(env, run.app, caller, method, args, ends),
       callFunction: async (caller, reference, input, idempotencyKey) =>
         await callRunFunction(env, caller, reference, input, idempotencyKey),
       modelBinding: async (alias) =>
@@ -370,7 +364,6 @@ const runWorkflow = async (
         input: event.payload,
         collections: Object.keys(bindings),
         connections: Object.keys(connections),
-        apps: Object.keys(apps),
       });
     } catch (error) {
       return await afterCpuKill(error, calls);

@@ -19,7 +19,7 @@ const workflowSource = (
   body: string,
   signature = "step, { params, input }"
 ) => `
-import { appExports, appFunctions, appServer, workflow } from "@grasp-os/sdk/workflow";
+import { appFunctions, workflow } from "@grasp-os/sdk/workflow";
 
 export default workflow("sample", { params: {} }, async (${signature}) => {
 ${body}
@@ -306,9 +306,8 @@ describe(describeWorkflow, () => {
     const source = workflowSource(
       [
         `const total = await step.do("read", { description: "Read" }, async () => 1);`,
-        `await step.do("book", { description: "Book", input: total }, async () => await bindings.APP.call("book", total));`,
-        `await step.do("mail", { description: "Mail" }, async () => [await bindings.MAIL.call("mail.send", {}), await appExports<Crm>(bindings.CRM).find({})]);`,
-        `await step.do("keep", { description: "Keep" }, async () => await appServer<App>(bindings).keep(total));`,
+        `await step.do("book", { description: "Book", input: total }, async () => await bindings.APP.callFunction({ contractId: "book", kind: "mutation" }, total));`,
+        `await step.do("mail", { description: "Mail" }, async () => [await bindings.MAIL.call("mail.send", {}), await bindings.CRM.call("find", {})]);`,
         `await step.do("propose", { description: "Propose" }, async () => await appFunctions<Intake>(bindings).mutation("drafts.propose", { total }));`,
       ].join("\n"),
       "step, { input, env: bindings }"
@@ -322,7 +321,6 @@ describe(describeWorkflow, () => {
       { name: "read", env: undefined },
       { name: "book", env: ["APP"] },
       { name: "mail", env: ["MAIL", "CRM"] },
-      { name: "keep", env: ["APP"] },
       { name: "propose", env: ["APP"] },
     ]);
     expect(() =>
@@ -408,18 +406,12 @@ describe(describeWorkflow, () => {
     const cases: [string, string][] = [
       // A stub made in one step and called in another: the call would
       // show under the step that made the stub.
-      [
-        `let app;\n${inStep(`app = appServer(env);`, "prepare")}\n${inStep(`await app.hit();`)}`,
-        "don't keep `env`",
-      ],
       // A function over env kept in one step and run in another.
       [
         `const later = [];\n${inStep(`later.push(() => env.APP.call("hit"));`, "prepare")}\n${inStep(`await later[0]();`)}`,
         own,
       ],
       // A stub kept within one step.
-      [inStep(`const app = appServer(env); await app.hit();`), "don't keep"],
-      [inStep(`const crm = appExports(env.CRM); await crm.find({});`), "keep"],
       [
         inStep(
           `const functions = appFunctions(env); await functions.query("drafts.list", {});`
@@ -574,7 +566,8 @@ describe(describeWorkflow, () => {
       [inStep(`await helper({ env });`), "don't keep `env`"],
       [inStep(`await helper({ ...env });`), "don't keep `env`"],
       [inStep(`await helper([env][0]);`), "don't keep `env`"],
-      [inStep(`await appServer(env, 1).sendAll();`), "don't keep `env`"],
+      // No stub but `appFunctions` takes `env`.
+      [inStep(`await appServer(env).sendAll();`), "don't keep `env`"],
       [
         inStep(`await appFunctions(env, 1).query("drafts.list", {});`),
         "don't keep `env`",
@@ -607,12 +600,6 @@ describe(describeWorkflow, () => {
       [inStep(`await env.APP[input.method]("sendAll");`), "don't keep `env`"],
       [inStep(`await env?.APP.call("sendAll");`), "don't keep `env`"],
       // The SDK's stubs, which take `env`, under another name.
-      [`const stub = appServer;`, "Only call `appServer`"],
-      [
-        `const appServer = (bindings) => bindings; const all = appServer(env);`,
-        "Only call `appServer`",
-      ],
-      [inStep(`await helper(appExports);`), "Only call `appExports`"],
       [inStep(`await helper(appFunctions);`), "Only call `appFunctions`"],
       [
         `const appFunctions = (bindings) => bindings; const all = appFunctions(env);`,

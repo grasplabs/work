@@ -843,9 +843,8 @@ export interface StepOutline {
   /** Other options written as literals, e.g. `retries` or `instructions`. */
   options: Record<string, OptionValue>;
   /**
-   * The App's bindings the step's code calls (`env.NAME`): its own server
-   * (`APP`), a connection, another App's exports, each of which may change
-   * things. Absent when it calls none.
+   * The App's bindings the step's code calls (`env.NAME`): its own
+   * functions (`APP`) or a connection, each of which may change things. Absent when it calls none.
    */
   env?: string[];
   /**

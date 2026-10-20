@@ -64,9 +64,8 @@
  * workflow, shows them as they change (started, waiting for a decision,
  * ended) and answers their decisions, for the person using the screen;
  * `useRun("invoice-intake", id)` follows one run by its ID, however old. A
- * workflow saves what it finds by calling the App's server
- * (`appServer<App>(env)` in `@grasp-os/sdk/workflow`), which tells the
- * screens that have it open, as above.
+ * workflow saves what it finds by calling the App's functions
+ * (`appFunctions<Tree>(env)` in `@grasp-os/sdk/workflow`).
  */
 import { useEffect, useState } from "react";
 

@@ -1,9 +1,3 @@
-import {
-  appMethodPattern,
-  isExportName,
-  reservedAppMethods,
-} from "@grasp-os/shared/apps";
-import type { ReservedAppMethod } from "@grasp-os/shared/apps";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -19,7 +13,6 @@ import { z } from "zod";
 
 import type {
   Backoff,
-  BindingMethod,
   DecisionRecipient,
   EngineDecision,
   WorkflowEngine,
@@ -495,14 +488,6 @@ export interface ConnectionBinding {
 export type CollectionBinding = Readonly<CollectionReader>;
 
 /**
- * Another App's exports the run's App has a permission for, by its binding
- * name; typed by that App's exports with `appExports<Crm>(env.CRM)`.
- */
-export interface AppExportsBinding {
-  readonly call: (method: string, input: Json) => Promise<unknown>;
-}
-
-/**
  * Which of the App's functions `callFunction` calls: its generated
  * reference, or just its `contractId` and `kind`. The host checks the
  * rest against the release the run is pinned to.
@@ -516,12 +501,10 @@ export interface FunctionReferenceName {
 }
 
 /**
- * The run's own App (`env.APP`): its server methods (`call`, typed with
- * `appServer<App>(env)`) and its public functions (`callFunction`, typed
- * with `appFunctions<Tree>(env)`).
+ * The run's own App (`env.APP`): its public functions (`callFunction`,
+ * typed with `appFunctions<Tree>(env)`).
  */
 export interface OwnAppBinding {
-  readonly call: (method: string, ...args: Json[]) => Promise<unknown>;
   readonly callFunction: (
     reference: FunctionReferenceName,
     input: Json
@@ -532,8 +515,7 @@ export interface OwnAppBinding {
  * The run's bindings, by name, as its App's permissions make them. Empty
  * here: where an App's workflows are type-checked, the host declares
  * each binding the App holds a permission for in it, as what it is (a
- * `ConnectionBinding`, a `CollectionBinding`, an `AppExportsBinding`),
- * with `APP` (`OwnAppBinding`), so reading one binding's answer as
+ * `ConnectionBinding` or a `CollectionBinding`), with `APP` (`OwnAppBinding`), so reading one binding's answer as
  * another's is a type error.
  */
 // oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- declared per App by the host, by declaration merging
@@ -550,7 +532,7 @@ export interface WorkflowBindings {}
  */
 export type RunEnv = Readonly<WorkflowBindings> & WorkflowEnv;
 
-/** What `appServer` and `appFunctions` read of a run's `env`: its `APP`. */
+/** What `appFunctions` reads of a run's `env`: its `APP`. */
 export interface AppEnv {
   readonly APP?: Partial<OwnAppBinding>;
 }
@@ -561,11 +543,10 @@ export interface WorkflowContext<P extends Params, Input> {
   input: Input;
   params: ParamValues<P>;
   /**
-   * The App's connections and other permissions, and its own server
-   * methods, by binding name; call them in a step's own function, each
-   * written out as `env.NAME.method(…)`, `appServer(env).method(…)`,
-   * `appFunctions(env).query(…)` (or `mutation`, `action`) or
-   * `appExports(env.NAME).method(…)` (see `WorkflowEnv`). Where the
+   * The App's connections and other permissions, and its own functions,
+   * by binding name; call them in a step's own function, each written out
+   * as `env.NAME.method(…)` or `appFunctions(env).query(…)` (or
+   * `mutation`, `action`) (see `WorkflowEnv`). Where the
    * App's workflows are type-checked, each name the App holds a permission
    * for is typed as the binding it is (`WorkflowBindings`); any other
    * answers `unknown` (`RunEnv`).
@@ -598,233 +579,6 @@ export interface WorkflowContext<P extends Params, Input> {
     index: number
   ) => Promise<Uint8Array>;
 }
-
-// The App's own server
-
-/** Names core refuses to call as an App's methods. */
-const reserved: ReadonlySet<string> = new Set(reservedAppMethods);
-
-/** Letters a method's name may start with (`appMethodPattern`). */
-type Lowercase =
-  | "a"
-  | "b"
-  | "c"
-  | "d"
-  | "e"
-  | "f"
-  | "g"
-  | "h"
-  | "i"
-  | "j"
-  | "k"
-  | "l"
-  | "m"
-  | "n"
-  | "o"
-  | "p"
-  | "q"
-  | "r"
-  | "s"
-  | "t"
-  | "u"
-  | "v"
-  | "w"
-  | "x"
-  | "y"
-  | "z";
-
-/** Characters a method's name may hold after its first (`appMethodPattern`). */
-type NameCharacter =
-  | Lowercase
-  | Uppercase<Lowercase>
-  | "0"
-  | "1"
-  | "2"
-  | "3"
-  | "4"
-  | "5"
-  | "6"
-  | "7"
-  | "8"
-  | "9";
-
-/** Whether every character of `Rest` is a letter or a digit. */
-type AllNameCharacters<Rest extends string> = Rest extends ""
-  ? true
-  : Rest extends `${infer First}${infer Others}`
-    ? First extends NameCharacter
-      ? AllNameCharacters<Others>
-      : false
-    : false;
-
-/**
- * Names the stub leaves out though core would call them: `toJSON`, which
- * `JSON.stringify` looks up on any object, so serializing a stub (to log
- * it, say) must never call the App.
- */
-type StubOnlyName = "toJSON";
-
-/**
- * Whether core calls `Name` as a method of an App's server, and the stub
- * offers it: it starts with a lowercase letter, holds only letters and
- * digits, and is neither reserved (`reservedAppMethods`) nor `toJSON`.
- * Names such as `__DURABLE_OBJECT_BRAND`, which a class that extends
- * `DurableObject` has, or `set_status`, aren't. Types don't count, so a
- * name longer than `appMethodPattern`'s 64 characters still types, and
- * core refuses it with `app.method_invalid`.
- */
-type IsAppMethod<Name> = Name extends `${Lowercase}${infer Rest}`
-  ? Name extends ReservedAppMethod | StubOnlyName
-    ? false
-    : AllNameCharacters<Rest>
-  : false;
-
-/**
- * The methods of an App's server class `Server` as a workflow calls them:
- * without the caller, which core passes first, answering what each
- * answers. Only names core calls (`IsAppMethod`) and only functions.
- */
-export type AppServer<Server> = {
-  readonly [
-    Name in keyof Server as IsAppMethod<Name> extends true
-      ? Server[Name] extends (...args: never[]) => unknown
-        ? Name
-        : never
-      : never
-  ]: Server[Name] extends (caller: never, ...args: infer Args) => infer Answer
-    ? (...args: Args) => Promise<Awaited<Answer>>
-    : never;
-};
-
-/**
- * A typed stub whose every name `isName` accepts is `method(name)`, and
- * any other name, a symbol too, is `undefined`: nothing for `then` (so a
- * stub can be awaited as a value), `toJSON` (so serializing it calls
- * nothing), or any name core refuses. For `appServer` and `appExports`.
- */
-const methodsOf = (
-  isName: (name: string) => boolean,
-  method: (name: string) => BindingMethod
-): Readonly<Record<string, BindingMethod | undefined>> =>
-  new Proxy(
-    {},
-    {
-      get: (_target, name): BindingMethod | undefined =>
-        typeof name === "string" && isName(name) ? method(name) : undefined,
-    }
-  );
-
-/**
- * A typed stub of the run's own App's server methods (`app/server.ts`):
- * `appServer<App>(env).setStatus("INV-7", "booked")` is
- * `env.APP.call("setStatus", "INV-7", "booked")`, typed by the App's
- * class, which a workflow imports as a type only:
- *
- * ```ts
- * import type { App } from "../app/server.ts";
- *
- * await step.do("book", { description: "Book it", sideEffect: true }, async () => {
- *   await appServer<App>(env).setStatus(input.invoice, "booked");
- * });
- * ```
- *
- * Like `env.APP`, it works only inside a step, and acts for the person the
- * run acts for. Within one App no permission is needed. What the method
- * writes reaches the App's open screens as the App tells them (the
- * live updates of `@grasp-os/sdk/screen`).
- */
-export const appServer = <Server = Record<string, BindingMethod>>(
-  env: AppEnv
-): AppServer<Server> => {
-  const method =
-    (name: string): BindingMethod =>
-    async (...args) => {
-      const app = env.APP;
-      if (app?.call === undefined) {
-        throw invalidCall("The run has no App to call (env.APP)");
-      }
-      return await app.call(name, ...args);
-    };
-  const methods = methodsOf(
-    (name) =>
-      appMethodPattern.test(name) && !reserved.has(name) && name !== "toJSON",
-    method
-  );
-  // SAFETY: every name `AppServer` has is one this accepts (the type keeps
-  // only those), a method that calls the App's method of that name; core
-  // checks the name again, and refuses one the App doesn't have.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return methods as AppServer<Server>;
-};
-
-/**
- * The exports of another App as a workflow calls them, typed by
- * `Exports`, which the workflow writes from what that App's
- * `app/exports.json` declares: each export's one input, answering what it
- * answers. Only names core calls (`IsAppMethod`) and only functions.
- */
-export type AppExportsStub<Exports> = {
-  readonly [
-    Name in keyof Exports as Name extends "read" | "write"
-      ? never
-      : IsAppMethod<Name> extends true
-        ? Exports[Name] extends (input: never) => unknown
-          ? Name
-          : never
-        : never
-  ]: Exports[Name] extends (input: infer Input) => infer Answer
-    ? (input: Input) => Promise<Awaited<Answer>>
-    : never;
-};
-
-/**
- * A typed stub of another App's exports, by the run's permission on them
- * (its binding): `appExports<Crm>(env.CRM).findCustomers({ query: "Acme" })`
- * is `env.CRM.call("findCustomers", { query: "Acme" })`:
- *
- * ```ts
- * type Crm = {
- *   findCustomers: (input: { query: string }) => { id: string; name: string }[];
- * };
- *
- * const found = await step.do("find", { description: "Find the customer" }, async () =>
- *   await appExports<Crm>(env.CRM).findCustomers({ query: input.customer })
- * );
- * ```
- *
- * Like any binding, it works only inside a step, and acts for the person
- * the run acts for, under the run's App's permission; the called App's
- * method runs in its own sandbox. Core checks each call: the export must
- * be in that App's current version (`app.export_not_found` otherwise),
- * allowed by the permission (one marked `write` only from a version of
- * this App an admin approved), and its input and answer JSON within
- * `appCallLimits` and its schemas (`app.call_invalid`, `app.call_too_large`,
- * `app.answer_invalid`). If either App has read restricted data, both are
- * restricted from then on.
- *
- * Make one call of an export that writes per step, as with `appServer`:
- * the called App's own connection calls take the step's idempotency key,
- * so a second such call in the same step repeats the first one's side
- * effects' answers instead of making its own. A `sideEffect: true` step
- * gets the key.
- */
-export const appExports = <Exports = Record<string, (input: Json) => unknown>>(
-  binding: Partial<AppExportsBinding> | undefined
-): AppExportsStub<Exports> => {
-  const method =
-    (name: string): BindingMethod =>
-    async (input) => {
-      if (binding?.call === undefined) {
-        throw invalidCall("The run has no permission to call that App");
-      }
-      return await binding.call(name, input ?? null);
-    };
-  // SAFETY: every name `AppExportsStub` has is an export's name (the type
-  // keeps only those), a method that calls the export of that name; core
-  // checks the name again, and refuses one the App doesn't export.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return methodsOf(isExportName, method) as AppExportsStub<Exports>;
-};
 
 export type { AppErrorPayload } from "./references.ts";
 
@@ -938,8 +692,7 @@ export type AppFunctionsStub<Tree> = unknown extends Tree
  * person the run acts for; the host calls only a public function of the
  * release the run is pinned to, of the kind the method names
  * (`operation.kind_mismatch` otherwise), so the types offer only those.
- * The review of the workflow's steps reads each call as one of `APP`'s,
- * as it reads `appServer(env)`.
+ * The review of the workflow's steps reads each call as one of `APP`'s.
  */
 export const appFunctions = <Tree = unknown>(
   env: AppEnv
@@ -1499,7 +1252,7 @@ export const workflow = <
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         params: Object.freeze(params) as ParamValues<P>,
         // The host builds the run's bindings from its App's permissions
-        // (connections, collections, other Apps' exports) and its App
+        // (connections, collections) and its App
         // (`APP`), which is what `WorkflowBindings` declares where the App's
         // workflows are type-checked; a binding the run doesn't have when it
         // calls fails then (`permission.denied`).
