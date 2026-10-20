@@ -82,6 +82,8 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
       text: "# Rules\nBe kind.",
       ifVersion: 0,
     });
+    // The clock past its first save, so the moment comes after it.
+    await scheduler.wait(5);
     const since = justBefore();
     await admin.api.knowledge.saveDocument({
       collectionId: handbook.id,
