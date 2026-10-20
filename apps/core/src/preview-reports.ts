@@ -26,7 +26,8 @@ import type { ServerLog } from "@grasp-os/shared/screens";
 // A problem is text the draft's code wrote, or what the person typed into
 // the preview. It reaches the agent only as data in a check's result,
 // never as instructions (agent-builds.ts). A preview reads no real data
-// (preview-bindings.ts), so it carries none.
+// (sealed-previews.ts: a store of its own, no resources), so it carries
+// none.
 
 /** Most problems kept of one revision: the first ones. */
 const maxProblems = 10;
