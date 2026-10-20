@@ -74,10 +74,16 @@ interface OpenObligations {
 }
 
 /**
- * Every person's calls of unknown outcome now, as connect lists them for
- * the organization's admins (`listAllUnknownOutcomes`), for `person`'s
- * export: `null` for Grasp staff, whom connect refuses them, as the admin
- * listing does. The read is recorded, as the listing's is, before the
+ * Every person's calls of unknown outcome, as connect lists them for the
+ * organization's admins (`listAllUnknownOutcomes`), for `person`'s
+ * export. Read page by page from `listedAt`, newest first, not as one
+ * snapshot: a call that becomes of unknown outcome while it reads is newer
+ * than the pages it has yet to read, so it may be missing, even with
+ * `complete` true, which speaks of the calls there were when it began; one
+ * resolved meanwhile may still be listed. The audit log's own events of
+ * each call are exact, and the next export lists what this one missed.
+ * `null` for Grasp staff, whom connect refuses them, as the admin listing
+ * does. The read is recorded, as the listing's is, before the
  * export holds it.
  */
 const openObligations = async (

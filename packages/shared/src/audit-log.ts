@@ -365,6 +365,9 @@ export interface AuditApi {
    * `cursor`; its `effectKeyHash` is the one the call's events and its
    * resolution's carry. It holds at most 1,000, and `complete` says whether
    * that is all of them; it is `null` for Grasp staff, who see no one's.
+   * It is read page by page from `listedAt`, not as one snapshot: a call
+   * that becomes of unknown outcome while it is read may be missing, and
+   * one resolved meanwhile may still be listed.
    *
    * `csv`: a header and a row per record; its `verified`, `prev_hash` and
    * `hash` columns are the record check. A cell that a spreadsheet would
