@@ -40,7 +40,13 @@ import { recordEventIf, recordEvents } from "./audit.ts";
 import { connectionFor, recoverableNow } from "./call.ts";
 import { connections, idempotentCalls } from "./db/schema.ts";
 import { requireDecision } from "./decisions.ts";
-import { isUnknown, originOf, resolution, unknownNow } from "./idempotency.ts";
+import {
+  effectKeyHashOfRow,
+  isUnknown,
+  originOf,
+  resolution,
+  unknownNow,
+} from "./idempotency.ts";
 import type { Row } from "./idempotency.ts";
 import { descriptionOf, nameOf, shownConnection } from "./pending.ts";
 import type { ShownConnection } from "./pending.ts";
@@ -207,9 +213,11 @@ export const listUnknownOutcomes = async (
 
 /**
  * The columns an admin's listing reads (`listingOf`): never the input,
- * which may be large, nor the key or origin, which it never shows.
+ * which may be large, nor the origin, which it never shows; the key only
+ * for its receipt's hash, never shown itself.
  */
 const listingColumns = {
+  idempotencyKey: idempotentCalls.idempotencyKey,
   subjectType: idempotentCalls.subjectType,
   subjectId: idempotentCalls.subjectId,
   onBehalfOf: idempotentCalls.onBehalfOf,
@@ -240,12 +248,16 @@ const listingOf = async ({
     connection
   )?.title;
   return {
+    // The receipt the audit log names the call by, as its events do: a
+    // digest derived from the key, so an admin who can guess a key (App
+    // code chooses keys, and may put data in them) can confirm the guess,
+    // exactly as with the log's `idempotencyKeyHash`, which they read
+    // already, and no more.
+    effectKeyHash: await effectKeyHashOfRow(row),
     // Only tells rows apart, of what the admin is shown anyway and the
-    // row's random list ID, and never of its key: App code chooses keys and
-    // may put data in them, and a digest of a key a reader can guess would
-    // confirm the guess. The list ID makes it unique across every page,
-    // even for two calls alike in all the rest, claimed in the same
-    // millisecond.
+    // row's random list ID, and of nothing derived from its key. The list
+    // ID makes it unique across every page, even for two calls alike in
+    // all the rest, claimed in the same millisecond.
     id: await sha256Hex(
       JSON.stringify([
         row.subjectType,
@@ -359,6 +371,9 @@ const detailOf = async (
     : {
         resource: row.resource,
         onBehalfOf: row.onBehalfOf,
+        // The receipt, as the call's own events name it: what the
+        // resolution closes.
+        effectKeyHash: await effectKeyHashOfRow(row),
         // Never the input's hash: unsalted, it would let a reader of the
         // log guess a short value the input held (a workflow's sensitive
         // parameter), and the key's hash with the claim names the call.
