@@ -162,7 +162,12 @@ describe("a workflow action's run files on-prem", () => {
           }
           const { output } = await callFiles(
             env,
-            { runId, workflowId: workflow.id, effectKey: `step:${ordinal}` },
+            {
+              runId,
+              workflowId: workflow.id,
+              effectKey: `step:${ordinal}`,
+              requireHolds: () => {},
+            },
             built.operation,
             built.arguments
           );
