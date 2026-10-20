@@ -836,6 +836,85 @@ describe("a build's limits", () => {
   });
 });
 
+describe("a browser entry's budget", () => {
+  it("builds a browser entry exactly at its gzipped budget, and refuses one a byte past it, naming it", async () => {
+    const name = named("weighty");
+    // Noise doesn't compress: the entry is about as large gzipped as it.
+    // A module and its stylesheet, each fetched, and gzipped, on its own.
+    await publish(
+      esm(name, {
+        "index.js": `import "./style.css";\nexport const data = ${JSON.stringify(noise(64 * 1024))};`,
+        "style.css": `.weighty::after { content: ${JSON.stringify(noise(32 * 1024))}; }`,
+      })
+    );
+    const app = await approvedApp({ [name]: "1" });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status({
+      app: app.app,
+    });
+    const limits = z.record(z.string(), z.number()).parse(env.PACKAGE_LIMITS);
+    const buildUnder = async (browserEntryGzipBytes: number) =>
+      await buildDependencies(
+        { ...env, PACKAGE_LIMITS: { ...limits, browserEntryGzipBytes } },
+        identity,
+        {
+          app: app.app,
+          graphHash: app.request.graphHash,
+          target: "browser",
+          policyGeneration,
+        }
+      );
+    // Refused below its size, which the refusal says; nothing is kept.
+    const tiny = await failure(buildUnder(1));
+    const bytes = z.number().parse(tiny.details.bytes);
+    const past = await failure(buildUnder(bytes - 1));
+    const at = await buildUnder(bytes);
+    // The budget's measure: each file of the entry gzipped as a browser
+    // fetches it, on its own, summed; never their raw bytes, nor both
+    // gzipped as one.
+    const gzipped = async (path: string | null): Promise<number> => {
+      const file = await env.FILES.get(`package-builds/${at.hash}/${path}`);
+      const stream = (file?.body ?? new Blob([]).stream()).pipeThrough(
+        new CompressionStream("gzip")
+      );
+      const bytesOf = await new Response(stream).arrayBuffer();
+      return bytesOf.byteLength;
+    };
+    const entry = at.artifact.entries[name];
+    const measured =
+      (await gzipped(entry?.module ?? null)) +
+      (await gzipped(entry?.css ?? null));
+    expect({
+      measured,
+      both: entry?.module !== null && entry?.css !== null,
+    }).toStrictEqual({
+      measured: bytes,
+      both: true,
+    });
+    expect({ tiny, past, built: at.artifact.target }).toStrictEqual({
+      tiny: {
+        code: "package.quota",
+        details: {
+          quota: "browserEntryGzipBytes",
+          limit: 1,
+          entry: name,
+          bytes,
+        },
+      },
+      past: {
+        code: "package.quota",
+        details: {
+          quota: "browserEntryGzipBytes",
+          limit: bytes - 1,
+          entry: name,
+          bytes,
+        },
+      },
+      built: "browser",
+    });
+  });
+});
+
 describe("a build's durability", () => {
   it("keeps nothing when the approval stops holding while it builds", async () => {
     const { ui } = await badgeLibrary();
