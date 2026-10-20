@@ -115,6 +115,12 @@ export interface ChatDraft {
   revision: number;
   /** When it was last written (ISO 8601). */
   updatedAt: string;
+  /**
+   * The code step (`ChatCode.callId`) whose code wrote this revision:
+   * where the thread shows the draft's preview. Null when core doesn't
+   * know it (a revision written before it kept one).
+   */
+  callId: string | null;
 }
 
 /**

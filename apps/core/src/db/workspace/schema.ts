@@ -155,6 +155,14 @@ export const chatDrafts = sqliteTable(
     base: integer(),
     revision: integer().notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * The code step (its tool call's ID, `ChatCode.callId`) whose code
+     * wrote the draft's latest revision, from the code run's own record
+     * (`chat_code_runs`): where the chat's thread shows the draft's
+     * preview. Null once its changes are dropped, and for a revision the
+     * previous release wrote.
+     */
+    callId: text("call_id"),
   },
   (table) => [primaryKey({ columns: [table.chatId, table.appId] })]
 );

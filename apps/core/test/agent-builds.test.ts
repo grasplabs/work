@@ -17,6 +17,7 @@ import {
   pointAtGateway,
   setObjectEnv,
   testRunOpening,
+  transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
@@ -480,10 +481,19 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       })();
       return { own: instance.drafts(chat.chat.id, builder.userId), refused };
     });
+    // The draft names the code step that wrote it, where the thread shows
+    // its preview: the first, not the later one that only read it.
+    const messages = await transcript(chat.stub, chat.chat.id);
+    const steps = messages.flatMap((message) =>
+      message.role === "toolResult" ? [message.toolCallId] : []
+    );
     expect(listed).toMatchObject({
-      own: [{ app: existing, base: 1, changed: ["notes.md"] }],
+      own: [
+        { app: existing, base: 1, changed: ["notes.md"], callId: steps[0] },
+      ],
       refused: "agent.chat_not_found",
     });
+    expect(steps).toHaveLength(2);
   });
 
   it("stops the repair loop after four failed checks in a row, until the next question", async () => {
