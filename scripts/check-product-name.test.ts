@@ -125,6 +125,10 @@ describe("the product's old name", () => {
           '#~ msgid "Old"',
           '#~ msgstr "Grasp OS"',
           "",
+          'msgctxt "Grasp OS menu"',
+          'msgid "Open"',
+          String.raw`msgstr "Grasp\040OS öffnen"`,
+          "",
         ].join("\n"),
       },
       {
@@ -150,6 +154,8 @@ describe("the product's old name", () => {
       'apps/web/src/locales/de/messages.po:1: "Grasp OS"',
       // An escaped newline reads as one; an obsolete entry is no one's.
       'apps/web/src/locales/de/messages.po:9: "Grasp\\nOS"',
+      // An octal escape reads as its character; a context is never shown.
+      'apps/web/src/locales/de/messages.po:16: "Grasp OS"',
       // A built-in App's screen, which the root lint leaves alone.
       'apps/core/blueprints/intake/files/screens/desk.tsx:1: "Grasp OS"',
       // Wrapped across lines, named where it starts.

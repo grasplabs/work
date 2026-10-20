@@ -9,8 +9,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
-import { z } from "zod";
-
 import { findOldProductNames } from "./lint/old-product-name.ts";
 
 /**
@@ -24,37 +22,64 @@ const readFiles =
 const lineIn = (text: string, index: number): number =>
   text.slice(0, index).split("\n").length;
 
-/** A field of a PO entry and its first quoted part. */
+/** A field of a PO entry, its name and its first quoted part. */
 const poField =
-  /^(?:msgctxt|msgid|msgid_plural|msgstr(?:\[\d+\])?)\s+"(?<part>.*)"\s*$/u;
+  /^(?<name>msgctxt|msgid|msgid_plural|msgstr(?:\[\d+\])?)\s+"(?<part>.*)"\s*$/u;
 
 /** A quoted part that continues the field above it. */
 const poPart = /^"(?<part>.*)"\s*$/u;
 
-/** A quoted PO part as it reads: its escapes decoded, or as written when they aren't JSON's. */
-const decoded = (part: string): string => {
-  try {
-    return z.string().parse(JSON.parse(`"${part}"`));
-  } catch {
-    return part;
-  }
+/** C's escapes, which PO strings use: named, octal (`\040`) and hex (`\x20`). */
+const poEscape =
+  /\\(?:(?<octal>[0-7]{1,3})|x(?<hex>[0-9a-fA-F]{1,2})|(?<named>.))/gu;
+
+const namedEscapes: Readonly<Record<string, string>> = {
+  a: "\u0007",
+  b: "\b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
 };
+
+/** One escape of a PO string as it reads. */
+const unescaped = (
+  _escape: string,
+  octal: string | undefined,
+  hex: string | undefined,
+  named: string | undefined
+): string => {
+  if (octal !== undefined) {
+    return String.fromCodePoint(Number.parseInt(octal, 8));
+  }
+  if (hex !== undefined) {
+    return String.fromCodePoint(Number.parseInt(hex, 16));
+  }
+  return namedEscapes[named ?? ""] ?? named ?? "";
+};
+
+/** A quoted PO part as it reads, its escapes decoded. */
+const decoded = (part: string): string => part.replaceAll(poEscape, unescaped);
 
 /**
  * The messages of a PO catalog as people read them, each with the line
  * it starts on: its parts joined with nothing between them and their
- * escapes decoded. Comments and obsolete entries (`#~`) are no one's.
+ * escapes decoded. Comments, obsolete entries (`#~`) and contexts
+ * (`msgctxt`, which tells messages apart and is never shown) are no one's.
  */
 const poMessages = (text: string): { value: string; line: number }[] => {
   const messages: { value: string; line: number }[] = [];
   // The field a quoted part continues, while there is one.
   let open: { value: string; line: number } | undefined;
   for (const [index, line] of text.split("\n").entries()) {
-    const field = poField.exec(line)?.groups?.part;
+    const field = poField.exec(line)?.groups;
     const part = poPart.exec(line)?.groups?.part;
-    if (field !== undefined) {
-      open = { value: decoded(field), line: index + 1 };
-      messages.push(open);
+    if (field?.part !== undefined) {
+      open = { value: decoded(field.part), line: index + 1 };
+      if (field.name !== "msgctxt") {
+        messages.push(open);
+      }
     } else if (part !== undefined && open !== undefined) {
       open.value += decoded(part);
     } else {
