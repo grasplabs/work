@@ -18,6 +18,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { workflowRunFileChunks, workflowRunFiles } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 
 // A workflow run's own files (GRA-724): what its actions write through a
 // `files` binding and read back in later steps of the same run, each call
@@ -739,7 +740,8 @@ export const sweepRunFiles = async (
     // oxlint-disable-next-line no-await-in-loop -- one bounded delete after another
     await db
       .delete(workflowRunFileChunks)
-      .where(inArray(workflowRunFileChunks.key, keys));
+      // As one bound list: D1 binds at most 100 values to a statement.
+      .where(inList(workflowRunFileChunks.key, keys));
   }
   await db.delete(workflowRunFiles).where(
     and(

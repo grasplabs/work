@@ -942,6 +942,35 @@ describe("a workflow run's own files", () => {
     });
   });
 
+  it("sweep a deleted file of more chunks than one statement binds", async () => {
+    const caller = callerOf();
+    const { file } = await written(caller, "first");
+    // As many more of its chunks as one sweep round takes past D1's bound
+    // parameters, each with its object.
+    const extra = 150;
+    const keys = Array.from(
+      { length: extra },
+      (_, at) => `run-files/${caller.run}/${file}/extra-${String(at)}`
+    );
+    await env.DB.batch(
+      keys.map((key, at) =>
+        env.DB.prepare(
+          `INSERT INTO workflow_run_file_chunks (file_id, "index", key, append_key, size, sha256, stored)
+          VALUES (?, ?, ?, ?, 1, 'x', 1)`
+        ).bind(file, at + 1, key, `extra:${key}`)
+      )
+    );
+    await Promise.all(keys.map(async (key) => await env.FILES.put(key, "x")));
+    await callFiles(env, caller.next(), "delete", { file });
+    const before = await objectsOf(caller.run);
+    await sweepRunFiles(env, new Date(Date.now() + sweepGraceMs + 1000));
+    expect({
+      before,
+      objects: await objectsOf(caller.run),
+      rows: await rowsOf(caller.run),
+    }).toStrictEqual({ before: extra + 1, objects: 0, rows: [] });
+  });
+
   it("check a file's bytes against its type: a signature for a binary type, UTF-8 for text", async () => {
     const caller = callerOf();
     const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
