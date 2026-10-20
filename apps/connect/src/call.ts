@@ -36,13 +36,9 @@ import {
   originOf,
   recoveryWaitMs,
   replay,
+  scopeOf,
 } from "./idempotency.ts";
-import type {
-  IdempotencyScope,
-  Repeat,
-  Row,
-  StoredAnswer,
-} from "./idempotency.ts";
+import type { Repeat, Row, StoredAnswer } from "./idempotency.ts";
 import { McpError } from "./mcp.ts";
 import type {
   McpServer,
@@ -390,27 +386,6 @@ export const heldOutcome = async (
       : { state: "done", result: answer.result },
   };
 };
-
-/**
- * Where a side effect's result is kept under its idempotency key, for a
- * call that has one. Work that may only read (`readOnly`) has no side
- * effects, so it has no stored results of one either: none is replayed to
- * it, whatever key it names.
- */
-const scopeOf = (
-  { authority, resource, idempotencyKey, readOnly }: CapabilityClaims,
-  call: Omit<ConnectCall, "capability">
-): IdempotencyScope | undefined =>
-  idempotencyKey === null || readOnly
-    ? undefined
-    : {
-        subject: authority.subject,
-        onBehalfOf: authority.onBehalfOf,
-        connectionId: call.connectionId,
-        action: call.action,
-        idempotencyKey,
-        resource,
-      };
 
 type Store = ReturnType<typeof idempotencyStore>;
 

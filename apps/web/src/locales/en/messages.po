@@ -7580,6 +7580,10 @@ msgstr "reads the domain's data"
 msgid "Ready"
 msgstr "Ready"
 
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Receipt"
+msgstr "Receipt"
+
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"

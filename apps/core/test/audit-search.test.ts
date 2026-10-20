@@ -25,6 +25,7 @@ import {
   signedInWithRole,
   unique,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // Reading the audit log (threat model section 13, R16): only admins read
 // it, every read is itself recorded, and an export holds exactly what a
@@ -326,7 +327,79 @@ const chunksOf = async (response: Response): Promise<string[]> => {
   return chunks;
 };
 
+/** Most open obligations a JSON export holds (`AuditApi.export`). */
+const exportedObligationsMax = 1000;
+
+/**
+ * `count` calls of unknown outcome, every one another person's, as connect
+ * keeps a call whose answer was lost: what an export lists as open.
+ */
+const lostCalls = async (count: number): Promise<void> => {
+  const now = Date.now() - 60_000;
+  const rows = Array.from({ length: count }, (_, index) => ({
+    person: `user-${unique()}`,
+    key: `lost-${unique()}-${index}`,
+    listId: crypto.randomUUID(),
+  }));
+  await connectDb()
+    .prepare(
+      `INSERT INTO idempotent_calls (subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, state, created_at, claimed_at, list_id)
+       SELECT 'agent', 'agent-lost', json_extract(value, '$.person'), 'connection-lost', 'mail.send', json_extract(value, '$.key'), 'hash', 'unknown', ?2, ?2, json_extract(value, '$.listId')
+       FROM json_each(?1)`
+    )
+    .bind(JSON.stringify(rows), now)
+    .run();
+};
+
+/** The open obligations an admin's JSON export ends with, and its reads. */
+const exportedObligations = async (api: Api) => {
+  let text = "";
+  const events = await auditedDuring(async () => {
+    text = await exported(
+      api,
+      { from: new Date(Date.now() - 60_000).toISOString() },
+      "json"
+    );
+  });
+  const { openObligations } = z
+    .object({
+      openObligations: z.object({
+        complete: z.boolean(),
+        obligations: z.array(z.unknown()),
+      }),
+    })
+    .parse(JSON.parse(text));
+  return {
+    complete: openObligations.complete,
+    count: openObligations.obligations.length,
+    listedCount: events.find(
+      ({ action }) => action === "connection.call.unknown_listed"
+    )?.detail.count,
+  };
+};
+
 describe("audit log export", () => {
+  it("ends with the open obligations, 1,000 at most, saying exactly whether that is all, and records how many it read", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const { count: already } = await exportedObligations(api);
+    await lostCalls(exportedObligationsMax - already);
+    const full = await exportedObligations(api);
+    await lostCalls(1);
+    const past = await exportedObligations(api);
+    expect({ full, past }).toStrictEqual({
+      full: {
+        complete: true,
+        count: exportedObligationsMax,
+        listedCount: exportedObligationsMax,
+      },
+      past: {
+        complete: false,
+        count: exportedObligationsMax,
+        listedCount: exportedObligationsMax,
+      },
+    });
+  });
+
   it("exports what the search found, and verifies against the live chain", async () => {
     const { api } = await signedInApi(idp, "admin");
     const { app, connection, wrote, read, ran } = await appActivity();
@@ -477,6 +550,12 @@ describe("audit log export", () => {
         actor: { type: "person", userId: admin.userId },
         action: "audit.exported",
         detail: { "filter.targetId": targetId, format: "json" },
+      },
+      // The open obligations it ends with, read as the admin listing's are.
+      {
+        actor: { type: "person", userId: admin.userId },
+        action: "connection.call.unknown_listed",
+        detail: { via: "audit.exported" },
       },
     ]);
 

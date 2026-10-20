@@ -1095,6 +1095,11 @@ export type UnknownOutcomeCursor = z.infer<typeof unknownOutcomeCursorSchema>;
  */
 export interface UnknownOutcomeListing {
   /**
+   * Its receipt, as the audit log's events of the call and of its
+   * resolution name it: a SHA-256 of its effect key, never the key.
+   */
+  effectKeyHash: string;
+  /**
    * For telling rows apart, unique across every page: a digest of what
    * the listing shows anyway and the call's random list ID, never of its
    * key.
