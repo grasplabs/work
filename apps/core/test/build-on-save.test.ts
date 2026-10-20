@@ -561,6 +561,7 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
         app: appIdSchema.parse(crypto.randomUUID()),
         version: 1,
         files,
+        bindings: {},
       });
       expect(
         builds.screens.diagnostics
