@@ -1,4 +1,8 @@
-import { brainChangesOptionsSchema, brainErrors } from "@grasp-os/shared/brain";
+import {
+  brainChangesMaxAgeMs,
+  brainChangesOptionsSchema,
+  brainErrors,
+} from "@grasp-os/shared/brain";
 import type { BrainChange, BrainChangePage } from "@grasp-os/shared/brain";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import { documentTypeOf } from "@grasp-os/shared/knowledge";
@@ -29,12 +33,16 @@ import { allowedFor } from "./knowledge/app-entries.ts";
 //   decided as `brain.read` decides it (brain-rpc.ts, `onboardingFacts`).
 // - Hidden changes inferred from paging: a page, its size and where the
 //   next starts are made from what the person may read alone. The cursor
-//   is a position the server parses, never a filter: a forged one only
-//   moves through the person's own rows, and never before `since`.
+//   is a position the server parses, never a filter: malformed cursors
+//   are refused, and any other only moves through the person's own rows,
+//   never before `since`.
 // - Content: a change says what a listing says of a document (its path,
 //   title and type), never its text; and of a source, its title.
 // - Unbounded reads: at most `brainChangesMaxLimit` a page, in the order
-//   of `documents_updated_at_idx`.
+//   of `documents_updated_at_idx`, and never further back than
+//   `brainChangesMaxAgeMs`.
+// - A read the audit log can't hold: a page's documents and their
+//   collections fit in its event's provenance (`brainChangesMaxLimit`).
 //
 // The read is audited as any Knowledge read is (`noteProvenance`): one
 // `knowledge.read`, with the collections and documents it names. Deleted
@@ -55,8 +63,11 @@ interface Position {
   id: string;
 }
 
+/** The latest moment a `Date` holds, in ms since the epoch. */
+const maxDateMs = 8_640_000_000_000_000;
+
 const positionSchema = z.tuple([
-  z.int().nonnegative(),
+  z.int().nonnegative().max(maxDateMs),
   z.enum(["document", "source"]),
   z.string().min(1).max(256),
 ]);
@@ -130,7 +141,10 @@ export const brainChanges = async (
     brainChangesOptionsSchema,
     options
   );
-  const sinceAt = new Date(since);
+  // No further back than the feed goes.
+  const sinceAt = new Date(
+    Math.max(Date.parse(since), Date.now() - brainChangesMaxAgeMs)
+  );
   const after = cursor === undefined ? undefined : positionOf(cursor);
   const reader = { type: "person", person } as const;
   const db = drizzle(env.KNOWLEDGE);

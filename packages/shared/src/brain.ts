@@ -328,12 +328,21 @@ export const brainErrors = defineErrorFamily({
   "brain.invalid": "That isn't a valid moment, page or page size.",
 });
 
-/** Most changes one page holds. */
-export const brainChangesMaxLimit = 100;
+/**
+ * Most changes one page holds: its documents, and as many collections,
+ * fit in the audit event that records the read (`auditProvenanceMaxItems`).
+ */
+export const brainChangesMaxLimit = 50;
+
+/** How far back the changes go, whatever moment is asked about: 90 days. */
+export const brainChangesMaxAgeMs = 90 * 24 * 60 * 60 * 1000;
 
 /** What a call for the brain's changes asks for. */
 export const brainChangesOptionsSchema = z.strictObject({
-  /** Changes after this moment (ISO 8601). */
+  /**
+   * Changes after this moment (ISO 8601): at most `brainChangesMaxAgeMs`
+   * ago, an earlier one taken as that.
+   */
   since: z.iso.datetime({ offset: true }),
   /** Where the page before ended (`BrainChangePage.next`); none for the first. */
   cursor: z.string().min(1).max(512).optional(),

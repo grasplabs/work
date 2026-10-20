@@ -1,5 +1,5 @@
 import type { BrainChange } from "@grasp-os/shared/brain";
-import { brainErrors } from "@grasp-os/shared/brain";
+import { brainChangesMaxLimit, brainErrors } from "@grasp-os/shared/brain";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -27,7 +27,7 @@ const justBefore = (): string => new Date(Date.now() - 1).toISOString();
 const changesOf = async (
   person: Person,
   since: string,
-  limit = 100
+  limit = brainChangesMaxLimit
 ): Promise<BrainChange[]> => {
   const all: BrainChange[] = [];
   let cursor: string | undefined;
@@ -140,6 +140,72 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
     ).toBeTruthy();
   });
 
+  it("record every document of a full page in the read's audit event, and go back 90 days at most", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const since = justBefore();
+    const { id } = await admin.api.knowledge.createCollection({
+      name: `Many ${unique()}`,
+      access: "everyone",
+    });
+    const saved = await Promise.all(
+      Array.from(
+        { length: brainChangesMaxLimit },
+        async (_, index) =>
+          await admin.api.knowledge.saveDocument({
+            collectionId: id,
+            path: `many-${index}.md`,
+            text: `# Many ${index}`,
+            ifVersion: 0,
+          })
+      )
+    );
+    const page = await admin.api.brain.changes({
+      since,
+      limit: brainChangesMaxLimit,
+    });
+    const shown = page.changes.flatMap((change) =>
+      change.kind === "document" ? [change.document.id] : []
+    );
+    const events = await allEvents();
+    const recorded = events.find(
+      ({ action, actor, detail, provenance }) =>
+        action === "knowledge.read" &&
+        actor.type === "person" &&
+        actor.userId === admin.userId &&
+        detail.read === "changes" &&
+        detail.count === brainChangesMaxLimit &&
+        provenance.includes(saved[0]?.id ?? "")
+    );
+    // One of them last changed 100 days ago: past what the feed goes
+    // back to, whatever moment is asked about.
+    const old = saved[0]?.id ?? "";
+    await env.KNOWLEDGE.prepare(
+      "UPDATE documents SET updated_at = ? WHERE id = ?"
+    )
+      .bind(Date.now() - 100 * 24 * 60 * 60 * 1000, old)
+      .run();
+    const longAgo = await changesOf(
+      admin,
+      new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString()
+    );
+
+    expect({
+      full: shown.length,
+      recorded: shown.every((document) =>
+        (recorded?.provenance ?? []).includes(document)
+      ),
+      collection: recorded?.provenance.includes(id),
+      old: longAgo.some(
+        (change) => change.kind === "document" && change.document.id === old
+      ),
+    }).toStrictEqual({
+      full: brainChangesMaxLimit,
+      recorded: true,
+      collection: true,
+      old: false,
+    });
+  });
+
   it("page through every change once, newest first, and refuse a cursor core didn't make", async () => {
     const admin = await signedInApi(idp, "admin");
     const since = justBefore();
@@ -162,12 +228,18 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
           ? [change.document.path]
           : []
       );
-    const refused = await admin.api.brain
-      .changes({ since, cursor: btoa("not a cursor") })
-      .then(
+    const refusedFor = async (cursor: string) =>
+      await admin.api.brain.changes({ since, cursor }).then(
         () => "listed",
         (error: unknown) => brainErrors.codeOf(error) ?? String(error)
       );
+    const refused = {
+      malformed: await refusedFor(btoa("not a cursor")),
+      // Past the latest moment a date holds.
+      outOfRange: await refusedFor(
+        btoa(JSON.stringify([9_000_000_000_000_000, "document", "x"]))
+      ),
+    };
 
     const newestFirst = paths(await changesOf(admin, since, 2));
     // Changed at the same moment, as saves in one millisecond are: a page
@@ -195,7 +267,7 @@ describe("the brain's changes", { timeout: 120_000 }, () => {
       // Each once, by two or all at once.
       atOnce: ["note-1.md", "note-2.md", "note-3.md", "note-4.md", "note-5.md"],
       onePage: atOnce,
-      refused: "brain.invalid",
+      refused: { malformed: "brain.invalid", outOfRange: "brain.invalid" },
     });
   });
 });
