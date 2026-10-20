@@ -15,6 +15,7 @@ import type {
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
+import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { messageOf } from "@grasp-os/shared/errors";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -394,6 +395,7 @@ const withBindingsRead = (
             file,
             line: null,
             rule: "bindings",
+            category: diagnosticCategory("bindings"),
             severity: "error" as const,
             message: messageOf(error),
           },

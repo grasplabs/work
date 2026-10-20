@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
 import type { DefinitionPackage } from "./definition-packages.ts";
+import type { DiagnosticCategory } from "./diagnostics.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
@@ -319,6 +320,8 @@ export interface BuildDiagnostic {
    * (`shadcn/no-restyle`), or a compiler stage (`imports`, `compile`).
    */
   rule?: string;
+  /** What kind of problem it is, from a closed set (`diagnosticCategory`). */
+  category: DiagnosticCategory;
   severity: "error" | "warning";
   message: string;
   /** A change that would fix it, when the check suggests one. */

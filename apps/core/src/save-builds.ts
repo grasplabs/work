@@ -5,6 +5,7 @@ import type {
   CommittedVersion,
   SavedBuild,
 } from "@grasp-os/shared/apps";
+import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 
@@ -46,6 +47,7 @@ const toDiagnostic = ({
   line: line ?? null,
   ...(column === undefined ? {} : { column }),
   rule,
+  category: diagnosticCategory(rule),
   severity,
   message,
   ...(fix === undefined ? {} : { fix }),
