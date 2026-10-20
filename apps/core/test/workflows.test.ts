@@ -194,6 +194,20 @@ const versioned = (label: number) =>
   return { version: ${label} };`
   );
 
+/** A workflow whose one AI step goes through the App's `binding`. */
+const reading = (binding: string): Record<string, string> =>
+  workflowFiles(
+    "reader",
+    `  return await step.llm("extract", {
+    description: "Read the total",
+    binding: "${binding}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+  });`,
+    { extract: { total: 1234 } }
+  );
+
 describe("workflow runs", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
 
@@ -491,6 +505,201 @@ ${mailStep("after")}`,
           errorCode: "permission.denied",
         },
       ],
+    });
+  });
+
+  it("refuse to make a version current whose AI steps go through anything but a text model it declares, naming each step", async () => {
+    const builder = await personApi("builder");
+    const { id: app } = await builder.api.apps.create({ name: "Invoices" });
+    // A text model, and one with a structured output, beside the sample
+    // App's connector and statistics resources.
+    const registration = modelRegistration({ extractor: 6000 });
+    const appTs = (registration["app.ts"] ?? "")
+      .replace(
+        'import { app, resource } from "@grasp-os/sdk";',
+        'import { app, resource, v } from "@grasp-os/sdk";\n\nexport const shaped = resource.model("shaped", { maxOutputTokens: 100, structuredOutput: v.object({ total: v.number() }) });'
+      )
+      .replace(", extractor]", ", extractor, shaped]");
+    const activating = async (
+      files: Record<string, string>,
+      to = app
+    ): Promise<{ code: string; steps: string[] }> => {
+      const { version } = await builder.api.apps.files.commit(to, files, "Try");
+      const outcome = await refusal(
+        builder.api.apps.versions.setCurrent(to, version)
+      );
+      const refused = z
+        .object({
+          code: z.string(),
+          details: z.object({
+            diagnostics: z.array(
+              z.object({
+                file: z.string(),
+                line: z.number(),
+                message: z.string(),
+              })
+            ),
+          }),
+        })
+        .safeParse(outcome);
+      return refused.success
+        ? {
+            code: refused.data.code,
+            steps: refused.data.details.diagnostics.map(
+              ({ file, line, message }) =>
+                `${file}:${line} ${message.split(",")[0] ?? ""}`
+            ),
+          }
+        : { code: String(outcome), steps: [] };
+    };
+    const own = { ...registration, "app.ts": appTs };
+    // One after the other: each commit is the App's next version.
+    const undeclared = await activating({ ...own, ...reading("missing") });
+    const connector = await activating({ ...own, ...reading("send") });
+    const structured = await activating({ ...own, ...reading("shaped") });
+    // A step its outline can't read (in a \`try\`) runs all the same, and
+    // one taken through \`step\` passed on goes through a model no one can
+    // read.
+    const tried = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  try {
+    return await step.llm("extract", {
+      description: "Read the total",
+      binding: "missing",
+      instructions: "Read the total in cents.",
+      input: "Total 12.34 EUR",
+      schema: z.object({ total: z.int() }),
+    });
+  } catch {
+    return null;
+  }`,
+        { extract: { total: 1234 } }
+      ),
+    });
+    const passed = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  const ask = step;
+  return await ask.do("extract", { description: "Read the total" }, async () => 1);`,
+        { extract: 1 }
+      ),
+    });
+    // Options that may replace the binding can't be read either; a
+    // workflow whose context can't be read (\`env\` kept outside a step)
+    // is still read by its runner.
+    const spread = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    binding: "extractor",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    ...{ binding: "missing" },
+  });`,
+        { extract: { total: 1234 } }
+      ),
+    });
+    const unreadable = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  const kept = env.MAIL;
+  return await step.llm("extract", {
+    description: "Read the total",
+    binding: "missing",
+    instructions: String(kept),
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+  });`,
+        { extract: { total: 1234 } }
+      ),
+    });
+    // Text isn't a call: an unreadable workflow that only mentions one.
+    const mentioned = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  const kept = env.MAIL; // no llm here
+  return await step.do("extract", { description: "Count", input: { kept: String(kept) } }, async () => 1);`,
+        { extract: 1 }
+      ),
+    });
+    // Another variable named \`step\` is just that.
+    const shadowed = await activating({
+      ...own,
+      ...workflowFiles(
+        "reader",
+        `  const labels = ["a"].map((step) => step.length);
+  return await step.do("extract", { description: "Count", input: { labels } }, async () => 1);`,
+        { extract: 1 }
+      ),
+    });
+    const fits = await activating({ ...own, ...reading("extractor") });
+    // An App of the earlier layout declares no resources at all.
+    const { id: earlier } = await builder.api.apps.create({ name: "Earlier" });
+    const unsealed = await activating(reading("extractor"), earlier);
+    const step =
+      'workflows/reader.ts:4 AI step "extract" of workflow "reader" goes through';
+    expect({
+      undeclared,
+      connector,
+      structured,
+      tried,
+      passed,
+      spread,
+      unreadable,
+      mentioned,
+      shadowed,
+      fits,
+      unsealed,
+    }).toStrictEqual({
+      undeclared: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "missing"`],
+      },
+      connector: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "send"`],
+      },
+      structured: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "shaped"`],
+      },
+      tried: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "missing"`.replace(":4 ", ":5 ")],
+      },
+      passed: {
+        code: "workflow.model_undeclared",
+        steps: [
+          'workflows/reader.ts:4 An AI step of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
+        ],
+      },
+      spread: {
+        code: "workflow.model_undeclared",
+        steps: [
+          'workflows/reader.ts:4 AI step "extract" of workflow "reader" goes through a model that can\'t be read: call it as `step.llm("name"',
+        ],
+      },
+      unreadable: {
+        code: "workflow.model_undeclared",
+        steps: [
+          'workflows/reader.ts:5 AI step "extract" of workflow "reader" goes through "missing"',
+        ],
+      },
+      mentioned: { code: "ok", steps: [] },
+      shadowed: { code: "ok", steps: [] },
+      fits: { code: "ok", steps: [] },
+      unsealed: {
+        code: "workflow.model_undeclared",
+        steps: [`${step} "extractor"`],
+      },
     });
   });
 

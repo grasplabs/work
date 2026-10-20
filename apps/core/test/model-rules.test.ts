@@ -59,6 +59,27 @@ const llm = (retries: string) => `  return await step.llm("extract", {
     ${retries}
   });`;
 
+/**
+ * Commits `files` over App `app` and makes them current behind
+ * activation's back, as no API does: activation seals the release, then
+ * refuses AI steps through models it doesn't declare. What activation
+ * said, for the run-time gate to be tested past it.
+ */
+const currentPastActivation = async (
+  builder: Awaited<ReturnType<typeof signedInApi>>,
+  app: string,
+  files: Record<string, string>
+): Promise<string> => {
+  const { version } = await builder.api.apps.files.commit(app, files, "Past");
+  const activation = await outcome(
+    builder.api.apps.versions.setCurrent(app, version)
+  );
+  await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
+    .bind(version, app)
+    .run();
+  return activation;
+};
+
 const idp = mockIdp();
 
 const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -1044,36 +1065,45 @@ describe("model rules", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("refuse a workflow's AI step through an alias no admin bound, or one its App doesn't declare, before any model is asked", async () => {
+  it("refuse a workflow's AI step through an alias no admin bound, or one its version doesn't declare however it became current, before any model is asked", async () => {
     const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, {
-      ...workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
+    const app = await appWith(
+      builder,
+      workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
         extract: { total: 1234 },
-      }),
-      ...workflowFiles(
-        "stranger",
-        llm("retries: { limit: 2, delay: 1 },").replace(
-          'binding: "reader"',
-          'binding: "missing"'
-        ),
-        { extract: { total: 1234 } }
-      ),
-    });
+      })
+    );
     const { fake, result: runs } = await withDeploymentRules(
       { gateway, models: [workersAi, anthropic] },
       [],
       async () => {
         const unbound = await builder.api.workflows.start(app, "reader");
-        const undeclared = await builder.api.workflows.start(app, "stranger");
         await finished(unbound.id);
+        // A version that no longer declares `anywhere`, though an admin
+        // bound it for the one before, and whose step still names it:
+        // activation refuses it, and the run's own gate all the same.
+        await bindModel(app, "anywhere", anthropic);
+        const activation = await currentPastActivation(builder, app, {
+          ...modelRegistration({ reader: 32_768, eu: 32_768 }),
+          ...workflowFiles(
+            "stranger",
+            llm("retries: { limit: 2, delay: 1 },").replace(
+              'binding: "reader"',
+              'binding: "anywhere"'
+            ),
+            { extract: { total: 1234 } }
+          ),
+        });
+        const undeclared = await builder.api.workflows.start(app, "stranger");
         await finished(undeclared.id);
-        return { unbound: unbound.id, undeclared: undeclared.id };
+        return { activation, unbound: unbound.id, undeclared: undeclared.id };
       }
     );
     const refused = {
       status: "failed",
       failure: { error: { code: "resource.unavailable" } },
     };
+    expect(runs.activation).toBe("workflow.model_undeclared");
     await expect(
       Promise.all([
         builder.api.workflows.status(runs.unbound),
@@ -1219,10 +1249,16 @@ describe("model rules", { timeout: 60_000 }, () => {
     });
   });
 
-  it("refuse a workflow's AI step through a model resource with a structured output: the step brings its own schema", async () => {
+  it("refuse a workflow's AI step through a model resource with a structured output however its version became current: the step brings its own schema", async () => {
     const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, {
-      // A declaration whose answers are the App's own shape.
+    const { id: app } = await builder.api.apps.create({ name: "Models" });
+    // A declaration whose answers are the App's own shape, which
+    // activation refuses: the run's own gate refuses it all the same.
+    const activation = await currentPastActivation(builder, app, {
+      "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
       "app.ts": `import { app, resource, v } from "@grasp-os/sdk";
 
 import schema from "./schema.ts";
@@ -1257,6 +1293,7 @@ export default app({
         return started.id;
       }
     );
+    expect(activation).toBe("workflow.model_undeclared");
     await expect(builder.api.workflows.status(run)).resolves.toMatchObject({
       status: "failed",
       failure: { error: { code: "resource.unavailable" } },

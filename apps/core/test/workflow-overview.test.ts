@@ -47,6 +47,28 @@ type Person = Awaited<ReturnType<typeof personApi>>;
  * above a limit, and books the invoice; its test approves the review.
  */
 const approveFiles = {
+  // The text model resource its AI step goes through: a version whose
+  // steps go through one it doesn't declare isn't made current.
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+
+import schema from "./schema.ts";
+
+export const reader = resource.model("reader", { maxOutputTokens: 6000 });
+
+export default app({
+  name: "Invoices",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  internalOperations: {},
+  screens: [],
+  uses: [reader],
+});
+`,
   "workflows/approve.ts": `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
