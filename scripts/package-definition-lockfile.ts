@@ -203,6 +203,16 @@ const addLock = (
         ? [[name, peer.resolved] as const]
         : []
     );
+    // One package, one version: a dependency and a graph peer of the same
+    // name would be merged into one edge, the other version lost.
+    for (const [name, version] of graphPeers) {
+      const dependency = entry.dependencies[name];
+      if (dependency !== undefined && dependency !== version) {
+        refuse(
+          `${key} in ${owner}'s lock names ${name} as dependency ${dependency} and graph peer ${version}.`
+        );
+      }
+    }
     const known = meta.get(key);
     if (known !== undefined) {
       // Already pinned, by the checkout or another lock: the same tarball,

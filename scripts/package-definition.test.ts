@@ -1086,6 +1086,29 @@ describe(
             scratch().out
           )
         ),
+        dependencyAndPeerDiffer: await refusalOf(
+          packaged(
+            withLock(
+              lockOf({ "date-kit": "1.2.0" }, [
+                {
+                  ...locked("date-kit", "1.2.0", "MIT", {
+                    "tz-rules": "3.0.0",
+                  }),
+                  peers: {
+                    "tz-rules": {
+                      range: "^3.0.0",
+                      resolved: "3.1.0",
+                      by: "graph",
+                    },
+                  },
+                },
+                locked("tz-rules", "3.0.0", "MIT"),
+                locked("tz-rules", "3.1.0", "MIT"),
+              ])
+            ),
+            scratch().out
+          )
+        ),
         resolvedAgainstAnotherPlatform: await refusalOf(
           packaged(withLock(peered({}, { react: "17.0.2" })), scratch().out)
         ),
@@ -1153,6 +1176,7 @@ describe(
         refusals: {
           platformElsewhere: "refused",
           outsideRange: "refused",
+          dependencyAndPeerDiffer: "refused",
           resolvedAgainstAnotherPlatform: "refused",
           kitPeerTheLockMet: "refused",
           kitPackagePlatformElsewhere: "refused",
