@@ -558,7 +558,21 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       try {
         return await this.#loadPreview(by, chatId, id, name, screen);
       } finally {
-        await chats.settlePreviewUpdate(chatIdOf(chatId), by.userId, id, token);
+        // Housekeeping: a place never settled frees itself once its lease
+        // ends, so a failure here never replaces how the load ended.
+        try {
+          await chats.settlePreviewUpdate(
+            chatIdOf(chatId),
+            by.userId,
+            id,
+            token
+          );
+        } catch (error) {
+          log.warn("app.preview_settle_failed", {
+            app: id,
+            ...errorFields(error),
+          });
+        }
       }
     });
   }

@@ -694,7 +694,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     });
   });
 
-  it("lets the next update of a preview load once one that never settled is past its lease", async () => {
+  it("frees the place of an update that never settles once its lease is over, waking the one waiting by itself", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder, "Invoice desk", released);
     const { chatId } = await chatWithDraft(builder, app, {
@@ -713,39 +713,66 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
           // Taken, and never settled: its isolate went away mid-load.
           await take();
           vi.setSystemTime(started + previewUpdateLeaseMs);
-          let atLease = "waiting";
-          const next = take().then((token) => {
-            atLease = "loading";
+          let next = "waiting";
+          const waiting = take().then((token) => {
+            next = token === null ? "superseded" : "loading";
             return token;
           });
           await scheduler.wait(50);
-          const exactly = atLease;
+          const atLease = next;
+          // A millisecond past, nothing else happens: its own wait wakes it.
           vi.setSystemTime(started + previewUpdateLeaseMs + 1);
-          const after = take();
-          const loading = await next;
-          instance.settlePreviewUpdate(
-            chatId,
-            builder.userId,
-            app,
-            loading ?? 0
-          );
-          return {
-            exactly,
-            next: loading !== null,
-            after: (await after) !== null,
-          };
+          await waiting;
+          return { atLease, past: next };
         } finally {
           vi.useRealTimers();
         }
       }
     );
 
-    // Exactly at its lease it still holds its place; a millisecond past,
-    // the update waiting takes it, and the one after that loads next.
+    // Exactly at its lease the stuck update still holds its place.
+    expect(outcome).toStrictEqual({ atLease: "waiting", past: "loading" });
+  });
+
+  it("refuses the waiting update a newer one replaces, and loads the newer one next", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        const settle = (token: number | null) => {
+          instance.settlePreviewUpdate(chatId, builder.userId, app, token ?? 0);
+        };
+        const order: string[] = [];
+        const loading = await take();
+        const older = take().then((token) => {
+          order.push(token === null ? "older superseded" : "older loads");
+          return token;
+        });
+        const newer = take().then((token) => {
+          order.push(token === null ? "newer superseded" : "newer loads");
+          return token;
+        });
+        await older;
+        order.push("first settles");
+        settle(loading);
+        settle(await newer);
+        // Settled, the session is free again: the next loads at once.
+        const free = await take();
+        settle(free);
+        return { order, free: free !== null };
+      }
+    );
+
     expect(outcome).toStrictEqual({
-      exactly: "waiting",
-      next: true,
-      after: true,
+      order: ["older superseded", "first settles", "newer loads"],
+      free: true,
     });
   });
 });
