@@ -1144,11 +1144,13 @@ const phraseOf = (term: string): string => `"${term.replaceAll('"', '""')}"`;
 /**
  * How many of `documentIds` a search of the words index still finds by a
  * term, as whole tokens, once purged: the purge's own check of itself.
- * What it leaves on purpose (a term inside a longer address, "Tom" in
- * "Toms") isn't a token of its own, except an address or a domain inside
- * a longer one, whose tokens are all there: those count here too, and the
- * plan said so (`inLongerWords`). A term with no token (punctuation only)
- * has nothing to find.
+ * The index matches a term as its tokens, folded, so what a purge leaves
+ * on purpose can count here too: an address or a domain inside a longer
+ * one, whose tokens are all there (the plan counted it, `inLongerWords`),
+ * a form spelled otherwise that folds to the same tokens ("Rene" for
+ * "René"), and a term of several words joined otherwise ("tom-visser" for
+ * "tom visser"). "Tom" in "Toms" isn't a token of its own, so it doesn't.
+ * A term with no token (punctuation only) has nothing to find.
  */
 const stillFoundIn = async (
   db: DrizzleD1Database,

@@ -761,9 +761,12 @@ export interface PurgeResult {
   versions: number;
   /**
    * Documents named that a search still finds by a term, as whole words,
-   * once purged (`content`): only an address or a domain left inside a
-   * longer one, which the plan counted (`inLongerWords`), should ever be
-   * here. Absent for `personal`.
+   * once purged (`content`): what the purge leaves on purpose but the
+   * index matches by the same tokens, an address or a domain inside a
+   * longer one (which the plan counted, `inLongerWords`), a form spelled
+   * otherwise that folds to the same ("Rene" for "René"), or a term of
+   * several words joined otherwise ("tom-visser" for "tom visser").
+   * Absent for `personal`.
    */
   stillFound?: number;
 }
