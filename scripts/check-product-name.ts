@@ -18,12 +18,45 @@ import { findOldProductNames } from "./lint/old-product-name.ts";
 const readFiles =
   /^(?:(?:apps|packages)\/.+\.(?:po|html|md|txt|webmanifest|xml|svg)|apps\/core\/blueprints\/[^/]+\/files\/.+)$/u;
 
+/** The line of `text` its character `index` is on. */
+const lineIn = (text: string, index: number): number =>
+  text.slice(0, index).split("\n").length;
+
+/** Where a PO message wraps onto its next quoted line. */
+const poWrap = /"[ \t]*\n[ \t]*"/gu;
+
 /**
- * A PO catalog's message as it reads: a message wrapped over quoted lines
- * joined up, each break kept as a newline so lines still count.
+ * A file's text as people read it, and the line of the file each of its
+ * characters is on: a PO catalog's messages joined up where they wrap
+ * over quoted lines, which adds nothing between the parts.
  */
-const joinedPo = (text: string): string =>
-  text.replaceAll(/"[ \t]*\n[ \t]*"/gu, "\n");
+const readAs = (
+  path: string,
+  written: string
+): { text: string; lineOf: (index: number) => number } => {
+  if (!path.endsWith(".po")) {
+    return { text: written, lineOf: (index) => lineIn(written, index) };
+  }
+  // Each joined character's index in the file as written.
+  const positions: number[] = [];
+  let text = "";
+  let from = 0;
+  for (const wrap of written.matchAll(poWrap)) {
+    for (let at = from; at < wrap.index; at += 1) {
+      positions.push(at);
+    }
+    text += written.slice(from, wrap.index);
+    from = wrap.index + wrap[0].length;
+  }
+  for (let at = from; at < written.length; at += 1) {
+    positions.push(at);
+  }
+  text += written.slice(from);
+  return {
+    text,
+    lineOf: (index) => lineIn(written, positions[index] ?? written.length),
+  };
+};
 
 /** Not what clients read: tests and their fixtures. */
 const notRead = /(?:^|\/)(?:test|tests|e2e)\/|\.test\.[cm]?[jt]sx?$/u;
@@ -40,11 +73,10 @@ export const oldProductNames = (
   files: readonly { path: string; text: string }[]
 ): string[] =>
   files.flatMap(({ path, text: written }) => {
-    const text = path.endsWith(".po") ? joinedPo(written) : written;
-    return findOldProductNames(text).map(({ found, index }) => {
-      const line = text.slice(0, index).split("\n").length;
-      return `${path}:${line}: ${JSON.stringify(found)}`;
-    });
+    const { text, lineOf } = readAs(path, written);
+    return findOldProductNames(text).map(
+      ({ found, index }) => `${path}:${lineOf(index)}: ${JSON.stringify(found)}`
+    );
   });
 
 const main = (): void => {
