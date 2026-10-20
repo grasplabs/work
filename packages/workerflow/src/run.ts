@@ -1702,6 +1702,26 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     };
   }
 
+  /**
+   * How many steps named `name` completed (`do`, succeeded), every
+   * occurrence counted once, whatever attempts each took; undefined when
+   * there is no run. A step replayed after a restart is the same record,
+   * not another. For the host's own inspection, as `stepOutput`.
+   */
+  succeededSteps(name: string): number | undefined {
+    const { sql } = this.ctx.storage;
+    if (!hasJournal(sql)) {
+      return undefined;
+    }
+    const [row] = sql
+      .exec<{ count: number }>(
+        "SELECT count(*) AS count FROM steps WHERE type = 'do' AND name = ? AND state = 'succeeded'",
+        name
+      )
+      .toArray();
+    return row?.count ?? 0;
+  }
+
   /** The definition, or why there is none, as the run's end. */
   #resolve(run: RunRow): WorkflowDefinition | Settlement {
     const identity = {

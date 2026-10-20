@@ -5,11 +5,14 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import type {
+  AnyWorkflowReference,
   ArgsOf,
   Callable,
   ReferenceKind,
   ReturnOf,
   StreamingFunction,
+  WorkflowInputOf,
+  WorkflowOutputOf,
 } from "./references.ts";
 
 // App tests (spec 28.2), as `@grasp-os/sdk/testing` exports them.
@@ -116,6 +119,60 @@ export interface TestPrincipal {
     reference: Reference,
     args: ArgsOf<Reference>
   ) => Promise<LiveQuery<ReturnOf<Reference>>>;
+  /**
+   * Starts a run of one of the workflows the App binds (`workflows` from
+   * `#grasp`), as a screen's `useWorkflow` starts one: the same version,
+   * run on the real engine, with nothing of the organization's around it.
+   * Calls that leave its own code (an App's, a store's, a model's, a
+   * connection's) are refused (`resource.unavailable`) for now. The run is
+   * removed as the test ends.
+   */
+  start: <Reference extends AnyWorkflowReference>(
+    reference: Reference,
+    input: WorkflowInputOf<Reference>
+  ) => Promise<WorkflowTestRun<WorkflowOutputOf<Reference>>>;
+}
+
+/**
+ * A run a test principal started (`start`): its handle, for `t.runs` and
+ * `t.effects`. Only the test that started it can ask about it.
+ */
+export interface WorkflowTestRun<Output = unknown> {
+  /** The workflow's registered path, such as `workflows.summarizeNote`. */
+  readonly workflow: string;
+  /** Types only: never set. */
+  readonly output?: Output;
+}
+
+/** How a test's run ended (`t.runs.untilTerminal`). */
+export type TestRunOutcome<Output = unknown> =
+  | { readonly status: "completed"; readonly output: Output }
+  | {
+      readonly status: "failed";
+      readonly code: string | null;
+      readonly message: string;
+    }
+  | { readonly status: "cancelled" };
+
+/** What a test asks of the runs it started. */
+export interface TestRuns {
+  /**
+   * How `run` ended, once it has: completed with its output, failed with
+   * the error's code and message, or cancelled. Fails the test if it
+   * hasn't ended by the test's own deadline.
+   */
+  untilTerminal: <Output>(
+    run: WorkflowTestRun<Output>
+  ) => Promise<TestRunOutcome<Output>>;
+}
+
+/** What a test asks of the effects its runs made. */
+export interface TestEffects {
+  /**
+   * How many times `run`'s task `task` completed its step, as the engine
+   * recorded it: a step replayed after a restart counts once.
+   */
+  completedCount: (run: WorkflowTestRun, task: string) => Promise<number>;
 }
 
 /** What each test of an `appTest` suite gets. */
@@ -159,6 +216,32 @@ export interface AppTestSuite {
   readonly tests: Readonly<Record<string, AppTestFunction>>;
 }
 
+/** What each test of a `workflowTest` suite gets: `t`, with its runs. */
+export interface WorkflowTestContext extends AppTestContext {
+  /** The runs its principals started (`TestPrincipal.start`). */
+  runs: TestRuns;
+  /** What those runs' steps did, as the engine recorded it. */
+  effects: TestEffects;
+}
+
+/** One workflow test: what it does, through `t`. */
+export type WorkflowTestFunction = (t: WorkflowTestContext) => Promise<void>;
+
+/** What `workflowTest` takes. */
+export interface WorkflowTestDefinition {
+  /** The fixture the suite runs on: `tests/fixtures/<fixtures>.json`. */
+  fixtures: string;
+  /** Each test by its name, as people read it in a failure. */
+  tests: Readonly<Record<string, WorkflowTestFunction>>;
+}
+
+/** An App's suite of workflow tests, as `workflowTest` describes it. */
+export interface WorkflowTestSuite {
+  readonly kind: "workflow";
+  readonly fixtures: string;
+  readonly tests: Readonly<Record<string, WorkflowTestFunction>>;
+}
+
 /** A suite declared wrong: says what to fix. */
 export class TestDefinitionError extends Error {
   override name = "TestDefinitionError";
@@ -171,10 +254,19 @@ const refuseSuite: (message: string) => never = (message) => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The suite `definition` declares, checked and frozen. */
-const readSuite = (definition: unknown): AppTestSuite => {
+/** The suite `definition` declares, as `kind`, checked and frozen. */
+const readSuite = <Test extends AppTestFunction | WorkflowTestFunction>(
+  definition: unknown,
+  kind: "app" | "workflow"
+): {
+  kind: "app" | "workflow";
+  fixtures: string;
+  tests: Readonly<Record<string, Test>>;
+} => {
   if (!isRecord(definition)) {
-    return refuseSuite("appTest takes { fixtures, tests }.");
+    return refuseSuite(
+      `${kind === "app" ? "appTest" : "workflowTest"} takes { fixtures, tests }.`
+    );
   }
   const { fixtures, tests } = definition;
   if (typeof fixtures !== "string" || !testNamePattern.test(fixtures)) {
@@ -187,7 +279,7 @@ const readSuite = (definition: unknown): AppTestSuite => {
   }
   // Defined, never assigned: a test named `__proto__` is a test, not a
   // new prototype that would drop it.
-  const checked: Record<string, AppTestFunction> = {};
+  const checked: Record<string, Test> = {};
   for (const [name, test] of Object.entries(tests)) {
     if (name.trim() === "" || name.length > maxAppTestName) {
       return refuseSuite(
@@ -211,7 +303,7 @@ const readSuite = (definition: unknown): AppTestSuite => {
     );
   }
   return Object.freeze({
-    kind: "app",
+    kind,
     fixtures,
     tests: Object.freeze(checked),
   });
@@ -239,8 +331,46 @@ const readSuite = (definition: unknown): AppTestSuite => {
  * });
  * ```
  */
-export const appTest = (definition: AppTestDefinition): AppTestSuite =>
-  readSuite(definition);
+export const appTest = (definition: AppTestDefinition): AppTestSuite => {
+  const { fixtures, tests } = readSuite<AppTestFunction>(definition, "app");
+  return Object.freeze({ kind: "app", fixtures, tests });
+};
+
+/**
+ * Declares one of an App's suites of workflow tests: the default export of
+ * a file in its `tests/` folder named `*.test.ts`, as `appTest`'s. Its
+ * principals also start the workflows the App binds, each a real run on
+ * the engine (`t.as(...).start`), and `t` follows those runs: how each
+ * ended (`t.runs`) and what its steps did (`t.effects`). Its suites run,
+ * and refuse a failing version, as `appTest`'s do.
+ *
+ * ```ts
+ * import { workflowTest } from "@grasp-os/sdk/testing";
+ * import { workflows } from "#grasp";
+ *
+ * export default workflowTest({
+ *   fixtures: "notes",
+ *   tests: {
+ *     "a summary completes once": async (t) => {
+ *       const owner = await t.as("note-owner");
+ *       const run = await owner.start(workflows.summarize, { text: "Hi" });
+ *       const outcome = await t.runs.untilTerminal(run);
+ *       t.equal(outcome.status, "completed");
+ *       t.equal(await t.effects.completedCount(run, "summarize"), 1);
+ *     },
+ *   },
+ * });
+ * ```
+ */
+export const workflowTest = (
+  definition: WorkflowTestDefinition
+): WorkflowTestSuite => {
+  const { fixtures, tests } = readSuite<WorkflowTestFunction>(
+    definition,
+    "workflow"
+  );
+  return Object.freeze({ kind: "workflow", fixtures, tests });
+};
 
 /**
  * One test's session with core's test runner: a fresh fixture store, which
@@ -273,8 +403,22 @@ export interface AppTestSession {
     onLost: () => void
   ) => Promise<{ subscription: AppTestSubscription } | { refusal: string }>;
   /**
-   * Ends the session: releases the live queries its test left open, and
-   * discards its fixture store.
+   * Starts a workflow as principal `name`: `request` is a screen's start's
+   * JSON text (`{ workflow, command: "start", input, idempotencyKey }`),
+   * and the answer the JSON text of an `OperationResult` holding the run's
+   * number in the session (`{ run }`).
+   */
+  start: (name: string, request: string) => Promise<string>;
+  /**
+   * How run `run` ended, once it has, as JSON text (a `TestRunOutcome`):
+   * `null` when it hadn't by the test's deadline.
+   */
+  runOutcome: (run: number) => Promise<string>;
+  /** How many times run `run`'s task `task` completed its step. */
+  completedCount: (run: number, task: string) => Promise<number>;
+  /**
+   * Ends the session: removes the runs its test started, releases the
+   * live queries it left open, and discards its fixture store.
    */
   close: () => Promise<void>;
 }
@@ -383,7 +527,7 @@ const disposed = (stub: object): void => {
 };
 
 /** One test as it runs: its session, and what its live queries wait on. */
-interface TestRun {
+interface RunningTest {
   readonly session: AppTestSession;
   /** Ends each live query still open: the test is over. */
   readonly closers: Set<() => void>;
@@ -450,7 +594,7 @@ interface Attempt {
  * dropped.
  */
 const followed = async (
-  run: TestRun,
+  run: RunningTest,
   name: string,
   reference: unknown,
   args: unknown
@@ -666,7 +810,62 @@ const followed = async (
   };
 };
 
-const principalOf = (run: TestRun, name: string): TestPrincipal => {
+/** Each run a principal started, by its number in the test's session. */
+const runNumbers = new WeakMap<object, number>();
+
+/** The number of `run`, a handle `start` answered; fails the test otherwise. */
+const numberOf = (run: unknown): number => {
+  const number =
+    typeof run === "object" && run !== null ? runNumbers.get(run) : undefined;
+  if (number === undefined) {
+    throw new TestAssertionError(
+      "expected a run a test principal started, from start"
+    );
+  }
+  return number;
+};
+
+/** A key for one start, as a screen makes one: 16 random bytes in hex. */
+const startKey = (): string =>
+  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+
+/** The start request for `reference` with `input`, as a screen sends it. */
+const startRequestFor = (reference: unknown, input: unknown): string => {
+  if (!isRecord(reference) || reference.kind !== "workflow") {
+    throw new TestAssertionError(
+      "expected a reference to one of the App's workflows, from #grasp"
+    );
+  }
+  const { resourceId, resourceVersion, contractId, fingerprint } = reference;
+  return JSON.stringify({
+    workflow: {
+      resourceId,
+      resourceVersion,
+      contractId,
+      fingerprint,
+      kind: "workflow",
+    },
+    command: "start",
+    input,
+    idempotencyKey: startKey(),
+  });
+};
+
+/** What a start answers: the run's number in the session. */
+const startedNumber = (value: unknown): number => {
+  if (
+    isRecord(value) &&
+    typeof value.run === "number" &&
+    Number.isSafeInteger(value.run)
+  ) {
+    return value.run;
+  }
+  throw new Error("The test runner answered a start without its run.");
+};
+
+const principalOf = (run: RunningTest, name: string): TestPrincipal => {
   const { session } = run;
   const call =
     (kind: ReferenceKind) =>
@@ -686,10 +885,61 @@ const principalOf = (run: TestRun, name: string): TestPrincipal => {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     subscribe: (async (reference: unknown, args: unknown) =>
       await followed(run, name, reference, args)) as TestPrincipal["subscribe"],
+    // SAFETY: a start answers the run's handle, whose output only types it.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    start: (async (reference: unknown, input: unknown) => {
+      const answer = await session.start(
+        name,
+        startRequestFor(reference, input)
+      );
+      const handle: WorkflowTestRun = Object.freeze({
+        workflow:
+          isRecord(reference) && typeof reference.contractId === "string"
+            ? reference.contractId
+            : "a workflow",
+      });
+      runNumbers.set(handle, startedNumber(unwrapped(answer)));
+      return handle;
+    }) as TestPrincipal["start"],
   });
 };
 
-const contextFor = (run: TestRun): AppTestContext => ({
+/** The outcome `text` (`runOutcome`'s answer) holds; fails the test for none. */
+const outcomeOf = (text: string, run: WorkflowTestRun): TestRunOutcome => {
+  const parsed: unknown = JSON.parse(text);
+  if (parsed === null) {
+    throw new TestAssertionError(
+      `the run of ${run.workflow} didn't end before the test's deadline`
+    );
+  }
+  if (
+    isRecord(parsed) &&
+    (parsed.status === "completed" ||
+      parsed.status === "failed" ||
+      parsed.status === "cancelled")
+  ) {
+    // SAFETY: core answers a `FixtureRunOutcome`, which this is the shape of.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return parsed as TestRunOutcome;
+  }
+  throw new Error("The test runner answered something else than an outcome.");
+};
+
+const contextFor = (run: RunningTest): WorkflowTestContext => ({
+  runs: {
+    // SAFETY: the run's output was checked against its version's output
+    // schema as it ended, which `Output` types.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    untilTerminal: (async (handle: WorkflowTestRun) =>
+      outcomeOf(
+        await run.session.runOutcome(numberOf(handle)),
+        handle
+      )) as TestRuns["untilTerminal"],
+  },
+  effects: {
+    completedCount: async (handle, task) =>
+      await run.session.completedCount(numberOf(handle), task),
+  },
   as: async (name) => {
     const refused = await run.session.principal(name);
     if (refused !== undefined) {
@@ -742,7 +992,7 @@ const failureOf = (error: unknown): string => {
 const withinTime = async (
   test: Promise<void>,
   ms: number,
-  waiting: TestRun["waiting"]
+  waiting: RunningTest["waiting"]
 ): Promise<void> => {
   const limit = deadline(ms);
   try {
@@ -764,7 +1014,7 @@ const withinTime = async (
  * Runs `suite` (a test file's default export) over core's `host`, one
  * test after another, each in a session of its own that is closed after
  * it. Never throws for a test: each failure is in the report. Throws for
- * a file whose default export isn't an `appTest` suite. Each test may run
+ * a file whose default export isn't an `appTest` or `workflowTest` suite. Each test may run
  * `testTimeoutMs`: `appTestTimeoutMs`, or less where core says so.
  */
 export const runAppSuite = async (
@@ -773,18 +1023,21 @@ export const runAppSuite = async (
   { testTimeoutMs = appTestTimeoutMs }: { testTimeoutMs?: number } = {}
 ): Promise<AppTestReport> => {
   const timeoutMs = Math.min(testTimeoutMs, appTestTimeoutMs);
-  if (!isRecord(suite) || suite.kind !== "app") {
+  if (!isRecord(suite) || (suite.kind !== "app" && suite.kind !== "workflow")) {
     return refuseSuite(
-      "A test file (tests/*.test.ts) default-exports an appTest suite."
+      "A test file (tests/*.test.ts) default-exports an appTest or workflowTest suite."
     );
   }
-  const { fixtures, tests } = readSuite(suite);
+  const { fixtures, tests } = readSuite<WorkflowTestFunction>(
+    suite,
+    suite.kind
+  );
   const results: AppTestResult[] = [];
   for (const [name, test] of Object.entries(tests)) {
     // One test after another: each may only rely on its own session.
     // oxlint-disable-next-line no-await-in-loop -- see above
     const session = await host.open(fixtures, name);
-    const run: TestRun = {
+    const run: RunningTest = {
       session,
       closers: new Set(),
       waiting: new Set(),

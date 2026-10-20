@@ -395,8 +395,12 @@ export const markerOf = (value: unknown): CoreMarker | undefined => {
   };
 };
 
-/** A test's host of its own admits every attempt, with nothing to settle. */
-const unadmitted: AttemptAdmission = {
+/**
+ * An admission that admits every attempt, with nothing to settle: a test's
+ * host of its own, and a run an App's test started (fixture-runs.ts),
+ * which counts nothing against the organization's quotas.
+ */
+export const unadmitted: AttemptAdmission = {
   attemptsAllowed: platformLimits.workflowAttemptsPerStep,
   hostCall: async () => {
     // Nothing is counted.
