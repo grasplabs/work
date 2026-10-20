@@ -645,6 +645,10 @@ msgstr "{more, plural, one {{shown} en nog #} other {{shown} en nog #}}"
 msgid "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
 msgstr "{moreFindings, plural, one {En nog # bevinding: toon alle pakketten om die te lezen.} other {En nog # bevindingen: toon alle pakketten om ze te lezen.}}"
 
+#: src/chat/project-dialog.tsx
+msgid "{most, plural, one {A project holds up to # document.} other {A project holds up to # documents.}}"
+msgstr "{most, plural, one {Een project bevat maximaal # document.} other {Een project bevat maximaal # documenten.}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# daarvan veranderde later, in een volgend gesprek met het bestuur.} other {# daarvan veranderden later, in volgende gesprekken met het bestuur.}}"
@@ -1328,9 +1332,17 @@ msgstr "Een nieuwe sjabloon"
 msgid "A new version of this domain is available."
 msgstr "Er is een nieuwe versie van dit domein."
 
+#: src/chat/project-dialog.tsx
+msgid "A picked file couldn't be read. Pick it again."
+msgstr "Een gekozen bestand kon niet worden gelezen. Kies het opnieuw."
+
 #: src/screens/screen-files.ts
 msgid "A preview keeps no files."
 msgstr "Een voorbeeld bewaart geen bestanden."
+
+#: src/chat/project-dialog.tsx
+msgid "A project takes Markdown, text, CSV and JSON files."
+msgstr "Een project neemt Markdown-, tekst-, CSV- en JSON-bestanden aan."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
@@ -1499,6 +1511,10 @@ msgstr "Een widget toevoegen"
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Add a word"
 msgstr "Een woord toevoegen"
+
+#: src/chat/project-dialog.tsx
+msgid "Add documents"
+msgstr "Documenten toevoegen"
 
 #: src/landscape/filter-menu.tsx
 msgid "Add filter"
@@ -2525,6 +2541,7 @@ msgstr "Kwam naar voren in {source}"
 msgid "Can {verbs} company data"
 msgstr "Kan bedrijfsdata {verbs}"
 
+#: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
@@ -2763,6 +2780,10 @@ msgstr "Naam van de chat"
 #: src/routes/_shell.index.tsx
 msgid "Chats"
 msgstr "Chats"
+
+#: src/chat/chat-list.tsx
+msgid "Chats by date"
+msgstr "Chats op datum"
 
 #. Folder of the chats people had with a Grasp agent
 #: src/brain/brain.ts
@@ -3242,6 +3263,10 @@ msgstr "De workflows van dit domein konden niet worden geladen."
 msgid "Create"
 msgstr "Aanmaken"
 
+#: src/chat/project-dialog.tsx
+msgid "Create project"
+msgstr "Project maken"
+
 #: src/activity/audit-words.ts
 msgid "Created a collection"
 msgstr "Een collectie aangemaakt"
@@ -3430,6 +3455,14 @@ msgstr "Verwijderen"
 msgid "Delete “{title}”?"
 msgstr "‘{title}’ verwijderen?"
 
+#: src/chat/chat-list.tsx
+msgid "Delete project"
+msgstr "Project verwijderen"
+
+#: src/chat/chat-list.tsx
+msgid "Delete the project “{name}”?"
+msgstr "Het project ‘{name}’ verwijderen?"
+
 #: src/activity/audit-words.ts
 msgid "Deleted a team"
 msgstr "Een team verwijderd"
@@ -3575,9 +3608,14 @@ msgid "Document not found"
 msgstr "Document niet gevonden"
 
 #: src/brain/brain.ts
+#: src/chat/project-dialog.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Documents"
 msgstr "Documenten"
+
+#: src/chat/project-dialog.tsx
+msgid "Documents in this project"
+msgstr "Documenten in dit project"
 
 #: src/onboarding/staff-words.ts
 msgctxt "what Grasp knows, by source"
@@ -3725,6 +3763,10 @@ msgstr "Een bewaarde build van goedgekeurde pakketten verwijderd"
 msgid "Dropped an event no workflow could take"
 msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 
+#: src/chat/project-dialog.tsx
+msgid "Each document holds up to 100 KB."
+msgstr "Elk document is maximaal 100 KB."
+
 #: src/routes/_shell.domains.index.tsx
 msgid "Each domain runs one part of the business: its workflows, apps and connections."
 msgstr "Elk domein draait één deel van het bedrijf: de workflows, apps en koppelingen die erbij horen."
@@ -3766,6 +3808,10 @@ msgstr "Bewerken"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Edit details"
 msgstr "Gegevens wijzigen"
+
+#: src/chat/project-dialog.tsx
+msgid "Edit project"
+msgstr "Project bewerken"
 
 #: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -3867,6 +3913,18 @@ msgstr "Elke aanroep blijft in de EU: nee."
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: yes."
 msgstr "Elke aanroep blijft in de EU: ja."
+
+#: src/chat/project-dialog.tsx
+msgid "Every chat in this project reads it."
+msgstr "Elke chat in dit project leest het."
+
+#: src/chat/project-dialog.tsx
+msgid "Every chat in this project reads them. Markdown, text, CSV or JSON, up to 100 KB each."
+msgstr "Elke chat in dit project leest ze. Markdown, tekst, CSV of JSON, elk tot 100 KB."
+
+#: src/chat/chat-list.tsx
+msgid "Every chat is in a project."
+msgstr "Elke chat zit in een project."
 
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
@@ -4332,8 +4390,13 @@ msgid "Go to Grasp"
 msgstr "Naar Grasp"
 
 #: src/brain/brain.ts
+#: src/chat/project-dialog.tsx
 msgid "Goal"
 msgstr "Doel"
+
+#: src/chat/chat-list.tsx
+msgid "Goal and documents"
+msgstr "Doel en documenten"
 
 #: src/brain/brain.ts
 msgid "Goals"
@@ -4990,6 +5053,10 @@ msgid "Its current version has no parameters."
 msgstr "De huidige versie heeft geen parameters."
 
 #: src/chat/chat-list.tsx
+msgid "Its goal and documents are deleted. Its chats stay, back among the chats by date."
+msgstr "Het doel en de documenten worden verwijderd. De chats blijven, terug bij de chats op datum."
+
+#: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "De berichten worden definitief verwijderd en elke wijziging die de agent voor je vasthoudt, wordt afgewezen. Wat de agent deed, blijft in het auditlog."
 
@@ -5544,6 +5611,10 @@ msgstr "Meer over deze koppelingen"
 msgid "More for {title}"
 msgstr "Meer voor {title}"
 
+#: src/chat/chat-list.tsx
+msgid "More for the project {name}"
+msgstr "Meer voor het project {name}"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Meer dan {about} apps waarin je workflows kunnen werken. Grasp doet per app alleen wat jij toestaat."
@@ -5580,10 +5651,15 @@ msgstr "{label} verplaatsen, gebruik de pijltjestoetsen"
 msgid "Move {title}: drag it, or use the arrow keys"
 msgstr "{title} verplaatsen: sleep, of gebruik de pijltjestoetsen"
 
+#: src/chat/chat-list.tsx
+msgid "Move to project"
+msgstr "Naar project verplaatsen"
+
 #: src/activity/audit-words.ts
 msgid "Moved old entries out of the audit trail"
 msgstr "Oude vermeldingen uit het auditlogboek verplaatst"
 
+#: src/chat/project-dialog.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
@@ -5694,9 +5770,26 @@ msgstr "Nooit"
 msgid "New chat"
 msgstr "Nieuwe chat"
 
+#: src/routes/_shell.index.tsx
+msgid "New chat in the project {projectName}"
+msgstr "Nieuwe chat in het project {projectName}"
+
+#: src/chat/chat-list.tsx
+msgid "New chat in this project"
+msgstr "Nieuwe chat in dit project"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "New note"
 msgstr "Nieuwe notitie"
+
+#: src/chat/chat-list.tsx
+#: src/chat/project-dialog.tsx
+msgid "New project"
+msgstr "Nieuw project"
+
+#: src/chat/chat-list.tsx
+msgid "New project…"
+msgstr "Nieuw project…"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "New since the last approval: {added}"
@@ -5812,6 +5905,10 @@ msgstr "Geen kaart bekend"
 #: src/landscape/overview-tab.tsx
 msgid "No certifications on file"
 msgstr "Geen certificeringen vastgelegd"
+
+#: src/chat/chat-list.tsx
+msgid "No chats yet. Drag one here, or move it from its menu."
+msgstr "Nog geen chats. Sleep er een hierheen, of verplaats hem via zijn menu."
 
 #: src/landscape/usage-tab.tsx
 msgid "No connected users"
@@ -7235,6 +7332,14 @@ msgstr "Verwerkersovereenkomst {states}"
 msgid "Profile"
 msgstr "Profiel"
 
+#: src/chat/chat-list.tsx
+msgid "Project name"
+msgstr "Projectnaam"
+
+#: src/chat/chat-list.tsx
+msgid "Projects"
+msgstr "Projecten"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Projects and tasks"
@@ -7572,6 +7677,10 @@ msgstr "Opnieuw laden"
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove"
 msgstr "Verwijderen"
+
+#: src/chat/project-dialog.tsx
+msgid "Remove {documentName}"
+msgstr "{documentName} verwijderen"
 
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
@@ -8037,6 +8146,7 @@ msgstr "Heeft ja gezegd"
 msgid "Same version, different contents: {changed}"
 msgstr "Zelfde versie, andere inhoud: {changed}"
 
+#: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
@@ -8786,6 +8896,10 @@ msgstr "De goedkeuring van {screen} intrekken"
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
 msgstr "Van het dashboard halen"
+
+#: src/chat/chat-list.tsx
+msgid "Take out of the project"
+msgstr "Uit het project halen"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Take the go back"
@@ -10468,6 +10582,14 @@ msgstr "Wat"
 #: src/routes/_shell.settings.billing.tsx
 msgid "What appears on every invoice."
 msgstr "Wat op elke factuur staat."
+
+#: src/chat/project-dialog.tsx
+msgid "What are you trying to achieve?"
+msgstr "Wat wil je bereiken?"
+
+#: src/chat/project-dialog.tsx
+msgid "What are you working on?"
+msgstr "Waar werk je aan?"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox sort"
