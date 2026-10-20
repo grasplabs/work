@@ -131,6 +131,8 @@ catalog:
   # The kit's one-time-code input.
   input-otp: 1.5.0
   lucide-react: 1.47.0
+  # The kit's motion, as the prototype animates (components/shimmer).
+  motion: 14.3.0
   react: 19.3.0
   # The kit's calendar.
   react-day-picker: 10.0.2
