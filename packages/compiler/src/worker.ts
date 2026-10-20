@@ -30,8 +30,7 @@ import {
   isAppLayout,
   isAppTestSuite,
   maxAppTestSuites,
-  strayServerFileMessage,
-  strayServerFiles,
+  serverCodeFolders,
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
@@ -63,9 +62,11 @@ import type {
   ImportSite,
   ModuleImports,
 } from "./imports.ts";
+import type { CodeFolder } from "./inputs.ts";
 import {
   appCodeLimitErrors,
   buildFiles,
+  componentsFolder,
   declarationFile,
   limitErrors,
   computeModuleErrors,
@@ -73,7 +74,10 @@ import {
   screenFile,
   serverEntry,
   serverFiles,
+  strayFileMessage,
+  strayFilesIn,
   workflowFiles,
+  workflowsFolder,
 } from "./inputs.ts";
 import {
   appModuleName,
@@ -190,6 +194,21 @@ const nameClashes = (paths: string[]): Diagnostic[] => {
   }
   return clashes;
 };
+
+/**
+ * What `files` hold in `folders` that isn't their code, each refused by
+ * name under `rule`: nothing there is ever silently left out of a build.
+ */
+const strayProblems = (
+  files: Readonly<Record<string, string>>,
+  folders: readonly CodeFolder[],
+  rule: string
+): Diagnostic[] =>
+  folders.flatMap((folder) =>
+    strayFilesIn(files, folder).map((file) =>
+      problem(rule, strayFileMessage(file, folder), { file })
+    )
+  );
 
 /**
  * An error's message without the file Babel names in it (as `/<path>`):
@@ -402,9 +421,21 @@ export const buildScreens = async (
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
-  const sources = Object.entries(app).filter(
-    ([path]) => !declarationFile.test(path)
-  );
+  const strays = strayProblems(app, [componentsFolder], "screens");
+  if (strays.length > 0) {
+    return { ok: false, diagnostics: strays };
+  }
+  // Only screens, components and the references they import are
+  // compiled, whatever else is passed: what isn't is refused above, and
+  // kept out should that ever miss it. Declarations are only types.
+  const sources = Object.entries(app)
+    .filter(
+      ([path]) =>
+        screenFile.test(path) ||
+        componentsFolder.isFile(path) ||
+        path === screenReferences.path
+    )
+    .filter(([path]) => !declarationFile.test(path));
   const paths = sources.map(([path]) => path);
   if (!paths.some((path) => screenFile.test(path))) {
     return {
@@ -838,16 +869,11 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
-  // Nothing under operations/ is passed over: what isn't server code is
-  // refused, by name.
-  const strays = strayServerFiles(code);
+  // Nothing under operations/ or migrations/ is passed over: what isn't
+  // server code is refused, by name.
+  const strays = strayProblems(code, serverCodeFolders, "server");
   if (strays.length > 0) {
-    return {
-      ok: false,
-      diagnostics: strays.map((file) =>
-        problem("server", strayServerFileMessage(file), { file })
-      ),
-    };
+    return { ok: false, diagnostics: strays };
   }
   if (!isAppLayout(code)) {
     return {
@@ -908,12 +934,21 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
 export const buildWorkflows = (
   files: Record<string, string>
 ): WorkflowBuild => {
-  const workflows = workflowFiles(files);
+  const read = workflowFiles(files);
   const context = workflowTypeContext(files);
-  const tooMuch = appCodeLimitErrors({ ...context, ...workflows });
+  const tooMuch = appCodeLimitErrors({ ...context, ...read });
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
+  const strays = strayProblems(read, [workflowsFolder], "workflows");
+  if (strays.length > 0) {
+    return { ok: false, diagnostics: strays };
+  }
+  // Only workflow code is compiled or checked, whatever else is passed:
+  // what isn't is refused above, and kept out should that ever miss it.
+  const workflows = Object.fromEntries(
+    Object.entries(read).filter(([path]) => workflowsFolder.isFile(path))
+  );
   const built = compileCode(workflowCode, workflows);
   if (!built.ok) {
     return built;
