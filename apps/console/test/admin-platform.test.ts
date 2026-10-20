@@ -128,26 +128,33 @@ describe("the Platform page's model", () => {
     ]);
   });
 
-  it("says which active companies run each release, the newest first", () => {
+  it("says which active companies run each release, the newest first, then the ones the page doesn't list", () => {
     const spread = spreadOf(
       [
         row("acme", { release: "r2" }),
         row("beta", { release: "r3" }),
         row("gone", { release: "r3", status: "offboarded" }),
+        row("ancient", { release: "r0" }),
+        row("new", { release: null, status: "provisioning" }),
       ],
       [release("r2", 2), release("r3", 3), release("r1", 1)]
     );
 
     expect(
-      spread.map(({ release: { id }, clientIds }) => ({ id, clientIds }))
+      spread.map(({ releaseId, release: listed, clientIds }) => ({
+        releaseId,
+        listed: listed !== null,
+        clientIds,
+      }))
     ).toStrictEqual([
-      { id: "r3", clientIds: ["beta"] },
-      { id: "r2", clientIds: ["acme"] },
-      { id: "r1", clientIds: [] },
+      { releaseId: "r3", listed: true, clientIds: ["beta"] },
+      { releaseId: "r2", listed: true, clientIds: ["acme"] },
+      { releaseId: "r1", listed: true, clientIds: [] },
+      { releaseId: "r0", listed: false, clientIds: ["ancient"] },
     ]);
   });
 
-  it("lists the companies that need a look first: a failed deploy, drift, errors, or two releases behind unpinned", () => {
+  it("lists the companies that need a look first: a failed deploy, drift, errors, or two releases behind unpinned, older than every listed one included", () => {
     const releases = [release("r1", 1), release("r2", 2), release("r3", 3)];
     const companies = companiesOf(
       [
@@ -158,6 +165,7 @@ describe("the Platform page's model", () => {
         row("split"),
         row("noisy"),
         row("behind", { release: "r1" }),
+        row("older", { release: "r0" }),
         row("pinned", { release: "r1", pinnedReleaseId: "r1" }),
         row("new", { status: "provisioning", release: null }),
         row("gone", { status: "offboarded", release: "r1" }),
@@ -168,6 +176,7 @@ describe("the Platform page's model", () => {
         split: live({ drift: "split" }),
         noisy: live({ day: { requests: 100, errors: 1 } }),
         behind: live(),
+        older: live(),
         pinned: live(),
       },
       releases
@@ -183,6 +192,7 @@ describe("the Platform page's model", () => {
       { id: "behind", standing: "attention", needs: ["behind"] },
       { id: "failed", standing: "attention", needs: ["failed"] },
       { id: "noisy", standing: "attention", needs: ["errors"] },
+      { id: "older", standing: "attention", needs: ["behind"] },
       { id: "split", standing: "attention", needs: ["drift"] },
       { id: "new", standing: "setup", needs: [] },
       { id: "pinned", standing: "healthy", needs: [] },

@@ -128,22 +128,50 @@ export const ringsOf = (
   });
 };
 
-/** Which companies run each release, the newest release first. */
+/** The newest release first. */
+const newestFirst = (releases: readonly ReleaseSummary[]): ReleaseSummary[] =>
+  releases.toSorted(
+    (a, b) =>
+      b.builtAt.getTime() - a.builtAt.getTime() || b.id.localeCompare(a.id)
+  );
+
+/**
+ * Which active companies run each release, the newest release first; then
+ * any release a company runs that `releases` doesn't list (older than the
+ * releases the page reads), as its id alone.
+ */
 export const spreadOf = (
   rows: readonly GridRow[],
   releases: readonly ReleaseSummary[]
-): { release: ReleaseSummary; clientIds: string[] }[] =>
-  releases
-    .toSorted(
-      (a, b) =>
-        b.builtAt.getTime() - a.builtAt.getTime() || b.id.localeCompare(a.id)
-    )
-    .map((release) => ({
+): {
+  releaseId: string;
+  release: ReleaseSummary | null;
+  clientIds: string[];
+}[] => {
+  const active = rows.filter(({ status }) => status === "active");
+  const on = (releaseId: string): string[] =>
+    active.filter((row) => row.release === releaseId).map(({ id }) => id);
+  const listed = new Set(releases.map(({ id }) => id));
+  const unlisted = [
+    ...new Set(
+      active.flatMap(({ release }) =>
+        release === null || listed.has(release) ? [] : [release]
+      )
+    ),
+  ].toSorted((a, b) => b.localeCompare(a));
+  return [
+    ...newestFirst(releases).map((release) => ({
+      releaseId: release.id,
       release,
-      clientIds: rows
-        .filter((row) => row.status === "active" && row.release === release.id)
-        .map(({ id }) => id),
-    }));
+      clientIds: on(release.id),
+    })),
+    ...unlisted.map((releaseId) => ({
+      releaseId,
+      release: null,
+      clientIds: on(releaseId),
+    })),
+  ];
+};
 
 /** Of the last day's requests, the share that ended in an error; null without any, or unread. */
 export const errorRateOf = (live: LiveStatus | undefined): number | null => {
@@ -153,17 +181,19 @@ export const errorRateOf = (live: LiveStatus | undefined): number | null => {
     : day.errors / day.requests;
 };
 
-/** How many releases came after the one the company runs; 0 when it runs none the console knows. */
+/**
+ * How many releases came after the one the company runs: 0 when it runs
+ * none; every listed one when it runs a release older than all of them.
+ */
 export const behindOf = (
   row: GridRow,
   releases: readonly ReleaseSummary[]
 ): number => {
-  const newest = releases.toSorted(
-    (a, b) =>
-      b.builtAt.getTime() - a.builtAt.getTime() || b.id.localeCompare(a.id)
-  );
-  const index = newest.findIndex(({ id }) => id === row.release);
-  return Math.max(index, 0);
+  if (row.release === null) {
+    return 0;
+  }
+  const index = newestFirst(releases).findIndex(({ id }) => id === row.release);
+  return index === -1 ? releases.length : index;
 };
 
 /** What about a company needs someone at Grasp, the most pressing first. */
