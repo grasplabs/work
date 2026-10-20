@@ -9,6 +9,7 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
+import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 import type { DocumentType } from "./knowledge.ts";
 
@@ -321,6 +322,11 @@ export interface BrainApi {
    * first, a page at a time, as the person may read it.
    */
   changes: (options: BrainChangesOptions) => Promise<BrainChangePage>;
+  /**
+   * Every note in the brain with its links (`brain.notes`), a page at a
+   * time, as the person may read them.
+   */
+  notes: (options?: BrainNotesOptions) => Promise<BrainNotePage>;
 }
 
 /** Why a brain call was refused. */
@@ -384,6 +390,54 @@ export type BrainChange =
 /** A page of the brain's changes, newest first. */
 export interface BrainChangePage {
   changes: BrainChange[];
+  /** Where the next page starts; null when this is the last. */
+  next: string | null;
+}
+
+/**
+ * Most notes one page holds: they, and as many collections, fit in the
+ * audit event that records the read (`auditProvenanceMaxItems`).
+ */
+export const brainNotesMaxLimit = 50;
+
+/** What a call for the brain's notes asks for. */
+export const brainNotesOptionsSchema = z
+  .strictObject({
+    /** Where the page before ended (`BrainNotePage.next`); none for the first. */
+    cursor: documentIdSchema.optional(),
+    limit: z.int().min(1).max(brainNotesMaxLimit).default(brainNotesMaxLimit),
+  })
+  .default({ limit: brainNotesMaxLimit });
+export type BrainNotesOptions = z.input<typeof brainNotesOptionsSchema>;
+
+/** A link in a note, to the path it names in the note's collection. */
+export interface BrainNoteLink {
+  path: string;
+  label: string | null;
+  /** The document at that path, when the person may read it; null otherwise. */
+  documentId: DocumentId | null;
+}
+
+/**
+ * One note of the brain: what core records today, a Knowledge document,
+ * what a listing shows of it (never its text) and its links. A union on
+ * `kind` once core keeps other records.
+ */
+export interface BrainNote {
+  kind: "document";
+  id: DocumentId;
+  collectionId: CollectionId;
+  path: string;
+  title: string;
+  type: DocumentType;
+  /** ISO 8601. */
+  updatedAt: string;
+  links: BrainNoteLink[];
+}
+
+/** A page of the brain's notes. */
+export interface BrainNotePage {
+  notes: BrainNote[];
   /** Where the next page starts; null when this is the last. */
   next: string | null;
 }
