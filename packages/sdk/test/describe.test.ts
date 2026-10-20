@@ -176,6 +176,90 @@ describe(describeWorkflow, () => {
     ]);
   });
 
+  it("names an option read only at run time as dynamic, and keeps reading every other step", () => {
+    const source = workflowSource(`
+  await step.do("fetch", { description: "Fetch" }, async () => 1);
+  await step.decision("review", {
+    description: "Review it",
+    from: input.reviewer,
+    timeout: input.days * 86_400_000,
+    remindAfter: "1 hour",
+    ask: async () => {},
+  });
+  await step.decision("sign-off", {
+    description: "Sign off",
+    from: "role:admin",
+    timeout: "1 day",
+    ask: async () => {},
+  });
+  await step.sleep("cool-off", { description: "Cool off", duration: input.wait });`);
+
+    const outline = describeWorkflow(source).steps.map((node) =>
+      node.type === "step"
+        ? {
+            name: node.name,
+            options: node.options,
+            dynamic: node.dynamic,
+            showsHow: node.code.includes("input."),
+          }
+        : node
+    );
+
+    expect({
+      outline,
+      calls: reviewedCalls(source).steps,
+    }).toStrictEqual({
+      outline: [
+        { name: "fetch", options: {}, dynamic: undefined, showsHow: false },
+        {
+          name: "review",
+          options: { remindAfter: "1 hour" },
+          dynamic: ["from", "timeout"],
+          showsHow: true,
+        },
+        {
+          name: "sign-off",
+          options: { from: "role:admin", timeout: "1 day" },
+          dynamic: undefined,
+          showsHow: false,
+        },
+        {
+          name: "cool-off",
+          options: {},
+          dynamic: ["duration"],
+          showsHow: true,
+        },
+      ],
+      // Every step is still held to the review by name.
+      calls: { fetch: [], review: [], "sign-off": [], "cool-off": [] },
+    });
+  });
+
+  it("still refuses a spread, a literal option written otherwise, or a literal outside its rule, beside a dynamic option", () => {
+    const cases: [string, string][] = [
+      [
+        `await step.decision("go", { description: "Go", from: input.reviewer, timeout: "1 day", ...extra, ask: async () => {} });`,
+        "without spreads",
+      ],
+      [
+        `await step.decision("go", { description: input.label, from: input.reviewer, timeout: "1 day", ask: async () => {} });`,
+        "must be a literal",
+      ],
+      [
+        `await step.llm("x", { description: "X", binding: input.model, instructions: "i", input: 1, schema });`,
+        "must be a literal",
+      ],
+      [
+        `await step.sleep("go", { description: "Go", duration: "366 days" });`,
+        "up to 365 days",
+      ],
+    ];
+
+    for (const [body, message] of cases) {
+      expect(() => describeWorkflow(workflowSource(body))).toThrow(message);
+    }
+  });
+
   it("reads the context only when it's destructured, without a rest element", () => {
     const body = `await step.sleep("rest", { description: "Rest", duration: 1000 });`;
 
@@ -240,10 +324,6 @@ describe(describeWorkflow, () => {
       [
         `await step.do("go", { description: " " }, async () => 1);`,
         "is invalid",
-      ],
-      [
-        `await step.do("go", { description: "Go", retries: count }, async () => 1);`,
-        "must be a literal, an object of literals or a parameter",
       ],
       [
         `await step.sleep("go", { description: "Go", duration: "366 days" });`,

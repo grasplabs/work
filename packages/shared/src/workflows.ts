@@ -843,6 +843,13 @@ export interface StepOutline {
   /** Other options written as literals, e.g. `retries` or `instructions`. */
   options: Record<string, OptionValue>;
   /**
+   * Options the step reads only at run time, e.g. a decision's `from` or
+   * `timeout` taken from the run's input: neither a parameter nor
+   * literals, so the review shows only how they're written (`code`).
+   * Absent when there are none.
+   */
+  dynamic?: string[];
+  /**
    * The App's bindings the step's code calls (`env.NAME`): its own
    * functions (`APP`) or a connection, each of which may change things. Absent when it calls none.
    */

@@ -40,12 +40,8 @@ export type {
   WorkflowOutline,
 } from "@grasp-os/shared/workflows";
 
-const formHints: Record<OptionForm, string> = {
-  literal: "must be a literal",
-  param: "must be a parameter, e.g. `params.reviewer`",
-  value: "must be a literal, an object of literals or a parameter",
-  code: "",
-};
+/** Why a `literal` option written any other way can't be read. */
+const literalHint = "must be a literal";
 // Options with a field of their own in the outline, or no literal meaning.
 const unrecordedOptions = new Set([
   "description",
@@ -980,27 +976,43 @@ const optionsOfMethod = (method: StepMethod) =>
     )
   );
 
-/** Why an option's value can't be read as its form asks; undefined if it can. */
-const optionProblem = (
+/**
+ * How an option's value reads as its form asks: read (`ok`), only at run
+ * time (`dynamic`), or not at all (`problem`, which says why).
+ *
+ * A `param` or `value` option written as neither a parameter nor
+ * literals (a decision's reviewer or deadline from the run's input, say)
+ * is dynamic: the outline names it as such, and the rest of the step
+ * list stays readable, so every other step keeps its name and is held
+ * to the review. What it holds is checked when the run gets there, and
+ * the host holds it to the platform's ceilings; the review shows the
+ * call as written. A `literal` option never is: the review must read it
+ * (an AI step's binding, say).
+ */
+const optionReading = (
   { schema, form }: { schema: z.ZodType; form: OptionForm },
   value: Node,
   bindings: Bindings
-): string | undefined => {
+): { kind: "ok" | "dynamic" } | { kind: "problem"; problem: string } => {
   if (form === "code") {
-    return undefined;
+    return { kind: "ok" };
   }
-  const isParam = paramReadOf(bindings, value) !== undefined;
-  if (form === "param" || (form === "value" && isParam)) {
-    return isParam ? undefined : formHints.param;
+  if (form !== "literal" && paramReadOf(bindings, value) !== undefined) {
+    return { kind: "ok" };
   }
   const literal = form === "literal" ? literalOf(value) : staticValueOf(value);
   if (literal === undefined) {
-    return formHints[form];
+    return form === "literal"
+      ? { kind: "problem", problem: literalHint }
+      : { kind: "dynamic" };
   }
   const result = schema.safeParse(literal);
   return result.success
-    ? undefined
-    : `is invalid: ${z.prettifyError(result.error)}`;
+    ? { kind: "ok" }
+    : {
+        kind: "problem",
+        problem: `is invalid: ${z.prettifyError(result.error)}`,
+      };
 };
 
 const optionOf = (
@@ -1020,15 +1032,19 @@ const optionOf = (
   return { option, value: property.value };
 };
 
-/** The options of a step call, checked against what its method takes. */
+/**
+ * The options of a step call, checked against what its method takes, and
+ * those it reads only at run time (`optionReading`), in source order.
+ */
 const readOptions = (
   reader: Reader,
   name: string,
   method: StepMethod,
   object: ObjectExpression
-): Map<string, Node> => {
+): { options: Map<string, Node>; dynamic: string[] } => {
   const allowed = optionsOfMethod(method);
   const options = new Map<string, Node>();
+  const dynamic: string[] = [];
   for (const property of object.properties) {
     const { option, value } = optionOf(name, property);
     const allowedOption = allowed.get(option);
@@ -1038,9 +1054,15 @@ const readOptions = (
         `\`${option}\` isn't an option of \`step.${method}\`; it takes ${[...allowed.keys()].join(", ")}`
       );
     }
-    const problem = optionProblem(allowedOption, value, reader.bindings);
-    if (problem !== undefined) {
-      throw fail(property, `Option \`${option}\` of step "${name}" ${problem}`);
+    const reading = optionReading(allowedOption, value, reader.bindings);
+    if (reading.kind === "problem") {
+      throw fail(
+        property,
+        `Option \`${option}\` of step "${name}" ${reading.problem}`
+      );
+    }
+    if (reading.kind === "dynamic") {
+      dynamic.push(option);
     }
     options.set(option, value);
   }
@@ -1056,7 +1078,7 @@ const readOptions = (
   if (missing.length > 0) {
     throw fail(object, `Step "${name}" needs ${missing.join(", ")}`);
   }
-  return options;
+  return { options, dynamic };
 };
 
 const literalOptions = (
@@ -1113,7 +1135,7 @@ const describeCall = (
       `Write the options of step "${name}" as an object literal in the call`
     );
   }
-  const options = readOptions(reader, name, method, optionsNode);
+  const { options, dynamic } = readOptions(reader, name, method, optionsNode);
   const keyNode = options.get("key");
   if (inLoop && !keyNode) {
     throw fail(
@@ -1138,6 +1160,7 @@ const describeCall = (
     locked: method === "do" && flag("locked"),
     params: paramsIn(reader.bindings, call.arguments),
     options: literalOptions(options),
+    ...(dynamic.length === 0 ? {} : { dynamic }),
     ...(env.length === 0 ? {} : { env }),
     code: textOf(reader, call),
     line: lineOf(call),

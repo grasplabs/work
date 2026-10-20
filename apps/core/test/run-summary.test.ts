@@ -267,6 +267,80 @@ export default workflowTests(definition, [
     expect(JSON.stringify(waiting)).not.toContain(invoice);
   });
 
+  it("name every step of a workflow whose reviewer and deadline come from its input, which its page shows as dynamic and its runs are held to by name", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, {
+      "workflows/routed.ts": `import { type Person, workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow(
+  "routed",
+  { params: {}, input: z.object({ reviewer: z.string(), days: z.number() }) },
+  async (step, { input }) => {
+    await step.do("fetch", { description: "Fetch the invoice" }, async () => 1);
+    return await step.decision("review", {
+      description: "Approve the invoice",
+      from: input.reviewer as Person,
+      ask: async () => {},
+      timeout: input.days * 86_400_000,
+    });
+  }
+);
+`,
+      "workflows/routed.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./routed.ts";
+
+export default workflowTests(definition, [
+  { name: "waits", input: { reviewer: "role:admin", days: 7 }, decisions: { review: { approved: true, by: "anna" } }, expect: {} },
+]);
+`,
+    });
+    const kept = await env.DB.prepare(
+      "SELECT workflow_calls FROM app_versions WHERE app_id = ? AND version = 1"
+    )
+      .bind(app)
+      .first<{ workflow_calls: string }>();
+    const { id: run } = await builder.api.screens.startRun(app, "routed", {
+      reviewer: "role:admin",
+      days: 7,
+    });
+
+    const waiting = await summaryWhen(
+      builder,
+      app,
+      run,
+      ({ waits }) => waits.length === 1
+    );
+
+    const detail = await builder.api.workflows.get(app, "routed");
+    const keptCalls: unknown = JSON.parse(kept?.workflow_calls ?? "null");
+
+    expect({
+      // The workflow's page shows which options are read only at run time.
+      outline: detail.steps.ok
+        ? detail.steps.outline.steps.map((step) =>
+            step.type === "step"
+              ? {
+                  name: step.name,
+                  dynamic: step.dynamic,
+                  options: step.options,
+                }
+              : step.type
+          )
+        : detail.steps.message,
+      // Held to its steps by name, as any workflow whose steps read.
+      kept: keptCalls,
+      waits: waiting.waits.map(({ name }) => name),
+    }).toStrictEqual({
+      outline: [
+        { name: "fetch", dynamic: undefined, options: {} },
+        { name: "review", dynamic: ["from", "timeout"], options: {} },
+      ],
+      kept: { routed: { steps: { fetch: [], review: [] }, all: [] } },
+      waits: ["review"],
+    });
+  });
+
   it("show a pause still being applied, which leaves cancelling open, and a failed run's error", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, {
