@@ -1635,6 +1635,21 @@ export class App extends DurableObject<Env> {
     return told;
   }
 
+  /**
+   * Tells every connection that follows the App's live queries that what
+   * the App may start may have changed (a permission of the App granted or
+   * revoked, permissions.ts): each reads its workflow queries and watches
+   * of the App again, as its person, so a screen's `canRun` and
+   * `canCancel` follow the grant (screen-workflows.ts). Returns at once,
+   * with how many connections it told.
+   */
+  workflowPolicyChanged(): number {
+    for (const [id, follower] of this.#accessFollowers) {
+      void this.#tellRunsChanged(id, follower.onRevoked);
+    }
+    return this.#accessFollowers.size;
+  }
+
   async #tellRunsChanged(id: string, onRevoked: AccessWatcher): Promise<void> {
     try {
       await onRevoked(false, true);

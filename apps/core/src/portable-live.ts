@@ -17,6 +17,7 @@ import { rpcCopyNodeBounds } from "@grasp-os/shared/rpc-accounting";
 import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
 import { screenErrors } from "@grasp-os/shared/screens";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 
 import {
   appAfter,
@@ -32,6 +33,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { serveRpc } from "./rpc.ts";
 import type { RunSubscription } from "./run-subscription.ts";
 import { deliveryAt, requireDelivery } from "./screen-trust.ts";
+import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, stillHasRole } from "./screens-rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -382,6 +384,10 @@ export class PortableQueriesRpc
       operation: "portable.watchQuery",
       stage: "admission",
     });
+    // Nor does it follow an App's workflows yet (screen-workflows.ts).
+    if (isWorkflowRequest(request)) {
+      throw workflowResourceErrors.create("workflow.portable_unavailable");
+    }
     return this.#queries.subscribe(by, id, undefined, request, onSnapshot);
   }
 }

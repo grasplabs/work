@@ -48,6 +48,16 @@ export const issuesOf = (
  */
 const expectedCodes = new Set<string>();
 
+/** Each expected code's message, as its family defines it. */
+const expectedMessages = new Map<string, string>();
+
+/**
+ * The message the platform defines for expected code `code`, if it is
+ * one: what may be shown of a failure whose own message can't be.
+ */
+export const expectedMessageOf = (code: string): string | undefined =>
+  expectedMessages.get(code);
+
 /**
  * Defines one family of expected errors: a fixed set of codes, each with the
  * message people see. Create errors from it, and read the code back from
@@ -57,8 +67,9 @@ export const defineErrorFamily = <Code extends string>(
   messages: Readonly<Record<Code, string>>
 ) => {
   const codes = new Set<unknown>(Object.keys(messages));
-  for (const code of Object.keys(messages)) {
+  for (const [code, message] of Object.entries<string>(messages)) {
     expectedCodes.add(code);
+    expectedMessages.set(code, message);
   }
   const isCode = (value: unknown): value is Code => codes.has(value);
   const create = (

@@ -1,5 +1,7 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
   appWorkflowBindingSchema,
@@ -22,6 +24,7 @@ import {
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { appHost } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
@@ -73,6 +76,24 @@ const bindingOf = (
 
 const invalid = () =>
   workflowResourceErrors.create("workflow.app_binding_invalid");
+
+/**
+ * Tells App `app`'s screens following its workflows to read them again
+ * (app.ts, `workflowPolicyChanged`): a binding changed what each watch may
+ * show and what its person may start (screen-workflows.ts). Best effort:
+ * the change stands if the App can't be reached, and its screens read
+ * again at their runs' next change.
+ */
+const tellBindingChanged = async (env: Env, app: string): Promise<void> => {
+  try {
+    await appHost(env, appIdSchema.parse(app)).workflowPolicyChanged();
+  } catch (error) {
+    log.error("app.workflow_policy_tell_failed", {
+      appId: app,
+      ...errorFields(error),
+    });
+  }
+};
 
 /**
  * Binds version `input.version` of workflow `id` to App `input.app` under
@@ -158,6 +179,7 @@ export const bindWorkflowToApp = async (
     }
     throw error;
   }
+  await tellBindingChanged(env, found.id);
   return bindingOf(row);
 };
 
@@ -241,6 +263,7 @@ export const unbindWorkflowFromApp = async (
       },
     }),
   ]);
+  await tellBindingChanged(env, row.appId);
 };
 
 /**
