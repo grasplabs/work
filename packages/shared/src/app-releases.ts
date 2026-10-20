@@ -258,5 +258,5 @@ export const versionErrors = defineErrorFamily({
   "version.migration_fixtures_failed":
     "One of this version's migrations failed on its fixtures as the version was sealed, so it runs on no records and the version can't be made current. These details name the migration, the fixture and why.",
   "version.migration_sample_failed":
-    "One of this version's migrations failed on a sample of real records an admin dry-ran it on, so the version can't be made current until a newer sample passes. These details name the migration and why.",
+    "One of this version's migrations failed on a sample of real records an admin dry-ran it on. The version can't be made current until a newer sample of that migration passes on at least as many records, or finds no records to transform. These details name the migration and why.",
 });
