@@ -22,6 +22,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ServerLog } from "@grasp-os/shared/screens";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
@@ -126,13 +127,16 @@ import type { Draft } from "./workspace.ts";
 // the person.
 
 /**
- * Most checks of one draft that may fail in a row in one turn: the repair
- * loop's step limit. Checks running at once count against it before they
- * run. A turn has at most 30 code runs (agent.ts), so this leaves it room
- * to answer: without it a draft that never passes would take every run the
- * turn has before the person hears it can't be fixed.
+ * Most checks of one draft that may fail in a row in one turn: a repair
+ * session's passes (spec 18.1, `repairPasses`), whose active time is
+ * bounded too (`repairActiveMs`, workspace.ts). Checks running at once
+ * count against it before they run. A turn has at most 30 code runs
+ * (agent.ts), so this leaves it room to answer: without it a draft that
+ * never passes would take every run the turn has before the person hears
+ * it can't be fixed. The agent's model is the chat's, so a session has no
+ * model escalation to bound (`repairEscalations`).
  */
-export const maxFailedChecks = 5;
+export const maxFailedChecks = platformLimits.repairPasses;
 
 /**
  * Most Apps the chat's agent may create in one turn. An App can't be
