@@ -260,6 +260,13 @@ export interface Invocation {
    */
   readonly observeReads?: (readSet: Record<string, number>) => void;
   /**
+   * Told the fence of the receipt the call's mutation claimed (its own
+   * attempt's, `StoreHost.claim`), before its handler runs: a screen's
+   * recovery index ties core's failure answer to it
+   * (screen-submissions.ts). The top-level call's only.
+   */
+  readonly observeClaim?: (fence: number) => void;
+  /**
    * How core starts the workflows the App binds, for this call; none
    * started without it. A workflow run's call (app-functions.ts,
    * `runInvocationFor`) and a store operation's (store-operations.ts) have
@@ -738,6 +745,24 @@ const checkedProgress = (
  * 9.5: the receipt identity holds the contract ID and version, and host
  * contract IDs survive compatible revisions, 7.1).
  */
+/**
+ * The contract ID a mutation's receipt is scoped by: its path and a hash
+ * of its argument and return descriptors, so a retry across an upgrade
+ * that kept them gets the outcome it had. What screen-submissions.ts
+ * looks a receipt up by, too.
+ */
+export const operationContractId = async (
+  operation: Pick<OperationManifest, "path" | "args" | "returns">
+): Promise<string> => {
+  const hash = await sha256Hex(
+    canonicalJson(
+      // Descriptors are JSON data, as the manifest holds them.
+      jsonOf({ args: operation.args, returns: operation.returns }) ?? null
+    )
+  );
+  return `${operation.path}@${hash.slice(0, 32)}`;
+};
+
 const contractIdOf = async (
   compiled: Compiled,
   operation: OperationManifest
@@ -746,15 +771,7 @@ const contractIdOf = async (
   if (known !== undefined) {
     return await known;
   }
-  const made = (async () => {
-    const hash = await sha256Hex(
-      canonicalJson(
-        // Descriptors are JSON data, as the manifest holds them.
-        jsonOf({ args: operation.args, returns: operation.returns }) ?? null
-      )
-    );
-    return `${operation.path}@${hash.slice(0, 32)}`;
-  })();
+  const made = operationContractId(operation);
   compiled.contracts.set(operation.path, made);
   return await made;
 };
@@ -2889,6 +2906,9 @@ const runMutation = async (
   );
   if ("outcome" in claimed) {
     return claimed.outcome.result;
+  }
+  if (run.depth === 0) {
+    invocation.observeClaim?.(claimed.held.fence);
   }
   if (run.depth === 0) {
     await run.filesAdmitted?.();

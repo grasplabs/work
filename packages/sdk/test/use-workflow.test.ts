@@ -97,6 +97,8 @@ const unheard = (): void => {
 /** The page and host a client reaches, scripted by each test. */
 const host = () => {
   const commands: Command[] = [];
+  /** What the client acknowledged to the host's recovery index. */
+  const received: string[] = [];
   const subscriptions: Subscription[] = [];
   let watchRefusal: Error | undefined;
   let reply: (command: Command) => Reply | Promise<Reply> = (command) =>
@@ -121,6 +123,9 @@ const host = () => {
         };
       }
       return { result: { ok: true, value: answer.value } };
+    },
+    received: (text) => {
+      received.push(text);
     },
     watch: async (text, onSnapshot, onLost) => {
       const refused = watchRefusal;
@@ -172,6 +177,7 @@ const host = () => {
   return {
     client: new GraspClient(transport),
     commands,
+    received,
     open,
     one,
     answer: (next: typeof reply) => {
@@ -821,6 +827,27 @@ describe("starting runs", () => {
     // Two deliberate starts are two submissions, never one deduplicated.
     const keys = new Set(page.commands.map((sent) => sent.idempotencyKey));
     expect(keys.size).toBe(2);
+  });
+
+  it("acknowledges none of a burst of starts and refusals: the host's recovery index holds no workflow command", async () => {
+    const page = host();
+    let sent = 0;
+    page.answer(() => {
+      sent += 1;
+      return sent % 3 === 0
+        ? { failed: "workflow.start_denied" }
+        : { value: handleOf(`run-${sent}`) };
+    });
+    const hook = mount(page, null);
+    const starts = await Promise.allSettled(
+      Array.from({ length: 6 }, async () => await hook.store.run({ noteId }))
+    );
+    await flush();
+    expect({
+      started: starts.filter(({ status }) => status === "fulfilled").length,
+      refused: starts.filter(({ status }) => status === "rejected").length,
+      received: page.received,
+    }).toStrictEqual({ started: 4, refused: 2, received: [] });
   });
 
   it("keeps the run shown when a start is refused, and never shows the refusal as the run's error", async () => {

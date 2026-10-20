@@ -15,6 +15,7 @@ import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
+import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
@@ -131,6 +132,7 @@ export default {
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
             sweepReleases(env, new Date(controller.scheduledTime)),
             sweepTestFixtures(env, new Date(controller.scheduledTime)),
+            sweepScreenSubmissions(env, new Date(controller.scheduledTime)),
             sweepTokenKeys(env, new Date(controller.scheduledTime)),
             auditLog(env).armRetention(),
           ]

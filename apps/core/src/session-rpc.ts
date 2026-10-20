@@ -25,6 +25,7 @@ import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
 import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
+import { ScreenSubmissionsRpc } from "./screen-submissions.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
@@ -72,6 +73,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #stores: StoresRpc;
   readonly #pendingActions: PendingActionsRpc;
   readonly #unknownOutcomes: UnknownOutcomesRpc;
+  readonly #screenSubmissions: ScreenSubmissionsRpc;
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
   readonly #dashboard: DashboardRpc;
@@ -111,6 +113,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
+    this.#screenSubmissions = new ScreenSubmissionsRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
     this.#dashboard = new DashboardRpc(env, full);
@@ -244,6 +247,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get unknownOutcomes(): UnknownOutcomesRpc {
     return this.#unknownOutcomes;
+  }
+
+  get screenSubmissions(): ScreenSubmissionsRpc {
+    return this.#screenSubmissions;
   }
 
   get signals(): SignalsRpc {

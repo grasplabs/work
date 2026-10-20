@@ -330,6 +330,12 @@ export interface ScreenFrameApi {
   /** Whether the frame's build gets the App's data now. */
   delivery: () => Promise<ScreenDelivery>;
   /**
+   * Tells core the page got the answer of `request`, a keyed submission
+   * the frame sent (spec 10.7.8): core forgets it from the person's
+   * recovery index. Anything else is forgotten nothing.
+   */
+  received: (request: string) => Promise<void>;
+  /**
    * Calls `method` of the App's server with `args`, as the person. Plain
    * data, and functions (callbacks the server may keep and call later
    * with plain data). The answer is plain data, whatever it holds.

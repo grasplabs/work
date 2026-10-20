@@ -178,6 +178,13 @@ import { readDescriptor } from "./value-read.ts";
 export interface ClientTransport {
   call: (request: string, app: string) => Promise<unknown>;
   /**
+   * Tells the host the client got the answer to `request`, a keyed
+   * mutation or action, and that it says what the submission came to:
+   * the host forgets it from the person's recovery index (spec 10.7.8).
+   * Never awaited, never throws. A transport without it keeps no index.
+   */
+  received?: (request: string) => void;
+  /**
    * Follows the query `request` names (spec 11): `onSnapshot` gets each
    * push of core's (`{ revision, result }`), and `onLost` is called once
    * core, or the connection to it, let go of the subscription. Resolves
@@ -1596,7 +1603,13 @@ export class GraspClient {
             target,
             request,
             key,
-            { scoped: canonicalJson([client.#generation, key]), input: "" },
+            // A workflow's command is no keyed function call: the host's
+            // recovery index has no row of it to forget.
+            {
+              scoped: canonicalJson([client.#generation, key]),
+              input: "",
+              acknowledge: false,
+            },
             events
           ),
         fence: (refusal) => {
@@ -3128,7 +3141,11 @@ export class GraspClient {
     const done =
       joined?.input === inputText
         ? joined.done
-        : this.#send(reference, request, key, { scoped, input: inputText });
+        : this.#send(reference, request, key, {
+            scoped,
+            input: inputText,
+            acknowledge: true,
+          });
     return await waitFor(done, signal, () =>
       clientError("submission.cancelled", { sent: true })
     );
@@ -3144,7 +3161,16 @@ export class GraspClient {
     reference: SubmissionTarget,
     request: string,
     key: string,
-    held: { readonly scoped: string; readonly input: string },
+    held: {
+      readonly scoped: string;
+      readonly input: string;
+      /**
+       * Whether its settled answer is acknowledged (`received`): only a
+       * keyed mutation's or action's, which the host's recovery index
+       * holds, so nothing else spends what acknowledgements may take.
+       */
+      readonly acknowledge: boolean;
+    },
     events?: {
       readonly onRecovering: () => void;
       readonly read: (value: unknown) => unknown;
@@ -3180,6 +3206,9 @@ export class GraspClient {
         });
         if (verdict.next === "settle") {
           this.#uncertainKeys.delete(uncertainScope(reference, key));
+          if (held.acknowledge) {
+            this.#transport?.received?.(request);
+          }
           return verdict.value;
         }
         if (verdict.next === "fail") {
@@ -3190,6 +3219,12 @@ export class GraspClient {
             );
           } else if (settlesSubmission(verdict.error)) {
             this.#uncertainKeys.delete(uncertainScope(reference, key));
+            // A failure of its own, never a fence (a build revoked under a
+            // committed change refuses its answer, not the change): the
+            // host's recovery index may forget it.
+            if (held.acknowledge) {
+              this.#transport?.received?.(request);
+            }
           }
           throw verdict.error;
         }

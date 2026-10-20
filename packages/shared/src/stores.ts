@@ -256,6 +256,36 @@ export const claimSchema = z.strictObject({
 export type ClaimInput = z.infer<typeof claimSchema>;
 
 /**
+ * A look at a mutation's receipt, never a claim of it (spec 10.7.8): what
+ * it is scoped to and its key, as `claimSchema` has them. Nothing about it
+ * changes, and nothing runs.
+ */
+export const receiptLookupSchema = z.strictObject({
+  storeId: storeIdSchema,
+  scope: receiptScopeSchema,
+  key: receiptKeySchema,
+});
+export type ReceiptLookup = z.infer<typeof receiptLookupSchema>;
+
+/**
+ * Where a mutation's receipt stands, without its outcome: `committed` once
+ * its change committed; `claimed` while an attempt holds it, until
+ * `deadline`, past which nothing more commits under that attempt;
+ * `expired` once only its tombstone is left, so whether it committed
+ * can't be told; `none` when no attempt ever claimed it.
+ */
+export type ReceiptStanding =
+  | { readonly state: "committed" }
+  | {
+      readonly state: "claimed";
+      readonly deadline: number;
+      /** The latest attempt's claim: each claim moves it on. */
+      readonly fence: number;
+    }
+  | { readonly state: "expired" }
+  | { readonly state: "none" };
+
+/**
  * The attempt holding a receipt, as its commit names it. The deadline it
  * claimed with stays with the store, which checks it.
  */

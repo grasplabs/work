@@ -205,6 +205,9 @@ const linkAsAda = (
   /** Runs while core resolves a navigation, before it answers. */
   whileResolving: () => void = () => {
     // Nothing happens meanwhile.
+  },
+  received: (request: string) => Promise<void> = async () => {
+    await Promise.resolve();
   }
 ): CoreLink => {
   let asked = 0;
@@ -220,6 +223,7 @@ const linkAsAda = (
       frame: async (app: string, lease: string) =>
         await Promise.resolve({
           delivery: present,
+          received,
           watchQuery: async (
             request: string,
             onSnapshot: (push: unknown) => Promise<unknown>
@@ -257,8 +261,8 @@ const linkAsAda = (
     },
   };
   // SAFETY: the page reaches only `authenticate`, `whoami`, the frame's
-  // `delivery`, `watchQuery` and `close`, `version`, `onRpcBroken` and
-  // disposal, which this stand-in has.
+  // `delivery`, `received`, `watchQuery` and `close`, `version`,
+  // `onRpcBroken` and disposal, which this stand-in has.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
   const connection = core as unknown as ReturnType<
     NonNullable<ConstructorParameters<typeof CoreLink>[1]>
@@ -310,6 +314,43 @@ const runningWithDraft = async (present: () => Promise<string>) => {
   await expect(target.drafts()).resolves.toStrictEqual({ n1: "Ada's draft" });
   return { target, cleanups, events };
 };
+
+describe("a running screen's submissions core keeps for recovery", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("are forgotten through the frame's own way to its App once its client has their answer", async () => {
+    vi.stubGlobal("sessionStorage", tabStorage());
+    pageEvents();
+    const told: string[] = [];
+    const link = linkAsAda(
+      async () => await Promise.resolve("open"),
+      undefined,
+      undefined,
+      undefined,
+      async (request) => {
+        told.push(request);
+        await Promise.resolve();
+      }
+    );
+    const { target } = appScreen(
+      bundle.app,
+      bundle.screen,
+      confirmNothing,
+      noNavigation
+    ).connect(
+      link,
+      bundle,
+      () => {
+        // Core never refuses the build here.
+      },
+      []
+    );
+    await target.submissionReceived("request");
+    expect(told).toStrictEqual(["request"]);
+  });
+});
 
 describe("a running screen's drafts once core refuses the person", () => {
   afterEach(() => {

@@ -641,6 +641,20 @@ export const refusalOf = (
 /** How a call of an App's function is made, beyond who and what. */
 interface FunctionCallOptions {
   readonly deadline: number;
+  /**
+   * Told of the call once it is resolved to `path`, a public function of
+   * `release`, before it runs (a screen's, to note its keyed submission).
+   */
+  /**
+   * Told the fence of the receipt the call's mutation claimed, before its
+   * handler runs (`Invocation.observeClaim`).
+   */
+  readonly observeClaim?: (fence: number) => void;
+  readonly onAdmitted?: (
+    release: Release,
+    call: FunctionRequest,
+    path: string
+  ) => Promise<void>;
   readonly stillAllowed?: () => Promise<void>;
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   readonly parentSession?: string;
@@ -903,6 +917,47 @@ const answeredPreferences = async (
 };
 
 /** `callAppFunction`, with all of its options. */
+/**
+ * `invocation`, telling `observeReads` what a query read of `release`'s
+ * store and `observeClaim` the fence its mutation claimed, where given.
+ */
+const observedInvocation = (
+  invocation: Invocation,
+  release: Release,
+  observeReads: FunctionCallOptions["observeReads"],
+  observeClaim: FunctionCallOptions["observeClaim"]
+): Invocation => {
+  const { store } = release;
+  return {
+    ...invocation,
+    ...(observeReads === undefined || store === null
+      ? {}
+      : {
+          observeReads: (readSet: Record<string, number>) => {
+            observeReads(storeIdSchema.parse(store.storeId), readSet);
+          },
+        }),
+    ...(observeClaim === undefined ? {} : { observeClaim }),
+  };
+};
+
+/**
+ * Tells `onAdmitted` of `call` once it resolved to `path`, one of the
+ * release's public functions, before it runs: a screen's keyed submission
+ * is noted for recovery (screen-submissions.ts). A paginated window's read
+ * is no submission.
+ */
+const toldAdmitted = async (
+  onAdmitted: FunctionCallOptions["onAdmitted"],
+  release: Release,
+  call: FunctionRequest,
+  path: string
+): Promise<void> => {
+  if (call.window === undefined) {
+    await onAdmitted?.(release, call, path);
+  }
+};
+
 const callFunction = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams">,
@@ -916,6 +971,7 @@ const callFunction = async (
     parentSession,
     kind,
     observeReads,
+    observeClaim,
     chargeWindow,
     agent,
     chain,
@@ -924,6 +980,7 @@ const callFunction = async (
     requireHolds,
     runOrigin,
     cancelled,
+    onAdmitted,
     sources = invocationSources(),
   } = options;
   const requestId = crypto.randomUUID();
@@ -987,6 +1044,7 @@ const callFunction = async (
       deadline,
     });
   }
+  await toldAdmitted(onAdmitted, release, call, path);
   try {
     const invocation = await invocationFor(env, release, {
       by,
@@ -1006,17 +1064,12 @@ const callFunction = async (
       callApp: async (person, called, appRequest, appOptions) =>
         await callFunction(env, person, called, appRequest, appOptions),
     });
-    const { store } = release;
-    const observe =
-      observeReads === undefined || store === null
-        ? undefined
-        : (readSet: Record<string, number>) => {
-            observeReads(storeIdSchema.parse(store.storeId), readSet);
-          };
-    const observed =
-      observe === undefined
-        ? invocation
-        : { ...invocation, observeReads: observe };
+    const observed = observedInvocation(
+      invocation,
+      release,
+      observeReads,
+      observeClaim
+    );
     const hosted = hostedRelease(env, release);
     const reference = { path, kind: call.reference.kind };
     const result =
@@ -1044,7 +1097,7 @@ const callFunction = async (
               input: call.input,
               extent: call.window.extent,
             },
-            observe
+            observed.observeReads
           );
     return {
       result,
@@ -1179,11 +1232,16 @@ export const callScreenFunction = async (
   app: unknown,
   request: unknown,
   deadline: number,
-  chargeWindow: (pages: number, whole: number) => Promise<void>
+  chargeWindow: (pages: number, whole: number) => Promise<void>,
+  recovery?: Pick<FunctionCallOptions, "onAdmitted" | "observeClaim">
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)
-    : await callFunction(env, by, app, request, { deadline, chargeWindow });
+    : await callFunction(env, by, app, request, {
+        deadline,
+        chargeWindow,
+        ...recovery,
+      });
 
 /**
  * The extent of the window `request` asks for, or undefined when it asks
