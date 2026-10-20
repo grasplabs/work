@@ -4,7 +4,10 @@ import type {
   ChatMessage,
   ChatPartial,
   ChatReplyEnd,
+  ChatReplyUsage,
 } from "@grasp-os/shared/chat";
+
+import { contextWindowOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
 // reads it: their questions, the agent's answers with the code it ran,
@@ -55,6 +58,29 @@ export const partialOf = (message: AssistantMessage): ChatPartial => ({
   code: codeOf(message),
 });
 
+/** The provider core names its own messages by (workspace.ts). */
+const coreProvider = "grasp";
+
+/**
+ * What a reply used, as the gateway counted it (models.ts prices its cost
+ * as the budgets are charged); none for core's own words.
+ */
+const usageOf = ({
+  provider,
+  model,
+  usage,
+}: AssistantMessage): ChatReplyUsage | undefined =>
+  provider === coreProvider
+    ? undefined
+    : {
+        input: usage.input,
+        output: usage.output,
+        cacheRead: usage.cacheRead,
+        cacheWrite: usage.cacheWrite,
+        cost: usage.cost.total,
+        contextWindow: contextWindowOf(model) ?? null,
+      };
+
 /** A stored message as the person reads it; `undefined` for a system one. */
 export const chatMessageOf = (
   id: number,
@@ -66,6 +92,7 @@ export const chatMessageOf = (
     return { id, role: "user", text: textOf(message.content), at };
   }
   if (message.role === "assistant") {
+    const usage = usageOf(message);
     return {
       id,
       role: "assistant",
@@ -74,6 +101,7 @@ export const chatMessageOf = (
       ...(message.stopReason === "error" && message.errorMessage !== undefined
         ? { error: message.errorMessage }
         : {}),
+      ...(usage === undefined ? {} : { usage }),
       at,
     };
   }

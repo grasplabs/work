@@ -2,6 +2,7 @@ import { applyPartial } from "@grasp-os/shared/chat";
 import type {
   ChatPartial,
   ChatProvenance,
+  ChatReplyUsage,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -131,6 +132,20 @@ const shown = (follower: Follower) =>
     role: message.role,
     text: message.text,
   }));
+
+/**
+ * A reply's usage as the gateway's record of its request puts it: the
+ * prompt with the cache's tokens, and whether the window holds the prompt.
+ */
+const usedOf = (usage: ChatReplyUsage | undefined) =>
+  usage === undefined
+    ? null
+    : {
+        prompt: usage.input + usage.cacheRead + usage.cacheWrite,
+        output: usage.output,
+        cost: usage.cost,
+        window: (usage.contextWindow ?? 0) > usage.input,
+      };
 
 describe("chats", () => {
   it("are kept per person: made, listed newest first, renamed and deleted", async () => {
@@ -641,6 +656,35 @@ describe("chats", () => {
       { role: "user", text: "Hi." },
       { role: "assistant", text: "Hi, Ann." },
     ]);
+  });
+
+  it("show what each reply used as the model gateway counted it: its tokens, its cost and the model's window", async () => {
+    const ann = await person();
+    await answering(ann, says("Hi, Ann."));
+    const chat = await ann.chats.create("Usage");
+    const follower = await follow(ann.chats, chat.id);
+
+    await ann.chats.send(chat.id, { text: "Hi.", model });
+    await settled(follower);
+    const reply = follower.messages().at(-1);
+    // The gateway's own record of the request.
+    const events = await allEvents();
+    const counted = events.find(
+      ({ action, actor }) =>
+        action === "model.call" &&
+        actor.type === "agent" &&
+        actor.onBehalfOf === ann.userId
+    );
+
+    expect(
+      reply?.role === "assistant" ? usedOf(reply.usage) : null
+    ).toStrictEqual({
+      prompt: counted?.model?.inputTokens,
+      output: counted?.model?.outputTokens,
+      cost: counted?.cost?.amount,
+      window: true,
+    });
+    expect(counted?.cost?.amount).toBeGreaterThan(0);
   });
 
   it("stream a reply as it is written: its code steps, their results, and the answer", async () => {
