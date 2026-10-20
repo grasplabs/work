@@ -926,6 +926,18 @@ import { workflow } from "@grasp-os/sdk/workflow";
 const reader = workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" }));
 export { reader as default };
 `),
+      // A type around it changes nothing of what runs.
+      asserted: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+export default workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" })) as unknown as object;
+`),
+      assertedVariable: bindings(`
+import { workflow } from "@grasp-os/sdk/workflow";
+
+const reader = (workflow("sample", { params: {} }, async (step) => await step.llm("read", { binding: "missing" })) satisfies object);
+export default reader;
+`),
       unparsed: aiStepCalls("export default ("),
     }).toStrictEqual({
       calls: ["read:reader"],
@@ -936,6 +948,8 @@ export { reader as default };
       exported: [],
       throughVariable: ["read:missing"],
       throughSpecifier: ["read:missing"],
+      asserted: ["read:missing"],
+      assertedVariable: ["read:missing"],
       unparsed: null,
     });
   });

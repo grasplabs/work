@@ -1505,6 +1505,21 @@ const aiStepCallOf = (
   };
 };
 
+/** `node` without the types around it: `workflow(…) as X` is the call. */
+const unwrapped = (node: Node | null | undefined): Node | undefined => {
+  let current = node ?? undefined;
+  while (
+    current?.type === "TSAsExpression" ||
+    current?.type === "TSSatisfiesExpression" ||
+    current?.type === "TSNonNullExpression" ||
+    current?.type === "TSTypeAssertion" ||
+    current?.type === "ParenthesizedExpression"
+  ) {
+    current = current.expression;
+  }
+  return current;
+};
+
 /**
  * The call of the SDK's `workflow` that `file` exports as its default:
  * the export itself, or the variable it names (`export default reader`,
@@ -1522,7 +1537,7 @@ const exportedWorkflowCall = (file: Node): CallExpression | undefined => {
   let named: string | undefined;
   visit(file, (node) => {
     if (node.type === "ExportDefaultDeclaration") {
-      exported = node.declaration;
+      exported = unwrapped(node.declaration);
     }
     if (node.type === "ExportNamedDeclaration") {
       for (const specifier of node.specifiers) {
@@ -1541,13 +1556,15 @@ const exportedWorkflowCall = (file: Node): CallExpression | undefined => {
   const name = exported?.type === "Identifier" ? exported.name : named;
   let call: CallExpression | undefined;
   visit(file, (node) => {
+    const init =
+      node.type === "VariableDeclarator" ? unwrapped(node.init) : undefined;
     if (
       node.type === "VariableDeclarator" &&
       node.id.type === "Identifier" &&
       node.id.name === name &&
-      isWorkflowCall(node.init)
+      isWorkflowCall(init)
     ) {
-      call = node.init;
+      call = init;
     }
   });
   return call;
