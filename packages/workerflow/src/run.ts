@@ -1703,9 +1703,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * How many steps named `name` completed (`do`, succeeded), every
-   * occurrence counted once, whatever attempts each took; undefined when
-   * there is no run. A step replayed after a restart is the same record,
+   * How many steps named `name` completed (a `do` that succeeded, or a
+   * sleep that ended), every occurrence counted once, whatever attempts
+   * each took; undefined when there is no run. A step replayed after a restart is the same record,
    * not another. For the host's own inspection, as `stepOutput`.
    */
   succeededSteps(name: string): number | undefined {
@@ -1715,7 +1715,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     }
     const [row] = sql
       .exec<{ count: number }>(
-        "SELECT count(*) AS count FROM steps WHERE type = 'do' AND name = ? AND state = 'succeeded'",
+        "SELECT count(*) AS count FROM steps WHERE type IN ('do', 'sleep') AND name = ? AND state = 'succeeded'",
         name
       )
       .toArray();
