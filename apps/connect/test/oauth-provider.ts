@@ -11,7 +11,7 @@ import { afterEach, beforeEach, vi } from "vite-plus/test";
 
 import { acmeTenant, clients } from "./provider-config.ts";
 
-export type ProviderName = keyof typeof clients;
+export type ProviderName = Exclude<keyof typeof clients, "microsoftLandscape">;
 
 /** The account a code is for, as its ID token will say. */
 export interface Account {
@@ -38,6 +38,11 @@ export interface Account {
   aliases?: string[];
   /** Google only: send-as addresses Google hasn't verified. */
   unverified?: string[];
+  /**
+   * The scopes the token answer says it granted (its `scope`); left out
+   * of the answer unless set.
+   */
+  granted?: string;
 }
 
 /** One request connect sent to a provider. */
@@ -163,13 +168,17 @@ export const fakeProviders = () => {
       refresh_token: refreshToken,
       expires_in: 3600,
       id_token: idTokenFor(account),
+      scope: account.granted,
     });
   };
 
   const tokenEndpoint = async (form: URLSearchParams): Promise<Response> => {
-    const provider: ProviderName =
-      form.get("client_id") === clients.google.id ? "google" : "microsoft";
-    if (form.get("client_secret") !== clients[provider].secret) {
+    const clientId = form.get("client_id");
+    const client =
+      [clients.google, clients.microsoftLandscape].find(
+        ({ id }) => id === clientId
+      ) ?? clients.microsoft;
+    if (form.get("client_secret") !== client.secret) {
       return oauthError("invalid_client", 401);
     }
     if (form.get("grant_type") === "authorization_code") {

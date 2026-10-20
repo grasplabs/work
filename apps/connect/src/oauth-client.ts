@@ -59,6 +59,8 @@ export interface TokenSet {
   /** Epoch milliseconds, counted from before the request. */
   expiresAt: number;
   idToken?: string;
+  /** The scopes the provider says it granted, as its answer lists them. */
+  scope?: string;
 }
 
 /** The first `maxResponseBytes` of the body; more than that is refused. */
@@ -176,6 +178,7 @@ const tokenSet = (
     refresh_token: refreshToken,
     expires_in: expiresIn,
     id_token: idToken,
+    scope,
   } = body;
   if (typeof accessToken !== "string" || accessToken === "") {
     throw new OAuthResponseError(200);
@@ -188,6 +191,7 @@ const tokenSet = (
         : undefined,
     expiresAt: requestedAt + lifetimeSeconds(expiresIn) * 1000,
     idToken: typeof idToken === "string" ? idToken : undefined,
+    scope: typeof scope === "string" ? scope : undefined,
   };
 };
 

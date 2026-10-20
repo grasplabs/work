@@ -209,6 +209,11 @@ export const startConnection = async (
     throw roleErrors.create("role.forbidden");
   }
   const { provider, client, vault } = await ready(env, providerId);
+  // The landscape's connection reads the whole tenant: the organization's,
+  // never a person's own.
+  if (provider.sharedOnly === true && scope !== "shared") {
+    throw connectionErrors.create("connection.invalid");
+  }
   // A suite's flow is pinned to the organization's tenant; an app's has
   // none, so it is always "" (`isTenant`).
   const tenant = provider.pinned ? (rest.tenant ?? "").toLowerCase() : "";
@@ -457,6 +462,7 @@ type Refuse = (
 ) => Promise<void>;
 
 type RefusalReason =
+  | "connection.scopes_refused"
   | "connection.wrong_account"
   | "connection.not_own_account"
   | "connection.already_connected"
@@ -543,6 +549,38 @@ const keepAccount = async (
   }
 };
 
+/** How Entra may prefix a Microsoft Graph scope in a token's answer. */
+const graphScopePrefix = "https://graph.microsoft.com/";
+
+/**
+ * Whether `tokens` were granted exactly the access `provider` asks for,
+ * where it must hold no more (`granted`): every scope the provider's
+ * answer lists among those allowed, and every one required among them.
+ * An answer that lists none is refused: nobody can tell what it holds.
+ */
+const grantedAsAsked = (
+  { granted }: OAuthProviderConfig,
+  { scope }: TokenSet
+): boolean => {
+  if (granted === undefined) {
+    return true;
+  }
+  if (scope === undefined) {
+    return false;
+  }
+  const scopes = new Set(
+    scope
+      .split(" ")
+      .filter((each) => each !== "")
+      // Entra may name Graph's scopes by their full URI.
+      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
+  );
+  return (
+    [...scopes].every((each) => granted.allowed.has(each)) &&
+    granted.required.every((each) => scopes.has(each.toLowerCase()))
+  );
+};
+
 /**
  * Keeps the tokens a flow came back with, once they are known to be for an
  * account the person may connect: for a suite, in the organization's
@@ -586,6 +624,9 @@ const keepTokens = async (
         ? "connection.wrong_account"
         : "connection.provider_refused"
     );
+  }
+  if (!grantedAsAsked(provider, tokens)) {
+    return await refusal("connection.scopes_refused");
   }
   const { refreshToken } = tokens;
   if (refreshToken === undefined) {

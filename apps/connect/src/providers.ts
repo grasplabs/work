@@ -4,6 +4,8 @@ import {
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
 import type { OAuthProvider } from "@grasp-os/shared/connect";
+import { landscapeProviderSchema } from "@grasp-os/shared/landscape";
+import type { LandscapeProvider } from "@grasp-os/shared/landscape";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
@@ -85,6 +87,18 @@ export interface OAuthProviderConfig {
   scopes: readonly string[];
   /** How the scope parameter joins `scopes`. */
   scopeSeparator: string;
+  /**
+   * The access a token must be granted, exactly: tokens granted more than
+   * `allowed`, or less than `required`, are refused
+   * (`connection.scopes_refused`). For a connection that must hold no
+   * more than it asks for, as the landscape's; none for the rest.
+   */
+  granted?: {
+    allowed: ReadonlySet<string>;
+    required: readonly string[];
+  };
+  /** Only shared connections, never a person's own (the landscape's). */
+  sharedOnly?: boolean;
   /** Parameters the authorization request adds to the standard ones. */
   authorizationParams: (tenant: string) => Record<string, string>;
   /** How the client authenticates at the token and revocation endpoints. */
@@ -164,6 +178,40 @@ const googleIssuers = new Set([
 const microsoftLogin = "https://login.microsoftonline.com";
 
 /**
+ * The Entra account an ID token is for, if it comes from Entra for the
+ * client `clientId` and the account is homed in `tenant`.
+ */
+// oxlint-disable-next-line require-await -- an app's lookup is async
+const entraAccount: OAuthProviderConfig["account"] = async (
+  { idToken },
+  tenant,
+  clientId
+) => {
+  const parsed = microsoftClaims.safeParse(idTokenClaims(idToken));
+  if (!parsed.success) {
+    return null;
+  }
+  const {
+    iss,
+    aud,
+    tid,
+    oid,
+    idp,
+    email,
+    preferred_username: name,
+  } = parsed.data;
+  // A guest is homed in another tenant: not an account of the organization.
+  const inTenant =
+    tid.toLowerCase() === tenant &&
+    iss.toLowerCase() === `${microsoftLogin}/${tenant}/v2.0` &&
+    (idp === undefined || idp === iss) &&
+    aud === clientId;
+  return inTenant
+    ? { id: oid, name: name ?? null, email: email ?? name ?? null }
+    : null;
+};
+
+/**
  * Microsoft 365, through Entra ID's v2 endpoints for the organization's own
  * tenant, so the sign-in page offers only its accounts. Entra has no token
  * revocation endpoint: disconnecting deletes the tokens, and they lapse.
@@ -200,31 +248,61 @@ const microsoft: OAuthProviderConfig = {
   client: (env) =>
     credentials(env.MICROSOFT_CLIENT_ID, env.MICROSOFT_CLIENT_SECRET),
   subject: ({ idToken }) => oidOnly.safeParse(idTokenClaims(idToken)).data?.oid,
-  // oxlint-disable-next-line require-await -- an app's lookup is async
-  account: async ({ idToken }, tenant, clientId) => {
-    const parsed = microsoftClaims.safeParse(idTokenClaims(idToken));
-    if (!parsed.success) {
-      return null;
-    }
-    const {
-      iss,
-      aud,
-      tid,
-      oid,
-      idp,
-      email,
-      preferred_username: name,
-    } = parsed.data;
-    // A guest is homed in another tenant: not an account of the organization.
-    const inTenant =
-      tid.toLowerCase() === tenant &&
-      iss.toLowerCase() === `${microsoftLogin}/${tenant}/v2.0` &&
-      (idp === undefined || idp === iss) &&
-      aud === clientId;
-    return inTenant
-      ? { id: oid, name: name ?? null, email: email ?? name ?? null }
-      : null;
+  account: entraAccount,
+};
+
+/** What the landscape's Microsoft connection reads Graph with, and only that. */
+const landscapeScopes = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "User.Read",
+  // The tenant's enterprise apps, with their publishers.
+  "Application.Read.All",
+  // The grants people and admins gave them.
+  "DelegatedPermissionGrant.Read.All",
+  // The names of the people who gave them.
+  "User.ReadBasic.All",
+] as const;
+
+/**
+ * The application landscape's read-only admin connection to Entra
+ * (GRA-539), kept apart from Microsoft 365's mail, calendar and files.
+ * It signs in with an app registration of its own
+ * (`MICROSOFT_LANDSCAPE_CLIENT_*`): Entra puts every scope a person ever
+ * granted an app into each token it issues for it, so a token of the
+ * Microsoft 365 app could carry mail. A token granted anything beyond
+ * these scopes, or short of the reads, is refused all the same.
+ */
+const microsoftLandscape: OAuthProviderConfig = {
+  ...microsoft,
+  id: "microsoft-landscape",
+  // No connector: its connection takes no calls, only core's sync reads it.
+  server: "microsoft-landscape",
+  scopes: landscapeScopes,
+  granted: {
+    // Entra names the OpenID scopes in its answer, or leaves them out.
+    allowed: new Set(landscapeScopes.map((scope) => scope.toLowerCase())),
+    required: [
+      "Application.Read.All",
+      "DelegatedPermissionGrant.Read.All",
+      "User.ReadBasic.All",
+    ],
   },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.MICROSOFT_LANDSCAPE_CLIENT_ID,
+      env.MICROSOFT_LANDSCAPE_CLIENT_SECRET
+    ),
+};
+
+/** The landscape's connections, by provider. */
+const landscapeProviders: Readonly<
+  Record<LandscapeProvider, OAuthProviderConfig>
+> = {
+  "microsoft-landscape": microsoftLandscape,
 };
 
 /**
@@ -378,11 +456,15 @@ const appProvider = ({
   };
 };
 
-/** The provider `id` names: a suite, or an app of this release. */
+/** The provider `id` names: a suite, the landscape's, or an app of this release. */
 export const providerFor = (id: string): ProviderConfig | undefined => {
   const suite = oauthProviderSchema.safeParse(id);
   if (suite.success) {
     return providers[suite.data];
+  }
+  const landscape = landscapeProviderSchema.safeParse(id);
+  if (landscape.success) {
+    return landscapeProviders[landscape.data];
   }
   const record = appProviderSchema.safeParse(id).success
     ? appRecord(id)
