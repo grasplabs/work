@@ -470,6 +470,28 @@ const statusOf = {
 } as const;
 
 /**
+ * The release of App `app`'s `version` that started a run: one no longer
+ * readable (retention removed it, or it was revoked or no longer matches
+ * what was sealed) leaves the run as one this screen can't see
+ * (`workflow.run_unavailable`), never a `version.*` refusal, which the
+ * screen would take for its own release having changed.
+ */
+const originRelease = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<Release> => {
+  try {
+    return await loadRelease(env, app, version);
+  } catch (error) {
+    if (versionErrors.codeOf(error) !== undefined) {
+      throw workflowResourceErrors.create("workflow.run_unavailable");
+    }
+    throw error;
+  }
+};
+
+/**
  * The contract the App version that started a run declared for `alias`:
  * its fingerprint, so the screen tells a run of another contract apart,
  * and its output, which what the run returned is projected by.
@@ -487,7 +509,7 @@ const startedContract = async (
     originAppVersion === asking.version
       ? resolved
       : await declaredIn(
-          await loadRelease(env, asking.app, originAppVersion),
+          await originRelease(env, asking.app, originAppVersion),
           resolved.alias
         );
   if (started === undefined) {
