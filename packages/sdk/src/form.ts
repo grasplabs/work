@@ -710,12 +710,30 @@ export class FormBinding {
   /** The values TanStack starts from: never changed after. */
   readonly initialValues: Record<string, unknown>;
 
+  /**
+   * Tells the session client whether this form holds unsaved edits or a
+   * submission in flight or of unknown outcome (`GraspClient.guardLeave`),
+   * for the host to confirm leaving the screen while it does.
+   */
+  readonly #leaveGuard:
+    | ((holder: object, guarded: boolean) => void)
+    | undefined;
+  /** What `#leaveGuard` was told last. */
+  #guarded = false;
+  /**
+   * An operation form's values its last successful submission sent, kept
+   * in the fields (no `resetOnSuccess`): saved, so not edits to guard.
+   */
+  #savedValues: Record<string, unknown> | undefined;
+
   constructor(
     target: Target,
     initialValues: Record<string, unknown>,
     options: FormOptionsInput,
-    draft?: DraftSlot
+    draft?: DraftSlot,
+    leaveGuard?: (holder: object, guarded: boolean) => void
   ) {
+    this.#leaveGuard = leaveGuard;
     this.#target = target;
     this.#options = options;
     this.#baseline = options.record;
@@ -770,6 +788,7 @@ export class FormBinding {
    */
   setMounted(mounted: boolean): void {
     this.#mounted = mounted;
+    this.#tellGuard();
     const slot = this.#draft;
     if (slot !== undefined) {
       if (mounted) {
@@ -829,6 +848,7 @@ export class FormBinding {
 
   /** Tells every listener of a new status. */
   #tellStatus(): void {
+    this.#tellGuard();
     for (const listener of this.#listeners) {
       listener();
     }
@@ -838,9 +858,37 @@ export class FormBinding {
     const next = { ...this.#status, ...change };
     this.#status = { ...next, locked: next.phase !== "idle" };
     this.#keepDraft();
+    this.#tellGuard();
     for (const listener of this.#listeners) {
       listener();
     }
+  }
+
+  /**
+   * Whether leaving the screen would lose something: while mounted, edits
+   * not saved (a record form's draft, another form's values changed from
+   * where they started), or a submission in flight or of unknown outcome.
+   * Told to the client only when it changes.
+   */
+  #tellGuard(): void {
+    const guarded =
+      this.#mounted &&
+      this.#form !== undefined &&
+      (this.#status.phase !== "idle" || this.#unsaved());
+    if (guarded !== this.#guarded) {
+      this.#guarded = guarded;
+      this.#leaveGuard?.(this.#owner, guarded);
+    }
+  }
+
+  /** Whether the values hold edits not saved. */
+  #unsaved(): boolean {
+    return this.#target.kind === "record"
+      ? this.#dirty()
+      : !same(
+          this.#formOf().state.values,
+          this.#savedValues ?? this.initialValues
+        );
   }
 
   /** The rest of the save's arguments: `args` of the baseline, or as restored. */
@@ -973,6 +1021,7 @@ export class FormBinding {
       return;
     }
     this.#keepDraft();
+    this.#tellGuard();
   };
 
   #formOf(): FormApiOf<Record<string, unknown>> {
@@ -1080,6 +1129,7 @@ export class FormBinding {
       target.kind === "record"
         ? pick(this.#baseline, target.fields)
         : this.initialValues;
+    this.#savedValues = undefined;
     this.#formOf().reset(values, { keepDefaultValues: true });
     this.#set({
       attempted: false,
@@ -1252,6 +1302,7 @@ export class FormBinding {
     const kept = this.#draft?.store.get(this.#draft.key);
     const sentDraft =
       kept !== undefined && kept === this.#written ? kept : undefined;
+    const sentValues = this.#formOf().state.values;
     let result: unknown;
     try {
       result = await this.#send(submission);
@@ -1259,7 +1310,7 @@ export class FormBinding {
       throw this.#failed(error, submission);
     }
     this.#uncertain = undefined;
-    const refused = this.#succeeded(result, sentDraft);
+    const refused = this.#succeeded(result, sentDraft, sentValues);
     if (refused !== undefined) {
       throw refused;
     }
@@ -1349,7 +1400,11 @@ export class FormBinding {
   }
 
   /** A submission committed: the new baseline, the reset and the callback. */
-  #succeeded(result: unknown, sentDraft?: FormDraft): GraspError | undefined {
+  #succeeded(
+    result: unknown,
+    sentDraft: FormDraft | undefined,
+    sentValues: Record<string, unknown>
+  ): GraspError | undefined {
     const target = this.#target;
     if (target.kind === "record") {
       const committed = identityOf(result);
@@ -1387,9 +1442,13 @@ export class FormBinding {
         this.#dropSaved(sentDraft);
       }
     } else {
+      // Set first: the guard `#set` tells reads it.
+      this.#savedValues =
+        this.#options.resetOnSuccess === true ? undefined : sentValues;
       this.#set({ phase: "idle", attempted: false });
       if (this.#options.resetOnSuccess === true) {
         this.#formOf().reset(this.initialValues, { keepDefaultValues: true });
+        this.#tellGuard();
       }
     }
     void this.#notify(result, this.#started);
@@ -1549,7 +1608,10 @@ export const bindForm = (
     read,
     initialValuesOf(read, options),
     options,
-    draftSlotOf(client, target, read, options)
+    draftSlotOf(client, target, read, options),
+    (holder, guarded) => {
+      client.guardLeave(holder, guarded);
+    }
   );
 };
 

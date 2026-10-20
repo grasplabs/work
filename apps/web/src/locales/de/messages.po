@@ -4944,6 +4944,10 @@ msgstr "Es ist geschehen"
 msgid "It happened: {who}"
 msgstr "Es ist geschehen: {who}"
 
+#: src/screens/screen-frame.tsx
+msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
+msgstr "Es gibt nicht gespeicherte Änderungen oder eine Änderung ohne Rückmeldung. Beim Verlassen gehen nicht gespeicherte Änderungen verloren; bereits Gespeichertes oder Laufendes bleibt."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "Er hat keine Parameter."
@@ -5274,9 +5278,17 @@ msgstr "Teamleitungen erhalten ihren Link {when}. Alle anderen direkt, nachdem i
 msgid "Leads talked: {count} of {of}"
 msgstr "Leitungen gesprochen: {count} von {of}"
 
+#: src/screens/screen-frame.tsx
+msgid "Leave"
+msgstr "Verlassen"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Leave out personnel files and anything about one person."
 msgstr "Lassen Sie Personalakten und alles über einzelne Personen weg."
+
+#: src/screens/screen-frame.tsx
+msgid "Leave this app?"
+msgstr "Diese App verlassen?"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Leaves this list"
@@ -8755,6 +8767,10 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
 
+#: src/screens/screen-frame.tsx
+msgid "Stay"
+msgstr "Bleiben"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "Stays by hand"
 msgstr "Bleibt von Hand"
@@ -9827,6 +9843,10 @@ msgstr "Dieser Link funktioniert nicht. Bitten Sie die Person, die ihn geschickt
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Dieser Link ist abgelaufen. Bitten Sie die Person, die ihn geschickt hat, um einen neuen."
+
+#: src/screens/screen-frame.tsx
+msgid "This link opens the app with something it doesn't take. Open the app from its domain instead."
+msgstr "Dieser Link öffnet die App mit etwas, das sie nicht annimmt. Öffnen Sie die App stattdessen über ihre Domäne."
 
 #: src/onboarding/setup-steps.tsx
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."

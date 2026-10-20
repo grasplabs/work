@@ -1,5 +1,6 @@
 import type { ScreenBridge, Theme } from "@grasp-os/sdk/screen-runtime";
 import { requestErrors } from "@grasp-os/shared/errors";
+import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   accountedTransport,
@@ -12,9 +13,10 @@ import {
   rateLimited,
   screenErrors,
   screenLimits,
+  screenNavigationSchema,
   screenProblemSchema,
 } from "@grasp-os/shared/screens";
-import type { ScreenProblem } from "@grasp-os/shared/screens";
+import type { ScreenNavigation, ScreenProblem } from "@grasp-os/shared/screens";
 import { takeToken } from "@grasp-os/shared/token-bucket";
 import type { TokenBucket } from "@grasp-os/shared/token-bucket";
 import { RpcSession, RpcStub } from "capnweb";
@@ -76,6 +78,19 @@ export interface FrameTarget {
   saveDraft: (key: string, text: string | null) => void;
   /** Drops every draft of the person and App, as `saveDraft` does. */
   clearDrafts: () => void;
+  /** The screen's route input, as core normalized it when it opened. */
+  input: () => Json;
+  /**
+   * Opens another of the App's screens (spec 10.7.7), once core checked
+   * the target and the input: the target navigates the page itself, and
+   * resolves once it has.
+   */
+  navigate: (navigation: ScreenNavigation) => Promise<void>;
+  /**
+   * Whether the screen holds unsaved edits or an unknown outcome now: the
+   * target confirms once before the page leaves it while it does.
+   */
+  leaveGuard: (guarded: boolean) => void;
 }
 
 /** The page's theme, as the `dark` class on its root says (theme.js). */
@@ -128,12 +143,24 @@ export const FrameRpcTarget = boundedRpcTarget({
   size: screenLimits.rpc.maxMessageSize,
 });
 
+/**
+ * The longest navigation a frame may ask for, as text: its input's bound,
+ * and room for the screen's name and the rest of the request.
+ */
+const navigationRequestMax = screenLimits.navigationInputBytes + 256;
+
+/** How long a leave guard held past its budget waits: one token's worth. */
+const guardRetryMs = 60_000 / screenLimits.leaveGuards.perMinute;
+
 class Bridge extends FrameRpcTarget implements ScreenBridge {
   readonly #target: FrameTarget;
   readonly #cleanups: (() => void)[];
   #requests: TokenBucket | undefined;
   #reports: TokenBucket | undefined;
   #draftRequests: TokenBucket | undefined;
+  #leaveGuards: TokenBucket | undefined;
+  /** The newest leave guard held back past its budget, and its retry. */
+  #heldGuard: { guarded: boolean; stop: () => void } | undefined;
   #themed = false;
 
   constructor(target: FrameTarget, cleanups: (() => void)[]) {
@@ -365,6 +392,86 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
   /** Drops every draft of the person and App, gathered as `saveDraft` is. */
   clearDrafts(): void {
     this.#target.clearDrafts();
+  }
+
+  /** The screen's route input, as core normalized it. */
+  async input(): Promise<Json> {
+    await Promise.resolve();
+    return this.#target.input();
+  }
+
+  /**
+   * Passes a navigation on, once it is one: text no longer than its
+   * input may be with room for the rest (`navigationRequestMax`), JSON of
+   * `{ screen, input?, replace? }` (`screenNavigationSchema`), and counted
+   * as one of the frame's requests. The target has core check the target
+   * screen and the input before the page goes anywhere.
+   */
+  async navigate(request: unknown): Promise<void> {
+    this.#request();
+    if (typeof request !== "string" || request.length > navigationRequestMax) {
+      throw screenErrors.create("screen.invalid");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(request);
+    } catch {
+      throw screenErrors.create("screen.invalid");
+    }
+    const navigation = screenNavigationSchema.safeParse(parsed);
+    if (!navigation.success) {
+      throw screenErrors.create("screen.invalid");
+    }
+    await this.#target.navigate(navigation.data);
+  }
+
+  /**
+   * Whether the screen holds unsaved edits now; anything else, ignored.
+   * Changes past their budget (`screenLimits.leaveGuards`) are gathered:
+   * the newest is passed on once the bucket refills, so the page always
+   * ends with what the screen said last, however often it said it.
+   */
+  leaveGuard(guarded: unknown): void {
+    if (typeof guarded !== "boolean") {
+      return;
+    }
+    if (this.#heldGuard !== undefined) {
+      this.#heldGuard.guarded = guarded;
+      return;
+    }
+    this.#passGuard(guarded);
+  }
+
+  /** Passes `guarded` on within budget, or holds it for a retry. */
+  #passGuard(guarded: boolean): void {
+    const { taken, bucket } = takeToken(
+      this.#leaveGuards,
+      screenLimits.leaveGuards,
+      Date.now()
+    );
+    this.#leaveGuards = bucket;
+    if (taken) {
+      this.#target.leaveGuard(guarded);
+      return;
+    }
+    // Stopped with the bridge; let go of once it fired.
+    const held = { guarded, stop: (): void => undefined };
+    const timer = setTimeout(() => {
+      const at = this.#cleanups.indexOf(held.stop);
+      if (at !== -1) {
+        this.#cleanups.splice(at, 1);
+      }
+      const newest = this.#heldGuard;
+      this.#heldGuard = undefined;
+      if (newest !== undefined) {
+        this.#passGuard(newest.guarded);
+      }
+    }, guardRetryMs);
+    held.stop = () => {
+      clearTimeout(timer);
+    };
+    this.#heldGuard = held;
+    this.#cleanups.push(held.stop);
   }
 
   /** Past what a screen may report, or in no valid shape: dropped here. */

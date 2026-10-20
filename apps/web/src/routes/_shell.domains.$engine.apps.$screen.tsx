@@ -12,6 +12,10 @@ import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { ScreenFrame } from "../screens/screen-frame.tsx";
+import {
+  screenSearchSchema,
+  useScreenNavigate,
+} from "../screens/screen-navigate.ts";
 
 // One of an engine's apps (core's screens), in the Grasp frame: the site
 // header with the way back to its engine and "Open full page", then the
@@ -22,6 +26,8 @@ import { ScreenFrame } from "../screens/screen-frame.tsx";
 
 const AppPage = () => {
   const { engine, screen } = Route.useParams();
+  const { route, input } = Route.useSearch();
+  const navigate = useScreenNavigate(engine, "/domains/$engine/apps/$screen");
   const page = Route.useLoaderData();
   const router = useRouter();
   const { t } = useLingui();
@@ -43,6 +49,7 @@ const AppPage = () => {
           <Link
             className={buttonVariants({ size: "sm", variant: "outline" })}
             params={{ engine, screen }}
+            search={{ route, input }}
             to="/domains/$engine/apps/$screen/full"
           >
             <Maximize2Icon data-icon="inline-start" />
@@ -62,13 +69,18 @@ const AppPage = () => {
       <div className="flex min-h-0 flex-1 flex-col">
         <ScreenFrame
           app={engine}
-          key={`${engine}/${screen}`}
+          // A navigation to another input of the same screen starts it
+          // afresh, as one to another screen does.
+          key={`${engine}/${screen}/${route ?? ""}/${input ?? ""}`}
+          onNavigate={navigate}
           // Loading the app again reads the engine's current version again
           // too: its apps may have changed with it.
           onReload={() => {
             void router.invalidate();
           }}
           screen={screen}
+          {...(route === undefined ? {} : { route })}
+          {...(input === undefined ? {} : { input })}
         />
       </div>
     </>
@@ -78,6 +90,7 @@ const AppPage = () => {
 export const Route = createFileRoute("/_shell/domains/$engine/apps/$screen")({
   pendingComponent: PageLoading,
   component: AppPage,
+  validateSearch: screenSearchSchema,
   loader: async ({ context: { core }, params }) => {
     const page = await loadFromCore(core, async (session) => {
       const [app, contents] = await Promise.all([

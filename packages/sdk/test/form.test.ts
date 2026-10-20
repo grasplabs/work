@@ -65,6 +65,7 @@ const sentOf = (body: string): Sent => {
  */
 const host = (answer: (sent: Sent) => Answer | Promise<Answer>) => {
   const sent: Sent[] = [];
+  const guards: boolean[] = [];
   const transport: ClientTransport = {
     call: async (request) => {
       const call = sentOf(request);
@@ -117,8 +118,18 @@ const host = (answer: (sent: Sent) => Answer | Promise<Answer>) => {
       await Promise.resolve();
       throw new Error("Nothing here follows a query.");
     },
+    // What the host is told of leaving the screen (spec 10.7.7).
+    navigation: {
+      navigate: async () => {
+        await Promise.resolve();
+        throw new Error("Nothing here navigates.");
+      },
+      leaveGuard: (guarded) => {
+        guards.push(guarded);
+      },
+    },
   };
-  return { client: new GraspClient(transport), sent };
+  return { client: new GraspClient(transport), sent, guards };
 };
 
 /** A form of `target` through `client`, connected to a TanStack form as `useForm` does. */
@@ -577,5 +588,77 @@ describe("a form's callbacks", () => {
     reject(new Error("The first one's follow-up failed."));
     await turns();
     expect(binding.status().applicationError).toBeUndefined();
+  });
+});
+
+describe("leaving a screen with a form", () => {
+  it("is confirmed by the host while the form holds unsaved edits, or a submission whose outcome is unknown, and no longer once it doesn't", async () => {
+    const { client, guards } = host(({ contractId }) =>
+      contractId === "notes.tally" ? "unknown" : { value: 3 }
+    );
+    const edited = formOf(client, api.notes.create, {
+      defaultValues: { title: "", body: "" },
+    });
+    edited.binding.setMounted(true);
+    edited.form.setFieldValue("title", "Groceries");
+    edited.binding.fieldChanged("title");
+    const whileEdited = [...guards];
+    edited.form.setFieldValue("title", "");
+    edited.binding.fieldChanged("title");
+    const afterUndo = [...guards];
+    edited.form.setFieldValue("title", "Again");
+    edited.binding.fieldChanged("title");
+    // An unmounted form holds nothing a leave would lose.
+    edited.binding.setMounted(false);
+    const afterUnmount = [...guards];
+
+    const tallied = formOf(client, api.notes.tally, { defaultValues: {} });
+    tallied.binding.setMounted(true);
+    await settle(tallied.binding.submit());
+    const whileUnknown = [...guards];
+    tallied.binding.discard();
+    expect({
+      whileEdited,
+      afterUndo,
+      afterUnmount,
+      whileUnknown,
+      afterDiscard: guards,
+    }).toStrictEqual({
+      whileEdited: [true],
+      afterUndo: [true, false],
+      afterUnmount: [true, false, true, false],
+      whileUnknown: [true, false, true, false, true],
+      afterDiscard: [true, false, true, false, true, false],
+    });
+  });
+
+  it("is no longer confirmed once a submission saved the values, kept in the fields or reset, until they are edited again", async () => {
+    const { client, guards } = host(() => ({ value: noteId }));
+    const kept = formOf(client, api.notes.create, {
+      defaultValues: { title: "", body: "" },
+    });
+    kept.binding.setMounted(true);
+    kept.form.setFieldValue("title", "Groceries");
+    kept.binding.fieldChanged("title");
+    await kept.binding.submit();
+    const afterSave = [...guards];
+    kept.form.setFieldValue("title", "Groceries, again");
+    kept.binding.fieldChanged("title");
+    const afterEdit = [...guards];
+    kept.binding.setMounted(false);
+
+    const reset = formOf(client, api.notes.create, {
+      defaultValues: { title: "", body: "" },
+      resetOnSuccess: true,
+    });
+    reset.binding.setMounted(true);
+    reset.form.setFieldValue("title", "Errands");
+    reset.binding.fieldChanged("title");
+    await reset.binding.submit();
+    expect({ afterSave, afterEdit, afterReset: guards }).toStrictEqual({
+      afterSave: [true, false],
+      afterEdit: [true, false, true],
+      afterReset: [true, false, true, false, true, false],
+    });
   });
 });

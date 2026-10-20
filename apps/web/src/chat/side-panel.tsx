@@ -21,6 +21,7 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ScreenFrame } from "../screens/screen-frame.tsx";
+import { useScreenNavigate } from "../screens/screen-navigate.ts";
 import { useCore } from "../use-core.ts";
 import { ChatBuilds } from "./builds.tsx";
 import type { ChatBuildsRead } from "./builds.tsx";
@@ -46,6 +47,9 @@ const OpenedApp = ({
 }) => {
   const [screen] = contents.screens;
   const { name } = app;
+  // A screen in the panel opens the screen it navigates to in the main
+  // pane, in Grasp's frame (decision 4 on GRA-259).
+  const navigate = useScreenNavigate(app.id, "/domains/$engine/apps/$screen");
   return (
     <div className="flex flex-1 flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -66,7 +70,15 @@ const OpenedApp = ({
           <Trans>{name} has no app to show.</Trans>
         </p>
       ) : (
-        <ScreenFrame app={app.id} embedded screen={screen} />
+        <ScreenFrame
+          app={app.id}
+          embedded
+          // Always a new entry: the chat's own is never replaced.
+          onNavigate={async (target) => {
+            await navigate(target, false);
+          }}
+          screen={screen}
+        />
       )}
     </div>
   );

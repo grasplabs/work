@@ -1,4 +1,7 @@
 // oxlint-disable max-classes-per-file -- a connection's screens, and each frame's own way to its App on that connection, which shares its checks
+import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import type { AppManifest } from "@grasp-os/sdk/host";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors, appVersionSchema } from "@grasp-os/shared/apps";
 import type { App } from "@grasp-os/shared/apps";
 import type {
@@ -9,8 +12,10 @@ import type {
 import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { jsonOf, jsonWithin } from "@grasp-os/shared/operations";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenDelivery } from "@grasp-os/shared/screen-trust";
 import {
@@ -20,16 +25,20 @@ import {
   screenErrors,
   screenLimits,
   screenNameSchema,
+  screenPath,
   screenProblemSchema,
+  screenRouteSchema,
 } from "@grasp-os/shared/screens";
 import type {
   AppErrorLog,
   QuerySnapshotPush,
   RunChange,
   ScreenBundle,
+  ScreenRoute,
   ScreenRun,
   ScreenFrameApi,
   ScreensApi,
+  ScreenTarget,
 } from "@grasp-os/shared/screens";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import type {
@@ -40,9 +49,12 @@ import type {
 import { z } from "zod";
 
 import { windowExtentOf } from "./app-functions.ts";
+import { versionReferenceSource } from "./app-releases.ts";
 import { callApp, isPlainData, plainDataBounds } from "./app.ts";
 import type { AppAnswer } from "./app.ts";
 import { appFor, findVersion, getApp, versionFiles } from "./apps.ts";
+import { withReferencesOf } from "./draft-references.ts";
+import type { ReferenceSource } from "./draft-references.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { PageCallback, StillOpen } from "./page-callbacks.ts";
@@ -52,7 +64,6 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
-import { withScreenReferences } from "./screen-references.ts";
 import {
   deliveryOf,
   deliveryAt,
@@ -224,18 +235,186 @@ export const withinAnswer = <Answer>(answer: Answer): Answer => {
   return answer;
 };
 
+/** A screen's route, as its version's manifest declares it (spec 8). */
+type RouteManifest = AppManifest["screens"][string];
+
+/** What a navigation or an opening names: a route, and its input. */
+const screenRouteRequestSchema = z.strictObject({
+  route: screenRouteSchema,
+  input: z.unknown().optional(),
+});
+
+/** Each route's input schema, read once from its descriptor. */
+const routeSchemas = new WeakMap<
+  RouteManifest,
+  ReturnType<typeof schemaFromDescriptor>
+>();
+
+/** The most issues a refused screen input names. */
+const maxInputIssues = 10;
+
+/**
+ * `input` as `route`'s schema normalizes it (defaults filled in, strings
+ * trimmed), an omitted input as `{}`, as an operation's arguments are
+ * (spec 10.7.7): read as JSON within `navigationInputBytes`, then
+ * validated by the native validator. `screen.input_too_large` or
+ * `screen.input_invalid` otherwise, naming what is wrong.
+ */
+const routeInput = (route: RouteManifest, input?: unknown): Json => {
+  // Only input left out is `{}`: `null` is input, and refused as one.
+  const read = jsonWithin(
+    input === undefined ? {} : input,
+    screenLimits.navigationInputBytes
+  );
+  if (read === "too_large") {
+    throw screenErrors.create("screen.input_too_large");
+  }
+  if (read === undefined) {
+    throw screenErrors.create("screen.input_invalid", {
+      issues: ["The input isn't JSON"],
+    });
+  }
+  let schema = routeSchemas.get(route);
+  if (schema === undefined) {
+    schema = schemaFromDescriptor(JSON.stringify(route.input));
+    routeSchemas.set(route, schema);
+  }
+  const result = schema["~standard"].validate(read.json);
+  if (result instanceof Promise) {
+    throw new TypeError("A route's schema validates asynchronously");
+  }
+  if (result.issues !== undefined) {
+    throw screenErrors.create("screen.input_invalid", {
+      issues: result.issues
+        .slice(0, maxInputIssues)
+        .map(({ message }) => message),
+    });
+  }
+  const normalized = jsonOf(result.value);
+  if (normalized === undefined) {
+    throw new TypeError("A validated screen input isn't JSON");
+  }
+  // Defaults fill it in: what the page carries, and opening checks again,
+  // stays within the same bound.
+  if (
+    jsonWithin(normalized, screenLimits.navigationInputBytes) === "too_large"
+  ) {
+    throw screenErrors.create("screen.input_too_large");
+  }
+  return normalized;
+};
+
+/** The route `name` of `manifest`, and the screen file it opens. */
+const routeNamed = (
+  manifest: AppManifest | undefined,
+  name: string
+): { route: RouteManifest; file: string } => {
+  const route =
+    manifest !== undefined && Object.hasOwn(manifest.screens, name)
+      ? manifest.screens[name]
+      : undefined;
+  const file =
+    route === undefined
+      ? undefined
+      : screenPath.exec(route.source)?.groups?.name;
+  if (route === undefined || file === undefined) {
+    throw screenErrors.create("screen.not_found");
+  }
+  return { route, file };
+};
+
+/**
+ * The route screen file `file` opens by, and its input: the route `asked`
+ * names (it must open that file), with its input normalized; or, asked
+ * for none, the first route of the file, in the order declared, whose
+ * input may be left out (empty or all defaults), with that normalized.
+ * `{}` and no route for a file no route names, or a version not of spec
+ * 8's layout. A file whose every route needs input is refused
+ * (`screen.input_invalid`): it opens only by navigating to it.
+ */
+const routedOpen = (
+  manifest: AppManifest | undefined,
+  file: string,
+  asked: z.infer<typeof screenRouteRequestSchema> | undefined
+): { route: string | null; input: Json } => {
+  if (asked !== undefined) {
+    const named = routeNamed(manifest, asked.route);
+    if (named.file !== file) {
+      throw screenErrors.create("screen.not_found");
+    }
+    return {
+      route: named.route.name,
+      input: routeInput(named.route, asked.input),
+    };
+  }
+  const routes = Object.values(manifest?.screens ?? {}).filter(
+    ({ source }) => source === `screens/${file}.tsx`
+  );
+  if (routes.length === 0) {
+    return { route: null, input: {} };
+  }
+  let refusal: unknown;
+  for (const route of routes) {
+    try {
+      return { route: route.name, input: routeInput(route) };
+    } catch (error) {
+      // Only an input refusal moves on to the next route; anything else
+      // is a fault, not a reason to try another.
+      if (!isExpectedError(error)) {
+        throw error;
+      }
+      refusal = error;
+    }
+  }
+  throw refusal;
+};
+
+/** Why a version's server code yields no manifest to route by. */
+const unroutedCodes: ReadonlySet<string> = new Set([
+  "version.build_failed",
+  "version.inspection_failed",
+  "version.invalid_manifest",
+]);
+
+/**
+ * What a version's screens route by and generate their references from:
+ * its manifest and bound workflows (`versionReferenceSource`); undefined
+ * for a version not of spec 8's layout, or whose server code doesn't
+ * inspect, which routes nothing.
+ */
+const routeSourceOf = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  files: Record<string, string>
+): Promise<ReferenceSource | undefined> => {
+  try {
+    return await versionReferenceSource(env, app, version, files);
+  } catch (error) {
+    // Only server code that doesn't build or inspect routes nothing; a
+    // sealed release that fails its checks is refused as itself.
+    if (unroutedCodes.has(versionErrors.codeOf(error) ?? "")) {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
 /**
  * A running App's screen, built from its current version, with core's
  * lease on that build for the person: only a build that gets the App's
  * data now, once this request of theirs is counted (`admitted`). One that
  * doesn't is refused before its code is where a frame can load it; one
- * that does is put there (`stageFrame`).
+ * that does is put there (`stageFrame`). With the input its route takes
+ * (`routedOpen`), checked before anything is built: the screen gets only
+ * what its route's schema normalized.
  */
 const openScreen = async (
   env: Env,
   by: Identity,
   app: unknown,
-  screen: unknown
+  screen: unknown,
+  route?: unknown
 ): Promise<ScreenBundle> => {
   const {
     id,
@@ -243,17 +422,19 @@ const openScreen = async (
     currentVersion: version,
   } = await admittedApp(env, by, app);
   // A name that can't be a screen's is refused before `app.not_running`.
-  screenErrors.parse("screen.invalid", screenNameSchema, screen);
+  const file = screenErrors.parse("screen.invalid", screenNameSchema, screen);
+  const asked =
+    route === undefined
+      ? undefined
+      : screenErrors.parse("screen.invalid", screenRouteRequestSchema, route);
   if (version === null) {
     throw appErrors.create("app.not_running");
   }
-  const files = await withScreenReferences(
-    env,
-    id,
-    version,
-    await versionFiles(env, id, version)
-  );
-  const built = await screenCode(env, files, screen, version, id);
+  const raw = await versionFiles(env, id, version);
+  const source = await routeSourceOf(env, id, version, raw);
+  const opened = routedOpen(source?.manifest, file, asked);
+  const files = await withReferencesOf(id, version, raw, source);
+  const built = await screenCode(env, files, file, version, id);
   const { artifact } = built;
   // What it builds to now, refused or not: a fact about the version, for
   // what waits on an admin (screen-builds.ts).
@@ -268,10 +449,48 @@ const openScreen = async (
     name: appName,
     version,
     screen: built.screen,
+    route: opened.route,
+    input: opened.input,
     artifact,
     frameToken: await frameAccess(env, artifact),
     lease: await leaseFor(env, by.userId, id, artifact),
   };
+};
+
+/**
+ * Where a screen of App `app` may go (spec 10.7.7): the screen route
+ * `request.route` names at the App's current version, with its input
+ * normalized, once this request of the person's is counted (`admitted`)
+ * and the screen's build gets the App's data now, as `openScreen` decides
+ * it. Nothing is built for a frame or leased: the page opens the screen
+ * after, and `openScreen` checks all of it again.
+ */
+const navigateScreen = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  request: unknown
+): Promise<ScreenTarget> => {
+  const { id, currentVersion: version } = await admittedApp(env, by, app);
+  const asked = screenErrors.parse(
+    "screen.invalid",
+    screenRouteRequestSchema,
+    request
+  );
+  if (version === null) {
+    throw appErrors.create("app.not_running");
+  }
+  const raw = await versionFiles(env, id, version);
+  const source = await routeSourceOf(env, id, version, raw);
+  const { route, file } = routeNamed(source?.manifest, asked.route);
+  const input = routeInput(route, asked.input);
+  const files = await withReferencesOf(id, version, raw, source);
+  const built = await screenCode(env, files, file, version, id);
+  await requireDelivery(env, by, id, built.artifact, {
+    operation: "navigate",
+    stage: "admission",
+  });
+  return { screen: built.screen, route: route.name, input };
 };
 
 /** What a connection's calls on an App are decided on. */
@@ -1234,10 +1453,21 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     return open;
   }
 
-  async open(app: string, screen: string): Promise<ScreenBundle> {
+  async open(
+    app: string,
+    screen: string,
+    route?: ScreenRoute
+  ): Promise<ScreenBundle> {
     return await withPerson(
       this.#check,
-      async (by) => await openScreen(this.#env, by, app, screen)
+      async (by) => await openScreen(this.#env, by, app, screen, route)
+    );
+  }
+
+  async navigate(app: string, navigation: ScreenRoute): Promise<ScreenTarget> {
+    return await withPerson(
+      this.#check,
+      async (by) => await navigateScreen(this.#env, by, app, navigation)
     );
   }
 

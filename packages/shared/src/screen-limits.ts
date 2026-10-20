@@ -144,6 +144,17 @@ export const screenLimits = {
   inputBytes: platformLimits.operationInputBytes,
   /** A server call's answer, as UTF-8 JSON, in bytes: more is paged. */
   answerBytes: platformLimits.operationOutputBytes,
+  /**
+   * A screen's input, as UTF-8 JSON, in bytes: what a navigation names
+   * and the page carries in its address, so a route's ID or two, never a
+   * document (spec 10.7.7).
+   */
+  navigationInputBytes: 2048,
+  /**
+   * How often a frame may change its leave guard (spec 10.7.7); changes
+   * past it are gathered, the newest passed on once the bucket refills.
+   */
+  leaveGuards: { burst: 10, perMinute: 60 },
   /** A person's requests of one App's screens (subscriptions apart). */
   requests: {
     burst: platformLimits.browserRequestBurst,

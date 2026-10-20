@@ -63,6 +63,8 @@ export type {
   ReturnOf,
   RunHandle,
   ScreenInputOf,
+  ScreenOutputOf,
+  ScreenProps,
   ScreenReference,
   WorkflowDecisionDetail,
   WorkflowDecisionInboxItem,

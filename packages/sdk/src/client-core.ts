@@ -27,6 +27,8 @@ import type { Settled } from "./client-error.ts";
 import { ClientFiles } from "./client-files.ts";
 import type { FileTransport } from "./client-files.ts";
 import { PortableLive } from "./client-live.ts";
+import { navigateThrough } from "./client-navigation.ts";
+import type { Navigate, NavigationTransport } from "./client-navigation.ts";
 import { PortableTransport } from "./client-portable.ts";
 import type {
   PortableClientOptions,
@@ -210,6 +212,11 @@ export interface ClientTransport {
   drafts?: DraftPersistence;
   /** How files move (client-files.ts); a client without it moves none. */
   files?: FileTransport;
+  /**
+   * How the client asks the trusted host to open another of the App's
+   * screens (client-navigation.ts); a client without it navigates nowhere.
+   */
+  navigation?: NavigationTransport;
 }
 
 /**
@@ -1456,6 +1463,25 @@ export class GraspClient {
    * reused, and one session deletes few.
    */
   readonly #deletedFiles = new Set<string>();
+  /**
+   * What holds unsaved edits or an unknown outcome now (`guardLeave`):
+   * the host confirms leaving the screen while any does.
+   */
+  readonly #leaveGuards = new Set<object>();
+
+  /**
+   * Opens another of the App's screens through the trusted host (spec
+   * 10.7.7, `useNavigate`): `screen` from the generated `screens`, its
+   * route input (left out only for an empty or all-default input), and
+   * `{ replace }` to replace the current entry rather than push one.
+   * Resolves once the host accepted the navigation, not once the screen
+   * loaded. One function for the client's life, so a screen's callbacks
+   * can keep it.
+   */
+  readonly navigate: Navigate = async (screen, ...args) => {
+    const [input, options] = args;
+    await navigateThrough(this.#transport?.navigation, screen, input, options);
+  };
 
   /**
    * The App's files: downloading and deleting them through a files
@@ -1473,6 +1499,24 @@ export class GraspClient {
    * By design, not isolation: screen code shares the frame and could make
    * one, but gets nothing from it that `bridge()` doesn't already give it.
    */
+  /**
+   * Says whether `holder` (a form) holds unsaved edits or a submission
+   * whose outcome isn't known now: the host is told once whether any does,
+   * each time that changes, and confirms leaving the screen while any does.
+   */
+  guardLeave(holder: object, guarded: boolean): void {
+    const before = this.#leaveGuards.size > 0;
+    if (guarded) {
+      this.#leaveGuards.add(holder);
+    } else {
+      this.#leaveGuards.delete(holder);
+    }
+    const after = this.#leaveGuards.size > 0;
+    if (before !== after) {
+      this.#transport?.navigation?.leaveGuard(after);
+    }
+  }
+
   constructor(connection: PortableClientOptions | ClientTransport) {
     if ("call" in connection && typeof connection.call === "function") {
       this.#transport = connection;

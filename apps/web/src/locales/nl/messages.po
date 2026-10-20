@@ -4944,6 +4944,10 @@ msgstr "Het is gebeurd"
 msgid "It happened: {who}"
 msgstr "Het is gebeurd: {who}"
 
+#: src/screens/screen-frame.tsx
+msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
+msgstr "Er zijn wijzigingen die niet zijn opgeslagen, of een wijziging waarop nog geen antwoord is. Bij verlaten gaan niet-opgeslagen wijzigingen verloren; wat al is opgeslagen of loopt, blijft."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "Er zijn geen parameters."
@@ -5274,9 +5278,17 @@ msgstr "Teamleiders krijgen hun link {when}. Alle anderen direct nadat hun teaml
 msgid "Leads talked: {count} of {of}"
 msgstr "Leads gesproken: {count} van {of}"
 
+#: src/screens/screen-frame.tsx
+msgid "Leave"
+msgstr "Verlaten"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Leave out personnel files and anything about one person."
 msgstr "Laat personeelsdossiers en alles over één persoon weg."
+
+#: src/screens/screen-frame.tsx
+msgid "Leave this app?"
+msgstr "Deze app verlaten?"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Leaves this list"
@@ -8755,6 +8767,10 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
 
+#: src/screens/screen-frame.tsx
+msgid "Stay"
+msgstr "Blijven"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "Stays by hand"
 msgstr "Blijft met de hand"
@@ -9827,6 +9843,10 @@ msgstr "Deze link werkt niet. Vraag wie hem stuurde om een nieuwe."
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Deze link is verlopen. Vraag wie hem stuurde om een nieuwe."
+
+#: src/screens/screen-frame.tsx
+msgid "This link opens the app with something it doesn't take. Open the app from its domain instead."
+msgstr "Deze link opent de app met iets wat ze niet aanneemt. Open de app in plaats daarvan vanuit haar domein."
 
 #: src/onboarding/setup-steps.tsx
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."

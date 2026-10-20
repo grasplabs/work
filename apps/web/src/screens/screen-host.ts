@@ -14,7 +14,11 @@ import {
   screenLimits,
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
-import type { ScreenBundle } from "@grasp-os/shared/screens";
+import type {
+  ScreenBundle,
+  ScreenRoute,
+  ScreenTarget,
+} from "@grasp-os/shared/screens";
 import { RpcStub } from "capnweb";
 
 import type { CoreConnection, SessionEnded } from "../core-connection.ts";
@@ -123,6 +127,8 @@ export type FailureReason =
   | "revoked"
   /** Someone else signed in on the browser since the frame was opened. */
   | "principal-changed"
+  /** The screen was opened with input its route doesn't take. */
+  | "bad-input"
   | "unknown";
 
 /**
@@ -138,6 +144,8 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "app.no_draft": "not-found",
   "screen.not_found": "not-found",
   "screen.invalid": "not-found",
+  "screen.input_invalid": "bad-input",
+  "screen.input_too_large": "bad-input",
   "app.not_running": "not-running",
   "screen.build_failed": "broken",
   "screen.build_slow": "timed-out",
@@ -477,6 +485,27 @@ const seeingRefusals = (
 };
 
 /**
+ * How the page navigates for a screen (spec 10.7.7): to the screen core
+ * resolved, pushing an entry or replacing the current one, resolving once
+ * the page went there; and whether the screen holds unsaved edits now,
+ * which the page confirms once before leaving it.
+ */
+export interface ScreenNavigator {
+  navigate: (target: ScreenTarget, replace: boolean) => Promise<void>;
+  leaveGuard: (guarded: boolean) => void;
+}
+
+/**
+ * How a screen is opened: by the route and input it was navigated to,
+ * which core checks again (none for a screen opened by its file, which
+ * opens by its route that takes no input), and how it navigates on.
+ */
+export interface ScreenOpening {
+  route?: ScreenRoute;
+  navigation: ScreenNavigator;
+}
+
+/**
  * Asks the person, in Grasp's own dialog outside the frame, to confirm an
  * answer a screen asked to give (decision-confirmation.tsx): whether they
  * did.
@@ -484,6 +513,19 @@ const seeingRefusals = (
 export type ConfirmDecision = (
   pending: PendingConfirmation
 ) => Promise<boolean>;
+
+/**
+ * Where the screen's navigation goes, as core resolves it for the person
+ * on the frame's link: refusals as core words them.
+ */
+const framedNavigation = async (
+  hold: FrameHold,
+  app: string,
+  route: ScreenRoute
+): Promise<ScreenTarget> => {
+  const { screens } = await hold.session();
+  return await screens.navigate(app, route);
+};
 
 /**
  * A running App's screen: its own App's server, runs and error log. Its
@@ -504,7 +546,8 @@ const appTarget = (
   refused: (reason: Refused) => void,
   hold: FrameHold,
   confirm: ConfirmDecision,
-  drafts: AppDrafts
+  drafts: AppDrafts,
+  navigation: ScreenNavigator
 ): FrameTarget => {
   const { app, version, screen, lease } = bundle;
   // Core's refusal pushed to what the screen follows, after it started:
@@ -676,6 +719,18 @@ const appTarget = (
     },
     saveDraft: drafts.save,
     clearDrafts: drafts.clear,
+    input: () => bundle.input,
+    // Core decides first whether the person may open the screen the frame
+    // names, with that input, now: the page goes nowhere it refuses, and
+    // only to what core resolved, never to anything the frame sent.
+    navigate: async ({ screen: route, input, replace }) => {
+      const target = await framedNavigation(hold, app, { route, input });
+      // Stopped while core resolved it: the page stays where the person
+      // went meanwhile (refused as a stopped frame).
+      await hold.session();
+      await navigation.navigate(target, replace === true);
+    },
+    leaveGuard: navigation.leaveGuard,
   };
 };
 
@@ -831,6 +886,13 @@ export const previewTarget = (
     },
     clearDrafts: () => {
       // Nothing kept.
+    },
+    // A preview opens with no route input, and navigates nowhere: it runs
+    // beside the chat, not in the App's own pages.
+    input: () => ({}),
+    navigate: refusedInPreview,
+    leaveGuard: () => {
+      // Nothing to leave: a preview's forms change nothing.
     },
   };
 };
@@ -1084,11 +1146,16 @@ const runFrame = <Bundle extends FrameCode>(
 export const appScreen = (
   app: string,
   screen: string,
-  confirm: ConfirmDecision
+  confirm: ConfirmDecision,
+  opening: ScreenOpening
 ): Omit<FrameSource<ScreenBundle>, "join"> => ({
   open: async (session) => {
     try {
-      return await session.screens.open(app, screen);
+      return await session.screens.open(
+        app,
+        screen,
+        ...(opening.route === undefined ? [] : [opening.route])
+      );
     } catch (error) {
       // Refused the person or the App, not only this screen (one not
       // found among the App's): its drafts were read under access gone.
@@ -1125,7 +1192,14 @@ export const appScreen = (
       hold.close();
     });
     return {
-      target: appTarget(bundle, closing, hold, confirm, drafts),
+      target: appTarget(
+        bundle,
+        closing,
+        hold,
+        confirm,
+        drafts,
+        opening.navigation
+      ),
       // Core's file channel, under the screen's lease, with the person's
       // session: a plain request of the page's own origin, naming the
       // person the frame is for. One core refuses as someone else's, or
@@ -1198,7 +1272,8 @@ export const runScreen = (
   screen: string,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
-  confirm: ConfirmDecision
+  confirm: ConfirmDecision,
+  opening: ScreenOpening
 ): (() => void) => {
   // A screen refused or stopped for access (the person's, or its build's)
   // takes the person's drafts of its App with it; a session that ended,
@@ -1222,7 +1297,7 @@ export const runScreen = (
   return runFrame(
     frame,
     {
-      ...appScreen(app, screen, confirm),
+      ...appScreen(app, screen, confirm, opening),
       join: (onEnded) => tabLink(core, onEnded),
     },
     stateOf,
