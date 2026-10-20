@@ -750,3 +750,47 @@ export const preferences = sqliteTable("sdk_preferences", {
   lastInputHash: text("last_input_hash"),
   lastAnswerJson: text("last_answer_json"),
 });
+
+/**
+ * A cascade past one commit's bound (store-host.ts, `#planCascadeJob`): the
+ * records a commit's deletions reach by `onDelete: "cascade"`, planned in
+ * that commit and deleted by the store's alarm in batches, leaves first.
+ * Written in the commit that planned it, with its members; finished once
+ * the last member is gone. Who deleted is the commit's principal, and the
+ * commit's receipt names the job (`Committed.cascadePending`).
+ */
+export const cascadeJobs = sqliteTable("sdk_cascade_jobs", {
+  jobId: text("job_id").primaryKey(),
+  receiptId: text("receipt_id").notNull(),
+  principal: text().notNull(),
+  /** The App whose release committed the deletion, if one did. */
+  resourceId: text("resource_id"),
+  /** The first record the commit itself deleted: what the job is named by. */
+  rootTableId: text("root_table_id").notNull(),
+  rootRecordId: text("root_record_id").notNull(),
+  planned: integer().notNull(),
+  deleted: integer().notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+  finishedAt: integer("finished_at"),
+});
+
+/**
+ * The records a cascade job still has to delete: one row per record, so a
+ * record belongs to one job at most. While it has a row it stays readable,
+ * and a write to it or a new reference to it is refused (`data.deleting`);
+ * the batch that deletes it removes the row in the same transaction.
+ */
+export const cascadeMembers = sqliteTable(
+  "sdk_cascade_members",
+  {
+    tableId: text("table_id").notNull(),
+    recordId: text("record_id").notNull(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => cascadeJobs.jobId),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tableId, table.recordId] }),
+    index("sdk_cascade_members_job").on(table.jobId),
+  ]
+);

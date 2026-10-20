@@ -10,6 +10,7 @@ import type { AccessMode } from "@grasp-os/sdk/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
+  cascadeJobMaxRecords,
   commitMaxCascade,
   commitMaxGuards,
   commitMaxInputBytes,
@@ -24,13 +25,15 @@ import type {
   StoreFields,
   WriterRoles,
 } from "@grasp-os/shared/stores";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { allEvents } from "./audit-events.ts";
+import { failure } from "./sealed-apps.ts";
 import {
   manifestHash,
   memberRoles,
@@ -2264,7 +2267,7 @@ describe("a store's cascades", () => {
     await expect(recordCount(store)).resolves.toBe(0);
   });
 
-  it("refuses a deletion that would take more than one commit may, for a workflow to batch", async () => {
+  it("deletes up to the bound in the commit itself, and leaves more to a cascade job", async () => {
     const store = await newCascadeStore();
     const [many = "", most = ""] = await insertCascading(
       store,
@@ -2277,15 +2280,21 @@ describe("a store's cascades", () => {
     await insertCascading(store, "links", ...linksTo(most, commitMaxCascade));
     const before = await recordCount(store);
 
-    await expect(deleteNote(store, many)).rejects.toMatchObject({
-      code: "data.cascade_limit",
-      details: { limit: commitMaxCascade },
+    const pending = await deleteNote(store, many);
+    // Nothing deleted yet: the job does it after the commit.
+    const afterJob = await recordCount(store);
+    const inline = await deleteNote(store, most);
+    expect({
+      pending: pending.cascadePending?.members,
+      inline: inline.cascaded?.length,
+      afterJob,
+      afterInline: await recordCount(store),
+    }).toStrictEqual({
+      pending: commitMaxCascade + 2,
+      inline: commitMaxCascade,
+      afterJob: before,
+      afterInline: before - commitMaxCascade - 1,
     });
-    await expect(recordCount(store)).resolves.toBe(before);
-    await deleteNote(store, most);
-    await expect(recordCount(store)).resolves.toBe(
-      before - commitMaxCascade - 1
-    );
   });
 
   it("shows a mutation's staged reads what its deletion takes, as its commit will", async () => {
@@ -2313,5 +2322,378 @@ describe("a store's cascades", () => {
     expect(value).toBeNull();
     // A staged read keeps nothing.
     await expect(store.get("links", link)).resolves.not.toBeNull();
+  });
+});
+
+/** `insertCascading`, a commit's writes at a time, for any number of records. */
+const insertMany = async (
+  store: OpenStore,
+  table: "notes" | "links" | "subs",
+  fields: StoreFields[]
+): Promise<string[]> => {
+  const ids: string[] = [];
+  for (let at = 0; at < fields.length; at += commitMaxWrites) {
+    const chunk = fields.slice(at, at + commitMaxWrites);
+    // oxlint-disable-next-line no-await-in-loop -- a commit's writes at a time
+    const inserted = await insertCascading(store, table, ...chunk);
+    ids.push(...inserted);
+  }
+  return ids;
+};
+
+/** The store's cascade jobs, and the members each has left. */
+const cascadeJobsOf = async (store: OpenStore) =>
+  await runInDurableObject(objectOf(store.id), (_instance, state) =>
+    state.storage.sql
+      .exec<{
+        job: string;
+        planned: number;
+        deleted: number;
+        finished: number | null;
+        left: number;
+      }>(
+        `SELECT j.job_id AS job, j.planned, j.deleted, j.finished_at AS finished,
+           (SELECT count(*) FROM sdk_cascade_members m WHERE m.job_id = j.job_id) AS left
+         FROM sdk_cascade_jobs j ORDER BY j.created_at`
+      )
+      .toArray()
+  );
+
+/** One alarm of the store's object, as its next wake-up runs it. */
+const alarmOnce = async (store: OpenStore): Promise<void> => {
+  await runDurableObjectAlarm(objectOf(store.id));
+};
+
+/** The store's alarms, until no cascade job has members left. */
+const cascadeDone = async (store: OpenStore): Promise<void> => {
+  for (let alarms = 0; alarms < 50; alarms += 1) {
+    // One alarm after the other: each goes on from where the last stopped.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const jobs = await cascadeJobsOf(store);
+    if (jobs.every(({ finished }) => finished !== null)) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await alarmOnce(store);
+  }
+  throw new Error("The cascade job never finished");
+};
+
+/**
+ * References the store holds to records it no longer holds: what a
+ * reader would follow to nothing.
+ */
+const danglingReferences = async (store: OpenStore): Promise<number> =>
+  await runInDurableObject(
+    objectOf(store.id),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          `SELECT count(*) AS count FROM sdk_record_refs r
+         WHERE NOT EXISTS (SELECT 1 FROM sdk_records t
+           WHERE t.table_id = r.to_table_id AND t.record_id = r.to_record_id)`
+        )
+        .one().count
+  );
+
+/**
+ * A note with `links` links to it, each with `subs` subs: a cascade two
+ * levels deep, inserted a commit's writes at a time.
+ */
+const deepCascade = async (store: OpenStore, links: number, subs: number) => {
+  const [note = ""] = await insertCascading(store, "notes", { title: "Root" });
+  const linkIds = await insertCascading(
+    store,
+    "links",
+    ...linksTo(note, links)
+  );
+  const subFields = linkIds.flatMap((link) =>
+    Array.from({ length: subs }, () => ({ link }))
+  );
+  for (let at = 0; at < subFields.length; at += commitMaxWrites) {
+    // oxlint-disable-next-line no-await-in-loop -- a commit's writes at a time
+    await insertCascading(
+      store,
+      "subs",
+      ...subFields.slice(at, at + commitMaxWrites)
+    );
+  }
+  return { note, links: linkIds, members: 1 + links + links * subs };
+};
+
+describe("a store's cascade jobs", { timeout: 180_000 }, () => {
+  it("deletes everything a cascade reaches after its commit, leaves first, never leaving a reference to nothing, even across a restart", async () => {
+    const store = await newCascadeStore();
+    const { note, members } = await deepCascade(store, 10, 110);
+    const before = await recordCount(store);
+    const committed = await deleteNote(store, note);
+    // Its first batches are due at once.
+    const alarmIn = await runInDurableObject(
+      objectOf(store.id),
+      async (_instance, state) =>
+        ((await state.storage.getAlarm()) ?? Number.POSITIVE_INFINITY) -
+        Date.now()
+    );
+    // Still readable, all of it, until the job deletes it.
+    const pending = {
+      soon: alarmIn < 5000,
+      outcome: committed.cascadePending?.members,
+      note: (await store.get("notes", note)) !== null,
+      count: await recordCount(store),
+    };
+    // One alarm deletes some batches (the subs first), never the root,
+    // and comes again at once for the rest.
+    await alarmOnce(store);
+    const againIn = await runInDurableObject(
+      objectOf(store.id),
+      async (_instance, state) =>
+        ((await state.storage.getAlarm()) ?? Number.POSITIVE_INFINITY) -
+        Date.now()
+    );
+    const midway = {
+      soon: againIn < 5000,
+      dangling: await danglingReferences(store),
+      note: (await store.get("notes", note)) !== null,
+      deleted: before - (await recordCount(store)),
+    };
+    // The store's object dies mid-job: its next alarm goes on from there.
+    await runInDurableObject(objectOf(store.id), (_instance, state) => {
+      state.abort("Killed mid-job");
+    }).catch(() => {});
+    await cascadeDone(store);
+    const [job] = await cascadeJobsOf(store);
+    expect({
+      pending,
+      midway: { ...midway, partial: midway.deleted < members },
+      after: {
+        count: await recordCount(store),
+        dangling: await danglingReferences(store),
+        job: { planned: job?.planned, deleted: job?.deleted, left: job?.left },
+      },
+    }).toStrictEqual({
+      pending: { soon: true, outcome: members, note: true, count: before },
+      midway: {
+        soon: true,
+        dangling: 0,
+        note: true,
+        deleted: midway.deleted,
+        partial: true,
+      },
+      after: {
+        count: before - members,
+        dangling: 0,
+        job: { planned: members, deleted: members, left: 0 },
+      },
+    });
+  });
+
+  it("answers a retry under the same key with the same job, and starts no second", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Root",
+    });
+    await insertMany(store, "links", linksTo(note, commitMaxCascade + 5));
+    const key = [crypto.randomUUID()];
+    const attempt = async () => {
+      const claimed = await store.claim({
+        scope: { ...scope, principal: ada.userId },
+        key,
+        inputHash,
+        runId: null,
+        deadline: Date.now() + 60_000,
+      });
+      if ("outcome" in claimed) {
+        return claimed.outcome;
+      }
+      if (!("held" in claimed)) {
+        throw new Error("The key is busy");
+      }
+      return await store.commit({
+        roles: { appMember: true, appBuilder: false },
+        stagedAt: Date.now(),
+        principal: ada,
+        schemaHash: cascadeHash,
+        writes: [
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ],
+        receipt: claimed.held,
+      });
+    };
+    const first = await attempt();
+    const again = await attempt();
+    const jobs = await cascadeJobsOf(store);
+    expect({
+      same: again.cascadePending?.job === first.cascadePending?.job,
+      jobs: jobs.length,
+    }).toStrictEqual({ same: true, jobs: 1 });
+  });
+
+  it("deletes nothing when planning finds a restricting reference, naming nothing", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Root",
+    });
+    const links = await insertMany(
+      store,
+      "links",
+      linksTo(note, commitMaxCascade + 5)
+    );
+    // A sub that only pins one of the links: it restricts its deletion.
+    await insertCascading(store, "subs", { pinned: links.at(-1) ?? "" });
+    const before = await recordCount(store);
+    const refused = await failure(async () => await deleteNote(store, note));
+    expect({
+      refused,
+      count: await recordCount(store),
+      jobs: await cascadeJobsOf(store),
+    }).toStrictEqual({ refused: "data.referenced", count: before, jobs: [] });
+  });
+
+  it("refuses changing, deleting or newly referring to a record it is deleting", async () => {
+    const store = await newCascadeStore();
+    const [note = "", other = ""] = await insertCascading(
+      store,
+      "notes",
+      { title: "Root" },
+      { title: "Other" }
+    );
+    const [link = ""] = await insertMany(
+      store,
+      "links",
+      linksTo(note, commitMaxCascade + 5)
+    );
+    await deleteNote(store, note);
+    const tried = async (writes: Commit["writes"]) =>
+      await failure(
+        async () =>
+          await commitIn(store, {
+            principal: ada,
+            schemaHash: cascadeHash,
+            writes,
+          })
+      );
+    expect({
+      update: await tried([
+        {
+          op: "patch",
+          table: "links",
+          id: link,
+          expectedRevision: 1,
+          fields: { kept: other },
+        },
+      ]),
+      delete: await tried([
+        { op: "delete", table: "links", id: link, expectedRevision: 1 },
+      ]),
+      refer: await tried([
+        { op: "insert", table: "links", id: newRecordId(), fields: { note } },
+      ]),
+      // A record outside the job is written as ever.
+      elsewhere: await tried([
+        {
+          op: "insert",
+          table: "links",
+          id: newRecordId(),
+          fields: { note: other },
+        },
+      ]),
+    }).toStrictEqual({
+      update: "data.deleting",
+      delete: "data.deleting",
+      refer: "data.deleting",
+      elsewhere: "ok",
+    });
+  });
+
+  it("refuses a deletion whose cascade would reach more than a job may delete", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Root",
+    });
+    // More links than a job may delete, planted straight into the store.
+    await runInDurableObject(objectOf(store.id), (_instance, state) => {
+      const linksTable = state.storage.sql
+        .exec<{ id: string }>(
+          "SELECT table_id AS id FROM sdk_tables WHERE name = 'links'"
+        )
+        .one().id;
+      const notesTable = state.storage.sql
+        .exec<{ id: string }>(
+          "SELECT table_id AS id FROM sdk_tables WHERE name = 'notes'"
+        )
+        .one().id;
+      for (let at = 0; at < cascadeJobMaxRecords; at += 1) {
+        const id = newRecordId();
+        state.storage.sql.exec(
+          "INSERT INTO sdk_records (table_id, record_id, owner_id, revision, created_at, updated_at, value_json, schema_hash) VALUES (?, ?, 'ada', 1, 0, 0, ?, ?)",
+          linksTable,
+          id,
+          JSON.stringify({ note }),
+          cascadeHash
+        );
+        state.storage.sql.exec(
+          "INSERT INTO sdk_record_refs (table_id, record_id, to_table_id, to_record_id, cascade) VALUES (?, ?, ?, ?, 1)",
+          linksTable,
+          id,
+          notesTable,
+          note
+        );
+      }
+    });
+    await expect(deleteNote(store, note)).rejects.toMatchObject({
+      code: "data.cascade_limit",
+      details: { limit: cascadeJobMaxRecords },
+    });
+    await expect(cascadeJobsOf(store)).resolves.toStrictEqual([]);
+  });
+
+  it("audits who started it, each batch's records with their owners, and its end", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Root",
+    });
+    const links = await insertMany(
+      store,
+      "links",
+      linksTo(note, commitMaxCascade + 5)
+    );
+    const committed = await deleteNote(store, note);
+    const job = committed.cascadePending?.job ?? "";
+    await cascadeDone(store);
+    const logged = await allEvents();
+    const events = logged.filter(
+      ({ action, detail }) =>
+        action.startsWith("store.cascade_") && detail.job === job
+    );
+    const batches = events.filter(
+      ({ action }) => action === "store.cascade_batch"
+    );
+    expect({
+      actions: [...new Set(events.map(({ action }) => action))].toSorted(),
+      actors: [...new Set(events.map(({ actor }) => JSON.stringify(actor)))],
+      started: events.find(({ action }) => action === "store.cascade_started")
+        ?.detail,
+      batched: batches.flatMap(({ provenance }) => provenance).toSorted(),
+      owners: [...new Set(batches.map(({ detail }) => detail.owner))],
+      finished: events.find(({ action }) => action === "store.cascade_finished")
+        ?.detail,
+    }).toStrictEqual({
+      actions: [
+        "store.cascade_batch",
+        "store.cascade_finished",
+        "store.cascade_started",
+      ],
+      actors: [JSON.stringify({ type: "person", userId: ada.userId })],
+      started: {
+        job,
+        table: "notes",
+        id: note,
+        members: links.length + 1,
+        app: null,
+      },
+      batched: [...links, note].toSorted(),
+      owners: [ada.userId],
+      finished: { job, deleted: links.length + 1 },
+    });
   });
 });
