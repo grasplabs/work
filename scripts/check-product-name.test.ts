@@ -111,7 +111,21 @@ describe("the product's old name", () => {
       { path: "apps/web/index.html", text: "<title>Grasp Work</title>\n" },
       {
         path: "apps/web/src/locales/de/messages.po",
-        text: 'msgid ""\n"Welcome to Grasp "\n"OS"\nmsgstr ""\n"Grasp"\n"OS"\n',
+        text: [
+          'msgid ""',
+          '"Welcome to Grasp "',
+          '"OS"',
+          'msgstr ""',
+          '"Grasp"',
+          '"OS"',
+          "",
+          'msgid "Hello"',
+          String.raw`msgstr "Hallo von Grasp\nOS"`,
+          "",
+          '#~ msgid "Old"',
+          '#~ msgstr "Grasp OS"',
+          "",
+        ].join("\n"),
       },
       {
         path: "apps/core/blueprints/intake/files/screens/desk.tsx",
@@ -130,9 +144,12 @@ describe("the product's old name", () => {
       oldProductNames(files.filter(({ path }) => read.has(path)))
     ).toStrictEqual([
       'apps/web/src/locales/nl/messages.po:2: "Grasp OS"',
-      // Wrapped over the catalog's quoted lines, named where it starts;
-      // parts joined with nothing between them, "GraspOS" is no name.
-      'apps/web/src/locales/de/messages.po:2: "Grasp OS"',
+      // Wrapped over the catalog's quoted lines, named on the line its
+      // field starts; parts join with nothing between them, so "GraspOS"
+      // is no name.
+      'apps/web/src/locales/de/messages.po:1: "Grasp OS"',
+      // An escaped newline reads as one; an obsolete entry is no one's.
+      'apps/web/src/locales/de/messages.po:9: "Grasp\\nOS"',
       // A built-in App's screen, which the root lint leaves alone.
       'apps/core/blueprints/intake/files/screens/desk.tsx:1: "Grasp OS"',
       // Wrapped across lines, named where it starts.

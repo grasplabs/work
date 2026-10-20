@@ -9,6 +9,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
+import { z } from "zod";
+
 import { findOldProductNames } from "./lint/old-product-name.ts";
 
 /**
@@ -22,41 +24,55 @@ const readFiles =
 const lineIn = (text: string, index: number): number =>
   text.slice(0, index).split("\n").length;
 
-/** Where a PO message wraps onto its next quoted line. */
-const poWrap = /"[ \t]*\n[ \t]*"/gu;
+/** A field of a PO entry and its first quoted part. */
+const poField =
+  /^(?:msgctxt|msgid|msgid_plural|msgstr(?:\[\d+\])?)\s+"(?<part>.*)"\s*$/u;
+
+/** A quoted part that continues the field above it. */
+const poPart = /^"(?<part>.*)"\s*$/u;
+
+/** A quoted PO part as it reads: its escapes decoded, or as written when they aren't JSON's. */
+const decoded = (part: string): string => {
+  try {
+    return z.string().parse(JSON.parse(`"${part}"`));
+  } catch {
+    return part;
+  }
+};
 
 /**
- * A file's text as people read it, and the line of the file each of its
- * characters is on: a PO catalog's messages joined up where they wrap
- * over quoted lines, which adds nothing between the parts.
+ * The messages of a PO catalog as people read them, each with the line
+ * it starts on: its parts joined with nothing between them and their
+ * escapes decoded. Comments and obsolete entries (`#~`) are no one's.
  */
-const readAs = (
-  path: string,
-  written: string
-): { text: string; lineOf: (index: number) => number } => {
-  if (!path.endsWith(".po")) {
-    return { text: written, lineOf: (index) => lineIn(written, index) };
-  }
-  // Each joined character's index in the file as written.
-  const positions: number[] = [];
-  let text = "";
-  let from = 0;
-  for (const wrap of written.matchAll(poWrap)) {
-    for (let at = from; at < wrap.index; at += 1) {
-      positions.push(at);
+const poMessages = (text: string): { value: string; line: number }[] => {
+  const messages: { value: string; line: number }[] = [];
+  // The field a quoted part continues, while there is one.
+  let open: { value: string; line: number } | undefined;
+  for (const [index, line] of text.split("\n").entries()) {
+    const field = poField.exec(line)?.groups?.part;
+    const part = poPart.exec(line)?.groups?.part;
+    if (field !== undefined) {
+      open = { value: decoded(field), line: index + 1 };
+      messages.push(open);
+    } else if (part !== undefined && open !== undefined) {
+      open.value += decoded(part);
+    } else {
+      // Anything else ends the field: a comment, a blank line.
+      open = undefined;
     }
-    text += written.slice(from, wrap.index);
-    from = wrap.index + wrap[0].length;
   }
-  for (let at = from; at < written.length; at += 1) {
-    positions.push(at);
-  }
-  text += written.slice(from);
-  return {
-    text,
-    lineOf: (index) => lineIn(written, positions[index] ?? written.length),
-  };
+  return messages;
 };
+
+/** What people read in a file, each piece with the line it starts on. */
+const readPieces = (
+  path: string,
+  text: string
+): { value: string; lineOf: (index: number) => number }[] =>
+  path.endsWith(".po")
+    ? poMessages(text).map(({ value, line }) => ({ value, lineOf: () => line }))
+    : [{ value: text, lineOf: (index) => lineIn(text, index) }];
 
 /** Not what clients read: tests and their fixtures. */
 const notRead = /(?:^|\/)(?:test|tests|e2e)\/|\.test\.[cm]?[jt]sx?$/u;
@@ -72,12 +88,14 @@ export const readPaths = (paths: readonly string[]): string[] =>
 export const oldProductNames = (
   files: readonly { path: string; text: string }[]
 ): string[] =>
-  files.flatMap(({ path, text: written }) => {
-    const { text, lineOf } = readAs(path, written);
-    return findOldProductNames(text).map(
-      ({ found, index }) => `${path}:${lineOf(index)}: ${JSON.stringify(found)}`
-    );
-  });
+  files.flatMap(({ path, text }) =>
+    readPieces(path, text).flatMap(({ value, lineOf }) =>
+      findOldProductNames(value).map(
+        ({ found, index }) =>
+          `${path}:${lineOf(index)}: ${JSON.stringify(found)}`
+      )
+    )
+  );
 
 const main = (): void => {
   const paths = execFileSync(
