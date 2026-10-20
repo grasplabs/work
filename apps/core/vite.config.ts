@@ -16,32 +16,12 @@ import {
   connectProvidersScript,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
+import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
 
-// V8's background JavaScript compilation off in the tests' workerd. Each
-// package build loads a fresh Loader isolate (esbuild's WebAssembly), which
-// then sits idle in the runtime that `isolate: false` keeps for the whole
-// worker. A Maglev or concurrent Sparkplug job of such an isolate that
-// needs a garbage collection waits on a V8 worker thread for the isolate's
-// main thread to run it, which workerd only does when it runs code in that
-// isolate again: never. On CI's 4-vCPU runners workerd has three worker
-// threads; once three jobs wait like that, the runtime stops, and Vitest
-// never times its test out (GRA-554: the stalls of package-builds and
-// package-artifacts, each runtime's three worker threads parked in
-// `CollectionBarrier::AwaitCollectionBackground`). Compiled on the main
-// thread, no job waits. Miniflare passes this variable on to every workerd
-// it starts; on CI the build-heavy files took as long with it as without.
-const noBackgroundCompile = [
-  "--no-concurrent-recompilation",
-  "--no-concurrent-sparkplug",
-];
-process.env.MINIFLARE_WORKERD_V8_FLAGS = [
-  ...new Set([
-    ...(process.env.MINIFLARE_WORKERD_V8_FLAGS ?? "").split(" "),
-    ...noBackgroundCompile,
-  ]),
-]
-  .filter((flag) => flag !== "")
-  .join(" ");
+// Background compilation off in the tests' workerd (workerd-v8-flags.ts).
+process.env.MINIFLARE_WORKERD_V8_FLAGS = withNoBackgroundCompile(
+  process.env.MINIFLARE_WORKERD_V8_FLAGS
+);
 
 const coreMigrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/core/migrations`
