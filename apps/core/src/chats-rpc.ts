@@ -20,6 +20,7 @@ import type {
   PreviewBundle,
   ProjectDocument,
 } from "@grasp-os/shared/chat";
+import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import {
   authErrors,
   internalErrors,
@@ -55,6 +56,7 @@ import { gatewaySettings, modelEffortsOf } from "./models.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { relayPreviewStream } from "./preview-stream-relay.ts";
+import { previewLoadMsOf } from "./preview-updates.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type { LiveReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -567,7 +569,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         if (!confirmed) {
           throw appErrors.create("app.preview_superseded");
         }
-        return await this.#loadPreview(by, chatId, id, name, screen);
+        return await this.#loadPreviewInTime(by, chatId, id, name, screen);
       } finally {
         // Housekeeping: a place never settled frees itself once its lease
         // ends, so a failure here never replaces how the load ended.
@@ -588,20 +590,49 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
-  /** The bundle of `chatId`'s preview of App `id`, built from its draft now. */
-  async #loadPreview(
+  /** `#loadPreview`, refused as slow once a load may take no longer. */
+  async #loadPreviewInTime(
     by: Identity,
     chatId: string,
     id: AppId,
     name: string,
     screen: string | undefined
   ): Promise<PreviewBundle> {
+    // Ends before its place does (preview-updates.ts): a load that stalls
+    // stops at its next step, so it never builds alongside the next one.
+    const limit = timeLimit(previewLoadMsOf(this.#env));
+    try {
+      return await Promise.race([
+        this.#loadPreview(by, chatId, id, name, screen, limit.signal),
+        whenAborted(limit.signal),
+      ]);
+    } catch (error) {
+      if (limit.signal.aborted) {
+        throw screenErrors.create("screen.build_slow");
+      }
+      throw error;
+    } finally {
+      limit.clear();
+    }
+  }
+
+  /** The bundle of `chatId`'s preview of App `id`, built from its draft now, until `signal` stops it. */
+  async #loadPreview(
+    by: Identity,
+    chatId: string,
+    id: AppId,
+    name: string,
+    screen: string | undefined,
+    signal: AbortSignal
+  ): Promise<PreviewBundle> {
     const draft = await this.#chatsOf(by.userId).previewDraft(
       chatIdOf(chatId),
       by.userId,
       id
     );
+    signal.throwIfAborted();
     const files = await draftFiles(this.#env, id, draft);
+    signal.throwIfAborted();
     const screens = screensIn(files);
     if (screens.length === 0) {
       throw screenErrors.create("screen.not_found");
@@ -618,6 +649,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           draft.revision
         )) ?? undefined
     );
+    signal.throwIfAborted();
     const built = await screenCode(
       this.#env,
       withReferences,
@@ -627,7 +659,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
     // A preview reads no real data, so no approval decides it; its
     // frame still runs exactly this build and nothing else.
+    signal.throwIfAborted();
     await stageFrame(this.#env, built.artifact, built.code);
+    signal.throwIfAborted();
     return {
       app: id,
       name,

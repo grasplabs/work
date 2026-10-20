@@ -29,10 +29,33 @@ export const previewUpdateLeaseMs = platformLimits.serverInvocationWallMs;
  */
 export const previewUpdateConfirmMs = 5000;
 
+/**
+ * How long a load may take, its place held: it ends before its place
+ * does, by the time a waiting update has to confirm one, so no load
+ * goes on building once another has taken its place.
+ */
+export const previewLoadMs = previewUpdateLeaseMs - previewUpdateConfirmMs;
+
+/** The bound on a load: {@link previewLoadMs}, or less where tests set `PREVIEW_LOAD_MS`. */
+export const previewLoadMsOf = (env: Env): number => {
+  const set = Number(env.PREVIEW_LOAD_MS);
+  return Number.isInteger(set) && set > 0 && set < previewLoadMs
+    ? set
+    : previewLoadMs;
+};
+
 interface Waiting {
   token: string;
   go: (taken: boolean) => void;
+  /** Ends its wait for a place to free, once it no longer waits. */
+  stop?: () => void;
 }
+
+/** Gives `waiting` its answer, and ends its wait for a place. */
+const answer = (waiting: Waiting, taken: boolean): void => {
+  waiting.stop?.();
+  waiting.go(taken);
+};
 
 /** One preview session's updates: those building, by when their place ends, and those waiting. */
 interface Session {
@@ -67,7 +90,7 @@ const fill = (session: Session): void => {
       return;
     }
     session.running.set(next.token, Date.now() + previewUpdateConfirmMs);
-    next.go(true);
+    answer(next, true);
   }
 };
 
@@ -96,13 +119,17 @@ export class PreviewUpdates {
       return token;
     }
     if (session.waiting.length >= platformLimits.previewUpdatesPending) {
-      session.waiting.shift()?.go(false);
+      const replaced = session.waiting.shift();
+      if (replaced !== undefined) {
+        answer(replaced, false);
+      }
     }
     const turn = Promise.withResolvers<boolean>();
-    session.waiting.push({ token, go: turn.resolve });
+    const waiting: Waiting = { token, go: turn.resolve };
+    session.waiting.push(waiting);
     // Woken by a settled update, or else once the place of the first one
     // building ends: it never settles when its isolate went away.
-    void this.#wakeAfterLease(key, session, token);
+    void this.#wakeAfterLease(key, session, waiting);
     return (await turn.promise) ? token : null;
   }
 
@@ -139,15 +166,26 @@ export class PreviewUpdates {
     return made;
   }
 
-  /** Lets `token` take a place once the place of each update ahead of it ends, while it still waits. */
+  /**
+   * Lets `waiting` take a place once the place of each update ahead of it
+   * ends, while it still waits: its sleep ends as soon as it is answered.
+   */
   async #wakeAfterLease(
     key: string,
     session: Session,
-    token: string
+    waiting: Waiting
   ): Promise<void> {
-    while (session.waiting.some((waiting) => waiting.token === token)) {
+    while (session.waiting.includes(waiting)) {
+      const slept = Promise.withResolvers<boolean>();
+      const timer = setTimeout(() => {
+        slept.resolve(true);
+      }, untilFree(session));
+      waiting.stop = () => {
+        clearTimeout(timer);
+        slept.resolve(false);
+      };
       // oxlint-disable-next-line no-await-in-loop -- until its turn comes
-      await scheduler.wait(untilFree(session));
+      await slept.promise;
       expire(session);
       this.#promote(key, session);
     }

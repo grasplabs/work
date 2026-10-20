@@ -22,6 +22,7 @@ import type {
 import { RpcStub } from "capnweb";
 
 import type { CoreConnection, SessionEnded } from "../core-connection.ts";
+import { wait as pauseFor } from "../core.ts";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import {
   appDrafts,
@@ -1323,6 +1324,36 @@ export const runScreen = (
  * Runs `screen` (the draft's first when none is named) of the chat's
  * draft of `app` in `frame`, as a preview (`runFrame`).
  */
+/** How long a preview whose load a newer one replaced waits before asking again. */
+export const supersededRetryMs = 250;
+
+/**
+ * `open`, asked again while core says a newer load of the same preview
+ * replaced it (another tab, or this one before its draft changed again):
+ * core loads one at a time with the newest waiting, so asking again joins
+ * the line, until the page's wait for the build (`openMs`) is spent.
+ */
+export const openPreview = async <T>(
+  open: () => Promise<T>,
+  pause: (ms: number) => Promise<void> = pauseFor,
+  now: () => number = Date.now
+): Promise<T> => {
+  const endsAt = now() + screenLimits.openMs;
+  for (;;) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one load at a time
+      return await open();
+    } catch (error) {
+      const replaced = appErrors.codeOf(error) === "app.preview_superseded";
+      if (!replaced || now() + supersededRetryMs >= endsAt) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one load at a time
+    await pause(supersededRetryMs);
+  }
+};
+
 export const runPreview = (
   frame: HTMLIFrameElement,
   { chatId, app, screen }: { chatId: string; app: string; screen?: string },
@@ -1332,7 +1363,10 @@ export const runPreview = (
   runFrame(
     frame,
     {
-      open: async (session) => await session.chats.preview(chatId, app, screen),
+      open: async (session) =>
+        await openPreview(
+          async () => await session.chats.preview(chatId, app, screen)
+        ),
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
       // let go of them, so only closing the connection when the preview

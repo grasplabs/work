@@ -292,6 +292,10 @@ const setUp = async () => {
   return { admin, builder, app, mail, noteId, ...draft };
 };
 
+/** A preview's outcome: `loaded`, or the code it was refused with. */
+const named = (outcome: unknown): unknown =>
+  typeof outcome === "string" ? outcome : "loaded";
+
 /** What a call answered, or the code of the error it failed with. */
 const answer = async (promise: Promise<unknown>): Promise<unknown> => {
   try {
@@ -304,29 +308,42 @@ const answer = async (promise: Promise<unknown>): Promise<unknown> => {
 };
 
 /**
- * Runs `during` with every read of core's files a second and a half slow:
- * a preview's load (which reads the draft's base version) outlives the
- * loads started next to it. Set back however it ends.
+ * Runs `during` with every read of core's files held until it calls
+ * `release`: a preview's load (which reads the draft's base version) waits
+ * there for as long as the test needs. `calls` names each call to core's
+ * files made since the release. Set back however it ends.
  */
-const slowReadsDuring = async <T>(during: () => Promise<T>): Promise<T> => {
+const heldReadsDuring = async <T>(
+  during: (letGo: () => void, calls: string[]) => Promise<T>
+): Promise<T> => {
   const { FILES: files } = env;
+  const gate = Promise.withResolvers<boolean>();
+  let open = false;
+  const calls: string[] = [];
   env.FILES = new Proxy(files, {
     get: (target, property) => {
       const value: unknown = Reflect.get(target, property);
-      if (property === "get" && typeof value === "function") {
+      if (typeof property === "string" && typeof value === "function") {
         return async (...args: unknown[]): Promise<unknown> => {
-          await scheduler.wait(1500);
+          if (open) {
+            calls.push(property);
+          } else if (property === "get") {
+            await gate.promise;
+          }
           return await Reflect.apply(value, target, args);
         };
       }
-      return typeof value === "function"
-        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-        : value;
+      return value;
     },
   });
+  const letGo = () => {
+    open = true;
+    gate.resolve(true);
+  };
   try {
-    return await during();
+    return await during(letGo, calls);
   } finally {
+    letGo();
     env.FILES = files;
   }
 };
@@ -673,24 +690,35 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       "screens/list.tsx": screen,
     });
     const { chats } = builder.api;
-    const loadedAtOnce = async (count: number): Promise<unknown[]> =>
-      await slowReadsDuring(async () => {
-        const outcomes = await Promise.all(
-          Array.from(
-            { length: count },
-            async () => await answer(chats.preview(chatId, app))
-          )
+    /** `count` loads at once, the first held at its read until `releaseWhen` says. */
+    const loadedAtOnce = async (
+      count: number,
+      releaseWhen: (outcomes: Promise<unknown>[]) => Promise<unknown>
+    ): Promise<unknown[]> =>
+      await heldReadsDuring(async (letGo) => {
+        const outcomes = Array.from(
+          { length: count },
+          async () => await answer(chats.preview(chatId, app))
         );
-        return outcomes
-          .map((outcome) => (typeof outcome === "string" ? outcome : "loaded"))
-          .toSorted();
+        await releaseWhen(outcomes);
+        letGo();
+        const settled = await Promise.all(outcomes);
+        return settled
+          .map(named)
+          .toSorted((a, b) => String(a).localeCompare(String(b)));
       });
 
     expect({
       // One loads and one waits for it: both load.
-      two: await loadedAtOnce(2),
-      // The third replaces the one waiting.
-      three: await loadedAtOnce(3),
+      two: await loadedAtOnce(2, async () => {
+        await scheduler.wait(300);
+      }),
+      // The third replaces the one waiting: that refusal comes first, while
+      // the first load is still held.
+      three: await loadedAtOnce(
+        3,
+        async (outcomes) => await Promise.race(outcomes)
+      ),
     }).toStrictEqual({
       two: ["loaded", "loaded"],
       three: ["app.preview_superseded", "loaded", "loaded"],
@@ -933,5 +961,39 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     );
 
     expect(outcome).toStrictEqual({ afterOld: "waiting", afterOwn: "loading" });
+  });
+
+  it("stops a load that outlives its time before it builds, and frees its place", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const { chats } = builder.api;
+
+    env.PREVIEW_LOAD_MS = "500";
+    try {
+      const outcome = await heldReadsDuring(async (letGo, calls) => {
+        // Its read of the draft's base stalls past its time.
+        const stalled = await answer(chats.preview(chatId, app));
+        letGo();
+        // Let go, the read finishes: nothing is built or staged after it.
+        await scheduler.wait(2000);
+        return {
+          stalled,
+          after: calls.filter((method) => method !== "get"),
+        };
+      });
+      expect({
+        ...outcome,
+        next: named(await answer(chats.preview(chatId, app))),
+      }).toStrictEqual({
+        stalled: "screen.build_slow",
+        after: [],
+        next: "loaded",
+      });
+    } finally {
+      delete env.PREVIEW_LOAD_MS;
+    }
   });
 });
