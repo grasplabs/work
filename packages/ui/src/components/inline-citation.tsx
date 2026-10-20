@@ -110,11 +110,16 @@ function InlineCitationCardTrigger({
 
 function InlineCitationCardBody({
   className,
+  label = "Sources",
   ...props
-}: React.ComponentProps<typeof PopoverContent>) {
+}: React.ComponentProps<typeof PopoverContent> & {
+  /** The card's name for assistive technology, which shows no title. */
+  label?: string;
+}) {
   return (
     <PopoverContent
       data-slot="inline-citation-card"
+      aria-label={label}
       className={cn("relative w-80 gap-0 p-0", className)}
       {...props}
     />

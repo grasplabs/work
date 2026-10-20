@@ -218,10 +218,13 @@ function PromptInputButton({
   tooltip,
   ...props
 }: PromptInputButtonProps) {
+  // A lone icon is a square button; words, with or without an icon, a wide one.
+  const icon = isValidElement(props.children);
   const button = (
     <InputGroupButton
-      // A lone icon is a square button; words, with or without an icon, a wide one.
-      size={size ?? (isValidElement(props.children) ? "icon-sm" : "sm")}
+      // A lone icon is named by its tooltip's words, unless named already.
+      aria-label={icon && typeof tooltip === "string" ? tooltip : undefined}
+      size={size ?? (icon ? "icon-sm" : "sm")}
       type="button"
       variant={variant}
       {...props}
@@ -318,6 +321,8 @@ function PromptInputSubmit({
   // While an answer is coming and nothing can stop it, nothing is sent.
   return (
     <InputGroupButton
+      {...props}
+      // What it does follows the status, whatever else it is given.
       data-slot="prompt-input-submit"
       aria-label={stops ? stopLabel : sendLabel}
       onClick={(event) => {
@@ -331,7 +336,6 @@ function PromptInputSubmit({
       size={size}
       type={stops ? "button" : "submit"}
       variant={variant}
-      {...props}
       disabled={(answering && !stops) || props.disabled}
     >
       {children ?? statusIcons[status]}
