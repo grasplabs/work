@@ -21,10 +21,12 @@
  * process.
  *
  * Whatever it's sent, the isolate gets no env and no network: this Worker
- * sets both itself. It has no binding but its Loader, so code that escaped
+ * sets both itself. Nor does it print anything to the process's output,
+ * which the deployment's logs share (quiet-isolate.ts). It has no binding but its Loader, so code that escaped
  * its isolate would find nothing here: no storage, no secrets.
  */
 
+import { quietModules } from "./quiet-isolate.ts";
 import { sessionResponse } from "./sandbox-session.ts";
 import { isolateSettings } from "./sandbox-settings.ts";
 
@@ -94,7 +96,8 @@ const run = async (
     const stub: unknown = env.LOADER.get(null, () => ({
       ...isolateSettings,
       mainModule: worker.mainModule,
-      modules: worker.modules,
+      // Printing nothing to the process's output, the deployment's logs.
+      modules: quietModules(worker.mainModule, worker.modules),
       env: {},
       globalOutbound: null,
     })).getEntrypoint(entrypoint);

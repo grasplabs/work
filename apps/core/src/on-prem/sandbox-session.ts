@@ -33,6 +33,7 @@ import {
 import type { RpcTarget } from "cloudflare:workers";
 
 import { sessionMaxRuns } from "../call-limits.ts";
+import { quietModules } from "./quiet-isolate.ts";
 import {
   declaredMethodsOf,
   invoke,
@@ -359,7 +360,11 @@ class Session extends CapnwebTarget {
         ? [...compatibilityFlags, "nodejs_compat"]
         : compatibilityFlags,
       mainModule: parsed.mainModule,
-      modules: { ...parsed.modules, ...chunked },
+      // Printing nothing to the process's output, the deployment's logs.
+      modules: quietModules(parsed.mainModule, {
+        ...parsed.modules,
+        ...chunked,
+      }),
       env: {},
       globalOutbound: null,
     })).getEntrypoint(
