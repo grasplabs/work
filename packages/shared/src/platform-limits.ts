@@ -53,6 +53,12 @@ export const platformLimits = {
   workflowAttemptCpuMs: 30 * second,
   /** One workflow attempt's active wall time, by default. */
   workflowAttemptWallMs: 60 * second,
+  /**
+   * Wall time one activation of a run spends outside its steps, in all:
+   * its code between them, which no attempt holds (core's
+   * workflows/between-steps.ts).
+   */
+  workflowBetweenStepsMs: 60 * second,
 
   // Workflows.
   /** Logical steps one run takes. */

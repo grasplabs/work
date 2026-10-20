@@ -81,6 +81,11 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_UNKNOWN_HOLD_MS?: string;
   /**
+   * Tests only: a shorter budget for the time one activation of a run
+   * spends outside its steps (src/workflows/between-steps.ts).
+   */
+  WORKFLOW_BETWEEN_STEPS_MS?: string;
+  /**
    * Tests only: the delay before every step's retry, in place of the one
    * its config says (src/workflows/dispatcher.ts).
    */
