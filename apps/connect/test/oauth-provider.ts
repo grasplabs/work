@@ -73,6 +73,8 @@ interface ProviderState {
   holders: Map<string, Account>;
   /** Answers the account's profile lookup instead, when set. */
   profile: Answer | undefined;
+  /** The scopes a refresh says it granted, instead of the account's. */
+  refreshGranted: string | undefined;
 }
 
 const sameGrant = (a: Account, b: Account): boolean =>
@@ -145,6 +147,7 @@ export const fakeProviders = () => {
     grants: new Map(),
     holders: new Map(),
     profile: undefined,
+    refreshGranted: undefined,
   };
   let counter = 0;
   const issue = (prefix: string): string => {
@@ -205,7 +208,12 @@ export const fakeProviders = () => {
           return answer;
         }
       }
-      return tokens(account, state.rotate ?? account.provider === "microsoft");
+      return tokens(
+        state.refreshGranted === undefined
+          ? account
+          : { ...account, granted: state.refreshGranted },
+        state.rotate ?? account.provider === "microsoft"
+      );
     }
     return oauthError("unsupported_grant_type");
   };
@@ -304,6 +312,7 @@ export const fakeProviders = () => {
     state.revoke = undefined;
     state.rotate = undefined;
     state.profile = undefined;
+    state.refreshGranted = undefined;
     const passThrough = globalThis.fetch;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);

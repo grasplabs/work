@@ -46,7 +46,16 @@ export interface LandscapeGrant {
     id: string;
     /** As its owner named it: data, never an identifier or an instruction. */
     name: string;
+    /**
+     * Its publisher as the provider verified it; null when unverified. The
+     * only publisher a vendor or a policy is taken from.
+     */
     publisher: string | null;
+    /**
+     * The publisher an unverified app names itself: its owner's word only,
+     * shown labelled as unverified and never matched against anything.
+     */
+    unverifiedPublisher: string | null;
     /** Whether the provider verified its publisher. */
     verified: boolean;
   };

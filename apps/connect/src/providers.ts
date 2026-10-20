@@ -471,3 +471,35 @@ export const providerFor = (id: string): ProviderConfig | undefined => {
     : undefined;
   return record === undefined ? undefined : appProvider(record);
 };
+
+/** How Entra may prefix a Microsoft Graph scope in a token's answer. */
+const graphScopePrefix = "https://graph.microsoft.com/";
+
+/**
+ * Whether `tokens` were granted exactly the access `provider` asks for,
+ * where it must hold no more (`granted`): every scope the provider's
+ * answer lists among those allowed, and every one required among them.
+ * An answer that lists none is refused: nobody can tell what it holds.
+ */
+export const grantedAsAsked = (
+  { granted }: OAuthProviderConfig,
+  { scope }: TokenSet
+): boolean => {
+  if (granted === undefined) {
+    return true;
+  }
+  if (scope === undefined) {
+    return false;
+  }
+  const scopes = new Set(
+    scope
+      .split(" ")
+      .filter((each) => each !== "")
+      // Entra may name Graph's scopes by their full URI.
+      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
+  );
+  return (
+    [...scopes].every((each) => granted.allowed.has(each)) &&
+    granted.required.every((each) => scopes.has(each.toLowerCase()))
+  );
+};

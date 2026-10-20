@@ -41,6 +41,9 @@ import { accessTokenFor } from "./tokens.ts";
 //   device) is read at all.
 // - A flood: one read asks for `grantsPerRead` grants and sends at most
 //   `requestsPerRead` requests; core bounds the reads of a sync.
+// - Not read in phase 1: the application permissions admins granted apps
+//   (app role assignments), the most dangerous consents; GRA-900 adds
+//   them. Delegated grants only, for now.
 
 const graphHost = "graph.microsoft.com";
 const hosts = [graphHost];
@@ -89,9 +92,21 @@ const userSchema = z.object({
 const listOf = <Item extends z.ZodType>(item: Item) =>
   z.object({ value: z.array(item) });
 
-/** A name as kept: trimmed, at most `nameLength`, null when empty. */
+/**
+ * Control and format characters, bidirectional overrides among them: what
+ * could make a planted name show as something else.
+ */
+const invisible = /[\p{Cc}\p{Cf}]/gu;
+
+/**
+ * A name as kept: without control or format characters, trimmed, at most
+ * `nameLength`, null when nothing is left.
+ */
 const nameOf = (name: string | null | undefined): string | null => {
-  const trimmed = (name ?? "").trim().slice(0, landscapeLimits.nameLength);
+  const trimmed = (name ?? "")
+    .replaceAll(invisible, "")
+    .trim()
+    .slice(0, landscapeLimits.nameLength);
   return trimmed === "" ? null : trimmed;
 };
 
@@ -184,6 +199,27 @@ export const landscapeConnections = async (
   });
 };
 
+/**
+ * An app's publisher: the one the provider verified, the only one a vendor
+ * comes from; or, unverified, the name the app gives itself, kept apart.
+ */
+const publisherOf = (
+  app: z.output<typeof servicePrincipalSchema>
+): Pick<
+  LandscapeGrant["app"],
+  "publisher" | "unverifiedPublisher" | "verified"
+> => {
+  const verified = (app.verifiedPublisher?.verifiedPublisherId ?? "") !== "";
+  const publisher = verified
+    ? nameOf(app.verifiedPublisher?.displayName)
+    : null;
+  return {
+    publisher,
+    unverifiedPublisher: verified ? null : nameOf(app.publisherName),
+    verified,
+  };
+};
+
 /** The grants of one page, with their apps and people, merged by both. */
 const grantsOf = (
   page: z.output<typeof grantsPageSchema>["value"],
@@ -195,7 +231,11 @@ const grantsOf = (
     const app = apps.get(clientId);
     const admin = consentType === "AllPrincipals";
     const personId = admin ? null : (principalId ?? null);
-    if (app === undefined || (!admin && personId === null)) {
+    // A person's grant names them by their Entra ID, or isn't kept.
+    if (
+      app === undefined ||
+      (!admin && (personId === null || !guidPattern.test(personId)))
+    ) {
       continue;
     }
     const key = `${app.appId} ${personId ?? ""}`;
@@ -206,10 +246,7 @@ const grantsOf = (
         app: {
           id: app.appId,
           name: nameOf(app.displayName) ?? app.appId,
-          publisher: nameOf(
-            app.verifiedPublisher?.displayName ?? app.publisherName
-          ),
-          verified: (app.verifiedPublisher?.verifiedPublisherId ?? "") !== "",
+          ...publisherOf(app),
         },
         consent: admin ? "admin" : "person",
         person:
