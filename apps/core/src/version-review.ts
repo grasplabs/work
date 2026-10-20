@@ -516,8 +516,42 @@ const stepChanges = (
 };
 
 /**
+ * `source` without its steps' calls: each call as written (`code`), cut
+ * out where it is, from the start of its line on (`line`), never the same
+ * text elsewhere, such as inside a helper's string. A step the outline
+ * doesn't place (`keptOnly`) cuts nothing.
+ */
+const withoutCalls = (source: string, steps: Iterable<StepOutline>): string => {
+  const lineStarts = [0];
+  for (
+    let next = source.indexOf("\n");
+    next !== -1;
+    next = source.indexOf("\n", next + 1)
+  ) {
+    lineStarts.push(next + 1);
+  }
+  const spans = [...steps].flatMap(({ code, line }) => {
+    const from = lineStarts[line - 1];
+    if (code === "" || from === undefined) {
+      return [];
+    }
+    const at = source.indexOf(code, from);
+    return at === -1 ? [] : [{ at, end: at + code.length }];
+  });
+  let left = "";
+  let cursor = 0;
+  for (const { at, end } of spans.toSorted((x, y) => x.at - y.at)) {
+    if (at >= cursor) {
+      left += source.slice(cursor, at);
+      cursor = end;
+    }
+  }
+  return left + source.slice(cursor);
+};
+
+/**
  * Whether a workflow's own file changed outside its steps' calls: its
- * source before and now, each without the calls as written (`code`),
+ * source before and now, each without its own calls (`withoutCalls`),
  * compared exactly, so a change inside a string (`"high risk"` to
  * `"highrisk"`) shows, and so, conservatively, does reformatting. A helper
  * in the file that an option reads at run time (`StepOutline.dynamic`), a
@@ -525,25 +559,13 @@ const stepChanges = (
  * of one changed.
  */
 const changedOutsideSteps = (
-  before: string | undefined,
-  now: string | undefined,
-  steps: readonly StepOutline[]
-): boolean => {
-  if (before === undefined || now === undefined) {
-    return false;
-  }
-  const calls = [...new Set(steps.map(({ code }) => code))]
-    .filter((code) => code !== "")
-    .toSorted((a, b) => b.length - a.length);
-  const rest = (source: string): string => {
-    let left = source;
-    for (const code of calls) {
-      left = left.replaceAll(code, "");
-    }
-    return left;
-  };
-  return rest(before) !== rest(now);
-};
+  before: { source: string | undefined; steps: Iterable<StepOutline> },
+  now: { source: string | undefined; steps: Iterable<StepOutline> }
+): boolean =>
+  before.source !== undefined &&
+  now.source !== undefined &&
+  withoutCalls(before.source, before.steps) !==
+    withoutCalls(now.source, now.steps);
 
 /**
  * A workflow's steps now, and how they differ from before (`stepChanges`):
@@ -564,9 +586,8 @@ const stepsChangedIn = (
   }
   const file = workflowPaths(id).workflow;
   const outside = changedOutsideSteps(
-    before?.files[file],
-    proposed.files[file],
-    [...stepsBefore.values(), ...stepsNow.values()]
+    { source: before?.files[file], steps: stepsBefore.values() },
+    { source: proposed.files[file], steps: stepsNow.values() }
   );
   return {
     stepsNow,
