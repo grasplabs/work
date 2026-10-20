@@ -43,6 +43,7 @@ import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
+import { wakingOnSettle } from "./share-wakes.ts";
 
 // What every run executes (run-object.ts): each time the engine activates
 // a run, at its start and on every wake or recovery, the dispatcher loads
@@ -268,6 +269,11 @@ const runWorkflow = async (
   // The refusal that caught the run's isolate tampering (host.ts), if any:
   // the run fails with it, whatever its code made of the refusal.
   let tampered: StepError | undefined;
+  // The wakes its attempts' settles sent (share-wakes.ts): awaited once
+  // the run's code is done, never before a step's outcome; none started
+  // after that, by a settle that came too late.
+  const wakes: Promise<void>[] = [];
+  const waking = { open: true };
   const result = await settledRun(async () => {
     const authority = await authorityOf(env, row);
     const { bindings, connections, apps } = await runBindingsFor(
@@ -330,15 +336,23 @@ const runWorkflow = async (
       modelBinding: async (alias) =>
         await stepModelBinding(env, run.app, run.version, alias),
       admitAttempt: async (attempt) =>
-        await admitAttempt(
+        wakingOnSettle(
           env,
-          {
-            run: runId,
-            root: row.rootRunId ?? runId,
-            subject: run.shareSubject,
-            resource: run.app,
-          },
-          attempt
+          await admitAttempt(
+            env,
+            {
+              run: runId,
+              root: row.rootRunId ?? runId,
+              subject: run.shareSubject,
+              resource: run.app,
+            },
+            attempt
+          ),
+          (wake) => {
+            if (waking.open) {
+              wakes.push(wake());
+            }
+          }
         ),
     });
     try {
@@ -354,6 +368,8 @@ const runWorkflow = async (
       return await afterCpuKill(error, calls);
     }
   });
+  waking.open = false;
+  await Promise.all(wakes);
   if (!result.ok && memory.current?.() === false) {
     // Cancelled or taken over as it ran (its load let go, say): whoever
     // ended it, or the newer activation, records what comes of it.

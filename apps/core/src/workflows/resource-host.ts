@@ -42,6 +42,7 @@ import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import { takesExactly } from "./exact-values.ts";
 import {
   busyMarker,
+  loadRound,
   busyOf,
   cpuLimitKill,
   forIsolate,
@@ -1202,7 +1203,13 @@ export class ResourceRunHost
           }
           const prefix = waitStep(waitKey, "busy", round);
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          await this.#step.sleep(prefix, run.wait.sleepMs);
+          await loadRound(
+            this.#step,
+            prefix,
+            stepName,
+            marker,
+            run.wait.sleepMs
+          );
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           recorded = await this.#step.do(
             `${prefix}:run`,
