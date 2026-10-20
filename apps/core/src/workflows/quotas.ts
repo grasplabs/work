@@ -19,7 +19,8 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { outboxedIfChanged } from "../audit-outbox.ts";
+import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
+import type { OutboxEnv } from "../audit-outbox.ts";
 import {
   quotaPolicies,
   runLineageAccounts,
@@ -219,9 +220,7 @@ const refusalsLogged = new Set<string>();
  * With nothing recorded and no var, or one that doesn't parse
  * (`deploymentConfig` logs it), the platform's own policy applies.
  */
-export const quotaPolicy = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">
-): Promise<QuotaPolicy> => {
+export const quotaPolicy = async (env: QuotaEnv): Promise<QuotaPolicy> => {
   const configured = deploymentConfig(
     quotaLimitsSchema,
     "QUOTA_LIMITS",
@@ -240,7 +239,7 @@ export const quotaPolicy = async (
   ) {
     // Recorded with its audit event, which only the isolate whose insert
     // recorded it writes: a generation is logged once, as it is recorded.
-    await db.batch([
+    await auditedBatch(env, db, [
       db
         .insert(quotaPolicies)
         .values({
@@ -301,7 +300,7 @@ export const quotaPolicy = async (
  * admission would.
  */
 export const quotaPolicyReport = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">
+  env: QuotaEnv
 ): Promise<QuotaPolicyReport> => {
   const policy = await quotaPolicy(env);
   const recorded = await highestRecorded(drizzle(env.DB));
@@ -321,6 +320,12 @@ export const quotaPolicyReport = async (
         : null,
   };
 };
+
+/**
+ * What reading the quota policy takes: its database and var, and the audit
+ * log a newly recorded generation is written to.
+ */
+export type QuotaEnv = Pick<Env, "DB" | "QUOTA_LIMITS"> & OutboxEnv;
 
 /** The limits a lineage reaches, as a refusal names them. */
 const lineageLimits = {
@@ -603,7 +608,7 @@ const admittedKeyed = async (
 
 /** `admitChild` under `policy`; `retried` once read again (`policyStill`). */
 const admitChildOnce = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   parent: { id: string; rootRunId: string | null; depth: number },
   key: string | undefined,
   policy: QuotaPolicy,
@@ -656,7 +661,7 @@ const admitChildOnce = async (
  * nothing; a slot taken is never given back.
  */
 export const admitChild = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   parent: { id: string; rootRunId: string | null; depth: number },
   key?: string
 ): Promise<ChildPlace> =>
@@ -849,7 +854,7 @@ const hostCallBlockMax = 32;
  * left, or `execution.stale_attempt` for a settled attempt.
  */
 const reserveHostCallsOnce = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   lineage: { root: string; identity: ReturnType<typeof and> },
   block: number,
   policy: QuotaPolicy,
@@ -943,7 +948,7 @@ const reserveHostCallsOnce = async (
  * side, as the lineage never makes more than it may.
  */
 const hostCallsOf = (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   root: string,
   identity: ReturnType<typeof and>
 ): { take: () => Promise<void>; close: () => Promise<number> } => {
@@ -1117,7 +1122,7 @@ const outOfHostCalls = (
 
 /** `admitAttempt` under `policy`; `retried` once read again (`policyStill`). */
 const admitAttemptOnce = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   owner: AttemptOwner,
   attempt: QuotaAttempt,
   policy: QuotaPolicy,
@@ -1369,7 +1374,7 @@ const placeGivenUp = async (
  * the queue, unless a newer attempt of the step wrote it (`placeGivenUp`).
  */
 export const admitAttempt = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   owner: AttemptOwner,
   attempt: QuotaAttempt
 ): Promise<AttemptAdmission> => {
