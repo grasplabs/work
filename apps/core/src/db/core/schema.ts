@@ -1685,7 +1685,7 @@ export const runMailStampRefusals = sqliteTable(
  * in the lineage of `root_run_id`, claimed once, so every run charged to
  * it (`workflow_runs.account_run_id`) is charged to the one account, whose
  * `run_lineages` row counts its attempts and host calls. Never changed
- * (migration 0109's trigger).
+ * or deleted (migration 0109's triggers).
  */
 export const runLineageAccounts = sqliteTable(
   "run_lineage_accounts",

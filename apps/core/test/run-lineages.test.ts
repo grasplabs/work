@@ -789,6 +789,10 @@ ${llmStep()}`,
         root.id,
         root.id
       ),
+      deleted: await refused(
+        "DELETE FROM run_lineage_accounts WHERE root_run_id = ?",
+        root.id
+      ),
       // A run with none may still be given one: as core starts it.
       unset: await refused(
         "UPDATE workflow_runs SET started_by = started_by WHERE id = ?",
@@ -798,6 +802,7 @@ ${llmStep()}`,
       account: "refused",
       cleared: "refused",
       claim: "refused",
+      deleted: "refused",
       unset: "changed",
     });
   });
