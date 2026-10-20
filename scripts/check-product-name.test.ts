@@ -104,6 +104,10 @@ describe("the product's old name", () => {
         text: 'msgid "Welcome"\nmsgstr "Welkom bij Grasp OS"\n',
       },
       { path: "apps/web/index.html", text: "<title>Grasp Work</title>\n" },
+      {
+        path: "apps/core/src/skills/brief/SKILL.md",
+        text: "# Brief\n\nWrite to the person as\nGrasp\n  OS does.\n",
+      },
       { path: "apps/core/test/fixtures/page.html", text: "<p>Grasp OS</p>\n" },
       { path: "apps/web/src/routes/index.tsx", text: '"Grasp OS"\n' },
     ];
@@ -111,6 +115,10 @@ describe("the product's old name", () => {
 
     expect(
       oldProductNames(files.filter(({ path }) => read.has(path)))
-    ).toStrictEqual(['apps/web/src/locales/nl/messages.po:2: "Grasp OS"']);
+    ).toStrictEqual([
+      'apps/web/src/locales/nl/messages.po:2: "Grasp OS"',
+      // Wrapped across lines, named where it starts.
+      'apps/core/src/skills/brief/SKILL.md:4: "Grasp\\n  OS"',
+    ]);
   });
 });

@@ -8,3 +8,12 @@ const oldName = /\bgrasp\s+os\b/iu;
 
 export const findOldProductName = (text: string): string | undefined =>
   oldName.exec(text)?.[0];
+
+/** Each time `text` names the old product, with where: across lines too. */
+export const findOldProductNames = (
+  text: string
+): { found: string; index: number }[] =>
+  [...text.matchAll(new RegExp(oldName.source, "giu"))].map((match) => ({
+    found: match[0],
+    index: match.index,
+  }));

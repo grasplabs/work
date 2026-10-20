@@ -5,9 +5,9 @@
  * shows. Strings in code are held by the lint (`grasp/no-old-product-name`).
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
-import { findOldProductName } from "./lint/old-product-name.ts";
+import { findOldProductNames } from "./lint/old-product-name.ts";
 
 /** The files people read that aren't code: by extension, in the apps and packages. */
 const readFiles =
@@ -20,23 +20,29 @@ const notRead = /(?:^|\/)(?:test|tests|e2e)\/|\.test\.[cm]?[jt]sx?$/u;
 export const readPaths = (paths: readonly string[]): string[] =>
   paths.filter((path) => readFiles.test(path) && !notRead.test(path));
 
-/** Each of `files` that names the old product, with what it found and on which line. */
+/**
+ * Each place in `files` that names the old product, with what it found
+ * and on which line it starts: a name wrapped across lines counts too.
+ */
 export const oldProductNames = (
   files: readonly { path: string; text: string }[]
 ): string[] =>
   files.flatMap(({ path, text }) =>
-    text.split("\n").flatMap((line, index) => {
-      const found = findOldProductName(line);
-      return found === undefined ? [] : [`${path}:${index + 1}: "${found}"`];
+    findOldProductNames(text).map(({ found, index }) => {
+      const line = text.slice(0, index).split("\n").length;
+      return `${path}:${line}: ${JSON.stringify(found)}`;
     })
   );
 
 const main = (): void => {
   const paths = execFileSync(
     "git",
-    ["ls-files", "--cached", "--others", "--exclude-standard"],
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
     { encoding: "utf-8" }
-  ).split("\n");
+  )
+    .split("\0")
+    // A tracked file deleted and not yet staged is listed, but not there.
+    .filter((path) => path !== "" && existsSync(path));
   const found = oldProductNames(
     readPaths(paths).map((path) => ({
       path,
