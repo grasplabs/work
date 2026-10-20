@@ -64,6 +64,13 @@ import {
 } from "./sandboxed.ts";
 import { buildAppTests } from "./screens.ts";
 import { codeSession, startFailure } from "./workflows/code.ts";
+import {
+  discardFixtureRuns,
+  fixtureRunOutcome,
+  fixtureTaskCompletions,
+  startFixtureRun,
+  sweepFixtureRuns,
+} from "./workflows/fixture-runs.ts";
 
 // The trusted test runner for an App's tests (spec 28.2): every suite in
 // `tests/**.test.ts` runs whenever a version of the App is made current,
@@ -174,6 +181,9 @@ const defaultLimits: TestLimits = {
  */
 const fixtureLeftAfterMs = 60 * 60_000;
 
+/** The most workflow runs one test may start (`FixtureSession.start`). */
+const maxRunsPerTest = 10;
+
 /** `set` where it is a whole number of milliseconds below `most`, else `most`. */
 const lower = (set: number | undefined, most: number): number =>
   set !== undefined && Number.isInteger(set) && set > 0 && set < most
@@ -245,6 +255,9 @@ const hostOf = (numbered) => ({
           ? { subscription: { release: async () => await numbered.release(answer.subscription) } }
           : answer;
       },
+      start: async (who, request) => await numbered.start(session, who, request),
+      runOutcome: async (run) => await numbered.runOutcome(session, run),
+      completedCount: async (run, task) => await numbered.completedCount(session, run, task),
       close: async () => await numbered.close(session),
     };
   },
@@ -656,6 +669,12 @@ class FixtureSession extends TestTarget {
   readonly #queries = new Map<string, PrincipalQueries>();
   /** The live queries not released yet, which `close` releases. */
   readonly #following = new Set<RunSubscription>();
+  /**
+   * The workflow runs its principals started, by the number each start
+   * answered (`start`): the test asks of these alone, and `close` removes
+   * them.
+   */
+  readonly #runs: string[] = [];
 
   constructor(context: SessionContext, fixtures: string, fixture: Fixture) {
     super();
@@ -817,6 +836,85 @@ class FixtureSession extends TestTarget {
   }
 
   /**
+   * Starts, as principal `name`, the workflow `request` names (a screen's
+   * start's JSON text): the run, a real one of the workflow version the
+   * release under test binds, with nothing of the organization's around it
+   * (fixture-runs.ts). Answers the JSON text of an `OperationResult`: the
+   * run's number in this session, or why it was refused.
+   */
+  async start(name: unknown, request: unknown): Promise<string> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    this.#roleOf(name);
+    const requestId = crypto.randomUUID();
+    let result: OperationResult;
+    try {
+      // A test holds at most `maxRunsPerTest` runs: each is real work.
+      if (this.#runs.length >= maxRunsPerTest) {
+        throw operationErrors.create("operation.call_limit");
+      }
+      const runId = await startFixtureRun(
+        this.#env,
+        this.#release,
+        `fixture-${String(name)}`,
+        request
+      );
+      // Closed meanwhile: what started goes now, as nothing else would
+      // remove it but the sweep.
+      if (this.#closed) {
+        await discardFixtureRuns(this.#env, [runId]);
+        throw sessionEnded();
+      }
+      this.#runs.push(runId);
+      result = { ok: true, value: { run: this.#runs.length - 1 } };
+    } catch (error) {
+      result = { ok: false, error: refusalOf(error, requestId) };
+    }
+    return JSON.stringify(result);
+  }
+
+  /** Run `run`'s ID, which `start` answered; throws for any other. */
+  #runOf(run: unknown): string {
+    const id =
+      typeof run === "number" && Number.isSafeInteger(run)
+        ? this.#runs[run]
+        : undefined;
+    if (id === undefined) {
+      throw new Error("No run of this test has that number.");
+    }
+    return id;
+  }
+
+  /**
+   * How run `run` ended (fixture-runs.ts, `FixtureRunOutcome`), waiting
+   * for its end until the test's own: as JSON text, `null` when it hadn't
+   * ended by then.
+   */
+  async runOutcome(run: unknown): Promise<string> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    const outcome = await fixtureRunOutcome(
+      this.#env,
+      this.#runOf(run),
+      this.#endsAt
+    );
+    return JSON.stringify(outcome ?? null);
+  }
+
+  /**
+   * How many times run `run`'s task `task` completed its step, as the
+   * engine recorded it: once, however often the run was replayed.
+   */
+  async completedCount(run: unknown, task: unknown): Promise<number> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    return await fixtureTaskCompletions(this.#env, this.#runOf(run), task);
+  }
+
+  /**
    * Principal `name`'s live queries: a connection of its own to the
    * realtime manager, as a screen's page has (query-subscriptions.ts),
    * read as the principal, with its role, on the session's store, until
@@ -939,6 +1037,15 @@ class FixtureSession extends TestTarget {
    */
   async close(): Promise<void> {
     this.#closed = true;
+    // Its runs first: nothing of them runs on against a store discarded.
+    const runs = this.#runs.splice(0);
+    if (runs.length > 0) {
+      await within(discardFixtureRuns(this.#env, runs), this.#cleanupMs).catch(
+        (error: unknown) => {
+          log.warn("app_tests.run_discard_unfinished", errorFields(error));
+        }
+      );
+    }
     // Its live queries first: nothing follows a store being discarded.
     await Promise.all(
       [...this.#following].map(async (subscription) => {
@@ -1142,6 +1249,22 @@ class NumberedFixtureHost extends TestTarget {
     await subscription.release();
   }
 
+  async start(id: unknown, name: unknown, request: unknown): Promise<string> {
+    return await this.#session(id).start(name, request);
+  }
+
+  async runOutcome(id: unknown, run: unknown): Promise<string> {
+    return await this.#session(id).runOutcome(run);
+  }
+
+  async completedCount(
+    id: unknown,
+    run: unknown,
+    task: unknown
+  ): Promise<number> {
+    return await this.#session(id).completedCount(run, task);
+  }
+
   async close(id: unknown): Promise<void> {
     await this.#session(id).close();
   }
@@ -1154,6 +1277,9 @@ const numberedMethods = [
   "call",
   "subscribe",
   "release",
+  "start",
+  "runOutcome",
+  "completedCount",
   "close",
 ] as const;
 
@@ -1584,4 +1710,6 @@ export const sweepTestFixtures = async (env: Env, now: Date): Promise<void> => {
     // oxlint-disable-next-line no-await-in-loop -- see above
     await discardFixture(env, storeIdSchema.parse(storeId));
   }
+  // The runs test runs left, as old.
+  await sweepFixtureRuns(env, new Date(now.getTime() - fixtureLeftAfterMs));
 };

@@ -224,7 +224,7 @@ interface Asking {
 }
 
 /** What a reference resolved to in the release. */
-interface Resolved {
+export interface Resolved {
   readonly alias: string;
   readonly declared: BoundWorkflow;
   /** The workflow version the seal pinned the alias to, if any. */
@@ -269,21 +269,21 @@ const declaredIn = async (
 };
 
 /**
- * What `reference` names in the asking App's release: a workflow it
- * declares, of exactly its release and contract (`version.mismatch`
- * otherwise).
+ * What `reference` names in `release`: a workflow it declares, of exactly
+ * that release and contract (`version.mismatch` otherwise). For an App's
+ * tests too, against the release under test (fixture-runs.ts).
  */
-const resolve = async (
-  asking: Asking,
+export const resolveIn = async (
+  release: Release,
   reference: WorkflowRequest["workflow"]
 ): Promise<Resolved> => {
   const alias = aliasPattern.exec(reference.contractId)?.groups?.alias;
   const found =
-    alias === undefined ? undefined : await declaredIn(asking.release, alias);
+    alias === undefined ? undefined : await declaredIn(release, alias);
   if (alias === undefined || found === undefined) {
     throw operationErrors.create("operation.not_found");
   }
-  const { manifest } = asking.release;
+  const { manifest } = release;
   if (
     reference.resourceId !== manifest.resourceId ||
     reference.resourceVersion !== manifest.resourceVersion ||
@@ -294,8 +294,18 @@ const resolve = async (
   return { alias, ...found, pinned: found.declared.pinned };
 };
 
+/**
+ * What `reference` names in the asking App's release: a workflow it
+ * declares, of exactly its release and contract (`version.mismatch`
+ * otherwise).
+ */
+const resolve = async (
+  asking: Asking,
+  reference: WorkflowRequest["workflow"]
+): Promise<Resolved> => await resolveIn(asking.release, reference);
+
 /** The pin of `resolved`: refused when the seal pinned nothing. */
-const pinOf = (resolved: Resolved): WorkflowPin => {
+export const pinOf = (resolved: Resolved): WorkflowPin => {
   if (resolved.pinned === undefined) {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
   }

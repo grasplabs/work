@@ -3,6 +3,7 @@ import { generatedImport } from "@grasp-os/open-workflow/generate";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -301,6 +302,14 @@ export interface ResourceHostHooks {
    * alone.
    */
   modelCalls?: ActionModelCalls;
+  /**
+   * A run an App's test started (fixture-runs.ts): it acts for a fixture's
+   * principal, no member of the organization, and reaches nothing outside
+   * its own code and sealed modules. Every call that would (an App's, a
+   * store's, a model's, a connection's, Knowledge's, a template's, an
+   * action's) is refused (`resource.unavailable`) before it is built.
+   */
+  fixture?: true;
 }
 
 /**
@@ -1097,8 +1106,14 @@ export class ResourceRunHost
     }
   }
 
-  /** The person the run acts for must still be an active member. */
+  /**
+   * The person the run acts for must still be an active member: a test's
+   * run acts for its fixture's principal, whose role nothing changes.
+   */
   async #requirePerson(): Promise<void> {
+    if (this.#hooks.fixture === true) {
+      return;
+    }
     if (!(await memberRole(this.#env.DB, this.#run.principal))) {
       throw permissionErrors.create("permission.person_inactive");
     }
@@ -2266,6 +2281,10 @@ export class ResourceRunHost
     }
     if (call.name === "grasp.sleepUntil") {
       return this.#refuse(`Task "${task.id}" makes no call.`);
+    }
+    // A test's run reaches only its own sealed modules (`fixture`).
+    if (this.#hooks.fixture === true && call.name !== "grasp.compute") {
+      throw operationErrors.create("resource.unavailable");
     }
     if (call.name === "grasp.model") {
       if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
