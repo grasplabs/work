@@ -2671,7 +2671,7 @@ export class Workspace extends DurableObject<Env> {
       .all();
     // A draft whose changes are all gone keeps its row (its revision
     // goes on), and isn't one to show.
-    return rows.flatMap(({ appId, base, revision, updatedAt }) => {
+    return rows.flatMap(({ appId, base, revision, updatedAt, callId }) => {
       const files = paths.filter((row) => row.appId === appId);
       return files.length === 0
         ? []
@@ -2685,6 +2685,7 @@ export class Workspace extends DurableObject<Env> {
                 .map(({ path }) => path),
               revision,
               updatedAt: updatedAt.toISOString(),
+              callId,
             },
           ];
     });
@@ -2721,12 +2722,27 @@ export class Workspace extends DurableObject<Env> {
         return false;
       }
       const updatedAt = new Date();
+      // The code step that writes it, from the run's own record: never
+      // what the run's code says.
+      const callId =
+        this.#db
+          .select({ callId: chatCodeRuns.toolCallId })
+          .from(chatCodeRuns)
+          .where(eq(chatCodeRuns.id, runId))
+          .get()?.callId ?? null;
       this.#db
         .insert(chatDrafts)
-        .values({ chatId, appId, base, revision: revision + 1, updatedAt })
+        .values({
+          chatId,
+          appId,
+          base,
+          revision: revision + 1,
+          updatedAt,
+          callId,
+        })
         .onConflictDoUpdate({
           target: [chatDrafts.chatId, chatDrafts.appId],
-          set: { base, revision: revision + 1, updatedAt },
+          set: { base, revision: revision + 1, updatedAt, callId },
         })
         .run();
       for (const [path, content] of Object.entries(changes)) {
@@ -2818,10 +2834,11 @@ export class Workspace extends DurableObject<Env> {
           base: null,
           revision: now.revision + 1,
           updatedAt,
+          callId: null,
         })
         .onConflictDoUpdate({
           target: [chatDrafts.chatId, chatDrafts.appId],
-          set: { revision: now.revision + 1, updatedAt },
+          set: { revision: now.revision + 1, updatedAt, callId: null },
         })
         .run();
       return true;
