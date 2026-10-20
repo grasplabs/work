@@ -49,7 +49,6 @@ import type {
   TargetSurface,
 } from "@grasp-os/shared/screens";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
-import { valueDepth } from "@grasp-os/shared/value-depth";
 import type {
   RunControl,
   RunSummary,
@@ -61,7 +60,6 @@ import { z } from "zod";
 
 import { asksPreferenceWindow, windowExtentOf } from "./app-functions.ts";
 import { heldManifest, versionReferenceSource } from "./app-releases.ts";
-import { isPlainData, plainDataBounds } from "./app.ts";
 import type { AppAnswer } from "./app.ts";
 import { appFor, findVersion, getApp, listApps, versionFiles } from "./apps.ts";
 import { screenBuilds } from "./db/core/schema.ts";
@@ -115,13 +113,12 @@ import { runSummary } from "./workflows/summary.ts";
 //
 // What a screen may ask is bounded here and in the App's host, never only
 // on the page, which a person can change: each person's requests of an
-// App and its screens' reports by rate (`admitted`, `reportProblem`), a
-// call's arguments and answer by their size in bytes (`argumentsFor`,
-// `withinAnswer`). Who is asking is always the session core checked; a
+// App and its screens' reports by rate (`admitted`, `reportProblem`), an
+// answer by its size in bytes (`withinAnswer`). Who is asking is always the session core checked; a
 // screen names only its App, and has a role in it or is refused.
 //
 // Anyone with a role in the App (app-access.ts) uses its screens: opens
-// them, calls its server, reports problems, and starts, follows and
+// them, calls its functions, reports problems, and starts, follows and
 // answers its workflow runs (workflows/screen-runs.ts). Only its builders
 // read its error log.
 //
@@ -896,46 +893,6 @@ const followedCallback = (
     void look();
   }
   return callback;
-};
-
-/**
- * The arguments for the App: plain data, and callbacks of the caller's,
- * each as a function the App can only call (`ChatsRpc.previewCall`).
- */
-export const argumentsFor = (
-  args: unknown[],
-  stillOpen: StillOpen,
-  held?: Holder
-): { passed: unknown[]; callbacks: Disposable[] } => {
-  if (
-    !args.every(
-      (arg) =>
-        isStub(arg) ||
-        // Held to its bytes below, which says so.
-        isPlainData(arg, { ...plainDataBounds, depth: valueDepth })
-    )
-  ) {
-    throw screenErrors.create("screen.invalid");
-  }
-  // Measured without the callbacks, which carry nothing yet.
-  const data = args.filter((arg) => !isStub(arg));
-  if (jsonBytes(data, screenLimits.inputBytes) > screenLimits.inputBytes) {
-    throw screenErrors.create("screen.input_too_large");
-  }
-  const callbacks: Disposable[] = [];
-  const passed = args.map((arg) => {
-    if (!isStub(arg)) {
-      return arg;
-    }
-    // Kept by what passed it, if anything, until it is let go of.
-    const callback = callbackFor(arg, stillOpen, refusals, () => {
-      held?.forget(callback);
-    });
-    callbacks.push(callback);
-    held?.keep(callback);
-    return callback;
-  });
-  return { passed, callbacks };
 };
 
 /**

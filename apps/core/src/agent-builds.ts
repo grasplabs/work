@@ -53,7 +53,7 @@ import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { appBindingKinds, requestPermission } from "./permissions.ts";
-import { draftSealFailures, serverProblem } from "./preview-reports.ts";
+import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { admitPreviewCall } from "./screens-rpc.ts";
@@ -1260,71 +1260,44 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         const id = await this.#buildable(by, app);
         const { workspaceId, chatId, personId } = this.ctx.props;
         const chats = workspace(this.env, workspaceId);
-        if (
-          typeof method === "string" &&
-          (await chats.sealsDraft(chatId, personId, id))
-        ) {
-          // Counted as the person's request, as each of a screen's calls is
-          // (chats-rpc.ts): a loop of the agent's spends their budget too.
-          await admitPreviewCall(this.env, by, id);
-          if (!isPlainData(args ?? {})) {
-            throw appErrors.create("app.invalid", {
-              issues: ["A function's path and its input, as plain data."],
-            });
-          }
-          let answered: string;
-          try {
-            answered = await chats.callDraftFunction(
-              chatId,
-              personId,
-              id,
-              method,
-              args ?? {}
-            );
-          } catch (error) {
-            // The draft's to fix, as data: a path that names none of its
-            // public functions, or code that doesn't seal (doesn't build
-            // or inspect). Anything else (no draft, a refusal) is thrown.
-            const failed = draftCallFailure(error);
-            if (failed === undefined) {
-              throw error;
-            }
-            return failed;
-          }
-          return functionCall(answered);
-        }
-        if (
-          typeof method !== "string" ||
-          !Array.isArray(args ?? []) ||
-          !isPlainData(args ?? [])
-        ) {
+        if (typeof method !== "string") {
           throw appErrors.create("app.invalid", {
-            issues: ["A method name and an array of plain data."],
+            issues: ["A function's path and its input, as plain data."],
           });
         }
+        // Only a draft of spec 8's layout previews, from its sealed draft
+        // release: no draft's server code runs anywhere else.
+        if (!(await chats.sealsDraft(chatId, personId, id))) {
+          throw appErrors.create("app.preview_layout");
+        }
+        // Counted as the person's request, as each of a screen's calls is
+        // (chats-rpc.ts): a loop of the agent's spends their budget too.
+        await admitPreviewCall(this.env, by, id);
+        if (!isPlainData(args ?? {})) {
+          throw appErrors.create("app.invalid", {
+            issues: ["A function's path and its input, as plain data."],
+          });
+        }
+        let answered: string;
         try {
-          const answer = await chats.callDraft(
+          answered = await chats.callDraftFunction(
             chatId,
             personId,
             id,
             method,
-            // SAFETY: an array of plain data, checked just above.
-            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-            (args ?? []) as unknown[]
+            args ?? {}
           );
-          return { ok: true, answer };
         } catch (error) {
-          const failed = serverProblem(method, error);
+          // The draft's to fix, as data: a path that names none of its
+          // public functions, or code that doesn't seal (doesn't build
+          // or inspect). Anything else (no draft, a refusal) is thrown.
+          const failed = draftCallFailure(error);
           if (failed === undefined) {
             throw error;
           }
-          return {
-            ok: false,
-            code: appErrors.codeOf(error) ?? "app.failed",
-            message: failed.message,
-            note: callNote,
-          };
+          return failed;
         }
+        return functionCall(answered);
       },
       (called) => ({
         app: typeof app === "string" ? app : null,
@@ -1461,19 +1434,14 @@ build: {
   }[]>;
   /**
    * Calls the draft as a screen would, to see it run, in a preview that
-   * never touches the App's live data. An App with \`app.ts\` and
-   * \`schema.ts\`: \`method\` is a public function's path
-   * (\`"notes.create"\`) and \`args\` its input object; it runs on the
+   * never touches the App's live data: \`method\` is a public function's
+   * path (\`"notes.create"\`) and \`args\` its input object. It runs on the
    * draft sealed as a release, on a store of its own, which keeps what
    * calls write until the next \`env.build.write\` empties it, with no
-   * connections, Knowledge or models (\`resource.unavailable\`).
-   * Otherwise \`method\` of \`app/server.ts\` with \`args\` (an array of
-   * plain data), with a database of its own, emptied by each
-   * \`env.build.write\`, where connections, other Apps and writes to
-   * Knowledge are refused (\`app.preview_side_effect\`, thrown) and
-   * Knowledge is empty; what it
+   * connections, Knowledge or models (\`resource.unavailable\`); what it
    * wrote with \`console\`, in the next check's \`preview.logs\`. What the
-   * draft's code failed with comes back as \`ok: false\`.
+   * draft's code failed with comes back as \`ok: false\`. Only an App with
+   * \`app.ts\` and \`schema.ts\` previews (\`app.preview_layout\`, thrown).
    */
   call(app: string, method: string, args?: unknown): Promise<
     | { ok: true; answer: unknown }
