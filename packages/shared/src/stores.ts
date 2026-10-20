@@ -509,6 +509,7 @@ export const dataErrors = defineErrorFamily({
   "data.conflict":
     "The record changed since it was read. Read it again, then retry.",
   "data.store_unavailable": "This store doesn't exist or was deleted.",
+  "data.fixture_discarded": "This fixture store was discarded.",
   "data.receipt_invalid":
     "This commit doesn't hold a receipt its caller claimed.",
   "data.unknown_schema": "This store wasn't handed that schema.",

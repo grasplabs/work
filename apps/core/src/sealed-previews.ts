@@ -13,12 +13,13 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { jsonBytes } from "@grasp-os/shared/screens";
+import { dataErrors } from "@grasp-os/shared/stores";
 import {
   idempotencyKeySchema,
   submissionErrors,
 } from "@grasp-os/shared/submissions";
 import { exports } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { and, count, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
@@ -53,6 +54,7 @@ import {
 import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
 import { readWindow } from "./query-windows.ts";
+import { within } from "./release-retention.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import type { Draft } from "./workspace.ts";
 
@@ -100,6 +102,17 @@ import type { Draft } from "./workspace.ts";
 // - A store is lost: each is recorded here before its object is first
 //   touched, and forgotten only once it is discarded; what a failure left
 //   is discarded at the next preview this object starts.
+// - A preview's store outlives its use: someone may type personal data
+//   into it, and its chat's object may never wake again to drop it. Core
+//   discards every preview store a week after it was made, whatever its
+//   object does (`sweepPreviewStores`), recording it gone only once it
+//   is. A discarded store refuses every call after, one already running
+//   included, and never makes tables again, so nothing is ever written
+//   into it. A preview whose store core no longer records is out of date
+//   at its next protected step (`authorize`) and forgets it; its next call
+//   starts a new, empty store, and a store kept for a revision is reused
+//   only while core still records it (`#makeStore`). Losing the builder
+//   role refuses every call at once and leaves the store to that sweep.
 // - What App code keeps of one invocation acts in another's: every
 //   invocation runs in a fresh isolate of the release runner, whose
 //   channel stops working once it ends, as for every call of an App.
@@ -132,6 +145,161 @@ import type { Draft } from "./workspace.ts";
 //   a start under the same key runs anew), which a preview, changing
 //   nothing real, can afford.
 
+/** Whether core records `storeId` as a preview's store (`preview_fixture_stores`). */
+const recordedStore = async (env: Env, storeId: string): Promise<boolean> =>
+  (await drizzle(env.DB)
+    .select({ storeId: previewFixtureStores.storeId })
+    .from(previewFixtureStores)
+    .where(eq(previewFixtureStores.storeId, storeId))
+    .get()) !== undefined;
+
+/** Deletes core's record of preview store `storeId`. */
+const recordDeleted = async (
+  db: ReturnType<typeof drizzle>,
+  storeId: string
+): Promise<void> => {
+  await db
+    .delete(previewFixtureStores)
+    .where(eq(previewFixtureStores.storeId, storeId));
+};
+
+/** How long the sweep leaves a store whose discard failed before it tries again. */
+const retryDelayMs = 60 * 60 * 1000;
+
+/**
+ * Leaves preview store `storeId` until `retryDelayMs` after `at`, its
+ * discard having failed: logged, never thrown, as a failure to note it
+ * only means the next sweep tries it again sooner.
+ */
+const retriedLater = async (
+  db: ReturnType<typeof drizzle>,
+  storeId: string,
+  at: Date
+): Promise<void> => {
+  try {
+    await db
+      .update(previewFixtureStores)
+      .set({ retryAfter: new Date(at.getTime() + retryDelayMs) })
+      .where(eq(previewFixtureStores.storeId, storeId));
+  } catch (error) {
+    log.warn("preview.store_retry_unrecorded", {
+      store: storeId,
+      ...errorFields(error),
+    });
+  }
+};
+
+/** How long core keeps a preview's store once it was made. */
+const previewStoreKeptMs = 7 * 24 * 60 * 60 * 1000;
+
+/** Most stores one batch of the sweep takes. */
+const storesPerSweep = 100;
+
+/** How long one sweep goes on discarding, batch after batch. */
+const sweepBudgetMs = 20_000;
+
+/**
+ * The longest one store's discard may take in a sweep: a fraction of its
+ * budget, so one that hangs costs that sweep little.
+ */
+const storeStepMs = 5000;
+
+/**
+ * Discards every preview store made longer ago than core keeps one
+ * (`previewStoreKeptMs`), oldest first, batch after batch for as long as
+ * the sweep's time allows, whatever its chat's object does: each store's
+ * object first (`DataStore.discardFixture`, which refuses any store that
+ * isn't a recorded fixture), then core's row, so a discard that fails is
+ * found again by the next sweep. A preview still running on one is out of
+ * date at its next step (`#requireRecorded`). From the cron, for the time
+ * `at`.
+ */
+export const sweepPreviewStores = async (
+  env: Env,
+  at = new Date()
+): Promise<void> => {
+  const until = Date.now() + sweepBudgetMs;
+  const cutoff = new Date(at.getTime() - previewStoreKeptMs);
+  const db = drizzle(env.DB);
+  // Past the last store each batch took, so stores whose discard keeps
+  // failing never hold up the rest; the next sweep starts over, and tries
+  // them again.
+  let after: { createdAt: Date; storeId: string } | undefined;
+  while (Date.now() < until) {
+    // oxlint-disable-next-line no-await-in-loop -- batch after batch
+    const batch = await db
+      .select({
+        storeId: previewFixtureStores.storeId,
+        createdAt: previewFixtureStores.createdAt,
+      })
+      .from(previewFixtureStores)
+      .where(
+        and(
+          lte(previewFixtureStores.createdAt, cutoff),
+          // One whose discard failed waits out its delay, so it never takes
+          // each sweep's time from the rest.
+          or(
+            isNull(previewFixtureStores.retryAfter),
+            lte(previewFixtureStores.retryAfter, at)
+          ),
+          after === undefined
+            ? undefined
+            : or(
+                gt(previewFixtureStores.createdAt, after.createdAt),
+                and(
+                  eq(previewFixtureStores.createdAt, after.createdAt),
+                  gt(previewFixtureStores.storeId, after.storeId)
+                )
+              )
+        )
+      )
+      .orderBy(previewFixtureStores.createdAt, previewFixtureStores.storeId)
+      .limit(storesPerSweep);
+    for (const { storeId } of batch) {
+      // The budget checked before each store, not only each batch: one
+      // slow store never takes the sweep past it.
+      if (Date.now() >= until) {
+        break;
+      }
+      // Each step bounded, never past the sweep's own budget either: one
+      // that hangs, or is cut short, is tried again once its delay is over
+      // (a discard again changes nothing).
+      const stepMs = () =>
+        Math.max(1, Math.min(storeStepMs, until - Date.now()));
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one store after another
+        await within(
+          discardFixtureStore(env, storeIdSchema.parse(storeId)),
+          stepMs()
+        );
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await within(recordDeleted(db, storeId), stepMs());
+      } catch (error) {
+        log.warn("preview.store_sweep_failed", {
+          store: storeId,
+          ...errorFields(error),
+        });
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await retriedLater(db, storeId, at);
+      }
+    }
+    // A short batch, all of it dealt with, was the last.
+    if (batch.length < storesPerSweep && Date.now() < until) {
+      return;
+    }
+    after = batch.at(-1);
+  }
+  // Out of time with stores past the cutoff left: said, so a backlog that
+  // keeps growing is seen.
+  const [left] = await db
+    .select({ stores: count() })
+    .from(previewFixtureStores)
+    .where(lte(previewFixtureStores.createdAt, cutoff));
+  if ((left?.stores ?? 0) > 0) {
+    log.warn("preview.store_sweep_backlog", { stores: left?.stores ?? 0 });
+  }
+};
+
 /** What one chat's preview of one App runs: its revision, release and store. */
 interface Running {
   readonly revision: number;
@@ -141,6 +309,8 @@ interface Running {
   readonly release: Promise<Release>;
   /** The preview's store, once it is made. */
   store?: Promise<OpenStore>;
+  /** The ID `store` resolved to, once it did. */
+  storeId?: string;
   /** Its streaming actions' invocations, by `streamName`, oldest first. */
   readonly streams: Map<string, PreviewStream>;
 }
@@ -331,11 +501,16 @@ export class SealedPreviews {
     } catch (error) {
       return refused(error);
     }
+    // What the call ran on, once it has it: a discarded store's refusal
+    // thrown rather than answered (a window's last check of its reads)
+    // is mapped as an answered one is (`#unlessDiscarded`).
+    let held: { running: Running; store: OpenStore } | undefined;
     try {
       const running = this.#runningFor(chatId, app, draft);
       const release = await this.#loaded(chatId, app, running);
       const path = publicOperationOf(release, call.reference);
       const store = await this.#storeOf(chatId, app, running, release);
+      held = { running, store };
       const invocation = this.#invocationOf(chatId, personId, app, running, {
         store,
         requestId,
@@ -353,7 +528,7 @@ export class SealedPreviews {
           ? invocation
           : { ...invocation, observeReads: observe };
       const hosted = this.#hostedOf(chatId, app, running, release);
-      const result = await (call.window === undefined
+      const answered = await (call.window === undefined
         ? callOperation(
             hosted,
             observed,
@@ -376,6 +551,13 @@ export class SealedPreviews {
             },
             observe
           ));
+      const result = this.#unlessDiscarded(
+        chatId,
+        app,
+        running,
+        store,
+        answered
+      );
       return {
         answer: {
           result,
@@ -386,6 +568,13 @@ export class SealedPreviews {
         reads,
       };
     } catch (error) {
+      if (
+        held !== undefined &&
+        dataErrors.codeOf(error) === "data.fixture_discarded"
+      ) {
+        this.#forgetStore(chatId, app, held.running, held.store.id);
+        return refused(appErrors.create("app.preview_outdated"));
+      }
       return refused(error);
     }
   }
@@ -422,6 +611,7 @@ export class SealedPreviews {
       runId: null,
       authorize: async () => {
         requireCurrent();
+        await this.#requireRecorded(chatId, app, running, store);
         const role = await memberRole(this.#env.DB, personId);
         if (role === undefined) {
           throw permissionErrors.create("permission.person_inactive");
@@ -618,17 +808,19 @@ export class SealedPreviews {
     // operation host was reached, and how many effects the run made.
     let reached = false;
     let effects = 0;
+    let heldStore: OpenStore | undefined;
     try {
       const release = await this.#loaded(chatId, app, running);
       const path = publicOperationOf(release, call.reference);
       const store = await this.#storeOf(chatId, app, running, release);
+      heldStore = store;
       const invocation = this.#invocationOf(chatId, personId, app, running, {
         store,
         requestId,
         deadline: Date.now() + platformLimits.serverInvocationWallMs,
       });
       reached = true;
-      const result = await callOperation(
+      const answered = await callOperation(
         this.#hostedOf(chatId, app, running, release),
         invocation,
         { path, kind: call.reference.kind },
@@ -649,9 +841,24 @@ export class SealedPreviews {
           },
         }
       );
+      const result = this.#unlessDiscarded(
+        chatId,
+        app,
+        running,
+        store,
+        answered
+      );
       return { result, reached, effects };
     } catch (error) {
-      return { result: refusedResult(error), reached, effects };
+      const result = refusedResult(error);
+      return {
+        result:
+          heldStore === undefined
+            ? result
+            : this.#unlessDiscarded(chatId, app, running, heldStore, result),
+        reached,
+        effects,
+      };
     }
   }
 
@@ -832,11 +1039,18 @@ export class SealedPreviews {
       return noStore();
     }
     running.store ??= this.#makeStore(chatId, app, running, release);
+    const making = running.store;
     try {
-      return await running.store;
+      const store = await making;
+      if (running.store === making) {
+        running.storeId = store.id;
+      }
+      return store;
     } catch (error) {
-      // Tried again by the next call.
-      running.store = undefined;
+      // Tried again by the next call, unless another call replaced it.
+      if (running.store === making) {
+        running.store = undefined;
+      }
       throw error;
     }
   }
@@ -865,34 +1079,134 @@ export class SealedPreviews {
     }
     // The one kept for this revision is set up again, as a failure may
     // have cut its setup short: both steps below change nothing the second
-    // time.
-    const id = storeIdSchema.parse(kept?.storeId ?? crypto.randomUUID());
-    if (kept === undefined) {
+    // time. Only while core still records it: one it doesn't was cut short
+    // before it was recorded, or discarded by the sweep since, and a
+    // discarded store is never set up again. Either way a new one starts.
+    const reusable =
+      kept !== undefined && (await recordedStore(this.#env, kept.storeId));
+    if (kept !== undefined && !reusable) {
+      this.#db
+        .delete(previewStores)
+        .where(eq(previewStores.storeId, kept.storeId))
+        .run();
+    }
+    if (this.#running.get(nameOf(chatId, app)) !== running) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    const id = storeIdSchema.parse(
+      reusable ? kept.storeId : crypto.randomUUID()
+    );
+    if (!reusable) {
       this.#db
         .insert(previewStores)
         .values({ storeId: id, chatId, appId: app, revision: running.revision })
         .run();
+      // In core's database too, before the object is first touched: what
+      // lets the object be discarded as a fixture (`DataStore.discardFixture`).
+      // Never again for one reused: it is recorded, as just checked, and
+      // writing it again could record one the sweep discarded meanwhile.
+      await drizzle(this.#env.DB)
+        .insert(previewFixtureStores)
+        .values({ storeId: id, appId: app, createdAt: new Date() })
+        .onConflictDoNothing();
     }
-    // In core's database too, before the object is first touched: what
-    // lets the object be discarded as a fixture (`DataStore.discardFixture`).
-    await drizzle(this.#env.DB)
-      .insert(previewFixtureStores)
-      .values({ storeId: id, appId: app, createdAt: new Date() })
-      .onConflictDoNothing();
     // Dropped while that was written: its tables aren't made. The drop
     // discards the store (once that row exists, at the next preview).
     if (this.#running.get(nameOf(chatId, app)) !== running) {
       throw appErrors.create("app.preview_outdated");
     }
     const store = openFixtureStore(this.#env, id);
-    await store.defineTables(manifestText(release.app.schema), {
-      resourceId: app,
-      resourceVersion: running.version,
-    });
+    try {
+      await store.defineTables(manifestText(release.app.schema), {
+        resourceId: app,
+        resourceVersion: running.version,
+      });
+    } catch (error) {
+      // Discarded since it was checked: forgotten, so the next call starts
+      // a new one rather than find it again.
+      if (dataErrors.codeOf(error) === "data.fixture_discarded") {
+        this.#db
+          .delete(previewStores)
+          .where(eq(previewStores.storeId, id))
+          .run();
+        throw appErrors.create("app.preview_outdated");
+      }
+      throw error;
+    }
     if (this.#running.get(nameOf(chatId, app)) !== running) {
       throw appErrors.create("app.preview_outdated");
     }
     return store;
+  }
+
+  /**
+   * Refuses the call of `running` on `store` once core no longer records
+   * that store (`app.preview_outdated`): the sweep discarded it, so it
+   * refuses everything anyway. The preview forgets it, and its next call
+   * starts a new, empty one (`#makeStore`). A release without tables has
+   * no store to check.
+   */
+  async #requireRecorded(
+    chatId: ChatId,
+    app: AppId,
+    running: Running,
+    store: OpenStore
+  ): Promise<void> {
+    // Of the store this call holds, never the one the preview caches now,
+    // which another call may have replaced: a release without tables has
+    // none to check.
+    if (
+      store.id === noStore().id ||
+      (await recordedStore(this.#env, store.id))
+    ) {
+      return;
+    }
+    this.#forgetStore(chatId, app, running, store.id);
+    throw appErrors.create("app.preview_outdated");
+  }
+
+  /**
+   * Forgets store `storeId` of `running`, discarded: the cached store
+   * only while it is that one, never a new one another call is making,
+   * and the chat's record of it, so the next call starts a new, empty one.
+   */
+  #forgetStore(
+    chatId: ChatId,
+    app: AppId,
+    running: Running,
+    storeId: string
+  ): void {
+    if (
+      this.#running.get(nameOf(chatId, app)) === running &&
+      running.storeId === storeId
+    ) {
+      running.store = undefined;
+      running.storeId = undefined;
+    }
+    this.#db
+      .delete(previewStores)
+      .where(eq(previewStores.storeId, storeId))
+      .run();
+  }
+
+  /**
+   * `result` of a call of `running` on `store`, unless the store refused it
+   * as discarded (the sweep took it while core still recorded it, or
+   * while the call ran): then the store is forgotten (`#forgetStore`) and
+   * the call is `app.preview_outdated`, as at its next step it would be.
+   */
+  #unlessDiscarded(
+    chatId: ChatId,
+    app: AppId,
+    running: Running,
+    store: OpenStore,
+    result: OperationResult
+  ): OperationResult {
+    if (result.ok || result.error.code !== "data.fixture_discarded") {
+      return result;
+    }
+    this.#forgetStore(chatId, app, running, store.id);
+    return refusedResult(appErrors.create("app.preview_outdated"));
   }
 
   /**

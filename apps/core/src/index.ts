@@ -17,6 +17,7 @@ import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
+import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
@@ -112,7 +113,9 @@ export default {
   // src/packages/cleanup.ts), and sealed App releases nothing keeps any
   // more, with the artifacts no other release names (see
   // src/release-retention.ts), and the fixture stores App test runs
-  // left behind (see src/app-tests.ts), and App token keys that can verify
+  // left behind (see src/app-tests.ts), and chats' preview stores a week
+  // after they were made (see src/sealed-previews.ts), and App token keys
+  // that can verify
   // nothing any more (see src/auth/app-tokens.ts). And the
   // audit log's retention alarm armed, if it isn't yet: retention itself
   // runs on that alarm (see
@@ -130,6 +133,7 @@ export default {
             sweepRunDetails(env, new Date(controller.scheduledTime)),
             sweepCandidateRuns(env, new Date(controller.scheduledTime)),
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
+            sweepPreviewStores(env, new Date(controller.scheduledTime)),
             sweepBuilds(env, new Date(controller.scheduledTime)),
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
             sweepReleases(env, new Date(controller.scheduledTime)),
