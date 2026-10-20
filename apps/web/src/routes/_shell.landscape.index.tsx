@@ -78,6 +78,7 @@ const LandscapePage = () => {
     found,
     incomplete,
   } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   const navigate = useNavigate();
   const view = Route.useSearch().view ?? "table";
   const [query, setQuery] = useState("");
@@ -120,7 +121,7 @@ const LandscapePage = () => {
           title={t`Landscape`}
         />
         <LandscapeNotLoaded found={found} integrations={integrations} />
-        <ConnectLandscape syncs={syncs} />
+        <ConnectLandscape identity={identity} syncs={syncs} />
         <SyncNotices syncs={syncs} />
         <IncompleteNotice incomplete={incomplete} syncs={syncs} />
 

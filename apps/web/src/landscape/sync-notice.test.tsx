@@ -37,7 +37,7 @@ const textOf = (statuses: LandscapeSyncStatus[]): string =>
 
 /** The line a person who isn't an admin reads, if any. */
 const lineOf = (
-  incomplete: boolean,
+  incomplete: Parameters<typeof IncompleteNotice>[0]["incomplete"],
   syncs: Parameters<typeof IncompleteNotice>[0]["syncs"]
 ): string =>
   renderToStaticMarkup(
@@ -71,14 +71,17 @@ describe("the landscape's freshness", () => {
 
   it("tells anyone but an admin, in one line, when the apps found may be incomplete", () => {
     expect({
-      member: lineOf(true, null),
-      memberWhole: lineOf(false, null),
-      admin: lineOf(true, { state: "ready", data: [status({})] }),
-      adminUnread: lineOf(true, { state: "offline" }),
+      member: lineOf("incomplete", null),
+      memberWhole: lineOf("whole", null),
+      memberUnchecked: lineOf("unknown", null),
+      admin: lineOf("incomplete", { state: "ready", data: [status({})] }),
+      adminUnread: lineOf("incomplete", { state: "offline" }),
     }).toStrictEqual({
       member:
         "The apps found in Microsoft Entra may be incomplete: its last read didn't finish.",
       memberWhole: "",
+      memberUnchecked:
+        "The apps found in Microsoft Entra may be incomplete: Grasp couldn't check its last read.",
       admin: "",
       adminUnread:
         "The apps found in Microsoft Entra may be incomplete: its last read didn't finish.",

@@ -11,6 +11,7 @@ import { TriangleAlertIcon } from "lucide-react";
 
 import { formatDateTime } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import type { Completeness } from "./landscape-data.ts";
 
 // How fresh the apps found in Microsoft Entra are, for admins: when the
 // landscape last read the tenant's grants whole, and, when its last read
@@ -83,22 +84,28 @@ const SyncNotice = ({ status }: { status: LandscapeSyncStatus }) => {
 
 /**
  * A line saying the apps found may be incomplete, when a last read didn't
- * finish: for anyone the per-connection notices aren't shown to (anyone
- * but an admin, or an admin whose read of them failed).
+ * finish or Grasp couldn't check: for anyone the per-connection notices
+ * aren't shown to (anyone but an admin, or an admin whose read of them
+ * failed).
  */
 export const IncompleteNotice = ({
   incomplete,
   syncs,
 }: {
-  incomplete: boolean;
+  incomplete: Completeness;
   syncs: Loaded<LandscapeSyncStatus[]> | null;
 }) => {
   const { t } = useLingui();
-  return incomplete && syncs?.state !== "ready" ? (
+  if (incomplete === "whole" || syncs?.state === "ready") {
+    return null;
+  }
+  return (
     <p className="text-muted-foreground">
-      {t`The apps found in Microsoft Entra may be incomplete: its last read didn't finish.`}
+      {incomplete === "incomplete"
+        ? t`The apps found in Microsoft Entra may be incomplete: its last read didn't finish.`
+        : t`The apps found in Microsoft Entra may be incomplete: Grasp couldn't check its last read.`}
     </p>
-  ) : null;
+  );
 };
 
 /** Each landscape connection's freshness, for admins. */

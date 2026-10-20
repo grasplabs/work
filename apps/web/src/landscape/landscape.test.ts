@@ -553,6 +553,7 @@ describe("the landscape's apps", () => {
     const landscapeWith = async (parts: {
       list: () => Promise<ListedConnection[]>;
       apps: () => Promise<(typeof found)[]>;
+      incomplete?: () => Promise<string[]>;
     }) => {
       const fake = {
         connections: {
@@ -561,7 +562,8 @@ describe("the landscape's apps", () => {
         },
         landscape: {
           apps: parts.apps,
-          incomplete: async () => await Promise.resolve([]),
+          incomplete:
+            parts.incomplete ?? (async () => await Promise.resolve([])),
         },
       };
       // SAFETY: a stand-in for the parts of core's API the Landscape reads.
@@ -586,6 +588,7 @@ describe("the landscape's apps", () => {
             : data.apps.state,
         integrations: data.integrations.state,
         found: data.found.state,
+        incomplete: data.incomplete,
       };
     };
     expect({
@@ -598,18 +601,36 @@ describe("the landscape's apps", () => {
         apps: failing,
       }),
       bothDown: await landscapeWith({ list: failing, apps: failing }),
+      uncheckable: await landscapeWith({
+        list: async () => await Promise.resolve([]),
+        apps: async () => await Promise.resolve([found]),
+        incomplete: failing,
+      }),
     }).toStrictEqual({
       integrationsDown: {
         apps: ["entra:connection-entra:app-crm"],
         integrations: "refused",
         found: "ready",
+        incomplete: "whole",
       },
       foundDown: {
         apps: ["native:microsoft"],
         integrations: "ready",
         found: "refused",
+        incomplete: "whole",
       },
-      bothDown: { apps: "refused", integrations: "refused", found: "refused" },
+      bothDown: {
+        apps: "refused",
+        integrations: "refused",
+        found: "refused",
+        incomplete: "whole",
+      },
+      uncheckable: {
+        apps: ["entra:connection-entra:app-crm"],
+        integrations: "ready",
+        found: "ready",
+        incomplete: "unknown",
+      },
     });
   });
 });

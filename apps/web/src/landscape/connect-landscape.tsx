@@ -1,4 +1,5 @@
 import type { LandscapeSyncStatus } from "@grasp-os/shared/landscape";
+import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Alert,
   AlertAction,
@@ -23,11 +24,14 @@ import { useCoreAction } from "../use-core-action.ts";
 /**
  * What an admin is offered: to connect the landscape while there is no
  * connection, to connect it again while one needs it; nothing otherwise.
+ * Grasp staff see its freshness but are offered neither: core refuses
+ * them a connection.
  */
 export const landscapeOffer = (
-  syncs: Loaded<LandscapeSyncStatus[]> | null
+  syncs: Loaded<LandscapeSyncStatus[]> | null,
+  identity: Pick<Identity, "staff">
 ): "connect" | "reconnect" | null => {
-  if (syncs?.state !== "ready") {
+  if (identity.staff || syncs?.state !== "ready") {
     return null;
   }
   if (syncs.data.length === 0) {
@@ -41,11 +45,13 @@ export const landscapeOffer = (
 /** The offer to connect the landscape, or to connect it again. */
 export const ConnectLandscape = ({
   syncs,
+  identity,
 }: {
   syncs: Loaded<LandscapeSyncStatus[]> | null;
+  identity: Pick<Identity, "staff">;
 }) => {
   const { busy, failure, run } = useCoreAction();
-  const offer = landscapeOffer(syncs);
+  const offer = landscapeOffer(syncs, identity);
   if (offer === null) {
     return null;
   }

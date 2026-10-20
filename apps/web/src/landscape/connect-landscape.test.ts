@@ -40,20 +40,32 @@ const landscapeConnection: ListedConnection = {
 const person = (role: "admin" | "user", staff = false) => ({ role, staff });
 
 describe("the landscape's connection", () => {
-  it("is offered to an admin to connect while there is none, and to connect again while it needs it", () => {
+  it("is offered to an admin to connect while there is none, and to connect again while it needs it, never to staff", () => {
+    const admin = person("admin");
+    const staff = person("admin", true);
     expect({
-      unread: landscapeOffer(null),
-      none: landscapeOffer({ state: "ready", data: [] }),
-      lapsed: landscapeOffer({
-        state: "ready",
-        data: [status("needs_reauth")],
-      }),
-      active: landscapeOffer({ state: "ready", data: [status("active")] }),
+      unread: landscapeOffer(null, admin),
+      none: landscapeOffer({ state: "ready", data: [] }, admin),
+      lapsed: landscapeOffer(
+        { state: "ready", data: [status("needs_reauth")] },
+        admin
+      ),
+      active: landscapeOffer(
+        { state: "ready", data: [status("active")] },
+        admin
+      ),
+      staffNone: landscapeOffer({ state: "ready", data: [] }, staff),
+      staffLapsed: landscapeOffer(
+        { state: "ready", data: [status("needs_reauth")] },
+        staff
+      ),
     }).toStrictEqual({
       unread: null,
       none: "connect",
       lapsed: "reconnect",
       active: null,
+      staffNone: null,
+      staffLapsed: null,
     });
   });
 

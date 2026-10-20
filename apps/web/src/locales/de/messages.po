@@ -9343,6 +9343,10 @@ msgid "The Apps and workflows that may use approved npm packages. Open one to re
 msgstr "Die Apps und Workflows, die genehmigte npm-Pakete nutzen dürfen. Öffnen Sie eines, um stillzulegen oder zu widerrufen, was dafür genehmigt wurde."
 
 #: src/landscape/sync-notice.tsx
+msgid "The apps found in Microsoft Entra may be incomplete: Grasp couldn't check its last read."
+msgstr "Die in Microsoft Entra gefundenen Apps sind möglicherweise unvollständig: Grasp konnte das letzte Lesen nicht prüfen."
+
+#: src/landscape/sync-notice.tsx
 msgid "The apps found in Microsoft Entra may be incomplete: its last read didn't finish."
 msgstr "Die in Microsoft Entra gefundenen Apps sind möglicherweise unvollständig: das letzte Lesen wurde nicht abgeschlossen."
 

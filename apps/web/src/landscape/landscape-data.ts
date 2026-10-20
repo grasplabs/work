@@ -151,6 +151,9 @@ export const landscapeAppsOf = (
     )
     .map((integration) => appOf(integration, held));
 
+/** Whether the apps found in the identity provider are all of them. */
+export type Completeness = "whole" | "incomplete" | "unknown";
+
 /** What the Landscape's pages read: the apps, or why there are none. */
 export interface LandscapeData {
   /**
@@ -170,10 +173,24 @@ export interface LandscapeData {
   syncs: Loaded<LandscapeSyncStatus[]> | null;
   /**
    * Whether the apps found in the identity provider may be incomplete: a
-   * connection's last read stopped at its limit or failed. Anyone may know.
+   * connection's last read stopped at its limit or failed. Unknown when
+   * that couldn't be read though the apps could, so a list nobody could
+   * check never passes for whole. Anyone may know.
    */
-  incomplete: boolean;
+  incomplete: Completeness;
 }
+
+/** Whether the found apps are whole, given the read of which may not be. */
+const completenessOf = (
+  stopped: Loaded<string[]>,
+  found: Loaded<unknown>
+): Completeness => {
+  if (stopped.state === "ready") {
+    return stopped.data.length > 0 ? "incomplete" : "whole";
+  }
+  // With no found apps shown, their own failure is what the page says.
+  return found.state === "ready" ? "unknown" : "whole";
+};
 
 /**
  * The apps, from the catalog and the connections this person can see, with
@@ -217,7 +234,7 @@ export const loadLandscape = async (
   );
   return {
     syncs,
-    incomplete: stopped.state === "ready" && stopped.data.length > 0,
+    incomplete: completenessOf(stopped, discovered),
     integrations: fromIntegrations,
     found: discovered,
     apps:
