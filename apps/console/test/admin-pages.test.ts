@@ -283,6 +283,44 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("says there is nothing to build yet where the integrations' table goes, and how a build goes, with no build to move on", async () => {
+    const { status, html } = await page("/admin/integrations");
+    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
+    const steps = [
+      "A company’s workflow needs an app Composio does not have.",
+      "Build it starts Grasp’s agent on a branch of its own.",
+      "A person registers Grasp with the app and puts the keys in the console.",
+      "The agent writes the connection and its tests",
+      "The merge goes into the next release",
+    ].map((step) => text.indexOf(step));
+
+    expect({
+      status,
+      title: html.includes(">Integrations to build</h1>"),
+      nothingToBuild: html.includes("Nothing to build yet"),
+      howItIsBuilt: html.includes(">How it is built</h2>"),
+      stepsInOrder:
+        steps.every((at) => at >= 0) &&
+        steps.toSorted((a, b) => a - b).every((at, i) => at === steps[i]),
+      // No sample builds, and nothing that would move one on.
+      table: html.includes("<table"),
+      buttons: html
+        .slice(html.indexOf(">Integrations to build</h1>"))
+        .includes("<button"),
+      // Connect signs in with OAuth2 and API keys now (GRA-688).
+      firstByHand: text.includes("First, by hand"),
+    }).toStrictEqual({
+      status: 200,
+      title: true,
+      nothingToBuild: true,
+      howItIsBuilt: true,
+      stepsInOrder: true,
+      table: false,
+      buttons: false,
+      firstByHand: false,
+    });
+  });
+
   it("lists every organization on the overview: one that answered with where it stands and what needs Grasp, one that didn't with why and no numbers", async () => {
     const acme = await liveClient();
     acme.account.admin = readySnapshot("Acme");
