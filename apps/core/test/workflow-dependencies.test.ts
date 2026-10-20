@@ -196,7 +196,7 @@ describe("packages for a workflow's compute modules", () => {
         sourceRevision: "rev-1",
         purpose: "Render a chart.",
         targets: ["browser"],
-        dependencies: { stats: "^1.0.0" },
+        dependencies: [{ name: "stats", range: "^1.0.0" }],
       })
     );
     const { pending } = await builder.api.dependencies.status({ workflow });
@@ -378,7 +378,7 @@ describe("packages for a workflow's compute modules", () => {
     const intent = {
       sourceRevision: "rev-1",
       purpose: "Compute the weighted median of the quarter.",
-      dependencies: { [stats]: "^1.0.0" },
+      dependencies: [{ name: stats, range: "^1.0.0" }],
     } satisfies Partial<DependencyIntent>;
     const forWorkflow = await builder.api.dependencies.resolve({
       ...intent,
@@ -486,7 +486,7 @@ describe("packages for a workflow's compute modules", () => {
       sourceRevision: "rev-1",
       purpose: "Compute the weighted median of the quarter.",
       targets: ["computation"],
-      dependencies: { [stats]: "^1.0.0" },
+      dependencies: [{ name: stats, range: "^1.0.0" }],
     });
     const locks = async () => {
       const { results } = await env.DB.prepare(
@@ -618,7 +618,7 @@ const resolvedFor = async (
     sourceRevision: "rev-1",
     purpose: "Compute the weighted median of the quarter.",
     targets: ["computation"],
-    dependencies: { [stats]: "^1.0.0" },
+    dependencies: [{ name: stats, range: "^1.0.0" }],
   });
   return request;
 };

@@ -369,7 +369,7 @@ const workflowWith = async (pkg: string, entries?: string[]) => {
     sourceRevision: "rev-1",
     purpose: "Double the quarter's total.",
     targets: ["computation"],
-    dependencies: { [pkg]: "^1.0.0" },
+    dependencies: [{ name: pkg, range: "^1.0.0" }],
     ...(entries === undefined ? {} : { entries }),
   });
   return { builder, workflow, request };
@@ -975,7 +975,7 @@ describe("a workflow's modules importing approved packages", () => {
       sourceRevision: "rev-2",
       purpose: "Double the quarter's total.",
       targets: ["computation"],
-      dependencies: { [pkg]: "^1.0.0" },
+      dependencies: [{ name: pkg, range: "^1.0.0" }],
     });
     await approve(admin, next);
 
