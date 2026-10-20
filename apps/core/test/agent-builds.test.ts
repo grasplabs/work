@@ -526,6 +526,35 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect(returned(results[2]?.text)).toBe(1);
   });
 
+  it("starts a repair session's ten minutes again at a passing check, while others still run", async () => {
+    const { chat } = await setUp([]);
+    const started = Date.parse("2026-10-20T09:00:00Z");
+    const minutes = 60_000;
+
+    const taken = await runInDurableObject(chat.stub, (instance) => {
+      const take = () => instance.takeCheck(chat.chat.id, "draft", 4);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(started);
+      try {
+        take();
+        take();
+        // One passes five minutes in, while the other still runs, then fails.
+        vi.setSystemTime(started + 5 * minutes);
+        instance.settleCheck(chat.chat.id, "draft", true);
+        instance.settleCheck(chat.chat.id, "draft", false);
+        vi.setSystemTime(started + 15 * minutes);
+        const atLimit = take();
+        vi.setSystemTime(started + 15 * minutes + 1);
+        return { atLimit, past: take() };
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // Ten minutes from the pass, not from the session's first check.
+    expect(taken).toStrictEqual({ atLimit: true, past: false });
+  });
+
   it("holds checks started at once to the repair loop's limit", async () => {
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {

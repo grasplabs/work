@@ -3250,13 +3250,17 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Settles a check taken with `takeCheck`: one that didn't pass adds to
-   * the checks that failed in a row, and a passing one starts them again.
+   * the checks that failed in a row, and a passing one starts them again,
+   * and the repair session's time with them, checks still running or not.
    * How many failed in a row now.
    */
   settleCheck(chatId: ChatId, appId: string, passed: boolean): number {
     const draft = this.#draftBuilds(chatId, appId);
     draft.failed = passed ? 0 : draft.failed + 1;
     draft.running = Math.max(0, draft.running - 1);
+    if (passed) {
+      draft.startedAt = Date.now();
+    }
     return draft.failed;
   }
 
