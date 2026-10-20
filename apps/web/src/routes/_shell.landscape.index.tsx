@@ -38,6 +38,7 @@ import { ConnectLandscape } from "../landscape/connect-landscape.tsx";
 import { downloadCsv, fileDate } from "../landscape/download.ts";
 import { FilterMenu } from "../landscape/filter-menu.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
+import { LandscapeNotLoaded } from "../landscape/landscape-not-loaded.tsx";
 import {
   defaultColumns,
   landscapeCsv,
@@ -54,7 +55,6 @@ import type {
   LandscapeView,
 } from "../landscape/landscape.ts";
 import { hoverDelay, Toolbar, ToolbarLabel } from "../landscape/toolbar.tsx";
-import { NotLoaded } from "../load-from-core.tsx";
 import { policyBook, policyToday } from "../policies/policies-data.ts";
 import { applyPolicy, findings } from "../policies/policy.ts";
 
@@ -70,7 +70,7 @@ type ToolbarMenu = "filter" | "layout" | "columns";
 
 const LandscapePage = () => {
   const { t } = useLingui();
-  const { apps: loaded, syncs } = Route.useLoaderData();
+  const { apps: loaded, syncs, integrations, found } = Route.useLoaderData();
   const navigate = useNavigate();
   const view = Route.useSearch().view ?? "table";
   const [query, setQuery] = useState("");
@@ -112,7 +112,7 @@ const LandscapePage = () => {
           description={t`Every app your teams use: how Grasp knows about it, what data it touches and who owns it.`}
           title={t`Landscape`}
         />
-        <NotLoaded page={loaded} />
+        <LandscapeNotLoaded found={found} integrations={integrations} />
         <ConnectLandscape syncs={syncs} />
 
         <div className="flex flex-wrap items-center gap-2">

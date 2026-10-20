@@ -123,15 +123,17 @@ export const discoveredAppOf = (app: LandscapeAppSummary): LandscapeApp => ({
   },
 });
 
-/** The apps the landscape found, or none while core can't say. */
+/** The apps the landscape found, or why core couldn't say. */
 export const loadDiscoveredApps = async (
-  core: CoreConnection
-): Promise<LandscapeApp[]> => {
+  core: Pick<CoreConnection, "withSession">
+): Promise<Loaded<LandscapeApp[]>> => {
   const found = await loadFromCore(
     core,
     async (session) => await session.landscape.apps()
   );
-  return found.state === "ready" ? found.data.map(discoveredAppOf) : [];
+  return found.state === "ready"
+    ? { state: "ready", data: found.data.map(discoveredAppOf) }
+    : found;
 };
 
 /** Every app the company uses, as far as Grasp knows: each integration with a connection. */
@@ -145,7 +147,16 @@ export const landscapeAppsOf = (
 
 /** What the Landscape's pages read: the apps, or why there are none. */
 export interface LandscapeData {
+  /**
+   * Every app either source gave: ready once one of them loaded, so apps
+   * found in the identity provider show when the integrations didn't
+   * load, and the other way round.
+   */
   apps: Loaded<LandscapeApp[]>;
+  /** Why the integrations' apps didn't load; ready once they did. */
+  integrations: Loaded<unknown>;
+  /** Why the apps found in the identity provider didn't load; ready once they did. */
+  found: Loaded<unknown>;
   /**
    * The landscape's connections and their syncs, for admins, who connect
    * one; null for anyone else.
@@ -159,7 +170,7 @@ export interface LandscapeData {
  * catalog only names them: without it, an app goes by its provider's ID.
  */
 export const loadLandscape = async (
-  core: CoreConnection,
+  core: Pick<CoreConnection, "withSession">,
   identity: Identity
 ): Promise<LandscapeData> => {
   const [{ catalog, connections, held }, discovered, syncs] = await Promise.all(
@@ -174,24 +185,29 @@ export const loadLandscape = async (
         : null,
     ]
   );
-  if (connections.state !== "ready") {
-    return { apps: connections, syncs };
-  }
-  const integrations = integrationsOf(
-    catalog.state === "ready" ? catalog.data.entries : [],
-    connections.data
+  const fromIntegrations: Loaded<LandscapeApp[]> =
+    connections.state === "ready"
+      ? {
+          state: "ready",
+          data: landscapeAppsOf(
+            integrationsOf(
+              catalog.state === "ready" ? catalog.data.entries : [],
+              connections.data
+            ),
+            held?.state === "ready" ? held.data : undefined
+          ),
+        }
+      : connections;
+  const loaded = [fromIntegrations, discovered].flatMap((part) =>
+    part.state === "ready" ? [part.data] : []
   );
   return {
     syncs,
-    apps: {
-      state: "ready",
-      data: [
-        ...landscapeAppsOf(
-          integrations,
-          held?.state === "ready" ? held.data : undefined
-        ),
-        ...discovered,
-      ],
-    },
+    integrations: fromIntegrations,
+    found: discovered,
+    apps:
+      loaded.length === 0
+        ? fromIntegrations
+        : { state: "ready", data: loaded.flat() },
   };
 };

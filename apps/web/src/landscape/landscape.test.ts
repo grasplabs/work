@@ -8,8 +8,14 @@ import type { Permission } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
 
 import { integrationsOf } from "../connections/integrations.ts";
+import type { CoreConnection } from "../core-connection.ts";
+import type { Session } from "../core.ts";
 import { tabOf } from "./landscape-app.ts";
-import { discoveredAppOf, landscapeAppsOf } from "./landscape-data.ts";
+import {
+  discoveredAppOf,
+  landscapeAppsOf,
+  loadLandscape,
+} from "./landscape-data.ts";
 import {
   defaultColumns,
   discoveredAppOfId,
@@ -308,6 +314,12 @@ describe("an app's tabs", () => {
   });
 });
 
+/** A read of core's that fails, as one that is down does. */
+const failing = async (): Promise<never> => {
+  await Promise.resolve();
+  throw new Error("Down");
+};
+
 const connection = (
   patch: Partial<ListedConnection> & { id: string }
 ): ListedConnection => ({
@@ -518,6 +530,80 @@ describe("the landscape's apps", () => {
       },
       tab: "usage",
       notFound: [undefined, undefined, undefined, undefined],
+    });
+  });
+
+  it("show what one source gave when the other didn't load, saying which didn't", async () => {
+    const found = {
+      connectionId: "connection-entra",
+      appId: "app-crm",
+      name: "Contoso CRM",
+      publisher: null,
+      verified: false,
+      firstSeen: "2026-10-01T08:00:00.000Z",
+      lastSeen: "2026-10-20T08:00:00.000Z",
+      people: 1,
+      adminConsented: false,
+      scopes: [],
+      signals: [],
+    };
+    const landscapeWith = async (parts: {
+      list: () => Promise<ListedConnection[]>;
+      apps: () => Promise<(typeof found)[]>;
+    }) => {
+      const fake = {
+        connections: {
+          catalog: async () => await Promise.resolve({ entries, offered: [] }),
+          list: parts.list,
+        },
+        landscape: { apps: parts.apps },
+      };
+      // SAFETY: a stand-in for the parts of core's API the Landscape reads.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const session: Session = fake as never;
+      const core: Pick<CoreConnection, "withSession"> = {
+        withSession: async (read) => await read(session),
+      };
+      const data = await loadLandscape(core, {
+        userId: "user-1",
+        email: "ada@acme.test",
+        name: "Ada",
+        role: "user",
+        teams: [],
+        staff: false,
+        expiresAt: "2026-10-21T08:00:00.000Z",
+      });
+      return {
+        apps:
+          data.apps.state === "ready"
+            ? data.apps.data.map(({ id }) => id)
+            : data.apps.state,
+        integrations: data.integrations.state,
+        found: data.found.state,
+      };
+    };
+    expect({
+      integrationsDown: await landscapeWith({
+        list: failing,
+        apps: async () => await Promise.resolve([found]),
+      }),
+      foundDown: await landscapeWith({
+        list: async () => await Promise.resolve([connection({ id: "c1" })]),
+        apps: failing,
+      }),
+      bothDown: await landscapeWith({ list: failing, apps: failing }),
+    }).toStrictEqual({
+      integrationsDown: {
+        apps: ["entra:connection-entra:app-crm"],
+        integrations: "refused",
+        found: "ready",
+      },
+      foundDown: {
+        apps: ["native:microsoft"],
+        integrations: "ready",
+        found: "refused",
+      },
+      bothDown: { apps: "refused", integrations: "refused", found: "refused" },
     });
   });
 });
