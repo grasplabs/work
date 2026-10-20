@@ -8,6 +8,8 @@ import { screenLimits } from "@grasp-os/shared/screens";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -19,6 +21,7 @@ import {
   openFixtureStore,
   openStore,
 } from "../src/data-stores.ts";
+import { appMembers } from "../src/db/core/schema.ts";
 import { sweepPreviewStores } from "../src/sealed-previews.ts";
 import { openTestRun } from "./agent-chat.ts";
 import { release } from "./apps.ts";
@@ -193,6 +196,105 @@ const preferenceReference = async (
     fingerprint: await contractFingerprint(operation),
     kind: operation.kind,
   };
+};
+
+/** An App with preferences and no tables, and one screen. */
+const deskFiles = (marker = "Desk"): Record<string, string> => ({
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "app.ts": `import { app, v } from "@grasp-os/sdk";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+  preferences: ${preferencesSource},
+  uses: [],
+});
+`,
+  "screens/desk.tsx": `export default function Desk() {
+  return <main>${marker}</main>;
+}
+`,
+});
+
+/** The version `person`'s chat's draft release of `app` at `revision` is sealed as. */
+const draftVersion = async (
+  person: Person,
+  chatId: Parameters<typeof previewStores>[1],
+  app: AppId,
+  revision: number
+): Promise<number> => {
+  await chatsOf(person).previewReferences(chatId, person.userId, app, revision);
+  return await runInDurableObject(
+    chatsOf(person),
+    (_instance, state) =>
+      keptManifestSchema.parse(
+        JSON.parse(
+          state.storage.sql
+            .exec<{ manifest: string }>(
+              "SELECT manifest FROM preview_releases WHERE chat_id = ? AND app_id = ?",
+              chatId,
+              app
+            )
+            .one().manifest
+        )
+      ).resourceVersion
+  );
+};
+
+/**
+ * What a call of the draft's preference operation `name` answers in its
+ * preview, sent straight to the chat's object (past the checks of
+ * `chats-rpc.ts`, which only add to the preview's own), at `revision`.
+ */
+const preferenceCall = async (
+  person: Person,
+  {
+    chatId,
+    app,
+    revision,
+  }: {
+    chatId: Parameters<typeof previewStores>[1];
+    app: AppId;
+    revision: number;
+  },
+  name: "get" | "update",
+  input: unknown,
+  options: { deadline?: number } = {}
+): Promise<unknown> =>
+  outcomeOfText(
+    await chatsOf(person).previewFunction(
+      chatId,
+      person.userId,
+      app,
+      revision,
+      JSON.stringify({
+        reference: await preferenceReference(
+          app,
+          await draftVersion(person, chatId, app, revision),
+          name
+        ),
+        input,
+      }),
+      options
+    )
+  );
+
+/** A Desk App of `builder`'s, released, and a chat with a draft of it. */
+const deskDraft = async (builder: Person) => {
+  const { id } = await builder.api.apps.create({ name: "Desk" });
+  await release(builder, id, deskFiles());
+  const app = appIdSchema.parse(id);
+  const draft = await chatWithDraft(builder, app, {
+    "screens/desk.tsx": deskFiles("Drafted")["screens/desk.tsx"] ?? "",
+  });
+  return { app, ...draft };
 };
 
 /** The draft of `app` in a chat of the App's builder, and the App itself. */
@@ -451,10 +553,10 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
             )
           )
         ).reference.resourceVersion;
-    const draftVersion = await versionAt(revision);
+    const versionNow = await versionAt(revision);
     const draft = {
-      get: await preferenceReference(app, draftVersion, "get"),
-      update: await preferenceReference(app, draftVersion, "update"),
+      get: await preferenceReference(app, versionNow, "get"),
+      update: await preferenceReference(app, versionNow, "update"),
     };
     const first = {
       // The defaults, not what they chose on the App.
@@ -508,31 +610,8 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
 
   it("gives a draft with preferences and no tables a store of its own for them", async () => {
     const builder = await signedInApi(idp, "builder");
-    const files = {
-      "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-      "app.ts": `import { app, v } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: {} },
-  operations: {},
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  preferences: ${preferencesSource},
-  uses: [],
-});
-`,
-      "screens/desk.tsx": `export default function Desk() {
-  return <main>Desk</main>;
-}
-`,
-    };
     const { id } = await builder.api.apps.create({ name: "Desk" });
-    await release(builder, id, files);
+    await release(builder, id, deskFiles());
     const app = appIdSchema.parse(id);
     const { chatId, revision } = await chatWithDraft(builder, app, {
       "screens/desk.tsx": `export default function Desk() {
@@ -1602,5 +1681,187 @@ export class App extends DurableObject {
       0
     );
     expect(otherLogs).toStrictEqual([]);
+  });
+});
+
+describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
+  it("refuses a builder who lost the role while still a member, before any store is made for them", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const { id } = await owner.api.apps.create({ name: "Notes" });
+    await release(owner, id, withPreferences(notesFiles("released")));
+    const app = appIdSchema.parse(id);
+    const builder = await signedInApi(idp, "builder");
+    await drizzle(env.DB).insert(appMembers).values({
+      appId: app,
+      memberType: "person",
+      memberId: builder.userId,
+      role: "builder",
+      addedBy: owner.userId,
+      addedAt: new Date(),
+    });
+    const { chatId, revision } = await chatWithDraft(
+      builder,
+      app,
+      withPreferences(notesFiles("drafted"))
+    );
+    const titles = await requestFor(
+      builder,
+      { chatId, app, revision },
+      "notes.titles"
+    );
+    // Still a member of the App, as one of its users only.
+    await drizzle(env.DB)
+      .update(appMembers)
+      .set({ role: "user" })
+      .where(
+        and(eq(appMembers.appId, app), eq(appMembers.memberId, builder.userId))
+      );
+    const refused = {
+      preferences: await preferenceCall(
+        builder,
+        { chatId, app, revision },
+        "get",
+        {}
+      ),
+      functions: outcomeOfText(
+        await chatsOf(builder).previewFunction(
+          chatId,
+          builder.userId,
+          app,
+          revision,
+          titles
+        )
+      ),
+    };
+    expect({
+      refused,
+      stores: await previewStores(builder, chatId, app),
+    }).toStrictEqual({
+      refused: { preferences: "role.forbidden", functions: "role.forbidden" },
+      stores: [],
+    });
+  });
+
+  it("refuses a call past its deadline, reading and writing nothing", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const draft = await deskDraft(builder);
+    const late = await preferenceCall(
+      builder,
+      draft,
+      "update",
+      { expectedRevision: 0, patch: { compact: true } },
+      { deadline: Date.now() - 1 }
+    );
+    expect({
+      late,
+      read: await preferenceCall(builder, draft, "get", {}),
+    }).toStrictEqual({
+      late: "operation.deadline_exceeded",
+      read: { compact: false, theme: "light", _rev: 0 },
+    });
+  });
+
+  it("keeps each chat's preferences to itself, and drops them with its preview", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const first = await deskDraft(builder);
+    const second = await chatWithDraft(builder, first.app, {
+      "screens/desk.tsx": deskFiles("Elsewhere")["screens/desk.tsx"] ?? "",
+    });
+    const secondAt = { ...second, app: first.app };
+    await preferenceCall(builder, first, "update", {
+      expectedRevision: 0,
+      patch: { theme: "dark" },
+    });
+    // Another chat's preview of the same App has its own.
+    const elsewhere = await preferenceCall(builder, secondAt, "get", {});
+    // The draft changes: its preview, and the store holding its
+    // preferences, go; the next revision starts from the defaults.
+    const next = await first.write(
+      { "screens/desk.tsx": deskFiles("Again")["screens/desk.tsx"] ?? "" },
+      first.revision
+    );
+    const outdated = await failure(
+      async () => await preferenceCall(builder, first, "get", {})
+    );
+    const again = await preferenceCall(
+      builder,
+      { ...first, revision: next },
+      "get",
+      {}
+    );
+    // The store of the revision before, with the preferences written
+    // there, is discarded and forgotten.
+    await vi.waitFor(async () => {
+      const stores = await previewStores(builder, first.chatId, first.app);
+      expect(stores.map((row) => row.revision)).toStrictEqual([next]);
+    });
+    expect({ elsewhere, outdated, again }).toStrictEqual({
+      elsewhere: { compact: false, theme: "light", _rev: 0 },
+      outdated: "app.preview_outdated",
+      again: { compact: false, theme: "light", _rev: 0 },
+    });
+  });
+
+  it("follows the draft's preferences live, pushed as they change", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const draft = await deskDraft(builder);
+    const pushed: QuerySnapshotPush[] = [];
+    await builder.api.chats.previewWatchQuery(
+      draft.chatId,
+      draft.app,
+      draft.revision,
+      JSON.stringify({
+        reference: await preferenceReference(
+          draft.app,
+          await draftVersion(builder, draft.chatId, draft.app, draft.revision),
+          "get"
+        ),
+        input: {},
+      }),
+      (snapshot) => {
+        pushed.push(snapshot);
+      }
+    );
+    await vi.waitFor(() => {
+      expect(pushed.at(-1)?.result).toStrictEqual({
+        ok: true,
+        value: { compact: false, theme: "light", _rev: 0 },
+      });
+    });
+    await preferenceCall(builder, draft, "update", {
+      expectedRevision: 0,
+      patch: { compact: true },
+    });
+    await vi.waitFor(() => {
+      expect(pushed.at(-1)?.result).toStrictEqual({
+        ok: true,
+        value: { compact: true, theme: "light", _rev: 1 },
+      });
+    });
+  });
+
+  it("refuses a window of preferences before anything is charged", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const draft = await deskDraft(builder);
+    const request = JSON.stringify({
+      reference: await preferenceReference(
+        draft.app,
+        await draftVersion(builder, draft.chatId, draft.app, draft.revision),
+        "get"
+      ),
+      input: {},
+      window: { extent: 500 },
+    });
+    await expect(
+      failure(
+        async () =>
+          await builder.api.chats.previewFunction(
+            draft.chatId,
+            draft.app,
+            draft.revision,
+            request
+          )
+      )
+    ).resolves.toBe("contract.invalid_request");
   });
 });

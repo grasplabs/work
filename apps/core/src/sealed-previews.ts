@@ -14,6 +14,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { jsonBytes } from "@grasp-os/shared/screens";
 import { dataErrors } from "@grasp-os/shared/stores";
+import type { WriterRoles } from "@grasp-os/shared/stores";
 import {
   idempotencyKeySchema,
   submissionErrors,
@@ -543,10 +544,11 @@ export class SealedPreviews {
           release,
           call,
           deadline,
-          requestId,
         });
       }
       const path = publicOperationOf(release, call.reference);
+      // Before the preview's store is made or opened.
+      await this.#authorizer(chatId, personId, app, running)();
       const store = await this.#storeOf(chatId, app, running, release);
       held = { running, store };
       const invocation = this.#invocationOf(chatId, personId, app, running, {
@@ -632,12 +634,10 @@ export class SealedPreviews {
       release,
       call,
       deadline,
-      requestId,
     }: {
       release: Release;
       call: FunctionRequest;
       deadline: number;
-      requestId: string;
     }
   ): Promise<PreviewAnswer> {
     // Read whole: there is no window of one document.
@@ -645,12 +645,10 @@ export class SealedPreviews {
       throw operationErrors.create("contract.invalid_request");
     }
     const preference = await preferenceOperationOf(release, call.reference);
+    const authorize = this.#authorizer(chatId, personId, app, running);
+    // Before the preview's store is made or opened.
+    await authorize();
     const store = await this.#storeOf(chatId, app, running, release);
-    const { authorize } = this.#invocationOf(chatId, personId, app, running, {
-      store,
-      requestId,
-      deadline,
-    });
     let reads: PreviewAnswer["reads"];
     const result = await answerPreferences(
       this.#env,
@@ -684,10 +682,47 @@ export class SealedPreviews {
   }
 
   /**
+   * The gate of every call of `running`, for `personId`: the preview is
+   * still the draft's, and the person still an active member who builds
+   * the App. Run before the preview's store is made or opened, so a
+   * caller who may not use the preview makes none, and again before
+   * each protected step (`#invocationOf`).
+   */
+  #authorizer(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    running: Running
+  ): () => Promise<WriterRoles> {
+    const name = nameOf(chatId, app);
+    const requireCurrent = (): void => {
+      if (this.#running.get(name) !== running) {
+        throw appErrors.create("app.preview_outdated");
+      }
+    };
+    return async () => {
+      requireCurrent();
+      const role = await memberRole(this.#env.DB, personId);
+      if (role === undefined) {
+        throw permissionErrors.create("permission.person_inactive");
+      }
+      const roles = await operationRoles(
+        this.#env,
+        { userId: personId, role },
+        app
+      );
+      if (!roles.appBuilder) {
+        throw roleErrors.create("role.forbidden");
+      }
+      requireCurrent();
+      return roles;
+    };
+  }
+
+  /**
    * The invocation of a call of `running`, for `personId`, on `store`:
-   * its one gate, before the call starts and each commit, checks the
-   * preview is still the draft's, and the person still a member who
-   * builds the App. No resources: a preview reaches no outside system.
+   * its one gate (`#authorizer`), before the call starts and each commit.
+   * No resources: a preview reaches no outside system.
    */
   #invocationOf(
     chatId: ChatId,
@@ -700,12 +735,6 @@ export class SealedPreviews {
       deadline,
     }: { store: OpenStore; requestId: string; deadline: number }
   ): Invocation {
-    const name = nameOf(chatId, app);
-    const requireCurrent = (): void => {
-      if (this.#running.get(name) !== running) {
-        throw appErrors.create("app.preview_outdated");
-      }
-    };
     return {
       principal: personId,
       consumer: { resourceId: app, resourceVersion: running.version },
@@ -713,23 +742,11 @@ export class SealedPreviews {
       requestId,
       deadline,
       runId: null,
+      // The preview's gate, after the store this call holds is checked
+      // to be one core still records (the sweep may have taken it).
       authorize: async () => {
-        requireCurrent();
         await this.#requireRecorded(chatId, app, running, store);
-        const role = await memberRole(this.#env.DB, personId);
-        if (role === undefined) {
-          throw permissionErrors.create("permission.person_inactive");
-        }
-        const roles = await operationRoles(
-          this.#env,
-          { userId: personId, role },
-          app
-        );
-        if (!roles.appBuilder) {
-          throw roleErrors.create("role.forbidden");
-        }
-        requireCurrent();
-        return roles;
+        return await this.#authorizer(chatId, personId, app, running)();
       },
     };
   }
