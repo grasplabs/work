@@ -299,6 +299,21 @@ export const runRetentionDefaultDays = 30;
  */
 export const runRetentionSchema = z.int().min(1).max(30);
 
+// INBOUND_MAIL_DOMAIN (core's src/workflows/overview.ts)
+
+/**
+ * `INBOUND_MAIL_DOMAIN`: the domain the deployment receives mail at, as
+ * its Email Routing catch-all rule sends it to core (set up outside core),
+ * so an email trigger's address shows whole: `<local part>@<domain>`. A
+ * lowercase hostname of at most 253 characters, its labels at most 63.
+ * Unset, triggers show their local part alone.
+ */
+export const inboundMailDomainSchema = domainSchema
+  .max(253)
+  .refine((domain) => domain.split(".").every((label) => label.length <= 63), {
+    message: "Each part of the domain is at most 63 characters",
+  });
+
 /**
  * The names of the deployment config vars above, the only settings the
  * console sets on core as vars. `PLATFORM_CHANGE` is the console's own, set
@@ -312,4 +327,5 @@ export const deploymentConfigVars = [
   "AUDIT_ARCHIVE_RETENTION_DAYS",
   "RUN_RETENTION_DAYS",
   "QUOTA_LIMITS",
+  "INBOUND_MAIL_DOMAIN",
 ] as const;

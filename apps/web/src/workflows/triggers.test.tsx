@@ -50,15 +50,29 @@ describe("a workflow's triggers", () => {
     ]);
   });
 
-  it("shows an email trigger's address as the part before the @ it is, and an event trigger's event", () => {
-    // Core holds the local part only, as an email trigger declares it.
+  it("shows an email trigger's whole address, to copy, once the deployment has its mail domain, and an event trigger's event", () => {
     expect(
       textOf([
-        { type: "email", position: 0, address: "invoices" },
+        {
+          type: "email",
+          position: 0,
+          localPart: "invoices",
+          address: "invoices@mail.acme.test",
+        },
         { type: "event", position: 1, event: "invoice.paid" },
       ])
     ).toBe(
-      "When an email arrives for invoices The part of the address before the @, on the mail domain set up for Grasp. When the event invoice.paid happens"
+      "When an email arrives at invoices@mail.acme.test Copy address When the event invoice.paid happens"
+    );
+  });
+
+  it("shows an email trigger's address as the part before the @ while the deployment has no mail domain set", () => {
+    expect(
+      textOf([
+        { type: "email", position: 0, localPart: "invoices", address: null },
+      ])
+    ).toBe(
+      "When an email arrives for invoices The part of the address before the @, on the mail domain set up for Grasp."
     );
   });
 

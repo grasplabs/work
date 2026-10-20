@@ -740,11 +740,14 @@ export type WorkflowTrigger = { position: number } & (
     }
   | {
       type: "email";
+      /** The part of the address before the `@` ({@link emailLocalPartSchema}). */
+      localPart: string;
       /**
-       * The part of the address before the `@` ({@link emailLocalPartSchema}):
-       * the mail domain is Email Routing's, set up outside core.
+       * The whole address people send to: the local part at the
+       * deployment's inbound mail domain (`INBOUND_MAIL_DOMAIN`); null
+       * while the deployment has none set.
        */
-      address: string;
+      address: string | null;
     }
   | { type: "event"; event: string }
 );

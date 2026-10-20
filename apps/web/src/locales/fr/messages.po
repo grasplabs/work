@@ -1582,6 +1582,10 @@ msgstr "Ajoutée : lit et réécrit chaque enregistrement de {table}, quel qu'en
 msgid "Address"
 msgstr "Adresse"
 
+#: src/workflows/triggers.tsx
+msgid "Address copied"
+msgstr "Adresse copiée"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -3225,6 +3229,10 @@ msgstr "Copié"
 msgid "Copy"
 msgstr "Copier"
 
+#: src/workflows/triggers.tsx
+msgid "Copy address"
+msgstr "Copier l’adresse"
+
 #: src/landscape/app-table.tsx
 msgid "Copy app ID"
 msgstr "Copier l’ID de l’application"
@@ -3250,6 +3258,10 @@ msgstr "À améliorer"
 msgctxt "status of an uploaded policy"
 msgid "Could not be read"
 msgstr "Illisible"
+
+#: src/workflows/triggers.tsx
+msgid "Could not copy the address"
+msgstr "Impossible de copier l’adresse"
 
 #: src/landscape/audit-trail.tsx
 msgid "Could not copy the fingerprint"
@@ -10867,6 +10879,10 @@ msgstr "Quand"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "When a payment fails or the card is about to run out, so you can fix it in time."
 msgstr "Quand un paiement échoue ou que la carte arrive à expiration, pour que vous puissiez régler cela à temps."
+
+#: src/workflows/triggers.tsx
+msgid "When an email arrives at {address}"
+msgstr "Quand un e-mail arrive à {address}"
 
 #: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"
