@@ -73,9 +73,11 @@ if (await installBuiltinsFirst()) {
 afterEach(closeOpenSockets);
 
 /**
- * How long a file waits for its audit drains. One in an object a test
- * aborted never settles; one still running past this is let go, as a
- * reset lets go of a wake (reset-storage.ts).
+ * How long a file waits for its audit drains. A drain in an object a test
+ * aborted (`abortAllDurableObjects`, an eviction) never settles, and never
+ * calls anything again either: its request is gone. So the wait gives up
+ * on those, as a reset gives up on a wake (reset-storage.ts). A live drain
+ * takes milliseconds; one taking this long would be a bug of its own.
  */
 const drainsTimeoutMs = 5000;
 
