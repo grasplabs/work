@@ -10,6 +10,7 @@ import {
 } from "vite-plus/test";
 
 import { npmRegistryFake } from "./npm-registry-fake.ts";
+import { osvFake } from "./osv-fake.ts";
 
 // The npm registry through connect (src/npm.ts), from its threat model:
 // being sent elsewhere by a redirect, other bytes than the integrity hash
@@ -24,14 +25,19 @@ import { npmRegistryFake } from "./npm-registry-fake.ts";
  */
 const fakeInternet = () => {
   const registry = npmRegistryFake();
+  const osv = osvFake();
   const elsewhere: string[] = [];
   beforeEach(() => {
     registry.reset();
+    osv.reset();
     elsewhere.length = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);
       if (new URL(request.url).origin === registry.origin) {
         return await registry.answer(request);
+      }
+      if (new URL(request.url).origin === osv.origin) {
+        return await osv.answer(request);
       }
       elsewhere.push(request.url);
       return new Response("Somewhere else");
@@ -40,10 +46,10 @@ const fakeInternet = () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
-  return { registry, elsewhere };
+  return { registry, osv, elsewhere };
 };
 
-const { registry, elsewhere } = fakeInternet();
+const { registry, osv, elsewhere } = fakeInternet();
 
 const outcome = async (promise: Promise<unknown>): Promise<string> => {
   try {
@@ -961,6 +967,198 @@ describe("the registry's advisories, through connect", () => {
       failed: "package.registry_unavailable",
       redirected: "package.registry_unavailable",
       invalidName: "package.invalid",
+    });
+  });
+});
+
+/** OSV's answer to two queries: `vulns` for the first, none for the second. */
+const results = (vulns: unknown[]) =>
+  Response.json({ results: [{ vulns }, {}] });
+
+describe("OSV.dev's malware reports, through connect", () => {
+  it("asks OSV.dev's batch query for each version named, without credentials, and passes on only its MAL- reports", async () => {
+    osv.report("left-pad", "1.3.0", "MAL-2026-12435");
+    // Not a malware report: the registry's advisories carry these.
+    osv.report("left-pad", "1.3.0", "GHSA-p6mc-m468-83gw");
+    osv.report("left-pad", "1.3.1", "GHSA-p6mc-m468-83gw");
+    const answered = await connect.npmMalwareReports({
+      "left-pad": ["1.3.0", "1.3.1"],
+      constructor: ["1.0.0"],
+    });
+    const [asked] = osv.asked;
+    const body: unknown = JSON.parse(asked?.body ?? "null");
+    expect({
+      answered,
+      asked: {
+        method: asked?.method,
+        path: asked?.path,
+        body,
+        credentials: Object.keys(asked?.headers ?? {}).filter(
+          (header) => header === "authorization" || header === "cookie"
+        ),
+        // A redirect is never followed: refused, as any other answer.
+        redirect: asked?.redirect,
+      },
+      elsewhere,
+      registry: registry.asked.length,
+    }).toStrictEqual({
+      answered: [{ name: "left-pad", version: "1.3.0", id: "MAL-2026-12435" }],
+      asked: {
+        method: "POST",
+        path: "/v1/querybatch",
+        body: {
+          queries: [
+            {
+              package: { ecosystem: "npm", name: "left-pad" },
+              version: "1.3.0",
+            },
+            {
+              package: { ecosystem: "npm", name: "left-pad" },
+              version: "1.3.1",
+            },
+            {
+              package: { ecosystem: "npm", name: "constructor" },
+              version: "1.0.0",
+            },
+          ],
+        },
+        credentials: [],
+        redirect: "manual",
+      },
+      elsewhere: [],
+      registry: 0,
+    });
+  });
+
+  it("fails, never answering none, on an answer it can't read or that leaves part out", async () => {
+    const failing = async (respond: () => Response) => {
+      osv.override(respond);
+      return await outcome(
+        connect.npmMalwareReports({ "left-pad": ["1.3.0", "1.3.1"] })
+      );
+    };
+    expect({
+      notJson: await failing(() => new Response("<html>")),
+      noResults: await failing(() => Response.json({})),
+      fewerResults: await failing(() => Response.json({ results: [{}] })),
+      moreResults: await failing(() =>
+        Response.json({ results: [{}, {}, {}] })
+      ),
+      vulnsNotAList: await failing(() =>
+        Response.json({ results: [{ vulns: { id: "MAL-2026-1" } }, {}] })
+      ),
+      noId: await failing(() => results([{ modified: "2026-10-19" }])),
+      notAReport: await failing(() => results([{ id: "MAL-../../etc" }])),
+      tooMany: await failing(() =>
+        results(
+          Array.from(
+            { length: registryLimits.osvEntriesPerVersion + 1 },
+            (_, at) => ({ id: `GHSA-${String(at)}` })
+          )
+        )
+      ),
+      tooLarge: await failing(() =>
+        results([
+          { id: "GHSA-x", summary: "y".repeat(registryLimits.osvBytes) },
+        ])
+      ),
+      failed: await failing(() => new Response("Unavailable", { status: 503 })),
+      redirected: await failing(
+        () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: `${osv.origin}/v1/querybatch` },
+          })
+      ),
+      invalidName: await outcome(
+        connect.npmMalwareReports({ "../etc": ["1.0.0"] })
+      ),
+      elsewhere,
+    }).toStrictEqual({
+      notJson: "package.malware_unchecked",
+      noResults: "package.malware_unchecked",
+      fewerResults: "package.malware_unchecked",
+      moreResults: "package.malware_unchecked",
+      vulnsNotAList: "package.malware_unchecked",
+      noId: "package.malware_unchecked",
+      notAReport: "package.malware_unchecked",
+      tooMany: "package.malware_unchecked",
+      tooLarge: "package.malware_unchecked",
+      failed: "package.malware_unchecked",
+      redirected: "package.malware_unchecked",
+      invalidName: "package.invalid",
+      elsewhere: [],
+    });
+  });
+
+  it("asks again, by its page token alone, for a version whose entries go on to another page, a few pages and entries at most", async () => {
+    osv.pageSize(1);
+    osv.report("left-pad", "1.3.0", "GHSA-p6mc-m468-83gw");
+    osv.report("left-pad", "1.3.0", "MAL-2026-12435");
+    osv.report("left-pad", "1.3.0", "GHSA-xxjr-mmjv-4gpg");
+    const paged = await connect.npmMalwareReports({
+      "left-pad": ["1.3.0"],
+      clean: ["2.0.0"],
+    });
+    const rounds = osv.asked.map(({ body }): unknown => JSON.parse(body));
+    for (let more = 0; more <= registryLimits.osvPages; more += 1) {
+      osv.report("left-pad", "1.3.1", `GHSA-${String(more)}`);
+    }
+    const tooManyPages = await outcome(
+      connect.npmMalwareReports({ "left-pad": ["1.3.1"] })
+    );
+    // More entries over the graph's versions than are ever read.
+    const versions = Math.ceil(
+      (registryLimits.osvEntries + 1) / registryLimits.osvEntriesPerVersion
+    );
+    osv.override(() =>
+      Response.json({
+        results: Array.from({ length: versions }, () => ({
+          vulns: Array.from(
+            { length: registryLimits.osvEntriesPerVersion },
+            (_, at) => ({ id: `GHSA-${String(at)}` })
+          ),
+        })),
+      })
+    );
+    const tooManyEntries = await outcome(
+      connect.npmMalwareReports({
+        many: Array.from({ length: versions }, (_, patch) => `1.0.${patch}`),
+      })
+    );
+    expect({ paged, rounds, tooManyPages, tooManyEntries }).toStrictEqual({
+      paged: [{ name: "left-pad", version: "1.3.0", id: "MAL-2026-12435" }],
+      rounds: [
+        {
+          queries: [
+            {
+              package: { ecosystem: "npm", name: "left-pad" },
+              version: "1.3.0",
+            },
+            { package: { ecosystem: "npm", name: "clean" }, version: "2.0.0" },
+          ],
+        },
+        {
+          queries: [
+            {
+              package: { ecosystem: "npm", name: "left-pad" },
+              version: "1.3.0",
+              page_token: "1",
+            },
+          ],
+        },
+        {
+          queries: [
+            {
+              package: { ecosystem: "npm", name: "left-pad" },
+              version: "1.3.0",
+              page_token: "2",
+            },
+          ],
+        },
+      ],
+      tooManyPages: "package.malware_unchecked",
+      tooManyEntries: "package.malware_unchecked",
     });
   });
 });

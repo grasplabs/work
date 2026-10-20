@@ -266,9 +266,18 @@ const findingsOf = async (
   for (const { name, version } of packages) {
     asked.set(name, [...(asked.get(name) ?? []), version]);
   }
-  const advisories = await whenFree(
-    async () => await env.CONNECT.npmAdvisories(Object.fromEntries(asked))
-  );
+  // Two sources, asked at once: the registry's advisories (CWE-506 marks
+  // malware there), and OSV.dev's malware reports (GRA-749), which carry
+  // GitHub's malware advisories and the OpenSSF malicious-packages data
+  // the registry's answer never does. Either failing fails the resolve.
+  const [advisories, reports] = await Promise.all([
+    whenFree(
+      async () => await env.CONNECT.npmAdvisories(Object.fromEntries(asked))
+    ),
+    whenFree(
+      async () => await env.CONNECT.npmMalwareReports(Object.fromEntries(asked))
+    ),
+  ]);
   const affecting = packages.flatMap(({ name, version }) =>
     (Object.hasOwn(advisories, name) ? (advisories[name] ?? []) : [])
       .filter(
@@ -297,9 +306,18 @@ const findingsOf = async (
       )
       .slice(0, dependencyMaxFindings),
     total: all.length,
-    malware: affecting.flatMap(({ advisory, package: ref }) =>
-      advisory.malware ? [{ package: ref, advisory: advisory.id }] : []
-    ),
+    malware: [
+      ...affecting.flatMap(({ advisory, package: ref }) =>
+        advisory.malware ? [{ package: ref, advisory: advisory.id }] : []
+      ),
+      // Only for a version the graph holds: connect answers for what it
+      // was asked, and this holds it to that.
+      ...reports.flatMap(({ name, version, id }) =>
+        packages.some((ref) => ref.name === name && ref.version === version)
+          ? [{ package: { name, version }, advisory: id }]
+          : []
+      ),
+    ],
   };
 };
 

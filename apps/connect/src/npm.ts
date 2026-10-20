@@ -8,6 +8,7 @@ import { log } from "@grasp-os/shared/log";
 import {
   advisorySeverities,
   npmAdvisoriesRequestSchema,
+  npmMalwareReportsSchema,
   npmMetadataSchema,
   npmTarballRequestSchema,
   packageErrors,
@@ -16,6 +17,7 @@ import {
 import type {
   NpmAdvisories,
   NpmAdvisory,
+  NpmMalwareReports,
   NpmMetadata,
   NpmVersion,
 } from "@grasp-os/shared/packages";
@@ -59,6 +61,21 @@ import { z } from "zod";
 //   `package.registry_unavailable`, never an empty one. An advisory
 //   classified CWE-506 (Embedded Malicious Code) is passed on as malware,
 //   which core refuses: the bulk answer carries no other malware marker.
+// - Malware reports (GRA-749): GitHub's malware advisories and the OpenSSF
+//   malicious-packages data never reach the bulk answer, so OSV.dev is
+//   asked too, a second origin, fixed here (https://api.osv.dev), at one
+//   path, by POST with a body built here from the same checked names and
+//   versions, without credentials (it takes none), a redirect refused
+//   outright. A graph's versions fit one query batch (OSV takes 1000; a
+//   graph holds at most `dependencyMaxPackages`). Each answer is counted
+//   and capped as it arrives and read strictly: one result for each
+//   query, in order, each a list of entries with IDs. A query whose
+//   entries go on to another page is asked again by its page token alone,
+//   a few rounds and so many entries at most. Only `MAL-` entries
+//   are passed on, by ID alone; core refuses them as it does CWE-506.
+//   An answer that can't be read, or no answer, is
+//   `package.malware_unchecked`, never an empty one: core then refuses
+//   to propose the graph, as it does when advisories can't be read.
 
 const registry = new URL(npmRegistryOrigin);
 
@@ -684,6 +701,166 @@ const advisoryOf = (sent: z.infer<typeof sentAdvisorySchema>): NpmAdvisory => ({
   vulnerableVersions: sent.vulnerable_versions,
   malware: sent.cwe?.includes(malwareCwe) ?? false,
 });
+
+/** OSV.dev's batch query, the one endpoint asked there (GRA-749). */
+const osvQueryUrl = new URL("https://api.osv.dev/v1/querybatch");
+
+/** An OpenSSF malicious-packages report, as OSV names its entries. */
+const malwareReportPrefix = "MAL-";
+
+/** OSV.dev's answer to a batch query, read for what is passed on. */
+const osvAnswerSchema = z.object({
+  results: z.array(
+    z.object({
+      vulns: z
+        .array(z.object({ id: z.string().min(1).max(128) }))
+        .max(registryLimits.osvEntriesPerVersion)
+        .optional(),
+      // More of this query's entries are on another page (more than OSV
+      // sends at once, or its time ran out): asked for next.
+      next_page_token: z.string().min(1).max(1024).optional(),
+    })
+  ),
+});
+
+/** One query of a batch: a version, and the page of its entries asked. */
+interface OsvQuery {
+  readonly name: string;
+  readonly version: string;
+  readonly pageToken?: string;
+}
+
+/**
+ * OSV.dev's answer to one batch of `queries`: one result for each, in
+ * order, read strictly, or `package.malware_unchecked`.
+ */
+const askOsv = async (
+  queries: readonly OsvQuery[]
+): Promise<z.infer<typeof osvAnswerSchema>["results"]> => {
+  let response: Response;
+  try {
+    response = await fetch(osvQueryUrl, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        queries: queries.map(({ name, version, pageToken }) => ({
+          package: { ecosystem: "npm", name },
+          version,
+          ...(pageToken === undefined ? {} : { page_token: pageToken }),
+        })),
+      }),
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+  } catch {
+    log.warn("osv.unreachable", {});
+    throw packageErrors.create("package.malware_unchecked");
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    log.warn("osv.failed", { status: response.status });
+    throw packageErrors.create("package.malware_unchecked");
+  }
+  let reservation: Reservation | undefined;
+  let text: string;
+  try {
+    reservation = reserveMetadata(0, "osv");
+    text = await readTextCapped(
+      response,
+      registryLimits.osvBytes,
+      "osv",
+      reservation
+    );
+  } catch (error) {
+    if (response.body !== null && !response.body.locked) {
+      await response.body.cancel();
+    }
+    const code = packageErrors.codeOf(error);
+    if (code === "package.registry_busy") {
+      throw error;
+    }
+    log.warn(
+      code === "package.too_large" ? "osv.too_large" : "osv.unreadable",
+      {}
+    );
+    throw packageErrors.create("package.malware_unchecked");
+  } finally {
+    reservation?.release();
+  }
+  let sent: unknown;
+  try {
+    sent = JSON.parse(text);
+  } catch {
+    log.warn("osv.unreadable", {});
+    throw packageErrors.create("package.malware_unchecked");
+  }
+  const answer = osvAnswerSchema.safeParse(sent);
+  if (!answer.success || answer.data.results.length !== queries.length) {
+    log.warn("osv.unreadable", {});
+    throw packageErrors.create("package.malware_unchecked");
+  }
+  return answer.data.results;
+};
+
+/**
+ * The versions `input` names that OSV.dev reports as malware: each with
+ * its `MAL-` report. Fails, never answering none, when OSV's answer
+ * can't be read, or needs more pages or entries than are read.
+ */
+export const npmMalwareReports = async (
+  input: unknown
+): Promise<NpmMalwareReports> => {
+  const asked = packageErrors.parse(
+    "package.invalid",
+    npmAdvisoriesRequestSchema,
+    input
+  );
+  let pending: OsvQuery[] = Object.entries(asked).flatMap(([name, versions]) =>
+    versions.map((version) => ({ name, version }))
+  );
+  const reports: NpmMalwareReports = [];
+  let entries = 0;
+  // Each round asks again, by its page token, only for the queries whose
+  // entries went on: a few rounds, so many entries, at most.
+  for (let page = 0; pending.length > 0; page += 1) {
+    if (page >= registryLimits.osvPages) {
+      log.warn("osv.too_many_pages", {});
+      throw packageErrors.create("package.malware_unchecked");
+    }
+    // Each page follows from the last.
+    // oxlint-disable-next-line no-await-in-loop
+    const results = await askOsv(pending);
+    const next: OsvQuery[] = [];
+    for (const [at, { name, version }] of pending.entries()) {
+      const result = results[at];
+      const found = result?.vulns ?? [];
+      entries += found.length;
+      for (const { id } of found) {
+        if (id.startsWith(malwareReportPrefix)) {
+          reports.push({ name, version, id });
+        }
+      }
+      if (result?.next_page_token !== undefined) {
+        next.push({ name, version, pageToken: result.next_page_token });
+      }
+    }
+    if (entries > registryLimits.osvEntries) {
+      log.warn("osv.too_many_entries", {});
+      throw packageErrors.create("package.malware_unchecked");
+    }
+    pending = next;
+  }
+  // An ID that names a report but isn't one OSV gives: unreadable.
+  const read = npmMalwareReportsSchema.safeParse(reports);
+  if (!read.success) {
+    log.warn("osv.unreadable", {});
+    throw packageErrors.create("package.malware_unchecked");
+  }
+  return read.data;
+};
 
 /**
  * The advisories the registry knows for the packages `input` names, by
