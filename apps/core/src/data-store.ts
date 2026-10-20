@@ -15,6 +15,7 @@ import type {
   StoredRecord,
   StoreMigration,
 } from "@grasp-os/shared/stores";
+import { dataErrors } from "@grasp-os/shared/stores";
 import { DurableObject } from "cloudflare:workers";
 
 import migrations from "./db/data-store/migrations/migrations.js";
@@ -98,7 +99,8 @@ export class DataStore extends DurableObject<Env> {
    */
   #live(): StoreHost {
     if (this.#discarded()) {
-      throw new Error("This fixture store was discarded.");
+      // Coded, so whoever ran on it (a preview) can tell it apart.
+      throw dataErrors.create("data.fixture_discarded");
     }
     return this.#host;
   }

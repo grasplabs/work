@@ -108,7 +108,7 @@ export const markTakeoverMs = 60 * 60_000;
 export const markDeadlineMs = 15 * 60_000;
 
 /** The longest any one step of a deletion may take before it gives up. */
-const deletionStepMs = 60_000;
+export const deletionStepMs = 60_000;
 
 /** Queued bytes one page of a sweep deals with, and the pages per sweep. */
 export const candidatePage = 100;
@@ -429,7 +429,7 @@ export const markArtifact = async (
 };
 
 /** `work`, or a failure once `ms` have passed without it settling. */
-const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
+export const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
   const limit = deadline(ms);
   try {
     return await Promise.race([work, whenAborted(limit.signal)]);

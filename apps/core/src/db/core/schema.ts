@@ -989,14 +989,26 @@ export const screenSubmissions = sqliteTable(
  * and deleted once the object is discarded. Kept apart from App tests'
  * (`app_test_fixtures`), whose sweep discards a store an hour after it
  * was made: a preview's lives as long as its draft's revision, and the
- * chat's Workspace object, which also records it, discards it. A fixture
- * store is never in the store inventory (`business_stores`).
+ * chat's Workspace object, which also records it, discards it then; core
+ * discards it a week after it was made whatever that object does
+ * (`sweepPreviewStores`, by `created_at`). A fixture store is never in the
+ * store inventory (`business_stores`).
  */
-export const previewFixtureStores = sqliteTable("preview_fixture_stores", {
-  storeId: text("store_id").primaryKey(),
-  appId: text("app_id").notNull(),
-  createdAt: timestamp("created_at").notNull(),
-});
+export const previewFixtureStores = sqliteTable(
+  "preview_fixture_stores",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the sweep tries it again, once a discard of it failed or ran out
+     * of time: until then it steps past it, so a store that keeps failing
+     * never holds up the rest. Null until one did.
+     */
+    retryAfter: timestamp("retry_after"),
+  },
+  (table) => [index("preview_fixture_stores_created_at").on(table.createdAt)]
+);
 
 /**
  * Published templates (resource-bindings.ts): each version's content,
