@@ -21,7 +21,8 @@ const live = ["starting", "running", "paused"] as const;
 /**
  * Which of the lineages `keys` names have ended: every run of each, the
  * root and all it started at any depth, has ended, the last no later than
- * `endedBy` (ms since the epoch). A key is a lineage's root run, or an
+ * `endedBy` (ms since the epoch), and its root started no later than
+ * `startedBy`. A key is a lineage's root run, or an
  * App's account in a lineage (workflows/quotas.ts, `accountClaimed`),
  * which ends with its lineage: core's own row of that run names its root.
  * A key core has no run of is never taken for ended: core keeps every
@@ -31,7 +32,7 @@ const live = ["starting", "running", "paused"] as const;
 export const endedLineages = async (
   env: Pick<Env, "DB">,
   keys: readonly string[],
-  endedBy: number
+  { endedBy, startedBy }: { endedBy: number; startedBy: number }
 ): Promise<Set<string>> => {
   if (keys.length === 0) {
     return new Set();
@@ -56,6 +57,8 @@ export const endedLineages = async (
       lineage,
       live: sql<number>`sum(case when ${inArray(workflowRuns.status, [...live])} then 1 else 0 end)`,
       lastEnded: sql<number | null>`max(${workflowRuns.endedAt})`,
+      // The root's start: no run of a lineage starts before its root.
+      started: sql<number>`min(${workflowRuns.createdAt})`,
     })
     .from(workflowRuns)
     .where(
@@ -74,7 +77,8 @@ export const endedLineages = async (
         found !== undefined &&
         found.live === 0 &&
         found.lastEnded !== null &&
-        found.lastEnded <= endedBy
+        found.lastEnded <= endedBy &&
+        found.started <= startedBy
       );
     })
   );

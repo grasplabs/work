@@ -21,7 +21,7 @@ import type { GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { finished, woken } from "./runs.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
+import { openRpc, outcome, signedInApi, signedInWithRole } from "./sign-in.ts";
 import {
   appWith as serverAppWith,
   bindModel,
@@ -281,6 +281,26 @@ const rowsOf = async <Row>(query: string, ...binds: unknown[]) => {
   return results;
 };
 
+/** `id` by the name `names` gives it, or itself. */
+const named = (
+  id: string | null,
+  names: Record<string, string>
+): string | null =>
+  Object.entries(names).find(([, value]) => value === id)?.[0] ?? id;
+
+/** Whether core's database refused `query`, with `binds`, for an account. */
+const refused = async (query: string, ...binds: unknown[]): Promise<string> =>
+  await env.DB.prepare(query)
+    .bind(...binds)
+    .run()
+    .then(
+      () => "changed",
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("account")
+          ? "refused"
+          : String(error)
+    );
+
 /**
  * A call to Llama for the workflow run `trigger`, in the context of `app`
  * for `person`: capped at 100 tokens unless `capped` is false, when it
@@ -524,6 +544,19 @@ ${llmStep()}`,
         const own = await startChild(appX, "reader", root.id, builder.userId);
         await finished(own);
         const events = await eventsNow();
+        // What admins see of the run budgets: App Y's account, apart from
+        // the lineage's root.
+        const { session } = await signedInWithRole(idp, "admin");
+        const { core } = await openRpc(session, { coreEnv: env });
+        const settings = await core.authenticate().models.settings();
+        const budgets =
+          settings.rules.state === "on" ? settings.rules.budgets : [];
+        const listed = budgets
+          .filter(({ scope }) => scope === "run")
+          .flatMap(({ spent }) => spent)
+          .flatMap(({ of }) =>
+            of.type === "run" ? [[of.runId, of.rootRunId]] : []
+          );
         const accounts = events
           .filter(
             ({ action, actor }) =>
@@ -542,6 +575,16 @@ ${llmStep()}`,
           // Every model event of App Y's runs names its account: its first run.
           accounts: [...new Set(accounts)],
           firstId: first,
+          // This lineage's: a lineage's spend outlives the month, so the
+          // listing has other tests' too.
+          listed: listed
+            .filter(([id]) => id === first || id === root.id)
+            .map((pair) =>
+              pair.map((id) => named(id, { first, root: root.id }))
+            )
+            .toSorted(([one], [other]) =>
+              String(one).localeCompare(String(other))
+            ),
           // App Y's runs take App Y's triggers' share, not the root's
           // person's, and their attempts count on its account.
           attempts: await rowsOf<{ subject: string; account: string }>(
@@ -590,6 +633,12 @@ ${llmStep()}`,
       own: "completed",
       accounts: ["first"],
       firstId: undefined,
+      // App Y's account names the lineage it is in; X's own run spent under
+      // the root.
+      listed: [
+        ["first", "root"],
+        ["root", null],
+      ],
       attempts: [[`trigger:${appY}`, "first"]],
       lineages: {
         descendants: 3,
@@ -639,6 +688,118 @@ ${llmStep()}`,
       oneOfThem: started.some((run) => ofY.has(run)),
       own: accounts.find(({ id }) => id === own)?.account,
     }).toStrictEqual({ ofY: 1, oneOfThem: true, own: null });
+  });
+
+  it("charge the root's App's runs another App's mail starts back in a lineage to an account of their own, so they can't use up the root's", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const reader = workflowFiles("reader", llmStep("retries: { limit: 0 },"), {
+      extract: { total: 1234 },
+    });
+    const appX = await appWith(builder, {
+      ...workflowFiles("idle", "  return null;"),
+      ...reader,
+    });
+    const appY = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    const root = await builder.api.workflows.start(appX, "idle");
+    await finished(root.id);
+    const joined = await startedByMail(appY, "idle", root.id);
+    await finished(joined);
+
+    // $0.30 an account: one dear answer leaves no room for a second.
+    const result = await withGateway(
+      { run: { limit: 0.3 } },
+      times(3, dearTotal),
+      async (fake) => {
+        // App Y's mail starts App X's runs again, under Y's run: they
+        // spend an account of their own, one for all of them.
+        const back = await startedByMail(appX, "reader", joined);
+        await finished(back);
+        const again = await startedByMail(appX, "reader", joined);
+        await finished(again);
+        // ...and one of theirs starts another under it: the same account.
+        const under = await startedByMail(appX, "reader", back);
+        await finished(under);
+        // The root's own allowances are untouched: its next run spends.
+        const own = await startChild(appX, "reader", root.id, builder.userId);
+        await finished(own);
+        const accounts = await rowsOf<{ id: string; account: string | null }>(
+          "SELECT id, account_run_id AS account FROM workflow_runs WHERE id IN (?, ?, ?, ?)",
+          back,
+          again,
+          under,
+          own
+        );
+        const accountOf = (id: string) =>
+          accounts.find((row) => row.id === id)?.account;
+        return {
+          sent: fake.requests.length,
+          back: await statusOf(builder, back),
+          again: await failedWith(again),
+          under: await failedWith(under),
+          own: await statusOf(builder, own),
+          accounts: [accountOf(back), accountOf(again), accountOf(under)].map(
+            (account) => (account === back ? "back" : account)
+          ),
+          ownAccount: accountOf(own),
+        };
+      }
+    );
+
+    expect(result).toStrictEqual({
+      sent: 2,
+      back: "completed",
+      again: "model.run_limit",
+      under: "model.run_limit",
+      own: "completed",
+      accounts: ["back", "back", "back"],
+      ownAccount: null,
+    });
+  });
+
+  it("keep a run's account, and an account's claim, as they were written", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const appX = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    const appY = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    const root = await builder.api.workflows.start(appX, "idle");
+    await finished(root.id);
+    const joined = await startedByMail(appY, "idle", root.id);
+    await finished(joined);
+
+    expect({
+      account: await refused(
+        "UPDATE workflow_runs SET account_run_id = ? WHERE id = ?",
+        root.id,
+        joined
+      ),
+      cleared: await refused(
+        "UPDATE workflow_runs SET account_run_id = NULL WHERE id = ?",
+        joined
+      ),
+      claim: await refused(
+        "UPDATE run_lineage_accounts SET account_run_id = ? WHERE root_run_id = ?",
+        root.id,
+        root.id
+      ),
+      // A run with none may still be given one: as core starts it.
+      unset: await refused(
+        "UPDATE workflow_runs SET started_by = started_by WHERE id = ?",
+        root.id
+      ),
+    }).toStrictEqual({
+      account: "refused",
+      cleared: "refused",
+      claim: "refused",
+      unset: "changed",
+    });
   });
 
   it("count a retried step's requests on top of its lineage's, so its retry can't start the count afresh", async () => {

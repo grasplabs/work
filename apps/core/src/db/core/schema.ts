@@ -1147,13 +1147,15 @@ export const workflowRuns = sqliteTable(
     rootRunId: text("root_run_id"),
     /**
      * For a run of another App than its lineage root's (a run's own mail
-     * starts other Apps' runs under it, src/workflows/connector-events.ts):
-     * the run whose allowances its work is charged to, that App's first
-     * run in the lineage (`run_lineage_accounts`). Its attempts, host
+     * starts other Apps' runs under it, src/workflows/connector-events.ts),
+     * or of the root's App under another App's run: the run whose
+     * allowances its work is charged to, the first run of its kind in the
+     * lineage (`run_lineage_accounts`). Its attempts, host
      * calls, model spend and share count there; its place (descendants,
      * depth, age) stays the lineage's. Null for a root and a run of the
-     * root's App, charged to the lineage's own (src/workflows/quotas.ts).
-     * Written once, with the row.
+     * root's App under its own runs, charged to the lineage's own
+     * (src/workflows/quotas.ts). Written once, with the row: never changed
+     * once set (migration 0109's trigger).
      */
     accountRunId: text("account_run_id"),
     /**
@@ -1678,11 +1680,12 @@ export const runMailStampRefusals = sqliteTable(
 );
 
 /**
- * Each App's account in a run lineage it didn't start (src/workflows/
- * quotas.ts, `accountClaimed`): the first run of `app_id` in the lineage
- * of `root_run_id`, claimed once, so every run of that App in the lineage
- * is charged to the one account (`workflow_runs.account_run_id`), whose
- * `run_lineages` row counts its attempts and host calls.
+ * An App's accounts in a run lineage (src/workflows/quotas.ts,
+ * `accountClaimed`): at most two per App, each the first run of its kind
+ * in the lineage of `root_run_id`, claimed once, so every run charged to
+ * it (`workflow_runs.account_run_id`) is charged to the one account, whose
+ * `run_lineages` row counts its attempts and host calls. Never changed
+ * (migration 0109's trigger).
  */
 export const runLineageAccounts = sqliteTable(
   "run_lineage_accounts",
@@ -1691,10 +1694,17 @@ export const runLineageAccounts = sqliteTable(
       .notNull()
       .references(() => runLineages.rootRunId),
     appId: text("app_id").notNull(),
+    /**
+     * `joined` for an App's runs in a lineage another App started,
+     * `rejoined` for the root's App's runs under another App's run.
+     */
+    kind: text({ enum: ["joined", "rejoined"] }).notNull(),
     accountRunId: text("account_run_id").notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.rootRunId, table.appId] })]
+  (table) => [
+    primaryKey({ columns: [table.rootRunId, table.appId, table.kind] }),
+  ]
 );
 
 /**

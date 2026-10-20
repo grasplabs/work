@@ -42,11 +42,13 @@ import { microsPerDollar } from "./model-prices.ts";
 // input). It is counted across all their steps, retries, restarts and
 // children, for the lineage's whole life (the ledger never resets it by
 // month), so none of them starts afresh. A run of another App than the
-// root's (a run's own mail starts other Apps' runs under it) counts under
-// its App's account in the lineage instead (`accountRunId` on its actor,
-// from its row too, workflows/quotas.ts `accountClaimed`): every run of
-// that App in the lineage together, so one App never spends another's
-// budget, and hopping between Apps gives each one budget per lineage. It has a budget only where the
+// root's (a run's own mail starts other Apps' runs under it), or of the
+// root's App under another App's run, counts under its account in the
+// lineage instead (`accountRunId` on its actor, from its row too,
+// workflows/quotas.ts `accountClaimed`): so one App never spends
+// another's budget, and hopping between Apps gives each at most two
+// budgets per lineage. What a lineage spends in all grows with the Apps
+// it reaches, its descendant runs bounding how many. It has a budget only where the
 // deployment sets `run`; whatever it sets, a lineage makes at most the
 // provider requests the deployment's quota policy allows
 // (`lineageModelRequests`, @grasp-os/shared/quota-policy): the platform's
@@ -360,7 +362,12 @@ interface Names {
   people: ReadonlyMap<string, string>;
   runs: ReadonlyMap<
     string,
-    { appId: string; workflowId: string; startedAt: Date }
+    {
+      appId: string;
+      workflowId: string;
+      startedAt: Date;
+      rootRunId: string | null;
+    }
   >;
 }
 
@@ -381,6 +388,7 @@ const spenderOf = (
     return {
       type: "run",
       runId: key,
+      rootRunId: run?.rootRunId ?? null,
       appId: run?.appId ?? null,
       appName: run === undefined ? null : (names.apps.get(run.appId) ?? null),
       workflowId: run?.workflowId ?? null,
@@ -417,6 +425,7 @@ const namesOf = async (
             appId: workflowRuns.appId,
             workflowId: workflowRuns.workflowId,
             startedAt: workflowRuns.createdAt,
+            rootRunId: workflowRuns.rootRunId,
           })
           .from(workflowRuns)
           .where(inArray(workflowRuns.id, runIds));
@@ -450,9 +459,9 @@ const namesOf = async (
     apps: new Map(appRows.map(({ id, name }) => [id, name])),
     people: new Map(userRows.map(({ id, name }) => [id, name])),
     runs: new Map(
-      runRows.map(({ id, appId, workflowId, startedAt }) => [
+      runRows.map(({ id, appId, workflowId, startedAt, rootRunId }) => [
         id,
-        { appId, workflowId, startedAt },
+        { appId, workflowId, startedAt, rootRunId },
       ])
     ),
   };

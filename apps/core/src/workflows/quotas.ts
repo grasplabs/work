@@ -293,56 +293,74 @@ const limitReached = (limit: LineageLimit, policy: QuotaPolicy) =>
     generation: policy.generation,
   });
 
+/** The App of run `id`, as SQL: null for a run of no App's. */
+const appOf = (id: string): SQL =>
+  sql`(SELECT ${workflowRuns.appId} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${id})`;
+
 /**
- * The statements that charge `run`, started under another in the lineage
- * of `root`, to its App's account there, after the statement that writes
- * its row (nothing for a row that wasn't written). A run of the root's
- * App has none: it is charged to the lineage's own row. A run of another
- * App (a run's own mail starts other Apps' runs under it) is charged to
- * its App's first run in the lineage: claimed once, by the lineage and the
- * App (`run_lineage_accounts`), so starts at once agree on one, and given
- * a row of its own (`run_lineages`) whose age is the root's, so a hop to
- * another App never starts a lineage's life afresh. The run's row names
- * it (`account_run_id`), written once, here.
+ * The statements that charge `run`, started under `parent` in the lineage
+ * of `root`, to an account there, after the statement that writes its
+ * row (nothing for a row that wasn't written). Each App has at most two
+ * accounts in a lineage, each claimed once by the lineage, the App and
+ * its kind (`run_lineage_accounts`), so starts at once agree on one:
+ * - a run of another App than the root's (a run's own mail starts other
+ *   Apps' runs under it) is charged to its App's first such run in the
+ *   lineage (`joined`);
+ * - a run of the root's App under another App's run, which that App's
+ *   mail started, is charged to the first such run (`rejoined`), never to
+ *   the lineage's own allowances, which the other App could otherwise use
+ *   up by mailing the root's App;
+ * - a run of the root's App under one of its own runs is charged where
+ *   its parent is: the lineage's own (no account) or `rejoined`.
+ * So hopping between Apps never makes more than two accounts of an App,
+ * however often it goes back and forth. An account has a row of its own
+ * (`run_lineages`) whose age is the root's, so a hop never starts a
+ * lineage's life afresh. The run's row names its account
+ * (`account_run_id`), written once, here (migration 0109's triggers keep
+ * it).
  *
- * What it closes: one App using up another's allowances in a lineage it
- * joined (its attempts' active time, its host calls, its model spend,
- * keyed by its account, model-budgets.ts) and taking the share of a
- * person who never used it (dispatcher.ts, `admissionSubjectOf`). Its
- * place stays the lineage's: it takes one of the lineage's descendant
- * runs and sits a level deeper (`admitChild`), which bound runs mailing
- * each other back and forth, whichever Apps they are of.
+ * What it closes: one App using up another's allowances in a lineage
+ * (its attempts' active time, its host calls, its model spend, keyed by
+ * its account, model-budgets.ts) and taking the share of a person who
+ * never used it (dispatcher.ts, `admissionSubjectOf`). Its place stays
+ * the lineage's: it takes one of the lineage's descendant runs and sits a
+ * level deeper (`admitChild`), which bound runs mailing each other back
+ * and forth, whichever Apps they are of. What a lineage can spend in all
+ * grows with the Apps it reaches: up to twice the per-lineage limits for
+ * each App, the descendant runs it may start bounding how many Apps.
  */
 export const accountClaimed = (
   db: DrizzleD1Database,
   run: { id: string; appId: string; createdAt: Date },
-  root: string
+  root: string,
+  parent: string
 ) => {
   const accounts = runLineageAccounts;
-  const ofApp = and(
-    eq(accounts.rootRunId, root),
-    eq(accounts.appId, run.appId)
-  );
+  // Its account's kind, or none to be charged where its parent is.
+  const kind = sql`(CASE WHEN ${run.appId} IS NOT ${appOf(root)} THEN 'joined' WHEN ${run.appId} IS NOT ${appOf(parent)} THEN 'rejoined' ELSE NULL END)`;
+  const ofKind = sql`${accounts.rootRunId} = ${root} AND ${accounts.appId} = ${run.appId} AND ${accounts.kind} = ${kind}`;
   return [
     db
       .insert(accounts)
       .select(
-        sql`SELECT ${root}, ${run.appId}, ${run.id}, ${run.createdAt.getTime()} WHERE EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.id}) AND ${run.appId} IS NOT (SELECT ${workflowRuns.appId} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root})`
+        sql`SELECT ${root}, ${run.appId}, ${kind}, ${run.id}, ${run.createdAt.getTime()} WHERE EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.id}) AND ${kind} IS NOT NULL`
       )
       .onConflictDoNothing(),
     // Its row, when this run is the account: aged as the lineage is.
     db
       .insert(runLineages)
       .select(
-        sql`SELECT ${accounts.accountRunId}, (SELECT ${runLineages.createdAt} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root}), 0, 0, 0, 0, 0 FROM ${accounts} WHERE ${ofApp} AND ${accounts.accountRunId} = ${run.id}`
+        sql`SELECT ${accounts.accountRunId}, (SELECT ${runLineages.createdAt} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root}), 0, 0, 0, 0, 0 FROM ${accounts} WHERE ${ofKind} AND ${accounts.accountRunId} = ${run.id}`
       )
       .onConflictDoNothing(),
     db
       .update(workflowRuns)
       .set({
-        accountRunId: sql`(SELECT ${accounts.accountRunId} FROM ${accounts} WHERE ${ofApp})`,
+        accountRunId: sql`(CASE WHEN ${kind} IS NULL THEN (SELECT p.account_run_id FROM ${workflowRuns} AS p WHERE p.id = ${parent}) ELSE (SELECT ${accounts.accountRunId} FROM ${accounts} WHERE ${ofKind}) END)`,
       })
-      .where(eq(workflowRuns.id, run.id)),
+      .where(
+        and(eq(workflowRuns.id, run.id), isNull(workflowRuns.accountRunId))
+      ),
   ] as const;
 };
 

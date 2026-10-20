@@ -69,9 +69,10 @@ export const auditActorSchema = z.discriminatedUnion("type", [
     /**
      * The run whose allowances the run's work is charged to, for a run of
      * another App than its lineage root's (a run's own mail starts other
-     * Apps' runs under it): that App's first run in the lineage, read from
-     * the engine's record of the run, never from what the run was given.
-     * A run of the root's App has none: its lineage's own are charged.
+     * Apps' runs under it), or of the root's App under another App's run:
+     * the first run of its kind in the lineage, read from the engine's
+     * record of the run, never from what the run was given. None for a
+     * run charged to its lineage's own.
      */
     accountRunId: runIdSchema.optional(),
   }),

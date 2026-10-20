@@ -242,6 +242,7 @@ describe("model settings", { timeout: 60_000 }, () => {
                 of: {
                   type: "run",
                   runId: run.id,
+                  rootRunId: null,
                   appId: app,
                   appName: "Invoices",
                   workflowId: "idle",

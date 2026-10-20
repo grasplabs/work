@@ -8024,6 +8024,10 @@ msgstr "Exécution {runId}"
 msgid "Run {shortId} of {workflowId} in {domain}, started {started}"
 msgstr "Exécution {shortId} de {workflowId} dans {domain}, lancée le {started}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflowId} in {domain}, started {started}, in the runs run {rootId} started"
+msgstr "Exécution {shortId} de {workflowId} dans {domain}, lancée le {started}, parmi les exécutions lancées par l'exécution {rootId}"
+
 #: src/workflows/history-view.tsx
 msgid "Run history"
 msgstr "Historique de l'exécution"
