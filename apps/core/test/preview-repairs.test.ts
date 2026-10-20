@@ -542,6 +542,33 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
   });
 
+  it("refuses the agent a call of a draft that isn't spec 8's layout, whatever server code it has, and loads none of it", async () => {
+    const { stub, chatId } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+        await env.build.write(app.id, {
+          "app/server.ts": "export class App { count() { throw new Error(\\"ran as v1\\"); } }",
+        });
+        try {
+          return { answered: await env.build.call(app.id, "count") };
+        } catch (error) {
+          return { refused: error.code ?? String(error) };
+        }
+      };`),
+      says("Refused."),
+    ]);
+
+    await stub.ask(chatIdSchema.parse(chatId), {
+      text: "Count the invoice desk's notes",
+      model,
+    });
+
+    const results = await codeResults(stub, chatId);
+    expect(returned(results[0]?.text)).toStrictEqual({
+      refused: "app.preview_layout",
+    });
+  });
+
   it("throws to the agent what no change of its spec 8 draft fixes: a kept artifact changed since", async () => {
     const { builder, stub, chatId, app, gateway } = await setUp([
       codeStep(`export default async (self, env) => {
