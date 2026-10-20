@@ -20,7 +20,22 @@ const motionTags = {
   div: motion.div,
 } as const;
 
-interface ShimmerProps {
+/**
+ * The element's own attributes (`role`, `aria-live`, …), less what motion
+ * handles itself and the inline style the kit doesn't take.
+ */
+type ElementProps = Omit<
+  React.HTMLAttributes<HTMLElement>,
+  | "children"
+  | "className"
+  | "style"
+  | "onAnimationStart"
+  | "onDrag"
+  | "onDragEnd"
+  | "onDragStart"
+>;
+
+interface ShimmerProps extends ElementProps {
   children: string;
   /** The element it renders as; a paragraph by default. */
   as?: keyof typeof motionTags;
@@ -37,6 +52,7 @@ function Shimmer({
   className,
   duration = 2,
   spread = 2,
+  ...props
 }: ShimmerProps) {
   const MotionComponent = motionTags[as];
   // The sweep's width follows the text's length: a custom property,
@@ -44,6 +60,7 @@ function Shimmer({
   const width = `${children.length * spread}px`;
   return (
     <MotionComponent
+      {...props}
       data-slot="shimmer"
       animate={{ backgroundPosition: "0% center", "--spread": width }}
       className={cn(

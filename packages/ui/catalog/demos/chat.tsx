@@ -159,7 +159,9 @@ const QuestionnaireDemo = () => (
   </Questionnaire>
 );
 
-const ShimmerDemo = () => <Shimmer>Thinking about your question…</Shimmer>;
+const ShimmerDemo = () => (
+  <Shimmer aria-live="polite">Thinking about your question…</Shimmer>
+);
 
 export const chatDemos = {
   attachment: AttachmentDemo,
