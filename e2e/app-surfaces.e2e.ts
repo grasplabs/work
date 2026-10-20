@@ -263,12 +263,13 @@ test("an App's sidebar entry opens its screen, and its settings screen is a tab 
   );
   await expect(page.getByRole("tab", { name: "Settings" })).toHaveCount(0);
 
-  // A tab the page doesn't know, by address: the page, on its first tab.
+  // A tab the page doesn't know, by address, as text or as what reads as
+  // a number: the page, on its first tab.
+  const firstTab = page.getByRole("tab", { name: /^Apps/u });
   await page.goto(`/domains/${app}?tab=workflows`);
-  await expect(page.getByRole("tab", { name: /^Apps/u })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
+  await expect(firstTab).toHaveAttribute("aria-selected", "true");
+  await page.goto(`/domains/${app}?tab=1`);
+  await expect(firstTab).toHaveAttribute("aria-selected", "true");
 });
 
 test("a deep link opened signed out leads through sign-in, then to its screen with its input once core checked it", async ({

@@ -30,7 +30,6 @@ import {
 import { CogIcon, LayoutGridIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement } from "react";
-import { z } from "zod";
 
 import { IntegrationRow } from "../connections/integration-row.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
@@ -730,11 +729,13 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
   // Which tab opens first: a navigation to the App's settings opens its own.
   // Any other `tab` (an old or hand-typed address) opens the page as without
   // one, never its error.
-  validateSearch: z.object({
-    tab: z
-      .string()
-      .optional()
-      .transform((tab) => (tab === "settings" ? tab : undefined)),
+  // The router reads search values as JSON, so `?tab=1` comes as a number;
+  // and `tab` is always set here, since the address's own would otherwise
+  // pass through unchecked.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { tab?: "settings" | undefined } => ({
+    tab: search.tab === "settings" ? "settings" : undefined,
   }),
   loader: async ({ context: { core, identity }, params }) => ({
     // Not awaited: only their tabs wait for them. Core lists every
