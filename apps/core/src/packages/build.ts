@@ -606,6 +606,13 @@ const lockedTarballs = async (
     // One at a time, counting bytes as they come.
     // oxlint-disable-next-line no-await-in-loop
     const tarball = await verifiedTarball(env, request);
+    // Each tarball on its own, then the graph's together.
+    if (tarball.byteLength > limits.archiveBytes) {
+      throw packageErrors.create("package.quota", {
+        quota: "archiveBytes",
+        limit: limits.archiveBytes,
+      });
+    }
     archiveBytes += tarball.byteLength;
     if (archiveBytes > limits.graphArchiveBytes) {
       throw packageErrors.create("package.quota", {
