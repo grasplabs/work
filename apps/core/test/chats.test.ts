@@ -1,3 +1,5 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { applyPartial } from "@grasp-os/shared/chat";
 import type {
   ChatPartial,
@@ -133,19 +135,31 @@ const shown = (follower: Follower) =>
     text: message.text,
   }));
 
+/** Anthropic's models, as pi's catalog gives them. */
+const anthropicModels: Readonly<Record<string, Model<Api>>> = ANTHROPIC_MODELS;
+
+/** The chats' model's context window, as its provider's catalog gives it. */
+const modelWindow =
+  anthropicModels[model.slice(model.indexOf("/") + 1)]?.contextWindow;
+
 /**
  * A reply's usage as the gateway's record of its request puts it: the
- * prompt with the cache's tokens, and whether the window holds the prompt.
+ * prompt with the cache's tokens, the model's window, and whether the
+ * whole prompt fits in it.
  */
-const usedOf = (usage: ChatReplyUsage | undefined) =>
-  usage === undefined
-    ? null
-    : {
-        prompt: usage.input + usage.cacheRead + usage.cacheWrite,
-        output: usage.output,
-        cost: usage.cost,
-        window: (usage.contextWindow ?? 0) > usage.input,
-      };
+const usedOf = (usage: ChatReplyUsage | undefined) => {
+  if (usage === undefined) {
+    return null;
+  }
+  const prompt = usage.input + usage.cacheRead + usage.cacheWrite;
+  return {
+    prompt,
+    output: usage.output,
+    cost: usage.cost,
+    window: usage.contextWindow,
+    fits: prompt < (usage.contextWindow ?? 0),
+  };
+};
 
 describe("chats", () => {
   it("are kept per person: made, listed newest first, renamed and deleted", async () => {
@@ -691,7 +705,8 @@ describe("chats", () => {
         prompt: counted?.model?.inputTokens,
         output: counted?.model?.outputTokens,
         cost: counted?.cost?.amount,
-        window: true,
+        window: modelWindow,
+        fits: true,
       });
       expect(counted?.cost?.amount).toBeGreaterThan(0);
       // The cache's tokens apart from the prompt's own, as the provider
