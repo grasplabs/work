@@ -999,6 +999,33 @@ describe("screen trust", { timeout: 60_000 }, () => {
     });
   });
 
+  it("lets go of a build's run subscription when its approval is taken back, with nothing pushed after", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    await approveCurrent(admin, app);
+    const bundle = await openFrame(builder, app);
+    const state = { released: false };
+    const onChange = Object.assign(
+      (): void => {
+        // No run changes in this test.
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          state.released = true;
+        },
+      }
+    );
+    await builder.api.screens.watchRuns(app, "invoices", onChange);
+    const events = await auditedDuring(async () => {
+      await admin.api.screenTrust.revoke(app, bundle.artifact);
+      await vi.waitFor(() => {
+        expect(state.released).toBeTruthy();
+      }, pushWait);
+    });
+    expect(refusals(events)).toStrictEqual(["watchRuns/push: revoked"]);
+  });
+
   it("ends a live query of a build nobody approved when its App's data is sensitive again, with nothing written after", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");

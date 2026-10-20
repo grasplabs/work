@@ -1054,12 +1054,15 @@ describe("screens", { timeout: 60_000 }, () => {
       return { opening, first, second, pushes: watching.received.length };
     });
 
-    // One reading for the first few seconds' calls and pushes, then one more.
+    // One reading for the first few seconds' calls and pushes, and one as
+    // the connection starts to follow the App's revocations for the
+    // callback it keeps (a revocation that landed in between is found by
+    // that reading), then one more.
     expect({
       opening: result.opening,
       first: result.first,
       second: result.second,
-    }).toStrictEqual({ opening: 1, first: 1, second: 2 });
+    }).toStrictEqual({ opening: 1, first: 2, second: 3 });
     expect(result.pushes).toBeGreaterThan(10);
   });
 
@@ -2142,10 +2145,226 @@ export class App extends DurableObject {
 }
 `;
 
+/**
+ * An App the builder made from the sample with its screen approved, and
+ * the builder's connection presenting that build, as the page does.
+ */
+const approvedSample = async (admin: Person, builder: Person) => {
+  const app = await sampleApp(builder);
+  const review = await admin.api.screenTrust.review(app);
+  await admin.api.screenTrust.approve(app, {
+    version: review.version,
+    generation: review.generation,
+    artifacts: builtArtifacts(review.screens),
+  });
+  const bundle = await builder.api.screens.open(app, "notes");
+  return { app, bundle };
+};
+
+/** A page's callback that records what it gets, and whether it was let go of. */
+const keptCallback = () => {
+  const received: unknown[] = [];
+  const state = { released: false };
+  const callback = Object.assign(
+    (value: unknown): void => {
+      received.push(value);
+    },
+    {
+      [Symbol.dispose]: (): void => {
+        state.released = true;
+      },
+    }
+  );
+  return { received, state, callback };
+};
+
+/** Undoes nothing. */
+const nothingUndone = (): void => {
+  // Nothing done yet.
+};
+
+/** The query that reads what core holds for a build (`standingOf`). */
+const readsStanding = /AS releaseRevoked/u;
+
 describe(
   "the v1 server's calls of a revoked build",
   { timeout: 60_000 },
   () => {
+    it("read a build's standing once for every callback the connection keeps at a revocation", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const { app, bundle } = await approvedSample(admin, builder);
+      const reads = { standing: 0 };
+      const counted = {
+        ...env,
+        DB: new Proxy(env.DB, {
+          get: (target, property) => {
+            if (property === "prepare") {
+              return (query: string): D1PreparedStatement => {
+                if (readsStanding.test(query)) {
+                  reads.standing += 1;
+                }
+                return target.prepare(query);
+              };
+            }
+            const value: unknown = Reflect.get(target, property);
+            return typeof value === "function"
+              ? (...args: unknown[]): unknown =>
+                  Reflect.apply(value, target, args)
+              : value;
+          },
+        }),
+      };
+      const { core } = await openRpc(builder.session, { coreEnv: counted });
+      using api = core.authenticate();
+      await api.screens.present(app, bundle.lease);
+      const kept = Array.from({ length: 5 }, () => keptCallback());
+      for (const { callback, received } of kept) {
+        // oxlint-disable-next-line no-await-in-loop -- one kept at a time
+        await api.screens.call(app, "watchNotes", [callback]);
+        // oxlint-disable-next-line no-await-in-loop -- its first push in
+        await vi.waitFor(() => {
+          expect(received).toStrictEqual([[]]);
+        });
+      }
+      // What the calls and their first pushes read is done.
+      await vi.waitFor(() => {
+        expect(
+          kept.every(({ received }) => received.length === 1)
+        ).toBeTruthy();
+      });
+      const before = reads.standing;
+      await admin.api.screenTrust.revoke(app, bundle.artifact);
+      await vi.waitFor(
+        () => {
+          expect(kept.every(({ state }) => state.released)).toBeTruthy();
+        },
+        { timeout: 20_000, interval: 50 }
+      );
+      expect(reads.standing - before).toBe(1);
+    });
+
+    it("let go of the callbacks the App keeps when the App's revocations can't be followed", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const { app, bundle } = await approvedSample(admin, builder);
+      await builder.api.screens.present(app, bundle.lease);
+      let undo = nothingUndone;
+      await runInDurableObject(
+        appHost(env, appIdSchema.parse(app)),
+        (instance) => {
+          // SAFETY: an App's object's prototype holds its methods.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          const methods = Object.getPrototypeOf(instance) as Record<
+            string,
+            (...args: unknown[]) => Promise<unknown>
+          >;
+          const original = methods.followAccess;
+          if (original === undefined) {
+            throw new Error("An App's object follows access");
+          }
+          methods.followAccess = async (): Promise<unknown> =>
+            await Promise.reject(new Error("The App's host is away."));
+          undo = () => {
+            methods.followAccess = original;
+          };
+        }
+      );
+      const kept = keptCallback();
+      try {
+        await builder.api.screens.call(app, "watchNotes", [kept.callback]);
+        await vi.waitFor(
+          () => {
+            expect(kept.state.released).toBeTruthy();
+          },
+          { timeout: 20_000, interval: 50 }
+        );
+      } finally {
+        undo();
+      }
+      expect(kept.state.released).toBeTruthy();
+    });
+
+    it("keep no more than fifty callbacks a connection's calls have its Apps keep", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const { app, bundle } = await approvedSample(admin, builder);
+      await builder.api.screens.present(app, bundle.lease);
+      // On a held clock, a minute on every fifteen calls: what a person
+      // may ask a minute isn't what this bounds.
+      const answers = await atStoppedClock(async (advance) => {
+        const got: string[] = [];
+        for (let at = 0; at < 51; at += 1) {
+          if (at % 15 === 14) {
+            advance(60_000);
+          }
+          got.push(
+            // oxlint-disable-next-line no-await-in-loop -- one kept at a time
+            await outcome(
+              builder.api.screens.call(app, "watchNotes", [
+                keptCallback().callback,
+              ])
+            )
+          );
+        }
+        return got;
+      });
+      expect({
+        kept: answers.filter((answer) => answer === "ok").length,
+        last: answers.at(-1),
+      }).toStrictEqual({ kept: 50, last: "screen.too_many_subscriptions" });
+    });
+
+    it("let go of a callback the App keeps once the approval is taken back, with nothing pushed after", async () => {
+      const admin = await personApi("admin");
+      const builder = await personApi("builder");
+      const app = await sampleApp(builder);
+      const review = await admin.api.screenTrust.review(app);
+      await admin.api.screenTrust.approve(app, {
+        version: review.version,
+        generation: review.generation,
+        artifacts: builtArtifacts(review.screens),
+      });
+      const bundle = await builder.api.screens.open(app, "notes");
+      await builder.api.screens.present(app, bundle.lease);
+      const received: unknown[] = [];
+      const state = { released: false };
+      const onChange = Object.assign(
+        (notes: unknown): void => {
+          received.push(notes);
+        },
+        {
+          [Symbol.dispose]: (): void => {
+            state.released = true;
+          },
+        }
+      );
+      // The App keeps it, and pushes what it holds at once.
+      await builder.api.screens.call(app, "watchNotes", [onChange]);
+      await vi.waitFor(() => {
+        expect(received).toStrictEqual([[]]);
+      });
+      const events = await auditedDuring(async () => {
+        await admin.api.screenTrust.revoke(app, bundle.artifact);
+        // Nothing written: the revocation alone lets go of it.
+        await vi.waitFor(
+          () => {
+            expect(state.released).toBeTruthy();
+          },
+          { timeout: 20_000, interval: 50 }
+        );
+      });
+      expect({
+        received,
+        refused: events
+          .filter(({ action }) => action === "app.artifact.refused")
+          .map(
+            ({ detail }) =>
+              `${detail.operation}/${detail.stage}: ${detail.reason}`
+          ),
+      }).toStrictEqual({ received: [[]], refused: ["call/push: revoked"] });
+    });
+
     it("hand a screen no error of its App's once the approval is taken back as it runs", async () => {
       const admin = await personApi("admin");
       const builder = await personApi("builder");
@@ -2172,13 +2391,27 @@ describe(
         builder.api.screens.call(app, "failingNotes", [nothing])
       );
       let revoked: Awaited<ReturnType<typeof failure>> | undefined;
+      const passed = { released: false };
+      const revoking = Object.assign(
+        async (): Promise<void> => {
+          await admin.api.screenTrust.revoke(app, bundle.artifact);
+        },
+        {
+          [Symbol.dispose]: (): void => {
+            passed.released = true;
+          },
+        }
+      );
       const events = await auditedDuring(async () => {
         revoked = await failure(
-          builder.api.screens.call(app, "failingNotes", [
-            async () => {
-              await admin.api.screenTrust.revoke(app, bundle.artifact);
-            },
-          ])
+          builder.api.screens.call(app, "failingNotes", [revoking])
+        );
+        // The revocation lets go of the callback the call passed too.
+        await vi.waitFor(
+          () => {
+            expect(passed.released).toBeTruthy();
+          },
+          { timeout: 20_000, interval: 50 }
         );
       });
 
@@ -2190,11 +2423,14 @@ describe(
           .map(
             ({ detail }) =>
               `${detail.operation}/${detail.stage}: ${detail.reason}`
-          ),
+          )
+          .toSorted(),
       }).toStrictEqual({
         approved: { code: "app.failed", carriesData: true },
         revoked: { code: "screen.revoked", carriesData: false },
-        refused: ["call/delivery: revoked"],
+        // The answer, and the callback it passed, let go of at the
+        // revocation.
+        refused: ["call/delivery: revoked", "call/push: revoked"],
       });
     });
   }

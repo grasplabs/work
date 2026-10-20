@@ -457,6 +457,16 @@ const allHaveLatest = (evaluation: Evaluation): boolean =>
   );
 
 /** One connection's live queries. */
+/**
+ * A callback of an App's that isn't a live query, as the connection looks
+ * at it again (`QuerySubscriptions.follow`): `look` checks its access now,
+ * `lose` lets go of it, when the App's revocations can't be followed.
+ */
+interface Look {
+  readonly look: () => Promise<void>;
+  readonly lose: () => void;
+}
+
 export class QuerySubscriptions<By extends Reader = Identity> {
   readonly #env: Env;
   readonly #reads: LiveReads<By>;
@@ -488,6 +498,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
 
   /** The Apps whose revocations this connection follows (`#follow`). */
   readonly #following = new Map<AppId, Following>();
+
+  /**
+   * The looks of the connection's other callbacks of each App (a server
+   * call's, a run subscription's: `follow`), called whenever the person's
+   * access to it may have dropped.
+   */
+  readonly #looks = new Map<AppId, Set<Look>>();
 
   /**
    * How many times the person's access to each App may have dropped
@@ -1326,11 +1343,63 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
   }
 
-  /** Whether the connection still follows a query of `app`. */
+  /**
+   * Whether the connection still follows a query of `app`, or holds
+   * another callback of it (`follow`).
+   */
   #follows(app: AppId): boolean {
-    return [...this.#evaluations.values()].some(
-      (evaluation) => evaluation.app === app
+    return (
+      (this.#looks.get(app)?.size ?? 0) > 0 ||
+      [...this.#evaluations.values()].some(
+        (evaluation) => evaluation.app === app
+      )
     );
+  }
+
+  /**
+   * Has `look` called whenever `by`'s access to `app` may have dropped (a
+   * role taken away, a build's trust taken back: access-revocations.ts),
+   * as the connection's live queries of it are looked at again, until the
+   * returned handle is let go of: for a callback of the App's that isn't a
+   * live query (a server call's, a run subscription's), which checks its
+   * own access in `look` and lets itself go when refused, so what it last
+   * pushed doesn't stay on screen until its next push. When the App's
+   * revocations can't be followed, `lose` lets go of it, as the App's
+   * queries are then (`#lose`); its own check before each push stays.
+   */
+  follow(
+    by: By,
+    app: AppId,
+    look: () => Promise<void>,
+    lose: () => void
+  ): Disposable {
+    let looks = this.#looks.get(app);
+    if (looks === undefined) {
+      looks = new Set();
+      this.#looks.set(app, looks);
+    }
+    const entry: Look = { look, lose };
+    looks.add(entry);
+    if (this.#reads.revocable && !this.#following.has(app)) {
+      this.#follow(by.userId, app);
+    }
+    let held = true;
+    return {
+      [Symbol.dispose]: (): void => {
+        if (!held) {
+          return;
+        }
+        held = false;
+        const current = this.#looks.get(app);
+        current?.delete(entry);
+        if (current?.size === 0) {
+          this.#looks.delete(app);
+        }
+        if (!this.#follows(app)) {
+          this.#unfollow(app);
+        }
+      },
+    };
   }
 
   /**
@@ -1406,6 +1475,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         log.warn("query.follow_access_failed", errorFields(error));
         if (current()) {
           this.#following.delete(app);
+          // Its other callbacks too: let go of, so their screens follow
+          // again later, and nothing stays on screen unwatched.
+          // A Set iterates safely as each lets go of its own entry.
+          for (const { lose } of this.#looks.get(app) ?? []) {
+            lose();
+          }
           await Promise.all(
             [...this.#evaluations.values()]
               .filter((evaluation) => evaluation.app === app)
@@ -1469,6 +1544,18 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       if (evaluation.app === app) {
         void this.#recheck(evaluation, seen);
       }
+    }
+    for (const { look } of this.#looks.get(app) ?? []) {
+      void QuerySubscriptions.#lookAgain(look);
+    }
+  }
+
+  /** Calls `look`: a failure of it changes nothing for the others. */
+  static async #lookAgain(look: () => Promise<void>): Promise<void> {
+    try {
+      await look();
+    } catch (error) {
+      log.warn("query.callback_look_failed", errorFields(error));
     }
   }
 
