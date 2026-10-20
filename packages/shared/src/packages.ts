@@ -326,6 +326,13 @@ export const packageLimits = {
    */
   artifactBytes: Math.min(platformLimits.artifactBytes, builderArtifactBytes),
   /**
+   * One browser entry of a build, gzipped as a browser fetches it: the
+   * entry's module and its stylesheet together (spec 18.1). Builds split
+   * no lazy chunks, so an entry is everything it loads; a lazy specialist
+   * chunk would count apart.
+   */
+  browserEntryGzipBytes: platformLimits.browserEntryGzipBytes,
+  /**
    * The most characters the approved packages' modules one workflow
    * version seals have together (GRA-665): they are loaded with its build
    * at every call, so they are bounded as its own modules are. A version
