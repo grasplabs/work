@@ -277,7 +277,13 @@ function PromptInputActionMenuTrigger({
     ariaLabel ?? (children === undefined ? "More actions" : undefined);
   return (
     <DropdownMenuTrigger
-      render={<PromptInputButton aria-label={label} {...props} />}
+      render={
+        <PromptInputButton
+          // Only a name it has: an undefined one would hide its tooltip's.
+          {...(label === undefined ? {} : { "aria-label": label })}
+          {...props}
+        />
+      }
     >
       {children ?? <PlusIcon className="size-4" />}
     </DropdownMenuTrigger>
