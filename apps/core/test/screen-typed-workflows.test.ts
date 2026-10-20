@@ -1105,11 +1105,13 @@ describe(
       await second.subscription.release();
       await binding.subscription.release();
       expect({
-        // What it showed in turn, each read again as the binding changed.
+        // What it showed in turn, each read again as the binding changed,
+        // from the run running on (it may first have shown it queued).
         first: first.received
           .map(({ revision, outcome: shown }) =>
             typeof shown === "string" ? shown : stageOf(revision)
           )
+          .filter((shown) => shown !== 1)
           .filter((shown, at, all) => at === 0 || shown !== all[at - 1]),
         second: second.received.map(({ revision }) => stageOf(revision)),
       }).toStrictEqual({
