@@ -545,15 +545,17 @@ export const landscapeAppsOf = async (
     db.select().from(landscapeAppPeople),
     currentSince(db),
   ]);
+  // Each app's people, grouped once: every app reads only its own.
+  const peopleOf = Map.groupBy(
+    people,
+    ({ connectionId, appId }) => `${connectionId} ${appId}`
+  );
   return apps
     .map((app) => {
       const current = since.get(app.connectionId) ?? new Date(0);
-      const grants = people.filter(
-        (person) =>
-          person.connectionId === app.connectionId &&
-          person.appId === app.appId &&
-          person.lastSeen >= current
-      );
+      const grants = (
+        peopleOf.get(`${app.connectionId} ${app.appId}`) ?? []
+      ).filter((person) => person.lastSeen >= current);
       const adminConsented =
         app.adminSeenAt !== null && app.adminSeenAt >= current;
       return {
