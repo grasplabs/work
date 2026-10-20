@@ -1245,19 +1245,20 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
-  it("serves no call of an App's server, on the connection or a frame of it", async () => {
+  it("serves no call of an App's server through a frame, nor on the connection", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const raw = await openRawRpc(builder.session);
     const session = raw.push(["pipeline", 0, ["authenticate"], []]);
+    const frame = raw.push([
+      "pipeline",
+      session,
+      ["screens", "frame"],
+      [app, ""],
+    ]);
     const called = rawOutcome(
       await raw.pull(
-        raw.push([
-          "pipeline",
-          session,
-          ["screens", "call"],
-          [app, "addNote", [["Call Acme"]]],
-        ])
+        raw.push(["pipeline", frame, ["call"], ["addNote", [["Call Acme"]]]])
       )
     );
     raw.close();
