@@ -136,6 +136,10 @@ describe("the product's old name", () => {
         text: "<h1>Grasp OS desk</h1>\n",
       },
       {
+        path: "apps/core/blueprints/intake/blueprint.json",
+        text: '{\n  "name": "Intake",\n  "description": "Intake for Grasp OS"\n}\n',
+      },
+      {
         path: "apps/core/src/skills/brief/SKILL.md",
         text: "# Brief\n\nWrite to the person as\nGrasp\n  OS does.\n",
       },
@@ -158,6 +162,8 @@ describe("the product's old name", () => {
       'apps/web/src/locales/de/messages.po:16: "Grasp OS"',
       // A built-in App's screen, which the root lint leaves alone.
       'apps/core/blueprints/intake/files/screens/desk.tsx:1: "Grasp OS"',
+      // The manifest that names and describes a built-in to builders.
+      'apps/core/blueprints/intake/blueprint.json:3: "Grasp OS"',
       // Wrapped across lines, named where it starts.
       'apps/core/src/skills/brief/SKILL.md:4: "Grasp\\n  OS"',
     ]);

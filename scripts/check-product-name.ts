@@ -13,10 +13,11 @@ import { findOldProductNames } from "./lint/old-product-name.ts";
 
 /**
  * The files people read that the lint doesn't: by extension in the apps
- * and packages, and every file of a built-in App.
+ * and packages, and every file of a built-in App, with the manifest that
+ * names and describes it to builders (`blueprint.json`).
  */
 const readFiles =
-  /^(?:(?:apps|packages)\/.+\.(?:po|html|md|txt|webmanifest|xml|svg)|apps\/core\/blueprints\/[^/]+\/files\/.+)$/u;
+  /^(?:(?:apps|packages)\/.+\.(?:po|html|md|txt|webmanifest|xml|svg)|apps\/core\/blueprints\/[^/]+\/(?:files\/.+|blueprint\.json))$/u;
 
 /** The line of `text` its character `index` is on. */
 const lineIn = (text: string, index: number): number =>
