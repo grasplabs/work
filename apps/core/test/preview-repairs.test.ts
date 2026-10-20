@@ -511,6 +511,111 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
   });
 
+  it("keeps what its preview reports within bounds: twenty console lines a call, the newest fifty, ten problems, each message cut to its size", async () => {
+    const { builder, app, chatId, stub } = await setUp([], false);
+    const id = chatIdSchema.parse(chatId);
+    const appId = appIdSchema.parse(app);
+    const { chats } = builder.api;
+    const fixed = desk(true);
+    // The desk with a query that talks: a warning, then 25 lines.
+    const chatty: Record<string, string> = {
+      ...fixed,
+      "operations/desk.ts": `${fixed["operations/desk.ts"] ?? ""}
+export const chatty = query({
+  args: { note: v.string() },
+  returns: v.string(),
+  handler: async (_ctx, args) => {
+    console.warn("about to log", { note: args.note });
+    for (let line = 1; line <= 25; line += 1) {
+      console.log("line", line);
+    }
+    return "logged";
+  },
+});
+`,
+      "app.ts": (fixed["app.ts"] ?? "")
+        .replace("import { total }", "import { chatty, total }")
+        .replace("desk: { total }", "desk: { chatty, total }"),
+    };
+    await stub.saveDraft(
+      id,
+      app,
+      1,
+      chatty,
+      [],
+      0,
+      await openTestRun(stub, id)
+    );
+    const revision = 1;
+    const talk = async (note: string): Promise<unknown> =>
+      answerOf(
+        await chats.previewFunction(
+          chatId,
+          app,
+          revision,
+          await requestFor(
+            builder,
+            { chatId: id, app: appId, revision },
+            "desk.chatty",
+            { note }
+          )
+        )
+      );
+    /** The preview's reports once `lines` lines are in. */
+    const logged = async (lines: number) =>
+      await vi.waitFor(
+        async () => {
+          const reports = await stub.previewReports(id, app, revision, 0);
+          expect(reports.logs).toHaveLength(lines);
+          return reports;
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+
+    const called = await talk("ship");
+    // The first twenty lines of the call, each with its function.
+    const once = await logged(20);
+    // Three calls: the newest fifty lines.
+    await talk("again");
+    await talk("and again");
+    const thrice = await logged(50);
+    // A screen reporting in a loop, each message past what one keeps.
+    const long = "x".repeat(screenLimits.report.message + 1000);
+    for (let count = 0; count < 15; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a screen sends them
+      await chats.previewReport(chatId, app, revision, "desk", {
+        kind: "error",
+        message: `${String(count)} ${long}`,
+      });
+    }
+    const { problems } = await stub.previewReports(id, app, revision, 0);
+
+    const [{ at, ...firstLine } = { at: "" }] = once.logs;
+    expect({
+      called,
+      first: firstLine,
+      dated: !Number.isNaN(Date.parse(at)),
+      last: once.logs.at(-1)?.message,
+      newest: thrice.logs.at(-1)?.message,
+      oldest: thrice.logs[0]?.message,
+      problems: problems.length,
+      longest: Math.max(...problems.map(({ message }) => message.length)),
+    }).toStrictEqual({
+      called: "logged",
+      dated: true,
+      first: {
+        level: "warn",
+        message: 'about to log {"note":"ship"}',
+        method: "desk.chatty",
+      },
+      last: "line 19",
+      newest: "line 19",
+      oldest: "line 10",
+      problems: 10,
+      longest: screenLimits.report.message,
+    });
+  });
+
   it("lets the agent call a function of its spec 8 draft by its path, and hears what it got wrong as data", async () => {
     const drafted = spec8Notes;
     const { stub, chatId } = await setUp([

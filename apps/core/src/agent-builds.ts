@@ -1261,14 +1261,15 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             issues: ["A function's path and its input, as plain data."],
           });
         }
+        // Counted as the person's request, as each of a screen's calls is
+        // (chats-rpc.ts), before anything of the draft is read: a loop of
+        // the agent's spends their budget too, a refused call included.
+        await admitPreviewCall(this.env, by, id);
         // Only a draft of spec 8's layout previews, from its sealed draft
         // release: no draft's server code runs anywhere else.
         if (!(await chats.sealsDraft(chatId, personId, id))) {
           throw appErrors.create("app.preview_layout");
         }
-        // Counted as the person's request, as each of a screen's calls is
-        // (chats-rpc.ts): a loop of the agent's spends their budget too.
-        await admitPreviewCall(this.env, by, id);
         if (!isPlainData(args ?? {})) {
           throw appErrors.create("app.invalid", {
             issues: ["A function's path and its input, as plain data."],

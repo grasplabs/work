@@ -68,6 +68,16 @@ export const stagedMaxBytes =
  */
 export const documentMaxDepth = valueDepth;
 
+/**
+ * How deep an argument App code in a sandboxed isolate sends core may be
+ * (the operation channel, its forwarders, a test's or an action's host):
+ * a write's request (`WriteRequest`) around its fields around a field as
+ * deep as a record keeps, the deepest shape any of them takes. Deeper
+ * than a screen's (`rpcArgumentDepth`, which nothing on a page needs past
+ * `valueDepth`), so a write a store keeps is never refused on its way.
+ */
+export const isolateArgumentDepth = documentMaxDepth + 2;
+
 // The counts below bound what one commit or store holds: a commit is one
 // synchronous transaction in one store, and holds the store while it
 // runs, so larger changes are a workflow's, in batches. They are the
