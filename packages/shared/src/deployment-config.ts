@@ -305,14 +305,25 @@ export const runRetentionSchema = z.int().min(1).max(30);
  * `INBOUND_MAIL_DOMAIN`: the domain the deployment receives mail at, as
  * its Email Routing catch-all rule sends it to core (set up outside core),
  * so an email trigger's address shows whole: `<local part>@<domain>`. A
- * lowercase hostname of at most 253 characters, its labels at most 63.
+ * lowercase hostname of at most 253 characters, its labels at most 63,
+ * none starting or ending with a hyphen.
  * Unset, triggers show their local part alone.
  */
 export const inboundMailDomainSchema = domainSchema
   .max(253)
-  .refine((domain) => domain.split(".").every((label) => label.length <= 63), {
-    message: "Each part of the domain is at most 63 characters",
-  });
+  .refine(
+    (domain) =>
+      domain
+        .split(".")
+        .every(
+          (label) =>
+            label.length <= 63 && !label.startsWith("-") && !label.endsWith("-")
+        ),
+    {
+      message:
+        "Each part of the domain is at most 63 characters, and starts and ends with a letter or digit",
+    }
+  );
 
 /**
  * The names of the deployment config vars above, the only settings the

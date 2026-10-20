@@ -819,6 +819,7 @@ describe("deploying safely", () => {
       // Not a domain mail can be sent to: upper case, or a part too long.
       ["INBOUND_MAIL_DOMAIN", JSON.stringify("Mail.Acme.test")],
       ["INBOUND_MAIL_DOMAIN", JSON.stringify(`${"a".repeat(64)}.acme.test`)],
+      ["INBOUND_MAIL_DOMAIN", JSON.stringify("mail-.acme.test")],
       ["MEMORY_LIMITS", "{not json"],
       // A quota above the platform's: only a release raises one.
       [
