@@ -626,6 +626,52 @@ const lockedTarballs = async (
 };
 
 /**
+ * `parts` gzipped as a browser fetches them, each file on its own: their
+ * bytes together.
+ */
+const gzippedBytes = async (parts: readonly Uint8Array[]): Promise<number> => {
+  let total = 0;
+  for (const part of parts) {
+    const stream = new Blob([part])
+      .stream()
+      .pipeThrough(new CompressionStream("gzip"));
+    // oxlint-disable-next-line no-await-in-loop -- one file at a time
+    const gzipped = await new Response(stream).arrayBuffer();
+    total += gzipped.byteLength;
+  }
+  return total;
+};
+
+/**
+ * Refuses a browser build one of whose entries, its module and its
+ * stylesheet together, is more than `limit` bytes gzipped (spec 18.1's
+ * browser entry budget).
+ */
+const requireEntriesWithinBudget = async (
+  artifact: PackageArtifact,
+  files: Readonly<Record<string, Uint8Array>>,
+  limit: number
+): Promise<void> => {
+  for (const [entry, { module, css }] of Object.entries(artifact.entries)) {
+    const parts = [module, css].flatMap((path) => {
+      const bytes = path === null ? undefined : files[path];
+      return bytes === undefined ? [] : [bytes];
+    });
+    // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+    const bytes = await gzippedBytes(parts);
+    if (bytes > limit) {
+      // Which entry, and how large: what its author reduces.
+      throw packageErrors.create("package.quota", {
+        quota: "browserEntryGzipBytes",
+        limit,
+        entry,
+        bytes,
+      });
+    }
+  }
+};
+
+/**
  * Has the package builder build `request`, and checks what it answers:
  * its shape, that its files are the ones it describes, byte for byte,
  * and the artifact's size.
@@ -674,6 +720,13 @@ const builtArtifact = async (
       quota: "artifactBytes",
       limit: request.limits.artifactBytes,
     });
+  }
+  if (artifact.target === "browser") {
+    await requireEntriesWithinBudget(
+      artifact,
+      files,
+      request.limits.browserEntryGzipBytes
+    );
   }
   return { artifact, files, stats, artifactBytes, builtMs };
 };
