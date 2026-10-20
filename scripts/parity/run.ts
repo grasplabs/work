@@ -491,7 +491,8 @@ const clearEarlierReport = (out: string): void => {
       rmSync(target, { force: true });
     }
   }
-  rmSync(marker, { force: true });
+  // Still this tool's directory, should this run stop before writing its own.
+  writeFileSync(marker, "[]\n");
 };
 
 const main = async (): Promise<void> => {
