@@ -305,13 +305,20 @@ const readFailed = async (
   now: Date
 ): Promise<void> => {
   const code = landscapeErrors.codeOf(error);
-  if (code === "landscape.throttled" && sync.day === dayOf(now)) {
+  if (code === "landscape.throttled") {
     const details = isExpectedError(error) ? error.details : undefined;
     const wait = z.number().safeParse(details?.retryAfterMs).data;
-    await db
-      .update(landscapeSyncs)
-      .set({ retryAt: new Date(now.getTime() + (wait ?? defaultRetryMs)) })
-      .where(eq(landscapeSyncs.connectionId, sync.connectionId));
+    const retryAt = new Date(now.getTime() + (wait ?? defaultRetryMs));
+    // Waited for only within its day: past it, the sync ends, so the next
+    // day's starts.
+    if (dayOf(retryAt) === sync.day) {
+      await db
+        .update(landscapeSyncs)
+        .set({ retryAt })
+        .where(eq(landscapeSyncs.connectionId, sync.connectionId));
+      return;
+    }
+    await ended(db, sync, "failed", code, now);
     return;
   }
   if (

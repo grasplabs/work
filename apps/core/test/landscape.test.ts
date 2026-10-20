@@ -388,6 +388,26 @@ describe("the application landscape", () => {
     });
   });
 
+  it("ends a sync throttled past the end of its day", async () => {
+    const app = appOf("app-midnight", "Midnight");
+    await tenantHolds({
+      apps: [app],
+      people: [],
+      grants: [grantOf(app, "User.Read")],
+    });
+    const { connectionId } = await connected();
+    const lateEvening = new Date();
+    lateEvening.setUTCHours(23, 59, 0, 0);
+    await tenantHolds({ throttle: 120 });
+    await syncLandscapes(env, lateEvening);
+    await tenantHolds({ throttle: null });
+    await expect(syncOf(connectionId)).resolves.toStrictEqual({
+      state: "failed",
+      reads: 0,
+      reason: "landscape.throttled",
+    });
+  });
+
   it("lets no late write of an older sync change what a newer one wrote", async () => {
     const app = appOf("app-late", "Late");
     const ada = guid();
