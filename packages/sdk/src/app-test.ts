@@ -812,19 +812,34 @@ const followed = async (
   };
 };
 
-/** Each run a principal started, by its number in the test's session. */
-const runNumbers = new WeakMap<object, number>();
+/**
+ * Each run a principal started: the test that started it, and its number
+ * in that test's session, which names another run in any other test's.
+ */
+const runNumbers = new WeakMap<
+  object,
+  { readonly test: RunningTest; readonly number: number }
+>();
 
-/** The number of `run`, a handle `start` answered; fails the test otherwise. */
-const numberOf = (run: unknown): number => {
-  const number =
+/**
+ * The number of `run` in `test`'s session, a handle one of `test`'s own
+ * principals started; fails the test for any other, one kept from another
+ * test included.
+ */
+const numberOf = (test: RunningTest, run: unknown): number => {
+  const started =
     typeof run === "object" && run !== null ? runNumbers.get(run) : undefined;
-  if (number === undefined) {
+  if (started === undefined) {
     throw new TestAssertionError(
       "expected a run a test principal started, from start"
     );
   }
-  return number;
+  if (started.test !== test) {
+    throw new TestAssertionError(
+      "expected a run this test started, not one another test started"
+    );
+  }
+  return started.number;
 };
 
 /** A key for one start, as a screen makes one: 16 random bytes in hex. */
@@ -900,7 +915,10 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
             ? reference.contractId
             : "a workflow",
       });
-      runNumbers.set(handle, startedNumber(unwrapped(answer)));
+      runNumbers.set(handle, {
+        test: run,
+        number: startedNumber(unwrapped(answer)),
+      });
       return handle;
     }) as TestPrincipal["start"],
   });
@@ -934,13 +952,13 @@ const contextFor = (run: RunningTest): WorkflowTestContext => ({
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     untilTerminal: (async (handle: WorkflowTestRun) =>
       outcomeOf(
-        await run.session.runOutcome(numberOf(handle)),
+        await run.session.runOutcome(numberOf(run, handle)),
         handle
       )) as TestRuns["untilTerminal"],
   },
   effects: {
     completedCount: async (handle, task) =>
-      await run.session.completedCount(numberOf(handle), task),
+      await run.session.completedCount(numberOf(run, handle), task),
   },
   as: async (name) => {
     const refused = await run.session.principal(name);
