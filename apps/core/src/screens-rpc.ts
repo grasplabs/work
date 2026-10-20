@@ -143,15 +143,6 @@ import { runSummary } from "./workflows/summary.ts";
 const maxRunSubscriptions = 20;
 
 /**
- * Most callbacks one connection's server calls may have its Apps keep at
- * once (`argumentsFor`), as `maxRunSubscriptions` bounds run
- * subscriptions: each is looked at again whenever its App tells of a
- * revocation, so the look's cost is bounded per tab. A callback the App
- * doesn't keep is let go of with its call, and frees its slot.
- */
-const maxKeptCallbacks = 50;
-
-/**
  * The App `app` names, for the person, once the App's host has counted
  * this request of theirs: `screen.rate_limited` past what one person's
  * screens of an App may ask (`screenLimits.requests`).
@@ -511,11 +502,6 @@ interface Frame {
   /** What the frame keeps through its calls, let go of when it closes. */
   held: Holder;
   /**
-   * Called right before the App runs anything for a call: refuses once
-   * the frame closed.
-   */
-  dispatching: () => void;
-  /**
    * Has `look` called whenever the person's access to `app` may have
    * dropped (`QuerySubscriptions.follow`), until let go of; `lose` when
    * the App's revocations can't be followed.
@@ -538,8 +524,6 @@ interface Frame {
     artifact: string | undefined,
     operation: string
   ) => StillOpen;
-  /** The callbacks the connection's server calls have its Apps keep. */
-  kept: Set<Disposable>;
 }
 
 /**
@@ -634,20 +618,13 @@ const followedCallback = (
 };
 
 /**
- * The arguments for the App: plain data, and callbacks of the screen's
- * (how `live` in @grasp-os/sdk/screen subscribes), each as a function the
- * App can only call.
+ * The arguments for the App: plain data, and callbacks of the caller's,
+ * each as a function the App can only call (`ChatsRpc.previewCall`).
  */
 export const argumentsFor = (
   args: unknown[],
   stillOpen: StillOpen,
-  held?: Holder,
-  following?: {
-    frame: Frame;
-    by: Identity;
-    app: AppId;
-    artifact: string | undefined;
-  }
+  held?: Holder
 ): { passed: unknown[]; callbacks: Disposable[] } => {
   if (
     !args.every(
@@ -664,31 +641,15 @@ export const argumentsFor = (
   if (jsonBytes(data, screenLimits.inputBytes) > screenLimits.inputBytes) {
     throw screenErrors.create("screen.input_too_large");
   }
-  const stubs = args.filter((arg) => isStub(arg)).length;
-  if (
-    following !== undefined &&
-    following.frame.kept.size + stubs > maxKeptCallbacks
-  ) {
-    throw screenErrors.create("screen.too_many_subscriptions");
-  }
   const callbacks: Disposable[] = [];
   const passed = args.map((arg) => {
     if (!isStub(arg)) {
       return arg;
     }
-    // Kept by the frame that passed it, if any, until it is let go of:
-    // closing the frame lets go of it too, and a frame that closed while
-    // this call was admitted keeps none.
-    const callback =
-      following === undefined
-        ? callbackFor(arg, stillOpen, refusals, () => {
-            held?.forget(callback);
-          })
-        : followedCallback(arg, { ...following, operation: "call" }, () => {
-            following.frame.kept.delete(callback);
-            held?.forget(callback);
-          });
-    following?.frame.kept.add(callback);
+    // Kept by what passed it, if anything, until it is let go of.
+    const callback = callbackFor(arg, stillOpen, refusals, () => {
+      held?.forget(callback);
+    });
     callbacks.push(callback);
     held?.keep(callback);
     return callback;
@@ -914,8 +875,6 @@ interface FrameConnection {
   readonly queries: QuerySubscriptions;
   /** The connection's run subscriptions, bounded for the whole tab. */
   readonly runSubscriptions: Set<Disposable>;
-  /** The callbacks its server calls have Apps keep, bounded for the tab. */
-  readonly kept: Set<Disposable>;
   /** The connection's shared read of a build's standing (`standingNow`). */
   readonly standingNow: (
     app: AppId,
@@ -975,9 +934,6 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
           this.#held.delete(held);
         },
       },
-      dispatching: () => {
-        this.#open();
-      },
       follow: (by, id, look, lose) =>
         connection.queries.follow(by, id, look, lose),
       lookOpen: (by, id, build, operation) => {
@@ -1005,7 +961,6 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
           );
         };
       },
-      kept: connection.kept,
     };
   }
 
@@ -1272,9 +1227,6 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
   /** This connection's run subscriptions that haven't been released. */
   readonly #runSubscriptions = new Set<Disposable>();
 
-  /** The callbacks this connection's server calls have Apps keep. */
-  readonly #kept = new Set<Disposable>();
-
   /** Each build's standing being read for a look, by App and build. */
   readonly #standings = new Map<string, Promise<Standing>>();
 
@@ -1375,7 +1327,6 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
         stillOpen: (frameApp) => this.#stillOpen(frameApp),
         queries: this.#queries,
         runSubscriptions: this.#runSubscriptions,
-        kept: this.#kept,
         standingNow: async (frameApp, build) =>
           await this.#standingNow(frameApp, build),
       });

@@ -319,6 +319,42 @@ const sweptAt = async (ahead: number): Promise<void> => {
 };
 
 describe("screens", { timeout: 60_000 }, () => {
+  it("is refused to people without a role in the App, and to nobody signed in", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const user = await personApi("user");
+
+    const asUser = await Promise.all([
+      outcome(user.api.screens.open(app, "notes")),
+      outcome(user.api.screens.frame(app, "").startRun("notes")),
+      outcome(user.api.screens.version(app)),
+      outcome(
+        user.api.screens.report(
+          app,
+          { version: 1, screen: "notes" },
+          { kind: "error", message: "boom" }
+        )
+      ),
+      outcome(user.api.screens.errors(app)),
+    ]);
+    const { core } = await openRpc();
+    const signedOut = await Promise.all([
+      outcome(core.authenticate().screens.frame(app, "").startRun("notes")),
+      outcome(core.authenticate().screens.version(app)),
+    ]);
+    expect({ asUser, signedOut }).toStrictEqual({
+      // As for an App that isn't there (app-roles.test.ts).
+      asUser: [
+        "app.not_found",
+        "app.not_found",
+        "app.not_found",
+        "app.not_found",
+        "app.not_found",
+      ],
+      signedOut: ["auth.unauthenticated", "auth.unauthenticated"],
+    });
+  });
+
   it("opens a screen at the App's current version, with only the kit modules it needs", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
