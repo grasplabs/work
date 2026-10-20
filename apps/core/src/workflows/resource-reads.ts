@@ -165,6 +165,31 @@ const document = async (
 };
 
 /**
+ * What knowledge call `call` asks, checked: a search's text and limit, or
+ * a read's document ID (`workflow.call_invalid` otherwise).
+ */
+export const requireKnowledgeRequest = (
+  call: KnowledgeCall
+):
+  | { operation: "search"; request: z.infer<typeof searchSchema> }
+  | { operation: "read"; request: z.infer<typeof readSchema> } => {
+  if (call.operation === "search") {
+    const request = searchSchema.safeParse(call.arguments);
+    if (!request.success) {
+      throw callInvalid(
+        `arguments: Give text of 1 to ${knowledgeSearchMaxLength} characters, and a limit of 1 to 20 if any.`
+      );
+    }
+    return { operation: "search", request: request.data };
+  }
+  const request = readSchema.safeParse(call.arguments);
+  if (!request.success) {
+    throw callInvalid("arguments: Give a document's ID.");
+  }
+  return { operation: "read", request: request.data };
+};
+
+/**
  * Makes knowledge call `call` of `run` through `binding`, its authority
  * already decided again (`makeCall`): a search's hits, or a document.
  */
@@ -179,20 +204,10 @@ export const callKnowledge = async (
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   const bound = await boundCollection(env, run, target.permissionId);
-  if (call.operation === "search") {
-    const request = searchSchema.safeParse(call.arguments);
-    if (!request.success) {
-      throw callInvalid(
-        `arguments: Give text of 1 to ${knowledgeSearchMaxLength} characters, and a limit of 1 to 20 if any.`
-      );
-    }
-    return await searched(env, run, bound, request.data);
-  }
-  const request = readSchema.safeParse(call.arguments);
-  if (!request.success) {
-    throw callInvalid("arguments: Give a document's ID.");
-  }
-  return await document(env, run, bound, request.data);
+  const request = requireKnowledgeRequest(call);
+  return request.operation === "search"
+    ? await searched(env, run, bound, request.request)
+    : await document(env, run, bound, request.request);
 };
 
 /**

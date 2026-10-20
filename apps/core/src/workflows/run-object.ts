@@ -14,6 +14,7 @@ import { z } from "zod";
 
 import { appHost } from "../durable-objects.ts";
 import type { AttemptFence } from "./attempt-fence.ts";
+import { projectCandidateRun } from "./candidate-runs.ts";
 import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
@@ -727,13 +728,16 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       definition: latest.workflow,
       version: latest.version,
     });
-    if (pin?.type === "resource") {
-      // An independent workflow's run: no cancel or control of it exists
-      // yet, so its row follows the engine's status alone.
+    if (pin?.type === "resource" || pin?.type === "candidate") {
+      // An independent workflow's run, or a test run of its draft: no
+      // cancel or control of it exists yet, so its row follows the
+      // engine's status alone.
       // Why it failed, from its own journal: kept on its row, so the code
       // outlives the engine's record of the run.
       const live = this.status();
-      await projectResourceRun(
+      const project =
+        pin.type === "resource" ? projectResourceRun : projectCandidateRun;
+      await project(
         this.env,
         latest.instanceId,
         {

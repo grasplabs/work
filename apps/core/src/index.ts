@@ -18,6 +18,7 @@ import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepStatistics } from "./statistics.ts";
+import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { repairControls } from "./workflows/controls.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
@@ -127,6 +128,7 @@ export default {
             deleteExpiredEmail(env, new Date(controller.scheduledTime)),
             sweepGuestChats(env, new Date(controller.scheduledTime)),
             sweepRunDetails(env, new Date(controller.scheduledTime)),
+            sweepCandidateRuns(env, new Date(controller.scheduledTime)),
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
             sweepBuilds(env, new Date(controller.scheduledTime)),
             sweepPackageFiles(env, new Date(controller.scheduledTime)),

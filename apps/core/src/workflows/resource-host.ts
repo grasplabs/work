@@ -261,6 +261,13 @@ export interface HostedResourceRun {
    * the host's ceiling (resource-runs.ts).
    */
   maxModelCalls: number;
+  /**
+   * For a test run (candidate-runs.ts): the longest any one of its waits
+   * may last, and the furthest past its start a sleep until a time may end,
+   * in ms. One past it fails the run (`workflow.candidate_wait_limit`), so
+   * no test run sits waiting for long.
+   */
+  maxSleepMs?: number;
 }
 
 /** How the host reaches back into the dispatcher. */
@@ -1649,6 +1656,8 @@ export class ResourceRunHost
           `Task "${task?.id ?? ""}" waits as its build says.`
         );
       }
+      // Its length alone, as sealed: the same on every replay.
+      this.#requireShortSleep(task.milliseconds);
       await this.#requirePerson();
       await this.#step.sleep(`task:${task.id}`, task.milliseconds);
       return null;
@@ -1675,10 +1684,25 @@ export class ResourceRunHost
           `Task "${task?.id ?? ""}" sleeps until the deadline it recorded.`
         );
       }
+      // From the run's start, both recorded: the same on every replay.
+      this.#requireShortSleep(deadline - this.#run.createdAt);
       await this.#requirePerson();
       await this.#step.sleepUntil(`task:${task.id}`, deadline);
       return null;
     });
+  }
+
+  /**
+   * Refuses a sleep of `ms` past a test run's `maxSleepMs`
+   * (`workflow.candidate_wait_limit`); any sleep of any other run.
+   */
+  #requireShortSleep(ms: number): void {
+    const { maxSleepMs } = this.#run;
+    if (maxSleepMs !== undefined && ms > maxSleepMs) {
+      throw workflowResourceErrors.create("workflow.candidate_wait_limit", {
+        limit: maxSleepMs,
+      });
+    }
   }
 
   /** Generated code never waits for a decision (yet). */

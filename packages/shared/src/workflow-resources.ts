@@ -195,6 +195,20 @@ export const workflowResourceErrors = defineErrorFamily({
     "This run is restricted, so its actions can't make connector calls: connect holds those for a decision, which an action can't wait for.",
   "workflow.action_call_limit":
     "A task's action made as many calls as one attempt of it may, so the run failed.",
+  "workflow.candidate_unfixtured":
+    "This test run made a call its start gave no answer for. A test run never calls anything: give each binding it calls an answer, then start it again.",
+  "workflow.candidate_unexecutable":
+    "This checkpoint uses something a run can't do yet, so it can't be test-run.",
+  "workflow.candidate_unavailable":
+    "This test run doesn't exist, or isn't one you can see.",
+  "workflow.candidate_limit":
+    "You already have as many test runs of this workflow going as one person may. Wait for one to end, or stop one.",
+  "workflow.candidate_kept_limit":
+    "You have as many test runs of this workflow kept as one person may. Older ones are removed after a week.",
+  "workflow.candidate_time_limit":
+    "This test run went on longer than a test run may, so it failed. Shorten what it waits for to test it.",
+  "workflow.candidate_wait_limit":
+    "This test run would wait longer than a test run may, so it failed. Shorten the wait to test it.",
 });
 
 /**
@@ -797,6 +811,82 @@ export const workflowDraftPublishSchema = z.strictObject({
   basedOn: z.number().int().positive().nullable(),
 });
 
+/** Most bindings a test run's start answers for. */
+export const maxCandidateFixtures = 64;
+
+/** Most bytes of a test run's fixtures, as JSON text, all answers together. */
+export const maxCandidateFixtureBytes = 256 * 1024;
+
+/**
+ * Most test runs of one workflow that haven't ended a person may have at
+ * once: a start past it is refused (`workflow.candidate_limit`).
+ */
+export const maxLiveCandidateRuns = 5;
+
+/**
+ * Most test runs of one workflow a person may have kept, ended or not,
+ * until the sweep removes them: a start past it is refused
+ * (`workflow.candidate_kept_limit`).
+ */
+export const maxKeptCandidateRuns = 100;
+
+/**
+ * The longest a test run may wait or sleep, from its start: a wait past it
+ * fails the run (`workflow.candidate_wait_limit`).
+ */
+export const maxCandidateWaitMs = 15 * 60 * 1000;
+
+/**
+ * The longest a test run may go on, from its start: its first activation
+ * past it fails the run (`workflow.candidate_time_limit`), however its
+ * waits are chained.
+ */
+export const maxCandidateLifetimeMs = 60 * 60 * 1000;
+
+/**
+ * A test run of a draft's checkpoint (GRA-815): the checkpoint's exact
+ * revision, the run's input, the parameter values it runs with (each
+ * left out takes its default; the workflow's own values never count),
+ * and what each binding it calls answers, by alias. A test run never
+ * calls anything: a call through a binding with no answer here fails
+ * (`workflow.candidate_unfixtured`).
+ */
+export const workflowCandidateStartSchema = z.strictObject({
+  revision: z.int().min(1),
+  input: z.json(),
+  params: z.record(z.string().max(64), z.json()).optional(),
+  fixtures: z
+    .record(z.string().min(1).max(64), z.strictObject({ output: z.json() }))
+    .refine(
+      (fixtures) => Object.keys(fixtures).length <= maxCandidateFixtures,
+      { message: `At most ${maxCandidateFixtures} bindings.` }
+    )
+    .refine(
+      (fixtures) =>
+        new TextEncoder().encode(JSON.stringify(fixtures)).byteLength <=
+        maxCandidateFixtureBytes,
+      { message: `At most ${maxCandidateFixtureBytes} bytes of answers.` }
+    ),
+});
+
+/** A test run of a draft's checkpoint, for the workflow's builders. */
+export interface WorkflowCandidateRun {
+  id: string;
+  workflowId: string;
+  /** The draft revision whose checkpoint it runs. */
+  draftRevision: number;
+  /** The executable identity it runs, compiled as it started. */
+  buildHash: string;
+  principal: string;
+  status: WorkflowRunStatus;
+  createdAt: string;
+  endedAt: string | null;
+  /** What it returned, once completed. */
+  output?: unknown;
+  /** Why it failed. */
+  error?: { code: string | null; message: string };
+}
+
 /**
  * A workflow's draft, for its builders: its latest text and revision (0
  * while nobody has edited it: then the current version's definition, or
@@ -882,6 +972,19 @@ export interface WorkflowResourcesApi {
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
   /** What run `runId` did, over its version's diagram, for builders. */
   runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
+  /**
+   * Starts a test run of the draft's checkpoint at an exact revision,
+   * never published, its calls answered from the start's fixtures; for
+   * builders (`workflowCandidateStartSchema`).
+   */
+  startCandidateRun: (id: string, input: unknown) => Promise<{ runId: string }>;
+  /** One of its test runs, for builders. */
+  candidateRun: (id: string, runId: string) => Promise<WorkflowCandidateRun>;
+  /** Stops one of its test runs that hasn't ended; for builders. */
+  terminateCandidateRun: (
+    id: string,
+    runId: string
+  ) => Promise<WorkflowCandidateRun>;
   /** Its parameters' configuration, for anyone with a role. */
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */

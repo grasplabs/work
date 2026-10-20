@@ -23,6 +23,7 @@ import {
   runLineageAttempts,
   runLineageChildren,
   runLineages,
+  workflowCandidateRuns,
   workflowResourceRuns,
   workflowRuns,
 } from "../db/core/schema.ts";
@@ -296,7 +297,8 @@ const limitReached = (limit: LineageLimit, policy: QuotaPolicy) =>
  * its run's row, unless it has its row already: its age counts from the
  * root's start. A root is an App's run (`workflow_runs`) or an
  * independent workflow's (`workflow_resource_runs`, its start's
- * admission): the same counters and admissions hold both, so no run gets
+ * admission), or a test run of its draft (`workflow_candidate_runs`,
+ * candidate-runs.ts): the same counters and admissions hold both, so no run gets
  * past a limit for being of either kind. Nothing for a run core has no
  * row of.
  */
@@ -305,7 +307,8 @@ export const lineageCreated = (db: DrizzleD1Database, root: string) =>
     .insert(runLineages)
     .select(
       sql`SELECT ${workflowRuns.id}, ${workflowRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root}
-        UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${root}`
+        UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${root}
+        UNION ALL SELECT ${workflowCandidateRuns.id}, ${workflowCandidateRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${root}`
     )
     .onConflictDoNothing();
 
@@ -317,19 +320,22 @@ export const lineageCreated = (db: DrizzleD1Database, root: string) =>
  */
 const cancelledRun = (run: string): SQL =>
   sql`(EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.cancelRequestedAt} IS NOT NULL)
-    OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND ${workflowResourceRuns.status} = 'cancelled'))`;
+    OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND ${workflowResourceRuns.status} = 'cancelled')
+    OR EXISTS (SELECT 1 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${run} AND ${workflowCandidateRuns.status} = 'cancelled'))`;
 
 /**
  * That the engine has fenced run `run`'s attempts of activation
  * `generation`, as SQL: the run was cancelled (`cancelledRun`), its object
  * said its attempts of this generation, or a newer one, hold no more
- * (`sharesReleased`), or, for an independent run, it has ended. However
+ * (`sharesReleased`), or, for an independent run or a test run, it has
+ * ended. However
  * late an admission of such an attempt lands, it takes no share.
  */
 const fencedRun = (run: string, generation: number): SQL =>
   sql`(${cancelledRun(run)}
     OR EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.sharesFencedThrough} >= ${generation})
-    OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND (${workflowResourceRuns.sharesFencedThrough} >= ${generation} OR ${workflowResourceRuns.status} IN ('completed', 'failed', 'cancelled'))))`;
+    OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND (${workflowResourceRuns.sharesFencedThrough} >= ${generation} OR ${workflowResourceRuns.status} IN ('completed', 'failed', 'cancelled')))
+    OR EXISTS (SELECT 1 FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${run} AND (${workflowCandidateRuns.sharesFencedThrough} >= ${generation} OR ${workflowCandidateRuns.status} IN ('completed', 'failed', 'cancelled'))))`;
 
 /**
  * The statements that record, for run `run` of either kind, that the
@@ -357,6 +363,16 @@ const fenceRecorded = (db: DrizzleD1Database, run: string, through: number) =>
           eq(workflowResourceRuns.id, run),
           lt(workflowResourceRuns.sharesFencedThrough, through),
           sql`${workflowResourceRuns.status} IN ('starting', 'running')`
+        )
+      ),
+    db
+      .update(workflowCandidateRuns)
+      .set({ sharesFencedThrough: through })
+      .where(
+        and(
+          eq(workflowCandidateRuns.id, run),
+          lt(workflowCandidateRuns.sharesFencedThrough, through),
+          sql`${workflowCandidateRuns.status} IN ('starting', 'running')`
         )
       ),
   ] as const;

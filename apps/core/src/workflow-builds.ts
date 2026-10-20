@@ -1103,35 +1103,14 @@ const verifiedBuild = async (
   });
 };
 
-/**
- * The executable build of version `version` of workflow `id`, verified:
- * its manifest against its hash and, with `pinned`, the manifest hash a
- * start froze; then every artifact against its entry, and the build's
- * identity against them (`workflow.version_corrupt` otherwise, and for a
- * version that isn't executable, which nothing should load).
- */
-export const loadWorkflowBuild = async (
+/** `loadWorkflowBuild`'s work, of the manifest `row` keeps. */
+const loadSealedBuild = async (
   env: Env,
   id: string,
   version: number,
-  pinned?: string
+  row: { manifest: string; manifestHash: string },
+  pinned: string | undefined
 ): Promise<LoadedBuild> => {
-  const row = await drizzle(env.DB)
-    .select({
-      manifest: workflowResourceVersions.manifest,
-      manifestHash: workflowResourceVersions.manifestHash,
-    })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, id),
-        eq(workflowResourceVersions.version, version)
-      )
-    )
-    .get();
-  if (row === undefined) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
   const hash = await sha256Hex(row.manifest);
   if (hash !== row.manifestHash || (pinned !== undefined && pinned !== hash)) {
     throw corrupt(id, version, "manifest");
@@ -1174,3 +1153,51 @@ export const loadWorkflowBuild = async (
     return loaded;
   });
 };
+
+/**
+ * The executable build of version `version` of workflow `id`, verified:
+ * its manifest against its hash and, with `pinned`, the manifest hash a
+ * start froze; then every artifact against its entry, and the build's
+ * identity against them (`workflow.version_corrupt` otherwise, and for a
+ * version that isn't executable, which nothing should load).
+ */
+export const loadWorkflowBuild = async (
+  env: Env,
+  id: string,
+  version: number,
+  pinned?: string
+): Promise<LoadedBuild> => {
+  const row = await drizzle(env.DB)
+    .select({
+      manifest: workflowResourceVersions.manifest,
+      manifestHash: workflowResourceVersions.manifestHash,
+    })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, id),
+        eq(workflowResourceVersions.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  return await loadSealedBuild(env, id, version, row, pinned);
+};
+
+/**
+ * The executable build of a test run of workflow `id`'s draft checkpoint
+ * (workflows/candidate-runs.ts), from the manifest its row keeps, verified
+ * as a version's is (`loadWorkflowBuild`): the manifest against its hash
+ * and the one the run was pinned to, then every artifact, and the build's
+ * identity against them.
+ */
+export const loadCandidateBuild = async (
+  env: Env,
+  id: string,
+  row: { manifest: string; manifestHash: string },
+  pinned: string
+): Promise<LoadedBuild> =>
+  // Version 0: no version's, for what a corrupt build's report names.
+  await loadSealedBuild(env, id, 0, row, pinned);
