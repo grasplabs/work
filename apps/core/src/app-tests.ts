@@ -675,6 +675,12 @@ class FixtureSession extends TestTarget {
    * them.
    */
   readonly #runs: string[] = [];
+  /**
+   * The starts admitted against `maxRunsPerTest`, under way or done: one
+   * is counted before it awaits anything, so starts at once can't each
+   * find room for one more.
+   */
+  #starts = 0;
 
   constructor(context: SessionContext, fixtures: string, fixture: Fixture) {
     super();
@@ -851,15 +857,23 @@ class FixtureSession extends TestTarget {
     let result: OperationResult;
     try {
       // A test holds at most `maxRunsPerTest` runs: each is real work.
-      if (this.#runs.length >= maxRunsPerTest) {
+      if (this.#starts >= maxRunsPerTest) {
         throw operationErrors.create("operation.call_limit");
       }
-      const runId = await startFixtureRun(
-        this.#env,
-        this.#release,
-        `fixture-${String(name)}`,
-        request
-      );
+      this.#starts += 1;
+      let runId: string;
+      try {
+        runId = await startFixtureRun(
+          this.#env,
+          this.#release,
+          `fixture-${String(name)}`,
+          request
+        );
+      } catch (error) {
+        // Refused before it ran: its room goes back.
+        this.#starts -= 1;
+        throw error;
+      }
       // Closed meanwhile: what started goes now, as nothing else would
       // remove it but the sweep.
       if (this.#closed) {
