@@ -9334,6 +9334,10 @@ msgstr "L’approbation du code de cette application a été retirée, et l’ap
 msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
 msgstr "Les apps et workflows qui peuvent utiliser des paquets npm approuvés. Ouvrez-en un pour mettre hors service ou révoquer ce qui lui a été approuvé."
 
+#: src/landscape/sync-notice.tsx
+msgid "The apps found in Microsoft Entra may be incomplete: its last read didn't finish."
+msgstr "Les apps trouvées dans Microsoft Entra sont peut-être incomplètes : sa dernière lecture ne s'est pas terminée."
+
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
 msgstr "Les apps citées par les équipes, et celles utilisées que personne n’a mentionnées."

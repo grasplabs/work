@@ -7,7 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { formatDateTime } from "../format.ts";
 import { discoveredAppOf } from "./landscape-data.ts";
 import { signalTextOf } from "./landscape.ts";
-import { SyncNotices } from "./sync-notice.tsx";
+import { IncompleteNotice, SyncNotices } from "./sync-notice.tsx";
 
 // How fresh the apps found in Microsoft Entra are, as admins see it, and
 // how an unverified publisher shows: never as the app's vendor.
@@ -34,6 +34,19 @@ const textOf = (statuses: LandscapeSyncStatus[]): string =>
     .replaceAll(/\s+/gu, " ")
     .trim();
 
+/** The line a person who isn't an admin reads, if any. */
+const lineOf = (
+  incomplete: boolean,
+  syncs: Parameters<typeof IncompleteNotice>[0]["syncs"]
+): string =>
+  renderToStaticMarkup(
+    <I18nProvider i18n={i18n}>
+      <IncompleteNotice incomplete={incomplete} syncs={syncs} />
+    </I18nProvider>
+  )
+    .replaceAll(/<[^>]+>/gu, "")
+    .replaceAll("&#x27;", "'");
+
 describe("the landscape's freshness", () => {
   it("says when the list was last read whole, and says so when the last read stopped at its limit or failed", () => {
     const whole = formatDateTime("2026-10-20T10:00:00.000Z");
@@ -52,6 +65,19 @@ describe("the landscape's freshness", () => {
         "The last read of Microsoft Entra stopped at its limit Your organization has more grants than one day's read takes, so some apps may be missing. Microsoft Entra hasn't been read whole yet.",
       failed: `The last read of Microsoft Entra failed The Microsoft Entra connection needs an admin to connect it again. Apps found in Microsoft Entra as of ${whole}.`,
       failedOther: `The last read of Microsoft Entra failed Microsoft didn't answer the reads. Grasp tries again tomorrow. Apps found in Microsoft Entra as of ${whole}.`,
+    });
+  });
+
+  it("tells anyone but an admin, in one line, when the apps found may be incomplete", () => {
+    expect({
+      member: lineOf(true, null),
+      memberWhole: lineOf(false, null),
+      admin: lineOf(true, { state: "ready", data: [status({})] }),
+    }).toStrictEqual({
+      member:
+        "The apps found in Microsoft Entra may be incomplete: its last read didn't finish.",
+      memberWhole: "",
+      admin: "",
     });
   });
 

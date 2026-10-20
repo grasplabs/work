@@ -559,7 +559,10 @@ describe("the landscape's apps", () => {
           catalog: async () => await Promise.resolve({ entries, offered: [] }),
           list: parts.list,
         },
-        landscape: { apps: parts.apps },
+        landscape: {
+          apps: parts.apps,
+          incomplete: async () => await Promise.resolve([]),
+        },
       };
       // SAFETY: a stand-in for the parts of core's API the Landscape reads.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

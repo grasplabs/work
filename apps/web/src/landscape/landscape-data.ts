@@ -163,6 +163,11 @@ export interface LandscapeData {
    * one; null for anyone else.
    */
   syncs: Loaded<LandscapeSyncStatus[]> | null;
+  /**
+   * Whether the apps found in the identity provider may be incomplete: a
+   * connection's last read stopped at its limit or failed. Anyone may know.
+   */
+  incomplete: boolean;
 }
 
 /**
@@ -174,18 +179,21 @@ export const loadLandscape = async (
   core: Pick<CoreConnection, "withSession">,
   identity: Identity
 ): Promise<LandscapeData> => {
-  const [{ catalog, connections, held }, discovered, syncs] = await Promise.all(
-    [
+  const [{ catalog, connections, held }, discovered, stopped, syncs] =
+    await Promise.all([
       loadIntegrations(core, identity, { held: true }),
       loadDiscoveredApps(core),
+      loadFromCore(
+        core,
+        async (session) => await session.landscape.incomplete()
+      ),
       isAdmin(identity.role)
         ? loadFromCore(
             core,
             async (session) => await session.landscape.status()
           )
         : null,
-    ]
-  );
+    ]);
   const fromIntegrations: Loaded<LandscapeApp[]> =
     connections.state === "ready"
       ? {
@@ -204,6 +212,7 @@ export const loadLandscape = async (
   );
   return {
     syncs,
+    incomplete: stopped.state === "ready" && stopped.data.length > 0,
     integrations: fromIntegrations,
     found: discovered,
     apps:

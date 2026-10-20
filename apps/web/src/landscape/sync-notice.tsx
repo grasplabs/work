@@ -81,6 +81,25 @@ const SyncNotice = ({ status }: { status: LandscapeSyncStatus }) => {
   );
 };
 
+/**
+ * For anyone but an admin (who sees each connection's notice): a line
+ * saying the apps found may be incomplete, when a last read didn't finish.
+ */
+export const IncompleteNotice = ({
+  incomplete,
+  syncs,
+}: {
+  incomplete: boolean;
+  syncs: Loaded<LandscapeSyncStatus[]> | null;
+}) => {
+  const { t } = useLingui();
+  return incomplete && syncs === null ? (
+    <p className="text-muted-foreground">
+      {t`The apps found in Microsoft Entra may be incomplete: its last read didn't finish.`}
+    </p>
+  ) : null;
+};
+
 /** Each landscape connection's freshness, for admins. */
 export const SyncNotices = ({
   syncs,
