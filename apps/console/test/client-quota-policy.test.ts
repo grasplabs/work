@@ -73,7 +73,7 @@ const setQuota = async (
     })
     .onConflictDoUpdate({
       target: [settings.clientId, settings.key],
-      set: { value },
+      set: { value, updatedAt: new Date() },
     });
 };
 
@@ -88,7 +88,7 @@ const deploy = async (clientId: string, releaseId: string): Promise<void> => {
 describe("a client's quota policy", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
 
-  it("is in sync while core applies the generation the console deployed, and drifted once core refuses a lower one", async () => {
+  it("is in sync while core applies the generation the console deployed, and drifted once core refuses a lower one, whatever else waits", async () => {
     const release = await importedRelease("feat(core): quota policy report");
     const { clientId } = await recordClient();
     await setQuota(clientId, 3, 100);
@@ -98,8 +98,18 @@ describe("a client's quota policy", () => {
     await setQuota(clientId, 2, 50);
     await deploy(clientId, release);
     const drifted = await clientQuotaPolicy(env, clientId);
+    // Another setting's change waiting for its deploy hides no drift.
+    await db
+      .update(clients)
+      .set({ configChangedAt: new Date() })
+      .where(eq(clients.id, clientId));
+    const stillDrifted = await clientQuotaPolicy(env, clientId);
 
-    expect({ inSync, drifted }).toMatchObject({
+    expect({
+      inSync,
+      drifted,
+      stillDrifted: stillDrifted?.state,
+    }).toMatchObject({
       inSync: {
         set: { generation: 3, lowered: { workflowSteps: 100 } },
         inForce: { generation: 3, lowered: { workflowSteps: 100 } },
@@ -110,6 +120,7 @@ describe("a client's quota policy", () => {
         inForce: { generation: 3, lowered: { workflowSteps: 100 } },
         state: "drifted",
       },
+      stillDrifted: "drifted",
     });
   });
 

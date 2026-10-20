@@ -145,8 +145,8 @@ const stateOf = (
   if (inForce.generation === set.generation) {
     return "in_sync";
   }
-  // A change waiting for the next deploy, of this setting or another: the
-  // deploy may still bring core the console's generation.
+  // A change of the setting waiting for the next deploy may still bring
+  // core the console's generation.
   return pending ? "pending" : "drifted";
 };
 
@@ -161,23 +161,26 @@ export const clientQuotaPolicy = async (
 ): Promise<ClientQuotaPolicy | null> => {
   const db = consoleDatabase(env.DB);
   const [client] = await db
-    .select({
-      status: clients.status,
-      configChangedAt: clients.configChangedAt,
-    })
+    .select({ status: clients.status })
     .from(clients)
     .where(eq(clients.id, clientId));
   if (client === undefined) {
     return null;
   }
   const [setting] = await db
-    .select({ value: settings.value })
+    .select({ value: settings.value, updatedAt: settings.updatedAt })
     .from(settings)
     .where(
       and(eq(settings.clientId, clientId), eq(settings.key, "QUOTA_LIMITS"))
     );
   const set = setPolicyOf(setting?.value);
-  const pending = await isConfigPending(db, clientId, client.configChangedAt);
+  // Only a change of this setting waits to reach core: another setting's
+  // change waiting for its deploy says nothing of the policy.
+  const pending = await isConfigPending(
+    db,
+    clientId,
+    setting?.updatedAt ?? null
+  );
   const domain = clientDomain(env);
   const inForce =
     client.status !== "active" || domain === null
