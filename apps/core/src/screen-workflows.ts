@@ -561,7 +561,7 @@ export const failureOf = (
  * `contract.invalid_return` for anything else, `workflow.run_details_removed`
  * past its retention.
  */
-const outputOf = (declared: unknown, output: unknown): Json => {
+export const outputOf = (declared: unknown, output: unknown): Json => {
   if (output === undefined) {
     // The contract has a completed run's output, always: past its
     // retention, there is none to show.
