@@ -51,6 +51,15 @@ import type { ExportedBinding } from "./workflow-resources.ts";
 //   events, listens and decisions, never a pin, and none for a workflow
 //   the package doesn't carry) are no files, but are counted and scanned
 //   as files are.
+// - A workflow version's approved packages are lost, so its modules'
+//   bare imports resolve nowhere, or travel as if approved: the version
+//   carries what it seals (`packages`), the graph's hash, the entries its
+//   modules import and the graph's lock, every exact version and
+//   integrity, without this deployment's build pins, its approval or its
+//   artifact. Nothing at the destination trusts it: a publication there
+//   seals only a graph approved for its own workflow, asked for and
+//   approved anew from the lock's exact versions. The record counts
+//   against the byte budget and is scanned like every file.
 // - Someone exports what they can't read: only the App's builders (its
 //   admins among them), never Grasp staff; and only workflows they build,
 //   as for a workflow's source. A workflow they don't is listed as
@@ -388,6 +397,12 @@ class WorkflowGraph {
       ...found.files,
       "workflow.json": definition.text,
     });
+    // Named as the package names it: it is no file of the version's.
+    if (found.packages !== null) {
+      this.#budget(`workflows/${key}`, {
+        packages: canonicalText(found.packages),
+      });
+    }
     this.#pending.push({
       key,
       entry: {
@@ -404,6 +419,14 @@ class WorkflowGraph {
         files,
         withheldDefaults: definition.defaults,
         withheldConstraints: definition.constraints,
+        packages:
+          found.packages === null
+            ? null
+            : {
+                graphHash: found.packages.graphHash,
+                entries: [...found.packages.entries],
+                lock: found.packages.lock,
+              },
       },
       bindings: found.bindings,
     });

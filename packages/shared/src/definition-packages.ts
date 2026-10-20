@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { graspLockSchema, packageEntrySchema } from "./packages.ts";
 import { catalogBindingKinds } from "./workflow-resources.ts";
 
 // A definition package: an App's current sealed release and
@@ -11,10 +12,18 @@ import { catalogBindingKinds } from "./workflow-resources.ts";
 // approval, catalog target, parameter value, store, member, record or
 // audit data; bindings are their aliases and kinds, which the destination
 // binds anew. What builders wrote into source is theirs, scanned for
-// known secret formats before it leaves (definition-export.ts).
+// known secret formats before it leaves (definition-export.ts). A
+// workflow version's approved npm packages travel as their graph and the
+// entries its modules import, never as an approval: the destination asks
+// for and approves them again before anything it publishes seals them.
 
-/** The format of a definition package. */
-export const definitionPackageFormatVersion = 1;
+/**
+ * The format of a definition package. 2 since a workflow version carries
+ * the approved packages it seals (GRA-737): a format 1 package has no
+ * room for them, so one of a version that sealed some would have lost
+ * them without saying so, and is refused, to be exported again.
+ */
+export const definitionPackageFormatVersion = 2;
 
 /** The most workflow versions one package holds. */
 export const definitionPackageMaxWorkflows = 64;
@@ -173,6 +182,23 @@ export const definitionPackageSchema = z.strictObject({
       workflows: z.record(aliasSchema, workflowKeySchema.nullable()),
       /** Each catalog contract it binds, by alias: its kind. */
       bindings: z.record(aliasSchema, z.enum(catalogBindingKinds)),
+      /**
+       * The approved npm packages its modules import (GRA-665), null when
+       * it seals none: the graph's hash, the entries the modules import,
+       * and the graph's lock (`grasp.lock.json`) without this
+       * deployment's build pins, from which the destination asks for the
+       * same exact versions and a standalone project pins them. Null lock
+       * when this deployment no longer keeps it. Never an approval: the
+       * destination approves the graph for its own workflow before
+       * anything it publishes seals it.
+       */
+      packages: z
+        .strictObject({
+          graphHash: sha256Schema,
+          entries: z.array(packageEntrySchema).min(1).max(256),
+          lock: graspLockSchema.omit({ artifacts: true }).nullable(),
+        })
+        .nullable(),
     })
   ),
   /** Every binding named above that the package doesn't resolve. */
