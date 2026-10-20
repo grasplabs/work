@@ -37,11 +37,17 @@ test("a screen opens another with its input, and leaving unsaved edits is confir
   await start
     .getByRole("button", { name: "Open note n42", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/apps\/note\/full\?route=note&input=/u);
+  // What it opens with is in the page's history, never its address.
+  await expect(page).toHaveURL(/\/apps\/note\/full$/u);
   const note = page.frameLocator('iframe[title="note app"]');
   await expect(note.getByRole("heading", { name: "Note n42" })).toBeVisible({
     timeout: 20_000,
   });
+
+  // Asked for where it already is, it is there: nothing is refused.
+  await note.getByRole("button", { name: "Open this note again" }).click();
+  await page.waitForTimeout(1500);
+  await expect(note.getByText("Refused 0")).toBeVisible();
 
   // Unsaved: going back asks once; staying keeps the screen and the edit.
   const leave = page.getByRole("alertdialog", { name: "Leave this app?" });
@@ -143,9 +149,7 @@ test("a screen in the chat's side panel opens what it navigates to in the main p
   const home = panel.frameLocator('iframe[title="home app"]');
   // The screen asks to replace the page's entry: the panel's never does.
   await home.getByRole("button", { name: "Open note n42 in place" }).click();
-  await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/note\\?route=note&input=`, "u")
-  );
+  await expect(page).toHaveURL(new RegExp(`/domains/${app}/apps/note$`, "u"));
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/\\?chat=${chat}`, "u"));
 });

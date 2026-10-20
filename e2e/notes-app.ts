@@ -697,9 +697,57 @@ export default function Note({ input }: ScreenProps<typeof screens.note>) {
         <TextField form={form} label="Title" name="title" />
       </Form>
       <Button onClick={() => void navigate(screens.start).catch(() => setRefused((count) => count + 1))}>Back to start</Button>
+      <Button onClick={() => void navigate(screens.note, { id: input.id }).catch(() => setRefused((count) => count + 1))}>Open this note again</Button>
       <p>Refused {refused}</p>
     </main>
   );
 }
 `,
 });
+
+/**
+ * The navigation fixture with surfaces (spec 34.1): the start screen as a
+ * panel (named to list after the note's panel, which needs input, so the
+ * chat's side panel must pass that one over) and the App's settings, the note as a panel and a deep link, and
+ * the list in the sidebar. The start screen also opens the note's panel.
+ */
+export const surfaceFiles = (): Record<string, string> => {
+  const files = navigationFiles();
+  return {
+    ...files,
+    "app.ts": (files["app.ts"] ?? "").replace(
+      "input: v.object({ id: v.string() }) },\n  ],\n",
+      `input: v.object({ id: v.string() }) },
+    { name: "prefs", path: "/prefs", source: "screens/prefs.tsx", input: v.object({ section: v.enum(["general", "billing"]).default("general") }) },
+  ],
+  surfaces: [
+    { name: "start", kind: "panel", screen: "start", title: "Start beside", input: v.object({}) },
+    { name: "peek", kind: "panel", screen: "note", title: "Peek", input: v.object({ id: v.string() }) },
+    { name: "all", kind: "sidebar", screen: "notes", title: "All notes", input: v.object({}) },
+    { name: "prefs", kind: "settings", screen: "prefs", title: "Preferences", input: v.object({ section: v.enum(["general", "billing"]).default("general") }) },
+    { name: "shared", kind: "deepLink", screen: "note", title: "Shared note", input: v.object({ id: v.string() }) },
+  ],
+`
+    ),
+    "screens/prefs.tsx": `import type { ScreenProps } from "@grasp-os/sdk/react";
+import type { screens } from "#grasp";
+
+export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
+  return (
+    <main className="p-6">
+      <h1>Preferences {input.section}</h1>
+    </main>
+  );
+}
+`,
+    "screens/home.tsx": (files["screens/home.tsx"] ?? "").replace(
+      "    </main>",
+      `      <Button onClick={() => void navigate(screens.note, { id: "n9" }, { surface: "peek" })}>Peek at note n9</Button>
+      <Button onClick={() => void navigate(screens.prefs, {}, { surface: "prefs" })}>Open preferences</Button>
+      <Button onClick={() => void navigate(screens.prefs, { section: "billing" }, { surface: "prefs" })}>Open billing preferences</Button>
+      <Button onClick={() => { setTimeout(() => { void navigate(screens.note, { id: "n77" }); }, 1500); }}>Open note n77 later</Button>
+      <Button onClick={() => { setTimeout(() => { void navigate(screens.notes); }, 1500); }}>Open the list later</Button>
+    </main>`
+    ),
+  };
+};

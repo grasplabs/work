@@ -1,5 +1,4 @@
-import type { App, AppContents } from "@grasp-os/shared/apps";
-import { Button } from "@grasp-os/ui/components/button";
+import type { App } from "@grasp-os/shared/apps";
 import {
   Empty,
   EmptyDescription,
@@ -7,107 +6,47 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
-import { Trans } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import {
-  ArrowLeftIcon,
-  BoxIcon,
-  CogIcon,
-  ChevronRightIcon,
-} from "lucide-react";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { BoxIcon, CogIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { ScreenFrame } from "../screens/screen-frame.tsx";
-import { useScreenNavigate } from "../screens/screen-navigate.ts";
+import { useAppPanel } from "../screens/app-panel-context.tsx";
 import { useCore } from "../use-core.ts";
 import { ChatBuilds } from "./builds.tsx";
 import type { ChatBuildsRead } from "./builds.tsx";
 
 // Beside the chat: a slot for what the chat is about. The versions up for
 // review of the Apps its agent builds (builds.tsx; the drafts themselves
-// stand in the studio, studio.tsx), and one of the person's Apps, its
-// screen running beside the conversation, and a way to its workflows on
-// the App's page.
+// stand in the studio, studio.tsx), and the person's Apps, each opened in
+// the shell's panel slot beside the page.
 
-/** The App open in the panel, and what it has to show. */
-interface Opened {
-  app: App;
-  contents: AppContents;
-}
-
-const OpenedApp = ({
-  opened: { app, contents },
-  onClose,
-}: {
-  opened: Opened;
-  onClose: () => void;
-}) => {
-  const [screen] = contents.screens;
-  const { name } = app;
-  // A screen in the panel opens the screen it navigates to in the main
-  // pane, in Grasp's frame (decision 4 on GRA-259).
-  const navigate = useScreenNavigate(app.id, "/domains/$engine/apps/$screen");
-  return (
-    <div className="flex flex-1 flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <Button onClick={onClose} size="sm" variant="ghost">
-          <ArrowLeftIcon data-icon="inline-start" />
-          <Trans>All domains</Trans>
-        </Button>
-        <Link
-          className="text-sm underline"
-          params={{ engine: app.id }}
-          to="/domains/$engine"
-        >
-          <Trans>Workflows and more</Trans>
-        </Link>
-      </div>
-      {screen === undefined || contents.version === null ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>{name} has no app to show.</Trans>
-        </p>
-      ) : (
-        <ScreenFrame
-          app={app.id}
-          embedded
-          // Always a new entry: the chat's own is never replaced.
-          onNavigate={async (target) => {
-            await navigate(target, false);
-          }}
-          screen={screen}
-        />
-      )}
-    </div>
+/** Why an App didn't open: it has nothing to show, or core didn't answer. */
+const OpeningNote = ({ opening }: { opening: Loaded<string> }) =>
+  opening.state === "ready" ? (
+    <p className="text-muted-foreground text-sm">{opening.data}</p>
+  ) : (
+    <NotLoaded page={opening} />
   );
-};
 
 /**
  * The side panel: the versions of what the chat's agent built that wait
  * for review (`builds`, which the chat page reads), and the person's
- * Apps, one of them open. Which one (`opened`, said back through
- * `onOpened`) is kept by the chat page, so a panel drawn anew where a
- * window crossing lg puts it opens the same App again. The Apps are read
- * each time the panel opens.
+ * Apps. Opening one opens its panel surface (spec 34.1) in the shell's
+ * panel slot (screens/app-panel.tsx), or its first screen when it declares
+ * none: there it stays while the page navigates. The Apps are read each
+ * time the panel opens.
  */
-export const SidePanel = ({
-  builds,
-  opened: openedId,
-  onOpened,
-}: {
-  builds: ChatBuildsRead;
-  opened: string | undefined;
-  onOpened: (app?: string) => void;
-}) => {
+export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
+  const { t } = useLingui();
   const [apps, setApps] = useState<Loaded<App[]>>();
   const core = useCore();
-  const [opened, setOpened] = useState<Loaded<Opened>>();
-  // Only the App opened last shows, whichever read ends last.
+  const panel = useAppPanel();
+  const [opening, setOpening] = useState<Loaded<string> | undefined>();
+  // Only the App opened last opens, whichever read ends last.
   const latest = useRef<App | null>(null);
-  /** The App open when this panel was drawn: it opens again. */
-  const reopen = useRef(openedId);
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
@@ -115,25 +54,8 @@ export const SidePanel = ({
         core,
         async (session) => await session.apps.list()
       );
-      if (!current) {
-        return;
-      }
-      setApps(found);
-      // One that is gone no longer opens, nor one opened meanwhile.
-      const app =
-        found.state === "ready"
-          ? found.data.find(({ id }) => id === reopen.current)
-          : undefined;
-      if (app === undefined || latest.current !== null) {
-        return;
-      }
-      latest.current = app;
-      const again = await loadFromCore(core, async (session) => ({
-        app,
-        contents: await session.apps.contents(app.id),
-      }));
-      if (current && latest.current === app) {
-        setOpened(again);
+      if (current) {
+        setApps(found);
       }
     };
     void read();
@@ -143,27 +65,44 @@ export const SidePanel = ({
   }, [core]);
   const open = async (app: App): Promise<void> => {
     latest.current = app;
-    onOpened(app.id);
-    const found = await loadFromCore(core, async (session) => ({
-      app,
-      contents: await session.apps.contents(app.id),
-    }));
-    if (latest.current === app) {
-      setOpened(found);
+    const found = await loadFromCore(core, async (session) => {
+      const [contents, surfaces] = await Promise.all([
+        session.apps.contents(app.id),
+        session.screens.surfaces(app.id),
+      ]);
+      return { contents, surfaces };
+    });
+    if (latest.current !== app) {
+      return;
+    }
+    if (found.state !== "ready") {
+      setOpening(found);
+      return;
+    }
+    const { contents, surfaces } = found.data;
+    // Opened from here with nothing: a panel surface that takes nothing.
+    const surface = surfaces.find(
+      ({ kind, opensEmpty }) => kind === "panel" && opensEmpty
+    );
+    const [first] = contents.screens;
+    if (surface !== undefined) {
+      setOpening(undefined);
+      panel?.open({
+        app: app.id,
+        screen: surface.screen,
+        title: surface.title,
+        route: surface.route,
+        input: "{}",
+        surface: surface.name,
+      });
+    } else if (first !== undefined && contents.version !== null) {
+      setOpening(undefined);
+      panel?.open({ app: app.id, screen: first, title: app.name });
+    } else {
+      const { name } = app;
+      setOpening({ state: "ready", data: t`${name} has no app to show.` });
     }
   };
-  if (opened?.state === "ready") {
-    return (
-      <OpenedApp
-        onClose={() => {
-          latest.current = null;
-          setOpened(undefined);
-          onOpened();
-        }}
-        opened={opened.data}
-      />
-    );
-  }
   if (apps === undefined) {
     return <LoadingLines />;
   }
@@ -184,7 +123,7 @@ export const SidePanel = ({
           />
           <Trans>Domains</Trans>
         </h2>
-        {opened === undefined ? null : <NotLoaded page={opened} />}
+        {opening === undefined ? null : <OpeningNote opening={opening} />}
         {apps.data.length === 0 ? (
           <Empty>
             <EmptyHeader>

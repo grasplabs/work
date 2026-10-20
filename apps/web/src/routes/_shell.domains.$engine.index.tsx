@@ -3,6 +3,7 @@ import type { DependencyApprovals } from "@grasp-os/shared/dependencies";
 import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
+import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import type { RunsPage, WorkflowSummary } from "@grasp-os/shared/workflows";
 import {
   Table,
@@ -20,10 +21,16 @@ import {
 } from "@grasp-os/ui/components/tabs";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Await, createFileRoute, Link } from "@tanstack/react-router";
+import {
+  Await,
+  createFileRoute,
+  Link,
+  useRouterState,
+} from "@tanstack/react-router";
 import { CogIcon, LayoutGridIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement } from "react";
+import { z } from "zod";
 
 import { IntegrationRow } from "../connections/integration-row.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
@@ -47,6 +54,11 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { ScreenFrame } from "../screens/screen-frame.tsx";
+import {
+  usePushNavigate,
+  useScreenOpening,
+} from "../screens/screen-navigate.ts";
 import { useCore } from "../use-core.ts";
 import { listRuns, listWorkflows } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
@@ -412,6 +424,63 @@ const PackagesTab = ({
   );
 };
 
+/** The App's settings surface (spec 34.1), if it declares one. */
+const settingsOf = (surfaces: Loaded<SurfaceSummary[]>) =>
+  surfaces.state === "ready"
+    ? surfaces.data.find(({ kind }) => kind === "settings")
+    : undefined;
+
+/** The Settings tab, there once core says the App declares its surface. */
+const SettingsTab = ({
+  surfaces,
+}: {
+  surfaces: Deferred<SurfaceSummary[]>;
+}) => (
+  <Await fallback={null} promise={surfaces}>
+    {(loaded) =>
+      settingsOf(loaded) === undefined ? null : (
+        <TabsTrigger value="settings">
+          <Trans>Settings</Trans>
+        </TabsTrigger>
+      )
+    }
+  </Await>
+);
+
+/**
+ * The App's settings screen: its settings surface, opened with nothing,
+ * as any of its screens, with the person's own access and no more. Its
+ * navigation opens routes in the main pane, as new entries.
+ */
+const SettingsScreen = ({
+  engine,
+  surface,
+}: {
+  engine: string;
+  surface: SurfaceSummary;
+}) => {
+  const navigate = usePushNavigate(engine);
+  // What a navigation to the settings asked for, as core resolved it; a
+  // visit to the tab by its address opens with nothing.
+  const opening = useScreenOpening(engine, surface.screen);
+  const input =
+    opening !== undefined && opening.surface === surface.name
+      ? opening.input
+      : "{}";
+  return (
+    <ScreenFrame
+      app={engine}
+      embedded
+      input={input}
+      key={input}
+      onNavigate={navigate}
+      route={surface.route}
+      screen={surface.screen}
+      surface={surface.name}
+    />
+  );
+};
+
 /** How many a tab holds, after its name. */
 const Count = ({ count }: { count: number }) => (
   <span className="text-muted-foreground tabular-nums">{count}</span>
@@ -427,7 +496,12 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     resources,
     storeChanges,
     packages,
+    surfaces,
   } = Route.useLoaderData();
+  const { tab } = Route.useSearch();
+  const entry = useRouterState({
+    select: ({ location }) => location.state.__TSR_key,
+  });
   const { identity } = Route.useRouteContext();
   const core = useCore();
   // The packages as they are each time their tab opens, not as they were
@@ -456,7 +530,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
       <Tabs
-        defaultValue="apps"
+        // The address's tab, again for each entry of the page's history:
+        // a navigation to the App's settings opens that tab, whichever the
+        // person had chosen on this page since.
+        defaultValue={tab ?? "apps"}
+        key={`${tab ?? "apps"}/${entry ?? ""}`}
         onValueChange={(value) => {
           if (value === "packages") {
             setPackagesRead(
@@ -489,6 +567,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             </TabsTrigger>
           )}
           <PackagesTab packages={packages} />
+          <SettingsTab surfaces={surfaces} />
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
@@ -534,6 +613,23 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             {packagesRead === undefined ? null : (
               <Packages packages={packagesRead} />
             )}
+          </div>
+        </TabsContent>
+        <TabsContent value="settings">
+          <div className="flex min-h-96 flex-col pt-4">
+            <Await fallback={<LoadingLines />} promise={surfaces}>
+              {(loaded) => {
+                const surface = settingsOf(loaded);
+                if (surface !== undefined) {
+                  return <SettingsScreen engine={app.id} surface={surface} />;
+                }
+                // A domain without settings has no Settings tab: asked for
+                // by its address, the page opens on its first tab instead.
+                return loaded.state === "ready" ? null : (
+                  <NotLoaded page={loaded} />
+                );
+              }}
+            </Await>
           </div>
         </TabsContent>
         <TabsContent value="members">
@@ -631,6 +727,15 @@ const EnginePageView = () => {
 export const Route = createFileRoute("/_shell/domains/$engine/")({
   pendingComponent: PageLoading,
   component: EnginePageView,
+  // Which tab opens first: a navigation to the App's settings opens its own.
+  // Any other `tab` (an old or hand-typed address) opens the page as without
+  // one, never its error.
+  validateSearch: z.object({
+    tab: z
+      .string()
+      .optional()
+      .transform((tab) => (tab === "settings" ? tab : undefined)),
+  }),
   loader: async ({ context: { core, identity }, params }) => ({
     // Not awaited: only their tabs wait for them. Core lists every
     // engine's workflows at once (there is no read of one engine's), so
@@ -646,6 +751,11 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
     members: loadFromCore(
       core,
       async (session) => await session.apps.members.list(params.engine)
+    ),
+    // Where the App's surfaces go: its Settings tab, if it declares one.
+    surfaces: loadFromCore(
+      core,
+      async (session) => await session.screens.surfaces(params.engine)
     ),
     // Only for who decides it: the organization's own admins.
     approval: decidesRequests(identity)
