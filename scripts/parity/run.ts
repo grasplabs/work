@@ -23,7 +23,13 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
@@ -372,6 +378,23 @@ const takeAll = async (
 const main = async (): Promise<void> => {
   const commit = checkPrototype();
   const out = path.resolve(root, args.out);
+  // Only an earlier report is ever deleted: never the checkout or what
+  // holds it, nor a directory of anything else.
+  const fromOut = path.relative(out, root);
+  if (fromOut === "" || !fromOut.startsWith("..")) {
+    throw new Error(
+      `--out ${out} is the checkout or holds it: pick a directory of its own.`
+    );
+  }
+  if (
+    existsSync(out) &&
+    readdirSync(out).length > 0 &&
+    !existsSync(path.join(out, "index.html"))
+  ) {
+    throw new Error(
+      `--out ${out} holds files that aren't a parity report: refusing to delete them.`
+    );
+  }
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   try {
