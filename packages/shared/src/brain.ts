@@ -6,6 +6,12 @@
  * brain reads are here, as the prototype named them.
  */
 
+import { z } from "zod";
+
+import { defineErrorFamily } from "./errors.ts";
+import type { CollectionId, DocumentId } from "./ids.ts";
+import type { DocumentType } from "./knowledge.ts";
+
 /** The standard business processes a workflow belongs to. */
 export type ProcessId = "o2c" | "i2r" | "p2p" | "r2c" | "r2r" | "h2r";
 
@@ -310,4 +316,65 @@ export interface Workspace {
  */
 export interface BrainApi {
   read: () => Promise<Workspace>;
+  /**
+   * What changed in the brain since a moment (`brain.changes`), newest
+   * first, a page at a time, as the person may read it.
+   */
+  changes: (options: BrainChangesOptions) => Promise<BrainChangePage>;
+}
+
+/** Why a brain call was refused. */
+export const brainErrors = defineErrorFamily({
+  "brain.invalid": "That isn't a valid moment, page or page size.",
+});
+
+/** Most changes one page holds. */
+export const brainChangesMaxLimit = 100;
+
+/** What a call for the brain's changes asks for. */
+export const brainChangesOptionsSchema = z.strictObject({
+  /** Changes after this moment (ISO 8601). */
+  since: z.iso.datetime({ offset: true }),
+  /** Where the page before ended (`BrainChangePage.next`); none for the first. */
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.int().min(1).max(brainChangesMaxLimit).default(50),
+});
+export type BrainChangesOptions = z.input<typeof brainChangesOptionsSchema>;
+
+/**
+ * One change in the brain: what core records today. A union on `kind`, so
+ * goals, questions and workflow suggestions join it once core keeps them.
+ */
+export type BrainChange =
+  | {
+      /** A Knowledge document added or changed: what a listing shows of it, never its text. */
+      kind: "document";
+      /** ISO 8601: when it was last changed. */
+      at: string;
+      /** Added after the moment asked about, or only changed since. */
+      change: "added" | "changed";
+      document: {
+        id: DocumentId;
+        collectionId: CollectionId;
+        path: string;
+        title: string;
+        type: DocumentType;
+      };
+    }
+  | {
+      /**
+       * A source the onboarding gave the brain, as `brain.read`'s sources
+       * name it (the kickoff, the staff list): for admins, who read them.
+       */
+      kind: "source";
+      /** ISO 8601: when it came in, or was last saved. */
+      at: string;
+      source: { id: string; title: string };
+    };
+
+/** A page of the brain's changes, newest first. */
+export interface BrainChangePage {
+  changes: BrainChange[];
+  /** Where the next page starts; null when this is the last. */
+  next: string | null;
 }
