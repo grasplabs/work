@@ -62,7 +62,8 @@ function InlineCitationCard(props: React.ComponentProps<typeof Popover>) {
 /** A source is a URL or, for a document without one, its title. */
 const sourceLabel = (source: string): string => {
   try {
-    return new URL(source).hostname;
+    // A URL without a host (`doi:10.1000/1234`) is named whole.
+    return new URL(source).hostname || source;
   } catch {
     return source;
   }
@@ -236,7 +237,7 @@ function InlineCitationCarouselPrev({
       type="button"
       {...props}
     >
-      <ArrowLeftIcon className="text-muted-foreground size-4" />
+      <ArrowLeftIcon className="text-muted-foreground size-4 rtl:rotate-180" />
     </button>
   );
 }
@@ -261,7 +262,7 @@ function InlineCitationCarouselNext({
       type="button"
       {...props}
     >
-      <ArrowRightIcon className="text-muted-foreground size-4" />
+      <ArrowRightIcon className="text-muted-foreground size-4 rtl:rotate-180" />
     </button>
   );
 }

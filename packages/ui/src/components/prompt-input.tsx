@@ -68,6 +68,22 @@ const pastedFiles = (event: React.ClipboardEvent): File[] =>
     return file === null ? [] : [file];
   });
 
+/**
+ * Sends `form` as its send button would: not while the button is off, nor
+ * while an answer is coming and it stops that answer instead; the button
+ * as the submitter, as a click on it would be.
+ */
+const send = (form: HTMLFormElement | null): void => {
+  const submit =
+    form?.querySelector<HTMLButtonElement>(
+      '[data-slot="prompt-input-submit"]'
+    ) ?? form?.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submit?.disabled === true || submit?.type === "button") {
+    return;
+  }
+  form?.requestSubmit(submit ?? undefined);
+};
+
 function PromptInputTextarea({
   onKeyDown,
   onPaste,
@@ -93,16 +109,7 @@ function PromptInputTextarea({
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault();
-      // Only what the send button would do: nothing while it is off, or
-      // while an answer is coming and it stops that answer instead.
-      const { form } = event.currentTarget;
-      const submit =
-        form?.querySelector<HTMLButtonElement>(
-          '[data-slot="prompt-input-submit"]'
-        ) ?? form?.querySelector<HTMLButtonElement>('button[type="submit"]');
-      if (submit?.disabled !== true && submit?.type !== "button") {
-        form?.requestSubmit();
-      }
+      send(event.currentTarget.form);
       return;
     }
     const last = attachments?.files.at(-1);
@@ -248,10 +255,16 @@ function PromptInputActionMenu(
 
 function PromptInputActionMenuTrigger({
   children,
+  "aria-label": ariaLabel,
   ...props
 }: PromptInputButtonProps) {
+  // The default trigger is a lone icon: it gets a name unless given one.
+  const label =
+    ariaLabel ?? (children === undefined ? "More actions" : undefined);
   return (
-    <DropdownMenuTrigger render={<PromptInputButton {...props} />}>
+    <DropdownMenuTrigger
+      render={<PromptInputButton aria-label={label} {...props} />}
+    >
       {children ?? <PlusIcon className="size-4" />}
     </DropdownMenuTrigger>
   );
@@ -302,6 +315,7 @@ function PromptInputSubmit({
 }) {
   const answering = status === "submitted" || status === "streaming";
   const stops = answering && onStop !== undefined;
+  // While an answer is coming and nothing can stop it, nothing is sent.
   return (
     <InputGroupButton
       data-slot="prompt-input-submit"
@@ -318,6 +332,7 @@ function PromptInputSubmit({
       type={stops ? "button" : "submit"}
       variant={variant}
       {...props}
+      disabled={(answering && !stops) || props.disabled}
     >
       {children ?? statusIcons[status]}
     </InputGroupButton>
