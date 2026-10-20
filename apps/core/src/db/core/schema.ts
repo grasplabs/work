@@ -21,6 +21,7 @@ import type {
  */
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -1662,15 +1663,19 @@ export const workflowRunControls = sqliteTable(
  * for (a decision's answer), or before it (a held side effect's
  * decision, which connect keeps), and deleted once the engine took the
  * event. `id` is the delivery's key, which the engine takes once, and
- * `type` the event type the run's wait waits for.
+ * `type` the event type the run's wait waits for. The run is an App's
+ * (`run_id`) or an independent workflow's (`resource_run_id`), exactly
+ * one of them: the engine knows either by its ID.
  */
 export const workflowRunWakes = sqliteTable(
   "workflow_run_wakes",
   {
     id: text().primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id),
+    runId: text("run_id").references(() => workflowRuns.id),
+    resourceRunId: text("resource_run_id").references(
+      // oxlint-disable-next-line no-use-before-define -- declared with the independent runs, below
+      () => workflowResourceRuns.id
+    ),
     type: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
     /**
@@ -1689,6 +1694,12 @@ export const workflowRunWakes = sqliteTable(
     resendUntil: timestamp("resend_until"),
   },
   (table) => [
+    check(
+      "workflow_run_wakes_one_run",
+      // Unqualified: a check naming its table by name would keep the name
+      // of the table its migration made it in.
+      sql`(run_id IS NULL) <> (resource_run_id IS NULL)`
+    ),
     // The repair (src/workflows/wakes.ts): next due first.
     index("workflow_run_wakes_due_idx").on(table.retryAt, table.id),
     // The repair's drop of wakes sent again for as long as they may be.

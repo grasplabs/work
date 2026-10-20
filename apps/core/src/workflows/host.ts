@@ -738,7 +738,7 @@ const stepConfig = ({
  * by its message too, which survives every way to core.
  */
 const timedOut = /^(?:WorkflowTimeoutError: )?Execution timed out\b/u;
-const isTimeout = (error: unknown): boolean =>
+export const isTimeout = (error: unknown): boolean =>
   error instanceof Error &&
   (error.name === "WorkflowTimeoutError" || timedOut.test(error.message));
 

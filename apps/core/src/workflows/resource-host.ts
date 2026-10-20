@@ -48,6 +48,7 @@ import {
   fromIsolate,
   heldCheckRetries,
   isCpuLimitKill,
+  isTimeout,
   loadWaitAfter,
   loadWaitStart,
   markerOf,
@@ -68,6 +69,7 @@ import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
+import { heldWakeType } from "./wakes.ts";
 
 // The host a run of an independent workflow's sealed build runs against
 // (resource-runs.ts): the calls the generated code's SDK makes
@@ -1572,16 +1574,23 @@ export class ResourceRunHost
    * Waits, in round `round`, while the call of step `stepName` (a call
    * task's, whose key its call carries) is held for the run's person:
    * each check a step of its own (retried, and replayed without asking
-   * connect again), then a durable sleep, a first wait (`waitMsOf`)
-   * doubling up to `maxWaits` of them, in steps named after the round.
-   * What connect says
-   * decides; a confirmation, a decline or a drop ends the wait, and the
-   * step's next run gets the answer. Each check and sleep is a step of
-   * the run's, so the run's step limit bounds the wait.
+   * connect again), then a durable wait that the person's decision ends
+   * (`heldWakeType`, wakes.ts), or else the next check: a first wait
+   * (`waitMsOf`) doubling up to `maxWaits` of them, in steps named after
+   * the round, the backstop for holds connect ends by itself and for a
+   * wake that was lost. A wake only makes the step check again: what
+   * connect says decides; a confirmation, a decline or a drop ends the
+   * wait, and the step's next run gets the answer. Each check and wait is
+   * a step of the run's, so the run's step limit bounds the wait.
+   *
+   * The waits replaced plain sleeps of the same names, with no branch for
+   * a run suspended in one: Grasp has no release yet, so no such run
+   * outlives a deploy.
    */
   async #waitWhileHeld(stepName: string, round: number): Promise<void> {
     const first = waitMsOf(this.#env);
     const prefix = `${stepName}:held:${round}`;
+    const wakeType = await heldWakeType(stepName);
     // The key `#made` gives the task's call, in every attempt and round.
     const idempotencyKey = stepIdempotencyKey(this.#run.runId, stepName);
     for (let checks = 0; ; checks += 1) {
@@ -1604,11 +1613,19 @@ export class ResourceRunHost
       if (held !== true) {
         return;
       }
-      // oxlint-disable-next-line no-await-in-loop -- one wait at a time
-      await this.#step.sleep(
-        `${prefix}:${checks}`,
-        first * Math.min(2 ** checks, maxWaits)
-      );
+      // Until its person decides, which wakes the step (wakes.ts), or the
+      // next check is due.
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+        await this.#step.waitForEvent(`${prefix}:${checks}`, {
+          type: wakeType,
+          timeout: first * Math.min(2 ** checks, maxWaits),
+        });
+      } catch (error) {
+        if (!isTimeout(error)) {
+          throw error;
+        }
+      }
     }
   }
 
