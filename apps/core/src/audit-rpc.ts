@@ -16,14 +16,24 @@ import type {
   ChainVerification,
   ParsedAuditFilter,
 } from "@grasp-os/shared/audit-log";
+import { unknownOutcomeListLimit } from "@grasp-os/shared/connect";
+import type {
+  UnknownOutcomeCursor,
+  UnknownOutcomeListing,
+} from "@grasp-os/shared/connect";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
-import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
+import {
+  isMemberAdmin,
+  requireAdmin,
+  roleErrors,
+} from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import { actorIdsOf, auditLog } from "./audit-log.ts";
 import type { SearchRange } from "./audit-log.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
+import { personOf } from "./connections.ts";
 import { errorResponse } from "./errors.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -36,12 +46,73 @@ import type { SessionCheck } from "./session-check.ts";
 // nothing. Grasp staff read it only through the admin role their staff
 // access gives them, and are recorded as staff; they can't change retention
 // or archive anything (that's deployment config and the log's own alarm).
+// A JSON export ends with every person's calls of unknown outcome as it
+// ends (`openObligations`), as the admin listing shows them and recorded
+// as that read is; staff, whom connect refuses them, get none.
 
 /** Most records one page of a search holds. */
 const searchPageSize = 100;
 
 /** Records an export reads from the log at a time. */
 const exportPageSize = 500;
+
+/**
+ * Pages of open obligations a JSON export reads (`openObligations`), each
+ * of `unknownOutcomeListLimit`: past them it says it isn't complete.
+ */
+const obligationPagesPerExport = 5;
+
+/** An open obligation as an export holds it: a listing, without its paging. */
+type ExportedObligation = Omit<UnknownOutcomeListing, "cursor" | "id">;
+
+/** A JSON export's `openObligations`, as `AuditApi.export` describes it. */
+interface OpenObligations {
+  listedAt: string;
+  complete: boolean;
+  obligations: ExportedObligation[];
+}
+
+/**
+ * Every person's calls of unknown outcome now, as connect lists them for
+ * the organization's admins (`listAllUnknownOutcomes`), for `person`'s
+ * export: `null` for Grasp staff, whom connect refuses them, as the admin
+ * listing does. The read is recorded, as the listing's is, before the
+ * export holds it.
+ */
+const openObligations = async (
+  env: Env,
+  person: Identity
+): Promise<OpenObligations | null> => {
+  if (!isMemberAdmin(person)) {
+    return null;
+  }
+  const listedAt = new Date().toISOString();
+  const connectPerson = await personOf(env, person);
+  const obligations: ExportedObligation[] = [];
+  let before: UnknownOutcomeCursor | undefined;
+  let complete = false;
+  for (let page = 0; page < obligationPagesPerExport; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const listed = await env.CONNECT.listAllUnknownOutcomes(
+      connectPerson,
+      before
+    );
+    for (const { cursor: _cursor, id: _id, ...obligation } of listed) {
+      obligations.push(obligation);
+    }
+    before = listed.at(-1)?.cursor;
+    if (listed.length < unknownOutcomeListLimit || before === undefined) {
+      complete = true;
+      break;
+    }
+  }
+  await appendAuditEvent(env, {
+    actor: actorOf(person),
+    action: "connection.call.unknown_listed",
+    detail: { count: obligations.length, via: "audit.exported" },
+  });
+  return { listedAt, complete, obligations };
+};
 
 const parseFilter = (filter: unknown): ParsedAuditFilter =>
   auditErrors.parse("audit.invalid", auditFilterSchema, filter);
@@ -153,7 +224,8 @@ const exportStream = (
   env: Env,
   filter: ParsedAuditFilter,
   format: AuditExportFormat,
-  recheck: () => Promise<void>
+  recheck: () => Promise<void>,
+  obligations: () => Promise<OpenObligations | null>
 ): ReadableStream<Uint8Array> => {
   const log = auditLog(env);
   const encoder = new TextEncoder();
@@ -183,7 +255,10 @@ const exportStream = (
       unverified,
     };
     const lastFullVerification = await log.lastFullVerification();
-    return `\n],"recordCheck":${JSON.stringify(recordCheck)},"lastFullVerification":${JSON.stringify(lastFullVerification)}}\n`;
+    // Read last, after the session and role were checked for the last
+    // page: what is open as the export ends.
+    const open = await obligations();
+    return `\n],"recordCheck":${JSON.stringify(recordCheck)},"lastFullVerification":${JSON.stringify(lastFullVerification)},"openObligations":${JSON.stringify(open)}}\n`;
   };
 
   /** The next page of records as text, and whether it was the last. */
@@ -285,7 +360,10 @@ const startExport = async (
     format: parsedFormat,
   });
   return {
-    stream: exportStream(env, parsed, parsedFormat, recheck),
+    stream: exportStream(env, parsed, parsedFormat, recheck, async () => {
+      await recheck();
+      return await openObligations(env, person);
+    }),
     format: parsedFormat,
   };
 };

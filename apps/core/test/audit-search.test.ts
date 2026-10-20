@@ -478,6 +478,12 @@ describe("audit log export", () => {
         action: "audit.exported",
         detail: { "filter.targetId": targetId, format: "json" },
       },
+      // The open obligations it ends with, read as the admin listing's are.
+      {
+        actor: { type: "person", userId: admin.userId },
+        action: "connection.call.unknown_listed",
+        detail: { via: "audit.exported" },
+      },
     ]);
 
     const statusOf = async (...args: Parameters<typeof download>) => {

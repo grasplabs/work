@@ -1,5 +1,8 @@
+import { signCapability } from "@grasp-os/shared/capability";
 import type { PendingKey } from "@grasp-os/shared/connect";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { workContextSchema } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -24,7 +27,9 @@ import {
   openRpc,
   outcome as codeOf,
   routed,
+  signedIn,
   signedInWithRole,
+  staffPerson,
 } from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 import {
@@ -116,6 +121,51 @@ const sentFrom = async (mailbox: string): Promise<number> => {
   return sent.filter((message) => message.mailbox === mailbox).length;
 };
 
+/**
+ * What an auditor names each send from `mailbox` by: the SHA-256 of the tag
+ * Graph keeps on the message, its effect key.
+ */
+const receiptsFrom = async (mailbox: string): Promise<string[]> => {
+  const response = await providers().fetch(graphSentUrl);
+  const sent = z
+    .array(z.object({ mailbox: z.string(), effectKey: z.string().nullable() }))
+    .parse(await response.json());
+  return await Promise.all(
+    sent
+      .filter((message) => message.mailbox === mailbox)
+      .map(async ({ effectKey }) => await sha256Hex(effectKey ?? ""))
+  );
+};
+
+/** The open obligations a JSON export of the log holds, for `api`. */
+const exportedObligations = async (api: Api["api"]) => {
+  const stream = await api.audit.export(
+    { from: new Date(Date.now() - 60_000).toISOString() },
+    "json"
+  );
+  const exported = z
+    .object({
+      openObligations: z
+        .object({
+          complete: z.boolean(),
+          obligations: z.array(z.record(z.string(), z.unknown())),
+        })
+        .nullable(),
+    })
+    .parse(JSON.parse(await new Response(stream).text()));
+  return exported.openObligations;
+};
+
+/**
+ * The open obligations a JSON export holds for Grasp staff, signed in from
+ * Grasp's tenant, who read the log as admins.
+ */
+const staffExport = async () => {
+  const session = await signedIn(idp, "grasp-staff", staffPerson());
+  const { core } = await openRpc(session);
+  return await exportedObligations(core.authenticate());
+};
+
 /** How many drafts Graph made in `mailbox`. */
 const draftsIn = async (mailbox: string): Promise<number> => {
   const response = await providers().fetch(
@@ -205,6 +255,10 @@ const resolutions = async (connectionId: string) => {
       actor: actor.type,
       choice: detail.choice,
       reason: detail.reason,
+      // Only where the resolution read the call it names.
+      ...(detail.effectKeyHash === undefined
+        ? {}
+        : { effectKeyHash: detail.effectKeyHash }),
     }));
 };
 
@@ -215,6 +269,20 @@ const callsOn = async (connectionId: string): Promise<number> => {
     ({ action, target }) =>
       action === "connection.call" && target?.id === connectionId
   ).length;
+};
+
+/** How each call the log records on `connectionId` ended, and its receipt. */
+const callReceipts = async (connectionId: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, target }) =>
+        action === "connection.call" && target?.id === connectionId
+    )
+    .map(({ detail }) => ({
+      outcome: detail.outcome,
+      effectKeyHash: detail.effectKeyHash,
+    }));
 };
 
 /** How many calls of unknown outcome are listed for `person`. */
@@ -310,12 +378,22 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       { timeout: 10_000, interval: 100 }
     );
     const before = await sentFrom(mailbox);
+    // The receipt Graph's message carries, as an auditor reads it.
+    const [receipt] = await receiptsFrom(mailbox);
+    const openBefore = await exportedObligations(admin.api);
     await admin.api.unknownOutcomes.resolve(
       unknown.key,
       "happened",
       unknown.claim
     );
     await finished(run.id);
+    const openAfter = await exportedObligations(admin.api);
+    const ofThisCall = (
+      open: Awaited<ReturnType<typeof exportedObligations>>
+    ) =>
+      open?.obligations.filter(
+        ({ effectKeyHash }) => effectKeyHash === receipt
+      ) ?? [];
     expect({
       unknown,
       before,
@@ -323,6 +401,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       sent: await sentFrom(mailbox),
       listed: await admin.api.unknownOutcomes.list(),
       resolutions: await resolutions(connectionId),
+      calls: await callReceipts(connectionId),
+      exportedBefore: ofThisCall(openBefore),
+      exportedAfter: ofThisCall(openAfter),
       audited: await runEvents(run.id, "workflow.run.completed"),
     }).toMatchObject({
       unknown: {
@@ -340,14 +421,33 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       // The one mail, and no other.
       sent: 1,
       listed: [],
+      // The call, the obligation and its resolution, all by the receipt
+      // the provider's record carries: tied together without the run.
       resolutions: [
         {
           action: "connection.call.resolved",
           actor: "person",
           choice: "happened",
           reason: undefined,
+          effectKeyHash: receipt,
         },
       ],
+      calls: [
+        { outcome: "unknown", effectKeyHash: receipt },
+        // The step again, refused as resolved: nothing sent.
+        { outcome: "refused", effectKeyHash: receipt },
+      ],
+      exportedBefore: [
+        {
+          effectKeyHash: receipt,
+          onBehalfOf: admin.userId,
+          subject: { type: "app", appId: app },
+          connectionId,
+          action: "mail.send",
+          resource: null,
+        },
+      ],
+      exportedAfter: [],
       audited: [
         "workflow.run.completed",
         "workflow.run.started",
@@ -356,6 +456,20 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         "workflow.step.completed send",
       ],
     });
+    // Never what was sent, nor its key, in what leaves the platform.
+    expect(
+      Object.keys(ofThisCall(openBefore)[0] ?? {}).toSorted()
+    ).toStrictEqual([
+      "action",
+      "connectionId",
+      "connectionName",
+      "effectKeyHash",
+      "onBehalfOf",
+      "resource",
+      "sentAt",
+      "subject",
+      "title",
+    ]);
   });
 
   it("sends it once more, under the same key, once its person says it didn't happen", async () => {
@@ -516,6 +630,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     const other = await personApi("admin");
     const member = await personApi("builder");
     const listed = await other.api.unknownOutcomes.listAll();
+    const [receipt] = await receiptsFrom(mailbox);
     const theirs = listed.filter(
       ({ onBehalfOf }) => onBehalfOf === admin.userId
     );
@@ -545,6 +660,8 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         )
       ),
       memberAll: await codeOf(member.api.unknownOutcomes.listAll()),
+      // Grasp staff export the log as admins, without anyone's obligations.
+      staffExport: await staffExport(),
       memberOwn: await member.api.unknownOutcomes.list(),
       stillListed: await listedFor(admin),
       live: await liveStatus(run.id),
@@ -558,6 +675,8 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     }).toMatchObject({
       theirs: [
         {
+          // The receipt the log and Graph's message name the call by.
+          effectKeyHash: receipt,
           onBehalfOf: admin.userId,
           subject: { type: "app", appId: app },
           connectionId,
@@ -573,6 +692,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
           "connectionId",
           "connectionName",
           "cursor",
+          "effectKeyHash",
           "id",
           "onBehalfOf",
           "resource",
@@ -584,6 +704,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       reads: [{ actor: "person", count: listed.length }],
       resolved: "connect.outcome_not_found",
       memberAll: "role.forbidden",
+      staffExport: null,
       memberOwn: [],
       stillListed: 1,
       live: "waiting",
@@ -634,19 +755,76 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     }
   });
 
-  it("stays an obligation of its person when the run is cancelled: only the run's wait goes, and nothing says it was undone", async () => {
+  it("stays an obligation of its person when the run is cancelled, and past the run's retention keeps its receipt, its events and its refusal to send again", async () => {
     const admin = await personApi("admin");
-    const { connectionId, run, unknown } = await waitingRun(admin);
+    const { mailbox, connectionId, app, run, unknown } =
+      await waitingRun(admin);
     await admin.api.workflows.cancel(run.id);
     await finished(run.id);
     const listed = await admin.api.unknownOutcomes.list();
+    const [receipt] = await receiptsFrom(mailbox);
     // Past the run's retention its input goes; the obligation stays.
     await runQuarterHourCron({}, new Date(Date.now() + 31 * day));
+    const row = await connectDb()
+      .prepare(
+        "SELECT state, input_hash AS inputHash, origin FROM idempotent_calls WHERE idempotency_key = ?"
+      )
+      .bind(unknown.key.idempotencyKey)
+      .first<{ state: string; inputHash: string; origin: string }>();
+    const origin = z
+      .object({
+        mode: z.enum(["interactive", "workflow"]),
+        appVersion: z.int().positive(),
+        permissionId: z.string(),
+        context: workContextSchema,
+      })
+      .parse(JSON.parse(row?.origin ?? "null"));
+    // The same call made again, as the run's step made it, now its details
+    // are gone: connect still knows it, and sends nothing.
+    const capability = await signCapability(
+      env.CAPABILITY_SIGNING_KEY,
+      {
+        subject: { type: "app", appId: appIdSchema.parse(app) },
+        onBehalfOf: admin.userId,
+        mode: origin.mode,
+        appVersion: origin.appVersion,
+      },
+      {
+        connectionId,
+        action: "mail.send",
+        idempotencyKey: unknown.key.idempotencyKey,
+        origin: {
+          permissionId: origin.permissionId,
+          context: origin.context,
+        },
+        context: origin.context,
+      }
+    );
+    const repeated = await codeOf(
+      env.CONNECT.call({
+        capability,
+        connectionId,
+        action: "mail.send",
+        idempotencyKey: unknown.key.idempotencyKey,
+        input: {
+          mailbox,
+          subject: invoiceMail.subject,
+          body: "Attached.",
+          to: [invoiceMail.to],
+        },
+      })
+    );
     const events = await allEvents();
     expect({
       run: await statusOf(admin, run.id),
       listed,
       afterRetention: await admin.api.unknownOutcomes.list(),
+      receiptKept: row?.state,
+      repeated,
+      sent: await sentFrom(mailbox),
+      // The call's event, and the repeat's, by the receipt Graph's message
+      // carries: the evidence outlives the run's.
+      calls: await callReceipts(connectionId),
       undone: events.some(
         ({ action, target }) =>
           (target?.id === connectionId || target?.id === run.id) &&
@@ -657,6 +835,13 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       run: "cancelled",
       listed: [unknown],
       afterRetention: [{ key: unknown.key, input: null }],
+      receiptKept: "unknown",
+      repeated: "connect.outcome_unknown",
+      sent: 1,
+      calls: [
+        { outcome: "unknown", effectKeyHash: receipt },
+        { outcome: "unknown", effectKeyHash: receipt },
+      ],
       undone: false,
     });
   });

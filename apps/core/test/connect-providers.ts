@@ -136,6 +136,8 @@ export default {
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
           headers: message.internetMessageHeaders ?? [],
+          // The tag a native connector puts on what it sends: its effect key.
+          effectKey: (message.singleValueExtendedProperties ?? [])[0]?.value ?? null,
         });
         return losesAnswer(mailbox)
           ? new Response("Bad Gateway", { status: 502 })

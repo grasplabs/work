@@ -28,7 +28,9 @@ import {
 // whose answer was lost, so an admin can follow up with each person. Read
 // only: only the person a call acted for says what became of it, on their
 // dashboard, and only they see what was sent (core's unknown-outcomes.ts
-// lists these without it). Core checks the role on every read.
+// lists these without it). Each shows its receipt, the effect key's hash
+// the audit log's events of the call and of its resolution carry, so the
+// trail of each is found in an export. Core checks the role on every read.
 
 interface Outcomes {
   listed: UnknownOutcomeListing[];
@@ -60,6 +62,9 @@ const OutcomeRows = ({ outcomes }: { outcomes: Outcomes }) => {
             </TableHead>
             <TableHead>
               <Trans>Sent</Trans>
+            </TableHead>
+            <TableHead>
+              <Trans>Receipt</Trans>
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -93,6 +98,11 @@ const OutcomeRows = ({ outcomes }: { outcomes: Outcomes }) => {
                 <time dateTime={outcome.sentAt}>
                   {formatDateTime(outcome.sentAt)}
                 </time>
+              </TableCell>
+              <TableCell>
+                <code className="font-mono text-xs break-all">
+                  {outcome.effectKeyHash}
+                </code>
               </TableCell>
             </TableRow>
           ))}

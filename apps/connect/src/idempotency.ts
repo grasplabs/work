@@ -124,6 +124,27 @@ import { idempotentCalls } from "./db/schema.ts";
 //   call's whole scope, so it differs between any two calls and names
 //   nobody (`effectKeyOf`).
 
+// Receipts in the audit log (GRA-586): every event of a side effect, and
+// of its resolution, names its receipt (`effectKeyHashOf`), with how it
+// ended, so an auditor ties a provider's record to Grasp's, and an open
+// obligation to what closed it, without the run, whose details retention
+// removes (core's workflows/retention.ts drops connect's held actions and
+// kept input, never a key, its input's hash or its state). Threat model,
+// and how each is closed:
+// - The log leaves the platform and gives away what was sent: it holds no
+//   input, no input's hash and no key; the effect key's hash is of the
+//   call's scope and key alone, every other part of which the same event
+//   names, so it confirms a guessed key no more than the key's own hash.
+// - The log hands a reader the value a lookup matches on: it holds the
+//   hash of the effect key, never the key; an auditor hashes the tag on
+//   the provider's record.
+// - Someone who may not see obligations reads them: the audit export and
+//   the admin listing are an admin's only, staff refused, and each read
+//   of everyone's is recorded; neither shows input, key, claim or origin.
+// - Retention erases the evidence: a run's sweep leaves its receipts, its
+//   unknown keys and their events, and a call repeated after it is still
+//   refused, never sent again.
+
 // Resolution by a person (spec 14.3): a call of unknown outcome is an
 // open obligation of the person it acted for, who may say what became of
 // it once they looked (outcomes.ts). Threat model, and how each is closed:
@@ -383,19 +404,24 @@ export const recoveryWaitMs = (row: Row, now: number): number | null => {
   return Math.max(0, lastClaimOf(row) + claimTimeoutMs - now);
 };
 
-/**
- * The effect key of the call `scope` names (`effectKeyMetaKey`): a SHA-256
- * over its whole scope, so it is the same for every attempt of one call,
- * differs between any two, and gives away neither the caller's key nor
- * who called.
- */
-export const effectKeyOf = async (scope: IdempotencyScope): Promise<string> => {
-  const { subjectType, subjectId } = subjectColumns(scope.subject);
-  return await sha256Hex(
+/** What an effect key hashes: a call's whole scope, as its row keeps it. */
+type EffectScope = Pick<
+  Row,
+  | "subjectType"
+  | "subjectId"
+  | "onBehalfOf"
+  | "connectionId"
+  | "action"
+  | "resource"
+  | "idempotencyKey"
+>;
+
+const effectKeyFrom = async (scope: EffectScope): Promise<string> =>
+  await sha256Hex(
     canonicalJson([
       "grasp-os/effect",
-      subjectType,
-      subjectId,
+      scope.subjectType,
+      scope.subjectId,
       scope.onBehalfOf,
       scope.connectionId,
       scope.action,
@@ -403,7 +429,51 @@ export const effectKeyOf = async (scope: IdempotencyScope): Promise<string> => {
       scope.idempotencyKey,
     ])
   );
-};
+
+/**
+ * The effect key of the call `scope` names (`effectKeyMetaKey`): a SHA-256
+ * over its whole scope, so it is the same for every attempt of one call,
+ * differs between any two, and gives away neither the caller's key nor
+ * who called.
+ */
+export const effectKeyOf = async (scope: IdempotencyScope): Promise<string> =>
+  await effectKeyFrom({ ...scope, ...subjectColumns(scope.subject) });
+
+/**
+ * What the audit log names a side effect's receipt by (`effectKeyHash`): a
+ * SHA-256 of its effect key, never the key itself. An auditor hashes the
+ * tag a provider keeps on what the call made (a native connector's effect
+ * key) to find the events of it; the log never holds the value a lookup
+ * (`find`) matches on.
+ */
+export const effectKeyHashOf = async (
+  scope: IdempotencyScope
+): Promise<string> => await sha256Hex(await effectKeyOf(scope));
+
+/** {@link effectKeyHashOf} of the call the row `row` keeps. */
+export const effectKeyHashOfRow = async (row: EffectScope): Promise<string> =>
+  await sha256Hex(await effectKeyFrom(row));
+
+/**
+ * Where a side effect's result is kept under its idempotency key, for a
+ * call that has one. Work that may only read (`readOnly`) has no side
+ * effects, so it has no stored results of one either: none is replayed to
+ * it, whatever key it names.
+ */
+export const scopeOf = (
+  { authority, resource, idempotencyKey, readOnly }: CapabilityClaims,
+  call: { connectionId: string; action: string }
+): IdempotencyScope | undefined =>
+  idempotencyKey === null || readOnly
+    ? undefined
+    : {
+        subject: authority.subject,
+        onBehalfOf: authority.onBehalfOf,
+        connectionId: call.connectionId,
+        action: call.action,
+        idempotencyKey,
+        resource,
+      };
 
 /** The output as kept for repeats: itself, or nothing when too large. */
 const retainable = (output: string): string | null =>

@@ -25,6 +25,7 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { auditOutbox } from "./db/schema.ts";
+import { effectKeyHashOf, scopeOf } from "./idempotency.ts";
 
 /**
  * Records events: stored in the outbox, in one batch with `alongside` (the
@@ -211,6 +212,23 @@ const callerOf = (
 };
 
 /**
+ * The receipt of a side effect, for a call that has one (idempotency.ts,
+ * "Receipts in the audit log"): the same for every attempt of the call and
+ * for its resolution.
+ */
+const receiptOf = async ({
+  call,
+  claims,
+  sideEffect,
+}: CallRecord): Promise<string | undefined> => {
+  const scope =
+    sideEffect === true && claims !== undefined && call !== undefined
+      ? scopeOf(claims, call)
+      : undefined;
+  return scope === undefined ? undefined : await effectKeyHashOf(scope);
+};
+
+/**
  * Records one call: who made it (the platform, while its capability isn't
  * verified), on which connection, what it did and read, and how it ended.
  * Identifiers only, never the input or the output. A call that read more
@@ -248,6 +266,7 @@ export const auditCall = async (
       ? undefined
       : await sha256Hex(call.idempotencyKey)
   );
+  add("effectKeyHash", await receiptOf(record));
   for (const [key, value] of Object.entries(callerOf(claims))) {
     add(key, value);
   }
