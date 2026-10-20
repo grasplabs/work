@@ -17,15 +17,17 @@ const recordValue = "record-value-7f3a";
 const controlValue = "control-value-91c2";
 
 /**
- * An App whose migration logs each record it gets, as it loads and as it
- * runs, every way it can: on the console, through `node:console`, and
- * through a console method it puts back itself.
+ * An App whose migration logs each record it gets every way it can: on
+ * the console, with a console method it kept as it loaded, through
+ * `node:console`, and through a console method it puts back itself.
  */
 const app = `import nodeConsole from "node:console";
-console.log("loaded");
+// Kept as the module loads, to log with later.
+const kept = console.log;
 export default {
   migrate(rows) {
     for (const row of rows) {
+      kept(row.fields.title);
       console.log(row.fields.title);
       console.info(row);
       console.warn(row.fields.title);
