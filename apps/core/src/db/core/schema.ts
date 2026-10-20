@@ -651,7 +651,9 @@ export const appVersions = sqliteTable(
      * previous release writes gets none (the default).
      */
     workflowBindings: text("workflow_bindings", { mode: "json" })
-      .$type<Record<string, "connection" | "collection">>()
+      // `app`, another App's exports, only in a version committed before
+      // runs lost them (`workflowBindingKinds`).
+      .$type<Record<string, "connection" | "collection" | "app">>()
       .notNull()
       .default(sql`'{}'`),
   },
