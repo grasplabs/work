@@ -427,7 +427,9 @@ describe("the application landscape", () => {
       grants: [grantOf(app, "User.Read", ada), grantOf(app, "Files.Read", bob)],
     });
     const { admin, connectionId } = await connected();
+    // Mid-morning, UTC: "later that day" stays within the day.
     const now = new Date();
+    now.setUTCHours(10, 0, 0, 0);
     // A sync under way, which two cron runs at once go on with: both read
     // its page and write it, the same, and its end is recorded once.
     await env.DB.prepare(
