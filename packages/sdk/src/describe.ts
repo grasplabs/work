@@ -1554,11 +1554,21 @@ const exportedWorkflowCall = (file: Node): CallExpression | undefined => {
     return exported;
   }
   const name = exported?.type === "Identifier" ? exported.name : named;
+  // The module's own declaration of that name: one in a function or a
+  // block is another variable.
   let call: CallExpression | undefined;
-  visit(file, (node) => {
+  visit(file, (node, ancestors) => {
+    const declaration = ancestors.at(-1)?.node;
+    const scope = ancestors.at(declaration === undefined ? -1 : -2)?.node;
+    const inModule =
+      scope?.type === "Program" ||
+      (scope?.type === "ExportNamedDeclaration" &&
+        ancestors.at(-3)?.node.type === "Program");
     const init =
       node.type === "VariableDeclarator" ? unwrapped(node.init) : undefined;
     if (
+      inModule &&
+      declaration?.type === "VariableDeclaration" &&
       node.type === "VariableDeclarator" &&
       node.id.type === "Identifier" &&
       node.id.name === name &&
