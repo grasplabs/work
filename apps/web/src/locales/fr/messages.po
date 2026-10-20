@@ -4944,6 +4944,10 @@ msgstr "C'est arrivé"
 msgid "It happened: {who}"
 msgstr "C'est arrivé : {who}"
 
+#: src/screens/screen-frame.tsx
+msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
+msgstr "Elle a des modifications non enregistrées, ou une modification sans réponse. En quittant, les modifications non enregistrées sont perdues ; ce qui est déjà enregistré ou en cours reste."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "Il n’a aucun paramètre."
@@ -5274,9 +5278,17 @@ msgstr "Les responsables reçoivent leur lien {when}. Tous les autres juste apr�
 msgid "Leads talked: {count} of {of}"
 msgstr "Responsables ayant parlé : {count} sur {of}"
 
+#: src/screens/screen-frame.tsx
+msgid "Leave"
+msgstr "Quitter"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Leave out personnel files and anything about one person."
 msgstr "Laissez de côté les dossiers du personnel et tout ce qui concerne une seule personne."
+
+#: src/screens/screen-frame.tsx
+msgid "Leave this app?"
+msgstr "Quitter cette app ?"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Leaves this list"
@@ -8755,6 +8767,10 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Statut"
 
+#: src/screens/screen-frame.tsx
+msgid "Stay"
+msgstr "Rester"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "Stays by hand"
 msgstr "Reste à la main"
@@ -9827,6 +9843,10 @@ msgstr "Ce lien ne fonctionne pas. Demandez-en un nouveau à la personne qui l�
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Ce lien a expiré. Demandez-en un nouveau à la personne qui l’a envoyé."
+
+#: src/screens/screen-frame.tsx
+msgid "This link opens the app with something it doesn't take. Open the app from its domain instead."
+msgstr "Ce lien ouvre l’app avec quelque chose qu’elle n’accepte pas. Ouvrez plutôt l’app depuis son domaine."
 
 #: src/onboarding/setup-steps.tsx
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."

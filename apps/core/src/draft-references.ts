@@ -63,6 +63,25 @@ export interface ReferenceSource {
   readonly workflows: readonly WorkflowBindingExtras[];
 }
 
+/** The references `source` generates for `app`'s `version`, if any. */
+const referencesOf = async (
+  app: AppId,
+  version: number,
+  source: ReferenceSource | undefined
+): Promise<string | undefined> => {
+  const generated =
+    source === undefined
+      ? {}
+      : await generateModules(
+          source.manifest,
+          { resourceId: app, resourceVersion: version },
+          source.workflows
+        );
+  return Object.hasOwn(generated, generatedPaths.references)
+    ? generated[generatedPaths.references]
+    : undefined;
+};
+
 /**
  * `files` with the references their screens import as `#grasp`, generated
  * for `app`'s `version` from what `sourceOf` reads (see
@@ -74,20 +93,22 @@ export const withReferencesFrom = async (
   files: Record<string, string>,
   sourceOf: () => Promise<ReferenceSource | undefined>
 ): Promise<Record<string, string>> =>
-  await withReferencesText(files, async () => {
-    const source = await sourceOf();
-    const generated =
-      source === undefined
-        ? {}
-        : await generateModules(
-            source.manifest,
-            { resourceId: app, resourceVersion: version },
-            source.workflows
-          );
-    return Object.hasOwn(generated, generatedPaths.references)
-      ? generated[generatedPaths.references]
-      : undefined;
-  });
+  await withReferencesText(
+    files,
+    async () => await referencesOf(app, version, await sourceOf())
+  );
+
+/** `withReferencesFrom`, for a source read already. */
+export const withReferencesOf = async (
+  app: AppId,
+  version: number,
+  files: Record<string, string>,
+  source: ReferenceSource | undefined
+): Promise<Record<string, string>> =>
+  await withReferencesText(
+    files,
+    async () => await referencesOf(app, version, source)
+  );
 
 /**
  * `files` as saved or drafted, for `app`'s `version` (a draft's base), with

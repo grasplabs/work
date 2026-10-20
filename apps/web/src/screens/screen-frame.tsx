@@ -1,9 +1,22 @@
+import { screenErrors } from "@grasp-os/shared/screens";
+import type { ScreenTarget } from "@grasp-os/shared/screens";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
-import { useEffect, useState } from "react";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { useBlocker, useRouter } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { DecisionConfirmDialog } from "../decision-confirmation.tsx";
@@ -11,6 +24,8 @@ import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { useCore } from "../use-core.ts";
 import { frameQuestions } from "./frame-questions.ts";
 import type { Asked } from "./frame-questions.ts";
+import { navigationPolicy } from "./navigation-policy.ts";
+import type { NavigationPolicy, PageState } from "./navigation-policy.ts";
 import { runPreview, runScreen } from "./screen-host.ts";
 import type { FailureReason, ScreenState } from "./screen-host.ts";
 
@@ -25,6 +40,7 @@ const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
   unreviewed: msg`Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page.`,
   revoked: msg`The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page.`,
   "principal-changed": msg`Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now.`,
+  "bad-input": msg`This link opens the app with something it doesn't take. Open the app from its domain instead.`,
   unknown: msg`The app couldn't be loaded.`,
 };
 
@@ -69,7 +85,28 @@ interface FrameSource {
   app: string;
   screen?: string;
   chatId?: string;
+  /** The route the screen was navigated to by, and its input as JSON text. */
+  route?: string;
+  input?: string;
 }
+
+/** How a screen navigates the page, and holds it while a form is unsaved. */
+interface FrameNavigation {
+  navigate: (target: ScreenTarget, replace: boolean) => Promise<void>;
+  leaveGuard: (guarded: boolean) => void;
+}
+
+/** `text` read as JSON, or null when it isn't: core refuses that input. */
+const jsonInput = (text: string | undefined): unknown => {
+  if (text === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Starts what `source` names in `frame`, a screen over the tab's
@@ -78,13 +115,19 @@ interface FrameSource {
 const start = (
   frame: HTMLIFrameElement,
   core: CoreConnection,
-  { app, screen, chatId }: FrameSource,
+  { app, screen, chatId, route, input }: FrameSource,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
-  confirm: (review: PendingConfirmation) => Promise<boolean>
+  confirm: (review: PendingConfirmation) => Promise<boolean>,
+  navigation: FrameNavigation
 ): (() => void) =>
   chatId === undefined
-    ? runScreen(frame, core, app, screen ?? "", onState, onOpened, confirm)
+    ? runScreen(frame, core, app, screen ?? "", onState, onOpened, confirm, {
+        ...(route === undefined
+          ? {}
+          : { route: { route, input: jsonInput(input) } }),
+        navigation,
+      })
     : runPreview(
         frame,
         { chatId, app, ...(screen === undefined ? {} : { screen }) },
@@ -105,7 +148,8 @@ const startAsking = (
   source: FrameSource,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
-  onAsk: (asked: Asked | null) => void
+  onAsk: (asked: Asked | null) => void,
+  navigation: FrameNavigation
 ): (() => void) => {
   const questions = frameQuestions(onAsk);
   const stop = start(
@@ -119,11 +163,53 @@ const startAsking = (
       onState(state);
     },
     onOpened,
-    questions.confirm
+    questions.confirm,
+    navigation
   );
   return () => {
     questions.end();
     stop();
+    // A start that stopped (reloaded, or its screen changed) holds no
+    // edits; the next one says when its own forms do.
+    navigation.leaveGuard(false);
+  };
+};
+
+/**
+ * How one start of a frame navigates the page and reports its guard,
+ * under that start's policy (navigation-policy.ts): a fresh start is a
+ * fresh page for it.
+ */
+const policedNavigation = (
+  router: ReturnType<typeof useRouter>,
+  navigateTo: { readonly current: ScreenNavigate | undefined },
+  onGuard: (guarded: boolean) => void,
+  current: { current: NavigationPolicy | null }
+): FrameNavigation => {
+  // Read as each navigation is asked for.
+  const page: PageState = {
+    location: () => ({
+      here: router.state.location.href,
+      going: router.latestLocation.href,
+    }),
+    activated: () => navigator.userActivation?.isActive ?? false,
+    now: () => Date.now(),
+  };
+  const policy = navigationPolicy(async (target, replace) => {
+    const go = navigateTo.current;
+    if (go === undefined) {
+      throw screenErrors.create("screen.invalid");
+    }
+    await go(target, replace);
+  }, page);
+  // The leave dialog tells this start's policy when the person stays.
+  current.current = policy;
+  return {
+    navigate: policy.navigate,
+    leaveGuard: (guarded) => {
+      policy.guardChanged(guarded);
+      onGuard(guarded);
+    },
   };
 };
 
@@ -133,6 +219,12 @@ interface FrameProps extends FrameSource {
   onOpened: (appName: string) => void;
   /** Shows the question waiting in the dialog, or takes it away. */
   onAsk: (asked: Asked | null) => void;
+  /** How the screen navigates the page now, read when it asks. */
+  navigateTo: { readonly current: ScreenNavigate | undefined };
+  /** Whether the screen holds unsaved edits now. */
+  onGuard: (guarded: boolean) => void;
+  /** Where the current start's navigation policy is kept, for the dialog. */
+  policy: { current: NavigationPolicy | null };
 }
 
 /**
@@ -143,12 +235,18 @@ const Frame = ({
   app,
   screen,
   chatId,
+  route,
+  input,
   title,
   onState,
   onOpened,
   onAsk,
+  navigateTo,
+  onGuard,
+  policy,
 }: FrameProps) => {
   const core = useCore();
+  const router = useRouter();
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   useEffect(
     () =>
@@ -160,13 +258,31 @@ const Frame = ({
               app,
               ...(screen === undefined ? {} : { screen }),
               ...(chatId === undefined ? {} : { chatId }),
+              ...(route === undefined ? {} : { route }),
+              ...(input === undefined ? {} : { input }),
             },
             onState,
             onOpened,
-            onAsk
+            onAsk,
+            policedNavigation(router, navigateTo, onGuard, policy)
           )
         : undefined,
-    [frame, core, app, screen, chatId, onState, onOpened, onAsk]
+    [
+      frame,
+      core,
+      router,
+      app,
+      screen,
+      chatId,
+      route,
+      input,
+      onState,
+      onOpened,
+      onAsk,
+      navigateTo,
+      onGuard,
+      policy,
+    ]
   );
   return (
     <iframe
@@ -178,6 +294,53 @@ const Frame = ({
     />
   );
 };
+
+/**
+ * Asks whether to leave a screen whose forms hold unsaved edits, or a
+ * change whose outcome isn't known yet: once per leave, in Grasp's own
+ * dialog, which the screen can't draw over or answer.
+ */
+const LeaveConfirmDialog = ({
+  open,
+  onLeave,
+  onStay,
+}: {
+  open: boolean;
+  onLeave: () => void;
+  onStay: () => void;
+}) => (
+  <AlertDialog
+    onOpenChange={(next) => {
+      if (!next) {
+        onStay();
+      }
+    }}
+    open={open}
+  >
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>
+          <Trans>Leave this app?</Trans>
+        </AlertDialogTitle>
+        <AlertDialogDescription>
+          <Trans>
+            It has changes that aren&apos;t saved, or a change it hasn&apos;t
+            heard back about. Leaving loses unsaved changes; anything already
+            saved or running stays.
+          </Trans>
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>
+          <Trans>Stay</Trans>
+        </AlertDialogCancel>
+        <AlertDialogAction onClick={onLeave}>
+          <Trans>Leave</Trans>
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);
 
 /**
  * What `source` names, running in a sandboxed frame, inside the page's
@@ -193,18 +356,41 @@ const FramedScreen = ({
   label,
   embedded,
   onReload,
+  onNavigate,
 }: {
   source: FrameSource;
   title: string;
   label: string;
   embedded: boolean;
   onReload?: () => void;
+  onNavigate?: ScreenNavigate;
 }) => {
   const Title = embedded ? "h2" : "h1";
   const [state, setState] = useState<ScreenState>({ status: "loading" });
   const [appName, setAppName] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [asked, setAsked] = useState<Asked | null>(null);
+  // Whether a form of the screen holds unsaved edits or an unknown
+  // outcome: leaving the screen then, however the page leaves it, is
+  // confirmed once, in Grasp's own dialog (spec 10.7.7).
+  const [guarded, setGuarded] = useState(false);
+  // A failed or signed-out screen is emptied: nothing of it is left to lose.
+  const holdsEdits =
+    guarded && (state.status === "running" || state.status === "updated");
+  const leaving = useBlocker({
+    shouldBlockFn: () => holdsEdits,
+    enableBeforeUnload: () => holdsEdits,
+    withResolver: true,
+  });
+  // The latest way to navigate, read when the screen asks: the frame keeps
+  // one object for its whole start, so drawing the page again restarts
+  // nothing.
+  const navigateTo = useRef(onNavigate);
+  const policy = useRef<NavigationPolicy | null>(null);
+  useEffect(() => {
+    navigateTo.current = onNavigate;
+  }, [onNavigate]);
+
   const reload = () => {
     setState({ status: "loading" });
     setAttempt(attempt + 1);
@@ -231,23 +417,54 @@ const FramedScreen = ({
         pending={asked?.review}
         source="screen"
       />
+      <LeaveConfirmDialog
+        onLeave={() => {
+          leaving.proceed?.();
+        }}
+        onStay={() => {
+          leaving.reset?.();
+          policy.current?.stayed();
+        }}
+        open={leaving.status === "blocked"}
+      />
       <Frame
         app={source.app}
+        navigateTo={navigateTo}
+        policy={policy}
         onAsk={setAsked}
+        onGuard={setGuarded}
         key={attempt}
         onOpened={setAppName}
         onState={setState}
         title={title}
         {...(source.screen === undefined ? {} : { screen: source.screen })}
         {...(source.chatId === undefined ? {} : { chatId: source.chatId })}
+        {...(source.route === undefined ? {} : { route: source.route })}
+        {...(source.input === undefined ? {} : { input: source.input })}
       />
     </div>
   );
 };
 
+/**
+ * Takes the page to the screen core resolved for a screen's navigation,
+ * pushing an entry or replacing the current one (`replace`), and resolves
+ * once it went there: refused (`screen.navigation_cancelled`) when the
+ * person chose to stay on a screen with unsaved edits.
+ */
+export type ScreenNavigate = (
+  target: ScreenTarget,
+  replace: boolean
+) => Promise<void>;
+
 interface ScreenFrameProps {
   app: string;
   screen: string;
+  /** The route the screen was navigated to by, and its input as JSON text. */
+  route?: string;
+  input?: string;
+  /** How its navigation takes the page on (`ScreenNavigate`). */
+  onNavigate?: ScreenNavigate;
   /**
    * Inside a page with a heading of its own (the App's page): the App's
    * name is a second-level heading, not the page's.
@@ -261,17 +478,26 @@ interface ScreenFrameProps {
 export const ScreenFrame = ({
   app,
   screen,
+  route,
+  input,
   embedded = false,
   onReload,
+  onNavigate,
 }: ScreenFrameProps) => {
   const { t } = useLingui();
   return (
     <FramedScreen
       embedded={embedded}
       label={t`Domain app`}
-      source={{ app, screen }}
+      source={{
+        app,
+        screen,
+        ...(route === undefined ? {} : { route }),
+        ...(input === undefined ? {} : { input }),
+      }}
       title={t`${screen} app`}
       {...(onReload === undefined ? {} : { onReload })}
+      {...(onNavigate === undefined ? {} : { onNavigate })}
     />
   );
 };

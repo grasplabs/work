@@ -997,7 +997,7 @@ const referencesText = async (
   );
   const screenTypes = screens.map(
     (screen) =>
-      `  readonly ${key(screen.name)}: ScreenReference<${JSON.stringify(screen.name)}, ${valueTypeOf(screen.input, "input")}>;`
+      `  readonly ${key(screen.name)}: ScreenReference<${JSON.stringify(screen.name)}, ${valueTypeOf(screen.input, "input")}, ${valueTypeOf(screen.input, "output")}>;`
   );
   const screenValues = screens.map(
     (screen) =>

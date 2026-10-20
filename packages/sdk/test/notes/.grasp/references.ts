@@ -6943,8 +6943,8 @@ export const resources: {
 });
 
 export const screens: {
-  readonly note: ScreenReference<"note", { id: Id<"notes"> }>;
-  readonly notes: ScreenReference<"notes", Record<never, never>>;
+  readonly note: ScreenReference<"note", { id: Id<"notes"> }, { id: Id<"notes"> }>;
+  readonly notes: ScreenReference<"notes", Record<never, never>, Record<never, never>>;
 } = frozen({
   note: {
     "input": {

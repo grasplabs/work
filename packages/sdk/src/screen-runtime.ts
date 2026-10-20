@@ -111,6 +111,22 @@ export interface ScreenBridge {
   saveDraft: (key: string, text: string | null) => void;
   /** Drops every draft of this person and App: access was lost. */
   clearDrafts: () => void;
+  /**
+   * The screen's route input, as core validated and normalized it when the
+   * page opened the screen: what the screen gets as its `input` prop.
+   */
+  input: () => Promise<unknown>;
+  /**
+   * Opens another of the App's screens (spec 10.7.7): `request` is
+   * `{ screen, input, replace }` as JSON text. The page has core check the
+   * target and the input, then navigates itself; resolves once it has.
+   */
+  navigate: (request: string) => Promise<void>;
+  /**
+   * Whether a form of the screen holds unsaved edits or a submission whose
+   * outcome isn't known: the page confirms once before leaving the screen.
+   */
+  leaveGuard: (guarded: boolean) => void;
 }
 
 let connected: RpcStub<ScreenBridge> | undefined;
@@ -142,6 +158,15 @@ const releaseQuietly = async (
     // Core lets go of it anyway once the page's connection does.
   } finally {
     subscription[Symbol.dispose]();
+  }
+};
+
+/** Runs `call` on the page, never failing the screen if the page can't. */
+const quietly = async (call: () => Promise<unknown>): Promise<void> => {
+  try {
+    await call();
+  } catch {
+    // A draft not kept by the page stays in the frame's memory.
   }
 };
 
@@ -213,16 +238,17 @@ export const bridgeTransport = (
     };
   },
   cancelStream: async (request) => await page().cancelStream(request),
+  navigation: {
+    navigate: async (request) => {
+      await page().navigate(request);
+    },
+    leaveGuard: (guarded) => {
+      void quietly(async () => {
+        await page().leaveGuard(guarded);
+      });
+    },
+  },
 });
-
-/** Runs `call` on the page, never failing the screen if the page can't. */
-const quietly = async (call: () => Promise<unknown>): Promise<void> => {
-  try {
-    await call();
-  } catch {
-    // A draft not kept by the page stays in the frame's memory.
-  }
-};
 
 /**
  * How long the frame waits for the page to hand over its drafts before
@@ -559,7 +585,9 @@ class ScreenBoundary extends Component<BoundaryProps, BoundaryState> {
   }
 }
 
-const isScreenModule = (value: unknown): value is { default: ComponentType } =>
+const isScreenModule = (
+  value: unknown
+): value is { default: ComponentType<{ input: unknown }> } =>
   typeof value === "object" &&
   value !== null &&
   "default" in value &&
@@ -585,6 +613,9 @@ export const runScreen = async (
     await page.theme((theme) => {
       document.documentElement.classList.toggle("dark", theme === "dark");
     });
+    // Its route input, as core normalized it: asked for before its module
+    // loads, so the screen's first render has it.
+    const input: unknown = await page.input();
     const loaded: unknown = await import(screen);
     if (!isScreenModule(loaded)) {
       throw new Error(`${screen} has no default export to render.`);
@@ -627,7 +658,7 @@ export const runScreen = async (
               clientInternals(client).retryFailed();
             },
           },
-          createElement(loaded.default),
+          createElement(loaded.default, { input }),
           createElement(Mounted, { start })
         )
       )

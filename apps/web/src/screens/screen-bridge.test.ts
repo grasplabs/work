@@ -3,6 +3,7 @@ import type { ScreenBridge } from "@grasp-os/sdk/screen-runtime";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { screenLimits } from "@grasp-os/shared/screen-limits";
 import { portTransport } from "@grasp-os/shared/screen-port";
+import type { ScreenNavigation } from "@grasp-os/shared/screens";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 import {
@@ -51,6 +52,8 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   const functionCalls: string[] = [];
   const reports: string[] = [];
   const draftRequests: string[] = [];
+  const navigations: ScreenNavigation[] = [];
+  const guards: boolean[] = [];
   const subscriptions: Subscription[] = [];
   // The live queries' callbacks core keeps.
   const kept: Disposable[] = [];
@@ -102,6 +105,14 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
     clearDrafts: () => {
       draftRequests.push("clear");
     },
+    input: () => ({ id: "n1" }),
+    navigate: async (navigation) => {
+      navigations.push(navigation);
+      await Promise.resolve();
+    },
+    leaveGuard: (guarded) => {
+      guards.push(guarded);
+    },
     watchQuery: async (_request, onSnapshot) => {
       // Kept, as core keeps a live query's callback until it lets go.
       if (onSnapshot instanceof RpcStub) {
@@ -116,6 +127,8 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
     calls,
     draftRequests,
     functionCalls,
+    guards,
+    navigations,
     opening,
     reports,
     streams,
@@ -316,6 +329,87 @@ describe("the page's bridge to a screen", () => {
     });
     expect(frame.functionCalls).toStrictEqual([request]);
     frame.close();
+  });
+
+  it("hands the frame its route input, and passes a navigation on only as one of its App's screens with its input", async () => {
+    const frame = framed();
+    const go = async (request: unknown) =>
+      await outcome(frame.page.navigate(unchecked(request)));
+    const input = await frame.page.input();
+    const results = {
+      push: await go(JSON.stringify({ screen: "note", input: { id: "n1" } })),
+      replace: await go(
+        JSON.stringify({ screen: "notes", input: {}, replace: true })
+      ),
+      // No URL, path, App or person: only a screen's route name.
+      url: await go(JSON.stringify({ screen: "https://evil.test", input: {} })),
+      path: await go(JSON.stringify({ screen: "/notes/n1" })),
+      withApp: await go(JSON.stringify({ screen: "note", app: "other" })),
+      notText: await go({ screen: "note" }),
+      notJson: await go("{"),
+      notReplace: await go(JSON.stringify({ screen: "note", replace: "yes" })),
+      tooLong: await go(
+        JSON.stringify({
+          screen: "note",
+          input: { id: "x".repeat(screenLimits.navigationInputBytes + 256) },
+        })
+      ),
+    };
+    frame.close();
+
+    expect({ input, results, reached: frame.navigations }).toStrictEqual({
+      input: { id: "n1" },
+      results: {
+        push: undefined,
+        replace: undefined,
+        url: "screen.invalid",
+        path: "screen.invalid",
+        withApp: "screen.invalid",
+        notText: "screen.invalid",
+        notJson: "screen.invalid",
+        notReplace: "screen.invalid",
+        tooLong: "screen.invalid",
+      },
+      reached: [
+        { screen: "note", input: { id: "n1" } },
+        { screen: "notes", input: {}, replace: true },
+      ],
+    });
+  });
+
+  it("passes on whether the screen holds unsaved edits, and nothing but that", async () => {
+    const frame = framed();
+    await frame.page.leaveGuard(true);
+    await frame.page.leaveGuard(unchecked("yes"));
+    await frame.page.leaveGuard(false);
+    await frame.page.input();
+    frame.close();
+    expect(frame.guards).toStrictEqual([true, false]);
+  });
+
+  it("gathers leave guards past their budget and passes on the newest, so the page ends with what the screen said last", async () => {
+    vi.useFakeTimers();
+    try {
+      const frame = framed();
+      const { burst } = screenLimits.leaveGuards;
+      for (let at = 0; at < burst + 5; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- each goes in order, as a screen sends them
+        await frame.page.leaveGuard(at % 2 === 0);
+      }
+      // The newest of those held back: what the screen said last.
+      await frame.page.leaveGuard(false);
+      const withinBudget = frame.guards.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      const settled = [...frame.guards];
+      frame.close();
+      expect({
+        withinBudget,
+        passedLater: settled.length - withinBudget,
+        last: settled.at(-1),
+      }).toStrictEqual({ withinBudget: burst, passedLater: 1, last: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lets a burst of requests through, refuses the rest, and fills again with time", async () => {

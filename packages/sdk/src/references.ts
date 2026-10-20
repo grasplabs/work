@@ -152,10 +152,13 @@ export interface LinksReference<
   readonly origins: Origins;
 }
 
+declare const screenInputType: unique symbol;
+
 /** A generated reference to one of the App's screens. */
 export interface ScreenReference<
   Name extends string = string,
   Input = unknown,
+  Output = Input,
 > {
   readonly name: Name;
   /** Its route, e.g. `/notes/:id`. */
@@ -164,11 +167,41 @@ export interface ScreenReference<
   readonly input: ValueDescriptor;
   /** Types only: never set. */
   readonly [argsType]?: Input;
+  /** Types only: never set. */
+  readonly [screenInputType]?: Output;
 }
 
 /** The route input of `Screen`, as a caller passes it. */
 export type ScreenInputOf<Screen> =
   Screen extends ScreenReference<string, infer Input> ? Input : never;
+
+/**
+ * The route input `Screen` gets, as its route's schema normalized it
+ * (defaults filled in): what the host hands the screen.
+ */
+export type ScreenOutputOf<Screen> =
+  Screen extends ScreenReference<string, unknown, infer Output>
+    ? Output
+    : never;
+
+/**
+ * The props the host renders `Screen`'s component with (spec 10.7.7):
+ * its route input, validated and normalized by the host.
+ *
+ * The input comes from the page's address, which anyone can put in a
+ * link: valid in shape, never proof the person meant it. Read with it;
+ * don't change anything on mount because of it (save, start, delete).
+ * Changes wait for the person's own click.
+ *
+ * ```tsx
+ * export default function Note({ input }: ScreenProps<typeof screens.note>) {
+ *   const note = useQuery(api.notes.get, { id: input.id });
+ * }
+ * ```
+ */
+export interface ScreenProps<Screen> {
+  readonly input: ScreenOutputOf<Screen>;
+}
 
 declare const waitType: unique symbol;
 
