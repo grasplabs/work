@@ -21,6 +21,7 @@ import {
   actionMaxRunning,
   streamMaxRunning,
 } from "@grasp-os/shared/operation-limits";
+import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
@@ -680,6 +681,8 @@ interface Invocation {
   kind: InvocationKind;
   /** Statistics points it recorded and reads it made (`claimStatistic`). */
   statistics?: { point: number; read: number };
+  /** The stub calls it made (`claimHostCall`), each counted as it starts. */
+  hostCalls?: number;
   /** The version its code runs on, once started. */
   version?: number;
   /**
@@ -1755,6 +1758,45 @@ export class App extends DurableObject<Env> {
   }
 
   /**
+   * Admits one stub call of the running call `token` names for `use`, as
+   * `admit` does, and counts it against the call's host calls: the same
+   * budget an App function's operation channel has
+   * (`platformLimits.invocationHostCalls`, 100; operation-channel.ts), for
+   * the App's stubs, which reach core outside that channel. Every stub
+   * call counts, each as it reaches the host, refused or not: a read, a
+   * call of another App, a connection's action, a statistics point, a
+   * guest invited, each a request of a resource outside the App, as the
+   * channel counts its resource requests whatever they change. (The App's
+   * own writes, to its SQLite, never come through a stub: the channel's
+   * uncounted staged writes have no stub here.) Past the budget the stub
+   * call is refused, `operation.call_limit`, before it does anything: a
+   * method's loop of them ends there, however long its deadline. Only a
+   * stub call's first admission counts (app-bindings.ts,
+   * `countedCallerOf`): one admitted again before it acts, or before its
+   * answer goes back, is admitted with `admit` alone. Kept for the call's
+   * life, in memory, as its token is: a call the object outlives not, nor
+   * a retry, which is another call with a budget of its own.
+   */
+  claimHostCall(token: string, use: InvocationKind): Admitted {
+    // The token first, then the count, then what the call may do: a write
+    // a read-only call is refused (`app.read_only`) still counts, as the
+    // channel counts what it refuses, so a loop of refused writes ends at
+    // the budget too. A token of no running call counts for nothing.
+    const valid = this.admit(token, "read");
+    const call = this.#calls.get(token);
+    if (call === undefined) {
+      throw appErrors.create("app.caller_invalid");
+    }
+    call.hostCalls = (call.hostCalls ?? 0) + 1;
+    if (call.hostCalls > platformLimits.invocationHostCalls) {
+      throw operationErrors.create("operation.call_limit", {
+        maxHostCalls: platformLimits.invocationHostCalls,
+      });
+    }
+    return use === "write" ? this.admit(token, use) : valid;
+  }
+
+  /**
    * Counts one statistics `use` (a point recorded, or a read) of the
    * running call `token` names, for the App's stubs
    * (statistics-binding.ts), and answers who the call acts for as
@@ -1766,7 +1808,10 @@ export class App extends DurableObject<Env> {
    * by a call that may only read.
    */
   claimStatistic(token: string, use: StatisticUse): Admitted {
-    const resolved = this.admit(token, use === "point" ? "write" : "read");
+    const resolved = this.claimHostCall(
+      token,
+      use === "point" ? "write" : "read"
+    );
     const call = this.#calls.get(token);
     if (call === undefined) {
       throw appErrors.create("app.caller_invalid");

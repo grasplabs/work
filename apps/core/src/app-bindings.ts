@@ -153,6 +153,28 @@ export const callerOf = async (
 };
 
 /**
+ * Who `caller` is, as `callerOf` says, for a stub call as it starts:
+ * counted against its call's host calls (`App.claimHostCall`), once,
+ * `operation.call_limit` past the call's budget. Each stub call starts here once; it is admitted again
+ * (`stillAdmitted`, `handedBack`) without counting.
+ */
+export const countedCallerOf = async (
+  env: Env,
+  app: AppId,
+  caller: unknown,
+  use: InvocationKind
+): Promise<Admitted> => {
+  const token = tokenOf(caller);
+  return await admitted(
+    env,
+    app,
+    token,
+    use,
+    async (host) => await host.claimHostCall(token, use)
+  );
+};
+
+/**
  * Admits the call `token` names for `use` again, in full, as `callerOf`
  * does: a stub's last word before it acts, after whatever it awaited
  * since it was admitted. Not the host's word alone: what let the call in
@@ -301,7 +323,7 @@ export class AppConnectionBinding extends WorkerEntrypoint<
           // Admitted as a read: whether the action changes anything is
           // connect's to know, and a call that may only read has it refuse
           // every side effect.
-          const known = await callerOf(this.env, app, { token }, "read");
+          const known = await countedCallerOf(this.env, app, { token }, "read");
           const { authority, idempotencyKey, kind, path } = known;
           ({ fence } = known);
           if (authority.mode === "workflow") {
