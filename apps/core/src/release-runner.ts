@@ -524,6 +524,7 @@ export const noStore = (): OpenStore => ({
   defineTables: unbound,
   get: unbound,
   claim: unbound,
+  receiptStanding: unbound,
   commit: unbound,
   read: unbound,
   generations: unbound,

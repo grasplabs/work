@@ -57,6 +57,8 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   const subscriptions: Subscription[] = [];
   // The live queries' callbacks core keeps.
   const kept: Disposable[] = [];
+  // What the frame said it got the answers of.
+  const received: string[] = [];
   const streams: { subscription: Subscription; end: () => void }[] = [];
   /** Holds each stream's opening until it resolves, when a test sets it. */
   const opening: { gate: Promise<unknown> | undefined } = { gate: undefined };
@@ -68,6 +70,10 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
     callFunction: async (request) => {
       functionCalls.push(request);
       return await Promise.resolve(answer);
+    },
+    submissionReceived: async (request) => {
+      received.push(request);
+      await Promise.resolve();
     },
     streamFunction: async (_what, request, _onFrame, onEnded) => {
       functionCalls.push(request);
@@ -127,6 +133,7 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
     calls,
     draftRequests,
     functionCalls,
+    received,
     guards,
     navigations,
     opening,
@@ -410,6 +417,29 @@ describe("the page's bridge to a screen", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("passes on that the frame got a call's answer, as the text it sent, and nothing else", async () => {
+    const frame = framed();
+    const request = JSON.stringify({ reference: {}, idempotencyKey: "k" });
+    const results = {
+      text: await outcome(frame.page.submissionReceived(request)),
+      object: await outcome(
+        frame.page.submissionReceived(unchecked({ request }))
+      ),
+      tooLong: await outcome(
+        frame.page.submissionReceived("x".repeat(functionRequestMaxBytes + 1))
+      ),
+    };
+    expect({ results, received: frame.received }).toStrictEqual({
+      results: {
+        text: undefined,
+        object: "screen.invalid",
+        tooLong: "screen.invalid",
+      },
+      received: [request],
+    });
+    frame.close();
   });
 
   it("lets a burst of requests through, refuses the rest, and fills again with time", async () => {

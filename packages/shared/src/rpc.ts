@@ -28,6 +28,7 @@ import type { ScreensApi } from "./screens.ts";
 import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { StoresApi } from "./stores.ts";
+import type { ScreenSubmissionsApi } from "./submissions.ts";
 import type { UploadsApi } from "./uploads.ts";
 import type { WorkflowResourcesApi } from "./workflow-resources.ts";
 import type { WorkflowsApi } from "./workflows.ts";
@@ -180,6 +181,11 @@ export interface SessionApi {
    * that connect couldn't recover: the person says what became of each.
    */
   readonly unknownOutcomes: UnknownOutcomesApi;
+  /**
+   * The person's screen submissions whose answer may never have reached
+   * their page, by status only (spec 10.7.8).
+   */
+  readonly screenSubmissions: ScreenSubmissionsApi;
   /**
    * Improvement signals from runs and the audit log, computed daily: every
    * one for admins, an App's for its builders.

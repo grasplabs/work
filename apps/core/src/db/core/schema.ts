@@ -912,6 +912,78 @@ export const appTestFixtures = sqliteTable(
 );
 
 /**
+ * The recovery index of screens' keyed submissions (spec 10.7.8,
+ * screen-submissions.ts): one row per mutation or action a person's screen
+ * sent under an idempotency key, written as core admits it and deleted
+ * once the person's screen got an answer its receipt settled. A row left
+ * is one whose answer may never have reached them: the shell reads its status from the
+ * receipt its key names, never anything it changed or answered. Only the
+ * descriptor and the key: no input, no result. A row goes with its
+ * receipt's retention (`expires_at`), and a person keeps at most
+ * `maxSubmissionsPerApp` of an App and `maxSubmissionsPerPerson` in all.
+ */
+export const screenSubmissions = sqliteTable(
+  "screen_submissions",
+  {
+    id: text().primaryKey(),
+    personId: text("person_id").notNull(),
+    appId: text("app_id").notNull(),
+    kind: text({ enum: ["mutation", "action"] }).notNull(),
+    /** The function's contract ID, as the screen's reference names it. */
+    contractId: text("contract_id").notNull(),
+    fingerprint: text().notNull(),
+    /** The App version whose release resolved the call. */
+    appVersion: integer("app_version").notNull(),
+    /** The function's path in that release, for its receipt's scope. */
+    path: text().notNull(),
+    /**
+     * For a mutation, the store its receipt is in and the contract ID that
+     * scopes it (operations.ts `operationContractId`), as the release that
+     * ran it had them: null for an action, and for a release with no store.
+     */
+    storeId: text("store_id"),
+    storeContractId: text("store_contract_id"),
+    /**
+     * For a mutation core answered as run and failed (its handler's own
+     * failure, which commits nothing and leaves its receipt claimed), that
+     * failure's category: it reads as `failed` unless a later attempt
+     * under its key committed.
+     */
+    failedCategory: text("failed_category"),
+    /**
+     * The receipt fence the failed attempt itself claimed: a newer claim
+     * since is another attempt, which may still commit.
+     */
+    failedFence: integer("failed_fence"),
+    /**
+     * Which attempt under its key the row follows, from 1: each one noted
+     * moves it on, and core's answer marks the row only for its own.
+     */
+    attempt: integer().notNull().default(1),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("screen_submissions_key").on(
+      table.personId,
+      table.appId,
+      table.kind,
+      table.contractId,
+      table.fingerprint,
+      table.idempotencyKey
+    ),
+    index("screen_submissions_person").on(table.personId, table.createdAt),
+    index("screen_submissions_expires_at").on(table.expiresAt),
+    index("screen_submissions_app").on(table.personId, table.appId),
+    check(
+      "screen_submissions_kind",
+      sql`${table.kind} IN ('mutation', 'action')`
+    ),
+  ]
+);
+
+/**
  * The fixture stores chats' previews of their drafts run on
  * (sealed-previews.ts), each recorded before its object is first touched
  * and deleted once the object is discarded. Kept apart from App tests'

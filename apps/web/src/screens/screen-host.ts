@@ -515,6 +515,17 @@ export type ConfirmDecision = (
   pending: PendingConfirmation
 ) => Promise<boolean>;
 
+/** Tells core the frame got `request`'s answer; never throws. */
+const forget = async (hold: FrameHold, request: string): Promise<void> => {
+  try {
+    await hold.use(async (frame) => {
+      await frame.received(request);
+    });
+  } catch {
+    // The row stays, shown once as settled.
+  }
+};
+
 /**
  * Where the screen's navigation goes, as core resolves it for the person
  * on the frame's link: refusals as core words them.
@@ -611,6 +622,12 @@ const appTarget = (
       await plain(
         async (person) => await callFunction(app, { lease, person }, request)
       ),
+    // The frame's client has its answer, which says what it came to: core
+    // forgets the submission from the person's recovery index (spec
+    // 10.7.8). Best effort: a row left only shows once as settled.
+    submissionReceived: async (request) => {
+      await forget(hold, request);
+    },
     streamFunction: async (what, request, onFrame, onEnded) =>
       await plain(
         async (person) =>
@@ -793,6 +810,11 @@ export const previewTarget = (
         async ({ chats }) =>
           await chats.previewFunction(chatId, app, revision, request)
       ),
+    // A preview's calls run on its draft's own store, and core keeps no
+    // recovery index of them.
+    submissionReceived: async () => {
+      await Promise.resolve();
+    },
     // A streaming action runs in the draft's preview too, on its draft
     // release and store (core's sealed-previews.ts), relayed over the
     // page's connection while the person may still have it.

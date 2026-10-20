@@ -629,6 +629,54 @@ describe("the session client and lost access", () => {
   });
 });
 
+/** The code a call failed with, or "ok". */
+const codeOf = async (send: () => Promise<unknown>): Promise<string> => {
+  try {
+    await send();
+    return "ok";
+  } catch (error) {
+    return error instanceof GraspError ? error.code : "threw";
+  }
+};
+
+describe("the session client and the host's recovery index", () => {
+  it("tells the transport it got a submission's answer once that answer says what it came to, never while it is uncertain", async () => {
+    const answers = [
+      answered(noteId),
+      failedWith("note.closed", "domain"),
+      failedWith("operation.sandbox_lost", "uncertain"),
+    ];
+    const received: string[] = [];
+    const sent: string[] = [];
+    const client = new GraspClient({
+      call: async (request) => {
+        sent.push(request);
+        return await Promise.resolve(answers[sent.length - 1]);
+      },
+      received: (request) => {
+        received.push(request);
+      },
+      watch: unwatched,
+    });
+    const outcomes = [
+      await codeOf(
+        async () => await client.mutation(api.notes.create, { title: "Saved" })
+      ),
+      await codeOf(
+        async () => await client.mutation(api.notes.create, { title: "Closed" })
+      ),
+      // An action the host can't tell the outcome of rejects at once, its
+      // key kept; a mutation's would be sent again.
+      await codeOf(async () => await client.action(api.notes.tally)),
+    ];
+    expect({ outcomes, received }).toStrictEqual({
+      outcomes: ["ok", "note.closed", "operation.sandbox_lost"],
+      // The very requests sent, key and all, of the first two only.
+      received: sent.slice(0, 2),
+    });
+  });
+});
+
 describe("the session client and a change it confirmed", () => {
   it("answers a query asked after a confirmed change with a read sent after it, not one under way since before", async () => {
     const { promise: held, resolve: release } = Promise.withResolvers<null>();

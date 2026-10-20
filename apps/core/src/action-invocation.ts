@@ -13,6 +13,7 @@ import {
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import type {
   AppErrorPayload,
+  ErrorCategory,
   OperationResult,
 } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -103,6 +104,14 @@ export interface InvocationOpen {
   /** Only read what already runs or ran; never start it. */
   readonly attach: boolean;
 }
+
+/** Where an invocation stands (`ActionInvocation.standing`), never its result. */
+export type InvocationStanding =
+  | { readonly state: "running" }
+  | { readonly state: "succeeded" }
+  | { readonly state: "failed"; readonly category: ErrorCategory }
+  | { readonly state: "expired" }
+  | { readonly state: "none" };
 
 /** What a reader is sent, one JSON line each. */
 export type InvocationFrame =
@@ -378,6 +387,30 @@ export class ActionInvocation extends DurableObject<Env> {
     await Promise.resolve();
     const record = this.#record();
     return record?.owner === userId ? record.version : undefined;
+  }
+
+  /**
+   * Where the invocation of `userId` stands, its result left out (spec
+   * 10.7.8): a look that starts nothing and changes nothing. A settled
+   * one says only whether it succeeded, and a failure's category, never
+   * what it answered; anyone but the person it runs for gets `none`, as
+   * for no invocation.
+   */
+  async standing(userId: string): Promise<InvocationStanding> {
+    await Promise.resolve();
+    const record = this.#record();
+    if (record?.owner !== userId) {
+      return { state: "none" };
+    }
+    if (record.state === "running") {
+      return { state: "running" };
+    }
+    if (record.state === "expired") {
+      return { state: "expired" };
+    }
+    return record.result.ok
+      ? { state: "succeeded" }
+      : { state: "failed", category: record.result.error.category };
   }
 
   /**
@@ -704,7 +737,12 @@ export class ActionInvocation extends DurableObject<Env> {
 export const invocationName = async (
   userId: string,
   app: string,
-  call: FunctionRequest,
+  call: {
+    readonly reference: Pick<
+      FunctionRequest["reference"],
+      "contractId" | "fingerprint"
+    >;
+  },
   key: string,
   streaming: boolean
 ): Promise<string> => {
