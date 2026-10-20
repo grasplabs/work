@@ -33,14 +33,17 @@
     "@secretlint/secretlint-rule-preset-recommend": "catalog:",
     "@shadcn/lint": "catalog:",
     "@types/node": "catalog:",
+    "@types/semver": "catalog:",
     "aws4fetch": "catalog:",
     "capnweb": "catalog:",
     "secretlint": "catalog:",
+    "semver": "catalog:",
     "typescript": "catalog:",
     "ultracite": "catalog:",
     "vite-plus": "catalog:",
     "workerd": "catalog:",
     "wrangler": "catalog:",
+    "yaml": "catalog:",
     "zod": "catalog:"
   },
   "commitlint": {

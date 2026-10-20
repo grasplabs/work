@@ -1,15 +1,16 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
 import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -23,12 +24,17 @@ import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { canonicalText } from "@grasp-os/shared/json";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { parse } from "yaml";
 import { z } from "zod";
 
 import { steeringCases } from "../apps/core/test/steering-cases.ts";
 import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
 import notes from "../packages/sdk/test/notes/app.ts";
-import { packageProject, PackagingError } from "./package-definition-lib.ts";
+import {
+  packageProject,
+  PackagingError,
+  readCatalog,
+} from "./package-definition-lib.ts";
 
 // Packaging a definition package into a standalone project
 // (package-definition-lib.ts). The package is the SDK's Notes fixture, an
@@ -198,7 +204,8 @@ const definitionOf = (
 });
 
 /** A locked package, as an App's lock records it. */
-const integrity = `sha512-${"A".repeat(86)}==`;
+/** The integrity `locked` gives every package. */
+const lockedIntegrity = `sha512-${"A".repeat(86)}==`;
 const locked = (
   name: string,
   version: string,
@@ -207,7 +214,7 @@ const locked = (
 ) => ({
   name,
   version,
-  integrity,
+  integrity: lockedIntegrity,
   license,
   publishedAt: "2026-01-01T00:00:00.000Z",
   dependencies,
@@ -215,7 +222,8 @@ const locked = (
 });
 const lockOf = (
   direct: Record<string, string>,
-  packages: ReturnType<typeof locked>[]
+  packages: ReturnType<typeof locked>[],
+  platformPeers: Record<string, string> = {}
 ) =>
   JSON.stringify({
     lockfileVersion: 1,
@@ -224,7 +232,7 @@ const lockOf = (
       Object.entries(direct).map(([name, version]) => [name, `^${version}`])
     ),
     direct,
-    platformPeers: {},
+    platformPeers,
     targets: {},
     packages: Object.fromEntries(
       packages.map((entry) => [`${entry.name}@${entry.version}`, entry])
@@ -259,6 +267,94 @@ const packageJsonSchema = z.object({
 });
 
 const exact = /^\d+\.\d+\.\d+$/u;
+const exactOrPrerelease =
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
+const sha512 = /^sha512-[A-Za-z0-9+/]{86}==$/u;
+
+/** The integrity the checkout's lockfile pins `key` (`name@version`) with. */
+const kitIntegrity = (key: string): string =>
+  z
+    .object({
+      packages: z.record(
+        z.string(),
+        z.object({ resolution: z.object({ integrity: z.string() }) })
+      ),
+    })
+    .parse(parse(readFileSync(path.join(ROOT, "pnpm-lock.yaml"), "utf-8")))
+    .packages[key]?.resolution.integrity ?? "";
+
+/** What a test reads of a project's pnpm-lock.yaml. */
+const lockfileOf = (out: string) =>
+  z
+    .object({
+      importers: z.record(
+        z.string(),
+        z.object({
+          dependencies: z
+            .record(z.string(), z.object({ version: z.string() }))
+            .optional(),
+        })
+      ),
+      packages: z.record(
+        z.string(),
+        z.object({ resolution: z.object({ integrity: z.string() }) })
+      ),
+      snapshots: z.record(
+        z.string(),
+        z.object({ dependencies: z.record(z.string(), z.string()).optional() })
+      ),
+    })
+    .parse(parse(readFileSync(path.join(out, "pnpm-lock.yaml"), "utf-8")));
+
+/** What meets `peer` for the kit's package `name`, at any version. */
+const metFor = (
+  lockfile: ReturnType<typeof lockfileOf>,
+  name: string,
+  peer: string
+): (string | undefined)[] =>
+  Object.entries(lockfile.snapshots)
+    .filter(([key]) => key.startsWith(`${name}@`))
+    .map(([, snapshot]) => snapshot.dependencies?.[peer]);
+
+/**
+ * The project's install as a developer runs it, by the checkout's own
+ * package manager, from the store the checkout installed into; pnpm's
+ * re-check of each pin against the registry's publish times is skipped,
+ * as it needs the registry: the checkout made those pins.
+ */
+const installIn = async (
+  out: string,
+  args: string[]
+): Promise<{ status: number | null; output: string }> => {
+  // Not a CI run, which pnpm freezes on its own: only the project's own
+  // settings may freeze an install here.
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([name]) => !name.toLowerCase().startsWith("npm_")
+      )
+    ),
+    CI: "false",
+  };
+  const passed = args.includes("--") ? args : [...args, "--"];
+  const child = spawn(
+    path.join(ROOT, "node_modules/.bin/vp"),
+    ["install", ...passed, "--trust-lockfile"],
+    { cwd: out, env }
+  );
+  let output = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  const [status] = z
+    .tuple([z.number().nullable()])
+    .rest(z.unknown())
+    .parse(await once(child, "close"));
+  return { status, output };
+};
 
 /** The TypeScript the platform checks App code with: the compiler's. */
 const platformTypescript = z
@@ -274,67 +370,6 @@ const platformTypescript = z
       )
     )
   ).version;
-
-/** Where the checkout installed packages, as candidates for a project's. */
-const installedIn = [
-  "packages/compiler",
-  "packages/ui",
-  "packages/sdk",
-  "packages/shared",
-  ".",
-].map((dir) => path.join(ROOT, dir, "node_modules"));
-
-const versionOf = (dir: string): string | undefined => {
-  try {
-    return z
-      .object({ version: z.string() })
-      .parse(JSON.parse(readFileSync(path.join(dir, "package.json"), "utf-8")))
-      .version;
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * Installs the project's dependencies as a package manager would lay them
- * out, from the copies the checkout already holds at exactly the version
- * pinned: nothing is fetched. Answers what it couldn't find.
- */
-const installed = (out: string): string[] => {
-  const read = (file: string): Record<string, string> =>
-    z
-      .object({
-        dependencies: z.record(z.string(), z.string()).default({}),
-        devDependencies: z.record(z.string(), z.string()).default({}),
-      })
-      .transform(({ dependencies, devDependencies }) => ({
-        ...dependencies,
-        ...devDependencies,
-      }))
-      .parse(JSON.parse(readFileSync(path.join(out, file), "utf-8")));
-  const wanted = {
-    ...read("vendor/@grasp-os/shared/package.json"),
-    ...read("vendor/@grasp-os/sdk/package.json"),
-    ...read("vendor/@grasp-os/ui/package.json"),
-    ...read("package.json"),
-  };
-  const missing: string[] = [];
-  for (const [name, version] of Object.entries(wanted)) {
-    const target = path.join(out, "node_modules", name);
-    mkdirSync(path.dirname(target), { recursive: true });
-    const from = version.startsWith("file:")
-      ? path.join(out, version.slice("file:".length))
-      : installedIn
-          .map((dir) => path.join(dir, name))
-          .find((candidate) => versionOf(candidate) === version);
-    if (from === undefined) {
-      missing.push(`${name}@${version}`);
-    } else {
-      symlinkSync(realpathSync(from), target);
-    }
-  }
-  return missing;
-};
 
 const problemLine = /^(?<file>[^(:]+)(?:\(\d+,\d+\))?: error (?<code>\S+):/u;
 
@@ -391,7 +426,9 @@ describe(
         ...Object.entries(root.dependencies),
         ...Object.entries(root.devDependencies),
         ...vendored.flatMap(({ dependencies }) => Object.entries(dependencies)),
-      ].filter(([, version]) => !version.startsWith("file:"));
+      ].filter(([, version]) => !version.startsWith("link:"));
+      const lockfile = lockfileOf(out);
+      const lockedKeys = Object.keys(lockfile.packages);
       const notices = read("THIRD-PARTY-NOTICES.md");
 
       expect({
@@ -418,6 +455,16 @@ describe(
           read("LICENSES/AGPL-3.0-only.txt") ===
           readFileSync(path.join(ROOT, "LICENSE"), "utf-8"),
         fetched: fetches.mock.calls.length,
+        withoutIntegrity: Object.entries(lockfile.packages)
+          .filter(([, entry]) => !sha512.test(entry.resolution.integrity))
+          .map(([key]) => key),
+        notExactlyLocked: lockedKeys.filter(
+          (key) => !exactOrPrerelease.test(key.slice(key.lastIndexOf("@") + 1))
+        ),
+        unlocked: versions
+          .map(([name, version]) => `${name}@${version}`)
+          .filter((key) => !lockedKeys.includes(key)),
+        importers: Object.keys(lockfile.importers).toSorted(),
       }).toStrictEqual({
         app: [
           "app/.grasp/contracts.json",
@@ -450,13 +497,22 @@ describe(
         unnoticed: [],
         licence: true,
         fetched: 0,
+        withoutIntegrity: [],
+        notExactlyLocked: [],
+        unlocked: [],
+        importers: [
+          ".",
+          "vendor/@grasp-os/sdk",
+          "vendor/@grasp-os/shared",
+          "vendor/@grasp-os/ui",
+        ],
       });
     });
 
     it("type-checks as the platform does: what it accepts passes, with the platform's TypeScript, and what it refuses fails", async () => {
       const { out } = scratch();
       await packaged(definitionOf(), out);
-      const missing = installed(out);
+      const install = await installIn(out, ["--frozen-lockfile", "--offline"]);
       const project = packageJsonSchema.parse(
         JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
       );
@@ -512,7 +568,7 @@ describe(
       const failedBuild = projectCheck(out);
 
       expect({
-        missing,
+        install: install.status,
         typescript: project.devDependencies.typescript,
         accepted,
         failedCheck,
@@ -524,7 +580,7 @@ describe(
             .filter((code) => code !== "steering"),
         },
       }).toStrictEqual({
-        missing: [],
+        install: 0,
         typescript: platformTypescript,
         accepted: { status: 0, problems: {} },
         failedCheck: {
@@ -543,6 +599,90 @@ describe(
           files: Object.keys(steering).toSorted(),
           notSteering: [],
         },
+      });
+    });
+
+    it("installs from its lockfile alone, frozen and offline from what the checkout installed, and refuses a manifest that drifted from it", async () => {
+      const { out } = scratch();
+      await packaged(definitionOf(), out);
+      const install = await installIn(out, ["--frozen-lockfile", "--offline"]);
+      // A manifest that names what the lockfile doesn't is refused, not
+      // resolved, by a plain install: the project's own settings freeze
+      // its installs to its lockfile.
+      const manifest = z
+        .looseObject({ dependencies: z.record(z.string(), z.string()) })
+        .parse(
+          JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
+        );
+      writeFileSync(
+        path.join(out, "package.json"),
+        JSON.stringify({
+          ...manifest,
+          dependencies: { ...manifest.dependencies, "left-pad": "1.3.0" },
+        })
+      );
+      const drifted = await installIn(out, ["--offline"]);
+      expect({
+        install: install.status,
+        drifted: {
+          status: drifted.status === 0 ? "installed" : "refused",
+          why: drifted.output.includes("ERR_PNPM_OUTDATED_LOCKFILE"),
+        },
+      }).toStrictEqual({
+        install: 0,
+        drifted: { status: "refused", why: true },
+      });
+    });
+
+    it("refuses at install a tarball other than the one its lockfile pins", async () => {
+      const { out } = scratch();
+      await packaged(definitionOf(), out);
+      // The registry serves something else for one pinned package: here a
+      // registry of the test's own, and a pin to a tarball it doesn't
+      // have, so the install fetches it rather than reusing the store.
+      const served: string[] = [];
+      const registry = createServer((request, response) => {
+        served.push(request.url ?? "");
+        if (request.url?.endsWith(".tgz") === true) {
+          response.end("not the pinned tarball");
+        } else {
+          response.writeHead(404).end();
+        }
+      });
+      registry.listen(0, "127.0.0.1");
+      await once(registry, "listening");
+      const address = registry.address();
+      const port =
+        typeof address === "object" && address !== null ? address.port : 0;
+      const lockText = readFileSync(path.join(out, "pnpm-lock.yaml"), "utf-8");
+      const zodKey = Object.keys(lockfileOf(out).packages).find((key) =>
+        key.startsWith("zod@")
+      );
+      const tampered = lockText.replace(
+        new RegExp(
+          `("${zodKey}": \\{\\n\\s+"resolution": \\{\\n\\s+"integrity": ")[^"]+`,
+          "u"
+        ),
+        `$1sha512-${"A".repeat(86)}==`
+      );
+      writeFileSync(path.join(out, "pnpm-lock.yaml"), tampered);
+      const install = await installIn(out, [
+        "--frozen-lockfile",
+        "--",
+        `--registry=http://127.0.0.1:${port}/`,
+        "--fetch-retries=0",
+      ]);
+      registry.close();
+      expect({
+        tampered: tampered !== lockText,
+        status: install.status === 0 ? "installed" : "refused",
+        why: install.output.includes("ERR_PNPM_TARBALL_INTEGRITY"),
+        fetched: served.filter((url) => url.endsWith(".tgz")),
+      }).toStrictEqual({
+        tampered: true,
+        status: "refused",
+        why: true,
+        fetched: [`/zod/-/${zodKey?.replace("@", "-")}.tgz`],
       });
     });
 
@@ -568,6 +708,16 @@ describe(
         "operations/.GIT/hooks/pre-commit",
         ".npmrc",
         ".vscode/settings.json",
+        // What a package manager run inside app/ would read or install into.
+        "pnpm-workspace.yaml",
+        "operations/PNPM-LOCK.yaml",
+        ".pnpmfile.cjs",
+        ".pnpmfile.mjs",
+        ".pnpmfile.js",
+        "node_modules/left-pad/index.js",
+        ".yarnrc",
+        ".yarnrc.yml",
+        "bunfig.toml",
         `${"a".repeat(256)}.ts`,
       ];
       const outcomes: Record<string, string> = {};
@@ -617,17 +767,18 @@ describe(
         out
       );
       const project = z
-        .object({
-          dependencies: z.record(z.string(), z.string()),
-          overrides: z.record(z.string(), z.record(z.string(), z.string())),
-        })
+        .object({ dependencies: z.record(z.string(), z.string()) })
         .parse(
           JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
         );
+      const lockfile = lockfileOf(out);
       const notices = readFileSync(
         path.join(out, "THIRD-PARTY-NOTICES.md"),
         "utf-8"
       );
+      const zod = readCatalog(
+        readFileSync(path.join(ROOT, "pnpm-workspace.yaml"), "utf-8")
+      ).get("zod");
       const refused = await Promise.all(
         [
           lockOf({ "@grasp-os/sdk": "9.9.9" }, [
@@ -645,6 +796,31 @@ describe(
             locked("date-kit", "1.2.0", "MIT", { "@grasp-os/shared": "1.0.0" }),
             locked("@grasp-os/shared", "1.0.0", "MIT"),
           ]),
+          // A peer its graph met at one version, the project at another.
+          lockOf({ "date-kit": "1.2.0", "tz-rules": "3.2.0" }, [
+            {
+              ...locked("date-kit", "1.2.0", "MIT"),
+              peers: {
+                "tz-rules": { range: "^3.0.0", resolved: "3.1.0", by: "graph" },
+              },
+            },
+            locked("tz-rules", "3.1.0", "MIT"),
+            locked("tz-rules", "3.2.0", "MIT"),
+          ]),
+          // The tarball the kit installs, with other dependencies.
+          lockOf({ "date-kit": "1.2.0" }, [
+            locked("date-kit", "1.2.0", "MIT", { zod: zod ?? "" }),
+            {
+              ...locked("zod", zod ?? "", "MIT", { "left-pad": "1.3.0" }),
+              integrity: kitIntegrity(`zod@${zod ?? ""}`),
+            },
+            locked("left-pad", "1.3.0", "WTFPL"),
+          ]),
+          // The version of a package the kit installs, as another tarball.
+          lockOf({ "date-kit": "1.2.0" }, [
+            locked("date-kit", "1.2.0", "MIT", { zod: zod ?? "" }),
+            locked("zod", zod ?? "", "MIT"),
+          ]),
         ].map(
           async (lock) =>
             await refusalOf(packaged(withLock(lock), scratch().out))
@@ -652,7 +828,15 @@ describe(
       );
       expect({
         dateKit: project.dependencies["date-kit"],
-        overrides: project.overrides,
+        locked: Object.fromEntries(
+          ["date-kit@1.2.0", "tz-data@2.0.1", "tz-rules@3.1.0"].map((key) => [
+            key,
+            {
+              integrity: lockfile.packages[key]?.resolution.integrity,
+              dependencies: lockfile.snapshots[key]?.dependencies ?? {},
+            },
+          ])
+        ),
         notices: notices
           .split("\n")
           .filter(
@@ -661,11 +845,31 @@ describe(
         refused,
       }).toStrictEqual({
         dateKit: "1.2.0",
-        overrides: {
-          "date-kit@1.2.0": { "tz-data": "2.0.1", "tz-rules": "3.1.0" },
+        locked: {
+          // Its peers met as the lock met them: one by the graph, React by
+          // the project's own.
+          "date-kit@1.2.0": {
+            integrity: lockedIntegrity,
+            dependencies: {
+              react: lockfile.importers["."]?.dependencies?.react?.version,
+              "tz-data": "2.0.1",
+              "tz-rules": "3.1.0",
+            },
+          },
+          "tz-data@2.0.1": { integrity: lockedIntegrity, dependencies: {} },
+          "tz-rules@3.1.0": { integrity: lockedIntegrity, dependencies: {} },
         },
         notices: ["| date-kit | 1.2.0 | unknown | the App's lock |"],
-        refused: ["refused", "refused", "refused", "refused", "refused"],
+        refused: [
+          "refused",
+          "refused",
+          "refused",
+          "refused",
+          "refused",
+          "refused",
+          "refused",
+          "refused",
+        ],
       });
     });
 
@@ -698,13 +902,11 @@ describe(
       const { out } = scratch();
       await packaged(withPackages(sealed(dateKit("1.2.0"))), out);
       const project = z
-        .object({
-          dependencies: z.record(z.string(), z.string()),
-          overrides: z.record(z.string(), z.record(z.string(), z.string())),
-        })
+        .object({ dependencies: z.record(z.string(), z.string()) })
         .parse(
           JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8"))
         );
+      const lockfile = lockfileOf(out);
       const recorded = z
         .object({
           workflows: z.record(z.string(), z.object({ packages: z.unknown() })),
@@ -756,7 +958,7 @@ describe(
       };
       expect({
         dateKit: project.dependencies["date-kit"],
-        overrides: project.overrides,
+        dependencies: lockfile.snapshots["date-kit@1.2.0"]?.dependencies,
         recorded: recorded.workflows["workspace/greet/1.0.0"]?.packages,
         notices: notices
           .split("\n")
@@ -764,7 +966,7 @@ describe(
         refusals,
       }).toStrictEqual({
         dateKit: "1.2.0",
-        overrides: { "date-kit@1.2.0": { "tz-data": "2.0.1" } },
+        dependencies: { "tz-data": "2.0.1" },
         recorded: { graphHash: hash("9"), entries: ["date-kit"] },
         notices: ["| date-kit | 1.2.0 | MIT | workspace/greet/1.0.0's lock |"],
         refusals: {
@@ -814,6 +1016,236 @@ describe(
       });
     });
 
+    it("meets the kit's peers only from the kit, a lock's as its lock met them, and refuses a peer outside its range or a platform it wasn't resolved against", async () => {
+      const withLock = (lock: string) =>
+        definitionOf({
+          ...notesFiles(),
+          "package.json": JSON.stringify({
+            dependencies: Object.fromEntries(
+              Object.keys(
+                z
+                  .object({ direct: z.record(z.string(), z.string()) })
+                  .parse(JSON.parse(lock)).direct
+              ).map((name) => [name, "*"])
+            ),
+          }),
+          "grasp.lock.json": lock,
+        });
+      const lockfileFor = async (lock: string) => {
+        const { out } = scratch();
+        await packaged(withLock(lock), out);
+        return lockfileOf(out);
+      };
+      // An App's own versions of packages the kit's packages take as
+      // optional peers: never what meets them, not another version, nor
+      // the very one the checkout met a peer with outside the kit's graph.
+      const kit = lockfileOf(
+        await (async () => {
+          const { out } = scratch();
+          await packaged(definitionOf(), out);
+          return out;
+        })()
+      );
+      const withOwn = await lockfileFor(
+        lockOf({ "date-fns": "3.0.0", "supports-color": "10.2.2" }, [
+          locked("date-fns", "3.0.0", "MIT"),
+          {
+            ...locked("supports-color", "10.2.2", "MIT"),
+            integrity: kitIntegrity("supports-color@10.2.2"),
+          },
+        ])
+      );
+      const peered = (peers: Record<string, unknown>, platformPeers = {}) =>
+        lockOf(
+          { "date-kit": "1.2.0" },
+          [
+            { ...locked("date-kit", "1.2.0", "MIT"), peers },
+            locked("tz-rules", "3.1.0", "MIT"),
+          ],
+          platformPeers
+        );
+      const refusals = {
+        platformElsewhere: await refusalOf(
+          packaged(
+            withLock(
+              peered({
+                react: { range: "^17.0.0", resolved: "17.0.2", by: "platform" },
+              })
+            ),
+            scratch().out
+          )
+        ),
+        outsideRange: await refusalOf(
+          packaged(
+            withLock(
+              peered({
+                "tz-rules": { range: "^4.0.0", resolved: "3.1.0", by: "graph" },
+              })
+            ),
+            scratch().out
+          )
+        ),
+        resolvedAgainstAnotherPlatform: await refusalOf(
+          packaged(withLock(peered({}, { react: "17.0.2" })), scratch().out)
+        ),
+        // A kit package a lock names too, its peer met in the lock's graph
+        // with a version the kit doesn't install: the project would leave
+        // it unmet.
+        kitPeerTheLockMet: await refusalOf(
+          packaged(
+            withLock(
+              lockOf({ debug: "4.4.3" }, [
+                {
+                  ...locked("debug", "4.4.3", "MIT", { ms: "2.1.3" }),
+                  integrity: kitIntegrity("debug@4.4.3"),
+                  peers: {
+                    "supports-color": {
+                      range: "*",
+                      resolved: "10.2.2",
+                      by: "graph",
+                    },
+                  },
+                },
+                {
+                  ...locked("supports-color", "10.2.2", "MIT"),
+                  integrity: kitIntegrity("supports-color@10.2.2"),
+                },
+                {
+                  ...locked("ms", "2.1.3", "MIT"),
+                  integrity: kitIntegrity("ms@2.1.3"),
+                },
+              ])
+            ),
+            scratch().out
+          )
+        ),
+      };
+      expect({
+        dateFns: metFor(withOwn, "@base-ui/react", "date-fns"),
+        supportsColor: metFor(withOwn, "debug", "supports-color"),
+        refusals,
+      }).toStrictEqual({
+        dateFns: metFor(kit, "@base-ui/react", "date-fns"),
+        supportsColor: metFor(kit, "debug", "supports-color"),
+        refusals: {
+          platformElsewhere: "refused",
+          outsideRange: "refused",
+          resolvedAgainstAnotherPlatform: "refused",
+          kitPeerTheLockMet: "refused",
+        },
+      });
+    });
+
+    it("installs an App's locked packages with their peers as the lockfile meets them, and refuses one whose tarball isn't the one pinned", async () => {
+      // The App's packages, as a registry of the test's own serves them.
+      const tarballs = new Map<string, Buffer>();
+      const tarball = (name: string, version: string, index: string) => {
+        const dir = mkdtempSync(path.join(tmpdir(), "grasp-tarball-"));
+        made.push(dir);
+        mkdirSync(path.join(dir, "package"));
+        writeFileSync(
+          path.join(dir, "package/package.json"),
+          JSON.stringify({ name, version, main: "index.js" })
+        );
+        writeFileSync(path.join(dir, "package/index.js"), index);
+        spawnSync("tar", ["-czf", "package.tgz", "-C", dir, "package"], {
+          cwd: dir,
+        });
+        const bytes = readFileSync(path.join(dir, "package.tgz"));
+        tarballs.set(`/${name}/-/${name}-${version}.tgz`, bytes);
+        return `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+      };
+      const lock = (dateKitIntegrity?: string) =>
+        lockOf({ "date-kit": "1.2.0" }, [
+          {
+            ...locked("date-kit", "1.2.0", "MIT", { "tz-data": "2.0.1" }),
+            integrity:
+              dateKitIntegrity ??
+              tarball(
+                "date-kit",
+                "1.2.0",
+                'module.exports = [require("tz-data"), require("tz-rules"), require("react").version];\n'
+              ),
+            peers: {
+              "tz-rules": { range: "^3.0.0", resolved: "3.1.0", by: "graph" },
+              react: { range: "^19.0.0", resolved: "19.3.0", by: "platform" },
+            },
+          },
+          {
+            ...locked("tz-data", "2.0.1", "MIT"),
+            integrity: tarball(
+              "tz-data",
+              "2.0.1",
+              'module.exports = "tz-data";\n'
+            ),
+          },
+          {
+            ...locked("tz-rules", "3.1.0", "MIT"),
+            integrity: tarball(
+              "tz-rules",
+              "3.1.0",
+              'module.exports = "tz-rules";\n'
+            ),
+          },
+        ]);
+      const registry = createServer((request, response) => {
+        const bytes = tarballs.get(request.url ?? "");
+        if (bytes === undefined) {
+          response.writeHead(404).end();
+        } else {
+          response.end(bytes);
+        }
+      });
+      registry.listen(0, "127.0.0.1");
+      await once(registry, "listening");
+      const address = registry.address();
+      const port =
+        typeof address === "object" && address !== null ? address.port : 0;
+      const installed = async (appLock: string) => {
+        const { out } = scratch();
+        await packaged(
+          definitionOf({
+            ...notesFiles(),
+            "package.json": JSON.stringify({
+              dependencies: { "date-kit": "^1.2.0" },
+            }),
+            "grasp.lock.json": appLock,
+          }),
+          out
+        );
+        const install = await installIn(out, [
+          "--frozen-lockfile",
+          "--",
+          `--registry=http://127.0.0.1:${port}/`,
+          "--fetch-retries=0",
+        ]);
+        const loaded = spawnSync(
+          process.execPath,
+          ["-p", 'JSON.stringify(require("date-kit"))'],
+          { cwd: out, encoding: "utf-8" }
+        );
+        return { install, loaded: loaded.stdout.trim() };
+      };
+      const accepted = await installed(lock());
+      const tampered = await installed(
+        lock(`sha512-${createHash("sha512").update("other").digest("base64")}`)
+      );
+      registry.close();
+      expect({
+        accepted: { status: accepted.install.status, loaded: accepted.loaded },
+        tampered: {
+          status: tampered.install.status === 0 ? "installed" : "refused",
+          why: tampered.install.output.includes("ERR_PNPM_TARBALL_INTEGRITY"),
+        },
+      }).toStrictEqual({
+        accepted: {
+          status: 0,
+          loaded: JSON.stringify(["tz-data", "tz-rules", "19.3.0"]),
+        },
+        tampered: { status: "refused", why: true },
+      });
+    });
+
     it("renames the finished project onto an empty --out and leaves nothing beside it", async () => {
       const { dir, out } = scratch();
       mkdirSync(out);
@@ -830,6 +1262,8 @@ describe(
           "grasp",
           "grasp-project.json",
           "package.json",
+          "pnpm-lock.yaml",
+          "pnpm-workspace.yaml",
           "tsconfig.json",
           "vendor",
           "workflows",

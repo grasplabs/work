@@ -13,7 +13,9 @@
  *   (`safePath`): relative, `/` separated, at most 255 bytes a segment, no
  *   empty, `.` or `..` segment, no separator, drive, colon or control
  *   character, no trailing dot or space, no name Windows reserves, and no
- *   `.git`, `.npmrc` or `.vscode`; and each lands inside its subtree once
+ *   a tool's or package manager's file or folder (`.git`, `.npmrc`,
+ *   `.vscode`, `node_modules`, a pnpmfile, pnpm's, Yarn's or Bun's
+ *   settings); and each lands inside its subtree once
  *   resolved. Two paths the same once folded (NFC, full case folding) are
  *   refused, as is an App file where the references are generated.
  * - It writes through something already there, or leaves half a project:
@@ -27,19 +29,18 @@
  *   refused.
  * - Packages are fetched that nothing pinned, or replace one the project
  *   pins, or the network is reached: nothing here makes a network call.
- *   What is pinned exactly: the App's direct dependencies and, as npm
- *   `overrides`, each of its locked packages' dependencies, from its own
- *   lock, and the same of each workflow version's approved packages,
- *   from the lock its entry carries; two locks that pin one package at
- *   different versions are refused, as is a workflow that imports
- *   packages without a lock, since a project installs one of each
- *   (GRA-737); the vendored packages' and the project's own direct
- *   dependencies, from the catalog. What isn't: the catalog packages' own
- *   dependencies, which the package manager resolves at install, and
- *   integrity, which only a lockfile carries. A lock that names a package
- *   the project pins itself (Grasp's scope, React, the type-checker),
- *   anywhere in its graph but its peers, is refused. Installing is the
- *   developer's step, after.
+ *   Every package the project installs is pinned, exactly and with its
+ *   integrity, in its pnpm-lock.yaml (package-definition-lockfile.ts,
+ *   GRA-723): the App's and each workflow version's approved packages
+ *   from their own locks (GRA-737), the vendored packages' and the
+ *   project's own, transitive ones included, from the checkout's
+ *   lockfile; and its installs are frozen to it. Two locks that pin one
+ *   package at different versions, or one package with other
+ *   dependencies, are refused, as is a workflow that imports packages
+ *   without a lock, since a project installs one of each. A lock that
+ *   names a package the project pins itself (Grasp's scope, React, the
+ *   type-checker), anywhere in its graph but its peers, is refused.
+ *   Installing is the developer's step, after.
  * - Code from the package runs: none does. The references are generated
  *   from the registration as data (`generateModules`).
  * - Licences: the vendored packages ship with their AGPL-3.0 text, and the
@@ -91,6 +92,11 @@ import {
   workflowTarget,
 } from "../packages/compiler/src/type-check.ts";
 import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
+import {
+  LockfileError,
+  projectLockfile,
+} from "./package-definition-lockfile.ts";
+import type { Importer, LockfileInput } from "./package-definition-lockfile.ts";
 
 /** The workspace packages a project vendors, each with what it depends on. */
 const vendored = ["shared", "sdk", "ui"] as const;
@@ -124,11 +130,25 @@ const workflowKeyPattern =
 const forbiddenCharacters = /[\\/:*?"<>|\u0000-\u001F\u007F]/u;
 /** Names Windows reserves for devices, with or without an extension. */
 const reservedName = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/u;
-/** Segments that configure a tool or repository when written anywhere. */
+/**
+ * Segments that configure a tool or repository when written anywhere, or
+ * that a package manager reads or installs into: a package manager run
+ * inside `app/` would load a planted pnpmfile, which runs code, and its
+ * settings over the project's own.
+ */
 const toolSegments: ReadonlySet<string> = new Set([
   ".git",
   ".npmrc",
   ".vscode",
+  "pnpm-workspace.yaml",
+  "pnpm-lock.yaml",
+  ".pnpmfile.cjs",
+  ".pnpmfile.mjs",
+  ".pnpmfile.js",
+  "node_modules",
+  ".yarnrc",
+  ".yarnrc.yml",
+  "bunfig.toml",
 ]);
 const encoder = new TextEncoder();
 
@@ -144,7 +164,7 @@ export const folded = (text: string): string =>
  * at most 512 characters, refusing anything else, naming `where`. No
  * segment is empty, `.` or `..`; holds a separator, colon, character
  * Windows reserves or control character; ends in a dot or space; is a
- * name Windows reserves for a device; is `.git`, `.npmrc` or `.vscode`
+ * name Windows reserves for a device; is one of `toolSegments`
  * in any case; or takes more than 255 bytes.
  */
 export const safePath = (relative: string, where: string): string => {
@@ -440,9 +460,9 @@ const declaredDependenciesSchema = z.object({
 interface LockPins {
   readonly direct: Record<string, string>;
   /**
-   * npm `overrides`: for each locked package, by `<name>@<version>`, the
-   * exact version of each of its dependencies and of each peer met within
-   * its graph, as the lock resolved them.
+   * For each locked package, by `<name>@<version>`, the exact version of
+   * each of its dependencies and of each peer met within its graph, as
+   * the lock resolved them: two locks must agree on them.
    */
   readonly overrides: Record<string, Record<string, string>>;
 }
@@ -469,7 +489,7 @@ const ownedByProject = (name: string): boolean =>
 
 /**
  * What `lock`, `owner`'s, pins: its direct dependencies exactly as it
- * resolved them, and each locked package's dependencies as overrides, each
+ * resolved them, and each locked package's dependencies, each
  * direct one in the notices. A lock that names one the project pins itself
  * (the vendored packages, React, the type-checker) is refused: it would
  * swap it for whatever the registry serves.
@@ -619,7 +639,7 @@ const pinnedDependenciesOf = (
   )) {
     const sibling = dependency.replace("@grasp-os/", "");
     if (spec === "workspace:*" && vendored.some((each) => each === sibling)) {
-      pinnedDependencies[dependency] = `file:../${sibling}`;
+      pinnedDependencies[dependency] = `link:../${sibling}`;
     } else if (spec === "catalog:") {
       const version = pinned(vendoring.catalog, dependency);
       pinnedDependencies[dependency] = version;
@@ -643,7 +663,7 @@ const planVendored = (
   project: Plan,
   name: (typeof vendored)[number],
   vendoring: Vendoring
-): void => {
+): Importer => {
   const dir = path.join(vendoring.repo, "packages", name);
   const manifest = packageJsonSchema.parse(
     JSON.parse(readFileSync(path.join(dir, "package.json"), "utf-8"))
@@ -656,6 +676,7 @@ const planVendored = (
     )
   );
   const base = `vendor/@grasp-os/${name}`;
+  const dependencies = pinnedDependenciesOf(name, manifest, vendoring);
   project.add(
     `${base}/package.json`,
     jsonText({
@@ -665,7 +686,7 @@ const planVendored = (
       license: manifest.license,
       type: manifest.type,
       exports,
-      dependencies: pinnedDependenciesOf(name, manifest, vendoring),
+      dependencies,
       ...(manifest.peerDependencies === undefined
         ? {}
         : { peerDependencies: manifest.peerDependencies }),
@@ -677,6 +698,11 @@ const planVendored = (
       readFileSync(path.join(dir, "src", file), "utf-8")
     );
   }
+  return {
+    dependencies,
+    devDependencies: {},
+    peerDependencies: manifest.peerDependencies ?? {},
+  };
 };
 
 /**
@@ -829,6 +855,53 @@ const noticesText = (notices: readonly Notice[]): string => {
   ].join("\n");
 };
 
+/** `projectLockfile`, its refusals packaging's. */
+const lockfileOf = (input: LockfileInput): string => {
+  try {
+    return projectLockfile(input);
+  } catch (error) {
+    if (error instanceof LockfileError) {
+      return refuse(error.message);
+    }
+    throw error;
+  }
+};
+
+/**
+ * A `preinstall` that fails unless pnpm runs the install, by the user
+ * agent every package manager gives the scripts it runs.
+ */
+const onlyPnpm =
+  "node -e \"process.exitCode = /^pnpm\\//.test(process.env.npm_config_user_agent ?? '') ? 0 : 1\"";
+
+const minimumReleaseAgePattern = /^minimumReleaseAge:\s*(?<minutes>\d+)\s*$/mu;
+
+/** How long the checkout waits before it installs a new version, in minutes. */
+const minimumReleaseAgeOf = (workspace: string): number => {
+  const minutes = minimumReleaseAgePattern.exec(workspace)?.groups?.minutes;
+  return minutes === undefined
+    ? refuse("The checkout sets no minimumReleaseAge.")
+    : Number(minutes);
+};
+
+/** The checkout's package manager, exactly, as its package.json pins it. */
+const packageManagerOf = (repo: string): string =>
+  z
+    .object({ packageManager: z.string().startsWith("pnpm@") })
+    .parse(JSON.parse(readFileSync(path.join(repo, "package.json"), "utf-8")))
+    .packageManager;
+
+/** The App's lock, as the lockfile reads it, when it carries one. */
+const appLock = (
+  files: Readonly<Record<string, string>>
+): { owner: string; lock: GraspLock }[] => {
+  const text = files["grasp.lock.json"];
+  // `appDependencies` read it already, and refused what it doesn't read.
+  return text === undefined
+    ? []
+    : [{ owner: "the App", lock: graspLockSchema.parse(JSON.parse(text)) }];
+};
+
 /** The project's files for `input`, planned and checked; nothing written. */
 export const planProject = async (
   input: PackagingInput
@@ -854,8 +927,13 @@ export const planProject = async (
     version: `0.0.0-grasp.${input.commit.slice(0, 12)}`,
     notices,
   };
+  const importers: Record<string, Importer> = {};
   for (const name of vendored) {
-    planVendored(project, name, vendoring);
+    importers[`vendor/@grasp-os/${name}`] = planVendored(
+      project,
+      name,
+      vendoring
+    );
   }
   const typescriptVersion = platformTypescript(input.repo, catalogText);
   for (const name of [...projectDependencies, ...projectDevDependencies]) {
@@ -869,6 +947,32 @@ export const planProject = async (
   }
   const pinnedAll = (names: readonly string[]) =>
     Object.fromEntries(names.map((name) => [name, pinned(catalog, name)]));
+  const root: Importer = {
+    dependencies: {
+      ...Object.fromEntries(
+        vendored.map((name) => [
+          `@grasp-os/${name}`,
+          `link:vendor/@grasp-os/${name}`,
+        ])
+      ),
+      ...pins.direct,
+      ...pinnedAll(projectDependencies),
+    },
+    devDependencies: {
+      ...pinnedAll(projectDevDependencies),
+      typescript: typescriptVersion,
+    },
+    peerDependencies: {},
+  };
+  importers["."] = root;
+  // The project is pnpm's, as the checkout is: the same package manager,
+  // exactly, installing only what its lockfile pins (package-definition-
+  // lockfile.ts). Its own packages are linked by `link:`, which npm
+  // refuses. Yarn and Bun accept it and would ignore the lockfile: its
+  // `preinstall` fails any install that isn't pnpm's. Not
+  // `devEngines.packageManager`: with it, pnpm 11 also locks its own
+  // binaries for every platform, which the checkout's lockfile doesn't
+  // hold, so a frozen install couldn't start.
   project.add(
     "package.json",
     jsonText({
@@ -879,27 +983,52 @@ export const planProject = async (
       // Its check runs as TypeScript, which Node strips without a flag
       // from 22.18.
       engines: { node: ">=22.18" },
+      packageManager: packageManagerOf(input.repo),
       scripts: {
+        preinstall: onlyPnpm,
         typecheck: "node grasp/check.ts",
         build: "node grasp/check.ts",
       },
-      dependencies: {
-        ...Object.fromEntries(
-          vendored.map((name) => [
-            `@grasp-os/${name}`,
-            `file:./vendor/@grasp-os/${name}`,
-          ])
-        ),
-        ...pins.direct,
-        ...pinnedAll(projectDependencies),
-      },
-      devDependencies: {
-        ...pinnedAll(projectDevDependencies),
-        typescript: typescriptVersion,
-      },
-      ...(Object.keys(pins.overrides).length === 0
-        ? {}
-        : { overrides: pins.overrides }),
+      dependencies: root.dependencies,
+      devDependencies: root.devDependencies,
+    })
+  );
+  project.add(
+    "pnpm-workspace.yaml",
+    [
+      // pnpm 11, as `packageManager` pins it, reads its settings here.
+      "# Installs only what pnpm-lock.yaml pins, never resolving anew, with",
+      "# the checkout's supply-chain settings whatever pnpm's defaults or a",
+      "# global config say.",
+      "packages:",
+      '  - "vendor/@grasp-os/*"',
+      "frozenLockfile: true",
+      `minimumReleaseAge: ${minimumReleaseAgeOf(catalogText)}`,
+      "blockExoticSubdeps: true",
+      "strictDepBuilds: true",
+      "dangerouslyAllowAllBuilds: false",
+      "allowBuilds: {}",
+      "",
+    ].join("\n")
+  );
+  project.add(
+    "pnpm-lock.yaml",
+    lockfileOf({
+      checkoutLock: readFileSync(
+        path.join(input.repo, "pnpm-lock.yaml"),
+        "utf-8"
+      ),
+      importers,
+      locks: [
+        ...appLock(definition.app.files),
+        ...Object.entries(definition.workflows).flatMap(([key, workflow]) => {
+          // `workflowDependencies` refused one with packages but no lock.
+          const lock = workflow.packages?.lock;
+          return lock === undefined || lock === null
+            ? []
+            : [{ owner: key, lock }];
+        }),
+      ],
     })
   );
   planTypeCheck(project);
