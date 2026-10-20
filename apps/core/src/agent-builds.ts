@@ -1583,8 +1583,8 @@ build: {
     /** Why the App needs them. */
     purpose: string;
     targets: ("browser" | "server" | "workflow" | "computation")[];
-    /** package.json's dependencies: each name and its version range on the npm registry. */
-    dependencies: Record<string, string>;
+    /** package.json's dependencies: each name and its version range on the npm registry, one pair each. */
+    dependencies: { name: string; range: string }[];
     /** What the App imports of them, each a package or one of its subpaths; each dependency's own name when left out. */
     entries?: string[];
   }): Promise<{
