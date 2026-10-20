@@ -510,11 +510,12 @@ const failureShown = (error: { code: string | null; message: string }) => {
 };
 
 /**
- * Where in its lifecycle a run's revision says it is: 1 queued, 2
- * running, 3 cancelling, 4 ended, whatever policy generation it is under.
+ * Where in its lifecycle a run's revision says it is: 1 queued, 2 queued
+ * with a cancel asked, 3 running, 4 running with a cancel asked, 5 ended,
+ * whatever policy generation it is under.
  */
 const stageOf = (revision: number | undefined): number | undefined =>
-  revision === undefined ? undefined : ((revision - 1) % 4) + 1;
+  revision === undefined ? undefined : ((revision - 1) % 5) + 1;
 
 /** A cancel receipt with its revision as the stage it names. */
 const staged = (receipt: unknown) => {
@@ -601,7 +602,7 @@ describe(
         again: first,
         handle: { workflowId: fixture.workflow, workflowVersion: 1 },
         shown: {
-          revision: 4,
+          revision: 5,
           output: { status: "Hello, Ada" },
           control: {
             canPause: false,
@@ -672,11 +673,11 @@ describe(
           pendingControl: null,
         },
         pause: "workflow.control_refused",
-        receipt: { kind: "cancel", state: "applied", revision: 4 },
-        resent: { kind: "cancel", state: "applied", revision: 4 },
+        receipt: { kind: "cancel", state: "applied", revision: 5 },
+        resent: { kind: "cancel", state: "applied", revision: 5 },
         settles: true,
         ended: {
-          revision: 4,
+          revision: 5,
           control: {
             canPause: false,
             canResume: false,
@@ -1033,7 +1034,7 @@ describe(
       };
       const first = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
-        expect(stageOf(first.received.at(-1)?.revision)).toBe(2);
+        expect(stageOf(first.received.at(-1)?.revision)).toBe(3);
       }, settles);
       // The same run on the same connection: one reading, shared.
       const second = await following(builder, app, lease, watch);
@@ -1069,7 +1070,7 @@ describe(
           .object({ canRun: z.boolean() })
           .safeParse(binding.received.at(-1)?.outcome).data?.canRun;
       await vi.waitFor(() => {
-        expect(stageOf(first.received.at(-1)?.revision)).toBe(2);
+        expect(stageOf(first.received.at(-1)?.revision)).toBe(3);
         expect(canRun()).toBeTruthy();
       }, settles);
       // Rebound away: the screen is told at once, nothing else needed.
@@ -1112,8 +1113,8 @@ describe(
           .filter((shown, at, all) => at === 0 || shown !== all[at - 1]),
         second: second.received.map(({ revision }) => stageOf(revision)),
       }).toStrictEqual({
-        first: [2, "workflow.run_unavailable", 2],
-        second: [2],
+        first: [3, "workflow.run_unavailable", 3],
+        second: [3],
       });
     });
 
@@ -1130,7 +1131,7 @@ describe(
       };
       const first = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
-        expect(stageOf(first.received.at(-1)?.revision)).toBe(4);
+        expect(stageOf(first.received.at(-1)?.revision)).toBe(5);
       }, settles);
       // Its details removed, as the retention sweep removes them.
       await env.DB.prepare(
@@ -1235,7 +1236,7 @@ describe(
         await vi.waitFor(() => {
           const last = watched.received.at(-1);
           expect(
-            typeof last?.outcome === "string" || stageOf(last?.revision) === 4
+            typeof last?.outcome === "string" || stageOf(last?.revision) === 5
           ).toBeTruthy();
         }, settles);
         await watched.subscription.release();
@@ -1569,8 +1570,8 @@ describe(
       }).toStrictEqual({
         same: outcomeOf(one),
         cancels: [
-          { kind: "cancel", state: "applied", revision: 4 },
-          { kind: "cancel", state: "applied", revision: 4 },
+          { kind: "cancel", state: "applied", revision: 5 },
+          { kind: "cancel", state: "applied", revision: 5 },
         ],
         receipts: ["applied"],
         reopened: false,

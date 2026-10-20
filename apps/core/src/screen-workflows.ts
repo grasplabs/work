@@ -402,11 +402,23 @@ const cancelAsked = async (env: Env, runId: string): Promise<boolean> =>
     .where(eq(workflowResourceRunControls.runId, runId))
     .get()) !== undefined;
 
-/** Where a run is in its lifecycle, each later than the one before. */
-const stages = { queued: 1, running: 2, cancelling: 3, ended: 4 } as const;
+/**
+ * Where a run is in its lifecycle, each later than the one before along
+ * every path a run takes: queued, then running or a cancel asked while
+ * queued; running, then a cancel asked; ended last. A cancel asked is a
+ * stage of its own wherever it is asked, so the snapshot it changes is a
+ * revision of its own.
+ */
+const stages = {
+  queued: 1,
+  queuedCancelling: 2,
+  running: 3,
+  runningCancelling: 4,
+  ended: 5,
+} as const;
 
 /** How many stages a policy generation holds (`revisionOf`). */
-const stagesPerGeneration = 4;
+const stagesPerGeneration = 5;
 
 /**
  * The revision of a run at `stage` of its lifecycle under its workflow's
@@ -433,9 +445,9 @@ const stageOf = (
     return stages.ended;
   }
   if (row.status === "starting") {
-    return stages.queued;
+    return cancelling ? stages.queuedCancelling : stages.queued;
   }
-  return cancelling ? stages.cancelling : stages.running;
+  return cancelling ? stages.runningCancelling : stages.running;
 };
 
 /** Workflow `id`'s policy generation now. */
@@ -654,22 +666,26 @@ const cancelOf = async (env: Env, runId: string) =>
     .get();
 
 /**
- * A cancel receipt of a run of workflow `workflowId`, as a screen is
- * answered it: admitted, under the run's cancelling revision; settled,
- * its end's.
+ * A cancel receipt of run `row`, as a screen is answered it: admitted,
+ * under the revision of the run cancelling where it is now (queued or
+ * running); settled, its end's.
  */
 const receiptAnswer = async (
   env: Env,
-  workflowId: string,
+  row: RunRow,
   state: "admitted" | "applied" | "superseded"
-): Promise<Json> => ({
-  kind: "cancel",
-  state,
-  revision: revisionOf(
-    await generationOf(env, workflowId),
-    state === "admitted" ? stages.cancelling : stages.ended
-  ),
-});
+): Promise<Json> => {
+  const generation = await generationOf(env, row.workflowResourceId);
+  const now = state === "admitted" ? await runOf(env, row.id) : undefined;
+  return {
+    kind: "cancel",
+    state,
+    revision: revisionOf(
+      generation,
+      state === "admitted" ? stageOf(now ?? row, true) : stages.ended
+    ),
+  };
+};
 
 /**
  * The control `command` asks of a run, admitted: its receipt. Only a
@@ -701,7 +717,7 @@ const controlled = async (
       if (row.status !== "cancelled") {
         throw workflowErrors.create("workflow.control_refused");
       }
-      return await receiptAnswer(env, row.workflowResourceId, "applied");
+      return await receiptAnswer(env, row, "applied");
     }
     const id = crypto.randomUUID();
     const now = Date.now();
@@ -743,7 +759,7 @@ const controlled = async (
       });
     }
   }
-  return await receiptAnswer(env, row.workflowResourceId, receipt.state);
+  return await receiptAnswer(env, row, receipt.state);
 };
 
 /**
