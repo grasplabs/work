@@ -182,6 +182,11 @@ const approvedFor = async (
     purpose: "Double the quarter's total.",
     targets: ["computation"],
     ...intent,
+    // As a resolve takes them: name and range pairs.
+    dependencies: Object.entries(intent.dependencies).map(([name, range]) => ({
+      name,
+      range,
+    })),
   });
   await decideDependency(env, admin, request.id, {
     approved: true,
