@@ -2645,7 +2645,7 @@ export const workflowResources = sqliteTable(
      * When an admin released the name of this deleted workflow, and who: it
      * no longer holds the name, which a new workflow may take. Set once, on
      * a deleted row only, and never cleared; the row is never live again
-     * (migration 0103's triggers).
+     * (migration 0104's triggers).
      */
     nameReleasedAt: timestamp("name_released_at"),
     nameReleasedBy: text("name_released_by"),
