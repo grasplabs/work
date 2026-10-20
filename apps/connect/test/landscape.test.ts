@@ -1,9 +1,12 @@
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { landscapeErrors, landscapeLimits } from "@grasp-os/shared/landscape";
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
+import { connectionTokens } from "../src/db/schema.ts";
 import {
   addConnection,
   agentFor,
@@ -277,7 +280,32 @@ describe("the landscape's connection", () => {
   });
 });
 
+/** Expires the connection's access token: its next use renews it. */
+const expired = async (connectionId: string): Promise<void> => {
+  await drizzle(env.DB)
+    .update(connectionTokens)
+    .set({ accessExpiresAt: new Date(0) })
+    .where(eq(connectionTokens.connectionId, connectionId));
+};
+
 describe("a landscape read", () => {
+  it("whose token can't be renewed says so: a grant that ran out needs an admin, a provider that didn't answer is tried again", async () => {
+    const unanswered = await connectLandscape(someone("admin"));
+    await expired(unanswered);
+    providers.state.refresh = () =>
+      new Response("Unavailable", { status: 503 });
+    const down = await codeOf(read(unanswered));
+    const ranOut = await connectLandscape(someone("admin"));
+    await expired(ranOut);
+    providers.state.refresh = () => providers.oauthError("invalid_grant");
+    const revoked = await codeOf(read(ranOut));
+    providers.state.refresh = undefined;
+    expect({ down, revoked }).toStrictEqual({
+      down: "landscape.provider_failed",
+      revoked: "landscape.inactive",
+    });
+  });
+
   it("answers each grant as bounded rows: planted names cut and kept as data, scopes only as permission names, IDs only as Entra's", async () => {
     const admin = someone("admin");
     const connectionId = await connectLandscape(admin);

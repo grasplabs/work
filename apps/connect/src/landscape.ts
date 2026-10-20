@@ -1,3 +1,4 @@
+import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import {
   landscapeErrors,
   landscapeLimits,
@@ -230,6 +231,28 @@ const grantsOf = (
   return [...merged.values()];
 };
 
+/**
+ * The connection's access token, renewed if it must be: a grant that ran
+ * out is `landscape.inactive`, for an admin to reconnect; a renewal the
+ * provider didn't answer is `landscape.provider_failed`, tried again later.
+ */
+const landscapeToken = async (
+  env: Env,
+  connectionId: string
+): Promise<string> => {
+  try {
+    return await accessTokenFor(env, connectionId);
+  } catch (error) {
+    if (connectErrors.codeOf(error) === "connect.connection_inactive") {
+      throw landscapeErrors.create("landscape.inactive");
+    }
+    if (connectionErrors.codeOf(error) !== undefined) {
+      throw landscapeErrors.create("landscape.provider_failed");
+    }
+    throw error;
+  }
+};
+
 /** Reads one page of a landscape connection's grants, from `cursor` on. */
 export const readLandscape = async (
   env: Env,
@@ -259,7 +282,7 @@ export const readLandscape = async (
     throw landscapeErrors.create("landscape.cursor_invalid");
   }
   const access: ProviderAccess = {
-    token: await accessTokenFor(env, connection.id),
+    token: await landscapeToken(env, connection.id),
     budget: requestBudget(landscapeLimits.requestsPerRead),
   };
   try {
