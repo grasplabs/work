@@ -1,45 +1,31 @@
-import { actorOf } from "@grasp-os/shared/audit";
 import { toHex } from "@grasp-os/shared/encoding";
 import {
   appIdSchema,
-  permissionIdSchema,
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
-import {
-  AppConnectionBinding,
-  statisticCallerOf,
-} from "../src/app-bindings.ts";
-import { callApp } from "../src/app.ts";
 import { runBindingsFor } from "../src/bindings.ts";
-import { appHost } from "../src/durable-objects.ts";
 import type { CollectionBinding } from "../src/knowledge/binding.ts";
 import {
   AttemptHost,
   attemptCallLabels,
 } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
-import { cancelRun } from "../src/workflows/controls.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import { keepMessage } from "../src/workflows/kept-email.ts";
-import { requestGranted, serverBuilt } from "./apps.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
-import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
-import { aroundEngine, endLiveRuns, runObject, sleeping } from "./runs.ts";
-import { outcome as codeOfCall, signedInApi } from "./sign-in.ts";
-import { v1AppWith } from "./v1-app-server.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import { signedInApi } from "./sign-in.ts";
+import { appWith } from "./workflow-apps.ts";
 
 // What leaves the host for an attempt's code passes one fence
 // (attempt-host.ts): checked as each call starts and again as it returns,
@@ -167,7 +153,6 @@ const runOf = async (
         shareSubject: authority.onBehalfOf,
         collections,
         connections: {},
-        apps: {},
         calls,
       },
       {
@@ -177,9 +162,6 @@ const runOf = async (
         tampered: () => {},
         waiting: async () => {
           await Promise.resolve();
-        },
-        callApp: () => {
-          throw new Error("No App call here");
         },
         callFunction: () => {
           throw new Error("No App function call here");
@@ -544,338 +526,15 @@ describe("the hosts a run's code reaches", () => {
     expect({
       attempt: own(AttemptHost.prototype),
       run: own(RunHost.prototype),
+      // A run's code reaches its App's code through its sealed functions
+      // only: no server method, no other App's export.
+      v1: ["callApp", "callExport"].filter((name) =>
+        own(AttemptHost.prototype).includes(name)
+      ),
     }).toStrictEqual({
       attempt: Object.keys(attemptCallLabels).toSorted(),
       run: ["do", "sleep", "waitForDecision"],
+      v1: [],
     });
   });
 });
-
-/** One of core's stubs, as it is bound with `props`. */
-const stubOn = <Props, Stub>(
-  Binding: new (ctx: ExecutionContext<Props>, env: Env) => Stub,
-  props: Props
-): Stub => {
-  const ctx: Pick<ExecutionContext<Props>, "props"> = { props };
-  // SAFETY: the stubs read only `props` of their context.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return new Binding(ctx as ExecutionContext<Props>, env);
-};
-
-/** A step that waits in its App's `parkAtMail`, as long as the attempt may. */
-const parking = (options = "") =>
-  workflowFiles(
-    "parks",
-    `  await step.do("park", { description: "Park"${options} }, async () => {
-    await env.APP.call("parkAtMail");
-    // Still holding the attempt once the method has ended.
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    return null;
-  });
-  return null;`,
-    { park: null }
-  );
-
-/**
- * A run of a new App of a builder's (`person`, or a new one), granted `mail.search` on a mail
- * connection of its own (MAIL) and `files` beside the App's, whose step
- * `files` says waits in the App's `parkAtMail` at the mail server: with
- * the run, the token of the parked method's call, the server, and the
- * mail grant.
- */
-const parkedRun = async (
-  files: Record<string, string> = parking(),
-  grant?: (
-    builder: Awaited<ReturnType<typeof personApi>>,
-    app: AppId
-  ) => Promise<void>,
-  person?: Awaited<ReturnType<typeof personApi>>
-) => {
-  const builder = person ?? (await personApi("builder"));
-  const identity = await builder.api.whoami();
-  const app = appIdSchema.parse(await v1AppWith(builder, files));
-  const server = await mailConnection([], mailWithSearch);
-  const mailGrant = permissionIdSchema.parse(
-    await requestGranted(idp, builder, {
-      subject: { type: "app", appId: app },
-      object: { type: "connection", connectionId: server.id },
-      actions: ["mail.search"],
-      binding: "MAIL",
-    })
-  );
-  await grant?.(builder, app);
-  await serverBuilt(app, 1);
-  const { id: run } = await builder.api.workflows.start(app, "parks");
-  // The method waits at the mail server, its search naming its token.
-  let token = "";
-  await vi.waitFor(
-    async () => {
-      const searched = await server.searched();
-      const parked = searched.find((query) => query.startsWith("hold "));
-      if (parked === undefined) {
-        throw new Error("Not at the mail server yet");
-      }
-      token = parked.slice("hold ".length);
-    },
-    { timeout: 20_000, interval: 50 }
-  );
-  return { builder, identity, app, run, token, server, mailGrant };
-};
-
-/**
- * Runs `call` with the run `run` cancelled, in full, as the `nth` check
- * of an attempt in the run's object answers that the attempt holds: what
- * the call answered.
- */
-const cancelledAfterCheck = async (
-  run: string,
-  identity: Awaited<
-    ReturnType<Awaited<ReturnType<typeof personApi>>["api"]["whoami"]>
-  >,
-  nth: number,
-  call: () => Promise<unknown>
-): Promise<string> => {
-  let checks = 0;
-  return await aroundEngine(
-    async (method, through) => {
-      const answer = await through();
-      if (method === "attemptHolds") {
-        checks += 1;
-        if (checks === nth) {
-          await cancelRun(env, identity, run);
-        }
-      }
-      return answer;
-    },
-    async () => await codeOfCall(call())
-  );
-};
-
-// The v1 App server's stubs and caller tokens, which only its methods
-// reach: they go with it (GRA-645). A sealed function's calls are fenced
-// by the run's lease instead (run-functions.test.ts).
-describe(
-  "a stub call of an App method a step's attempt runs",
-  { timeout: 60_000 },
-  () => {
-    afterEach(endLiveRuns);
-
-    it("acts only while the method still runs as its last check is made, the attempt's checked before", async () => {
-      const builder = await personApi("builder");
-      const app = await v1AppWith(
-        builder,
-        workflowFiles(
-          "parks",
-          `  await step.do("park", { description: "Park" }, async () => {
-    await env.APP.call("parkAtMail");
-    // Still holding the attempt once the method has ended.
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    return null;
-  });
-  return null;`,
-          { park: null }
-        )
-      );
-      const appId = appIdSchema.parse(app);
-      const server = await mailConnection([], mailWithSearch);
-      await requestGranted(idp, builder, {
-        subject: { type: "app", appId },
-        object: { type: "connection", connectionId: server.id },
-        actions: ["mail.search"],
-        binding: "MAIL",
-      });
-      await serverBuilt(app, 1);
-      await builder.api.workflows.start(app, "parks");
-      // The method waits at the mail server, its search naming its token.
-      let token = "";
-      await vi.waitFor(
-        async () => {
-          const searched = await server.searched();
-          const parked = searched.find((query) => query.startsWith("hold "));
-          if (parked === undefined) {
-            throw new Error("Not at the mail server yet");
-          }
-          token = parked.slice("hold ".length);
-        },
-        { timeout: 20_000, interval: 50 }
-      );
-
-      // The method ends while its stub call's attempt is checked: the App
-      // answers anything else only once it has. Only that check is held: the
-      // method's mail search, let go, checks its attempt too on its way back.
-      let holding = true;
-      const recorded = await aroundEngine(
-        async (method, call) => {
-          if (method === "attemptHolds" && holding) {
-            holding = false;
-            await server.release();
-            await callApp(
-              env,
-              appId,
-              { userId: builder.userId, mode: "interactive" },
-              "hits",
-              ["parked:done"]
-            );
-          }
-          return await call();
-        },
-        async () =>
-          await codeOfCall(statisticCallerOf(env, appId, { token }, "point"))
-      );
-
-      expect(recorded).toBe("app.caller_invalid");
-    });
-
-    it("reaches no connection once its run was cancelled after its last attempt check, the App's own check refusing it", async () => {
-      const { identity, app, run, token, server, mailGrant } =
-        await parkedRun();
-      const connection = stubOn(AppConnectionBinding, {
-        app,
-        context: { type: "app", appId: app },
-        permissionId: mailGrant,
-        connection: { type: "connection", connectionId: server.id },
-      });
-      // Admitted, then checked again just before connect is called: the
-      // second check of the attempt is the last before connect.
-      const searched = await cancelledAfterCheck(
-        run,
-        identity,
-        2,
-        async () =>
-          await connection.call({ token }, "mail.search", { query: "probe" })
-      );
-      await server.release();
-
-      const queries = await server.searched();
-
-      expect({
-        searched,
-        reached: queries.includes("probe"),
-      }).toStrictEqual({ searched: "app.caller_invalid", reached: false });
-    });
-
-    it("records no statistics point once its run was cancelled after its attempt check", async () => {
-      const { identity, app, run, token, server } = await parkedRun();
-      const pointed = await cancelledAfterCheck(
-        run,
-        identity,
-        1,
-        async () => await statisticCallerOf(env, app, { token }, "point")
-      );
-      await server.release();
-
-      expect(pointed).toBe("app.caller_invalid");
-    });
-
-    it("is refused by its App once its run's cancel was finished by the run's object, the revoke repeated there", async () => {
-      const { identity, app, run, token, server } = await parkedRun();
-      const host = appHost(env, app);
-      const before = await codeOfCall(host.admit(token, "read"));
-      // The cancel's request dies once its mark is kept, before it told
-      // any App: the object's alarm revokes, and finishes the cancel.
-      await runInDurableObject(runObject(run), async (_object, state) => {
-        state.storage.sql.exec(
-          "CREATE TABLE IF NOT EXISTS grasp_run_cancelled (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL)"
-        );
-        state.storage.sql.exec(
-          "INSERT INTO grasp_run_cancelled (run_id, actor, at, due) VALUES (?, ?, ?, ?)",
-          run,
-          JSON.stringify(actorOf(identity)),
-          Date.now(),
-          Date.now()
-        );
-        await state.storage.setAlarm(Date.now());
-      });
-      await runDurableObjectAlarm(runObject(run));
-      const after = await codeOfCall(host.admit(token, "read"));
-      await server.release();
-
-      expect({ before, after }).toStrictEqual({
-        before: "ok",
-        after: "app.caller_invalid",
-      });
-    });
-
-    it("is refused by its App once the attempt that started it has returned", async () => {
-      // The step leaves its App's method running, and returns.
-      const { app, run, token, server } = await parkedRun(
-        workflowFiles(
-          "parks",
-          `  await step.do("park", { description: "Park" }, async () => {
-    void env.APP.call("parkAtMail");
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    return null;
-  });
-  await step.sleep("rest", { description: "Rest", duration: "1 day" });
-  return null;`,
-          { park: null }
-        )
-      );
-      await sleeping(run, "rest");
-      const after = await codeOfCall(appHost(env, app).admit(token, "read"));
-      await server.release();
-
-      expect(after).toBe("app.caller_invalid");
-    });
-
-    it("starts no App call the attempt left queued once it has returned", async () => {
-      const builder = await personApi("builder");
-      const app = appIdSchema.parse(
-        await v1AppWith(
-          builder,
-          workflowFiles(
-            "leaves",
-            `  await step.do("leave", { description: "Leave" }, async () => {
-    // The first holds the App's turn past the attempt's return: the
-    // second waits in the App, past every check of the run's host.
-    void env.APP.call("pause", 1000);
-    void env.APP.call("hit", "second");
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    return null;
-  });
-  await step.sleep("rest", { description: "Rest", duration: "1 day" });
-  return null;`,
-            { leave: null }
-          )
-        )
-      );
-      await serverBuilt(app, 1);
-      const { id: run } = await builder.api.workflows.start(app, "leaves");
-      await sleeping(run, "rest");
-      // Long enough for the queued call to have started, had it been let in.
-      await scheduler.wait(2000);
-      const second = await callApp(
-        env,
-        app,
-        { userId: builder.userId, mode: "interactive" },
-        "hits",
-        ["second"]
-      );
-
-      expect(second).toBe(0);
-    });
-
-    it("is refused by its App once its attempt timed out", async () => {
-      const { app, token, server } = await parkedRun(
-        parking(', timeout: "8 seconds", retries: { limit: 0 }')
-      );
-      const host = appHost(env, app);
-      const before = await codeOfCall(host.admit(token, "read"));
-      await vi.waitFor(
-        async () => {
-          if ((await codeOfCall(host.admit(token, "read"))) === "ok") {
-            throw new Error("Not timed out yet");
-          }
-        },
-        { timeout: 20_000, interval: 100 }
-      );
-      const after = await codeOfCall(host.admit(token, "read"));
-      await server.release();
-
-      expect({ before, after }).toStrictEqual({
-        before: "ok",
-        after: "app.caller_invalid",
-      });
-    });
-  }
-);

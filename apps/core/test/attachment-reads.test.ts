@@ -58,9 +58,6 @@ const hooks: HostHooks = {
   waiting: async () => {
     await Promise.resolve();
   },
-  callApp: () => {
-    throw new Error("A read calls no App");
-  },
   callFunction: () => {
     throw new Error("A read calls no App function");
   },
@@ -104,7 +101,6 @@ const runReading = async (changes: Partial<Env> = {}) => {
         appVersion: 1,
       }),
       connections: {},
-      apps: {},
       collections: {},
       calls: { steps: null, all: [] },
     },

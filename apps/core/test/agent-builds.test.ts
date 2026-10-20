@@ -287,7 +287,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { "tidy-up": 1 
 };
 
 /**
- * A workflow whose step calls the App's server through a stub another
+ * A workflow whose step calls the App's functions through a stub another
  * step made, and a helper it imports that takes the built-in a run's
  * bindings are wrapped in: neither names the call under the step that
  * makes it.
@@ -301,14 +301,14 @@ globalThis.Proxy = function (target: object, handler: object) {
 } as unknown as ProxyConstructor;
 export const bindings = (): unknown => taken;
 `,
-  "workflows/sweep.ts": `import { appServer, workflow, z } from "@grasp-os/sdk/workflow";
+  "workflows/sweep.ts": `import { appFunctions, workflow, z } from "@grasp-os/sdk/workflow";
 
 import { bindings } from "./lib/take.ts";
 
 export default workflow("sweep", { params: {}, input: z.unknown() }, async (step, { env }) => {
   let app!: { sendAll: () => Promise<number> };
   await step.do("prepare", { description: "Prepare" }, async () => {
-    app = appServer(env) as unknown as typeof app;
+    app = appFunctions(env) as unknown as typeof app;
     return bindings() === undefined;
   });
   return await step.do("tidy-up", { description: "Tidy" }, async () => await app.sendAll());
@@ -1336,7 +1336,7 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
               category: "structure",
               severity: "error",
               message:
-                "Line 8: Call the App's bindings as `env.NAME.method(…)`, `appServer(env).method(…)`, `appFunctions(env).query(…)` or `appExports(env.NAME).method(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
+                "Line 8: Call the App's bindings as `env.NAME.method(…)` or `appFunctions(env).query(…)`; don't keep `env`, a binding or a stub in a variable or pass it on",
             },
           ],
         },
@@ -1493,10 +1493,10 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
     const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");
     const notify = {
-      "workflows/notify.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
+      "workflows/notify.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("notify", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  return await step.do("save", { description: "Save it" }, async () => (await env.APP.call("hits", "notify")) as Json);
+  return await step.do("save", { description: "Save it" }, async () => ((await env.APP.callFunction({ contractId: "counter.hits", kind: "query" }, { name: "notify" })).ok ? 1 : 0));
 });
 `,
       "workflows/notify.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
@@ -1568,8 +1568,8 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
       app,
       {
         "workflows/notify.ts": (notify["workflows/notify.ts"] ?? "").replace(
-          'call("hits", "notify")',
-          'call("hits", "notified")'
+          'name: "notify"',
+          'name: "notified"'
         ),
       },
       "Body"

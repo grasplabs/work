@@ -265,7 +265,7 @@ describe(
         '    return (await env.APP.callFunction({ contractId: "counter.hits", kind: "query" }, { name: "x" })).output;',
       ],
       [
-        "a binding's answer recorded as a step's result, unnarrowed",
+        "a call of the App's server methods, which a run no longer has",
         '    return await env.APP.call("hits");',
       ],
     ])("refuse %s", async (_case, body) => {
@@ -346,14 +346,12 @@ describe(
       const bindings = {
         HANDBOOK: "collection",
         MAIL: "connection",
-        CRM: "app",
       };
       await expect(
         Promise.all(
           [
             '    return (await env.HANDBOOK.search("refunds")).hits.length;',
             '    return (await env.MAIL.call("mail.send", {})).output;',
-            '    return (await env.CRM.call("find", {})) === null ? 0 : 1;',
             // A name the App holds no permission for: callable, its answer
             // `unknown` until narrowed.
             '    return (await env.ARCHIVE.call("find", {})) === null ? 0 : 1;',
@@ -368,7 +366,6 @@ describe(
           )
         )
       ).resolves.toStrictEqual([
-        { ok: true, files: [], warned: [] },
         { ok: true, files: [], warned: [] },
         { ok: true, files: [], warned: [] },
         { ok: true, files: [], warned: [] },

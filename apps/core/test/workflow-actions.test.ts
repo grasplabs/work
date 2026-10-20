@@ -1667,7 +1667,6 @@ export const notify = action({
         {
           key: `${runId}:1`,
           deadline: Date.now() + 30_000,
-          fence: { run: runId, key: "k", number: 1, generation: 1 },
           requireHolds: () => {
             // Holds.
           },

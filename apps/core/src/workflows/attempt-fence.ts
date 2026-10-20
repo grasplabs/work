@@ -2,13 +2,14 @@ import { executionErrors } from "@grasp-os/shared/workflows";
 
 import { runObjectOf } from "./engine.ts";
 
-// A step attempt's calls reach beyond its host: its App's methods (and the
-// stub calls they make), other Apps' exports. Each carries who the attempt
-// is, and every stub call it makes checks, just before it acts, that the
-// attempt still holds its lease in the run's journal: once the engine gave
-// up on the attempt (it timed out, the run was cancelled, or another
-// activation took over), nothing started on its behalf acts any more,
-// however many hops away (spec 14.4).
+// The fence of a v1 App call made for a step's attempt: a call carrying
+// the attempt checks, just before it acts, that the attempt still holds
+// its lease in the run's journal (spec 14.4). No workflow run makes such a
+// call any more: a run reaches its App's code through sealed functions
+// only, which the run host holds to the attempt's lease itself
+// (`RunHost.#callFunction`), and no other App's exports. What still
+// carries a fence is the v1 App call path, removed with this in slice 4
+// of GRA-789.
 
 /**
  * Who a step's attempt is, as its host knows it: its run, its step's key

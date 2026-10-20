@@ -1,5 +1,6 @@
 import {
   appIdSchema,
+  connectionIdSchema,
   permissionIdSchema,
   runIdSchema,
   workflowIdSchema,
@@ -11,7 +12,6 @@ import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { runBindingsFor } from "../src/bindings.ts";
 import type { AttemptHost } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
@@ -22,8 +22,7 @@ import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
 import { endLiveRuns, finished } from "./runs.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
-import { v1AppWith } from "./v1-app-server.ts";
+import { signedInApi } from "./sign-in.ts";
 import {
   appWith,
   grantMail,
@@ -49,16 +48,6 @@ import {
 const idp = mockIdp();
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
-
-/** How often the v1 App counted `name` (its server's `hit`). */
-const v1HitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
 
 /** What version 1 of `app` keeps of what its workflows call. */
 const storedCalls = async (app: string): Promise<unknown> => {
@@ -118,10 +107,10 @@ const outcomeOf = async (
 };
 
 /**
- * A host for a run of a new App held to `calls`, whose v1 App method calls
- * (`callApp`, which goes with the v1 server, GRA-645) are counted in
- * `appCalls`, with a permission on another App's exports
- * as `CRM`; what it says fails the run as tampering is in `tampered`.
+ * A host for a run of a new App held to `calls`, whose calls of its App's
+ * functions are counted in `appCalls`, by contract, with a connection
+ * permission as `CRM` when it has no real App (`of`); what it says fails
+ * the run as tampering is in `tampered`.
  */
 const hostHeldTo = async (
   calls: WorkflowCalls,
@@ -154,7 +143,18 @@ const hostHeldTo = async (
   }
   const { connections } =
     of === undefined
-      ? { connections: {} }
+      ? {
+          connections: {
+            CRM: {
+              context: { type: "run" as const, appId: app, runId },
+              permissionId: permissionIdSchema.parse(crypto.randomUUID()),
+              connection: {
+                type: "connection" as const,
+                connectionId: connectionIdSchema.parse(crypto.randomUUID()),
+              },
+            },
+          },
+        }
       : await runBindingsFor(env, authority, {
           type: "run",
           appId: app,
@@ -173,12 +173,15 @@ const hostHeldTo = async (
     waiting: async () => {
       await Promise.resolve();
     },
-    callApp: async (_caller, method) => {
-      appCalls.push(method);
+    callFunction: async (_caller, reference) => {
+      appCalls.push(
+        typeof reference === "object" &&
+          reference !== null &&
+          "contractId" in reference
+          ? String(reference.contractId)
+          : "?"
+      );
       return await Promise.resolve({ ok: true, value: null });
-    },
-    callFunction: () => {
-      throw new Error("No App function call here");
     },
     modelBinding: () => {
       throw new Error("No model step here");
@@ -196,18 +199,15 @@ const hostHeldTo = async (
       authority,
       collections: {},
       connections,
-      apps: {
-        CRM: {
-          permissionId: permissionIdSchema.parse(crypto.randomUUID()),
-          app: appIdSchema.parse(crypto.randomUUID()),
-        },
-      },
       calls,
     },
     hooks
   );
   return { host, runId, appCalls, tampered, userId, leases };
 };
+
+/** The App's counter's `hit`, as a step calls it. */
+const hit = { contractId: "counter.hit", kind: "action" } as const;
 
 /** A settled call's error code, or `ok`. */
 const codeOf = (settled: Settled<unknown>): string =>
@@ -448,9 +448,6 @@ queueMicrotask(() => {
     });
   });
 
-  // Through the v1 App server's method calls (`callApp`), which go with it
-  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
-  // the step's lease and review.
   it("refuse a call made through a step attempt's host once that attempt is over, while another step runs, and a step whose name the review doesn't show", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: [], send: ["APP"] },
@@ -465,7 +462,7 @@ queueMicrotask(() => {
     const sent = await host.do("send", {}, async () => {
       // As code `arm` left behind would, through the host `arm` was handed.
       if (armed !== undefined) {
-        leftBehind = await armed.callApp("hit", ["armed"]);
+        leftBehind = await armed.callFunction(hit, { name: "armed" });
       }
       return { ok: true, value: null };
     });
@@ -493,36 +490,6 @@ queueMicrotask(() => {
         { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
       ],
     });
-  });
-
-  // The v1 App server's own fence on its methods: it goes with the server
-  // (GRA-645); a sealed function's calls hold to the step's lease
-  // (run-functions.test.ts).
-  it("start no App method, nor an export, for a step attempt that no longer holds by the time the App would start it", async () => {
-    const admin = await personApi("admin");
-    const app = await v1AppWith(admin, {});
-    // An attempt the engine let go of (or never had): its run holds no
-    // lease for it, as when it was let go during the App's reads.
-    const fence = {
-      run: crypto.randomUUID(),
-      key: "key:tidy",
-      number: 1,
-      generation: 1,
-    };
-    const refused = await outcome(
-      callApp(
-        env,
-        appIdSchema.parse(app),
-        { userId: admin.userId, mode: "workflow", fence },
-        "hit",
-        ["late"]
-      )
-    );
-
-    expect({
-      refused,
-      ran: await v1HitsOf(app, admin.userId, "late"),
-    }).toStrictEqual({ refused: "execution.stale_attempt", ran: 0 });
   });
 
   it("send no connection call whose attempt the engine gave up on while it was authorized and signed", async () => {
@@ -581,9 +548,6 @@ queueMicrotask(() => {
     });
   });
 
-  // Through the v1 App server's method calls (`callApp`), which go with it
-  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
-  // the step's lease and review.
   it("refuse a call unless the step running now and the step whose host it came through both call it, failing both", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: ["APP"], send: [] },
@@ -595,7 +559,7 @@ queueMicrotask(() => {
     // calls APP with it: `arm`'s review shows APP, `send`'s doesn't.
     const armed = await host.do("arm", {}, async (arm) => {
       sent = await host.do("send", {}, async () => {
-        passed = await arm.callApp("hit", ["passed"]);
+        passed = await arm.callFunction(hit, { name: "passed" });
         return { ok: true, value: null };
       });
       return { ok: true, value: null };
@@ -618,9 +582,6 @@ queueMicrotask(() => {
     });
   });
 
-  // Through the v1 App server's method calls (`callApp`), which go with it
-  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
-  // the step's lease and review.
   it("refuse, as stale, an attempt's calls of every kind once the engine gave up on it, and audit the first", async () => {
     const { host, runId, appCalls, leases, userId } = await hostHeldTo({
       steps: { tidy: ["APP", "CRM", "HANDBOOK"] },
@@ -643,8 +604,10 @@ queueMicrotask(() => {
       codes.collection = codeOf(
         await attempt.callCollection("HANDBOOK", "search", ["invoices"])
       );
-      codes.export = codeOf(await attempt.callExport("CRM", "find", {}));
-      codes.app = codeOf(await attempt.callApp("hit", ["late"]));
+      codes.connection = codeOf(
+        await attempt.callConnection("CRM", ["find", {}])
+      );
+      codes.app = codeOf(await attempt.callFunction(hit, { name: "late" }));
       codes.openDecision = codeOf(
         await attempt.openDecision({
           step: "tidy",
@@ -663,7 +626,7 @@ queueMicrotask(() => {
       codes: {
         model: "execution.stale_attempt",
         collection: "execution.stale_attempt",
-        export: "execution.stale_attempt",
+        connection: "execution.stale_attempt",
         app: "execution.stale_attempt",
         openDecision: "execution.stale_attempt",
         decisionRecipients: "execution.stale_attempt",
@@ -675,51 +638,6 @@ queueMicrotask(() => {
     });
   });
 
-  // Through the v1 App server's method calls (`callApp`), which go with it
-  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
-  // the step's lease and review.
-  it("refuse, as stale, a call whose attempt the engine gave up on while the host read what the call needs", async () => {
-    let giveUp: (() => void) | undefined;
-    // Core's database, giving the attempt up as the host reads it, after
-    // the call's first check that its attempt holds.
-    const db = new Proxy(env.DB, {
-      get: (target, key) => {
-        const value: unknown = Reflect.get(target, key);
-        if (key === "prepare" && typeof value === "function") {
-          return (query: string) => {
-            giveUp?.();
-            return target.prepare(query);
-          };
-        }
-        if (typeof value !== "function") {
-          return value;
-        }
-        const bound: unknown = value.bind(target);
-        return bound;
-      },
-    });
-    const { host, appCalls, leases } = await hostHeldTo(
-      { steps: { tidy: ["APP"] }, all: ["APP"] },
-      { db }
-    );
-    const codes: string[] = [];
-    await host.do("tidy", {}, async (attempt) => {
-      giveUp = () => {
-        leases.delete("key:tidy");
-      };
-      codes.push(codeOf(await attempt.callApp("hit", ["late"])));
-      return { ok: true, value: null };
-    });
-
-    expect({ codes, appCalls }).toStrictEqual({
-      codes: ["execution.stale_attempt"],
-      appCalls: [],
-    });
-  });
-
-  // Through the v1 App server's method calls (`callApp`), which go with it
-  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
-  // the step's lease and review.
   it("refuse, as stale, every call of an attempt the engine gave up on while its code ran on, and audit the first", async () => {
     const { host, runId, appCalls, leases } = await hostHeldTo({
       steps: { tidy: ["APP"] },
@@ -731,7 +649,7 @@ queueMicrotask(() => {
       leases.delete("key:tidy");
       for (let tries = 0; tries < 2; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one call at a time
-        codes.push(codeOf(await attempt.callApp("hit", ["late"])));
+        codes.push(codeOf(await attempt.callFunction(hit, { name: "late" })));
       }
       return { ok: true, value: "tidied" };
     });
@@ -745,9 +663,6 @@ queueMicrotask(() => {
     });
   });
 
-  // Through the v1 App server's method calls (`callApp`), which go with it
-  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
-  // the step's lease and review.
   it("audit only an attempt's first refused call, and refuse every later one of it at once, one its review shows too", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
       steps: { tidy: ["APP"] },
@@ -757,9 +672,9 @@ queueMicrotask(() => {
     const done = await host.do("tidy", {}, async (attempt) => {
       for (let tries = 0; tries < 3; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one call at a time
-        codes.push(codeOf(await attempt.callExport("CRM", "find", {})));
+        codes.push(codeOf(await attempt.callConnection("CRM", ["find", {}])));
       }
-      codes.push(codeOf(await attempt.callApp("hit", ["tidied"])));
+      codes.push(codeOf(await attempt.callFunction(hit, { name: "tidied" })));
       // The code carries on as if nothing was refused.
       return { ok: true, value: "tidied" };
     });
@@ -962,14 +877,11 @@ queueMicrotask(() => {
     });
   });
 
-  // Through the v1 App server's method calls (`callApp`), which go with it
-  // (GRA-645); run-functions.test.ts holds a sealed function's calls to
-  // the step's lease and review.
   it("refuse an attempt's model, attachment and decision calls once it had a call refused", async () => {
     const { host, userId } = await hostHeldTo({ steps: { tidy: [] }, all: [] });
     const codes: string[] = [];
     const done = await host.do("tidy", {}, async (attempt) => {
-      const refused = await attempt.callApp("hit", ["tidied"]);
+      const refused = await attempt.callFunction(hit, { name: "tidied" });
       const model = await attempt.callModel({
         step: "tidy",
         model: "default",

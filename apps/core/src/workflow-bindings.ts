@@ -1,9 +1,8 @@
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
-import { appExportsSchema } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import { identifierSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
@@ -24,15 +23,12 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { requireReleaseLoads } from "./app-releases.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
-  appVersions,
   permissions,
-  sdkReleasePins,
   teams,
   workflowBindingApprovals,
 } from "./db/core/schema.ts";
@@ -69,11 +65,11 @@ import type { PinnedBinding } from "./workflow-resources.ts";
 // - A declaration self-grants: an alias is served only by an active row
 //   here, written by an admin of the organization (never Grasp staff or a
 //   builder), re-checked in the writing statement, and audited.
-// - A binding to a resource the workflow can't use: a connector or
+// - A binding to a resource the workflow can't use: a connector or store
 //   operation target must be a permission the workflow itself holds
-//   (subject the workflow, active, on that connection or App, allowing
-//   every operation or the export), never its owner's, an App's or one of
-//   another workflow; a model one the deployment allows; a decision's
+//   (subject the workflow, active, on that connection or store, allowing
+//   every operation), never its owner's, an App's or one of another
+//   workflow; a model one the deployment allows; a decision's
 //   deciders people still in the organization, its teams or roles. A start
 //   re-reads the permission as it admits (workflow-starts.ts), so revoking
 //   it stops the next start.
@@ -88,11 +84,11 @@ import type { PinnedBinding } from "./workflow-resources.ts";
 //   answers whether it can (`requireTargetServes`), at approval and again
 //   each time a start freezes its bindings (workflow-starts.ts), so an
 //   approval never outlives its target. It loads the target as a call
-//   would: an operation's exact release through the release loader's own
-//   checks (sealed, not revoked, its manifest intact), a connector's
-//   contract as connect generates it for that connection now. And it
-//   compares the real shapes with the contract's exactly: each export's or
-//   connector action's input and output JSON Schemas must be the contract
+//   would: a connector's contract as connect generates it for that
+//   connection now, a store operation as its owning App's current release
+//   serves it. And it compares the real shapes with the contract's
+//   exactly: each store operation's or connector action's input and
+//   output JSON Schemas must be the contract
 //   descriptors' exact JSON Schemas, so a workflow never calls it with
 //   what it doesn't take or reads back what it doesn't return. There is no
 //   looser compatibility rule to apply yet, so anything but the same shape
@@ -105,10 +101,9 @@ import type { PinnedBinding } from "./workflow-resources.ts";
 //   call (`callApprovedStoreOperation`); the call runs as
 //   store-operations.ts runs it, as the person the run acts for, never
 //   with the store owner's privileges.
-// - An operation's code going away under an approval: it names an exact,
-//   sealed release of the App, which the approval pins (`approval` in
-//   `sdk_release_pins`) while it is active, so retention keeps that
-//   release; revoking it, or deleting the workflow, releases the pin.
+// - Another App's actions: no target reaches them. A store operation is
+//   a public query or mutation only; an action would run with its App's
+//   own resource bindings (store-operations.ts).
 // - A start on authority that changed: approving or revoking moves the
 //   workflow's policy generation, so a start decided before is refused;
 //   one that changed nothing refuses nothing.
@@ -230,7 +225,7 @@ const requireDeciders = async (
   }
 };
 
-/** `descriptor` (its JSON text) as the exact JSON Schema an export states. */
+/** `descriptor` (its JSON text) as its exact JSON Schema. */
 const schemaOfDescriptor = (
   descriptor: string | undefined
 ): string | undefined => {
@@ -323,81 +318,13 @@ const requireConnectorServes = async (
 };
 
 /**
- * Refuses an operation target the workflow may not call now, or that
- * doesn't take and return what the catalog contract `key` says: the App
- * version must load as a release does (sealed, not revoked, its manifest
- * intact: `requireReleaseLoads`), and its export's input and output must
- * be the contract's, exactly.
- */
-const requireOperationServes = async (
-  env: Env,
-  id: string,
-  key: string,
-  target: Extract<WorkflowBindingTarget, { kind: "operation" }>
-): Promise<void> => {
-  const row = await workflowPermission(env, id, target.permissionId);
-  if (row?.objectType !== "app") {
-    throw invalid(
-      "target.permissionId: The workflow holds no permission on that App's exports."
-    );
-  }
-  const app = appIdSchema.safeParse(row.objectId);
-  try {
-    if (!app.success) {
-      throw invalid("target.permissionId: It names no App.");
-    }
-    await requireReleaseLoads(env, app.data, target.appVersion);
-  } catch (error) {
-    if (isExpectedError(error)) {
-      throw invalid(
-        "target.appVersion: That release of the App doesn't load: it isn't sealed, it was revoked, or it no longer matches its seal."
-      );
-    }
-    throw error;
-  }
-  const version = await drizzle(env.DB)
-    .select({ exports: appVersions.exports })
-    .from(appVersions)
-    .where(
-      and(
-        eq(appVersions.appId, row.objectId),
-        eq(appVersions.version, target.appVersion)
-      )
-    )
-    .get();
-  const exported = appExportsSchema.safeParse(version?.exports ?? {}).data?.[
-    target.export
-  ];
-  const actions = actionsOf(row);
-  if (
-    exported === undefined ||
-    !(actions.includes(target.export) || actions.includes(exported.access))
-  ) {
-    throw invalid(
-      "target.export: That sealed App version exports no such function the workflow may call."
-    );
-  }
-  const contracts = await resolveCatalogKeys(env, [key]);
-  const contract = contracts.get(key)?.contract;
-  if (
-    !sameShape(exported.input, schemaOfDescriptor(contract?.input)) ||
-    !sameShape(exported.output, schemaOfDescriptor(contract?.output))
-  ) {
-    throw invalid(
-      "target.export: Its input and output aren't the operation contract's."
-    );
-  }
-};
-
-/**
  * The store operation `target` names, if workflow `id` may call it now
  * and it takes and returns exactly what the catalog contract `key` says:
  * the workflow's own store permission lists it, and the store's owning
  * App's current release serves it as a public query or mutation
  * (store-operations.ts), its arguments' and return's JSON Schemas the
  * contract's, exactly. Refused (`workflow.binding_invalid`) otherwise.
- * Unlike an export, no release is pinned: the store's App serves its
- * operations from whichever version is current, so each start, and each
+ * No release is pinned: the store's App serves its operations from whichever version is current, so each start, and each
  * call, checks the shape again.
  */
 const requireStoreOperationServes = async (
@@ -597,25 +524,6 @@ export const callApprovedStoreOperation = async (
 };
 
 /**
- * Releases the pins of workflow `id`'s approvals that no longer serve: as
- * a statement for the batch that revokes them.
- */
-export const approvalPinsReleased = (
-  db: ReturnType<typeof drizzle>,
-  id: string
-) =>
-  db.delete(sdkReleasePins).where(
-    and(
-      eq(sdkReleasePins.holderKind, "approval"),
-      sql`${sdkReleasePins.holderId} IN (SELECT approval.id
-          FROM workflow_binding_approvals AS approval
-          JOIN workflow_resources AS workflow ON workflow.id = approval.workflow_resource_id
-          WHERE approval.workflow_resource_id = ${id}
-            AND (approval.status = 'revoked' OR workflow.deleted_at IS NOT NULL))`
-    )
-  );
-
-/**
  * Refuses `target` unless it can serve `declared` for workflow `id` now,
  * as the threat model above says (`workflow.binding_invalid`, naming why):
  * the one answer approving and starting both take.
@@ -638,10 +546,6 @@ export const requireTargetServes = async (
     }
     case "connector": {
       await requireConnectorServes(env, id, declared.contractId, target);
-      return;
-    }
-    case "operation": {
-      await requireOperationServes(env, id, declared.contractId, target);
       return;
     }
     case "storeOperation": {
@@ -704,14 +608,6 @@ const targetDetail = (
         targetKind: target.kind,
         permissionId: target.permissionId,
         targetContract: target.contract,
-      };
-    }
-    case "operation": {
-      return {
-        targetKind: target.kind,
-        permissionId: target.permissionId,
-        appVersion: target.appVersion,
-        export: target.export,
       };
     }
     case "storeOperation": {
@@ -793,18 +689,8 @@ export const approveWorkflowBinding = async (
   // Only while `by` is still an admin and the workflow is live, read in
   // the batch. Versions never change, so the one reviewed stays the one
   // served, whichever is current.
-  // An operation's release must still be there to pin: retention may
-  // remove one no pin holds after it was checked, and an approval without
-  // its pin would leave every start on a release that's gone.
-  const releaseHeld =
-    target.kind === "operation"
-      ? sql`EXISTS (SELECT 1 FROM sdk_release_manifests AS manifest
-          JOIN permissions AS held ON held.id = ${target.permissionId}
-          WHERE manifest.app_id = held.object_id
-            AND manifest.version = ${target.appVersion})`
-      : sql`1`;
   const holds = sql`${stillAdminSql(by)} AND EXISTS (SELECT 1 FROM workflow_resources
-    WHERE id = ${workflow.id} AND deleted_at IS NULL) AND ${releaseHeld}`;
+    WHERE id = ${workflow.id} AND deleted_at IS NULL)`;
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
@@ -848,22 +734,6 @@ export const approveWorkflowBinding = async (
       workflow.id,
       sql`EXISTS (SELECT 1 FROM workflow_binding_approvals WHERE id = ${row.id})`
     ),
-    // An operation's release, kept while the approval serves.
-    ...(target.kind === "operation"
-      ? [
-          db.insert(sdkReleasePins).select(
-            sql`SELECT manifest.app_id, manifest.version, 'approval', ${row.id},
-                NULL, ${row.approvedAt.getTime()}
-              FROM sdk_release_manifests AS manifest
-              JOIN permissions AS held ON held.id = ${target.permissionId}
-              WHERE manifest.app_id = held.object_id
-                AND manifest.version = ${target.appVersion}
-                AND EXISTS (SELECT 1 FROM workflow_binding_approvals
-                  WHERE id = ${row.id})`
-          ),
-        ]
-      : []),
-    approvalPinsReleased(db, workflow.id),
   ]);
   const stored = await drizzle(env.DB)
     .select()
@@ -871,13 +741,6 @@ export const approveWorkflowBinding = async (
     .where(eq(workflowBindingApprovals.id, row.id))
     .get();
   if (stored === undefined) {
-    const release = await drizzle(env.DB).get<{ held: number }>(
-      sql`SELECT ${releaseHeld} AS held`
-    );
-    if (release.held === 0) {
-      // The release went as it ran: nothing approved, nothing pinned.
-      throw workflowResourceErrors.create("workflow.binding_invalid");
-    }
     // `by` stopped being an admin, or the workflow was deleted, as it ran.
     throw workflowResourceErrors.create("workflow.resource_unavailable");
   }
@@ -929,7 +792,6 @@ export const revokeWorkflowBinding = async (
           AND ${eq(workflowBindingApprovals.status, "revoked")}
           AND ${eq(workflowBindingApprovals.revokedAt, revokedAt)})`
     ),
-    approvalPinsReleased(db, workflow.id),
   ]);
 };
 

@@ -972,147 +972,7 @@ describe("approving a workflow's binding", () => {
 });
 
 describe("approving an operation", () => {
-  it("takes only an export of a release that loads, with the contract's exact shape, keeps that release while it serves, and stops serving once it can't", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const key = `lookup-${unique()}`;
-    const descriptor = JSON.stringify(emptyObject);
-    await publishCatalogContract(env, admin, {
-      key,
-      kind: "operation",
-      input: descriptor,
-      output: descriptor,
-    });
-    // What an export states for that contract: the descriptor's JSON Schema.
-    const shape = jsonSchemaOf(schemaFromDescriptor(descriptor).descriptor, {
-      exact: true,
-    });
-    const app = await appOf(ada);
-    // Versions 2 and 3 export the same: 2 was never sealed, 3 was revoked.
-    await env.DB.batch(
-      [2, 3].map((version) =>
-        env.DB.prepare(
-          "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, ?, 'tree', 0, ?, 'Version', ?, 1)"
-        ).bind(app, version, ada.userId, Date.now())
-      )
-    );
-    await env.DB.prepare("UPDATE app_versions SET exports = ? WHERE app_id = ?")
-      .bind(
-        JSON.stringify({
-          lookup: { access: "read", input: shape, output: shape },
-          other: { access: "read", input: shape, output: { type: "string" } },
-        }),
-        app
-      )
-      .run();
-    await sealed(app, 1);
-    await sealed(app, 3, true);
-    const workflow = await createWorkflowResource(env, ada, `op-${unique()}`);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: { lookup: { kind: "operation", contract: key } },
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
-          {
-            look: {
-              call: "grasp.operation",
-              with: { binding: "lookup", arguments: {} },
-            },
-          },
-          { finish: { set: { status: "done" } } },
-        ],
-      }),
-      basedOn: null,
-    });
-    const permissionId = await granted(ada, admin, {
-      subject: { type: "workflow", workflowId: workflow.id },
-      object: { type: "app", appId: appIdSchema.parse(app) },
-      actions: ["read"],
-      binding: `APP_${unique().toUpperCase().replaceAll("-", "_")}`,
-    });
-    const approve = async (target: Record<string, unknown>) =>
-      await approveWorkflowBinding(env, admin, workflow.id, {
-        alias: "lookup",
-        target: { kind: "operation", permissionId, ...target },
-        reviewed: { version: 1 },
-      });
-    const pins = async () => {
-      const rows = await env.DB.prepare(
-        "SELECT holder_id AS holder FROM sdk_release_pins WHERE app_id = ? AND holder_kind = 'approval'"
-      )
-        .bind(app)
-        .all<{ holder: string }>();
-      return rows.results.map(({ holder }) => holder);
-    };
-    const tries = {
-      otherShape: await outcome(approve({ appVersion: 1, export: "other" })),
-      unsealed: await outcome(approve({ appVersion: 2, export: "lookup" })),
-      revoked: await outcome(approve({ appVersion: 3, export: "lookup" })),
-    };
-    const approval = await approve({ appVersion: 1, export: "lookup" });
-    const whileServing = await pins();
-    const first = await start(ada, workflow.id);
-    const startsNow = first.runId === null ? "no run" : "ok";
-    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
-    const afterRevoke = await pins();
-    const again = await approve({ appVersion: 1, export: "lookup" });
-    // An admin revokes the release under the approval: it can't be called,
-    // so no start freezes it.
-    await env.DB.prepare(
-      "UPDATE sdk_release_manifests SET revoked_at = ? WHERE app_id = ? AND version = 1"
-    )
-      .bind(Date.now(), app)
-      .run();
-    const releaseRevoked = await outcome(start(ada, workflow.id));
-    const beforeDelete = await pins();
-    // The run the first start admitted holds the workflow until it ends:
-    // its call is refused, its approval revoked since.
-    await vi.waitFor(
-      async () => {
-        const run = await resourceRunFor(env, ada, workflow.id, first.runId);
-        expect(run.endedAt).not.toBeNull();
-      },
-      { timeout: 30_000, interval: 100 }
-    );
-    await deleteWorkflowResource(env, ada, workflow.id);
-    expect({
-      tries,
-      whileServing,
-      startsNow,
-      afterRevoke,
-      releaseRevoked,
-      beforeDelete,
-      afterDelete: await pins(),
-    }).toStrictEqual({
-      tries: {
-        otherShape: "workflow.binding_invalid",
-        unsealed: "workflow.binding_invalid",
-        revoked: "workflow.binding_invalid",
-      },
-      whileServing: [approval.id],
-      startsNow: "ok",
-      releaseRevoked: "workflow.binding_unapproved",
-      afterRevoke: [],
-      beforeDelete: [again.id],
-      afterDelete: [],
-    });
-  });
-
-  it("approves nothing when the release it would pin is removed as the approval is written", async () => {
+  it("takes no App's export as its target, whatever release or shape it names, and approves nothing", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const key = `lookup-${unique()}`;
@@ -1173,19 +1033,8 @@ describe("approving an operation", () => {
       actions: ["read"],
       binding: `APP_${unique().toUpperCase().replaceAll("-", "_")}`,
     });
-    // Retention removes the release, no pin holding it yet, just after the
-    // approval checked it and before its batch lands.
-    const db = racingDb(
-      async () =>
-        await env.DB.prepare(
-          "DELETE FROM sdk_release_manifests WHERE app_id = ? AND version = 1"
-        )
-          .bind(app)
-          .run(),
-      /insert into "workflow_binding_approvals"/iu
-    );
     const approved = await outcome(
-      approveWorkflowBinding({ ...env, DB: db }, admin, workflow.id, {
+      approveWorkflowBinding(env, admin, workflow.id, {
         alias: "lookup",
         target: {
           kind: "operation",
@@ -1201,9 +1050,14 @@ describe("approving an operation", () => {
     )
       .bind(workflow.id)
       .first<{ count: number }>();
-    expect({ approved, approvals: approvals?.count }).toStrictEqual({
+    expect({
+      approved,
+      approvals: approvals?.count,
+      starts: await outcome(start(ada, workflow.id)),
+    }).toStrictEqual({
       approved: "workflow.binding_invalid",
       approvals: 0,
+      starts: "workflow.binding_unapproved",
     });
   });
 });

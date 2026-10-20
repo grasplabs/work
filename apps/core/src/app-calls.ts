@@ -31,8 +31,8 @@ import type { AttemptFence } from "./workflows/attempt-fence.ts";
 // Calls between Apps. An App calls another's exports (the server methods
 // its `app/exports.json` declares, app-exports.ts) under a permission an
 // admin granted it on them: `await this.env.CRM.call(caller, "findCustomers",
-// input)` in its server code, `env.CRM.call("findCustomers", input)` in its
-// workflows. The call runs on the calling App's permission alone, for the
+// input)` in its server code; a workflow run reaches no other App's code.
+// The call runs on the calling App's permission alone, for the
 // person its caller acts for, as a connection call would: whether that
 // person has a role in the called App isn't checked. The called App's
 // method runs in its own sandbox, with its own permissions, and gets the

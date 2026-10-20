@@ -14,7 +14,6 @@ import { endLiveRuns, finished } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
-import { v1AppWith, v1Server } from "./v1-app-server.ts";
 import { appWith, hitCall } from "./workflow-apps.ts";
 
 // The runs a run's own mail starts, as its descendants: mail it sends
@@ -68,8 +67,6 @@ const sends = (local: string) =>
     // only when it is the same call.
     twice: `await env.MAIL.call("mail.send", mail, { idempotencyKey });
       return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);`,
-    // Through its App's server code, with its caller's key.
-    app: `return (await env.APP.call("relay", mail)) as Json;`,
     // Sends from its account, and drafts the same from a shared mailbox.
     draft: `await env.MAIL.call("mail.send", mail, { idempotencyKey });
       return JSON.parse(((await env.MAIL.call("mail.createDraft", { ...mail, mailbox: "${sharedMailbox(local)}" }, { idempotencyKey })) as { output: string }).output);`,
@@ -108,21 +105,6 @@ const input = { id: "m", stored: null, from: { name: "", address: "a@b.test" }, 
 export default workflowTests(definition, [{ name: "runs", input, mocks: { read: null }, expect: { output: null } }]);
 `,
 });
-
-/**
- * The v1 App server of `loop`'s `app` sends: the v1 sample's, and `relay`,
- * which sends `mail` with its caller's key. Only the v1 server's own test
- * uses it (GRA-645); a connector resource's sends have theirs below.
- */
-const relayServer = v1Server.replace(
-  "export class App extends DurableObject {",
-  `export class App extends DurableObject {
-  async relay(caller: Caller, mail: unknown): Promise<unknown> {
-    const { output } = await (this.env as any).MAIL.call(caller, "mail.send", mail, { idempotencyKey: caller.idempotencyKey });
-    return JSON.parse(output);
-  }
-`
-);
 
 /**
  * The `loop` workflow, receiving mail at `local`: from `mailbox`, it mails
@@ -211,10 +193,7 @@ const loopApp = async (
     ...(listening ? listen(local) : {}),
     ...files(local, connection.mailbox),
   };
-  const app =
-    send === "app"
-      ? await v1AppWith(admin, { ...workflows, "app/server.ts": relayServer })
-      : await appWith(admin, workflows);
+  const app = await appWith(admin, workflows);
   await requestGranted(idp, admin, {
     subject: { type: "app", appId: app },
     object: { type: "connection", connectionId: connection.id },
@@ -672,22 +651,6 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
         to.map((address) => tokenedAt(looping.local).test(address))
       ),
     }).toStrictEqual({ status: "completed", sent: [[true]] });
-  });
-
-  // The v1 App server's: it goes with the server (GRA-645); the
-  // connector resource's sends below are the sealed functions'.
-  it("join its lineage when it sends through its App's server code", async () => {
-    const admin = await personApi("admin");
-    const looping = await loopApp(admin, "app");
-    const subject = `Ping ${crypto.randomUUID()}`;
-
-    const rejected = await followHops(admin, looping, subject, 1);
-    await runsEnded(admin, looping.app, 2);
-
-    expect({ rejected, places: await placesOf(looping.app) }).toStrictEqual({
-      rejected: [undefined, undefined],
-      places: ["root", "child"],
-    });
   });
 
   it("are only the run's own: replies, a token on another address and a made-up token start roots, never deduplicated", async () => {

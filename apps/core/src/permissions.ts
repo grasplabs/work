@@ -1693,26 +1693,27 @@ export const activeOrRequestedPermissions = async (
   ]);
 
 /** A binding name's kind: the run's stub of it (bindings.ts, `runBindingsFor`). */
-export type WorkflowBindingKind = "connection" | "collection" | "app";
+export type WorkflowBindingKind = "connection" | "collection";
 
 /**
  * The binding names `held` gives, each with the kind of binding a run
- * gets from it: a connection's, a collection's or another App's exports'.
+ * gets from it: a connection's or a collection's. Another App's
+ * permission gives a run none: a run reaches no App's code but its own.
  * A name is the kind of the permission that holds it unrevoked, unique
  * among those (`permissions_live_binding_idx`), as that is the one a run
  * gets; a name only revoked permissions held is the kind the run's stub of
- * it would be, an export's over a connection's over a collection's
- * (`bindings`, workflows/code.ts).
+ * it would be, a connection's over a collection's (`bindings`,
+ * workflows/code.ts).
  */
 export const bindingKindsOf = (
   held: readonly { binding: string; objectType: string; status?: string }[]
 ): Record<string, WorkflowBindingKind> => {
-  const rank = { collection: 0, connection: 1, app: 2 } as const;
+  const rank = { collection: 0, connection: 1 } as const;
   const kinds: Record<string, { kind: WorkflowBindingKind; live: boolean }> =
     {};
   for (const { binding, objectType: kind, status } of held) {
     if (
-      (kind === "connection" || kind === "collection" || kind === "app") &&
+      (kind === "connection" || kind === "collection") &&
       bindingNameSchema.safeParse(binding).success
     ) {
       const live = status !== "revoked";

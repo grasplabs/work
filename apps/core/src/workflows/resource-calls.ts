@@ -1,20 +1,12 @@
 import { jsonSchemaOf } from "@grasp-os/sdk/host";
-import { appExportsSchema } from "@grasp-os/shared/apps";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import {
-  appIdSchema,
-  connectionIdSchema,
-  permissionIdSchema,
-} from "@grasp-os/shared/ids";
+import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { permissionErrors } from "@grasp-os/shared/permissions";
-import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { waitUntil } from "cloudflare:workers";
@@ -22,21 +14,15 @@ import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { requireReleaseLoads } from "../app-releases.ts";
-import { findApp } from "../apps.ts";
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { requireStepKey, runStubCall } from "../bindings.ts";
-import { appVersions, permissions } from "../db/core/schema.ts";
-import { appHost } from "../durable-objects.ts";
+import { permissions } from "../db/core/schema.ts";
 import { models } from "../models.ts";
-import { authorizeExport } from "../permissions.ts";
-import { restrict } from "../restricted.ts";
 import {
   approvalServing,
   callApprovedStoreOperation,
 } from "../workflow-bindings.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
-import type { AttemptFence } from "./attempt-fence.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
 import {
   requireCallAuthority,
@@ -57,8 +43,8 @@ import {
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
 // and `grasp.model` calls, each through the target its start froze for
-// the call's binding, and only through connect, an App's export or the
-// model gateway, as every external call and model call of the platform.
+// the call's binding, and only through connect, a business store's public
+// operation (store-operations.ts) or the model gateway, as every external call and model call of the platform.
 // Its time and random numbers are the run host's (resource-host.ts).
 //
 // Threat model, and how each is closed:
@@ -74,13 +60,13 @@ import {
 //   own grant; for a connector, once more just before the call goes to
 //   connect, with nothing but the attempt's lease after it. Then the
 //   permission itself, as every call of the platform: connect's capability
-//   (`authorize`, bindings.ts) and an export's (`authorizeExport`).
+//   (`authorize`, bindings.ts) and a store operation's (store-operations.ts).
 // - An effect repeated by a retry or a replay. A replay never calls: the
 //   step answers what it recorded. Each effect has its own idempotency
 //   key, its step's (`Effect.key`, the run and the task, so the same in
 //   every attempt and replay), which connect keys a side effect's stored
-//   result by, and an App's export gets as its caller's key, the only one
-//   its own connection calls take. A model call's step isn't retried
+//   result by, and a store operation commits under as its receipt's key.
+//   A model call's step isn't retried
 //   (resource-host.ts): a model request is not idempotent.
 // - Arguments or answers that aren't the contract's. Arguments are checked
 //   against the binding's catalog contract before anything is sent, and
@@ -90,19 +76,18 @@ import {
 //   output schema, as sealed.
 // - Restricted data reaching a run that would pass it on. A run never
 //   enters restricted mode once it runs (restricted.ts): for one that
-//   isn't restricted, an operation of an App in restricted mode is refused
-//   before it is called, and its answer withheld if the App entered it
-//   meanwhile (`permission.restricted`); so is a store operation of a
-//   store whose App is restricted (`resource.unavailable`,
-//   workflow-bindings.ts).
+//   isn't restricted, a store operation of a store whose App is
+//   restricted is refused before it runs, and its answer withheld if the
+//   App entered it meanwhile (`resource.unavailable`, workflow-
+//   bindings.ts).
 // - A restricted run (one a restricted App started) passing on what its
 //   start carried. Its connector calls carry its restricted mode to
 //   connect, which holds every one but a native connector's declared
 //   reads for its person (`connect.held`; the run waits for their
 //   decision, resource-host.ts); its model calls are judged as restricted
-//   by the gateway's data rules; and an App it calls, through an export
-//   or a store operation, is restricted before the input reaches it
-//   (`carryRestricted`), audited with the run as provenance.
+//   by the gateway's data rules; and the App owning a store it calls an
+//   operation of is restricted before the input reaches it, audited with
+//   the run as provenance (`callApprovedStoreOperation`).
 // - Sensitive values in what a run records. A binding argument (a
 //   sensitive parameter's value, put in by the host) is sent to connect
 //   only, and a connector's answer that echoes one is refused
@@ -118,8 +103,6 @@ export interface Effect {
   readonly key: string;
   /** When its attempt ends: nothing of it acts after. */
   readonly deadline: number;
-  /** Its attempt, which every call it starts beyond core checks. */
-  readonly fence: AttemptFence;
   /** Throws unless its attempt still holds its lease, nothing awaited. */
   readonly requireHolds: () => void;
   /**
@@ -185,21 +168,6 @@ const audited = async (env: Env, entry: AuditEntry): Promise<void> => {
 
 const callInvalid = (issue: string) =>
   workflowResourceErrors.create("workflow.call_invalid", { issues: [issue] });
-
-/**
- * `value`, an RPC call's result, without what the runtime adds to its top
- * level (its disposer, a symbol): only its own enumerable string keys,
- * read once, as JSON has.
- */
-const rpcResult = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    const items: unknown[] = value;
-    return [...items];
-  }
-  return typeof value === "object" && value !== null
-    ? Object.fromEntries(Object.entries(value))
-    : value;
-};
 
 /**
  * Refuses `value` unless the schema of `descriptor` (its JSON text) takes
@@ -397,58 +365,6 @@ const callConnector = async (
   return answer;
 };
 
-/** The export `name` of App `app`'s version `version`, if there is one. */
-const exportOf = async (
-  env: Env,
-  app: string,
-  version: number,
-  name: string
-) => {
-  const row = await drizzle(env.DB)
-    .select({ exports: appVersions.exports })
-    .from(appVersions)
-    .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
-    .get();
-  const exported = appExportsSchema.safeParse(row?.exports ?? {}).data;
-  return exported !== undefined && Object.hasOwn(exported, name)
-    ? exported[name]
-    : undefined;
-};
-
-/**
- * Carries restricted mode into App `authority.subject` before `run` calls
- * it, as a call from one App to another does (app-calls.ts): a restricted
- * run restricts the App first, its input may carry what the run's start
- * read restricted; an unrestricted run calls no App in restricted mode
- * (`permission.restricted`), whose answer could carry what that App read.
- */
-const carryRestricted = async (
-  env: Env,
-  run: CallingRun,
-  authority: Authority,
-  isAppRestricted: () => Promise<boolean>
-): Promise<void> => {
-  if (authority.subject.type !== "app") {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  if (run.restricted) {
-    await restrict(
-      env,
-      authority,
-      { type: "app", appId: authority.subject.appId },
-      [`workflow_run:${run.runId}`]
-    );
-    return;
-  }
-  if (await isAppRestricted()) {
-    throw permissionErrors.create("permission.restricted");
-  }
-};
-
-/** An operation call refused because the release it pins isn't current. */
-const releaseNotCurrent = () =>
-  workflowResourceErrors.create("workflow.call_release_not_current");
-
 /**
  * Calls the store operation the approval frozen with `binding` names
  * (`callApprovedStoreOperation`, workflow-bindings.ts), with `args`, as
@@ -506,91 +422,10 @@ const callStoreOperation = async (
   return requireShape(contract.output, answer, "output");
 };
 
-/** The longest an export call waits for its held actions' drop. */
-const dropWaitMs = 2000;
-
-/** What a drop's wait leaves of the call's time, to settle in. */
-const dropMarginMs = 1000;
-
-/** How long after a call's deadline its last held action can still land. */
-const lateHoldMs = 2000;
-
 /**
- * Drops whatever connect still holds under an export call's key `key` for
- * the run's person, once the App's method settled (GRA-748): a connection
- * call of the App's own that connect held for them. Hygiene, so the action
- * doesn't sit in the person's list: the security control is that
- * confirming it is refused as its run's end (pending-actions.ts,
- * `runEnded`, which finds the run isn't its App's), whether or not this
- * drop ever lands. The call's step is tried once and never runs the method
- * again to take their decision (resource-host.ts, `triedOnce`: untrusted
- * App code can't be relied on to do it twice to the same effect), so no
- * step would collect what a confirmation sent. Settled either way, failed
- * or answered (App code may catch the hold and answer all the same), the
- * App's actions under that key go, audited by connect (`step.settled`).
- * Only a key of the call's own run is ever dropped. A drop that fails, or
- * is still going after a moment, is logged and changes nothing of the call.
- */
-const dropUncollected = async (
-  env: Env,
-  run: CallingRun,
-  key: string,
-  deadline: number
-): Promise<void> => {
-  // The run's own step's key, as `makeCall` gives every call it makes:
-  // never another run's.
-  if (runOfStepKey(key) !== run.runId) {
-    log.error("workflow.export_hold_drop_refused", { runId: run.runId });
-    return;
-  }
-  const drop = async (): Promise<"dropped" | "failed"> => {
-    try {
-      await env.CONNECT.dropForSettledStep({
-        onBehalfOf: run.principal,
-        idempotencyKey: key,
-      });
-      return "dropped";
-    } catch (error) {
-      log.warn("workflow.export_hold_drop_failed", {
-        runId: run.runId,
-        ...errorFields(error),
-      });
-      return "failed";
-    }
-  };
-  const dropping = drop();
-  // Finished even once the call no longer waits for it.
-  waitUntil(dropping);
-  // And once more just after the call's deadline: a connection call of the
-  // App's still on its way as the method settled (one that timed out) may
-  // reach connect after the first drop, but never once its capability,
-  // which expires by that deadline, has (bindings.ts).
-  waitUntil(
-    (async () => {
-      await scheduler.wait(Math.max(0, deadline - Date.now()) + lateHoldMs);
-      await drop();
-    })()
-  );
-  // Waited for a moment at most, and never into the call's last second: a
-  // slow drop never keeps the step's attempt, tried once, open past its
-  // deadline, which would fail a call that settled.
-  const late = (async (): Promise<"late"> => {
-    await scheduler.wait(
-      Math.max(0, Math.min(dropWaitMs, deadline - Date.now() - dropMarginMs))
-    );
-    return "late";
-  })();
-  if ((await Promise.race([dropping, late])) === "late") {
-    log.warn("workflow.export_hold_drop_late", { runId: run.runId });
-  }
-};
-
-/**
- * Calls the export `binding`'s operation target names, at the App version
- * it pins, with `args`, for the run's principal, under the effect's key:
- * its answer, as the contract has it. Refused
- * (`workflow.call_release_not_current`) once that version isn't the App's
- * current one.
+ * Calls the operation `binding`'s target names: a business store's public
+ * operation, the only target an operation binding has (workflow-
+ * resources.ts). Anything else serves nothing (`workflow.call_denied`).
  */
 const callOperation = async (
   env: Env,
@@ -599,137 +434,10 @@ const callOperation = async (
   call: Extract<BuiltCall, { name: "grasp.operation" }>,
   effect: Effect
 ): Promise<Json> => {
-  const { target } = binding;
-  if (target.kind === "storeOperation") {
-    return await callStoreOperation(env, run, binding, call, effect);
-  }
-  if (target.kind !== "operation") {
+  if (binding.target.kind !== "storeOperation") {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
-  const contract = await contractOf(env, binding);
-  const input = requireShape(contract.input, call.arguments, "arguments");
-  const row = await workflowPermission(env, run, target.permissionId);
-  const app = appIdSchema.safeParse(row.objectId);
-  if (row.objectType !== "app" || !app.success) {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  try {
-    // The release the approval pins: sealed, not revoked, intact.
-    await requireReleaseLoads(env, app.data, target.appVersion);
-  } catch (error) {
-    if (isExpectedError(error)) {
-      throw workflowResourceErrors.create("workflow.call_denied");
-    }
-    throw error;
-  }
-  const exported = await exportOf(
-    env,
-    app.data,
-    target.appVersion,
-    target.export
-  );
-  if (exported === undefined) {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  const authority = runAuthority(run);
-  await authorizeExport(
-    env,
-    authority,
-    app.data,
-    { method: target.export, access: exported.access },
-    permissionIdSchema.parse(target.permissionId)
-  );
-  // The App's host runs only its current version, on data that version's
-  // schema shapes: a release no longer current (an upgrade or a rollback
-  // since the approval) can't safely run against it, so the call is
-  // refused, saying what to do, rather than routed to that release.
-  const notCurrent = async (): Promise<boolean> => {
-    const { currentVersion } = await findApp(env, app.data);
-    return currentVersion !== target.appVersion;
-  };
-  if (await notCurrent()) {
-    throw releaseNotCurrent();
-  }
-  const host = appHost(env, app.data);
-  await carryRestricted(
-    env,
-    run,
-    {
-      subject: { type: "app", appId: app.data },
-      onBehalfOf: run.principal,
-      mode: "workflow",
-      appVersion: target.appVersion,
-    },
-    async () => await host.isRestricted()
-  );
-  effect.requireHolds();
-  let answer: unknown;
-  try {
-    answer = await host.call(
-      {
-        userId: run.principal,
-        mode: "workflow",
-        idempotencyKey: effect.key,
-        fence: effect.fence,
-        admission: {
-          type: "workflowRun",
-          workflow: run.workflowId,
-          run: run.runId,
-          alias: binding.alias,
-        },
-      },
-      target.export,
-      [input],
-      {
-        version: target.appVersion,
-        chain: [],
-        // A run's call holds no App's turn while it waits for one.
-        holding: [],
-        deadline: effect.deadline,
-        readOnly: exported.access === "read",
-        // Recorded once the App pinned the call to the version, before its
-        // method runs: if it can't be, the method doesn't run.
-        onPinned: async () => {
-          await audited(env, {
-            actor: { type: "app", appId: app.data, part: "server" },
-            action: "app.called",
-            target: { type: "workflow_run", id: run.runId },
-            detail: {
-              method: target.export,
-              access: exported.access,
-              version: target.appVersion,
-              workflow: run.workflowId,
-              person: run.principal,
-            },
-          });
-          // Decided again as the App takes the call, its receipt kept, with
-          // nothing awaited after: its authority may have gone while the
-          // call waited for the App's turn, and the export may change the
-          // App's data without a stub call that would ask.
-          await requireCallAuthority(env, run, binding);
-          effect.requireHolds();
-        },
-      }
-    );
-  } catch (error) {
-    // Another version made current as the call went out: said as such.
-    if (
-      isExpectedError(error) &&
-      error.code === "app.conflict" &&
-      (await notCurrent())
-    ) {
-      throw releaseNotCurrent();
-    }
-    throw error;
-  } finally {
-    await dropUncollected(env, run, effect.key, effect.deadline);
-  }
-  // The App may have read restricted data as it answered: withheld from
-  // a run that isn't restricted itself.
-  if (!run.restricted && (await host.isRestricted())) {
-    throw permissionErrors.create("permission.restricted");
-  }
-  return requireShape(contract.output, rpcResult(answer), "output");
+  return await callStoreOperation(env, run, binding, call, effect);
 };
 
 /** The connections the run's connector bindings reach, for the model rules. */

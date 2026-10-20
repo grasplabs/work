@@ -15,14 +15,8 @@ export interface AttemptCalls {
     binding: unknown,
     call: unknown
   ) => Promise<Settled<unknown>>;
-  callApp: (method: unknown, args: unknown) => Promise<Settled<unknown>>;
   callFunction: (
     reference: unknown,
-    input: unknown
-  ) => Promise<Settled<unknown>>;
-  callExport: (
-    binding: unknown,
-    method: unknown,
     input: unknown
   ) => Promise<Settled<unknown>>;
   openDecision: (
@@ -68,9 +62,7 @@ export const attemptCallLabels: {
   callModel: "model",
   callCollection: "collection",
   callConnection: "connection",
-  callApp: "APP",
   callFunction: "APP",
-  callExport: "export",
   openDecision: "decision",
   decisionRecipients: "decision",
   readAttachment: "attachment",
@@ -166,23 +158,11 @@ export class AttemptHost extends RpcTarget implements AttemptCalls {
     return await this.#calls.callConnection(binding, call);
   }
 
-  async callApp(method: unknown, args: unknown): Promise<Settled<unknown>> {
-    return await this.#calls.callApp(method, args);
-  }
-
   async callFunction(
     reference: unknown,
     input: unknown
   ): Promise<Settled<unknown>> {
     return await this.#calls.callFunction(reference, input);
-  }
-
-  async callExport(
-    binding: unknown,
-    method: unknown,
-    input: unknown
-  ): Promise<Settled<unknown>> {
-    return await this.#calls.callExport(binding, method, input);
   }
 
   async openDecision(

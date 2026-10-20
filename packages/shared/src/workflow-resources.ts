@@ -335,13 +335,12 @@ const deciderSchema = z.string().regex(/^(?:person|team|role):[\w.-]{1,128}$/u);
  * - `connector`: one of the workflow's own connection permissions, and the
  *   contract connect generates for that connection (`<connector>.<family>@1`
  *   or `composio.<toolkit>@1`) whose actions serve the catalog contract;
- * - `operation`: an exact version of an App's export, through one of the
- *   workflow's own permissions on that App's exports;
  * - `storeOperation`: a business store's public operation, by its path,
  *   through one of the workflow's own store permissions, run by the App
  *   that owns the store as its current version serves it (core's
- *   store-operations.ts). It serves an `operation` binding, as an export
- *   does;
+ *   store-operations.ts). It is the only target an `operation` binding
+ *   has: no workflow reaches another App's actions, which would run with
+ *   that App's own resource bindings;
  * - `decision`: who answers it;
  * - `event`: that the workflow may listen for and emit the contract's
  *   types. Who may send each is the contract's (`browser`) and the
@@ -360,12 +359,6 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("connector"),
     permissionId: identifierSchema,
     contract: connectorContractIdSchema,
-  }),
-  z.strictObject({
-    kind: z.literal("operation"),
-    permissionId: identifierSchema,
-    appVersion: z.int().min(1),
-    export: z.string().regex(/^[A-Za-z][\w]{0,63}$/u),
   }),
   z.strictObject({
     kind: z.literal("storeOperation"),

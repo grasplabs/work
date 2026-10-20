@@ -65,7 +65,6 @@ import { boundEventsOf } from "./bound-workflow-events.ts";
 import type { PinnedEventBinding } from "./bound-workflow-events.ts";
 import {
   dependencyLocks,
-  sdkReleasePins,
   sdkResourceBindings,
   workflowResourceDraftInspections,
   workflowResourceDraftModules,
@@ -1380,7 +1379,7 @@ const asksModelInTasks = (tasks: readonly SealedTask[]): boolean =>
  * - each action that asks a model: its uses that may write;
  * - the workflow, when its build holds any model task: every write its
  *   call tasks may make, a connector task's operation, an operation task's
- *   export, and the writing uses of each action a task calls. Conservative:
+ *   store operation, and the writing uses of each action a task calls. Conservative:
  *   any model task counts as reaching every call, whatever their order or
  *   the flow of data between them.
  *
@@ -1388,8 +1387,9 @@ const asksModelInTasks = (tasks: readonly SealedTask[]): boolean =>
  * its binding pinned states it is read-only, and only while the catalog
  * still holds that exact contract (its fingerprint the one the version
  * sealed): a binding, contract or operation that isn't there, or a
- * contract that changed, counts as a write. An operation binding's use (an
- * App's export) always counts: its contract states nothing about reading.
+ * contract that changed, counts as a write. An operation binding's use (a
+ * store operation) always counts: its contract states nothing about
+ * reading.
  * So the flag shows whenever a write can't be ruled out.
  */
 const steeringReview = async (
@@ -3015,18 +3015,6 @@ const deletedOnce = async (
     db.delete(workflowResourceDraftInspections).where(
       sql`${workflowResourceDraftInspections.workflowResourceId} IN (SELECT id
         FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
-    ),
-    // The releases its approvals kept (workflow-bindings.ts) go back to
-    // their retention once it is deleted.
-    db.delete(sdkReleasePins).where(
-      and(
-        eq(sdkReleasePins.holderKind, "approval"),
-        sql`${sdkReleasePins.holderId} IN (SELECT approval.id
-          FROM workflow_binding_approvals AS approval
-          JOIN workflow_resources AS workflow ON workflow.id = approval.workflow_resource_id
-          WHERE approval.workflow_resource_id = ${id}
-            AND workflow.deleted_at IS NOT NULL)`
-      )
     ),
   ]);
   return deleted.length > 0;
