@@ -60,9 +60,10 @@ export const screenModulePath = "/screen-modules";
  * through the page's bridge or over a browser's connection to core.
  * Measured with capnweb 0.12.0, which refuses a message once a level's
  * depth reaches `maxDepth`, counting from 0 at the message's expression:
- * the call's list of arguments is one level, and the room for one more
- * is what a v1 server call's own list of arguments took (GRA-789 removed
- * it; the limit stays as it was).
+ * the call's list of arguments is one level, and one more is left only
+ * for `ChatsRpc.previewCall`, whose own list of arguments for a draft's
+ * server code is another. GRA-789's slice 3 removes `previewCall` and
+ * this level with it.
  *
  * A value passed straight as an argument (a run's input, a decision's
  * answer) has one level around it, and an answer, the message's own
