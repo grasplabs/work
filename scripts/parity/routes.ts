@@ -17,7 +17,15 @@ export interface ParityRoute {
   readonly prototype: string;
   /** The path in Grasp OS (`apps/web/src/routes`). */
   readonly grasp: string;
+  /** Who Grasp OS is taken as: the company's admin unless said. */
+  readonly session?: ParitySession;
 }
+
+/**
+ * Who a Grasp OS page is taken as: the seed's admin, or the stack's Grasp
+ * staff member for a page only staff reach (the onboarding area).
+ */
+export type ParitySession = "admin" | "staff";
 
 /** Every page compared, in the order the sidebar has them. */
 export const parityRoutes: readonly ParityRoute[] = [
@@ -31,7 +39,12 @@ export const parityRoutes: readonly ParityRoute[] = [
   { name: "integrations", prototype: "/integrations", grasp: "/integrations" },
   { name: "landscape", prototype: "/landscape", grasp: "/landscape" },
   { name: "policies", prototype: "/policies", grasp: "/policies" },
-  { name: "onboarding", prototype: "/onboarding", grasp: "/onboarding" },
+  {
+    name: "onboarding",
+    prototype: "/onboarding",
+    grasp: "/onboarding",
+    session: "staff",
+  },
   { name: "settings", prototype: "/settings", grasp: "/settings" },
   {
     name: "settings-profile",

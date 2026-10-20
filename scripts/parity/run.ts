@@ -27,6 +27,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -36,7 +37,9 @@ import { parseArgs } from "node:util";
 
 import { chromium } from "@playwright/test";
 import type { Browser } from "@playwright/test";
+import { z } from "zod";
 
+import { localStaff } from "../../apps/core/test/sign-in-config.ts";
 import { people } from "../seed/company.ts";
 import {
   cookieHeader,
@@ -51,7 +54,12 @@ import {
   parityWidths,
   prototypeCommit,
 } from "./routes.ts";
-import type { ParityRoute, ParityTheme, ParityWidth } from "./routes.ts";
+import type {
+  ParityRoute,
+  ParitySession,
+  ParityTheme,
+  ParityWidth,
+} from "./routes.ts";
 
 const root = path.join(import.meta.dirname, "../..");
 
@@ -67,6 +75,9 @@ const heightOf: Readonly<Record<ParityWidth, number>> = {
   1440: 900,
   390: 844,
 };
+
+/** How long a page gets to have its data and stop drawing loading states. */
+const readyTimeoutMs = 20_000;
 
 /** How long a page gets to settle once loaded: its data, fonts and motion. */
 const settleMs = 1500;
@@ -112,6 +123,18 @@ const checkPrototype = (): string => {
   if (!head.startsWith(prototypeCommit)) {
     throw new Error(
       `The prototype at ${prototypeDir} is at ${head.slice(0, 8)}, not ${prototypeCommit}: check that commit out first.`
+    );
+  }
+  // Vite serves the files as they are on disk: a changed or added one would
+  // be taken as the pinned commit's. What git ignores (node_modules) is fine.
+  const changed = execFileSync(
+    "git",
+    ["-C", prototypeDir, "status", "--porcelain", "--untracked-files=all"],
+    { encoding: "utf-8" }
+  ).trim();
+  if (changed !== "") {
+    throw new Error(
+      `The prototype at ${prototypeDir} has changes beyond ${prototypeCommit}: stash or remove them first.\n${changed}`
     );
   }
   return head;
@@ -181,25 +204,42 @@ const startPrototype = async (): Promise<void> => {
   await waitFor(prototypeOrigin, "The prototype");
 };
 
-/** The admin's session cookie in Grasp OS: the person who sees every page. */
-const graspSession = async (): Promise<string> => {
+/** How long one sign-in may take, its requests aborted after. */
+const signInTimeoutMs = 30_000;
+
+/**
+ * A session cookie in Grasp OS for `as`: the seed's admin, who sees every
+ * page a company's people do, or the stack's Grasp staff member, through
+ * Grasp's own tenant, for the pages only staff reach.
+ */
+const graspSession = async (
+  as: ParitySession,
+  signal = AbortSignal.timeout(signInTimeoutMs)
+): Promise<string> => {
+  if (as === "staff") {
+    return await signInAs(localStaff, { providerId: "grasp-staff", signal });
+  }
   const [admin] = people;
   if (admin === undefined) {
     throw new Error("The seed has no people.");
   }
-  return await signInAs(admin.email);
+  return await signInAs(admin.email, { signal });
 };
 
 /** Waits until the admin can sign in to Grasp OS, or throws after the timeout. */
 const waitForSignIn = async (): Promise<void> => {
   const until = Date.now() + startTimeoutMs;
   for (;;) {
+    const left = until - Date.now();
     try {
       // oxlint-disable-next-line no-await-in-loop -- tried one at a time
-      await graspSession();
+      await graspSession(
+        "admin",
+        AbortSignal.timeout(Math.max(1, Math.min(left, signInTimeoutMs)))
+      );
       return;
     } catch (error) {
-      if (Date.now() > until) {
+      if (Date.now() >= until) {
         throw error;
       }
     }
@@ -314,6 +354,33 @@ const shotOf = async (
     if (response !== null && !response.ok()) {
       return { missing: `${url} answered ${response.status()}.` };
     }
+    // Ready once its requests are done and nothing is still drawn as
+    // loading (a skeleton, as both apps' kits mark it); bounded, so a page
+    // that never gets there is said to be missing, not taken half drawn.
+    await page
+      .waitForLoadState("networkidle", { timeout: readyTimeoutMs })
+      .catch(() => null);
+    const ready = await page
+      .waitForFunction(
+        "!document.querySelector('[data-slot=\"skeleton\"]')",
+        null,
+        {
+          timeout: readyTimeoutMs,
+        }
+      )
+      .then(() => true)
+      .catch(() => false);
+    if (!ready) {
+      return {
+        missing: `${url} was still loading after ${String(readyTimeoutMs / 1000)} s.`,
+      };
+    }
+    // An app that sends the page elsewhere (one only staff reach) took
+    // another page: never labelled as this one.
+    const landed = new URL(page.url());
+    if (landed.pathname !== new URL(url).pathname) {
+      return { missing: `${url} sent the page to ${landed.pathname}.` };
+    }
     // In the page, where the DOM is: its fonts loaded before it's taken.
     await page.evaluate("document.fonts.ready.then(() => null)");
     await page.waitForTimeout(settleMs);
@@ -334,10 +401,11 @@ const shotOf = async (
 const takeAll = async (
   browser: Browser,
   out: string,
-  cookie: string
+  cookies: Readonly<Record<ParitySession, string>>
 ): Promise<ReportPage[]> => {
   const pages: ReportPage[] = [];
   for (const route of routesAsked()) {
+    const cookie = cookies[route.session ?? "admin"];
     const pairs: ShotPair[] = [];
     for (const width of parityWidths) {
       for (const theme of parityThemes) {
@@ -376,10 +444,55 @@ const takeAll = async (
 };
 
 /**
- * The file that marks a directory as one this tool wrote: the only kind
- * `--out` may delete, since many a directory holds an `index.html`.
+ * The file that marks a directory as one this tool wrote, listing the files
+ * it wrote there: the only ones a later run deletes.
  */
 const reportMarker = ".parity-report";
+
+/** The files a report is made of, relative to its directory. */
+const ownedFiles = (pages: readonly ReportPage[]): string[] => [
+  "index.html",
+  ...pages.flatMap(({ pairs }) =>
+    pairs.flatMap(({ prototype, grasp }) =>
+      [prototype, grasp].flatMap((shot) => ("file" in shot ? [shot.file] : []))
+    )
+  ),
+];
+
+/**
+ * Removes the files an earlier report under `out` was made of, as its
+ * marker lists them, and nothing else: notes or images put beside them
+ * stay. A directory with files but no marker isn't a report: refused.
+ */
+const clearEarlierReport = (out: string): void => {
+  const marker = path.join(out, reportMarker);
+  if (!existsSync(marker)) {
+    if (existsSync(out) && readdirSync(out).length > 0) {
+      throw new Error(
+        `--out ${out} holds files that aren't a parity report: refusing to touch them.`
+      );
+    }
+    mkdirSync(out, { recursive: true });
+    return;
+  }
+  let written: unknown;
+  try {
+    written = JSON.parse(readFileSync(marker, "utf-8"));
+  } catch {
+    // A marker of an older run, or unreadable: nothing listed to delete.
+    written = [];
+  }
+  const read = z.array(z.string()).safeParse(written);
+  const listed = read.success ? read.data : [];
+  for (const file of listed) {
+    const target = path.resolve(out, file);
+    // Only a file of the report's own directory, however the list reads.
+    if (target.startsWith(`${out}${path.sep}`)) {
+      rmSync(target, { force: true });
+    }
+  }
+  rmSync(marker, { force: true });
+};
 
 const main = async (): Promise<void> => {
   const commit = checkPrototype();
@@ -392,25 +505,21 @@ const main = async (): Promise<void> => {
       `--out ${out} is the checkout or holds it: pick a directory of its own.`
     );
   }
-  if (
-    existsSync(out) &&
-    readdirSync(out).length > 0 &&
-    !existsSync(path.join(out, reportMarker))
-  ) {
-    throw new Error(
-      `--out ${out} holds files that aren't a parity report: refusing to delete them.`
-    );
-  }
-  rmSync(out, { recursive: true, force: true });
-  mkdirSync(out, { recursive: true });
-  writeFileSync(path.join(out, reportMarker), "");
+  clearEarlierReport(out);
   try {
     await startPrototype();
     await startGrasp();
-    const cookie = await graspSession();
+    const cookies = {
+      admin: await graspSession("admin"),
+      staff: await graspSession("staff"),
+    };
     const browser = await chromium.launch();
     try {
-      const pages = await takeAll(browser, out, cookie);
+      const pages = await takeAll(browser, out, cookies);
+      writeFileSync(
+        path.join(out, reportMarker),
+        `${JSON.stringify(ownedFiles(pages), null, 2)}\n`
+      );
       writeFileSync(
         path.join(out, "index.html"),
         reportHtml(pages, {
@@ -429,9 +538,17 @@ const main = async (): Promise<void> => {
   }
 };
 
-process.on("SIGINT", () => {
-  stopAll();
-  process.exit(130);
-});
+// Stopped by a signal, the `finally` in `main` doesn't run: the servers'
+// process groups are stopped here instead.
+for (const [signal, code] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+  ["SIGHUP", 129],
+] as const) {
+  process.on(signal, () => {
+    stopAll();
+    process.exit(code);
+  });
+}
 
 await main();

@@ -54,14 +54,26 @@ const locationOf = (response: Response, step: string): string => {
  * (`devIdpOrigin` in apps/core/src/auth/config.ts), so a deployed core,
  * or anything else answering here, is never seeded.
  */
-export const signInAs = async (email: string): Promise<string> => {
+export const signInAs = async (
+  email: string,
+  {
+    providerId = "microsoft",
+    signal,
+  }: {
+    /** Grasp's own tenant (`grasp-staff`) for the stack's staff member. */
+    providerId?: "microsoft" | "grasp-staff";
+    /** Aborts each request of the sign-in, for a caller with a deadline. */
+    signal?: AbortSignal;
+  } = {}
+): Promise<string> => {
   let started: Response;
   try {
     started = await fetch(new URL("/api/auth/sign-in/sso", origin), {
       method: "POST",
       headers: { origin, "content-type": "application/json" },
+      signal,
       body: JSON.stringify({
-        providerId: "microsoft",
+        providerId,
         callbackURL: "/",
         errorCallbackURL: "/",
         loginHint: email,
@@ -87,9 +99,10 @@ export const signInAs = async (email: string): Promise<string> => {
       `Core at ${origin} signs people in at ${new URL(body.url).origin}, not the local fake IdP: the seed only fills the stack \`vp run dev\` runs.`
     );
   }
-  const atIdp = await fetch(body.url, { redirect: "manual" });
+  const atIdp = await fetch(body.url, { redirect: "manual", signal });
   const finished = await fetch(locationOf(atIdp, "The IdP"), {
     redirect: "manual",
+    signal,
     headers: { cookie: cookiesOf(started) },
   });
   const session = cookiesOf(finished)
