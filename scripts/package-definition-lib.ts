@@ -29,7 +29,11 @@
  *   pins, or the network is reached: nothing here makes a network call.
  *   What is pinned exactly: the App's direct dependencies and, as npm
  *   `overrides`, each of its locked packages' dependencies, from its own
- *   lock; the vendored packages' and the project's own direct
+ *   lock, and the same of each workflow version's approved packages,
+ *   from the lock its entry carries; two locks that pin one package at
+ *   different versions are refused, as is a workflow that imports
+ *   packages without a lock, since a project installs one of each
+ *   (GRA-737); the vendored packages' and the project's own direct
  *   dependencies, from the catalog. What isn't: the catalog packages' own
  *   dependencies, which the package manager resolves at install, and
  *   integrity, which only a lockfile carries. A lock that names a package
@@ -68,10 +72,13 @@ import {
   readSealedWorkflows,
 } from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
-import { definitionPackageSchema } from "@grasp-os/shared/definition-packages";
+import {
+  definitionPackageFormatVersion,
+  definitionPackageSchema,
+} from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { graspLockSchema } from "@grasp-os/shared/packages";
-import type { LockedPackage } from "@grasp-os/shared/packages";
+import type { GraspLock, LockedPackage } from "@grasp-os/shared/packages";
 import { z } from "zod";
 
 import { screenReferences } from "../packages/compiler/src/kit.ts";
@@ -345,7 +352,23 @@ export interface PackagingInput {
 }
 
 /** The package `definition`, of a protocol this checkout runs, or a refusal. */
+/** Just the format a package says it has, to refuse another one by name. */
+const formatSchema = z.object({ formatVersion: z.int() });
+
 const readDefinition = (definition: unknown): DefinitionPackage => {
+  const format = formatSchema.safeParse(definition);
+  if (
+    format.success &&
+    format.data.formatVersion !== definitionPackageFormatVersion
+  ) {
+    const remedy =
+      format.data.formatVersion < definitionPackageFormatVersion
+        ? "Export the App's definition again."
+        : "Update this checkout to package it.";
+    return refuse(
+      `The package is format ${format.data.formatVersion}; this checkout reads format ${definitionPackageFormatVersion}. ${remedy}`
+    );
+  }
   const parsed = definitionPackageSchema.safeParse(definition);
   if (!parsed.success) {
     return refuse("The file isn't a definition package this checkout reads.");
@@ -413,8 +436,8 @@ const declaredDependenciesSchema = z.object({
   dependencies: z.record(z.string(), z.string()).optional(),
 });
 
-/** What the App's lock pins: its direct dependencies, and theirs. */
-interface AppPins {
+/** What a lock pins: its direct dependencies, and theirs. */
+interface LockPins {
   readonly direct: Record<string, string>;
   /**
    * npm `overrides`: for each locked package, by `<name>@<version>`, the
@@ -445,15 +468,56 @@ const ownedByProject = (name: string): boolean =>
   projectDevDependencies.some((each) => each === name);
 
 /**
- * The App's own dependencies, exactly as its lock resolved them, and each
- * locked package's dependencies as overrides. A lock that names one the
- * project pins itself (the vendored packages, React, the type-checker) is
- * refused: it would swap it for whatever the registry serves.
+ * What `lock`, `owner`'s, pins: its direct dependencies exactly as it
+ * resolved them, and each locked package's dependencies as overrides, each
+ * direct one in the notices. A lock that names one the project pins itself
+ * (the vendored packages, React, the type-checker) is refused: it would
+ * swap it for whatever the registry serves.
  */
+const lockPins = (
+  lock: Omit<GraspLock, "artifacts">,
+  owner: string,
+  notices: Notice[]
+): LockPins => {
+  const locked = Object.values(lock.packages);
+  // Nothing the project pins itself is the lock's to replace, anywhere in
+  // the graph but its peers, which the project's own versions meet.
+  const named = locked.flatMap((entry) => [
+    entry.name,
+    ...Object.keys(entry.dependencies),
+    ...Object.keys(graphPeersOf(entry)),
+  ]);
+  if (
+    Object.keys(lock.direct).some(ownedByProject) ||
+    named.some(ownedByProject)
+  ) {
+    refuse(`A package the project pins itself is named in ${owner}'s lock.`);
+  }
+  for (const [name, version] of Object.entries(lock.direct)) {
+    notices.push({
+      name,
+      version,
+      licence:
+        locked.find((entry) => entry.name === name && entry.version === version)
+          ?.license ?? null,
+      from: `${owner}'s lock`,
+    });
+  }
+  const overrides: Record<string, Record<string, string>> = {};
+  for (const entry of locked) {
+    const pinnedEdges = { ...graphPeersOf(entry), ...entry.dependencies };
+    if (Object.keys(pinnedEdges).length > 0) {
+      overrides[`${entry.name}@${entry.version}`] = pinnedEdges;
+    }
+  }
+  return { direct: { ...lock.direct }, overrides };
+};
+
+/** The App's own dependencies, as its lock pins them (`lockPins`). */
 const appDependencies = (
   files: Readonly<Record<string, string>>,
   notices: Notice[]
-): AppPins => {
+): LockPins => {
   const lockText = files["grasp.lock.json"];
   if (lockText === undefined) {
     const declared =
@@ -472,38 +536,67 @@ const appDependencies = (
       "The App's grasp.lock.json isn't a lock this checkout reads."
     );
   }
-  const locked = Object.values(lock.data.packages);
-  // Nothing the project pins itself is the App's to replace, anywhere in
-  // the graph but its peers, which the project's own versions meet.
-  const named = locked.flatMap((entry) => [
-    entry.name,
-    ...Object.keys(entry.dependencies),
-    ...Object.keys(graphPeersOf(entry)),
-  ]);
-  if (
-    Object.keys(lock.data.direct).some(ownedByProject) ||
-    named.some(ownedByProject)
-  ) {
-    refuse("The App's lock names a package the project pins itself.");
-  }
-  for (const [name, version] of Object.entries(lock.data.direct)) {
-    notices.push({
-      name,
-      version,
-      licence:
-        locked.find((entry) => entry.name === name && entry.version === version)
-          ?.license ?? null,
-      from: "the App's lock",
+  return lockPins(lock.data, "the App", notices);
+};
+
+/**
+ * Each workflow version's approved packages, as the lock its entry
+ * carries pins them (`lockPins`): one that imports packages without a
+ * lock is refused, since nothing would pin what its modules import.
+ */
+const workflowDependencies = (
+  workflows: DefinitionPackage["workflows"],
+  notices: Notice[]
+): { owner: string; pins: LockPins }[] =>
+  Object.entries(workflows)
+    .toSorted(([a], [b]) => (a < b ? -1 : 1))
+    .flatMap(([key, { packages }]) => {
+      if (packages === null) {
+        return [];
+      }
+      if (packages.lock === null) {
+        return refuse(
+          `${key} imports packages, but the package carries no lock for them.`
+        );
+      }
+      return [{ owner: key, pins: lockPins(packages.lock, key, notices) }];
     });
-  }
+
+/** A locked package's pinned edges, by name, as one text to compare. */
+const edgesText = (edges: Readonly<Record<string, string>>): string =>
+  JSON.stringify(
+    Object.entries(edges).toSorted(([a], [b]) => (a < b ? -1 : 1))
+  );
+
+/**
+ * One project's pins of every lock in `all`: a package pinned at two
+ * versions, directly or in what one locked package depends on, is
+ * refused, since the project installs one of it.
+ */
+const mergedPins = (all: readonly { owner: string; pins: LockPins }[]) => {
+  const direct: Record<string, string> = {};
+  const directBy: Record<string, string> = {};
   const overrides: Record<string, Record<string, string>> = {};
-  for (const entry of locked) {
-    const pinnedEdges = { ...graphPeersOf(entry), ...entry.dependencies };
-    if (Object.keys(pinnedEdges).length > 0) {
-      overrides[`${entry.name}@${entry.version}`] = pinnedEdges;
+  for (const { owner, pins } of all) {
+    for (const [name, version] of Object.entries(pins.direct)) {
+      const before = direct[name];
+      if (before !== undefined && before !== version) {
+        refuse(
+          `${name} is pinned at ${before} by ${directBy[name] ?? "another lock"} and at ${version} by ${owner}; a project installs one.`
+        );
+      }
+      direct[name] = version;
+      directBy[name] ??= owner;
+    }
+    for (const [locked, edges] of Object.entries(pins.overrides)) {
+      const before = overrides[locked];
+      if (before !== undefined && edgesText(before) !== edgesText(edges)) {
+        refuse(`${locked} depends on other versions in ${owner}'s lock.`);
+      }
+      overrides[locked] = edges;
     }
   }
-  return { direct: lock.data.direct, overrides };
+  return { direct, overrides };
 };
 
 /** What a vendored package needs from the checkout. */
@@ -746,7 +839,10 @@ export const planProject = async (
   planWorkflows(project, definition.workflows);
 
   const notices: Notice[] = [];
-  const pins = appDependencies(definition.app.files, notices);
+  const pins = mergedPins([
+    { owner: "the App", pins: appDependencies(definition.app.files, notices) },
+    ...workflowDependencies(definition.workflows, notices),
+  ]);
   const catalogText = readFileSync(
     path.join(input.repo, "pnpm-workspace.yaml"),
     "utf-8"
@@ -827,6 +923,13 @@ export const planProject = async (
             provenance: workflow.provenance,
             withheldDefaults: workflow.withheldDefaults,
             withheldConstraints: workflow.withheldConstraints,
+            packages:
+              workflow.packages === null
+                ? null
+                : {
+                    graphHash: workflow.packages.graphHash,
+                    entries: workflow.packages.entries,
+                  },
           },
         ])
       ),

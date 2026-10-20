@@ -1,9 +1,12 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { generatedPath } from "@grasp-os/open-workflow/generate";
 import { readAppManifest } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -11,11 +14,18 @@ import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { exportAppDefinition } from "../src/definition-export.ts";
+import { grantApprover } from "../src/dependencies/approvers.ts";
+import { policyGeneration } from "../src/dependencies/policy.ts";
+import { decideDependency } from "../src/dependencies/requests.ts";
+import { resolveDependencies } from "../src/packages/resolve.ts";
+import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
+import { sealPackages } from "../src/workflows/sealed-packages.ts";
+import { publish } from "./npm.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, outcome, refusal, unique } from "./sign-in.ts";
 
@@ -112,6 +122,122 @@ const published = async (by: Acting, params: Record<string, unknown>) => {
     basedOn: null,
   });
   return workflow;
+};
+
+/** A definition of `name` that answers `total` of [1, 2, 3] as its status. */
+const computingDefinitionOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {},
+          bindings: {
+            total: { kind: "compute", contract: "local:code/total.ts#total" },
+          },
+        },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      {
+        add: {
+          call: "grasp.compute",
+          with: { binding: "total", arguments: "${ [1, 2, 3] }" },
+        },
+      },
+      { answer: { set: { status: "${ tostring }" } } },
+    ],
+  });
+
+/** A calculation doubling the sum with `pkg`'s `double`. */
+const moduleUsing = (
+  pkg: string
+): string => `import { compute, v } from "@grasp-os/sdk/compute";
+import { double } from ${JSON.stringify(pkg)};
+
+export const total = compute({
+  input: v.array(v.number().integer().min(0)).max(100),
+  output: v.number().integer().min(0),
+  handler: (amounts) => double(amounts.reduce((all, amount) => all + amount, 0)),
+});
+`;
+
+/** `by`'s request for workflow `id`'s packages `dependencies`, approved by `admin`. */
+const approvedFor = async (
+  by: Acting,
+  admin: Identity,
+  id: string,
+  intent: { dependencies: Record<string, string>; entries?: string[] }
+) => {
+  const { request } = await resolveDependencies(env, by, {
+    workflow: id,
+    sourceRevision: "rev-1",
+    purpose: "Double the quarter's total.",
+    targets: ["computation"],
+    ...intent,
+    // As a resolve takes them: name and range pairs.
+    dependencies: Object.entries(intent.dependencies).map(([name, range]) => ({
+      name,
+      range,
+    })),
+  });
+  await decideDependency(env, admin, request.id, {
+    approved: true,
+    reviewed: {
+      graphHash: request.graphHash,
+      policyGeneration: await policyGeneration(drizzle(env.DB)),
+    },
+  });
+  return request.graphHash;
+};
+
+/**
+ * An App whose current release binds `followUp` to a workflow version
+ * sealing an approved package, its licence `license`.
+ */
+const appSealingPackage = async (license: string) => {
+  const fixture = await appWith(files(), "Requests");
+  const { owner, app } = fixture;
+  const admin = await person("admin");
+  await grantApprover(env, admin, { type: "person", userId: admin.userId });
+  const pkg = `double-${unique()}`;
+  await publish({
+    name: pkg,
+    version: "1.0.0",
+    manifest: { type: "module", main: "index.js", license },
+    files: { "index.js": "export const double = (value) => value * 2;" },
+  });
+  const workflow = await createWorkflowResource(env, owner, `p-${unique()}`);
+  const graphHash = await approvedFor(owner, admin, workflow.id, {
+    dependencies: { [pkg]: "^1.0.0" },
+  });
+  await publishWorkflowVersion(
+    env,
+    owner,
+    workflow.id,
+    {
+      definition: computingDefinitionOf(workflow.name),
+      basedOn: null,
+      modules: { "code/total.ts": moduleUsing(pkg) },
+      packages: { graphHash },
+    },
+    sealPackages
+  );
+  await bindWorkflowToApp(env, owner, workflow.id, {
+    app,
+    alias: "followUp",
+    version: 1,
+  });
+  await seal(fixture);
+  await setCurrentVersion(env, owner, app, 1);
+  return { owner, app, admin, pkg, workflow, graphHash };
 };
 
 /** A workflow definition's parameters, as far as these tests read them. */
@@ -213,6 +339,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       workflow: keys(entry),
       workflowProvenance: keys(entry.provenance),
       workflowFiles: keys(entry.files),
+      workflowPackages: entry.packages,
     }).toStrictEqual({
       root: ["app", "formatVersion", "unresolved", "workflows"],
       app: [
@@ -247,6 +374,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       workflow: [
         "bindings",
         "files",
+        "packages",
         "provenance",
         "withheldConstraints",
         "withheldDefaults",
@@ -260,6 +388,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         "profile",
       ],
       workflowFiles: [generatedPath, "workflow.json"].toSorted(),
+      workflowPackages: null,
     });
     // The source, and the registration the seal read from it, which the
     // SDK reads back as it was sealed.
@@ -436,6 +565,120 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     expect(
       [tier, theirs.name, String(bound)].filter((value) => text.includes(value))
     ).toStrictEqual([]);
+  });
+
+  it("carries a version's approved packages, which publish again only once the graph is approved for the workflow publishing them", async () => {
+    const { owner, app, admin, pkg, workflow, graphHash } =
+      await appSealingPackage("MIT");
+
+    const exported = await exportAppDefinition(env, owner, app);
+    const entry =
+      exported.workflows[`${workflowNamespace}/${workflow.name}/1.0.0`];
+    const packages = entry?.packages;
+    if (entry === undefined || packages === null || packages === undefined) {
+      throw new Error("The version's packages weren't exported");
+    }
+
+    // Elsewhere, as an import would: another builder's workflow publishes
+    // the exported definition and modules, under its own name.
+    const builder = await person("builder");
+    const copy = await createWorkflowResource(env, builder, `p-${unique()}`);
+    const original = z
+      .looseObject({ document: z.looseObject({}) })
+      .parse(JSON.parse(entry.files["workflow.json"] ?? "{}"));
+    const definition = JSON.stringify({
+      ...original,
+      document: { ...original.document, name: copy.name },
+    });
+    const modules = Object.fromEntries(
+      Object.entries(entry.files).filter(([file]) => file.startsWith("code/"))
+    );
+    const publishCopy = async (sealing: string) =>
+      await publishWorkflowVersion(
+        env,
+        builder,
+        copy.id,
+        {
+          definition,
+          basedOn: null,
+          modules,
+          packages: { graphHash: sealing },
+        },
+        sealPackages
+      );
+    // The exported graph is never taken as approved for another workflow.
+    const unapproved = await outcome(publishCopy(packages.graphHash));
+    // Asked for at the lock's exact versions, and approved anew.
+    const asked = await approvedFor(builder, admin, copy.id, {
+      dependencies: packages.lock?.direct ?? {},
+      entries: [...packages.entries],
+    });
+    const republished = await publishCopy(asked);
+    const loaded = await loadWorkflowBuild(
+      env,
+      copy.id,
+      republished.version,
+      republished.manifestHash
+    );
+    expect({
+      packages: {
+        ...packages,
+        lock: packages.lock === null ? null : { direct: packages.lock.direct },
+      },
+      lockPinsNoBuild:
+        packages.lock !== null && !("artifacts" in packages.lock),
+      unapproved,
+      sameGraph: asked === packages.graphHash,
+      sealed: loaded.packages,
+    }).toStrictEqual({
+      packages: {
+        graphHash,
+        entries: [pkg],
+        lock: { direct: { [pkg]: "1.0.0" } },
+      },
+      lockPinsNoBuild: true,
+      unapproved: "dependency.approval_required",
+      sameGraph: true,
+      sealed: { graphHash },
+    });
+  });
+
+  it("refuses as corrupt a version whose stored lock doesn't read as a lock, JSON or not", async () => {
+    const { owner, app, workflow } = await appSealingPackage("MIT");
+    const exportWithLock = async (lock: string) => {
+      await env.DB.prepare(
+        "UPDATE dependency_locks SET lock = ? WHERE subject_type = 'workflow' AND subject_id = ?"
+      )
+        .bind(lock, workflow.id)
+        .run();
+      return await outcome(exportAppDefinition(env, owner, app));
+    };
+    expect({
+      notJson: await exportWithLock("{"),
+      notALock: await exportWithLock(JSON.stringify({ direct: 1 })),
+    }).toStrictEqual({
+      notJson: "workflow.version_corrupt",
+      notALock: "workflow.version_corrupt",
+    });
+  });
+
+  it("scans a version's packages for known secret formats like its files, naming the record and never the match", async () => {
+    // Built here, so no file of the repository holds one.
+    const token = ["ghp", "_", "Q".repeat(36)].join("");
+    const { owner, app, workflow } = await appSealingPackage(token);
+    const refused = await refusal(exportAppDefinition(env, owner, app));
+    expect({
+      refused: refusedSchema.parse(refused),
+      echoed: JSON.stringify(refused).includes(token),
+    }).toStrictEqual({
+      refused: {
+        code: "version.export_secret_found",
+        details: {
+          path: `workflows/${workflowNamespace}/${workflow.name}/1.0.0/packages`,
+        },
+      },
+      echoed: false,
+    });
   });
 
   it("refuses a package past its byte budget, or one whose files hold a known secret format, naming the file and never the match", async () => {
