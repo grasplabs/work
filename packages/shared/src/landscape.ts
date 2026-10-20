@@ -118,12 +118,16 @@ export type LandscapeSignal = (typeof landscapeSignals)[number];
  * alone.
  */
 export const isHighPrivilegeScope = (scope: string): boolean =>
-  /^(?:Mail|Files|Sites|Notes|Chat|ChannelMessage|Calendars|Contacts|EWS|IMAP|POP|SMTP)\./iu.test(
+  /^(?:Mail|MailboxSettings|Files|Sites|Notes|Chat|ChatMessage|ChannelMessage|Calendars|Contacts|EWS|IMAP|POP|SMTP)\./iu.test(
     scope
   ) ||
   // A person's own profile (`User.ReadWrite`) is theirs to give; anyone
   // else's, or the directory's, isn't.
-  /^(?:Directory|Group|Application|RoleManagement)\.ReadWrite/iu.test(scope) ||
+  /^(?:Directory|Group|GroupMember|Application|AppRoleAssignment|DelegatedPermissionGrant|RoleManagement)\.ReadWrite/iu.test(
+    scope
+  ) ||
+  // The signed-in person's own rights over the directory: an admin's write.
+  /^Directory\.AccessAsUser\./iu.test(scope) ||
   /^User\.ReadWrite\./iu.test(scope);
 
 /** An app of the landscape, as anyone in the organization may see it. */

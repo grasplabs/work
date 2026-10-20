@@ -16,6 +16,12 @@ describe("a high-privilege scope", () => {
       "User.ReadWrite.All",
       "Application.ReadWrite.OwnedBy",
       "RoleManagement.ReadWrite.Directory",
+      "ChatMessage.Send",
+      "Directory.AccessAsUser.All",
+      "DelegatedPermissionGrant.ReadWrite.All",
+      "AppRoleAssignment.ReadWrite.All",
+      "GroupMember.ReadWrite.All",
+      "MailboxSettings.ReadWrite",
       "User.ReadWrite",
       "User.Read",
       "User.ReadBasic.All",
@@ -31,6 +37,12 @@ describe("a high-privilege scope", () => {
       "User.ReadWrite.All",
       "Application.ReadWrite.OwnedBy",
       "RoleManagement.ReadWrite.Directory",
+      "ChatMessage.Send",
+      "Directory.AccessAsUser.All",
+      "DelegatedPermissionGrant.ReadWrite.All",
+      "AppRoleAssignment.ReadWrite.All",
+      "GroupMember.ReadWrite.All",
+      "MailboxSettings.ReadWrite",
     ]);
   });
 });
