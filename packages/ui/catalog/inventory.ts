@@ -814,6 +814,12 @@ export const graspComponents = {
       "PageHeaderTitle",
     ],
   },
+  shimmer: {
+    status: "supported",
+    summary:
+      "Text with a light sweeping across it, for what is still being worked out.",
+    exports: ["Shimmer"],
+  },
   "split-pane": {
     status: "supported",
     summary:

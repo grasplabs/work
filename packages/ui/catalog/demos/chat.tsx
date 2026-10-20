@@ -43,6 +43,7 @@ import {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@grasp-os/ui/components/questionnaire";
+import { Shimmer } from "@grasp-os/ui/components/shimmer";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { FileTextIcon } from "lucide-react";
 
@@ -158,6 +159,10 @@ const QuestionnaireDemo = () => (
   </Questionnaire>
 );
 
+const ShimmerDemo = () => (
+  <Shimmer aria-live="polite">Thinking about your question…</Shimmer>
+);
+
 export const chatDemos = {
   attachment: AttachmentDemo,
   bubble: BubbleDemo,
@@ -165,4 +170,5 @@ export const chatDemos = {
   message: MessageDemo,
   "message-scroller": MessageScrollerDemo,
   questionnaire: QuestionnaireDemo,
+  shimmer: ShimmerDemo,
 };
