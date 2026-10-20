@@ -176,6 +176,8 @@ describe("a draft's sealed preview on the on-prem sandbox", () => {
         // `trace` is no level a tail keeps: the next line is the long one.
         long: lines[5]?.message.length,
         unprintable: lines[6]?.message,
+        // A line logged while printing another fills the last place.
+        last: lines.at(-1)?.message,
         read: supervisor.output().includes("sandbox.listening"),
         printed: supervisor.output().includes(ran.value),
       }).toStrictEqual({
@@ -187,6 +189,7 @@ describe("a draft's sealed preview on the on-prem sandbox", () => {
         error: true,
         long: 2000,
         unprintable: "[unprintable]",
+        last: "inner",
         read: true,
         printed: false,
       });

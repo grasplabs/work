@@ -110,7 +110,11 @@ const recording = (level) => (...parts) => {
   } catch {
     message = "[unprintable]";
   }
-  lines.push({ at: Date.now(), level, message });
+  // Printing a value may log too (its toJSON): those lines may have
+  // filled the call's lines meanwhile.
+  if (lines.length < ${maxCapturedLines}) {
+    lines.push({ at: Date.now(), level, message });
+  }
 };
 const levels = new Set(${JSON.stringify(capturedLevels)});
 for (const name of Object.getOwnPropertyNames(console)) {

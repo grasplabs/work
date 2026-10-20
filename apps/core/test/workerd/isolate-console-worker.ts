@@ -89,6 +89,17 @@ export class Run extends WorkerEntrypoint {
         throw new Error("no text");
       },
     });
+    // Twelve lines more make 19, one short of a call's 20...
+    for (let n = 0; n < 12; n += 1) {
+      console.log(value, n);
+    }
+    // ...and printing this logs the 20th: it is kept, and this one isn't.
+    console.log({
+      toJSON() {
+        console.log("inner");
+        return "outer";
+      },
+    });
     for (let n = 0; n < 30; n += 1) {
       console.log(value, n);
     }
