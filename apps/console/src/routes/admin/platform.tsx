@@ -62,6 +62,22 @@ const rolloutStatusWords: Record<RolloutView["status"], string> = {
   cancelled: "Cancelled",
 };
 
+/**
+ * What the rollout's badge says: paused, as its run tells when staff
+ * paused it (its record doesn't), the ring it waits for, or its status.
+ */
+const rolloutBadgeWords = (
+  rollout: RolloutView,
+  next: number | null
+): string => {
+  if (rollout.run === "paused") {
+    return "Paused";
+  }
+  return next === null
+    ? rolloutStatusWords[rollout.status]
+    : `Waits for ring ${next}`;
+};
+
 /** The rollout going out, ring by ring, and each company in it. */
 const GoingOut = ({
   rollout,
@@ -84,10 +100,7 @@ const GoingOut = ({
   const next = nextRing(rollout, rollout.targets);
   const what =
     rollout.kind === "secrets" ? "new secrets" : (rollout.releaseId ?? "");
-  const status =
-    next === null
-      ? rolloutStatusWords[rollout.status]
-      : `Waits for ring ${next}`;
+  const status = rolloutBadgeWords(rollout, next);
   return (
     <Panel
       action={
