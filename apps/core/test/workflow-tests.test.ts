@@ -621,6 +621,47 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     await expect(recordedRuns(app)).resolves.toStrictEqual([rows[0]?.runId]);
   });
 
+  it("keep a run's record for the next sweep when it can't be deleted, and sweep on", async () => {
+    const app = `app_${unique()}`;
+    const runId = `left-${unique()}`;
+    await env.DB.prepare(
+      "INSERT INTO app_test_runs (run_id, app_id, app_version, workflow_resource_id, version, manifest_hash, build_hash, principal, input, params, created_at, deadline) VALUES (?, ?, 1, 'wf', 1, ?, ?, 'fixture-desk-user', '{}', '{}', ?, ?)"
+    )
+      .bind(
+        runId,
+        app,
+        "0".repeat(64),
+        "0".repeat(64),
+        Date.now(),
+        Date.now() - 1000
+      )
+      .run();
+    // D1 refuses the record's delete, and only that.
+    const db = new Proxy(env.DB, {
+      get: (target, name): unknown => {
+        const value: unknown = Reflect.get(target, name);
+        if (name === "prepare" && typeof value === "function") {
+          return (query: string): unknown => {
+            if (/delete from "app_test_runs"/iu.test(query)) {
+              throw new Error("D1 is unavailable.");
+            }
+            return Reflect.apply(value, target, [query]);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const swept = await refusal(async () => {
+      await sweepTestFixtures({ ...env, DB: db }, new Date());
+    });
+    expect({ swept, kept: await recordedRuns(app) }).toStrictEqual({
+      swept: "answered",
+      kept: [runId],
+    });
+  });
+
   it("stop an activation once its test's time is up", async () => {
     const { release } = await requestsApp(
       async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT2S" } }]))

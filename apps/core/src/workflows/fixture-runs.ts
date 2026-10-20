@@ -109,9 +109,17 @@ export const discardFixtureRuns = async (
     })
   );
   if (removed.length > 0) {
-    await drizzle(env.DB)
-      .delete(appTestRuns)
-      .where(inArray(appTestRuns.runId, removed));
+    try {
+      await drizzle(env.DB)
+        .delete(appTestRuns)
+        .where(inArray(appTestRuns.runId, removed));
+    } catch (error) {
+      // The engine let go of them: their records stay, for the sweep.
+      log.warn("app_tests.run_record_delete_failed", {
+        runs: removed.length,
+        ...errorFields(error),
+      });
+    }
   }
 };
 
