@@ -126,6 +126,34 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
+   * `StoreHost.sampleMigration`: a migration's dry-run sample, as JSON text
+   * (its records carry fields, which RPC types can't carry deeply).
+   */
+  sampleMigration(
+    storeId: StoreId,
+    sample: {
+      table: string;
+      migration: string;
+      consumer: { resourceId: string; resourceVersion: number };
+      limit: number;
+    }
+  ): string {
+    return JSON.stringify(this.#live().sampleMigration(storeId, sample));
+  }
+
+  /**
+   * `StoreHost.checkSampleOutputs`: a migration's dry-run outputs, as JSON
+   * text (they carry fields, which RPC types can't carry deeply).
+   */
+  checkSampleOutputs(
+    storeId: StoreId,
+    sample: string
+  ): ReturnType<StoreHost["checkSampleOutputs"]> {
+    const parsed: unknown = JSON.parse(sample);
+    return this.#live().checkSampleOutputs(storeId, parsed);
+  }
+
+  /**
    * `StoreHost.commitTransformed`: a migration's batch, transformed, as
    * JSON text (`TransformedBatch`).
    */

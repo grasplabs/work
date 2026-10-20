@@ -4,7 +4,8 @@
  * write over a key a table already holds, primary, unique or the implicit
  * rowid, the database refuses it and the row stays as it was. A new key is
  * written as before. Knowledge's sections refuse the same (knowledge
- * migration 0014), so no replace leaves a search row behind.
+ * migration 0014), so no replace leaves a search row behind. And a
+ * migration sample's receipt is append-only: neither updated nor deleted.
  */
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -53,7 +54,32 @@ const receipt = (id: string): Row => ({
   created_at: 1,
 });
 
+/** A migration sample's receipt (migration-samples.ts) for one fresh ID. */
+const sampleReceipt = (id: string): Row => ({
+  id: `sample-${id}`,
+  app_id: `app-${id}`,
+  version: 1,
+  migration: "derive",
+  store_id: `store-${id}`,
+  outcome: "failed",
+  rows: 5,
+  owners: 1,
+  reason: "threw",
+  manifest_hash: "manifest",
+  from_schema: "from",
+  to_schema: "to",
+  sampled_by: "admin",
+  sampled_at: 1,
+});
+
 const tables: readonly ImmutableTable[] = [
+  {
+    table: "migration_samples",
+    key: ["id"],
+    parents: () => [],
+    row: sampleReceipt,
+    change: { outcome: "passed", reason: null },
+  },
   {
     table: "workflow_resource_versions",
     key: ["workflow_resource_id", "version"],
@@ -387,6 +413,30 @@ describe("immutable records", () => {
       });
     }
   );
+
+  it("keeps a migration sample's receipt as it was written", async () => {
+    const [samples] = tables;
+    if (samples === undefined) {
+      throw new Error("No migration_samples spec");
+    }
+    const row = await seeded(samples);
+    const before = await rowsOf("migration_samples");
+    const updated = await refusal(
+      env.DB.prepare(
+        "UPDATE migration_samples SET outcome = 'passed', reason = NULL WHERE id = ?"
+      ).bind(row.id)
+    );
+    const deleted = await refusal(
+      env.DB.prepare("DELETE FROM migration_samples WHERE id = ?").bind(row.id)
+    );
+    expect({
+      updated: updated.includes("migration_samples are immutable"),
+      deleted: deleted.includes("migration_samples are immutable"),
+      unchanged:
+        JSON.stringify(await rowsOf("migration_samples")) ===
+        JSON.stringify(before),
+    }).toStrictEqual({ updated: true, deleted: true, unchanged: true });
+  });
 
   it("refuses a section written over its key or rowid, which would leave its search row", async () => {
     const db = env.KNOWLEDGE;
