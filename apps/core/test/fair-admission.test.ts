@@ -591,7 +591,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       await eventually(async () => {
         const summaries = await Promise.all(
           hotRuns.map(
-            async ({ id }) => await first.api.screens.summary(hot, id)
+            async ({ id }) => await first.api.screens.frame(hot, "").summary(id)
           )
         );
         // Once read: what they show was written by then.
@@ -1161,7 +1161,9 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
           const { retryAt, wakesAt } = await eventually2(async () => {
             const wakes = await loadWakesOf(run.id);
             expect(wakes).toHaveLength(3);
-            const summary = await builder.api.screens.summary(app, run.id);
+            const summary = await builder.api.screens
+              .frame(app, "")
+              .summary(run.id);
             return { retryAt: summary.queued?.retryAt, wakesAt: wakes.at(-1) };
           });
           await finished(run.id, 60_000);
@@ -1402,7 +1404,9 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         const run = await builder.api.workflows.start(app, "work");
         // Its second round: ten seconds of backoff, three left of its eight.
         await scheduler.wait(6500);
-        const summary = await builder.api.screens.summary(app, run.id);
+        const summary = await builder.api.screens
+          .frame(app, "")
+          .summary(run.id);
         await finished(run.id);
         return {
           code: await failedWith(run.id),
@@ -1459,7 +1463,9 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         });
         let childQueued: unknown;
         await eventually(async () => {
-          const summary = await builder.api.screens.summary(app, child.id);
+          const summary = await builder.api.screens
+            .frame(app, "")
+            .summary(child.id);
           childQueued = summary.queued?.waitingFor;
           expect(childQueued).toBeDefined();
         });
@@ -1507,13 +1513,17 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         // The holder's lease holds a minute; the run asks again sooner.
         let asksAgainIn = Number.POSITIVE_INFINITY;
         await eventually(async () => {
-          const summary = await builder.api.screens.summary(app, run.id);
+          const summary = await builder.api.screens
+            .frame(app, "")
+            .summary(run.id);
           expect(summary.queued).toBeDefined();
           asksAgainIn = (summary.queued?.retryAt ?? 0) - Date.now();
         });
         await stopped(run.id);
         await eventually(async () => {
-          const summary = await builder.api.screens.summary(app, run.id);
+          const summary = await builder.api.screens
+            .frame(app, "")
+            .summary(run.id);
           expect(summary.status).toBe("paused");
         });
         if ("admitted" in held) {
@@ -1632,7 +1642,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         sequence: 0,
       });
       const places = await placesOf(run.id);
-      const summary = await builder.api.screens.summary(app, run.id);
+      const summary = await builder.api.screens.frame(app, "").summary(run.id);
       return { places, status: summary.status };
     });
 
@@ -2155,7 +2165,9 @@ describe("a fenced workflow attempt's share", { timeout: 120_000 }, () => {
         });
         // Another run's object handed a batch naming this run, paused.
         await notifiedAgain(other, "paused", 1_000_000, run.id);
-        const summary = await builder.api.screens.summary(app, run.id);
+        const summary = await builder.api.screens
+          .frame(app, "")
+          .summary(run.id);
         const answer = {
           holding: await holdingOf(run.id),
           newcomer: shown(await admit(newcomer, "new")),

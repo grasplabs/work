@@ -702,10 +702,9 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
               answered: await outcome(
                 callApp(env, app, screen, "carrying", [shape])
               ),
-              pushed: await admin.api.screens.call(app, "push", [
-                onChange,
-                shape,
-              ]),
+              pushed: await admin.api.screens
+                .frame(app, "")
+                .call("push", [onChange, shape]),
             },
           ]
         )
@@ -759,18 +758,15 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       symbol: await callApp(env, app, screen, "echo", [{ [Symbol("n")]: 7n }]),
       // The App's getter is read as its answer leaves it: a big integer.
       getter: await outcome(callApp(env, app, screen, "carrying", ["getter"])),
-      pushedGetter: await admin.api.screens.call(app, "push", [
-        onChange,
-        "getter",
-      ]),
-      pushedHidden: await admin.api.screens.call(app, "push", [
-        onChange,
-        "hidden",
-      ]),
-      pushedSymbol: await admin.api.screens.call(app, "push", [
-        onChange,
-        "symbol",
-      ]),
+      pushedGetter: await admin.api.screens
+        .frame(app, "")
+        .call("push", [onChange, "getter"]),
+      pushedHidden: await admin.api.screens
+        .frame(app, "")
+        .call("push", [onChange, "hidden"]),
+      pushedSymbol: await admin.api.screens
+        .frame(app, "")
+        .call("push", [onChange, "symbol"]),
       received,
     }).toStrictEqual({
       flaky: { n: 1 },
@@ -807,9 +803,15 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       ),
       answered: await outcome(callApp(env, app, screen, "big")),
       plain: await callApp(env, app, screen, "echo", [{ n: 7 }]),
-      fromScreen: await outcome(admin.api.screens.call(app, "echo", [7n])),
-      pushedBig: await admin.api.screens.call(app, "push", [onChange, "big"]),
-      pushedPlain: await admin.api.screens.call(app, "push", [onChange, 7]),
+      fromScreen: await outcome(
+        admin.api.screens.frame(app, "").call("echo", [7n])
+      ),
+      pushedBig: await admin.api.screens
+        .frame(app, "")
+        .call("push", [onChange, "big"]),
+      pushedPlain: await admin.api.screens
+        .frame(app, "")
+        .call("push", [onChange, 7]),
       received,
     }).toStrictEqual({
       sent: "app.call_invalid",
@@ -828,7 +830,9 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const admin = await personApi("admin");
     const app = await newApp(admin);
     const fail = async (text: string, times: number) =>
-      await refusalOf(admin.api.screens.call(app, "fail", [text, times]));
+      await refusalOf(
+        admin.api.screens.frame(app, "").call("fail", [text, times])
+      );
 
     const short = await fail("Invoice 7 has no total. ", 2);
     const long = await fail("Invoice 7 has no total. ", 10_000);
@@ -872,7 +876,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const pointAfter = async (meanwhile: () => Promise<unknown>) => {
       const held = gate();
       const call = outcome(
-        clerk.api.screens.call(desk, "pointAfter", [held.wait])
+        clerk.api.screens.frame(desk, "").call("pointAfter", [held.wait])
       );
       await entered(held, call);
       await meanwhile();
@@ -945,7 +949,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const desk = await newApp(admin);
     const held = gate();
     const call = outcome(
-      admin.api.screens.call(desk, "pointAfter", [held.wait])
+      admin.api.screens.frame(desk, "").call("pointAfter", [held.wait])
     );
     await entered(held, call);
     // A permission granted restarts the App's code, in a new isolate with
@@ -997,7 +1001,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     // waits at the mail server until let go.
     const pointAfter = async (meanwhile: () => Promise<unknown>) => {
       const call = outcome(
-        clerk.api.screens.call(front, "via", ["searchThenPoint", {}])
+        clerk.api.screens.frame(front, "").call("via", ["searchThenPoint", {}])
       );
       try {
         await heldAtSearch(mail);
@@ -1080,7 +1084,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
           ): Promise<T> => {
             const held = gate();
             const call = outcome(
-              clerk.api.screens.call(desk, "holdCaller", [held.wait])
+              clerk.api.screens.frame(desk, "").call("holdCaller", [held.wait])
             );
             try {
               return await act(await entered(held, call));

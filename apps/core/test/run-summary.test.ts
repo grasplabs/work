@@ -36,7 +36,7 @@ const summaryWhen = async (
 ): Promise<RunSummary> =>
   await vi.waitFor(
     async () => {
-      const summary = await person.api.screens.summary(app, run);
+      const summary = await person.api.screens.frame(app, "").summary(run);
       if (!check(summary)) {
         throw new Error(`The run is ${summary.status}`);
       }
@@ -72,11 +72,9 @@ describe("a run's summary", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const admin = await personApi("admin");
     const app = await approvalApp(builder);
-    const { id: run } = await builder.api.screens.startRun(
-      app,
-      "approval",
-      byAdmins
-    );
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", byAdmins);
 
     const waiting = await summaryWhen(
       builder,
@@ -84,7 +82,7 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       run,
       ({ status, waits }) => status === "waiting" && waits.length === 1
     );
-    await builder.api.screens.control(app, run, "pause");
+    await builder.api.screens.frame(app, "").control(run, "pause");
     const paused = await summaryWhen(
       builder,
       app,
@@ -110,7 +108,7 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       run,
       ({ waits }) => waits.length === 0
     );
-    await builder.api.screens.control(app, run, "resume");
+    await builder.api.screens.frame(app, "").control(run, "resume");
     await finished(run);
     const done = await summaryWhen(
       builder,
@@ -194,11 +192,9 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       id: user.userId,
       role: "user",
     });
-    const { id: run } = await builder.api.screens.startRun(
-      app,
-      "approval",
-      byAdmins
-    );
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("approval", byAdmins);
     const seen = await summaryWhen(
       user,
       app,
@@ -208,7 +204,9 @@ describe("a run's summary", { timeout: 60_000 }, () => {
 
     expect({
       control: seen.control,
-      otherApp: await outcome(builder.api.screens.summary(other, run)),
+      otherApp: await outcome(
+        builder.api.screens.frame(other, "").summary(run)
+      ),
     }).toStrictEqual({
       control: none,
       otherApp: "workflow.run_not_found",
@@ -252,9 +250,11 @@ export default workflowTests(definition, [
       id: user.userId,
       role: "user",
     });
-    const { id: run } = await builder.api.screens.startRun(app, "keyed", {
-      invoice,
-    });
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("keyed", {
+        invoice,
+      });
 
     const waiting = await summaryWhen(
       user,
@@ -289,23 +289,27 @@ export default workflowTests(definition, [
         { fail: null }
       ),
     });
-    const { id: gated } = await builder.api.screens.startRun(app, "gated");
+    const { id: gated } = await builder.api.screens
+      .frame(app, "")
+      .startRun("gated");
     await summaryWhen(
       builder,
       app,
       gated,
       ({ status }) => status === "running"
     );
-    await builder.api.screens.control(app, gated, "pause");
-    const pausing = await builder.api.screens.summary(app, gated);
-    await builder.api.screens.control(app, gated, "cancel");
+    await builder.api.screens.frame(app, "").control(gated, "pause");
+    const pausing = await builder.api.screens.frame(app, "").summary(gated);
+    await builder.api.screens.frame(app, "").control(gated, "cancel");
     const cancelled = await summaryWhen(
       builder,
       app,
       gated,
       ({ status }) => status === "cancelled"
     );
-    const { id: failing } = await builder.api.screens.startRun(app, "failing");
+    const { id: failing } = await builder.api.screens
+      .frame(app, "")
+      .startRun("failing");
     const failed = await summaryWhen(
       builder,
       app,
@@ -353,21 +357,23 @@ export default workflowTests(definition, [
       id: user.userId,
       role: "user",
     });
-    const { id: run } = await builder.api.screens.startRun(app, "failing");
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("failing");
     const own = await summaryWhen(
       builder,
       app,
       run,
       ({ status }) => status === "failed"
     );
-    const other = await user.api.screens.summary(app, run);
-    const byAdmin = await admin.api.screens.summary(app, run);
+    const other = await user.api.screens.frame(app, "").summary(run);
+    const byAdmin = await admin.api.screens.frame(app, "").summary(run);
     await env.DB.prepare(
       "UPDATE workflow_runs SET details_removed_at = ? WHERE id = ?"
     )
       .bind(Date.now(), run)
       .run();
-    const removed = await builder.api.screens.summary(app, run);
+    const removed = await builder.api.screens.frame(app, "").summary(run);
     const { failure } = await builder.api.workflows.status(run);
 
     expect({
@@ -402,7 +408,9 @@ export default workflowTests(definition, [
         { fail: null }
       )
     );
-    const { id: run } = await builder.api.screens.startRun(app, "failing");
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("failing");
     await summaryWhen(builder, app, run, ({ status }) => status === "failed");
     // Ended longer ago than the run retention (30 days): the sweep hasn't
     // been by yet.
@@ -410,9 +418,9 @@ export default workflowTests(definition, [
     await env.DB.prepare("UPDATE workflow_runs SET ended_at = ? WHERE id = ?")
       .bind(longAgo, run)
       .run();
-    const expired = await builder.api.screens.summary(app, run);
+    const expired = await builder.api.screens.frame(app, "").summary(run);
     await sweepRunDetails(env, new Date());
-    const swept = await builder.api.screens.summary(app, run);
+    const swept = await builder.api.screens.frame(app, "").summary(run);
 
     expect({
       expired: expired.error,
@@ -431,7 +439,9 @@ export default workflowTests(definition, [
       builder,
       workflowFiles("quick", "  return null;", {})
     );
-    const { id: run } = await builder.api.screens.startRun(app, "quick");
+    const { id: run } = await builder.api.screens
+      .frame(app, "")
+      .startRun("quick");
     const done = await summaryWhen(
       builder,
       app,
@@ -460,7 +470,7 @@ export default workflowTests(definition, [
       sequence: 5,
       startedAt: Date.now(),
     });
-    const projected = await builder.api.screens.summary(app, skipped);
+    const projected = await builder.api.screens.frame(app, "").summary(skipped);
 
     expect({
       ran: done.startedAt !== null && done.startedAt <= (done.finishedAt ?? 0),

@@ -73,9 +73,9 @@ import {
 // screen-workflows.ts; the threat model is on GRA-626): its starts and
 // cancels as the page relays a screen's calls, over core's function
 // route, and its run and binding snapshots as the page follows a live
-// query, through `screens.watchQuery`. The SDK's own channel speaks to
-// both, so each answer and push passes the validators the hook reads them
-// with.
+// query through the frame's own capability (`screens.frame`). The SDK's
+// own channel speaks to both, so each answer and push passes the
+// validators the hook reads them with.
 
 const idp = mockIdp();
 
@@ -385,10 +385,9 @@ const requestsApp = async (
   };
 };
 
-/** A screen of `person`'s on the App, presented: its lease. */
+/** A screen of `person`'s on the App, opened: its frame's lease. */
 const screenOf = async (person: Person, app: string): Promise<string> => {
   const { lease } = await person.api.screens.open(app, "desk");
-  await person.api.screens.present(app, lease);
   return lease;
 };
 
@@ -420,7 +419,8 @@ const called = async (
 
 /**
  * A session client of `person`'s screen, as the frame's own: its calls
- * over core's function route, its live queries over `screens.watchQuery`.
+ * over core's function route, its live queries over its frame
+ * (`screens.frame`).
  */
 const screenClient = (
   person: Person,
@@ -440,12 +440,9 @@ const screenClient = (
           },
         }
       );
-      const subscription = await person.api.screens.watchQuery(
-        app,
-        lease,
-        request,
-        callback
-      );
+      const subscription = await person.api.screens
+        .frame(app, lease)
+        .watchQuery(request, callback);
       return {
         release: () => {
           void subscription.release();
@@ -491,12 +488,9 @@ const following = async (
       },
     }
   );
-  const subscription = await person.api.screens.watchQuery(
-    app,
-    lease,
-    JSON.stringify(request),
-    callback
-  );
+  const subscription = await person.api.screens
+    .frame(app, lease)
+    .watchQuery(JSON.stringify(request), callback);
   return { received, subscription };
 };
 
@@ -1374,7 +1368,6 @@ describe(
       const fixture = await requestsApp("PT1H");
       const { builder, admin, app, reference } = fixture;
       const { lease, artifact } = await builder.api.screens.open(app, "desk");
-      await builder.api.screens.present(app, lease);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
       const handle = await channel.start(read, { who: "Ada" });

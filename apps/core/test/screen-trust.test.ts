@@ -281,15 +281,9 @@ const classifyAs = async (
   await admin.api.screenTrust.classify(app, output, generation);
 };
 
-/** Opens the screen and presents its lease on the same connection, as the page does. */
-const openFrame = async (
-  person: Person,
-  app: string
-): Promise<ScreenBundle> => {
-  const bundle = await person.api.screens.open(app, "notes");
-  await person.api.screens.present(app, bundle.lease);
-  return bundle;
-};
+/** Opens the screen, as the page does: its lease names the build its frame runs. */
+const openFrame = async (person: Person, app: string): Promise<ScreenBundle> =>
+  await person.api.screens.open(app, "notes");
 
 /**
  * A call of `contractId` of `app`'s current release, as the screen client
@@ -414,12 +408,9 @@ const pushWait = { timeout: 20_000, interval: 50 };
 const following = async (person: Person, app: string) => {
   const bundle = await openFrame(person, app);
   const live = follower();
-  await person.api.screens.watchQuery(
-    app,
-    bundle.lease,
-    await requestFor(app, "notes.live", {}),
-    live.callback
-  );
+  await person.api.screens
+    .frame(app, bundle.lease)
+    .watchQuery(await requestFor(app, "notes.live", {}), live.callback);
   await vi.waitFor(() => {
     expect(live.values).toStrictEqual([[secret]]);
   }, pushWait);
@@ -629,13 +620,13 @@ describe("screen trust", { timeout: 60_000 }, () => {
     };
     const presented: Record<string, unknown> = {};
     for (const [name, lease] of Object.entries(forgeries)) {
-      // One connection each: nothing an earlier forgery presented is left.
+      // One connection each, as separate pages would.
       // oxlint-disable-next-line no-await-in-loop -- one forgery at a time
       const forger = await openRpc(builder.session);
       const api = forger.core.authenticate();
       presented[name] = [
         // oxlint-disable-next-line no-await-in-loop -- see above
-        await api.screens.present(unapproved, lease),
+        await api.screens.frame(unapproved, lease).delivery(),
         // The same lease on the screen's call of a function.
         // oxlint-disable-next-line no-await-in-loop -- see above
         await outcome(called(builder, unapproved, { lease })),
@@ -645,20 +636,23 @@ describe("screen trust", { timeout: 60_000 }, () => {
     // but core signed it for the builder: for anyone else it says nothing,
     // while their own does.
     const borrowed = [
-      await other.api.screens.present(approved, real.lease),
+      await other.api.screens.frame(approved, real.lease).delivery(),
       await outcome(called(other, approved, { lease: real.lease })),
     ];
     const own = await openFrame(other, approved);
     const withOwn = [
       await called(other, approved, { lease: own.lease }),
       // Past the gate, to the run the workflow doesn't have.
-      await outcome(other.api.screens.runs(approved, "invoices")),
+      await outcome(
+        other.api.screens.frame(approved, own.lease).runs("invoices")
+      ),
     ];
-    // A connection that presented its lease loses it to a forgery: it
-    // can't keep the approved build while its frame runs something else.
+    // A forgery of their own lease names no build: its frame runs one
+    // nobody approved, whatever another frame of theirs runs.
+    const forged = other.api.screens.frame(approved, `${own.artifact}.forged`);
     const afterForgery = [
-      await other.api.screens.present(approved, `${own.artifact}.forged`),
-      await outcome(other.api.screens.runs(approved, "invoices")),
+      await forged.delivery(),
+      await outcome(forged.runs("invoices")),
     ];
 
     expect({ presented, borrowed, withOwn, afterForgery }).toStrictEqual({
@@ -895,12 +889,9 @@ describe("screen trust", { timeout: 60_000 }, () => {
     await approveCurrent(admin, app);
     const bundle = await openFrame(builder, app);
     const live = follower();
-    await builder.api.screens.watchQuery(
-      app,
-      bundle.lease,
-      await requestFor(app, "notes.live", {}),
-      live.callback
-    );
+    await builder.api.screens
+      .frame(app, bundle.lease)
+      .watchQuery(await requestFor(app, "notes.live", {}), live.callback);
     // Its first read in before anything changes, so what it is pushed is
     // known exactly.
     await vi.waitFor(() => {
@@ -928,7 +919,11 @@ describe("screen trust", { timeout: 60_000 }, () => {
       answered = [
         await slow,
         await outcome(called(builder, app, { lease: bundle.lease })),
-        await outcome(builder.api.screens.watchRuns(app, "invoices", noop)),
+        await outcome(
+          builder.api.screens
+            .frame(app, bundle.lease)
+            .watchRuns("invoices", noop)
+        ),
       ];
       // The build is still in the cache; it opens nothing.
       cachedBuild = await outcome(builder.api.screens.open(app, "notes"));
@@ -938,7 +933,9 @@ describe("screen trust", { timeout: 60_000 }, () => {
         expect(live.refused).toStrictEqual(["screen.revoked"]);
       }, pushWait);
     });
-    const standing = await builder.api.screens.present(app, bundle.lease);
+    const standing = await builder.api.screens
+      .frame(app, bundle.lease)
+      .delivery();
     // A screen revoked no longer waits on an admin: it was decided.
     const waiting = await waitsOn(admin, app);
     // Approved again by a person, it runs again.
@@ -1016,7 +1013,9 @@ describe("screen trust", { timeout: 60_000 }, () => {
         },
       }
     );
-    await builder.api.screens.watchRuns(app, "invoices", onChange);
+    await builder.api.screens
+      .frame(app, bundle.lease)
+      .watchRuns("invoices", onChange);
     const events = await auditedDuring(async () => {
       await admin.api.screenTrust.revoke(app, bundle.artifact);
       await vi.waitFor(() => {
@@ -1117,20 +1116,28 @@ describe("screen trust", { timeout: 60_000 }, () => {
       expect({
         gated: await Promise.all([
           outcome(called(builder, app)),
-          outcome(screens.watchQuery(app, "", live, noop)),
-          outcome(screens.startRun(app, "invoices")),
-          outcome(screens.runs(app, "invoices")),
-          outcome(screens.run(app, "run-1")),
+          outcome(screens.frame(app, "").watchQuery(live, noop)),
+          outcome(screens.frame(app, "").startRun("invoices")),
+          outcome(screens.frame(app, "").runs("invoices")),
+          outcome(screens.frame(app, "").run("run-1")),
           outcome(
-            screens.reviewDecision(app, "run-1", "approve", { approved: true })
+            screens
+              .frame(app, "")
+              .reviewDecision("run-1", "approve", { approved: true })
           ),
           outcome(
-            screens.confirmDecision(app, "run-1", "approve", "revision", {
-              approved: true,
-            })
+            screens
+              .frame(app, "")
+              .confirmDecision("run-1", "approve", "revision", {
+                approved: true,
+              })
           ),
-          outcome(screens.decide(app, "run-1", "approve", { approved: true })),
-          outcome(screens.watchRuns(app, "invoices", noop)),
+          outcome(
+            screens
+              .frame(app, "")
+              .decide("run-1", "approve", { approved: true })
+          ),
+          outcome(screens.frame(app, "").watchRuns("invoices", noop)),
         ]),
         version: await screens.version(app),
         report: await outcome(
@@ -1175,7 +1182,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
       ({ lease } = bundle);
       ordinary = [
         await called(builder, app, { lease: bundle.lease }),
-        await builder.api.screens.present(app, bundle.lease),
+        await builder.api.screens.frame(app, bundle.lease).delivery(),
         // Nothing waits on an admin for it.
         await waitsOn(admin, app),
       ];
@@ -1462,12 +1469,12 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const copy = await sampleApp(builder);
     await classifyAs(admin, copy, "ordinary");
     expect({
-      present: await builder.api.screens.present(app, bundle.lease),
+      delivery: await builder.api.screens.frame(app, bundle.lease).delivery(),
       call: await outcome(called(builder, app, { lease: bundle.lease })),
       open: await outcome(builder.api.screens.open(app, "notes")),
       undecided: await outcome(builder.api.screens.open(copy, "notes")),
     }).toStrictEqual({
-      present: "revoked",
+      delivery: "revoked",
       call: "screen.revoked",
       open: "screen.revoked",
       undecided: "ok",

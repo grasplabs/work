@@ -26,7 +26,7 @@ import { signedInApi } from "./sign-in.ts";
 //   it, past any bounded base, to code that trusts its caller.
 // - A method answers a function, or data holding a target, a stub or a
 //   function: each is as callable by the browser as a target is.
-// - A target only a call hands out (`chats.watch`, `screens.watchRuns`)
+// - A target only a call hands out (`chats.watch`, `screens.frame`)
 //   is never looked at, because nothing gets to it without arguments.
 //
 // So the objects are built as rpc.ts builds them for a connection
@@ -291,21 +291,6 @@ const calls = {
     await page.pushed;
     return subscription;
   },
-  "authenticate.screens.watchRuns": async (screens, { app, held }) =>
-    holding(held, await screens.watchRuns(app, "approval", pageStub().stub)),
-  "authenticate.screens.watchQuery": async (screens, { app, held }) => {
-    const page = pageStub();
-    // A request that names no query: its refusal, pushed at once, ends
-    // the subscription, which is let go of after that, as a page does.
-    const subscription = holding(
-      held,
-      await screens.watchQuery(app, "", "{}", page.stub)
-    );
-    await page.pushed;
-    return subscription;
-  },
-  // A frame's own way to the App, with no lease of core's: decided as a
-  // build nobody approved, which the App's data allows here.
   "authenticate.screens.frame": async (screens, { app, held }) =>
     holding(held, await screens.frame(app, "")),
   "authenticate.screens.frame.watchRuns": async (frame, { held }) =>
@@ -542,7 +527,8 @@ describe("what a browser reaches over core's connection", () => {
         "authenticate.apps.files: AppFilesRpc",
         "authenticate.workflows.params: WorkflowParamsRpc",
         "authenticate.chats.watch: RunSubscription",
-        "authenticate.screens.watchRuns: RunSubscription",
+        "authenticate.screens.frame: ScreenFrameRpc",
+        "authenticate.screens.frame.watchRuns: RunSubscription",
         "authenticate.chats.previewWatchQuery: RunSubscription",
         "authenticate.chats.previewStream: RunSubscription",
       ])

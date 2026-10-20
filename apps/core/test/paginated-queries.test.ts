@@ -118,7 +118,6 @@ const openedApp = async () => {
     artifacts: builtArtifacts(review.screens),
   });
   const { lease } = await builder.api.screens.open(id, "notes");
-  await builder.api.screens.present(id, lease);
   const release = await loadRelease(env, id, version);
   return {
     app: id,
@@ -158,12 +157,9 @@ const pageTransport = (
       },
       { [Symbol.dispose]: onLost }
     );
-    const subscription = await screens.watchQuery(
-      app,
-      lease,
-      request,
-      callback
-    );
+    const subscription = await screens
+      .frame(app, lease)
+      .watchQuery(request, callback);
     return {
       release: () => {
         void subscription.release().catch(() => {
@@ -209,7 +205,6 @@ const clientFor = (
 const otherTab = async (opened: Opened) => {
   const { core } = await openRpc(opened.cookie);
   const { screens } = core.authenticate();
-  await screens.present(opened.app, opened.lease);
   return clientFor(opened, screens).client;
 };
 
@@ -694,12 +689,12 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       const loadMore = await codeOf(list.pager.loadMore(60));
       // A window that showed nothing yet: refused as its last push.
       const follower = pageFollower();
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        windowRequest(opened, "notes.list", {}, { extent: 160 }),
-        follower.callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(
+          windowRequest(opened, "notes.list", {}, { extent: 160 }),
+          follower.callback
+        );
       await eventually(() => {
         expect(follower.state.released).toBeTruthy();
       });
@@ -792,21 +787,15 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     );
     try {
       const first = pageFollower();
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        request,
-        first.callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(request, first.callback);
       // The first read is on its way, between its pages.
       await scheduler.wait(1000);
       const second = pageFollower();
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        request,
-        second.callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(request, second.callback);
       await eventually(() => {
         expect(second.received.length).toBeGreaterThan(0);
       });
@@ -825,24 +814,18 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     await seeded(opened, client);
     const request = windowRequest(opened, "notes.list", {}, { extent: 160 });
     const first = pageFollower();
-    await opened.screens.watchQuery(
-      opened.app,
-      opened.lease,
-      request,
-      first.callback
-    );
+    await opened.screens
+      .frame(opened.app, opened.lease)
+      .watchQuery(request, first.callback);
     await eventually(() => {
       expect(first.received).toHaveLength(1);
     });
     const restore = await writeBetweenPages(opened, Number.POSITIVE_INFINITY);
     try {
       const second = pageFollower();
-      await opened.screens.watchQuery(
-        opened.app,
-        opened.lease,
-        request,
-        second.callback
-      );
+      await opened.screens
+        .frame(opened.app, opened.lease)
+        .watchQuery(request, second.callback);
       await eventually(() => {
         expect(second.state.released).toBeTruthy();
       });
@@ -1146,7 +1129,6 @@ describe(
         role: "user",
       });
       const { lease } = await member.api.screens.open(opened.app, "notes");
-      await member.api.screens.present(opened.app, lease);
       const theirs = clientFor(
         { ...opened, lease, cookie: member.session, userId: member.userId },
         member.api.screens
@@ -1402,7 +1384,6 @@ describe(
         role: "builder",
       });
       const { lease } = await member.api.screens.open(opened.app, "notes");
-      await member.api.screens.present(opened.app, lease);
       const theirs = {
         ...opened,
         lease,
@@ -1459,7 +1440,6 @@ describe(
         role: "user",
       });
       const { lease } = await member.api.screens.open(opened.app, "notes");
-      await member.api.screens.present(opened.app, lease);
       const theirs = clientFor(
         { ...opened, lease, cookie: member.session, userId: member.userId },
         member.api.screens

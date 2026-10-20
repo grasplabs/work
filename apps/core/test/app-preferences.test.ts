@@ -904,17 +904,16 @@ const followingDesk = async () => {
     artifacts: builtArtifacts(review.screens),
   });
   const bundle = await builder.api.screens.open(desk.app, "desk");
-  await builder.api.screens.present(desk.app, bundle.lease);
   const follower = pageFollower();
-  const subscription = await builder.api.screens.watchQuery(
-    desk.app,
-    bundle.lease,
-    JSON.stringify({
-      reference: await referenceTo(desk.release, "get"),
-      input: {},
-    }),
-    follower.callback
-  );
+  const subscription = await builder.api.screens
+    .frame(desk.app, bundle.lease)
+    .watchQuery(
+      JSON.stringify({
+        reference: await referenceTo(desk.release, "get"),
+        input: {},
+      }),
+      follower.callback
+    );
   const latest = () => {
     const last = follower.received.at(-1)?.result;
     return last?.ok === true ? last.value : undefined;
@@ -1017,17 +1016,16 @@ describe(
         artifacts: builtArtifacts(review.screens),
       });
       const bundle = await builder.api.screens.open(desk.app, "desk");
-      await builder.api.screens.present(desk.app, bundle.lease);
       const follower = pageFollower();
-      const subscription = await builder.api.screens.watchQuery(
-        desk.app,
-        bundle.lease,
-        JSON.stringify({
-          reference: await referenceTo(desk.release, "get"),
-          input: {},
-        }),
-        follower.callback
-      );
+      const subscription = await builder.api.screens
+        .frame(desk.app, bundle.lease)
+        .watchQuery(
+          JSON.stringify({
+            reference: await referenceTo(desk.release, "get"),
+            input: {},
+          }),
+          follower.callback
+        );
       const last = () => follower.received.at(-1)?.result;
       await vi.waitFor(() => {
         const result = last();
