@@ -17,9 +17,7 @@ import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import type { MailAnswer } from "./mail-server.ts";
-import { finished } from "./runs.ts";
 import { callAuth, outcome, signedInApi, unique } from "./sign-in.ts";
-import { workflowFiles } from "./workflow-apps.ts";
 
 // Every call into an App runs as an invocation the host makes as the
 // call starts (app.ts): who it acts for, on which version, until when, and
@@ -900,47 +898,6 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     expect({ stays, leaves }).toStrictEqual({
       stays: "ok",
       leaves: "app.not_found",
-    });
-  });
-
-  it("stops acting for another App whose permission on its export is revoked while the call runs", async () => {
-    const relay = workflowFiles(
-      "relay",
-      `  return await step.do("ask", { description: "Ask the desk" }, async () =>
-    await appExports<{ sendThenList: (input: object) => { sent: string; listed: string } }>(env.DESK).sendThenList({})
-  );`,
-      { ask: { sent: "ok", listed: "ok" } }
-    );
-    const { admin, desk, front, mail, calls } = await setUp(
-      ["slow"],
-      Object.fromEntries(
-        Object.entries(relay).map(([path, text]) => [
-          path,
-          text.replace(" workflow, z }", " appExports, workflow, z }"),
-        ])
-      )
-    );
-    const { id: run } = await admin.api.workflows.start(front, "relay");
-    // The desk's send is out, held at the mail server.
-    try {
-      await vi.waitFor(
-        async () => {
-          await expect(mail.holding()).resolves.toBeTruthy();
-        },
-        { timeout: 15_000, interval: 100 }
-      );
-      await admin.api.permissions.revoke(calls);
-    } finally {
-      await mail.release();
-    }
-    await finished(run);
-    expect({
-      after: await lastAfter(desk, admin.userId),
-      mail: await mail.did(),
-    }).toStrictEqual({
-      // The send went out before the revoke; nothing after it did.
-      after: { sent: "ok", listed: "permission.denied" },
-      mail: { calls: 1, sent: [{ to: "ben@acme.test", subject: "Hello" }] },
     });
   });
 

@@ -1,19 +1,13 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { statisticRowsPerDay } from "@grasp-os/shared/statistics";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { callApp } from "../src/app.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { requestGranted, serverBuilt } from "./apps.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  mailConnection,
-  mailForApps,
-  mailWithSearch,
-} from "./mail-connection.ts";
+import { mailConnection, mailForApps } from "./mail-connection.ts";
 import {
   endLiveRuns,
   finished,
@@ -26,7 +20,6 @@ import {
   woken,
 } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
-import { v1AppWith } from "./v1-app-server.ts";
 import {
   appCall,
   appWith,
@@ -49,8 +42,7 @@ import {
 // are real, on the engine (Workerflow). Their side effects go
 // through the real connect to a fake mail server (test/mail-server.ts)
 // that counts every call that reached it, so a mail sent twice shows
-// there; the App's counters (`hitsOf`) show how often a step really ran
-// (`v1HitsOf` for the v1 server's own tests).
+// there; the App's counters (`hitsOf`) show how often a step really ran.
 //
 // How each failure is brought about, only from outside core:
 // - a crash or a deploy stops a run's execution: the engine's own pause,
@@ -78,16 +70,6 @@ import {
 const idp = mockIdp();
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
-
-/** How often the v1 App counted `name` (its server's `hit`). */
-const v1HitsOf = async (app: string, userId: string, name: string) =>
-  await callApp(
-    env,
-    appIdSchema.parse(app),
-    { userId, mode: "interactive" },
-    "hits",
-    [name]
-  );
 
 /**
  * The audit log's events of `action` on `target`. Read once a run has
@@ -128,35 +110,6 @@ const hangOnFirst = (
 ) => `if ((await ${hitCall(`"${counter}"`)}) === 1) {
         await new Promise(() => {});
       }`;
-
-/**
- * A step that calls `call`, and on its first attempt `then`, whose
- * failure it tells the mail server by name and code before throwing it
- * on: the attempt's code sees it whether or not the engine gave up on
- * the attempt first, so what it saw doesn't hang on which timer won.
- */
-const cutOff = (id: string, timeout: string, call: string, then: string) =>
-  workflowFiles(
-    id,
-    `  return await step.do(
-  "count",
-  { description: "Count", timeout: "${timeout}", retries: { limit: 1, delay: 10 } },
-  async () => {
-    try {
-      const attempt = (await env.APP.call(${call})) as number;
-      if (attempt === 1) {
-        await env.APP.call(${then});
-      }
-      return attempt;
-    } catch (error) {
-      const { name, code } = error as { name?: string; code?: string };
-      await env.MAIL.call("mail.search", { query: "seen ${id} " + name + " " + code });
-      throw error;
-    }
-  }
-);`,
-    { count: 1 }
-  );
 
 /** Workflow code calling the sample App's `stats.pointAfter` of `measure`. */
 const pointAfter = (measure: string) =>
@@ -262,58 +215,6 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
           { to: "ben@acme.test", subject: "Late" },
         ],
       },
-    });
-  });
-
-  // The v1 App server's own: its methods' keys, its call queue and its
-  // own time for a call. It goes with the server (GRA-645); the test
-  // after it holds a sealed function to the same.
-  it("have their App's methods mail with the step's key only, once across a retry", async () => {
-    const admin = await personApi("admin");
-    const mail = await mailConnection();
-    const app = await v1AppWith(
-      admin,
-      workflowFiles(
-        "app-mailer",
-        `  return await step.do(
-    "send",
-    { description: "Send the invoice", sideEffect: true, input: null, retries: { limit: 1, delay: 10 } },
-    async () => {
-      // A key of the method's own would send once per attempt.
-      const ownKey = (await env.APP.call("mail", true)) as Json;
-      const sent = (await env.APP.call("mail", false)) as Json;
-      if ((await env.APP.call("hit", "app-send")) === 1) {
-        // The mail went out, yet the attempt fails as if nothing was done,
-        // with a failure the engine retries: the retry mustn't mail again.
-        throw Object.assign(new Error("busy"), { code: "connect.server_unavailable" });
-      }
-      return { ownKey, sent };
-    }
-  );`,
-        { send: {} }
-      )
-    );
-    // A method that times out fails the run for good, so the App's first
-    // call mustn't have to build its code.
-    await serverBuilt(app, 1);
-    await grantMail(idp, admin, app, mail.id);
-    const run = await admin.api.workflows.start(app, "app-mailer");
-    await finished(run.id, runEnds);
-
-    expect({
-      run: await admin.api.workflows.status(run.id),
-      attempts: await v1HitsOf(app, admin.userId, "app-send"),
-      server: await mail.did(),
-    }).toMatchObject({
-      run: {
-        status: "completed",
-        output: {
-          ownKey: { refused: "workflow.idempotency_key_invalid" },
-          sent: { messageId: "message-1" },
-        },
-      },
-      attempts: 2,
-      server: { calls: 1, sent: [invoiceMail] },
     });
   });
 
@@ -740,198 +641,6 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       refused: await hitsOf(builder, app, "restarted:refused"),
       counted: await pointsOf(builder, app, "restarted"),
     }).toStrictEqual({ recorded: 0, refused: 0, counted: 0 });
-  });
-
-  // The v1 App server's call queue, which sealed functions don't have: it
-  // goes with the server (GRA-645).
-  it("give up a step's App call that waits behind another past its attempt's time, never running it", async () => {
-    const builder = await personApi("builder");
-    const app = await v1AppWith(
-      builder,
-      workflowFiles(
-        "queued",
-        `  return await step.do(
-    "count",
-    { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 0 } },
-    async () => (await env.APP.call("hit", "queued")) as Json
-  );`,
-        { count: 1 }
-      )
-    );
-    const mail = await mailConnection([], mailWithSearch);
-    await requestGranted(idp, builder, {
-      subject: { type: "app", appId: app },
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.search"],
-      binding: "MAIL",
-    });
-    await serverBuilt(app, 1);
-    // A screen's call holds the App, waiting at the mail server.
-    const holding = callApp(
-      env,
-      appIdSchema.parse(app),
-      { userId: builder.userId, mode: "interactive" },
-      "pointAfter",
-      ["held"]
-    ).catch(() => null);
-    let status: unknown;
-    try {
-      await vi.waitFor(
-        async () => {
-          await expect(mail.holding()).resolves.toBeTruthy();
-        },
-        { timeout: 30_000, interval: 100 }
-      );
-      const run = await builder.api.workflows.start(app, "queued");
-      await finished(run.id, runEnds);
-      ({ status } = await builder.api.workflows.status(run.id));
-    } finally {
-      await mail.release();
-      await holding;
-    }
-    expect({
-      status,
-      // The step's call gave up with its attempt, before the App was free.
-      queued: await v1HitsOf(app, builder.userId, "queued"),
-    }).toStrictEqual({ status: "failed", queued: 0 });
-  });
-
-  // The v1 App server's own: its methods' keys, its call queue and its
-  // own time for a call. It goes with the server (GRA-645); the test
-  // after it holds a sealed function to the same.
-  it("retry a step whose App call its attempt's time cut off, running or waiting its turn, and stop the run when the App's own time cuts it off", async () => {
-    const builder = await personApi("builder");
-    const app = await v1AppWith(builder, {
-      // Its first attempt's second call holds the App, at the mail server,
-      // past the attempt's time.
-      ...cutOff(
-        "running",
-        attemptTimeout,
-        `"hit", "running"`,
-        `"pointAfter", "running"`
-      ),
-      // Its call waits for the App, held by a screen's call, past the
-      // attempt's time.
-      ...cutOff(
-        "waiting",
-        attemptTimeout,
-        `"hit", "waiting"`,
-        `"hit", "after"`
-      ),
-      // Its first attempt's second call holds the App past the App's own
-      // time for a call (`APP_CALL_TIMEOUT_MS`, ten seconds), well within
-      // the attempt's.
-      ...cutOff(
-        "limited",
-        "40 seconds",
-        `"hit", "limited"`,
-        `"pointAfter", "limited"`
-      ),
-    });
-    const mail = await mailConnection([], mailWithSearch);
-    await requestGranted(idp, builder, {
-      subject: { type: "app", appId: app },
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.search"],
-      binding: "MAIL",
-    });
-    await serverBuilt(app, 1);
-    const statusOf = async (id: string) => {
-      const { status, output } = await builder.api.workflows.status(id);
-      return { status, output };
-    };
-
-    // Cut off running: the attempt timed out, and the next one completed.
-    const running = await builder.api.workflows.start(app, "running");
-    await finished(running.id, runEnds);
-    await mail.release();
-    const ranOut = {
-      status: await statusOf(running.id),
-      hits: await v1HitsOf(app, builder.userId, "running"),
-      // The first attempt's code went on past its time: the answer to its
-      // App call came after that, and was refused as it returned, as an
-      // attempt the engine had given up on, and so was what it called next.
-      stale: await staleCalls(running.id),
-    };
-
-    // Cut off waiting: the attempt timed out, and the next one, once the
-    // screen's call let go of the App, completed.
-    const holding = callApp(
-      env,
-      appIdSchema.parse(app),
-      { userId: builder.userId, mode: "interactive" },
-      "pointAfter",
-      ["held"]
-    ).catch(() => null);
-    let waited: unknown;
-    let released = false;
-    try {
-      await vi.waitFor(
-        async () => {
-          await expect(mail.holding()).resolves.toBeTruthy();
-        },
-        { timeout: 30_000, interval: 100 }
-      );
-      const waiting = await builder.api.workflows.start(app, "waiting");
-      // Once the first attempt was cut off: the answer to its App call,
-      // which came after its time, refused as it returned.
-      await vi.waitFor(
-        async () => {
-          await expect(staleCalls(waiting.id)).resolves.toStrictEqual([
-            "count APP",
-          ]);
-        },
-        { timeout: 30_000, interval: 100 }
-      );
-      await mail.release();
-      released = true;
-      await holding;
-      await finished(waiting.id, runEnds);
-      waited = {
-        status: await statusOf(waiting.id),
-        hits: await v1HitsOf(app, builder.userId, "waiting"),
-        stale: await staleCalls(waiting.id),
-      };
-    } finally {
-      if (!released) {
-        await mail.release();
-      }
-      await holding;
-    }
-
-    // Cut off by the App's own time: an outcome nobody knows, which no
-    // retry may repeat.
-    const limited = await builder.api.workflows.start(app, "limited");
-    await finished(limited.id, runEnds);
-    await mail.release();
-    const { status: limitedStatus } = await statusOf(limited.id);
-    const cutShort = {
-      status: limitedStatus,
-      hits: await v1HitsOf(app, builder.userId, "limited"),
-    };
-    const searched = await mail.searched();
-
-    expect({
-      seen: searched.filter((query) => query.startsWith("seen ")),
-      ranOut,
-      waited,
-      cutShort,
-    }).toStrictEqual({
-      // Only the attempt cut off by the App's own time, within its own,
-      // still reached the mail server once it was cut off.
-      seen: ["seen limited Error app.timed_out"],
-      ranOut: {
-        status: { status: "completed", output: 2 },
-        hits: 2,
-        stale: ["count APP"],
-      },
-      waited: {
-        status: { status: "completed", output: 1 },
-        hits: 1,
-        stale: ["count APP"],
-      },
-      cutShort: { status: "failed", hits: 1 },
-    });
   });
 
   it("retry a step whose App function call its attempt's time cut off, and stop the run when the call's own time cuts it off", async () => {

@@ -145,11 +145,11 @@ const nameOf = (node: Node): string | undefined => {
   return typeof literal === "string" ? literal : undefined;
 };
 
-/** The SDK's typed stubs of the App's bindings, which take `env`. */
-type Stub = "appServer" | "appFunctions" | "appExports";
+/** The SDK's typed stub of the App's bindings, which takes `env`. */
+type Stub = "appFunctions";
 
 const isStub = (name: string | undefined): name is Stub =>
-  name === "appServer" || name === "appFunctions" || name === "appExports";
+  name === "appFunctions";
 
 /** Names the workflow function binds for its steps and parameters. */
 interface Bindings {
@@ -174,7 +174,7 @@ const contextHint =
 const parametersHint =
   "The workflow function takes `step` and its context, without default values or computed names";
 const envHint = (env: string): string =>
-  `Call the App's bindings as \`${env}.NAME.method(…)\`, \`appServer(${env}).method(…)\`, \`appFunctions(${env}).query(…)\` or \`appExports(${env}.NAME).method(…)\`; don't keep \`${env}\`, a binding or a stub in a variable or pass it on`;
+  `Call the App's bindings as \`${env}.NAME.method(…)\` or \`appFunctions(${env}).query(…)\`; don't keep \`${env}\`, a binding or a stub in a variable or pass it on`;
 const stepHint =
   "Call the App's bindings in the step's own function, not between steps or in a function inside it (loop with `for...of` there)";
 
@@ -343,9 +343,8 @@ const isMethodCalled = (ancestors: Ancestor[]): boolean => {
 
 /**
  * The binding a use of `env` calls, from the use's `ancestors`: `NAME` in
- * `env.NAME.method(…)` and `appExports(env.NAME).method(…)`, `APP` in
- * `appServer(env).method(…)` and `appFunctions(env).query(…)` (any
- * method: each calls `APP`). Each is a call made where it is written.
+ * `env.NAME.method(…)`, `APP` in `appFunctions(env).query(…)` (or
+ * `mutation`, `action`). Each is a call made where it is written.
  * Undefined for any other use (an alias, an argument, a spread, a computed
  * name, a stub that isn't called at once), which could reach a binding
  * somewhere the step list doesn't name it.
@@ -355,9 +354,6 @@ const envCallOf = (
   ancestors: Ancestor[]
 ): string | undefined => {
   const parent = ancestors.at(-1);
-  if (isStubArgument(bindings, parent, "appServer")) {
-    return isMethodCalled(ancestors.slice(0, -1)) ? "APP" : undefined;
-  }
   if (isStubArgument(bindings, parent, "appFunctions")) {
     // Only its methods, one per kind of function: any other name is no
     // call the stub has.
@@ -371,11 +367,9 @@ const envCallOf = (
   if (parent?.node.type !== "MemberExpression" || !isObjectOfMember(parent)) {
     return undefined;
   }
-  const binding = ancestors.slice(0, -1);
-  const called = isStubArgument(bindings, binding.at(-1), "appExports")
-    ? isMethodCalled(binding.slice(0, -1))
-    : isMethodCalled(binding);
-  return called ? nameOf(parent.node.property) : undefined;
+  return isMethodCalled(ancestors.slice(0, -1))
+    ? nameOf(parent.node.property)
+    : undefined;
 };
 
 /**
@@ -1340,8 +1334,7 @@ export const checkWorkflowModule = (source: string): void => {
  * export, made by the SDK's `workflow`, and its function an arrow
  * function that destructures its context in its parameter list: the
  * context has no other name. `env` appears only in a call made where it
- * is written, `env.NAME.method(…)`, `appServer(env).method(…)`,
- * `appFunctions(env).query(…)` or `appExports(env.NAME).method(…)`, and
+ * is written, `env.NAME.method(…)` or `appFunctions(env).query(…)`, and
  * only in a step's own function
  * (`step.do`'s, or an option such as a decision's `ask`), not between
  * steps and not in a function inside it, which another step could run.

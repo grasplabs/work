@@ -484,8 +484,7 @@ export const bindingsFor = async (
 
 /**
  * A workflow run's permissions as they are now, as `bindingsFor` builds
- * them, but for its connections and other Apps' exports: those aren't
- * stubs in its env but grants, by binding name, which the run's host calls
+ * them, but for its connections: those aren't stubs in its env but grants, by binding name, which the run's host calls
  * for it (workflows/host.ts), so each call is checked against the step
  * running then and its key. The workflow dispatcher builds them on every
  * start and resume, so a revoked permission is gone from the next one.
@@ -497,12 +496,10 @@ export const runBindingsFor = async (
 ): Promise<{
   bindings: Record<string, Fetcher<CollectionBinding>>;
   connections: Record<string, ConnectionGrant>;
-  apps: Record<string, ExportGrant>;
 }> => {
   const permissions = await grantedPermissions(env, authority, context);
   return {
     bindings: stubsOf(permissions, collectionStubOf(authority, context)),
     connections: stubsOf(permissions, connectionGrantOf(context)),
-    apps: stubsOf(permissions, exportGrantOf),
   };
 };

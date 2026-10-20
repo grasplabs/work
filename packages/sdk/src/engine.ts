@@ -57,17 +57,11 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
 /**
  * What a run reaches outside its own code, by binding name: one binding per
  * permission of its App (a connection, say: `env.OUTLOOK.call(action,
- * input, { idempotencyKey })`, or another App's exports:
- * `env.CRM.call(method, input)`, typed with `appExports<Crm>(env.CRM)`),
- * and its App's own server methods (`env.APP.call(method, ...args)`, or
- * typed by the App's class with `appServer<App>(env)` from
- * `@grasp-os/sdk/workflow`). Each call is checked against the
+ * input, { idempotencyKey })`), and its App's own public functions
+ * (`env.APP.callFunction`, below). Each call is checked against the
  * permissions as they are then, and acts for the person the run acts for.
  * They work only inside a step (a replay doesn't call them again), and a
- * connection call takes that step's `idempotencyKey` or none. An App
- * method a step calls, its own App's or another's export, gets the same
- * key on its caller (`caller.idempotencyKey`), the only one its own
- * connection calls take.
+ * connection call takes that step's `idempotencyKey` or none.
  *
  * A public function of the App's own release (spec 8: a query, mutation
  * or action) is `env.APP.callFunction(reference, input)`: `reference` is
@@ -93,8 +87,7 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * for the person holds the step, as the run's own do.
  *
  * Write each call out where it happens, in the function of the step that
- * makes it: `env.NAME.method(…)`, `appServer(env).method(…)`,
- * `appFunctions(env).query(…)` or `appExports(env.NAME).method(…)`, so
+ * makes it: `env.NAME.method(…)` or `appFunctions(env).query(…)`, so
  * the workflow's step list names
  * every binding a step calls. `env`, a binding or a stub kept in a
  * variable, passed to a function, spread or read by a computed name

@@ -6,8 +6,6 @@ import { expectTypeOf } from "vite-plus/test";
 
 import type { stepOptionSchemas } from "../src/steps.ts";
 import {
-  appExports,
-  appServer,
   money,
   person,
   schedule,
@@ -15,8 +13,6 @@ import {
   workflow,
 } from "../src/workflow.ts";
 import type {
-  AppExportsStub,
-  AppServer,
   DecisionOptions,
   DoOptions,
   LlmOptions,
@@ -205,56 +201,3 @@ expectTypeOf(
 ).returns.resolves.toExtend<{
   status: "unmatched" | "rejected" | "timedOut" | "booked";
 }>();
-
-// An App's server methods, typed by its class, without the caller core
-// passes first; the runtime's own members aren't methods to call.
-interface InvoiceServer {
-  ctx: unknown;
-  fetch: (request: Request) => Promise<Response>;
-  setStatus: (caller: { userId: string }, id: string, status: "booked") => void;
-  total: (caller: { userId: string }) => Promise<number>;
-  set_status: (caller: { userId: string }) => void;
-  "mark-paid": (caller: { userId: string }) => void;
-  toJSON: (caller: { userId: string }) => string;
-}
-declare const invoices: AppServer<InvoiceServer>;
-expectTypeOf(invoices.setStatus).toEqualTypeOf<
-  (id: string, status: "booked") => Promise<void>
->();
-expectTypeOf(invoices.total).toEqualTypeOf<() => Promise<number>>();
-expectTypeOf(appServer<InvoiceServer>(context.env)).toEqualTypeOf<
-  AppServer<InvoiceServer>
->();
-// The runtime's own, and what isn't a method, aren't there.
-expectTypeOf(invoices).not.toHaveProperty("fetch");
-expectTypeOf(invoices).not.toHaveProperty("ctx");
-// Nor names core refuses, and not `toJSON`, which serializing looks up.
-expectTypeOf(invoices).not.toHaveProperty("set_status");
-expectTypeOf(invoices).not.toHaveProperty("mark-paid");
-expectTypeOf(invoices).not.toHaveProperty("toJSON");
-// @ts-expect-error -- a status the method doesn't take
-void invoices.setStatus("INV-7", "paid");
-
-// Another App's exports, typed by what the workflow writes of them: each
-// takes its one input and answers a promise; names core refuses aren't
-// there.
-interface CrmExports {
-  findCustomers: (input: { query: string }) => { name: string }[];
-  count: (input: null) => Promise<number>;
-  find_customers: (input: null) => void;
-  toJSON: (input: null) => string;
-  read: (input: null) => string;
-}
-declare const crm: AppExportsStub<CrmExports>;
-expectTypeOf(crm.findCustomers).toEqualTypeOf<
-  (input: { query: string }) => Promise<{ name: string }[]>
->();
-expectTypeOf(crm.count).toEqualTypeOf<(input: null) => Promise<number>>();
-expectTypeOf(appExports<CrmExports>(context.env.CRM)).toEqualTypeOf<
-  AppExportsStub<CrmExports>
->();
-expectTypeOf(crm).not.toHaveProperty("find_customers");
-expectTypeOf(crm).not.toHaveProperty("toJSON");
-expectTypeOf(crm).not.toHaveProperty("read");
-// @ts-expect-error -- an input the export doesn't take
-void crm.findCustomers({ query: 7 });

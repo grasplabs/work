@@ -23,9 +23,7 @@ import { release, requestGranted, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
-import { finished } from "./runs.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
-import { workflowFiles } from "./workflow-apps.ts";
 
 // Calls between Apps: one App calls the methods another exports, under a
 // permission an admin granted it. These tests start from the ways that
@@ -1240,85 +1238,6 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     });
   });
 
-  it("queue a workflow run's call for an App whose call waits for the run's App: the run holds no App while it waits", async () => {
-    const admin = await personApi("admin");
-    const crm = await newApp(admin, "CRM");
-    const { id: created } = await admin.api.apps.create({
-      name: `Invoicing ${unique()}`,
-    });
-    const invoicing = appIdSchema.parse(created);
-    const lookup = workflowFiles(
-      "lookup",
-      `  const found = await step.do("find", { description: "Find the customer" }, async () =>
-    await appExports<{ findCustomers: (input: { query: string }) => Json[] }>(env.CRM).findCustomers({ query: "BV" })
-  );
-  await step.do("remember", { description: "Remember it" }, async () =>
-    (await env.APP.call("remember", found)) as Json
-  );`,
-      { find: [], remember: true }
-    );
-    await release(admin, invoicing, {
-      ...appFiles(),
-      ...Object.fromEntries(
-        Object.entries(lookup).map(([path, text]) => [
-          path,
-          text.replace(" workflow, z }", " appExports, workflow, z }"),
-        ])
-      ),
-    });
-    await grantCalls(admin, invoicing, crm, ["read"], "CRM");
-    await grantCalls(admin, crm, invoicing, ["read"], "NEXT");
-    const caller = { userId: admin.userId, mode: "interactive" as const };
-    // A screen's call holds the invoicing App; the CRM's waits for it.
-    const atInvoicing = gate();
-    const atCrm = gate();
-    const holding = callApp(env, invoicing, caller, "hold", [atInvoicing.wait]);
-    const fromCrm = holdThen(
-      crm,
-      admin.userId,
-      atCrm,
-      "NEXT",
-      "findCustomers",
-      {
-        query: "BV",
-      }
-    );
-    await entered(atInvoicing, holding);
-    await entered(atCrm, fromCrm);
-    await waitsAfter(() => {
-      atCrm.release();
-    });
-    let run = "";
-    const events = await auditedDuring(async () => {
-      // The run's call waits for the CRM, holding no App.
-      await waitsAfter(async () => {
-        ({ id: run } = await admin.api.workflows.start(invoicing, "lookup"));
-      }, callTimeoutMs(env));
-      atInvoicing.release();
-      await finished(run);
-    });
-    expect({
-      holding: await bounded(holding, "the screen's call to answer"),
-      fromCrm: await bounded(fromCrm, "the CRM's call to go on"),
-      runCalls: callsIn(events)
-        .filter(
-          ({ action, actor }) =>
-            action === "app.call" && actor.type === "workflow"
-        )
-        .map(({ detail }) => detail.outcome),
-      remembered: await callApp(env, invoicing, caller, "remembered"),
-    }).toStrictEqual({
-      holding: "let go",
-      fromCrm: found(admin.userId, crm),
-      runCalls: ["called"],
-      remembered: found(
-        admin.userId,
-        invoicing,
-        `${encodeURIComponent(run)}:find`
-      ).ok,
-    });
-  });
-
   it("end by the time the call they came from must, and run only the version they were checked against", async () => {
     const { admin, crm } = await setUp();
     const caller = { userId: admin.userId, mode: "interactive" as const };
@@ -1786,64 +1705,5 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
         plan.some((step) => fullScan.test(step) || step.includes("TEMP B-TREE"))
       )
     ).toStrictEqual([]);
-  });
-
-  it("reach another App's export from a workflow step, with the step's key", async () => {
-    const admin = await personApi("admin");
-    const crm = await newApp(admin, "CRM");
-    const { id: invoicing } = await admin.api.apps.create({
-      name: `Invoicing ${unique()}`,
-    });
-    const lookup = workflowFiles(
-      "lookup",
-      `  const found = await step.do("find", { description: "Find the customer" }, async () =>
-    await appExports<{ findCustomers: (input: { query: string }) => Json[] }>(env.CRM).findCustomers({ query: "BV" })
-  );
-  await step.do("remember", { description: "Remember it" }, async () =>
-    (await env.APP.call("remember", found)) as Json
-  );`,
-      { find: [], remember: true }
-    );
-    await release(admin, invoicing, {
-      ...appFiles(),
-      ...Object.fromEntries(
-        Object.entries(lookup).map(([path, text]) => [
-          path,
-          text.replace(" workflow, z }", " appExports, workflow, z }"),
-        ])
-      ),
-    });
-    await grantCalls(admin, appIdSchema.parse(invoicing), crm, ["read"], "CRM");
-
-    let run = "";
-    const events = await auditedDuring(async () => {
-      ({ id: run } = await admin.api.workflows.start(invoicing, "lookup"));
-      await finished(run);
-    });
-    const call = callsIn(events).find(({ action }) => action === "app.call");
-    expect({
-      actor: call?.actor,
-      output: await callApp(
-        env,
-        appIdSchema.parse(invoicing),
-        { userId: admin.userId, mode: "interactive" },
-        "remembered"
-      ),
-    }).toStrictEqual({
-      actor: {
-        type: "workflow",
-        appId: invoicing,
-        workflowId: "lookup",
-        runId: run,
-      },
-      output: [
-        {
-          name: "Acme BV",
-          for: admin.userId,
-          from: { id: invoicing, version: 1 },
-          key: `${encodeURIComponent(run)}:find`,
-        },
-      ],
-    });
   });
 });

@@ -61,10 +61,9 @@ import { collectionMethods, cpuLimitKill, fromIsolate } from "./host.ts";
 // come from the release that runs it, and so does the engine contract
 // between them (step names, `$params`): that contract must stay
 // the same across releases, or runs started before a release replay
-// differently after it. `env.APP.call` calls the App's current server
-// version, as every caller of the App does; `env.APP.callFunction` calls a
-// public function of the sealed release of the version the run is pinned
-// to (host.ts).
+// differently after it. `env.APP.callFunction` calls a public function of
+// the sealed release of the version the run is pinned to (host.ts): a
+// run reaches its App's code no other way.
 //
 // A version's workflows ship with their tests, which run in an isolate of
 // their own before the version can be made current. That is a quality
@@ -88,9 +87,8 @@ export type Settled<T> =
 
 /**
  * What the run's main module takes from core: the run, the parameter
- * values people set, its input, and the binding names of its collections,
- * connections and other Apps' exports, which it calls through the host
- * (host.ts).
+ * values people set, its input, and the binding names of its collections
+ * and connections, which it calls through the host (host.ts).
  */
 export interface RunStart {
   runId: RunId;
@@ -98,7 +96,6 @@ export interface RunStart {
   input: unknown;
   collections: string[];
   connections: string[];
-  apps: string[];
 }
 
 /** The run's main module, as core calls it. */
@@ -443,11 +440,10 @@ const guarded = (env) =>
 
 const collectionMethods = ${JSON.stringify(collectionMethods)};
 
-export const bindings = ({ connections, apps, collections }) => {
+export const bindings = ({ connections, collections }) => {
   const all = {
     __proto__: null,
     APP: {
-      call: async (method, ...args) => unwrapped(await currentAttempt().callApp(method, args)),
       callFunction: async (reference, input) =>
         unwrapped(await currentAttempt().callFunction(reference, input)),
     },
@@ -469,12 +465,6 @@ export const bindings = ({ connections, apps, collections }) => {
         unwrapped(await currentAttempt().callConnection(name, [action, input, options])),
     };
   }
-  for (let index = 0; index < apps.length; index += 1) {
-    const name = apps[index];
-    all[name] = {
-      call: async (method, input) => unwrapped(await currentAttempt().callExport(name, method, input)),
-    };
-  }
   return guarded(all);
 };
 `;
@@ -482,8 +472,8 @@ export const bindings = ({ connections, apps, collections }) => {
 /**
  * The main module of a run of workflow `id`: the engine the SDK runs on,
  * each of its calls sent to core's host (host.ts), and each error in plain
- * data both ways. Every binding (its App, its collections, connections
- * and other Apps' exports), and what the SDK does inside a step (a model
+ * data both ways. Every binding (its App, its collections and
+ * connections), and what the SDK does inside a step (a model
  * call, a decision), goes through the host of the attempt whose code makes
  * it, which core hands each attempt's function. A binding the run doesn't have (a permission revoked since, or
  * never granted) fails with a permission error, not `undefined`. It
@@ -501,7 +491,7 @@ import definition from ${JSON.stringify(appModuleName(workflowPaths(id).workflow
 ${settling}
 
 export class Run extends WorkerEntrypoint {
-  async run(host, { runId, params, input, connections, apps, collections }) {
+  async run(host, { runId, params, input, connections, collections }) {
     return await settled(async () => {
       if (definition?.metadata?.id !== ${JSON.stringify(id)} || typeof definition.run !== "function") {
         throw new Error(${JSON.stringify(`workflows/${id}.ts must export the workflow "${id}" as its default export.`)});
@@ -509,7 +499,7 @@ export class Run extends WorkerEntrypoint {
       const engine = {
         runId,
         params,
-        env: bindings({ connections, apps, collections }),
+        env: bindings({ connections, collections }),
         do: async (name, options, fn) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)))),
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),
         callModel: async (request) => unwrapped(await currentAttempt().callModel(request)),

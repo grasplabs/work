@@ -42,12 +42,10 @@ import { drizzle } from "drizzle-orm/d1";
 import type { Email } from "postal-mime";
 import { z } from "zod";
 
-import { callExport } from "../app-calls.ts";
 import type { RunCaller } from "../app-functions.ts";
-import type { AppAnswer, AppCallerInput } from "../app.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
 import { forSandbox, requireStepKey, runStubCall } from "../bindings.ts";
-import type { ConnectionGrant, ExportGrant } from "../bindings.ts";
+import type { ConnectionGrant } from "../bindings.ts";
 import { workflowRuns } from "../db/core/schema.ts";
 import {
   decisionDeadline,
@@ -62,13 +60,12 @@ import type {
 } from "../decisions/decisions.ts";
 import type { CollectionBinding } from "../knowledge/binding.ts";
 import { models } from "../models.ts";
-import { requireActivePerson, requireApprovedVersion } from "../permissions.ts";
+import { requireActivePerson } from "../permissions.ts";
 import type { StepModel } from "../resource-bindings.ts";
 import { tokensOfBound } from "../resource-model.ts";
 import { commitStepStatistics } from "../statistic-steps.ts";
 import { askAgainMs } from "./admission.ts";
 import type { Share } from "./admission.ts";
-import type { AttemptFence } from "./attempt-fence.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
@@ -142,8 +139,6 @@ export interface HostedRun {
   collections: Record<string, Fetcher<CollectionBinding>>;
   /** Its connection permissions, by binding name (`runBindingsFor`). */
   connections: Record<string, ConnectionGrant>;
-  /** Its permissions on other Apps' exports, by binding name. */
-  apps: Record<string, ExportGrant>;
   /**
    * The bindings its workflow calls, by step, as the review of its version
    * shows them (`app_versions.workflow_calls`).
@@ -225,7 +220,6 @@ interface StepAttempt {
    * call's place, which its key is derived from (`#callFunction`).
    */
   functionCalls: number;
-  calledApp: boolean;
   /**
    * Whether a function of its App it called kept a statistics point by it
    * (`BindingCaller.step`): added up, as an App method's, if it completes
@@ -910,14 +904,13 @@ const attemptContextSchema = z.object({
 
 /**
  * Whether `attempt` may have kept statistics points to add up as it
- * completes its step: it called its App's methods or its sealed
- * functions. Then the step gets its marker as it completes, whether or
- * not a point was kept, so a run of the step the engine makes again after
- * that adds up nothing, also when the first recorded nothing
- * (`commitStepStatistics`).
+ * completes its step: it called its App's sealed functions. Then the step
+ * gets its marker as it completes, whether or not a point was kept, so a
+ * run of the step the engine makes again after that adds up nothing, also
+ * when the first recorded nothing (`commitStepStatistics`).
  */
 const keptStatistics = (attempt: StepAttempt): boolean =>
-  attempt.calledApp || attempt.recorded || attempt.functionCalls > 0;
+  attempt.recorded || attempt.functionCalls > 0;
 
 /**
  * Whether an attempt has no retry after it: its number as the engine's
@@ -937,18 +930,6 @@ const isLastAttempt = (
     told?.config?.retries?.limit ?? configured ?? defaultRetryLimit;
   return (told?.attempt ?? tries) > retries;
 };
-
-/**
- * Whether an App call failed only because the attempt it came from ran out
- * of time (`StepAttempt.deadline`): it timed out, or gave up
- * waiting for its turn, once that time had come. The engine gives up on the
- * attempt at that same moment, by a timer of its own, and whichever lands
- * first must not decide the step's fate: the attempt timed out either way.
- */
-const cutOffByAttempt = (attempt: StepAttempt, error: unknown): boolean =>
-  Date.now() >= attempt.deadline &&
-  isExpectedError(error) &&
-  (error.code === "app.timed_out" || error.code === "app.busy");
 
 /**
  * The attempt's own timeout, as the engine ends an attempt that ran out of
@@ -1366,13 +1347,6 @@ export interface HostHooks {
    */
   leaseOf: (key: string, attempt: number) => AttemptLease | undefined;
   /**
-   * Hears that an attempt's function (`fence`) has returned, once it
-   * called an App: the run's object holds it no more, and revokes in the
-   * Apps the calls it started there (run-object.ts, `#attemptReturned`),
-   * without the run waiting. None for a host of its own.
-   */
-  revokeAttempt?: (fence: AttemptFence) => void;
-  /**
    * Hears, once, that the run's isolate asked for what only code that
    * gets past the SDK could (a step its review doesn't show): the run
    * fails with `error`, whatever its code makes of the refusal.
@@ -1383,16 +1357,6 @@ export interface HostHooks {
    * the person it acts for.
    */
   waiting: (why: WaitReason) => Promise<void>;
-  /**
-   * Calls a method of the run's App for `caller` (`callApp`), giving up
-   * at `ends`, when the step's attempt does.
-   */
-  callApp: (
-    caller: AppCallerInput,
-    method: string,
-    args: unknown[],
-    ends: number | undefined
-  ) => Promise<AppAnswer>;
   /**
    * The App's model binding of `alias` an AI step goes through, as it
    * serves now (`stepModelBinding`): `resource.unavailable` when none
@@ -1618,23 +1582,6 @@ export class RunHost extends RpcTarget {
           throw error;
         }
       }
-    }
-  }
-
-  /**
-   * `#stillHeld`, or `true` when connect can't say: the step then waits,
-   * and the wait's own checks, which retry, ask again.
-   */
-  async #stillHeldOrUnknown(step: string): Promise<boolean> {
-    try {
-      return await this.#stillHeld(step);
-    } catch (error) {
-      log.warn("workflow.held_check_failed", {
-        runId: this.#run.runId,
-        step,
-        ...errorFields(error),
-      });
-      return true;
     }
   }
 
@@ -1874,7 +1821,6 @@ export class RunHost extends RpcTarget {
           unknown: false,
           heldKeys: [],
           functionCalls: 0,
-          calledApp: false,
           recorded: false,
           last: isLastAttempt(context, tries, parsed.retries?.limit),
         };
@@ -1917,26 +1863,19 @@ export class RunHost extends RpcTarget {
           // the attempt's code still has out.
           attempt.over = true;
           this.#live.splice(this.#live.indexOf(attempt), 1);
-          if (attempt.calledApp) {
-            this.#hooks.revokeAttempt?.(this.#fenceOf(attempt));
-          }
           // What it held of its lineage's time turns into what it used.
           await admission.settle();
         }
         // Connect held a side effect of it for the person the run acts
         // for: the step ends as held, not failed, whatever the workflow
         // code made of the answer, and runs again once they decided. The
-        // run's own calls say so; for its App's methods, which may keep
-        // the answer to themselves, connect is asked about the step's key.
-        // (Core can't see whether an App method called out: its calls run
-        // in the App's own object.) Once decided, the rerun's call answers
-        // for good: a decline (`connect.declined`) is an error like any
-        // other, which workflow or App code may catch and carry on from;
-        // it is audited in connect whatever the code does with it.
-        const held =
-          current &&
-          (attempt.held ||
-            (attempt.calledApp && (await this.#stillHeldOrUnknown(step))));
+        // run's own calls say so, its App's functions' through their
+        // resource bindings (`BindingCaller.held`). Once decided, the
+        // rerun's call answers for good: a decline (`connect.declined`) is
+        // an error like any other, which workflow or App code may catch
+        // and carry on from; it is audited in connect whatever the code
+        // does with it.
+        const held = current && attempt.held;
         // A call its review doesn't show fails the step for good, even
         // when its code caught the refusal and carried on.
         if (attempt.refused !== undefined) {
@@ -2344,20 +2283,6 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Who `attempt` is, for the calls it starts beyond this host (its App's
-   * methods, other Apps' exports), whose every stub call checks it still
-   * holds before it acts (attempt-fence.ts).
-   */
-  #fenceOf(attempt: StepAttempt): AttemptFence {
-    return {
-      run: this.#run.runId,
-      key: attempt.key,
-      number: attempt.number,
-      generation: attempt.generation,
-    };
-  }
-
-  /**
    * Whether `attempt` may still act: its function hasn't returned, its
    * deadline hasn't passed, and the engine's journal still has it holding
    * its lease, under the generation that claimed it. Read at every call,
@@ -2405,12 +2330,8 @@ export class RunHost extends RpcTarget {
           await this.#callCollection(attempt, binding, method, args),
         callConnection: async (binding, call) =>
           await this.#callConnection(attempt, binding, call),
-        callApp: async (method, args) =>
-          await this.#callApp(attempt, method, args),
         callFunction: async (reference, input) =>
           await this.#callFunction(attempt, reference, input),
-        callExport: async (binding, method, input) =>
-          await this.#callExport(attempt, binding, method, input),
         openDecision: async (request) =>
           await this.#openDecision(attempt, request),
         decisionRecipients: async (decision, reminder) =>
@@ -2708,62 +2629,6 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Calls a method of the run's own App (`env.APP.call(method, ...args)`)
-   * for the person the run acts for, in workflow mode, only inside a step
-   * whose code its review shows calling it (`#requireReviewed`, as `APP`).
-   * The caller the method gets carries the step's key, the only one its
-   * connection calls take (app-bindings.ts). Within one App no permission
-   * is needed, but the person must still be there, and the run's version
-   * must be one an admin approved: the method runs the App's current
-   * version, as the person, whatever version the run is on
-   * (`requireApprovedVersion`). The answer is plain
-   * data (`callApp`), and whatever it holds of the App's data is covered by
-   * the run's restricted mode, which is the App's (restricted.ts). The call
-   * waits for its turn in the App, and its answer, no longer than the
-   * attempt it comes from runs (`StepAttempt.deadline`); cut off then, it fails
-   * as that attempt's timeout (`cutOffByAttempt`).
-   */
-  async #callApp(
-    attempt: StepAttempt,
-    method: unknown,
-    args: unknown
-  ): Promise<Settled<unknown>> {
-    return await settle(async () => {
-      this.#requireUntampered();
-      await this.#requireCurrent(attempt, "APP");
-      await this.#requireReviewed(attempt, "APP");
-      attempt.calledApp = true;
-      const idempotencyKey = this.#stepKeyOf(attempt);
-      const caller: AppCallerInput = {
-        userId: this.#run.authority.onBehalfOf,
-        mode: "workflow",
-        idempotencyKey,
-        attempt: attempt.leaseId,
-        fence: this.#fenceOf(attempt),
-      };
-      await this.#requirePerson();
-      await requireApprovedVersion(this.#env, this.#run.app, this.#run.version);
-      await this.#requireCurrent(attempt, "APP");
-      // The App's own connection calls take the step's key: held, they
-      // hold the step as the run's own do (`do` asks connect too).
-      try {
-        return await heldNoted(
-          attempt,
-          async () =>
-            await this.#hooks.callApp(
-              caller,
-              String(method),
-              checked(z.array(z.unknown()), args),
-              attempt.deadline
-            )
-        );
-      } catch (error) {
-        throw cutOffByAttempt(attempt, error) ? attemptTimedOut() : error;
-      }
-    });
-  }
-
-  /**
    * Calls a public function of the run's own App's sealed release
    * (`env.APP.callFunction(reference, input)`), at the version the run is
    * pinned to, for the person the run acts for, as the run, only inside a
@@ -2833,63 +2698,6 @@ export class RunHost extends RpcTarget {
         input,
         // Within what a submission key may be, whatever the step's name.
         `step:${await sha256Hex(canonicalJson([stepKey, place]))}`
-      );
-    });
-  }
-
-  /**
-   * Calls export `method` of another App, by the run's permission on its
-   * exports (`binding`), with `input` (`env.CRM.call(method, input)`),
-   * only inside a step whose code its review shows calling that binding
-   * (`#requireReviewed`), for the person the run acts for (app-calls.ts).
-   * The called App's method gets the step's key on its caller, the only
-   * one its connection calls take, so a side effect it holds holds the
-   * step as the run's own would.
-   */
-  async #callExport(
-    attempt: StepAttempt,
-    binding: unknown,
-    method: unknown,
-    input: unknown
-  ): Promise<Settled<unknown>> {
-    return await settle(async () => {
-      this.#requireUntampered();
-      await this.#requireCurrent(attempt, "export");
-      const idempotencyKey = this.#stepKeyOf(attempt);
-      const { apps, authority, app } = this.#run;
-      const name = checked(z.string(), binding);
-      const grant = Object.hasOwn(apps, name) ? apps[name] : undefined;
-      if (grant === undefined) {
-        throw workflowErrors.create("workflow.invalid");
-      }
-      await this.#requireReviewed(attempt, name);
-      attempt.calledApp = true;
-      await this.#requireCurrent(attempt, name);
-      return await heldNoted(
-        attempt,
-        async () =>
-          await callExport(
-            this.#env,
-            {
-              authority,
-              idempotencyKey,
-              attempt: attempt.leaseId,
-              fence: this.#fenceOf(attempt),
-              path: {
-                chain: [app],
-                // A run holds no App's turn while it waits for one.
-                holding: [],
-                // The called App's own limit, and no later than the
-                // attempt the call comes from.
-                deadline: attempt.deadline,
-                readOnly: false,
-              },
-              actor: this.#actor,
-            },
-            grant,
-            method,
-            input
-          )
       );
     });
   }

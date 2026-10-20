@@ -219,17 +219,16 @@ export const workflowEnvPath = ".grasp/workflow-env.ts";
 const bindingTypes = {
   connection: "ConnectionBinding",
   collection: "CollectionBinding",
-  app: "AppExportsBinding",
 } as const;
 
 /**
- * The binding names an App's permissions hold, by name: a connection's, a
- * collection's or another App's exports'. Names are a permission's, so
+ * The binding names an App's permissions hold, by name: a connection's or
+ * a collection's. Names are a permission's, so
  * the platform's own (`APP` among them) are never one.
  */
 export const workflowBindingsSchema = z.record(
   bindingNameSchema,
-  z.enum(["connection", "collection", "app"])
+  z.enum(["connection", "collection"])
 );
 
 /** What `workflowBindingsSchema` reads. */
@@ -251,7 +250,6 @@ export const workflowEnvDeclaration = (
     .map(([name, kind]) => `    readonly ${name}: ${bindingTypes[kind]};\n`)
     .join("");
   return `import type {
-  AppExportsBinding,
   CollectionBinding,
   ConnectionBinding,
   OwnAppBinding,

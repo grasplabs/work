@@ -13,7 +13,6 @@ import type { RunNotification } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
 import { appHost } from "../durable-objects.ts";
-import type { AttemptFence } from "./attempt-fence.ts";
 import { projectCandidateRun } from "./candidate-runs.ts";
 import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
@@ -282,10 +281,6 @@ const releasedThrough = (sql: SqlStorage): number => {
   );
 };
 
-/** One attempt of a step, as a key (`WorkflowRuns.#returned`). */
-const attemptKey = (key: string, attempt: number, generation: number) =>
-  `${String(generation)} ${String(attempt)} ${key}`;
-
 /** How long a cancel's request has to finish it before the object does. */
 const cancelRepairMs = 5000;
 
@@ -369,30 +364,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    */
   readonly #aiCalls: AiCalls = newAiCalls();
 
-  /**
-   * The attempts whose functions have returned (`#attemptReturned`), by
-   * `attemptKey`: none of them holds from then on, even while the engine
-   * still records its step's result. In memory: the host that hears of
-   * the return runs in this object, and an activation of a new object
-   * holds none of the attempts before it.
-   */
-  readonly #returned = new Set<string>();
-
-  /**
-   * Hears that the function of an attempt of the run (`fence`) returned:
-   * it holds no more here at once, so an App call it left queued starts
-   * nothing, and its calls running in Apps are revoked there, without the
-   * run waiting on its Apps (`revokeAttemptCalls`).
-   */
-  #attemptReturned(runId: string, fence: AttemptFence): void {
-    this.#returned.add(attemptKey(fence.key, fence.number, fence.generation));
-    this.ctx.waitUntil(
-      revokeOrLog(runId, async () => {
-        await this.revokeAttemptCalls(fence);
-      })
-    );
-  }
-
   // The engine's abstract hook, which a subclass can only override as it
   // is declared. Only core holds this namespace, and a definition built
   // for a caller runs nothing: the engine runs a run's definition itself.
@@ -435,9 +406,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           modelCalls: modelCallsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
-          revokeAttempt: (fence) => {
-            this.#attemptReturned(event.instanceId, fence);
-          },
           ...(this.#activation === undefined
             ? {}
             : { over: this.#activation.signal }),
@@ -633,10 +601,12 @@ export class WorkflowRuns extends WorkflowRun<Env> {
 
   /**
    * Whether the attempt `attempt` of the step whose key is `key` still
-   * holds its lease under `generation`, and its deadline hasn't passed:
-   * what a call an attempt started beyond its host (an App method, an
-   * export, and the stub calls they make) checks before it acts
-   * (attempt-fence.ts). Read from the journal; tells nothing else.
+   * holds its lease under `generation`, and its deadline hasn't passed
+   * (attempt-fence.ts). Read from the journal; tells nothing else. No
+   * workflow run starts a call it fences any more: a run's calls of its
+   * App's code are sealed functions, held by the run host's own lease
+   * checks. What remains asks of v1 App calls, which slice 4 of GRA-789
+   * removes with this.
    */
   attemptHolds(
     key: string,
@@ -646,7 +616,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   ): boolean {
     const lease = this.#leaseOf(key, attempt);
     const holds =
-      !this.#returned.has(attemptKey(key, attempt, generation)) &&
       lease !== undefined &&
       lease.generation === generation &&
       Date.now() < lease.deadline;
@@ -675,18 +644,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     await Promise.all(
       this.#appsCalled().map(async (app) => {
         await appHost(this.env, app).revokeRunCalls(runId, below);
-      })
-    );
-  }
-
-  /**
-   * Revokes the calls of one attempt of the run (`fence`) in every App an
-   * attempt of it started a method of, once its function has returned.
-   */
-  async revokeAttemptCalls(fence: AttemptFence): Promise<void> {
-    await Promise.all(
-      this.#appsCalled().map(async (app) => {
-        await appHost(this.env, app).revokeAttemptCalls(fence);
       })
     );
   }

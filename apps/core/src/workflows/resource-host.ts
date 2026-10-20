@@ -153,7 +153,7 @@ import { heldWakeType } from "./wakes.ts";
 // - An effect repeated. Each call is its task's step's work, recorded:
 //   a replay answers the record and calls nothing; a retry of the step
 //   calls again under the same key (`stepIdempotencyKey` of the step),
-//   and a call tried once (an export's, a model's) runs its module in one
+//   and a call tried once (a store operation's, a model's) runs its module in one
 //   attempt at most: a later attempt runs only if every one before it
 //   never did, as the run's object keeps (`#onceAtMost`, `TriedOnceMarks`).
 // - Time, randomness and deadlines that change on replay. `grasp.now`,
@@ -589,8 +589,8 @@ export const maxResultBytes = platformLimits.stepPayloadBytes;
 
 /**
  * The calls whose step is tried once only (spec 13.7: at most one attempt
- * for an effect not proven idempotent, and for a model): an App's export,
- * which gets the step's key but needn't keep to it, and a model request.
+ * for an effect not proven idempotent, and for a model): a store operation,
+ * run by another App's release, and a model request.
  * A connector's side effect is keyed in connect, so a retry finds its
  * stored result; the time and a random number change nothing outside.
  */
@@ -2328,12 +2328,6 @@ export class ResourceRunHost
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
       key: stepIdempotencyKey(this.#run.runId, `task:${task.id}`),
       deadline: attempt.deadline,
-      fence: {
-        run: this.#run.runId,
-        key: attempt.key,
-        number: attempt.number,
-        generation: attempt.generation,
-      },
       requireHolds: () => {
         this.#requireCurrent(attempt);
       },
@@ -2457,12 +2451,6 @@ export class ResourceRunHost
           return await makeCall(this.#env, this.#run.calling, task.id, built, {
             key: `${stepKey}:${ordinal}`,
             deadline: attempt.deadline,
-            fence: {
-              run: this.#run.runId,
-              key: attempt.key,
-              number: attempt.number,
-              generation: attempt.generation,
-            },
             requireHolds: () => {
               this.#requireCurrent(attempt);
             },

@@ -99,7 +99,6 @@ import {
   dropForEndedRun,
   dropForBinding,
   dropForEndedRuns,
-  dropForSettledStep,
   dropStaleBinding,
   heldFor,
   declineChatActions,
@@ -466,10 +465,6 @@ export default class Connect
 
   async dropForEndedRuns(request: unknown): Promise<void> {
     await dropForEndedRuns(this.env, request);
-  }
-
-  async dropForSettledStep(request: unknown): Promise<void> {
-    await dropForSettledStep(this.env, request);
   }
 
   async dropForBinding(request: unknown): Promise<void> {
