@@ -716,7 +716,12 @@ export const queueOrphanedReservations = async (
     // versions are never deleted, so neither are the bytes they run.
     sql`NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS versions
       WHERE versions.workflow_resource_id = ${sdkReleaseArtifacts.appId}
-        AND versions.version = ${sdkReleaseArtifacts.version})`
+        AND versions.version = ${sdkReleaseArtifacts.version})`,
+    // Nor a test run's build while its row is kept
+    // (workflows/candidate-runs.ts): the sweep of test runs deletes the
+    // row, and with it what keeps the reservation.
+    sql`NOT EXISTS (SELECT 1 FROM workflow_candidate_runs AS candidates
+      WHERE candidates.reservation = ${sdkReleaseArtifacts.appId})`
   );
   await db.batch([
     queueReserved(db, orphaned),

@@ -11,6 +11,7 @@ import { z } from "zod";
 import {
   workflowAdmissionQueue,
   workflowModelWaits,
+  workflowCandidateRuns,
   workflowResourceRuns,
   workflowRuns,
 } from "../db/core/schema.ts";
@@ -567,12 +568,14 @@ export const nextTurn = (pool: Pool, scope: AdmissionScope, now: number): SQL =>
  * The row of run `run`, as SQL to read from (`run`): its ID, and whether
  * it still goes (`active`: it hasn't ended, and no one cancelled it). An
  * App's run (`workflow_runs`) or an independent workflow's
- * (`workflow_resource_runs`, whose cancel ends it at once): their steps'
- * attempts take the same shares and wait in the same queue.
+ * (`workflow_resource_runs`, whose cancel ends it at once), or a test run
+ * of its draft (`workflow_candidate_runs`): their steps' attempts take the
+ * same shares and wait in the same queue.
  */
 const runRowOf = (run: string): SQL =>
   sql`(SELECT ${workflowRuns.id} AS id, (${workflowRuns.status} IN ('starting', 'running') AND ${workflowRuns.cancelRequestedAt} IS NULL) AS active FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run}
-    UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.status} IN ('starting', 'running') FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run}) AS run`;
+    UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.status} IN ('starting', 'running') FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run}
+    UNION ALL SELECT ${workflowCandidateRuns.id}, ${workflowCandidateRuns.status} IN ('starting', 'running') FROM ${workflowCandidateRuns} WHERE ${workflowCandidateRuns.id} = ${run}) AS run`;
 
 /**
  * Where the step at `place` stands in the queue: its place's turn and

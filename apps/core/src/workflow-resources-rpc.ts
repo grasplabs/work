@@ -3,6 +3,7 @@ import type {
   AppWorkflowBinding,
   CatalogContractEntry,
   WorkflowBindingApproval,
+  WorkflowCandidateRun,
   WorkflowDraft,
   WorkflowMember,
   WorkflowParams,
@@ -51,6 +52,11 @@ import {
   workflowVersions,
 } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
+import {
+  candidateRunFor,
+  startCandidateRun,
+  terminateCandidateRun,
+} from "./workflows/candidate-runs.ts";
 import { resourceRunTrace } from "./workflows/resource-run-trace.ts";
 import {
   listResourceRuns,
@@ -188,6 +194,34 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await listResourceRuns(this.#env, person, id)
+    );
+  }
+
+  async startCandidateRun(
+    id: string,
+    input: unknown
+  ): Promise<{ runId: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await startCandidateRun(this.#env, person, id, input)
+    );
+  }
+
+  async candidateRun(id: string, runId: string): Promise<WorkflowCandidateRun> {
+    return await withPerson(
+      this.#check,
+      async (person) => await candidateRunFor(this.#env, person, id, runId)
+    );
+  }
+
+  async terminateCandidateRun(
+    id: string,
+    runId: string
+  ): Promise<WorkflowCandidateRun> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await terminateCandidateRun(this.#env, person, id, runId)
     );
   }
 

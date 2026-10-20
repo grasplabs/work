@@ -3320,3 +3320,63 @@ export const appWorkflowBindings = sqliteTable(
     ),
   ]
 );
+
+/**
+ * Test runs of a workflow's draft checkpoint, never published
+ * (workflows/candidate-runs.ts, GRA-815): each of the exact checkpoint
+ * revision it names, compiled when it started into a build of its own,
+ * pinned by the manifest's hash (`manifest`, `manifest_hash`), whose
+ * artifacts are reserved under `reservation` for as long as the row is.
+ * Its input and parameters are frozen as it started (`input`, `params`:
+ * the start's own values or the defaults, never the workflow's set ones),
+ * and every named call it makes is answered from `fixtures`, never sent
+ * anywhere. Not a `workflow_resource_runs` row: it is no run of a version,
+ * nothing lists, binds or starts it but its workflow's builders, and it
+ * is kept briefly. `status` follows the engine's notifications, each
+ * applied only if newer than the last (`engine_sequence`).
+ */
+export const workflowCandidateRuns = sqliteTable(
+  "workflow_candidate_runs",
+  {
+    id: text().primaryKey(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    draftRevision: integer("draft_revision").notNull(),
+    manifest: text().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    reservation: text().notNull(),
+    principalId: text("principal_id").notNull(),
+    input: text().notNull(),
+    params: text().notNull(),
+    fixtures: text().notNull(),
+    status: text({
+      enum: ["starting", "running", "completed", "failed", "cancelled"],
+    }).notNull(),
+    engineSequence: integer("engine_sequence").notNull().default(0),
+    /**
+     * The newest activation generation whose attempts the engine fenced,
+     * as an independent run's (workflows/quotas.ts, `fenceRecorded`).
+     */
+    sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
+    /** Why core ended it, when the engine never had it (a start that failed). */
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at").notNull(),
+    endedAt: timestamp("ended_at"),
+  },
+  (table) => [
+    // A workflow's test runs, newest first, for its builders.
+    index("workflow_candidate_runs_workflow_idx").on(
+      table.workflowResourceId,
+      table.createdAt,
+      table.id
+    ),
+    // The sweep of test runs kept long enough.
+    index("workflow_candidate_runs_created_idx").on(table.createdAt),
+    // What keeps a build's artifacts reserved (release-retention.ts).
+    uniqueIndex("workflow_candidate_runs_reservation_idx").on(
+      table.reservation
+    ),
+  ]
+);

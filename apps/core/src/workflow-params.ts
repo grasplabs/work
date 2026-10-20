@@ -135,7 +135,10 @@ const acceptedValue = (
   name: string,
   value?: unknown
 ): unknown => {
-  const declared = contract.params[name];
+  // Its own names only: never one an object inherits (`constructor`).
+  const declared = Object.hasOwn(contract.params, name)
+    ? contract.params[name]
+    : undefined;
   if (declared === undefined) {
     throw workflowResourceErrors.create("workflow.params_invalid", {
       issues: [`${name}: The workflow has no such parameter.`],
@@ -149,6 +152,36 @@ const acceptedValue = (
     });
   }
   return checked.value;
+};
+
+/**
+ * The parameter values a test run of a draft's checkpoint runs with
+ * (workflows/candidate-runs.ts), frozen as a start freezes them, against
+ * the checkpoint's own contract: each one `given` names, else its default.
+ * Never the workflow's set values: a draft's code is its builder's, and a
+ * sensitive value they can't read must not reach it either. Refused
+ * (`workflow.params_invalid`) for a value that doesn't fit, a parameter
+ * the checkpoint doesn't declare, or one that has no default and isn't
+ * given.
+ */
+export const candidateParams = (
+  contract: VersionContract,
+  given: Record<string, unknown>
+): string => {
+  for (const name of Object.keys(given)) {
+    acceptedValue(contract, name, given[name]);
+  }
+  const frozen: Record<string, unknown> = {};
+  for (const name of Object.keys(contract.params).toSorted()) {
+    // Only what the start gives: an omitted name takes its default, even
+    // one an object inherits (`constructor`).
+    frozen[name] = acceptedValue(
+      contract,
+      name,
+      Object.hasOwn(given, name) ? given[name] : undefined
+    );
+  }
+  return boundedJson(frozen);
 };
 
 /**

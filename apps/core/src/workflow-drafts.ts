@@ -259,6 +259,29 @@ const draftRows = async (
 };
 
 /**
+ * The checkpoint of workflow `id`'s draft at exactly `revision`, with its
+ * modules, for a test run of it (workflows/candidate-runs.ts): only the
+ * latest revision, once it passed, as only it publishes
+ * (`publishWorkflowDraft`). A revision another edit replaced conflicts
+ * (`workflow.draft_conflict`); one that didn't pass, or a draft nobody
+ * edited, is refused (`workflow.draft_unchecked`).
+ */
+export const draftCheckpoint = async (
+  env: Env,
+  id: string,
+  revision: number
+): Promise<{ source: string; modules: Record<string, string> }> => {
+  const { latest, modules } = await draftRows(env, id);
+  if (latest !== undefined && latest.revision !== revision) {
+    throw workflowResourceErrors.create("workflow.draft_conflict");
+  }
+  if (latest === undefined || !latest.checked) {
+    throw workflowResourceErrors.create("workflow.draft_unchecked");
+  }
+  return { source: latest.source, modules };
+};
+
+/**
  * The draft of `workflow` as `workflowDraft` answers it; given `saved`,
  * as that edit left it, whatever was saved after it.
  */

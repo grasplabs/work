@@ -778,19 +778,32 @@ const acceptedOutput = (descriptor: string, value: unknown): unknown => {
 };
 
 /**
- * Runs (or resumes) one activation of a run of an independent workflow,
- * as `pin` names it (`loadedRun`): the build's generated module run in an
- * isolate of its own against a host of the run (resource-host.ts).
- * Answers the run's output, once it matches its version's output schema.
+ * Runs `loaded` (an independent workflow's run, or a test run of its
+ * draft's checkpoint, candidate-runs.ts) in its sandbox, on the engine's
+ * `engineStep`: its output, as its contract takes it, or the failure it
+ * ended with, thrown for the engine.
  */
-export const runResourceWorkflow = async (
+export const runLoadedResource = async (
   env: Env,
-  pin: PinnedResourceRun,
-  runId: string,
+  {
+    run,
+    output,
+    subject,
+    owner = ownerOf(run.workflowId),
+  }: {
+    run: HostedResourceRun;
+    output: string;
+    subject: string;
+    /**
+     * Whose its isolates and admissions are: the workflow's, or for a test
+     * run its own (candidate-runs.ts), so test runs never queue its runs.
+     */
+    owner?: string;
+  },
   engineStep: RunStep,
   memory: ResourceRunMemory
 ): Promise<unknown> => {
-  const { run, output, subject } = await loadedRun(env, pin, runId);
+  const { runId } = run;
   // The workflow's own step limit only ever lowers the host's.
   const ceiling = await stepLimitOf(env);
   const step = countedStep(
@@ -823,7 +836,7 @@ export const runResourceWorkflow = async (
         env,
         await admitAttempt(
           env,
-          { run: runId, root: runId, subject, resource: ownerOf(pin.workflow) },
+          { run: runId, root: runId, subject, resource: owner },
           attempt
         ),
         (wake) => {
@@ -836,7 +849,7 @@ export const runResourceWorkflow = async (
   const code = loadRunIsolate<ResourceAttemptHost>(
     env,
     {
-      owner: ownerOf(pin.workflow),
+      owner,
       mainModule: openRunModule,
       modules: async () =>
         await Promise.resolve({
@@ -875,8 +888,28 @@ export const runResourceWorkflow = async (
   return acceptedOutput(output, result.ok ? result.value : undefined);
 };
 
+/**
+ * Runs (or resumes) one activation of a run of an independent workflow,
+ * as `pin` names it (`loadedRun`): the build's generated module run in an
+ * isolate of its own against a host of the run (resource-host.ts).
+ * Answers the run's output, once it matches its version's output schema.
+ */
+export const runResourceWorkflow = async (
+  env: Env,
+  pin: PinnedResourceRun,
+  runId: string,
+  engineStep: RunStep,
+  memory: ResourceRunMemory
+): Promise<unknown> =>
+  await runLoadedResource(
+    env,
+    await loadedRun(env, pin, runId),
+    engineStep,
+    memory
+  );
+
 /** Where the engine has a run's result: its output, or why it failed. */
-const engineResultOf = async (
+export const engineResultOf = async (
   env: Env,
   id: string
 ): Promise<Pick<WorkflowResourceRun, "output" | "error">> => {
@@ -897,7 +930,7 @@ const engineResultOf = async (
  * for a run the engine never had, or the engine's code once the engine no
  * longer holds the run.
  */
-const keptFailureOf = (code: string): WorkflowResourceRun["error"] => {
+export const keptFailureOf = (code: string): WorkflowResourceRun["error"] => {
   const known = workflowResourceErrors.codeOf({ code });
   return {
     code,

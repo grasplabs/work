@@ -370,7 +370,7 @@ const liveWorkflows = async (
         );
 
 /** The live workflow `id`, or undefined. */
-const liveWorkflow = async (
+export const liveWorkflow = async (
   env: Env,
   id: unknown
 ): Promise<Live | undefined> => {
@@ -2219,6 +2219,49 @@ const publish = async (
     }
     return won;
   }
+};
+
+/**
+ * What a test run of a draft's checkpoint runs (workflows/candidate-runs.ts),
+ * compiled and checked exactly as a publication of it would be, against
+ * the host's catalog and `sources`, the draft's own modules; nothing is
+ * written. Its contract is the one a version of it would seal. Refused as
+ * publication refuses it (`workflow.definition_invalid` with its problems).
+ */
+export const candidateBuildOf = async (
+  env: Env,
+  by: Acting,
+  workflow: Live,
+  definition: string,
+  sources: Record<string, string>
+) => {
+  const modules =
+    Object.keys(sources).length === 0
+      ? undefined
+      : await compileModules(env, sources, workflow.id);
+  const parsed = parsedJson(definition);
+  const { checked, bindings } = await checkDefinition(
+    env,
+    by,
+    workflow,
+    definition,
+    modules,
+    parsed
+  );
+  const compiled = await compileWorkflow(
+    env,
+    checked,
+    definition,
+    workflow.id,
+    modules
+  );
+  return {
+    checked,
+    bindings,
+    compiled,
+    definitionHash: await definitionHashOf(checked.definition),
+    contract: contractOf(checked),
+  };
 };
 
 /**
