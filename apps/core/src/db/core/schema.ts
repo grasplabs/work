@@ -3509,3 +3509,77 @@ export const workflowCandidateRuns = sqliteTable(
     ),
   ]
 );
+
+/**
+ * The application landscape's syncs (src/landscape.ts), one row per
+ * landscape connection: the sync under way, or the last one. A sync reads
+ * the connection's grants a page at a time, `cursor` the next page's,
+ * each page written with the cursor that follows it, so a sync that
+ * stopped goes on from its last page. Every row of a sync is written as
+ * seen at `started_at`, so writing a page again writes the same.
+ */
+export const landscapeSyncs = sqliteTable("landscape_syncs", {
+  connectionId: text("connection_id").primaryKey(),
+  /** The UTC day it started, `YYYY-MM-DD`: one sync a day. */
+  day: text().notNull(),
+  startedAt: timestamp("started_at").notNull(),
+  cursor: text(),
+  reads: integer().notNull(),
+  state: text({
+    enum: ["running", "done", "partial", "failed"],
+  }).notNull(),
+  /** Why it failed, by code. */
+  reason: text(),
+  /** Throttled: not read again before. */
+  retryAt: timestamp("retry_at"),
+  finishedAt: timestamp("finished_at"),
+});
+
+/**
+ * Each app a landscape connection's tenant granted access, as last seen:
+ * its name and publisher as the provider says (data, never an identifier:
+ * `app_id`, its client ID, is), and when an admin's consent for everyone
+ * was last seen, with its scopes.
+ */
+export const landscapeApps = sqliteTable(
+  "landscape_apps",
+  {
+    connectionId: text("connection_id").notNull(),
+    appId: text("app_id").notNull(),
+    name: text().notNull(),
+    publisher: text(),
+    verified: integer({ mode: "boolean" }).notNull(),
+    adminScopes: text("admin_scopes", { mode: "json" }).$type<string[]>(),
+    adminSeenAt: timestamp("admin_seen_at"),
+    firstSeen: timestamp("first_seen").notNull(),
+    lastSeen: timestamp("last_seen").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.appId] }),
+    index("landscape_apps_last_seen_idx").on(table.lastSeen),
+  ]
+);
+
+/**
+ * Each person who granted an app access for themselves, by their ID at
+ * the provider, as last seen: dropped once not seen for the landscape's
+ * retention (src/landscape.ts).
+ */
+export const landscapeAppPeople = sqliteTable(
+  "landscape_app_people",
+  {
+    connectionId: text("connection_id").notNull(),
+    appId: text("app_id").notNull(),
+    personId: text("person_id").notNull(),
+    name: text(),
+    scopes: text({ mode: "json" }).$type<string[]>().notNull(),
+    firstSeen: timestamp("first_seen").notNull(),
+    lastSeen: timestamp("last_seen").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.appId, table.personId],
+    }),
+    index("landscape_app_people_last_seen_idx").on(table.lastSeen),
+  ]
+);
