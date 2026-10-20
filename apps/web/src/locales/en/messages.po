@@ -645,6 +645,10 @@ msgstr "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 msgid "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
 msgstr "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
 
+#: src/chat/project-dialog.tsx
+msgid "{most, plural, one {A project holds up to # document.} other {A project holds up to # documents.}}"
+msgstr "{most, plural, one {A project holds up to # document.} other {A project holds up to # documents.}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
@@ -1331,10 +1335,6 @@ msgstr "A new version of this domain is available."
 #: src/screens/screen-files.ts
 msgid "A preview keeps no files."
 msgstr "A preview keeps no files."
-
-#: src/chat/project-dialog.tsx
-msgid "A project holds up to {most} documents."
-msgstr "A project holds up to {most} documents."
 
 #: src/chat/project-dialog.tsx
 msgid "A project takes Markdown, text, CSV and JSON files."
@@ -3759,6 +3759,10 @@ msgstr "Dropped a kept build of approved packages"
 msgid "Dropped an event no workflow could take"
 msgstr "Dropped an event no workflow could take"
 
+#: src/chat/project-dialog.tsx
+msgid "Each document holds up to 100 KB."
+msgstr "Each document holds up to 100 KB."
+
 #: src/routes/_shell.domains.index.tsx
 msgid "Each domain runs one part of the business: its workflows, apps and connections."
 msgstr "Each domain runs one part of the business: its workflows, apps and connections."
@@ -5111,10 +5115,6 @@ msgstr "Jump to the newest message"
 #: src/connections/connect-dialog.tsx
 msgid "Just for you"
 msgstr "Just for you"
-
-#: src/chat/project-dialog.tsx
-msgid "Keep each document under 100 KB."
-msgstr "Keep each document under 100 KB."
 
 #: src/workflows/definition-editor.tsx
 msgid "Keep my text"

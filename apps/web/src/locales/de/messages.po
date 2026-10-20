@@ -645,6 +645,10 @@ msgstr "{more, plural, one {{shown} und # weiteres} other {{shown} und # weitere
 msgid "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
 msgstr "{moreFindings, plural, one {Und # weiterer Befund: Zeigen Sie alle Pakete an, um ihn zu lesen.} other {Und # weitere Befunde: Zeigen Sie alle Pakete an, um sie zu lesen.}}"
 
+#: src/chat/project-dialog.tsx
+msgid "{most, plural, one {A project holds up to # document.} other {A project holds up to # documents.}}"
+msgstr "{most, plural, one {Ein Projekt enthält bis zu # Dokument.} other {Ein Projekt enthält bis zu # Dokumente.}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# davon hat sich später geändert, in einem weiteren Gespräch mit der Geschäftsleitung.} other {# davon haben sich später geändert, in weiteren Gesprächen mit der Geschäftsleitung.}}"
@@ -1331,10 +1335,6 @@ msgstr "Eine neue Version dieser Domäne ist verfügbar."
 #: src/screens/screen-files.ts
 msgid "A preview keeps no files."
 msgstr "Eine Vorschau behält keine Dateien."
-
-#: src/chat/project-dialog.tsx
-msgid "A project holds up to {most} documents."
-msgstr "Ein Projekt enthält bis zu {most} Dokumente."
 
 #: src/chat/project-dialog.tsx
 msgid "A project takes Markdown, text, CSV and JSON files."
@@ -3759,6 +3759,10 @@ msgstr "Eine aufbewahrte Version freigegebener Pakete verworfen"
 msgid "Dropped an event no workflow could take"
 msgstr "Ein Ereignis verworfen, das kein Workflow annehmen konnte"
 
+#: src/chat/project-dialog.tsx
+msgid "Each document holds up to 100 KB."
+msgstr "Jedes Dokument darf bis zu 100 KB groß sein."
+
 #: src/routes/_shell.domains.index.tsx
 msgid "Each domain runs one part of the business: its workflows, apps and connections."
 msgstr "Jede Domäne steuert einen Teil des Geschäfts: ihre Workflows, Apps und Verbindungen."
@@ -5111,10 +5115,6 @@ msgstr "Zur neuesten Nachricht springen"
 #: src/connections/connect-dialog.tsx
 msgid "Just for you"
 msgstr "Nur für Sie"
-
-#: src/chat/project-dialog.tsx
-msgid "Keep each document under 100 KB."
-msgstr "Halten Sie jedes Dokument unter 100 KB."
 
 #: src/workflows/definition-editor.tsx
 msgid "Keep my text"

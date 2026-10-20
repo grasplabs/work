@@ -21,6 +21,7 @@ import {
 } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { FilePlusIcon, FileTextIcon, XIcon } from "lucide-react";
@@ -81,8 +82,11 @@ const useProblemText = (): Record<DocumentProblem, string> => {
   const most = projectDocumentsMax;
   return {
     type: t`A project takes Markdown, text, CSV and JSON files.`,
-    size: t`Keep each document under 100 KB.`,
-    count: t`A project holds up to ${most} documents.`,
+    size: t`Each document holds up to 100 KB.`,
+    count: t`${plural(most, {
+      one: "A project holds up to # document.",
+      other: "A project holds up to # documents.",
+    })}`,
   };
 };
 
@@ -110,13 +114,18 @@ const ProjectForm = ({
   const [problem, setProblem] = useState<DocumentProblem | null>(null);
   const named = projectNameSchema.safeParse(name).success;
 
+  // While picked files are read: nothing more is picked, and nothing is
+  // saved, until they are in the list.
+  const [reading, setReading] = useState(false);
   const add = async (files: readonly File[]): Promise<void> => {
+    setReading(true);
     const { read, first } = await readPicked(
       files,
       kept.length + picked.length
     );
     setPicked((before) => [...before, ...read]);
     setProblem(first);
+    setReading(false);
   };
 
   // What a Save that failed part-way got through, so trying again takes
@@ -188,7 +197,7 @@ const ProjectForm = ({
       className="flex flex-col gap-5"
       onSubmit={(event) => {
         event.preventDefault();
-        if (named && !busy) {
+        if (named && !busy && !reading) {
           void save();
         }
       }}
@@ -296,6 +305,7 @@ const ProjectForm = ({
         />
         <div className="flex">
           <Button
+            disabled={reading}
             onClick={() => {
               picker.current?.click();
             }}
@@ -316,7 +326,7 @@ const ProjectForm = ({
         <DialogClose render={<Button type="button" variant="outline" />}>
           <Trans>Cancel</Trans>
         </DialogClose>
-        <Button disabled={!named || busy} type="submit">
+        <Button disabled={!named || busy || reading} type="submit">
           {project === undefined ? (
             <Trans>Create project</Trans>
           ) : (

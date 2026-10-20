@@ -64,8 +64,13 @@ export const useAsk = (
   // next render.
   const sending = useRef(false);
   // A new chat made for a question that then failed to send: asking the
-  // same question again asks in it, rather than making another.
-  const unsent = useRef<{ id: string; question: string } | null>(null);
+  // same question again, from the same project or none, asks in it,
+  // rather than making another.
+  const unsent = useRef<{
+    id: string;
+    question: string;
+    projectId: string | undefined;
+  } | null>(null);
   const ask = async (question: string): Promise<void> => {
     if (sending.current) {
       return;
@@ -75,7 +80,10 @@ export const useAsk = (
     const sent = await run(async (session) => {
       let id =
         chatId ??
-        (unsent.current?.question === question ? unsent.current.id : undefined);
+        (unsent.current?.question === question &&
+        unsent.current.projectId === projectId
+          ? unsent.current.id
+          : undefined);
       if (id === undefined) {
         ({ id } = await session.chats.create(
           titleOf(question),
@@ -95,7 +103,7 @@ export const useAsk = (
       // The box keeps the question and says why it wasn't sent; a new chat
       // made for it waits to be asked in again, and shows in Chat's list.
       if (created !== undefined) {
-        unsent.current = { id: created, question };
+        unsent.current = { id: created, question, projectId };
         await router.invalidate();
       }
       return;
