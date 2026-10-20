@@ -4944,6 +4944,10 @@ msgstr "Ocurrió"
 msgid "It happened: {who}"
 msgstr "Ocurrió: {who}"
 
+#: src/screens/screen-frame.tsx
+msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
+msgstr "Tiene cambios sin guardar o un cambio sin respuesta todavía. Al salir se pierden los cambios sin guardar; lo que ya está guardado o en marcha se mantiene."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "No tiene parámetros."
@@ -5274,9 +5278,17 @@ msgstr "Los responsables reciben su enlace {when}. Los demás justo después de 
 msgid "Leads talked: {count} of {of}"
 msgstr "Responsables que hablaron: {count} de {of}"
 
+#: src/screens/screen-frame.tsx
+msgid "Leave"
+msgstr "Salir"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Leave out personnel files and anything about one person."
 msgstr "Deja fuera los expedientes de personal y todo lo que trate de una sola persona."
+
+#: src/screens/screen-frame.tsx
+msgid "Leave this app?"
+msgstr "¿Salir de esta app?"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Leaves this list"
@@ -8755,6 +8767,10 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Estado"
 
+#: src/screens/screen-frame.tsx
+msgid "Stay"
+msgstr "Quedarse"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "Stays by hand"
 msgstr "Sigue a mano"
@@ -9827,6 +9843,10 @@ msgstr "Este enlace no funciona. Pide uno nuevo a quien te lo envió."
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Este enlace ha caducado. Pide uno nuevo a quien te lo envió."
+
+#: src/screens/screen-frame.tsx
+msgid "This link opens the app with something it doesn't take. Open the app from its domain instead."
+msgstr "Este enlace abre la app con algo que no admite. Abra la app desde su dominio."
 
 #: src/onboarding/setup-steps.tsx
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."

@@ -643,3 +643,63 @@ export const unaskedDownloadFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
   "screens/notes.tsx": unaskedScreen,
 });
+
+/**
+ * The Notes App with two more screens to move between (spec 10.7.7): a
+ * start screen that opens a note by its route, and the note's screen,
+ * which gets the note's ID as its route input, holds a form, and goes back.
+ */
+export const navigationFiles = (): Record<string, string> => ({
+  ...notesAppFiles(),
+  "app.ts": registration
+    .replace(
+      'import { app, resource } from "@grasp-os/sdk";',
+      'import { app, resource, v } from "@grasp-os/sdk";'
+    )
+    .replace(
+      '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
+      `  screens: [
+    { name: "notes", path: "/", source: "screens/notes.tsx" },
+    { name: "start", path: "/start", source: "screens/home.tsx" },
+    { name: "note", path: "/notes/:id", source: "screens/note.tsx", input: v.object({ id: v.string() }) },
+  ],`
+    ),
+  "screens/home.tsx": `import { useNavigate } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { screens } from "#grasp";
+
+export default function Start() {
+  const navigate = useNavigate();
+  return (
+    <main className="flex flex-col gap-3 p-6">
+      <h1>Start</h1>
+      <Button onClick={() => void navigate(screens.note, { id: "n42" })}>Open note n42</Button>
+      <Button onClick={() => void navigate(screens.note, { id: "n42" }, { replace: true })}>Open note n42 in place</Button>
+    </main>
+  );
+}
+`,
+  "screens/note.tsx": `import { useState } from "react";
+import { useForm, useNavigate } from "@grasp-os/sdk/react";
+import type { ScreenProps } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { Form, TextField } from "@grasp-os/ui/form";
+import { api, screens } from "#grasp";
+
+export default function Note({ input }: ScreenProps<typeof screens.note>) {
+  const navigate = useNavigate();
+  const [refused, setRefused] = useState(0);
+  const form = useForm(api.notes.create, { defaultValues: { title: "", body: "" } });
+  return (
+    <main className="flex flex-col gap-3 p-6">
+      <h1>Note {input.id}</h1>
+      <Form aria-label="Draft" form={form}>
+        <TextField form={form} label="Title" name="title" />
+      </Form>
+      <Button onClick={() => void navigate(screens.start).catch(() => setRefused((count) => count + 1))}>Back to start</Button>
+      <p>Refused {refused}</p>
+    </main>
+  );
+}
+`,
+});

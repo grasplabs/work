@@ -70,6 +70,7 @@ import type {
   FileView,
   UploadOptions,
 } from "./client-files.ts";
+import type { Navigate } from "./client-navigation.ts";
 import { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
 import type { PaginationResult } from "./database.ts";
 import { useGraspForm } from "./form.ts";
@@ -116,10 +117,12 @@ export type {
 export type {
   AppErrorPayload,
   RunHandle,
+  ScreenProps,
   WorkflowEventReference,
   WorkflowReference,
   WorkflowWait,
 } from "./references.ts";
+export type { Navigate, NavigateOptions } from "./client-navigation.ts";
 export type {
   DeleteOptions,
   DownloadOptions,
@@ -296,6 +299,17 @@ export const useMutation = <Reference extends MutationReference>(
   const client = useClient();
   return async (...args) => await client.mutation(reference, ...args);
 };
+
+/**
+ * How a screen opens another of its App's screens (spec 10.7.7): one
+ * stable function, `navigate(screens.note, { id }, { replace? })`, with a
+ * screen from the generated `screens` and its route input, which may be
+ * left out only when it is empty or all defaults. Push by default;
+ * `replace: true` replaces the current entry. Resolves once the host
+ * accepted the navigation, not once the screen loaded. The screen it
+ * opens gets the input as its `ScreenProps`.
+ */
+export const useNavigate = (): Navigate => useClient().navigate;
 
 /**
  * The action `reference` names, as a stable function: each call is one

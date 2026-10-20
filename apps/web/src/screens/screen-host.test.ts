@@ -1,6 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { portTransport } from "@grasp-os/shared/screen-port";
-import type { ScreenBundle } from "@grasp-os/shared/screens";
+import { screenErrors } from "@grasp-os/shared/screens";
+import type { ScreenBundle, ScreenRoute } from "@grasp-os/shared/screens";
 import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -17,6 +18,7 @@ import {
   fileRefusal,
   previewTarget,
 } from "./screen-host.ts";
+import type { ScreenOpening } from "./screen-host.ts";
 import type { FrameLink } from "./tab-link.ts";
 
 // The page relaying a screen's function call to core: whatever comes back
@@ -38,6 +40,19 @@ const outcome = async (call: Promise<unknown>): Promise<unknown> => {
 /** No decision answer here asks the person: none is confirmed. */
 const confirmNothing = async (): Promise<boolean> =>
   await Promise.resolve(false);
+
+/** A screen opened by its file, which navigates nowhere. */
+const noNavigation: ScreenOpening = {
+  navigation: {
+    navigate: async () => {
+      await Promise.resolve();
+      throw new Error("Nowhere to go.");
+    },
+    leaveGuard: () => {
+      // Nothing to confirm.
+    },
+  },
+};
 
 /** The frame's lease, and the person it was opened for. */
 const frame = { lease: "lease", person: "person" };
@@ -186,7 +201,11 @@ const linkAsAda = (
     lease: string,
     request: string,
     onSnapshot: (push: unknown) => Promise<unknown>
-  ) => Promise<unknown> = async () => await Promise.resolve({})
+  ) => Promise<unknown> = async () => await Promise.resolve({}),
+  /** Runs while core resolves a navigation, before it answers. */
+  whileResolving: () => void = () => {
+    // Nothing happens meanwhile.
+  }
 ): CoreLink => {
   let asked = 0;
   const session = {
@@ -213,6 +232,19 @@ const linkAsAda = (
           },
         }),
       version: async () => await Promise.resolve(1),
+      // Core resolves only the App's `note` route, as it normalizes it.
+      navigate: async (_app: string, route: ScreenRoute) => {
+        whileResolving();
+        await Promise.resolve();
+        if (route.route !== "note") {
+          throw screenErrors.create("screen.not_found");
+        }
+        const id: unknown =
+          typeof route.input === "object" && route.input !== null
+            ? Reflect.get(route.input, "id")
+            : undefined;
+        return { screen: "note", route: "note", input: { id, tab: "view" } };
+      },
     },
   };
   const core = {
@@ -244,6 +276,8 @@ const bundle: ScreenBundle = {
   name: "Notes",
   version: 1,
   screen: "home",
+  route: null,
+  input: {},
   artifact: "artifact",
   frameToken: "token",
   lease: "lease",
@@ -254,7 +288,12 @@ const runningWithDraft = async (present: () => Promise<string>) => {
   vi.stubGlobal("sessionStorage", tabStorage());
   const events = pageEvents();
   saveDraft("ada", bundle.app, "n1", "Ada's draft");
-  const source = appScreen(bundle.app, bundle.screen, confirmNothing);
+  const source = appScreen(
+    bundle.app,
+    bundle.screen,
+    confirmNothing,
+    noNavigation
+  );
   const link = linkAsAda(present);
   const cleanups: (() => void)[] = [];
   const { target, running } = source.connect(
@@ -410,7 +449,12 @@ describe("a running screen's drafts while it follows a query", () => {
         return await Promise.resolve({});
       }
     );
-    const source = appScreen(bundle.app, bundle.screen, confirmNothing);
+    const source = appScreen(
+      bundle.app,
+      bundle.screen,
+      confirmNothing,
+      noNavigation
+    );
     const cleanups: (() => void)[] = [];
     const { target } = source.connect(
       link,
@@ -460,7 +504,12 @@ describe("a running screen whose query core refuses for its build", () => {
         return await Promise.resolve({});
       }
     );
-    const source = appScreen(bundle.app, bundle.screen, confirmNothing);
+    const source = appScreen(
+      bundle.app,
+      bundle.screen,
+      confirmNothing,
+      noNavigation
+    );
     const cleanups: (() => void)[] = [];
     const stopped = Promise.withResolvers<string>();
     const { target } = source.connect(
@@ -512,7 +561,7 @@ describe("an App's drafts when its screen can't be opened", () => {
     const asSession = session as unknown as Parameters<
       ReturnType<typeof appScreen>["open"]
     >[0];
-    await appScreen(bundle.app, bundle.screen, confirmNothing)
+    await appScreen(bundle.app, bundle.screen, confirmNothing, noNavigation)
       .open(asSession)
       .catch(() => {
         // Refused, as the test says.
@@ -564,7 +613,8 @@ describe("a screen's drafts handed over", () => {
     const { target } = appScreen(
       bundle.app,
       bundle.screen,
-      confirmNothing
+      confirmNothing,
+      noNavigation
     ).connect(
       link,
       bundle,
@@ -590,7 +640,8 @@ describe("a screen's drafts handed over", () => {
     const { target } = appScreen(
       bundle.app,
       bundle.screen,
-      confirmNothing
+      confirmNothing,
+      noNavigation
     ).connect(
       link,
       bundle,
@@ -647,7 +698,12 @@ describe("a running screen's drafts once core stops its build", () => {
       async () => await person.promise
     );
     await link.session();
-    const source = appScreen(bundle.app, bundle.screen, confirmNothing);
+    const source = appScreen(
+      bundle.app,
+      bundle.screen,
+      confirmNothing,
+      noNavigation
+    );
     const stopped: string[] = [];
     const refused = (reason: string): void => {
       stopped.push(reason);
@@ -825,5 +881,155 @@ describe("a preview's stream through the page", () => {
     await waited.promise;
     expect(stream.seen).toStrictEqual({ frames: [result], ended: 0 });
     stream.close();
+  });
+});
+
+describe("a screen's navigation, as the page takes it", () => {
+  it("is refused in a preview, before anything asks core or moves the page", async () => {
+    let asked = 0;
+    const link = {
+      session: async () => {
+        asked += 1;
+        return await Promise.reject(new Error("Not asked in a preview."));
+      },
+      person: async () => await Promise.resolve("ada"),
+    };
+    // SAFETY: a preview's navigation reaches nothing of the link; counted.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+    const asLink = link as unknown as FrameLink;
+    const target = previewTarget(asLink, "chat", {
+      ...bundle,
+      revision: 1,
+      screens: ["home"],
+    });
+    const refused = await outcome(
+      target.navigate({ screen: "note", input: { id: "n1" } })
+    );
+    expect({ refused, asked }).toStrictEqual({
+      refused: { code: "app.preview_side_effect" },
+      asked: 0,
+    });
+  });
+
+  it("goes only where core resolved, with what core normalized, and nowhere when core refuses", async () => {
+    vi.stubGlobal("sessionStorage", tabStorage());
+    pageEvents();
+    const went: { target: unknown; replace: boolean }[] = [];
+    const guards: boolean[] = [];
+    const opening: ScreenOpening = {
+      navigation: {
+        navigate: async (target, replace) => {
+          went.push({ target, replace });
+          await Promise.resolve();
+        },
+        leaveGuard: (guarded) => {
+          guards.push(guarded);
+        },
+      },
+    };
+    const link = linkAsAda(async () => await Promise.resolve("open"));
+    const cleanups: (() => void)[] = [];
+    const { target } = appScreen(
+      bundle.app,
+      bundle.screen,
+      confirmNothing,
+      opening
+    ).connect(
+      link,
+      { ...bundle, route: "notes", input: { page: 2 } },
+      () => {
+        // Core never refuses the build here.
+      },
+      cleanups
+    );
+    const input = target.input();
+    await target.navigate({ screen: "note", input: { id: "n1" } });
+    await target.navigate({
+      screen: "note",
+      input: { id: "n2" },
+      replace: true,
+    });
+    const refused = await target
+      .navigate({ screen: "settings", input: {} })
+      .then(
+        () => "went",
+        (error: unknown) => screenErrors.codeOf(error)
+      );
+    target.leaveGuard(true);
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+    expect({ input, went, refused, guards }).toStrictEqual({
+      input: { page: 2 },
+      went: [
+        {
+          target: {
+            screen: "note",
+            route: "note",
+            input: { id: "n1", tab: "view" },
+          },
+          replace: false,
+        },
+        {
+          target: {
+            screen: "note",
+            route: "note",
+            input: { id: "n2", tab: "view" },
+          },
+          replace: true,
+        },
+      ],
+      refused: "screen.not_found",
+      guards: [true],
+    });
+  });
+
+  it("goes nowhere once the screen stopped while core resolved where to", async () => {
+    vi.stubGlobal("sessionStorage", tabStorage());
+    pageEvents();
+    const went: unknown[] = [];
+    const opening: ScreenOpening = {
+      navigation: {
+        navigate: async (target) => {
+          went.push(target);
+          await Promise.resolve();
+        },
+        leaveGuard: () => {
+          // Not asked here.
+        },
+      },
+    };
+    const cleanups: (() => void)[] = [];
+    // The person leaves the screen before core answered.
+    const link = linkAsAda(
+      async () => await Promise.resolve("open"),
+      undefined,
+      undefined,
+      () => {
+        for (const cleanup of cleanups) {
+          cleanup();
+        }
+      }
+    );
+    const { target } = appScreen(
+      bundle.app,
+      bundle.screen,
+      confirmNothing,
+      opening
+    ).connect(
+      link,
+      bundle,
+      () => {
+        // Core never refuses the build here.
+      },
+      cleanups
+    );
+    const stopped = await target
+      .navigate({ screen: "note", input: { id: "n1" } })
+      .then(
+        () => false,
+        () => true
+      );
+    expect({ stopped, went }).toStrictEqual({ stopped: true, went: [] });
   });
 });

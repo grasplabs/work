@@ -121,6 +121,15 @@ const clientErrors = {
       "This stream is still running: wait for it to finish, or cancel it, before you run it again.",
     category: "contract",
   },
+  "navigation.invalid_screen": {
+    message:
+      "That isn't one of the App's screens: use one from the App's generated screens.",
+    category: "contract",
+  },
+  "navigation.unavailable": {
+    message: "This screen can't navigate: it isn't running in Grasp's shell.",
+    category: "contract",
+  },
   "stream.unavailable": {
     message: "Streaming actions can't run here.",
     category: "operational",

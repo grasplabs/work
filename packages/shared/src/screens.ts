@@ -8,6 +8,7 @@ import type {
 } from "./decisions.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { AppId } from "./ids.ts";
+import type { Json } from "./json.ts";
 import {
   screenFrameMounted,
   screenFrameReady,
@@ -63,6 +64,43 @@ export const screenNameSchema = z
   .string()
   .regex(/^[\w-]{1,64}$/u, "a screen's file name, without .tsx");
 
+/** A screen's route name, as an App declares it (`app({ screens })`). */
+export const screenRouteSchema = z
+  .string()
+  .regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u, "a screen's route name");
+
+/**
+ * Where a screen asks to go (spec 10.7.7, `useNavigate`): one of its own
+ * App's screens by route name, with its input, and whether the page
+ * replaces its current entry. No URL, path, App or person: the page builds
+ * the route itself, after core checked the target and the input.
+ */
+export const screenNavigationSchema = z.strictObject({
+  screen: screenRouteSchema,
+  input: z.unknown().optional(),
+  replace: z.boolean().optional(),
+});
+export type ScreenNavigation = z.infer<typeof screenNavigationSchema>;
+
+/**
+ * A screen of an App to open by route name, with its input, as core
+ * checks it before it opens (`ScreensApi.navigate`, `ScreensApi.open`).
+ */
+export interface ScreenRoute {
+  route: string;
+  input?: unknown;
+}
+
+/**
+ * Where core says a navigation goes: the file of the screen to open, the
+ * route it was named by and its input as the route's schema normalized it.
+ */
+export interface ScreenTarget {
+  screen: string;
+  route: string;
+  input: Json;
+}
+
 /** A screen's file, `screens/<name>.tsx`: its name is the `name` group. */
 export const screenPath = /^screens\/(?<name>[\w-]{1,64})\.tsx$/u;
 
@@ -90,6 +128,16 @@ export interface ScreenBundle {
    * minutes (`?token=`): a sandboxed frame sends no session.
    */
   frameToken: string;
+  /**
+   * The route this screen was opened by, as the App declares it; null for
+   * a screen file no route names.
+   */
+  route: string | null;
+  /**
+   * Its input, as its route's schema normalized it: what the screen gets
+   * as its `input` prop (`ScreenProps`). `{}` for a screen no route names.
+   */
+  input: Json;
   /**
    * Core's word that it handed this person this build of this App, for
    * the page to give back on the frame's own connection (`present`):
@@ -334,7 +382,21 @@ export interface ScreensApi {
    * audited, the same one once in a while. Counted against what one
    * person's screens of the App may ask (`screen.rate_limited`).
    */
-  open: (app: string, screen: string) => Promise<ScreenBundle>;
+  open: (
+    app: string,
+    screen: string,
+    route?: ScreenRoute
+  ) => Promise<ScreenBundle>;
+  /**
+   * Where a screen of the App may go (spec 10.7.7): the screen its route
+   * name `navigation.screen` names, at the App's current version, with
+   * its input normalized, once the person may open it now (their role in
+   * the App, and the build's delivery, as `open` decides them). Refused
+   * with `screen.not_found` for a name the App doesn't declare and with
+   * `screen.input_invalid` for input its schema refuses. Counted as one
+   * of the person's requests of the App's screens.
+   */
+  navigate: (app: string, navigation: ScreenRoute) => Promise<ScreenTarget>;
   /**
    * Says which build this connection's frame runs for the App, with the
    * lease `open` gave: what every call below is then decided on. Answers
@@ -492,6 +554,9 @@ export const screenErrors = defineErrorFamily({
   "screen.build_slow":
     "The app's screens are still building. Try again in a moment.",
   "screen.invalid": "That isn't a valid request for a screen.",
+  "screen.input_invalid": "That isn't valid input for the screen.",
+  "screen.navigation_cancelled":
+    "The person chose to stay on this screen, which has unsaved changes.",
   "screen.too_many_subscriptions":
     "This page follows at most 20 workflows' runs at once. Close a screen, then try again.",
   "screen.too_many_queries":
