@@ -1,17 +1,29 @@
 /**
  * What clients and buyers read outside code names the product Grasp Work,
  * never Grasp OS (GRA-143): the frontend's translation catalogs, HTML
- * pages and manifests, and the skills and templates the platform sends or
- * shows. Strings in code are held by the lint (`grasp/no-old-product-name`).
+ * pages and manifests, the skills and templates the platform sends or
+ * shows, and the built-in Apps' files, which the root lint leaves to the
+ * screen build (vite.config.ts). Strings in other code are held by the
+ * lint (`grasp/no-old-product-name`).
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
 import { findOldProductNames } from "./lint/old-product-name.ts";
 
-/** The files people read that aren't code: by extension, in the apps and packages. */
+/**
+ * The files people read that the lint doesn't: by extension in the apps
+ * and packages, and every file of a built-in App.
+ */
 const readFiles =
-  /^(?:apps|packages)\/.+\.(?:po|html|md|txt|webmanifest|xml|svg)$/u;
+  /^(?:(?:apps|packages)\/.+\.(?:po|html|md|txt|webmanifest|xml|svg)|apps\/core\/blueprints\/[^/]+\/files\/.+)$/u;
+
+/**
+ * A PO catalog's message as it reads: a message wrapped over quoted lines
+ * joined up, each break kept as a newline so lines still count.
+ */
+const joinedPo = (text: string): string =>
+  text.replaceAll(/"[ \t]*\n[ \t]*"/gu, "\n");
 
 /** Not what clients read: tests and their fixtures. */
 const notRead = /(?:^|\/)(?:test|tests|e2e)\/|\.test\.[cm]?[jt]sx?$/u;
@@ -27,12 +39,13 @@ export const readPaths = (paths: readonly string[]): string[] =>
 export const oldProductNames = (
   files: readonly { path: string; text: string }[]
 ): string[] =>
-  files.flatMap(({ path, text }) =>
-    findOldProductNames(text).map(({ found, index }) => {
+  files.flatMap(({ path, text: written }) => {
+    const text = path.endsWith(".po") ? joinedPo(written) : written;
+    return findOldProductNames(text).map(({ found, index }) => {
       const line = text.slice(0, index).split("\n").length;
       return `${path}:${line}: ${JSON.stringify(found)}`;
-    })
-  );
+    });
+  });
 
 const main = (): void => {
   const paths = execFileSync(

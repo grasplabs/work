@@ -86,12 +86,17 @@ describe("the product's old name", () => {
         'export const route = "/grasp-os";',
         "",
       ].join("\n"),
-      "apps/core/src/NAME.ts":
-        "export const subject = `Your Grasp OS invite`;\n",
+      "apps/core/src/NAME.ts": [
+        "export const subject = `Your Grasp OS invite`;",
+        // Escaped, it still reads as the old name.
+        "export const escaped = `Grasp\\u0020OS`;",
+        "",
+      ].join("\n"),
       "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
     });
     expect(reported).toStrictEqual([
       { file: "apps/core/src/NAME.ts", line: 1 },
+      { file: "apps/core/src/NAME.ts", line: 2 },
       { file: "apps/web/src/NAME.tsx", line: 2 },
       { file: "apps/web/src/NAME.tsx", line: 3 },
     ]);
@@ -105,6 +110,14 @@ describe("the product's old name", () => {
       },
       { path: "apps/web/index.html", text: "<title>Grasp Work</title>\n" },
       {
+        path: "apps/web/src/locales/de/messages.po",
+        text: 'msgid ""\n"Welcome to Grasp "\n"OS"\nmsgstr ""\n',
+      },
+      {
+        path: "apps/core/blueprints/intake/files/screens/desk.tsx",
+        text: "<h1>Grasp OS desk</h1>\n",
+      },
+      {
         path: "apps/core/src/skills/brief/SKILL.md",
         text: "# Brief\n\nWrite to the person as\nGrasp\n  OS does.\n",
       },
@@ -117,6 +130,10 @@ describe("the product's old name", () => {
       oldProductNames(files.filter(({ path }) => read.has(path)))
     ).toStrictEqual([
       'apps/web/src/locales/nl/messages.po:2: "Grasp OS"',
+      // Wrapped over the catalog's quoted lines, named where it starts.
+      'apps/web/src/locales/de/messages.po:2: "Grasp \\nOS"',
+      // A built-in App's screen, which the root lint leaves alone.
+      'apps/core/blueprints/intake/files/screens/desk.tsx:1: "Grasp OS"',
       // Wrapped across lines, named where it starts.
       'apps/core/src/skills/brief/SKILL.md:4: "Grasp\\n  OS"',
     ]);

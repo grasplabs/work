@@ -29,7 +29,7 @@ interface Node {
   type: string;
   value?: unknown;
   name?: Node | string;
-  quasis?: { value: { raw: string } }[];
+  quasis?: { value: { raw: string; cooked?: string | null } }[];
   source?: Node | null;
   specifiers?: Node[];
   local?: Node;
@@ -140,8 +140,10 @@ const noOldProductName = {
         }
       },
       TemplateLiteral: (node: Node): void => {
-        for (const quasi of node.quasis ?? []) {
-          check(node, quasi.value.raw);
+        // What it reads as, escapes and all; a tagged template's invalid
+        // escape has no cooked value, so its raw text then.
+        for (const { value } of node.quasis ?? []) {
+          check(node, value.cooked ?? value.raw);
         }
       },
       JSXText: (node: Node): void => {
