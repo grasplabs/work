@@ -3,6 +3,7 @@ import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import type { AppManifest, OperationManifest } from "./app.ts";
+import { preferenceOperations } from "./preference-operations.ts";
 import { workflowReferenceLimits } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor, ValueSchema } from "./value-descriptor.ts";
@@ -1009,9 +1010,24 @@ const referencesText = async (
   );
 
   // Only when declared: an App without preferences has no export to import.
+  // `get` and `update`, generated as any function reference is
+  // (preference-operations.ts), and nothing else (spec 10.7.7).
   if (manifest.preferences !== null) {
+    const operations = Object.entries(
+      preferenceOperations(manifest.preferences)
+    ).toSorted(([a], [b]) => (a < b ? -1 : 1));
+    const types = operations.map(
+      ([name, operation]) =>
+        `  readonly ${name}: ${referenceTypeOf(operation)};`
+    );
+    const values = await Promise.all(
+      operations.map(
+        async ([name, operation]) =>
+          `  ${name}: ${dataOf(referenceOf(identity, operation, await contractFingerprint(operation)), 1)},`
+      )
+    );
     parts.push(
-      `export const preferences: PreferencesReference<${valueTypeOf(manifest.preferences, "input")}, ${valueTypeOf(manifest.preferences, "output")}> = frozen(${dataOf({ resourceId: identity.resourceId, descriptor: manifest.preferences }, 0)});\n`
+      `export const preferences: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n} as const);\n`
     );
   }
 
@@ -1020,7 +1036,6 @@ const referencesText = async (
     "FilesReference",
     "LinksReference",
     "OperationReference",
-    "PreferencesReference",
     "ScreenReference",
     "WorkflowDecisionDetail",
     "WorkflowDecisionInboxItem",
@@ -1173,6 +1188,6 @@ export const symbolicModules = (): Record<string, string> => {
 `;
   return {
     [generatedPaths.serverReferences]: `${prelude}\nexport const internal = ${symbolicTree("internal")};\n`,
-    [generatedPaths.references]: `${prelude}\nexport const api = ${symbolicTree("public")};\nexport const workflows = Object.freeze({});\nexport const resources = Object.freeze({});\nexport const screens = Object.freeze({});\nexport const preferences = Object.freeze({ resourceId: "", descriptor: null });\n`,
+    [generatedPaths.references]: `${prelude}\nexport const api = ${symbolicTree("public")};\nexport const workflows = Object.freeze({});\nexport const resources = Object.freeze({});\nexport const screens = Object.freeze({});\nexport const preferences = Object.freeze({});\n`,
   };
 };

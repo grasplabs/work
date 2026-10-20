@@ -272,10 +272,50 @@ describe("generated modules", () => {
     });
   });
 
-  test("export preferences only when the App declares them", async () => {
-    expect(preferences.descriptor).toStrictEqual(
-      v.object({ compact: v.boolean().default(false) }).descriptor
-    );
+  test("export preferences as a get query and an update mutation, pinned as any function is", () => {
+    expect(Object.keys(preferences).toSorted()).toStrictEqual([
+      "get",
+      "update",
+    ]);
+    // What core rebuilds from the release's preferences must match exactly.
+    expect(preferences.get).toMatchObject({
+      contractId: "preferences.get",
+      kind: "query",
+      visibility: "public",
+      mode: "single",
+      resourceId: identity.resourceId,
+      resourceVersion: identity.resourceVersion,
+    });
+    expect(preferences.get.fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+    expect(preferences.update).toMatchObject({
+      contractId: "preferences.update",
+      kind: "mutation",
+      visibility: "public",
+      mode: "single",
+    });
+    expect(preferences.update.fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  test("answer every preference and `_rev`, and take a strict, all-optional patch", () => {
+    expect(
+      schemaOf(preferences.get.returns)["~standard"].validate({
+        compact: true,
+        _rev: 3,
+      })
+    ).toStrictEqual({ value: { compact: true, _rev: 3 } });
+    const updateArgs = schemaOf(preferences.update.args)["~standard"];
+    expect(
+      updateArgs.validate({ expectedRevision: 0, patch: {} })
+    ).toStrictEqual({ value: { expectedRevision: 0, patch: {} } });
+    expect(
+      updateArgs.validate({ expectedRevision: 0, patch: { dark: true } }).issues
+    ).toBeDefined();
+    expect(
+      updateArgs.validate({ expectedRevision: -1, patch: {} }).issues
+    ).toBeDefined();
+  });
+
+  test("export no preferences for an App that declares none", async () => {
     const manifest = readAppManifest(
       changed((data) => {
         setAt(data, ["preferences"], null);
@@ -1171,11 +1211,39 @@ describe("screens and preferences", () => {
 
   test.each([
     ["a value that isn't an object", v.boolean()],
-    ["a nullable object", v.object({ compact: v.boolean() }).nullable()],
+    [
+      "a nullable object",
+      v.object({ compact: v.boolean().default(false) }).nullable(),
+    ],
   ])("preferences that are %s are refused", (_case, declared) => {
     expect(refusal(() => small({ preferences: declared }))).toContain(
       "is a required `v.object`"
     );
+  });
+
+  test.each([
+    [
+      "a required field",
+      v.object({ compact: v.boolean() }),
+      "needs a `.default",
+    ],
+    [
+      "an optional field",
+      v.object({ compact: v.boolean().optional() }),
+      "needs a `.default",
+    ],
+    [
+      "a field named `_rev`",
+      v.object({ _rev: v.number().default(0) }),
+      "starts with `_`",
+    ],
+    [
+      "a field starting with `_`",
+      v.object({ _theme: v.string().default("light") }),
+      "starts with `_`",
+    ],
+  ])("preferences with %s are refused", (_case, declared, message) => {
+    expect(refusal(() => small({ preferences: declared }))).toContain(message);
   });
 
   test.each([
@@ -1455,6 +1523,18 @@ describe("reading a manifest back", () => {
         setAt(data, ["preferences", "nullable"], true);
       },
       "is a required `v.object`",
+    ],
+    [
+      "a preference without a default",
+      (data: unknown) => {
+        setAt(
+          data,
+          ["preferences", "fields", "compact", "presence"],
+          "required"
+        );
+        removeAt(data, ["preferences", "fields", "compact", "defaultValue"]);
+      },
+      "needs a `.default",
     ],
     [
       "a descriptor of a kind there isn't",

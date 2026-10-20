@@ -1805,7 +1805,7 @@ import { action, query } from "#grasp/server";
 export const defaults = query({
   args: {},
   returns: v.boolean(),
-  handler: () => preferences.descriptor !== null,
+  handler: () => preferences.get.contractId === "preferences.get",
 });
 
 export const reach = action({

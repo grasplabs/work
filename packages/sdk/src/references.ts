@@ -3,8 +3,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 
 // References (spec 8, 32.1): how code names one of an App's functions, a
-// browser-facing resource, a screen or its preferences, without holding
-// any of them. A reference is data: the App and version it belongs to,
+// browser-facing resource or a screen, without holding any of them. A reference is data: the App and version it belongs to,
 // the contract it pins (its ID and exact fingerprint), its kind and
 // visibility and the descriptors of its arguments and return. It holds no
 // handler and grants nothing: the host resolves every reference against
@@ -12,7 +11,8 @@ import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 // however it was made.
 //
 // The generated modules hold them: `#grasp` the public `api`, the
-// browser resources, the screens and the preferences; `#grasp/server-
+// browser resources, the screens and the preferences (two function
+// references, preference-operations.ts); `#grasp/server-
 // references` the `internal` tree, for the App's own server code. Their
 // types come from the descriptors, through the phantom members below,
 // which exist in types only: they are keyed by symbols that are declared,
@@ -576,16 +576,6 @@ export type WorkflowDecisionsOf<Reference> =
   >
     ? Decisions
     : never;
-
-/** A generated reference to the App's preferences, when it declares them. */
-export interface PreferencesReference<Input = unknown, Value = unknown> {
-  readonly resourceId: string;
-  readonly descriptor: ValueDescriptor;
-  /** Types only: never set. */
-  readonly [argsType]?: Input;
-  /** Types only: never set. */
-  readonly [returnType]?: Value;
-}
 
 const kinds: ReadonlySet<unknown> = new Set(["query", "mutation", "action"]);
 const visibilities: ReadonlySet<unknown> = new Set(["public", "internal"]);

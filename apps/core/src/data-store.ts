@@ -26,6 +26,9 @@ import type {
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 import type {
+  PreferencesReceipt,
+  PreferencesWritten,
+  StoredPreferences,
   BackfillAbandon,
   BackfillAbandonment,
   BackfillOutcome,
@@ -222,6 +225,28 @@ export class DataStore extends DurableObject<Env> {
   /** `StoreHost.generations`. */
   generations(storeId: StoreId, names: string[]): Record<string, number> {
     return this.#live().generations(storeId, names);
+  }
+
+  /** `StoreHost.readPreferences`. */
+  readPreferences(storeId: StoreId, personId: string): StoredPreferences {
+    return this.#live().readPreferences(storeId, personId);
+  }
+
+  /** `StoreHost.writePreferences`. */
+  writePreferences(
+    storeId: StoreId,
+    personId: string,
+    expectedRevision: number,
+    valueJson: string,
+    receipt?: PreferencesReceipt
+  ): PreferencesWritten {
+    return this.#live().writePreferences(
+      storeId,
+      personId,
+      expectedRevision,
+      valueJson,
+      receipt
+    );
   }
 
   /**

@@ -25,6 +25,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { operationRoles } from "./app-access.ts";
+import {
+  answerPreferences,
+  isPreferencePath,
+  preferenceOperationOf,
+} from "./app-preferences.ts";
+import type { ResolvedPreferenceOperation } from "./app-preferences.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { callTimeoutMs } from "./app.ts";
@@ -708,13 +714,67 @@ const referenceIn = async (
 ): Promise<{
   path: string;
   workflowQuery: ResolvedWorkflowQuery | undefined;
-}> =>
-  isWorkflowQueryPath(reference.contractId)
-    ? {
-        path: reference.contractId,
-        workflowQuery: await workflowQueryOf(release, reference),
-      }
-    : { path: publicOperationOf(release, reference), workflowQuery: undefined };
+  preference: ResolvedPreferenceOperation | undefined;
+}> => {
+  if (isWorkflowQueryPath(reference.contractId)) {
+    return {
+      path: reference.contractId,
+      workflowQuery: await workflowQueryOf(release, reference),
+      preference: undefined,
+    };
+  }
+  // The App's preferences (app-preferences.ts): core's too, under the
+  // `preferences` segment the SDK likewise keeps for the platform.
+  if (isPreferencePath(reference.contractId)) {
+    return {
+      path: reference.contractId,
+      workflowQuery: undefined,
+      preference: await preferenceOperationOf(release, reference),
+    };
+  }
+  return {
+    path: publicOperationOf(release, reference),
+    workflowQuery: undefined,
+    preference: undefined,
+  };
+};
+
+/**
+ * The gate a call core answers itself passes before it reads, as late as
+ * it can be: the caller's own check (an agent's permission, say), the
+ * release not revoked, the person's role in the App, read again now, so a
+ * revocation or a role lost since the call began reads nothing; and the
+ * call's deadline, as its invocation would hold it.
+ */
+const coreAnsweredGate =
+  (
+    env: Env,
+    {
+      by,
+      app,
+      release,
+      stillAllowed,
+      deadline,
+    }: {
+      by: Pick<Identity, "userId" | "role">;
+      app: string;
+      release: Release;
+      stillAllowed: FunctionCallOptions["stillAllowed"];
+      deadline: number;
+    }
+  ) =>
+  async (): Promise<void> => {
+    await stillAllowed?.();
+    await requireNotRevoked(
+      env,
+      appIdSchema.parse(app),
+      release.manifest.resourceVersion
+    );
+    await operationRoles(env, by, appIdSchema.parse(app));
+    if (Date.now() >= deadline) {
+      throw operationErrors.create("operation.deadline_exceeded");
+    }
+  };
 
 /** A workflow reference's query, answered as `callFunction` answers a call. */
 const answeredWorkflowQuery = async (
@@ -742,24 +802,14 @@ const answeredWorkflowQuery = async (
   }
 ): Promise<FunctionAnswer> => {
   try {
-    // The gate every call's invocation passes before it reads, as late as
-    // it can be: the caller's own check (an agent's permission, say), the
-    // release not revoked, the person's role in the App, read again now,
-    // so a revocation or a role lost since the call began reads nothing;
-    // and the call's deadline, as its invocation would hold it. A window
-    // passes it again before each page it reads.
-    const gate = async (): Promise<void> => {
-      await stillAllowed?.();
-      await requireNotRevoked(
-        env,
-        appIdSchema.parse(caller.app),
-        release.manifest.resourceVersion
-      );
-      await operationRoles(env, by, appIdSchema.parse(caller.app));
-      if (Date.now() >= deadline) {
-        throw operationErrors.create("operation.deadline_exceeded");
-      }
-    };
+    // A window passes the gate again before each page it reads.
+    const gate = coreAnsweredGate(env, {
+      by,
+      app: caller.app,
+      release,
+      stillAllowed,
+      deadline,
+    });
     await gate();
     const result =
       call.window === undefined
@@ -775,6 +825,65 @@ const answeredWorkflowQuery = async (
                 );
               }),
           });
+    return {
+      result,
+      provenance: null,
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
+
+/** An App's preference operation, answered as `callFunction` answers a call. */
+const answeredPreferences = async (
+  env: Env,
+  {
+    by,
+    app,
+    preference,
+    call,
+    release,
+    refused,
+    stillAllowed,
+    observeReads,
+    deadline,
+  }: {
+    by: Pick<Identity, "userId" | "role">;
+    app: string;
+    preference: ResolvedPreferenceOperation;
+    call: FunctionRequest;
+    release: Release;
+    refused: (error: unknown) => FunctionAnswer;
+    stillAllowed: FunctionCallOptions["stillAllowed"];
+    observeReads: FunctionCallOptions["observeReads"];
+    deadline: number;
+  }
+): Promise<FunctionAnswer> => {
+  try {
+    // Read whole: there is no window of one document.
+    if (call.window !== undefined) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const result = await answerPreferences(
+      env,
+      {
+        userId: by.userId,
+        release,
+        gate: coreAnsweredGate(env, {
+          by,
+          app,
+          release,
+          stillAllowed,
+          deadline,
+        }),
+        ...(observeReads === undefined ? {} : { observeReads }),
+      },
+      preference,
+      call.input,
+      call.idempotencyKey
+    );
     return {
       result,
       provenance: null,
@@ -827,6 +936,7 @@ const callFunction = async (
   let path: string;
   let appId: string;
   let workflowQuery: ResolvedWorkflowQuery | undefined;
+  let preference: ResolvedPreferenceOperation | undefined;
   try {
     // Anyone without a role in the App learns nothing of it.
     const found = await appFor(env, by, app, "user");
@@ -837,9 +947,25 @@ const callFunction = async (
     // The release of the App's current version: its manifest names the
     // App and the version the reference must name.
     release = await loadRelease(env, found.id, found.currentVersion);
-    ({ path, workflowQuery } = await referenceIn(release, call.reference));
+    ({ path, workflowQuery, preference } = await referenceIn(
+      release,
+      call.reference
+    ));
   } catch (error) {
     return refused(error);
+  }
+  if (preference !== undefined) {
+    return await answeredPreferences(env, {
+      by,
+      app: appId,
+      preference,
+      call,
+      release,
+      refused,
+      stillAllowed,
+      observeReads,
+      deadline,
+    });
   }
   if (workflowQuery !== undefined) {
     return await answeredWorkflowQuery(env, {
