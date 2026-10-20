@@ -261,6 +261,34 @@ const store = async (
     .where(eq(workflowRunFileChunks.key, key));
 };
 
+/**
+ * The same append again (its effect key's): stored once, under the chunk
+ * it reserved, whatever came of the first; its bytes must be the same.
+ */
+const appendedAgain = async (
+  env: Env,
+  row: FileRow,
+  chunk: typeof workflowRunFileChunks.$inferSelect,
+  bytes: Uint8Array,
+  sha256: string
+): Promise<FilesAnswer> => {
+  if (chunk.fileId !== row.id || chunk.sha256 !== sha256) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  if (!chunk.stored) {
+    await store(env, chunk.key, bytes, sha256);
+  }
+  const now = await drizzle(env.DB)
+    .select({ size: workflowRunFiles.size })
+    .from(workflowRunFiles)
+    .where(eq(workflowRunFiles.id, row.id))
+    .get();
+  return {
+    output: { size: now?.size ?? row.size },
+    detail: { ...detailOf(row), size: now?.size ?? row.size },
+  };
+};
+
 /** Adds up to `callBytes` to a file the calling task writes. */
 const append = async (
   env: Env,
@@ -284,14 +312,7 @@ const append = async (
     .where(eq(workflowRunFileChunks.appendKey, caller.effectKey))
     .get();
   if (earlier !== undefined) {
-    // The same append again: stored once, whatever came of the first.
-    if (earlier.fileId !== row.id || earlier.sha256 !== sha256) {
-      throw workflowResourceErrors.create("workflow.call_invalid");
-    }
-    if (!earlier.stored) {
-      await store(env, earlier.key, bytes, sha256);
-    }
-    return { output: { size: row.size }, detail: detailOf(row) };
+    return await appendedAgain(env, row, earlier, bytes, sha256);
   }
   const key = `run-files/${caller.runId}/${row.id}/${crypto.randomUUID()}`;
   // Reserved against every limit in the statement that adds it, before
@@ -335,6 +356,9 @@ const append = async (
     if (raced === undefined) {
       throw await limitPassed(env, caller, row, bytes.length);
     }
+    // The same append, made at once by another of the attempt's calls:
+    // stored once, under the chunk it reserved.
+    return await appendedAgain(env, row, raced, bytes, sha256);
   }
   await store(env, key, bytes, sha256);
   return {
