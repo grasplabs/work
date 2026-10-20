@@ -663,6 +663,8 @@ describe("chats", () => {
     // Breaks off with its prompt counted and not its answer: the gateway
     // estimates the answer's tokens, and so does the reply.
     ["broken off", { ...says("Hi, Ann, here is a longer answer."), cut: 12 }],
+    // Its prompt partly written to the provider's cache: counted apart.
+    ["cached", { ...says("Hi, Ann."), cacheWrite1h: 150 }],
   ])(
     "show what each reply used as the model gateway counted it, %s: its tokens, its cost and the model's window",
     async (_case, answer) => {
@@ -692,6 +694,12 @@ describe("chats", () => {
         window: true,
       });
       expect(counted?.cost?.amount).toBeGreaterThan(0);
+      // The cache's tokens apart from the prompt's own, as the provider
+      // counted them.
+      const usage = reply?.role === "assistant" ? reply.usage : undefined;
+      expect((usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0)).toBe(
+        answer.cacheWrite1h ?? 0
+      );
     }
   );
 
