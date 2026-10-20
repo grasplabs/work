@@ -2151,7 +2151,7 @@ const targets = {
     file: "workflows/extra.ts",
     wrap: (lines: string) => `${lines}\nexport const workflow = 1;\n`,
     build: async (files: Record<string, string>) =>
-      await buildWorkflows(env, files, "app-test"),
+      await buildWorkflows(env, files, "app-test", {}),
   },
 } as const;
 

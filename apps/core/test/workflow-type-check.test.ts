@@ -1,4 +1,5 @@
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
+import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -6,7 +7,9 @@ import { z } from "zod";
 
 import { buildWorkflows } from "../src/screens.ts";
 import { startRun } from "../src/workflows/runs.ts";
+import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { outcome as codeOf, refusal, signedInApi } from "./sign-in.ts";
 import { steeringCases } from "./steering-cases.ts";
@@ -21,7 +24,11 @@ import { sampleApp, workflowFiles } from "./workflow-apps.ts";
 // with a directive, a suppression or an ambient declaration; and a
 // version that got past the gate some other way still running. The App's
 // server code joins the check as types a workflow may name (its
-// `appFunctions<Tree>(env)`), only as it builds, so it steers nothing.
+// `appFunctions<Tree>(env)`), only as it builds, so it steers nothing. Its
+// `env` is typed by the App's permissions (GRA-720): each binding name
+// they hold as what it is, a connection, a collection or another App's
+// exports, with the App's own `APP`; any other name answers `unknown`,
+// never `any`, as the runtime refuses it if the App has no grant for it.
 
 const idp = mockIdp();
 
@@ -106,9 +113,10 @@ export default workflow("streaming", { params: {}, input: z.unknown() }, async (
  * errors name, and the rules of its warnings.
  */
 const built = async (
-  files: Record<string, string>
+  files: Record<string, string>,
+  bindings: Record<string, string> = {}
 ): Promise<{ ok: boolean; files: string[]; warned: string[] }> => {
-  const build = await buildWorkflows(env, files, "app-test");
+  const build = await buildWorkflows(env, files, "app-test", bindings);
   const diagnostics = build.ok ? [] : build.diagnostics;
   const of = (severity: string) =>
     diagnostics.filter((diagnostic) => diagnostic.severity === severity);
@@ -162,7 +170,7 @@ export default migration({
 const steered = async (
   files: Record<string, string>
 ): Promise<{ files: string[]; rules: string[] }> => {
-  const build = await buildWorkflows(env, files, "app-test");
+  const build = await buildWorkflows(env, files, "app-test", {});
   const errors = build.ok
     ? []
     : build.diagnostics.filter(({ severity }) => severity === "error");
@@ -177,10 +185,31 @@ const steered = async (
  * its diagnostics name; `ok` when it was made current.
  */
 const refusedActivation = async (
-  files: Record<string, string>
+  files: Record<string, string>,
+  /**
+   * Whether the App asks for a connection as `MAIL` first; `revoked`: and
+   * an admin grants it, then takes it back.
+   */
+  mail: boolean | "revoked" = false
 ): Promise<{ code: string; files: string[] }> => {
   const builder = await personApi("builder");
   const { id: app } = await builder.api.apps.create({ name: "Checked" });
+  if (mail !== false) {
+    const connection = await mailConnection();
+    const request: PermissionRequest = {
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId: connection.id },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    };
+    if (mail === "revoked") {
+      const granted = await requestGranted(idp, builder, request);
+      const admin = await personApi("admin");
+      await admin.api.permissions.revoke(granted);
+    } else {
+      await builder.api.permissions.request(request);
+    }
+  }
   const { version } = await builder.api.apps.files.commit(
     app,
     { ...sampleApp(), ...files },
@@ -224,15 +253,25 @@ describe(
         '    const total: number = "twelve";\n    return total;',
       ],
       [
-        "a binding's answer read as what it isn't said to be",
-        '    return (await env.MAIL.call("mail.send", {})).output;',
+        "the answer of a binding its App has no permission for, unnarrowed",
+        '    return (await env.CRM.call("find", {})).output;',
+      ],
+      [
+        "a connection's answer read as an App function's",
+        '    const answered = await env.MAIL.call("mail.send", {});\n    return answered.ok ? 1 : 0;',
+      ],
+      [
+        "an App function's answer read as a connection's",
+        '    return (await env.APP.callFunction({ contractId: "counter.hits", kind: "query" }, { name: "x" })).output;',
       ],
       [
         "a binding's answer recorded as a step's result, unnarrowed",
-        '    return await env.MAIL.call("mail.send", {});',
+        '    return await env.APP.call("hits");',
       ],
     ])("refuse %s", async (_case, body) => {
-      await expect(refusedActivation(checked(body))).resolves.toStrictEqual({
+      await expect(
+        refusedActivation(checked(body), true)
+      ).resolves.toStrictEqual({
         code: "workflow.build_failed",
         files: ["workflows/checked.ts"],
       });
@@ -279,14 +318,308 @@ describe(
       }
     );
 
-    it("make current a workflow that narrows what its bindings answer, and runs as its SDK types it", async () => {
+    it("make current a workflow that reads its bindings as what its App's permissions make them", async () => {
       await expect(
         refusedActivation(
           checked(`    const answered = await env.APP.callFunction({ contractId: "counter.hits", kind: "query" }, { name: "x" });
-    const { ok } = answered as { ok: boolean };
-    return ok ? crypto.randomUUID().length : 0;`)
+    const sent = await env.MAIL.call("mail.send", { to: "ada@acme.test" });
+    return answered.ok ? sent.output.length + crypto.randomUUID().length : 0;`),
+          true
         )
       ).resolves.toStrictEqual({ code: "ok", files: [] });
+    });
+
+    it("keep typing a binding whose permission was revoked, so its workflows still build", async () => {
+      // The call is refused when made (`permission.denied`); the code may
+      // still name it, as it may a binding only asked for.
+      await expect(
+        refusedActivation(
+          checked(
+            '    return (await env.MAIL.call("mail.send", {})).output.length;'
+          ),
+          "revoked"
+        )
+      ).resolves.toStrictEqual({ code: "ok", files: [] });
+    });
+
+    it("type each binding as the kind of binding its permission makes, and any other name's answer as unknown", async () => {
+      const bindings = {
+        HANDBOOK: "collection",
+        MAIL: "connection",
+        CRM: "app",
+      };
+      await expect(
+        Promise.all(
+          [
+            '    return (await env.HANDBOOK.search("refunds")).hits.length;',
+            '    return (await env.MAIL.call("mail.send", {})).output;',
+            '    return (await env.CRM.call("find", {})) === null ? 0 : 1;',
+            // A name the App holds no permission for: callable, its answer
+            // `unknown` until narrowed.
+            '    return (await env.ARCHIVE.call("find", {})) === null ? 0 : 1;',
+            '    return (await env.HANDBOOK.search("refunds")).output;',
+            '    return (await env.MAIL.call("mail.send", {})).ok ? 1 : 0;',
+            '    return (await env.MAIL.search("refunds")).hits.length;',
+            '    return (await env.ARCHIVE.call("find", {})).output;',
+            '    const found: Json = await env.ARCHIVE.call("find", {});\n    return found;',
+          ].map(
+            async (body) =>
+              await built({ ...sampleApp(), ...checked(body) }, bindings)
+          )
+        )
+      ).resolves.toStrictEqual([
+        { ok: true, files: [], warned: [] },
+        { ok: true, files: [], warned: [] },
+        { ok: true, files: [], warned: [] },
+        { ok: true, files: [], warned: [] },
+        { ok: false, files: ["workflows/checked.ts"], warned: [] },
+        { ok: false, files: ["workflows/checked.ts"], warned: [] },
+        { ok: false, files: ["workflows/checked.ts"], warned: [] },
+        { ok: false, files: ["workflows/checked.ts"], warned: [] },
+        { ok: false, files: ["workflows/checked.ts"], warned: [] },
+      ]);
+    });
+
+    it("type a version by the permissions asked for when it was committed: a later request types later versions, never one already current", async () => {
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Checked" });
+      // A cast that holds only while MAIL's answer is unknown.
+      const files = {
+        ...sampleApp(),
+        ...checked(`    if (input === "never") {
+      const sent = (await env.MAIL.call("mail.send", {})) as { other: number };
+      return sent.other;
+    }
+    return 1;`),
+      };
+      const first = await builder.api.apps.files.commit(app, files, "First");
+      await builder.api.apps.versions.setCurrent(app, first.version);
+      const connection = await mailConnection();
+      await builder.api.permissions.request({
+        subject: { type: "app", appId: app },
+        object: { type: "connection", connectionId: connection.id },
+        actions: ["mail.send"],
+        binding: "MAIL",
+      });
+      // Its run builds it again, as it was committed: still untyped.
+      const run = await startRun(env, {
+        app: appIdSchema.parse(app),
+        workflow: workflowIdSchema.parse("checked"),
+        input: undefined,
+        startedBy: builder.userId,
+        actor: { type: "system" },
+      });
+      await finished(run.id);
+      const { status } = await builder.api.workflows.status(run.id);
+      // The same code committed after the request is typed, and refused.
+      const second = await builder.api.apps.files.commit(
+        app,
+        { ...files, "notes.md": "Again" },
+        "Second"
+      );
+      const outcome = await refusal(
+        builder.api.apps.versions.setCurrent(app, second.version)
+      );
+      expect({
+        status,
+        second: failedBuild.safeParse(outcome).data?.code,
+      }).toStrictEqual({
+        status: "completed",
+        second: "workflow.build_failed",
+      });
+    });
+
+    it("type a name by the permission that holds it now over one revoked, whatever their kinds", async () => {
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Checked" });
+      const admin = await personApi("admin");
+      // MAIL once named a connection, taken back; now a collection.
+      const connection = await mailConnection();
+      await admin.api.permissions.revoke(
+        await requestGranted(idp, builder, {
+          subject: { type: "app", appId: app },
+          object: { type: "connection", connectionId: connection.id },
+          actions: ["mail.send"],
+          binding: "MAIL",
+        })
+      );
+      const { id: collectionId } = await admin.api.knowledge.createCollection({
+        name: `Mail ${crypto.randomUUID()}`,
+        access: "everyone",
+      });
+      await builder.api.permissions.request({
+        subject: { type: "app", appId: app },
+        object: { type: "collection", collectionId },
+        actions: ["read"],
+        binding: "MAIL",
+      });
+      const tried = async (body: string): Promise<string> => {
+        const { version } = await builder.api.apps.files.commit(
+          app,
+          { ...sampleApp(), ...checked(body) },
+          body
+        );
+        const outcome = await refusal(
+          builder.api.apps.versions.setCurrent(app, version)
+        );
+        return outcome === "ok"
+          ? "ok"
+          : (failedBuild.safeParse(outcome).data?.code ?? String(outcome));
+      };
+      // One after the other: each commit is the App's next version.
+      const asCollection = await tried(
+        '    return (await env.MAIL.search("refunds")).hits.length;'
+      );
+      const asConnection = await tried(
+        '    return (await env.MAIL.call("mail.send", {})).output;'
+      );
+      expect({ asCollection, asConnection }).toStrictEqual({
+        asCollection: "ok",
+        asConnection: "workflow.build_failed",
+      });
+    });
+
+    it("keep a version typed as committed when making it current asks for its permissions again", async () => {
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Checked" });
+      const connection = await mailConnection();
+      await requestGranted(idp, builder, {
+        subject: { type: "app", appId: app },
+        object: { type: "connection", connectionId: connection.id },
+        actions: ["mail.send"],
+        binding: "MAIL",
+      });
+      // Reads MAIL's answer as a connection's: typed only while MAIL is.
+      const { version } = await builder.api.apps.files.commit(
+        app,
+        {
+          ...sampleApp(),
+          ...checked(`    if (input === "never") {
+      return (await env.MAIL.call("mail.send", {})).output.length;
+    }
+    return 1;`),
+        },
+        "Typed"
+      );
+      // Made current by a builder who can't grant: MAIL, which changes
+      // things, is asked for again, now.
+      await builder.api.apps.versions.setCurrent(app, version);
+      const [mail] = await builder.api.permissions.list({
+        type: "app",
+        appId: app,
+      });
+      // Its run builds it again, as it was committed: MAIL still typed.
+      const run = await startRun(env, {
+        app: appIdSchema.parse(app),
+        workflow: workflowIdSchema.parse("checked"),
+        input: undefined,
+        startedBy: builder.userId,
+        actor: { type: "system" },
+      });
+      await finished(run.id);
+      const { status } = await builder.api.workflows.status(run.id);
+      expect({ mail: mail?.status, status }).toStrictEqual({
+        mail: "requested",
+        status: "completed",
+      });
+    });
+
+    it("type a build again once the App asks for another permission: the bindings are part of its cache key", async () => {
+      const files = {
+        ...sampleApp(),
+        ...checked(
+          `    return (await env.MAIL.call("mail.send", { at: "${crypto.randomUUID()}" })).output;`
+        ),
+      };
+      // The same files, built through the same R2 cache: first with no
+      // permission for MAIL, its answer then unknown; then with one.
+      const before = await built(files);
+      const after = await built(files, { MAIL: "connection" });
+      expect({ before, after }).toStrictEqual({
+        before: { ok: false, files: ["workflows/checked.ts"], warned: [] },
+        after: { ok: true, files: [], warned: [] },
+      });
+    });
+
+    it("refuse binding names the build is given that aren't a permission's, the platform's own among them", async () => {
+      const given: Record<string, string>[] = [
+        { APP: "connection" },
+        { mail: "connection" },
+        { MAIL: "model" },
+      ];
+      await expect(
+        Promise.all(
+          given.map(
+            async (bindings) =>
+              await built(
+                { ...sampleApp(), ...checked("    return 1;") },
+                bindings
+              )
+          )
+        )
+      ).resolves.toStrictEqual([
+        { ok: false, files: [".grasp/workflow-bindings.json"], warned: [] },
+        { ok: false, files: [".grasp/workflow-bindings.json"], warned: [] },
+        { ok: false, files: [".grasp/workflow-bindings.json"], warned: [] },
+      ]);
+    });
+
+    it("take a workflow's binding types only from the host: an App's own files where the host puts them are refused when saved and change nothing when built", async () => {
+      // What an App would write there to type a name it holds no
+      // permission for as answering anything.
+      const planted = {
+        ".grasp/workflow-env.ts": `declare module "@grasp-os/sdk/workflow" {
+  interface WorkflowBindings {
+    readonly ARCHIVE: { call(...args: unknown[]): Promise<any> };
+  }
+}
+export {};
+`,
+        ".grasp/workflow-bindings.json": JSON.stringify({
+          ARCHIVE: "connection",
+        }),
+      };
+      const declaration = planted[".grasp/workflow-env.ts"];
+      const builder = await personApi("builder");
+      const { id: app } = await builder.api.apps.create({ name: "Planted" });
+      const saved = await Promise.all(
+        Object.entries(planted).map(
+          async ([path, source]) =>
+            await codeOf(
+              builder.api.apps.files.commit(
+                app,
+                { ...sampleApp(), [path]: source },
+                "Planted"
+              )
+            )
+        )
+      );
+      const files = {
+        ...sampleApp(),
+        ...checked('    return (await env.ARCHIVE.call("find", {})).output;'),
+      };
+      const plantedAt: Record<string, string>[] = [
+        planted,
+        { ".grasp/workflow-env.ts": declaration },
+        {
+          ".grasp/workflow-bindings.json":
+            planted[".grasp/workflow-bindings.json"],
+        },
+        // Anywhere else the host puts its modules, too.
+        { ".grasp/extra.ts": declaration },
+      ];
+      const builtWith = await Promise.all(
+        plantedAt.map(async (more) => await built({ ...files, ...more }))
+      );
+      expect({ saved, builtWith }).toStrictEqual({
+        saved: ["app.invalid", "app.invalid"],
+        builtWith: [
+          { ok: false, files: ["workflows/checked.ts"], warned: [] },
+          { ok: false, files: ["workflows/checked.ts"], warned: [] },
+          { ok: false, files: ["workflows/checked.ts"], warned: [] },
+          { ok: false, files: ["workflows/checked.ts"], warned: [] },
+        ],
+      });
     });
 
     it("type a workflow's calls of its App's functions by the App's own operations", async () => {

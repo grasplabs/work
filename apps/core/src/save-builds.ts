@@ -10,6 +10,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 
 import { withDraftReferences } from "./draft-references.ts";
+import type { WorkflowBindingKind } from "./permissions.ts";
 import {
   buildScreens,
   buildServer,
@@ -32,6 +33,12 @@ interface SavedSource {
   app: AppId;
   version: number;
   files: Record<string, string>;
+  /**
+   * The binding names its workflows are typed by: a committed version's
+   * own (`workflowBindingKinds`), or for a draft the App's now
+   * (`appBindingKinds`), as a version committed from it would keep.
+   */
+  bindings: Readonly<Record<string, WorkflowBindingKind>>;
 }
 
 const toDiagnostic = ({
@@ -150,7 +157,8 @@ export const buildOnSave = async (
       "workflows",
       source,
       workflowFiles,
-      async () => await buildWorkflows(env, files, source.app, signal),
+      async () =>
+        await buildWorkflows(env, files, source.app, source.bindings, signal),
       env,
       signal
     ),
