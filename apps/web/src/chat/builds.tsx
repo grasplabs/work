@@ -30,7 +30,7 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { ChosenAtStart } from "../workflows/chosen-at-start.tsx";
+import { ChosenAtRunTime } from "../workflows/chosen-at-run-time.tsx";
 import {
   exportChangeText,
   migrationFixturesText,
@@ -410,7 +410,7 @@ const ReviewDetails = ({
                           <Trans>Shared code changed</Trans>
                         </Badge>
                       ) : null}
-                      <ChosenAtStart options={step.dynamic} />
+                      <ChosenAtRunTime options={step.dynamic} />
                     </span>
                   ))
                 )}

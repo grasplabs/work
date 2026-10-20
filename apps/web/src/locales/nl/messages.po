@@ -2837,9 +2837,9 @@ msgstr "Kies je taal"
 msgid "Choose your staff list"
 msgstr "Kies je personeelslijst"
 
-#: src/workflows/chosen-at-start.tsx
-msgid "Chosen when the run starts: {options}"
-msgstr "Gekozen bij de start van de run: {options}"
+#: src/workflows/chosen-at-run-time.tsx
+msgid "Chosen at run time: {options}"
+msgstr "Gekozen tijdens de run: {options}"
 
 #: src/activity/audit-log.tsx
 msgid "Clear"
@@ -4697,7 +4697,7 @@ msgstr "Hoe grondig het nadenkt"
 msgid "How long does one of those take you, Tim?"
 msgstr "Hoe lang ben je met zo’n factuur bezig, Tim?"
 
-#: src/workflows/chosen-at-start.tsx
+#: src/workflows/chosen-at-run-time.tsx
 msgid "how long it waits"
 msgstr "hoe lang hij wacht"
 
@@ -5104,7 +5104,7 @@ msgstr "haar uitvoer is niet wat het testrecord verwacht"
 msgid "Its parameters can't be read from its code."
 msgstr "De parameters kunnen niet uit de code worden gelezen."
 
-#: src/workflows/chosen-at-start.tsx
+#: src/workflows/chosen-at-run-time.tsx
 msgid "its retries"
 msgstr "de nieuwe pogingen"
 
@@ -9319,7 +9319,7 @@ msgstr "Overmorgen"
 msgid "The day the other teams get their links"
 msgstr "De dag waarop de andere teams hun links krijgen"
 
-#: src/workflows/chosen-at-start.tsx
+#: src/workflows/chosen-at-run-time.tsx
 msgid "the deadline"
 msgstr "de deadline"
 
@@ -9586,7 +9586,7 @@ msgstr "De persoon voor wie de run handelt zegt op haar dashboard wat er gebeurd
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "Het platform staat open voor iedereen in het bedrijf: het is nooit gesloten voor de onboarding."
 
-#: src/workflows/chosen-at-start.tsx
+#: src/workflows/chosen-at-run-time.tsx
 msgid "the reminder"
 msgstr "de herinnering"
 
@@ -10951,7 +10951,7 @@ msgctxt "log filter"
 msgid "Who"
 msgstr "Wie"
 
-#: src/workflows/chosen-at-start.tsx
+#: src/workflows/chosen-at-run-time.tsx
 msgid "who answers"
 msgstr "wie antwoordt"
 

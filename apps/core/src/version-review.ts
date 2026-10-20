@@ -515,14 +515,14 @@ const stepChanges = (
   });
 };
 
-const whitespace = /\s+/gu;
-
 /**
  * Whether a workflow's own file changed outside its steps' calls: its
- * source before and now, each without the calls as written (`code`), and
- * without whitespace, compared. A helper in the file that an option reads
- * at run time (`StepOutline.dynamic`), a condition or a loop: any step
- * may now behave differently, though no call of one changed.
+ * source before and now, each without the calls as written (`code`),
+ * compared exactly, so a change inside a string (`"high risk"` to
+ * `"highrisk"`) shows, and so, conservatively, does reformatting. A helper
+ * in the file that an option reads at run time (`StepOutline.dynamic`), a
+ * condition or a loop: a step may now behave differently, though no call
+ * of one changed.
  */
 const changedOutsideSteps = (
   before: string | undefined,
@@ -540,7 +540,7 @@ const changedOutsideSteps = (
     for (const code of calls) {
       left = left.replaceAll(code, "");
     }
-    return left.replaceAll(whitespace, "");
+    return left;
   };
   return rest(before) !== rest(now);
 };

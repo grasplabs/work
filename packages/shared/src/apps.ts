@@ -247,7 +247,7 @@ export interface VersionReview {
           calls: string[];
           sharedCode: boolean;
           /**
-           * Its options chosen when the run starts, not written in its
+           * Its options chosen at run time, not written in its
            * code (`StepOutline.dynamic`): a decision's reviewer from the
            * run's input, say. Absent when there are none.
            */

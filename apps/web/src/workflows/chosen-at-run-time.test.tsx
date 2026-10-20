@@ -3,9 +3,9 @@ import { I18nProvider } from "@lingui/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { ChosenAtStart } from "./chosen-at-start.tsx";
+import { ChosenAtRunTime } from "./chosen-at-run-time.tsx";
 
-// A step's options chosen when the run starts, as a version's review and
+// A step's options chosen at run time, as a version's review and
 // the workflow's page show them (builds.tsx, the workflow route's
 // StepCard), read from what the badge renders.
 
@@ -13,13 +13,13 @@ import { ChosenAtStart } from "./chosen-at-start.tsx";
 const shown = (options?: readonly string[]): string =>
   renderToStaticMarkup(
     <I18nProvider i18n={i18n}>
-      <ChosenAtStart options={options} />
+      <ChosenAtRunTime options={options} />
     </I18nProvider>
   )
     .replaceAll(/<[^>]+>/gu, "")
     .trim();
 
-describe("a step's options chosen when the run starts", () => {
+describe("a step's options chosen at run time", () => {
   it("names each one, in words where it has some, and shows nothing for a step without any", () => {
     expect({
       reviewer: shown(["from", "timeout"]),
@@ -27,8 +27,8 @@ describe("a step's options chosen when the run starts", () => {
       none: shown([]),
       absent: shown(),
     }).toStrictEqual({
-      reviewer: "Chosen when the run starts: who answers and the deadline",
-      other: "Chosen when the run starts: somethingNew",
+      reviewer: "Chosen at run time: who answers and the deadline",
+      other: "Chosen at run time: somethingNew",
       none: "",
       absent: "",
     });

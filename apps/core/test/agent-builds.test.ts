@@ -1774,9 +1774,39 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
       files(60_000),
       "Longer"
     );
+    // Another App whose helper changes only inside a string, which only
+    // its spaces tell apart.
+    const risky = (kind: string) => ({
+      ...paced,
+      "workflows/paced.ts": (paced["workflows/paced.ts"] ?? "").replace(
+        "export default",
+        `const wait = (n: number): number => ("${kind}" === "high risk" ? n : 2 * n);\n\nexport default`
+      ),
+    });
+    const other = await appWith(builder, risky("high risk"));
+    const { version: respaced } = await builder.api.apps.files.commit(
+      other,
+      risky("highrisk"),
+      "Respaced"
+    );
 
     const review = await builder.api.apps.versions.review(app, version);
+    const respacedReview = await builder.api.apps.versions.review(
+      other,
+      respaced
+    );
 
+    expect(
+      respacedReview.workflows.map(({ steps }) =>
+        steps?.map(({ name, change, sharedCode }) => ({
+          name,
+          change,
+          sharedCode,
+        }))
+      )
+    ).toStrictEqual([
+      [{ name: "pause", change: "modified", sharedCode: true }],
+    ]);
     expect(review.workflows).toMatchObject([
       {
         id: "paced",
