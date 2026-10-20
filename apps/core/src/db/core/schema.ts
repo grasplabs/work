@@ -3534,10 +3534,10 @@ export const landscapeSyncs = sqliteTable("landscape_syncs", {
   retryAt: timestamp("retry_at"),
   finishedAt: timestamp("finished_at"),
   /**
-   * When the last sync that read everything (done, or partial at its
-   * bound) started: what its rows were last seen at counts as current. Kept
-   * through later syncs until one of them reads everything; null before
-   * any did.
+   * When the last sync that read everything (`done`; never one stopped at
+   * its bound) started: what its rows were last seen at counts as current.
+   * Kept through later syncs until one of them reads everything; null
+   * before any did.
    */
   currentSince: timestamp("current_since"),
 });
