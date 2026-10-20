@@ -50,6 +50,23 @@ export const publish = async (published: Published): Promise<string> => {
     .integrity;
 };
 
+/** The bytes of `name@version`'s tarball, as the registry serves it. */
+export const tarballBytes = async (
+  name: string,
+  version: string
+): Promise<number> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  const base = name.slice(name.indexOf("/") + 1);
+  const response = await providers.fetch(
+    `https://registry.npmjs.org/${name}/-/${base}-${version}.tgz`
+  );
+  const bytes = await response.arrayBuffer();
+  return bytes.byteLength;
+};
+
 /** The fake registry knows `advisory`, as npm sends one, for `name`. */
 export const advise = async (
   name: string,

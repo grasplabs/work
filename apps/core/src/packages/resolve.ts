@@ -771,6 +771,13 @@ const inspectGraph = async (
       // In order: each tarball's size decides whether the batch is full.
       // oxlint-disable-next-line no-await-in-loop
       const tarball = await verifiedTarball(env, request);
+      // Each tarball on its own, then the graph's together.
+      if (tarball.byteLength > limits.archiveBytes) {
+        throw packageErrors.create("package.quota", {
+          quota: "archiveBytes",
+          limit: limits.archiveBytes,
+        });
+      }
       archiveBytes += tarball.byteLength;
       batchBytes += tarball.byteLength;
       if (archiveBytes > limits.graphArchiveBytes) {

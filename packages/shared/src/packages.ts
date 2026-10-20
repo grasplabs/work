@@ -19,6 +19,7 @@ import { sha256Hex } from "./encoding.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema, workflowResourceIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
+import { platformLimits } from "./platform-limits.ts";
 
 // npm packages as the registry has them, as connect fetches them for core.
 // Connect is the only part of Grasp that talks to the registry: core asks
@@ -261,11 +262,23 @@ export const packageMaturityMs = 3 * 24 * 60 * 60 * 1000;
  * registry says of itself. A deployment may set lower ones
  * (`packageLimitsOf`), never higher.
  */
+// What the package builder's isolate holds at once, the ceiling below the
+// spec's figures where its 128 MB in all is the tighter bound (see
+// `graphExtractedBytes`). Raising one takes a capacity check: a build past
+// what the isolate has is stopped by the runtime, not refused with a reason.
+const builderExtractedBytes = 40 * 1024 * 1024;
+const builderArtifactBytes = 16 * 1024 * 1024;
+
 export const packageLimits = {
-  /** Longest chain of dependencies from a direct one. */
-  graphDepth: 32,
-  /** Packages in one graph. */
+  /** Longest chain of dependencies from a direct one (spec 18.1). */
+  graphDepth: platformLimits.dependencyDepth,
+  /** Packages in one graph (spec 18.1). */
   graphPackages: dependencyMaxPackages,
+  /**
+   * One package's tarball, as fetched, compressed (spec 18.1): counted on
+   * the bytes read, never on what the registry says of it.
+   */
+  archiveBytes: platformLimits.dependencyArchiveBytes,
   /**
    * Tarballs of one graph together, as fetched: all of them go to the
    * builder in one call, under the 32 MiB a Worker RPC message may be.
@@ -275,7 +288,10 @@ export const packageLimits = {
    * What one package's tarball unpacks to (gzip's output). No more than a
    * whole graph may (`graphExtractedBytes`): unpacking one holds it all.
    */
-  extractedBytes: 40 * 1024 * 1024,
+  extractedBytes: Math.min(
+    platformLimits.dependencyExtractedBytes,
+    builderExtractedBytes
+  ),
   /** Entries in one package's tarball. */
   extractedEntries: 20_000,
   /**
@@ -288,7 +304,10 @@ export const packageLimits = {
    * isolate holds. Past what the isolate has, a build would be stopped by
    * the runtime instead of refused with a reason.
    */
-  graphExtractedBytes: 40 * 1024 * 1024,
+  graphExtractedBytes: Math.min(
+    platformLimits.dependencyGraphBytes,
+    builderExtractedBytes
+  ),
   /** Longest path in a tarball, in bytes, and most segments. */
   pathBytes: 1024,
   pathDepth: 64,
@@ -301,8 +320,11 @@ export const packageLimits = {
    * in use (pending, or the latest approval for some targets) are refused.
    */
   appLocks: 32,
-  /** What one target's build makes, every file of it together. */
-  artifactBytes: 16 * 1024 * 1024,
+  /**
+   * What one target's build makes, every file of it together: the spec's
+   * figure, or what the builder's isolate holds beside the rest, the lower.
+   */
+  artifactBytes: Math.min(platformLimits.artifactBytes, builderArtifactBytes),
   /**
    * The most characters the approved packages' modules one workflow
    * version seals have together (GRA-665): they are loaded with its build

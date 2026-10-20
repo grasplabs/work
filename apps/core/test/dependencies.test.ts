@@ -843,7 +843,7 @@ describe("dependency approval", () => {
     });
     const tooMany = chain(dependencyMaxPackages + 1, 1);
     // Within every count, and over the size: each package names many others.
-    const tooLarge = chain(dependencyMaxPackages, 12);
+    const tooLarge = chain(dependencyMaxPackages, 24);
     const largest = chain(dependencyMaxPackages, 1);
 
     const refused = {

@@ -26,6 +26,7 @@ import {
   osvAnswers,
   noise,
   plain,
+  tarballBytes,
   publish,
   reportToOsv,
   refusalsOf,
@@ -842,47 +843,142 @@ describe("the platform's own packages", () => {
   });
 });
 
-describe("a graph's limits", () => {
-  it("refuses a chain of dependencies deeper than the limit", async () => {
-    const { builder, app } = await builderWithApp();
-    const base = named("chain");
-    // Five deep: past the tests' limit of four.
-    for (let depth = 5; depth >= 1; depth -= 1) {
-      // Each depends on the next, so they are published from the end.
-      // oxlint-disable-next-line no-await-in-loop
-      await publish(
-        plain(
-          `${base}-${depth}`,
-          "1.0.0",
-          depth < 5 ? { dependencies: { [`${base}-${depth + 1}`]: "1" } } : {}
-        )
-      );
-    }
-    await expect(
-      failure(
-        builder.api.dependencies.resolve(intentFor(app, { [`${base}-1`]: "1" }))
+/** The tests' package limits (vite.config.ts, `PACKAGE_LIMITS`). */
+const testPackageLimits = z
+  .record(z.string(), z.number())
+  .parse(env.PACKAGE_LIMITS);
+
+/** The tests' environment with one package's tarball limit set to `archiveBytes`. */
+const withArchiveLimit = (archiveBytes: number): Env => ({
+  ...env,
+  PACKAGE_LIMITS: { ...testPackageLimits, archiveBytes },
+});
+
+/** A chain of `length` packages, each depending on the next: its first. */
+const chainOf = async (length: number): Promise<string> => {
+  const base = named("chain");
+  for (let depth = length; depth >= 1; depth -= 1) {
+    // Each depends on the next, so they are published from the end.
+    // oxlint-disable-next-line no-await-in-loop
+    await publish(
+      plain(
+        `${base}-${depth}`,
+        "1.0.0",
+        depth < length
+          ? { dependencies: { [`${base}-${depth + 1}`]: "1" } }
+          : {}
       )
-    ).resolves.toStrictEqual({
-      code: "package.quota",
-      details: { quota: "graphDepth", limit: 4 },
+    );
+  }
+  return `${base}-1`;
+};
+
+/** A package with `width` dependencies of its own: `width + 1` in all. */
+const wideOf = async (width: number): Promise<string> => {
+  const base = named("wide");
+  const leaves = Array.from(
+    { length: width },
+    (_, index) => `${base}-${index}`
+  );
+  await Promise.all(leaves.map(async (leaf) => await publish(plain(leaf))));
+  await publish(
+    plain(base, "1.0.0", {
+      dependencies: Object.fromEntries(leaves.map((leaf) => [leaf, "1"])),
+    })
+  );
+  return base;
+};
+
+/** "ok" once `promise` resolves, or its refusal's code and details. */
+const okOrRefusal = async (promise: Promise<unknown>): Promise<unknown> => {
+  let resolved = false;
+  const refusal = await failure(
+    promise.then(() => {
+      resolved = true;
+    })
+  ).catch((error: unknown) => {
+    if (resolved) {
+      return;
+    }
+    throw error;
+  });
+  return refusal ?? "ok";
+};
+
+/** Resolves `name` for `app`: "ok", or the refusal's code and details. */
+const resolvedOrRefused = async (
+  builder: Person,
+  app: string,
+  name: string
+): Promise<unknown> =>
+  await okOrRefusal(
+    builder.api.dependencies.resolve(intentFor(app, { [name]: "1" }))
+  );
+
+describe("a graph's limits", () => {
+  it("takes a chain of dependencies exactly as deep as the limit, and refuses one deeper", async () => {
+    const { builder, app } = await builderWithApp();
+    // The tests' limit is four.
+    const [deepest, tooDeep] = await Promise.all([chainOf(4), chainOf(5)]);
+    expect({
+      deepest: await resolvedOrRefused(builder, app, deepest),
+      tooDeep: await resolvedOrRefused(builder, app, tooDeep),
+    }).toStrictEqual({
+      deepest: "ok",
+      tooDeep: {
+        code: "package.quota",
+        details: { quota: "graphDepth", limit: 4 },
+      },
     });
   });
 
-  it("refuses a graph of more packages than the limit", async () => {
+  it("takes a graph of exactly as many packages as the limit, and refuses one more", async () => {
     const { builder, app } = await builderWithApp();
-    const base = named("wide");
-    const leaves = Array.from({ length: 12 }, (_, index) => `${base}-${index}`);
-    await Promise.all(leaves.map(async (leaf) => await publish(plain(leaf))));
-    await publish(
-      plain(base, "1.0.0", {
-        dependencies: Object.fromEntries(leaves.map((leaf) => [leaf, "1"])),
-      })
+    // The tests' limit is twelve: eleven dependencies and the package.
+    const [widest, tooWide] = await Promise.all([wideOf(11), wideOf(12)]);
+    expect({
+      widest: await resolvedOrRefused(builder, app, widest),
+      tooWide: await resolvedOrRefused(builder, app, tooWide),
+    }).toStrictEqual({
+      widest: "ok",
+      tooWide: {
+        code: "package.quota",
+        details: { quota: "graphPackages", limit: 12 },
+      },
+    });
+  });
+
+  it("takes one package's tarball exactly as large as the limit, compressed, and refuses one a byte larger", async () => {
+    const { builder, app } = await builderWithApp();
+    const name = named("bulky");
+    // Noise doesn't compress: its tarball is about as large as it.
+    await publish({
+      ...plain(name),
+      files: { "index.js": "export {};", "data.txt": noise(200 * 1024) },
+    });
+    const bytes = await tarballBytes(name, "1.0.0");
+    const by = await builder.api.whoami();
+    // The limit set at the tarball's size, then a byte under it.
+    const at = await okOrRefusal(
+      resolveDependencies(
+        withArchiveLimit(bytes),
+        by,
+        intentFor(app, { [name]: "1" })
+      )
     );
-    await expect(
-      failure(builder.api.dependencies.resolve(intentFor(app, { [base]: "1" })))
-    ).resolves.toStrictEqual({
-      code: "package.quota",
-      details: { quota: "graphPackages", limit: 12 },
+    const past = await okOrRefusal(
+      resolveDependencies(
+        withArchiveLimit(bytes - 1),
+        by,
+        intentFor(app, { [name]: "1" })
+      )
+    );
+    expect({ at, past }).toStrictEqual({
+      at: "ok",
+      past: {
+        code: "package.quota",
+        details: { quota: "archiveBytes", limit: bytes - 1 },
+      },
     });
   });
 

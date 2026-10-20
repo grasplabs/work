@@ -210,6 +210,7 @@ export const coreProject = (
             PACKAGE_LIMITS: {
               graphDepth: 4,
               graphPackages: 12,
+              archiveBytes: 256 * 1024,
               graphArchiveBytes: 512 * 1024,
               extractedBytes: 1024 * 1024,
               extractedEntries: 64,
