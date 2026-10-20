@@ -750,6 +750,13 @@
       "when": 1792487050563,
       "tag": "0106_version_workflow_bindings",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1792496591452,
+      "tag": "0107_released_workflow_names",
+      "breakpoints": true
     }
   ]
 }
