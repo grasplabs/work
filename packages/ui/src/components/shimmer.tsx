@@ -65,7 +65,7 @@ function Shimmer({
       animate={{ backgroundPosition: "0% center", "--spread": width }}
       className={cn(
         "relative inline-block bg-[length:250%_100%,auto] bg-clip-text text-transparent",
-        "[background-repeat:no-repeat,padding-box] [--bg:linear-gradient(90deg,transparent_calc(50%-var(--spread)),var(--color-background),transparent_calc(50%+var(--spread)))]",
+        "[background-repeat:no-repeat] [--bg:linear-gradient(90deg,transparent_calc(50%-var(--spread)),var(--color-background),transparent_calc(50%+var(--spread)))]",
         "bg-[image:var(--bg),linear-gradient(var(--color-muted-foreground),var(--color-muted-foreground))]",
         // Reduced motion in CSS, not a hook: the server's markup and the
         // first client render are the same either way.
