@@ -350,6 +350,10 @@ export const fixtureRunOutcome = async (
     // One look after another, as the run goes on.
     // oxlint-disable-next-line no-await-in-loop
     const status = await engine.status(run.runId);
+    // Its test is over: nothing more is told of it, its removal included.
+    if (stopped()) {
+      return undefined;
+    }
     if (status?.status === "complete") {
       try {
         return {
@@ -366,7 +370,7 @@ export const fixtureRunOutcome = async (
     if (status?.status === "terminated") {
       return { status: "cancelled" };
     }
-    if (stopped() || Date.now() + pollMs > until) {
+    if (Date.now() + pollMs > until) {
       return undefined;
     }
     // oxlint-disable-next-line no-await-in-loop
