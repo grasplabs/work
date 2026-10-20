@@ -12,7 +12,11 @@ import { sourcesOf, sourcesOfApps, unreadableBy } from "./app-provenance.ts";
 import { teamsOf } from "./auth/identity.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { rowsOf as memberRowsOf } from "./sharing.ts";
+import {
+  ceilingOf,
+  roleFromMembers,
+  rowsOf as memberRowsOf,
+} from "./sharing.ts";
 
 // Who may do what in an App (App roles). An App is open to:
 //
@@ -47,10 +51,6 @@ export type Person = Pick<Identity, "userId" | "role" | "teams">;
 const rowsOf = (by: Pick<Identity, "userId" | "teams">): SQL =>
   memberRowsOf(appMembers, by);
 
-/** The highest role `by`'s organization role lets them have in an App. */
-const ceilingOf = (by: Person): AppRole =>
-  canBuild(by.role) ? "builder" : "user";
-
 /**
  * `by`'s role in `app`, and whether it comes from whom the App is shared
  * with (`shared`), rather than from being an admin or its owner; undefined
@@ -71,11 +71,11 @@ const appRole = async (
     .select({ role: appMembers.role })
     .from(appMembers)
     .where(and(eq(appMembers.appId, app.id), rowsOf(by)));
-  if (rows.length === 0) {
-    return undefined;
-  }
-  const builds = rows.some(({ role }) => role === "builder");
-  return { role: builds ? ceilingOf(by) : "user", shared: true };
+  const role = roleFromMembers(
+    by,
+    rows.map((row) => row.role)
+  );
+  return role === undefined ? undefined : { role, shared: true };
 };
 
 /**

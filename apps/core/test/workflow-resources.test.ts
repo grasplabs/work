@@ -649,6 +649,56 @@ describe("roles in a workflow", () => {
     ).resolves.toBe("workflow.resource_unavailable");
   });
 
+  it("lists each workflow with the reader's own role in it, from their rows alone", async () => {
+    const ada = await person("builder");
+    const team = await newTeam();
+    const reader = await person("builder", [team]);
+    const [used, built, unshared] = await Promise.all([
+      workflowOf(ada, "used"),
+      workflowOf(ada, "built"),
+      workflowOf(ada, "unshared"),
+    ]);
+    const owned = await workflowOf(reader, "owned");
+    await shareWorkflowResource(env, ada, used.id, {
+      type: "person",
+      id: reader.userId,
+      role: "user",
+    });
+    // Two rows of theirs: the highest wins.
+    await shareWorkflowResource(env, ada, built.id, {
+      type: "person",
+      id: reader.userId,
+      role: "user",
+    });
+    await shareWorkflowResource(env, ada, built.id, {
+      type: "team",
+      id: team,
+      role: "builder",
+    });
+    // Someone else's row on a workflow the reader has none on.
+    const other = await person("builder");
+    await shareWorkflowResource(env, ada, unshared.id, {
+      type: "person",
+      id: other.userId,
+      role: "builder",
+    });
+
+    const mine = new Set([used.id, built.id, unshared.id, owned.id]);
+    const listed = await listWorkflowResources(env, reader);
+    expect(
+      listed
+        .filter(({ id }) => mine.has(id))
+        .map(({ id, role }) => ({ id, role }))
+        .toSorted((a, b) => a.id.localeCompare(b.id))
+    ).toStrictEqual(
+      [
+        { id: used.id, role: "user" },
+        { id: built.id, role: "builder" },
+        { id: owned.id, role: "builder" },
+      ].toSorted((a, b) => a.id.localeCompare(b.id))
+    );
+  });
+
   it("never lets Grasp staff decide whom it reaches or delete it", async () => {
     const ada = await person("builder");
     const staff = await person("admin", [], true);
@@ -985,6 +1035,42 @@ describe("role ceilings", () => {
     await expect(
       outcome(workflowMembers(env, stranger, workflow.id))
     ).resolves.toBe("workflow.resource_unavailable");
+  });
+
+  it("names a bound workflow no more once it is deleted, even to who built it", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    await shareWorkflowResource(env, ada, child.id, {
+      type: "person",
+      id: bob.userId,
+      role: "builder",
+    });
+    const parent = await workflowOf(bob, "parent");
+    const first = await publish(
+      bob,
+      parent.id,
+      bindingDefinition(parent.name, child.name)
+    );
+    // The parent binds it no more, so Ada may delete the child.
+    await publish(
+      bob,
+      parent.id,
+      definitionOf({ name: parent.name, version: "2.0.0" }),
+      first.version
+    );
+    const before = await workflowVersions(env, bob, parent.id);
+    await deleteWorkflowResource(env, ada, child.id);
+    const after = await workflowVersions(env, bob, parent.id);
+    const boundIn = (versions: typeof after) =>
+      versions.find(({ version }) => version === first.version)?.bindings[0]
+        ?.resourceId;
+
+    expect({ before: boundIn(before), after: boundIn(after) }).toStrictEqual({
+      before: child.id,
+      after: null,
+    });
   });
 
   it("names a bound workflow only to its builders", async () => {
