@@ -84,12 +84,24 @@ export interface PinnedResourceRun {
 }
 
 /**
+ * What a test run of a workflow's draft checkpoint is pinned to
+ * (candidate-runs.ts): the workflow, and the manifest of the build its
+ * start compiled, which its row keeps. The dispatcher loads nothing else.
+ */
+export interface PinnedCandidateRun {
+  workflow: WorkflowResourceId;
+  manifest: string;
+}
+
+/**
  * What a run executes: an App's pinned workflow, an independent workflow's
- * sealed version, or one of core's own.
+ * sealed version, a test run of its draft's checkpoint, or one of core's
+ * own.
  */
 export type RunPin =
   | ({ type: "app" } & PinnedRun)
   | ({ type: "resource" } & PinnedResourceRun)
+  | ({ type: "candidate" } & PinnedCandidateRun)
   | { type: "internal"; workflow: InternalWorkflow };
 
 /** The one definition every run is a run of. */
@@ -123,6 +135,17 @@ const pinSchema = z.union([
       manifest,
     })),
   z
+    .tuple([
+      z.literal("candidate"),
+      workflowResourceIdSchema,
+      z.string().regex(/^[0-9a-f]{64}$/u),
+    ])
+    .transform(([, workflow, manifest]): RunPin => ({
+      type: "candidate",
+      workflow,
+      manifest,
+    })),
+  z
     .tuple([z.literal("internal"), z.enum(internalWorkflows)])
     .transform(([, workflow]): RunPin => ({ type: "internal", workflow })),
 ]);
@@ -140,6 +163,9 @@ const versionOf = (pin: RunPin): string => {
         pin.version,
         pin.manifest,
       ]);
+    }
+    case "candidate": {
+      return JSON.stringify(["candidate", pin.workflow, pin.manifest]);
     }
     case "internal": {
       return JSON.stringify(["internal", pin.workflow]);
@@ -184,6 +210,15 @@ export interface RunEngine {
   createResource: (run: {
     id: string;
     pinned: PinnedResourceRun;
+    input: Json;
+  }) => Promise<void>;
+  /**
+   * As `create`, for a test run of a workflow's draft checkpoint, pinned
+   * to the manifest of the build its start compiled.
+   */
+  createCandidate: (run: {
+    id: string;
+    pinned: PinnedCandidateRun;
     input: Json;
   }) => Promise<void>;
   /** As `create`, for a run of one of core's own workflows. */
@@ -352,6 +387,9 @@ export const runEngine = (env: Env): RunEngine => ({
   },
   createResource: async ({ id, pinned, input }) => {
     await admit(env, id, { type: "resource", ...pinned }, input);
+  },
+  createCandidate: async ({ id, pinned, input }) => {
+    await admit(env, id, { type: "candidate", ...pinned }, input);
   },
   createInternal: async ({ id, workflow, input }) => {
     await admit(env, id, { type: "internal", workflow }, input);

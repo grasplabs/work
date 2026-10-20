@@ -43,8 +43,16 @@ import {
   runAuthority,
   runContext,
 } from "./resource-authority.ts";
-import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
-import { callKnowledge, callTemplate } from "./resource-reads.ts";
+import type {
+  CallingRun,
+  CandidateBinding,
+  FrozenCatalogBinding,
+} from "./resource-authority.ts";
+import {
+  callKnowledge,
+  callTemplate,
+  requireKnowledgeRequest,
+} from "./resource-reads.ts";
 
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
@@ -201,11 +209,8 @@ const rpcResult = (value: unknown): unknown => {
  * a value past what a step records, or nested past the evaluator's depth,
  * is refused before anything walks it.
  */
-export const requireShape = (
-  descriptor: string | undefined,
-  value: unknown,
-  what: string
-): Json => {
+/** `value` as JSON, as much as a step records, or `workflow.call_invalid`. */
+const boundedAnswer = (value: unknown, what: string): Json => {
   const written = writeJson(value, {
     maxBytes: platformLimits.stepPayloadBytes,
     maxDepth: evaluatorLimits.maxJsonDepth,
@@ -221,14 +226,22 @@ export const requireShape = (
     );
   }
   const parsed = z.json().safeParse(JSON.parse(written.text));
-  if (
-    descriptor === undefined ||
-    !parsed.success ||
-    !takesExactly(descriptor, parsed.data)
-  ) {
-    throw callInvalid(`${what}: Not what the contract takes.`);
+  if (!parsed.success) {
+    throw callInvalid(`${what}: Not JSON.`);
   }
   return parsed.data;
+};
+
+export const requireShape = (
+  descriptor: string | undefined,
+  value: unknown,
+  what: string
+): Json => {
+  const answer = boundedAnswer(value, what);
+  if (descriptor === undefined || !takesExactly(descriptor, answer)) {
+    throw callInvalid(`${what}: Not what the contract takes.`);
+  }
+  return answer;
 };
 
 /**
@@ -267,7 +280,10 @@ const echoes = (value: Json, sensitive: readonly Json[]): boolean => {
 };
 
 /** The catalog contract of `binding`, as its fingerprint pins it. */
-const contractOf = async (env: Env, binding: FrozenCatalogBinding) => {
+const contractOf = async (
+  env: Env,
+  binding: Pick<FrozenCatalogBinding, "contractId" | "fingerprint">
+) => {
   const resolved = await resolveCatalogKeys(env, [binding.contractId]);
   const found = resolved.get(binding.contractId);
   if (found?.fingerprint !== binding.fingerprint) {
@@ -737,6 +753,27 @@ const connectionsOf = async (env: Env, run: CallingRun): Promise<string[]> => {
 };
 
 /**
+ * What model call `call` asks for, checked as every model call is, a test
+ * run's included: its instructions as text, and a whole number above 0 of
+ * output tokens if any (`workflow.call_invalid` otherwise).
+ */
+const requireModelRequest = (
+  call: Extract<BuiltCall, { name: "grasp.model" }>
+): { instructions: string; tokens: number | undefined } => {
+  if (typeof call.instructions !== "string") {
+    throw callInvalid("instructions: Give text.");
+  }
+  const tokens = call.maxOutputTokens;
+  if (
+    tokens !== undefined &&
+    (typeof tokens !== "number" || !Number.isSafeInteger(tokens) || tokens < 1)
+  ) {
+    throw callInvalid("maxOutputTokens: Give a whole number above 0.");
+  }
+  return { instructions: call.instructions, tokens };
+};
+
+/**
  * Asks the model `binding`'s target names, through the model gateway, for
  * the task's structured output: its answer, as the task's output schema
  * takes it. The model is the binding's: a task may name it, never another.
@@ -753,18 +790,9 @@ const callModel = async (
   if (target.kind !== "model") {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
-  if (typeof call.instructions !== "string") {
-    throw callInvalid("instructions: Give text.");
-  }
+  const { instructions, tokens } = requireModelRequest(call);
   if (call.model !== undefined && call.model !== target.model) {
     throw callInvalid("model: The binding admits only its own model.");
-  }
-  const tokens = call.maxOutputTokens;
-  if (
-    tokens !== undefined &&
-    (typeof tokens !== "number" || !Number.isSafeInteger(tokens) || tokens < 1)
-  ) {
-    throw callInvalid("maxOutputTokens: Give a whole number above 0.");
   }
   const descriptor = JSON.stringify(call.outputSchema);
   const native = schemaOfDescriptor(descriptor);
@@ -783,7 +811,7 @@ const callModel = async (
     answer = await models(env).call({
       model: target.model,
       ...(tokens === undefined ? {} : { maxTokens: tokens }),
-      system: call.instructions,
+      system: instructions,
       input: z.json().parse(call.input),
       schema: z.fromJSONSchema(
         jsonSchemaOf(native.descriptor, { exact: true })
@@ -867,6 +895,8 @@ const writeAdmissionRefusal = async (
         workflow: run.workflowId,
         version: run.version,
         person: run.principal,
+        // A test run's refusal says so: it was never a run of a version.
+        ...(run.candidate === undefined ? {} : { candidate: true }),
         ...refusal,
       },
     });
@@ -904,6 +934,60 @@ export const auditAdmissionRefusal = async (
 };
 
 /**
+ * What `call` of a test run answers: the answer its start gave the call's
+ * binding, checked as a real call checks what it sends and what comes back
+ * (against the catalog contract the checkpoint was checked against, still
+ * as it was, or the task's own output schema), so a test run passes only
+ * what a run of the published version would. Nothing of it leaves core.
+ */
+const candidateAnswer = async (
+  env: Env,
+  bindings: ReadonlyMap<string, CandidateBinding>,
+  call: BuiltCall
+): Promise<Json> => {
+  const binding = bindings.get(call.binding);
+  if (binding?.kind !== kindOf[call.name]) {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  const { answer } = binding;
+  if (answer === undefined) {
+    throw workflowResourceErrors.create("workflow.candidate_unfixtured");
+  }
+  switch (call.name) {
+    case "grasp.connector": {
+      const contract = await contractOf(env, binding);
+      const shape = Object.hasOwn(contract.operations ?? {}, call.operation)
+        ? contract.operations?.[call.operation]
+        : undefined;
+      if (shape === undefined) {
+        throw callInvalid("operation: The contract has no such operation.");
+      }
+      requireShape(shape.input, call.arguments, "arguments");
+      return requireShape(shape.output, answer, "output");
+    }
+    case "grasp.operation": {
+      const contract = await contractOf(env, binding);
+      requireShape(contract.input, call.arguments, "arguments");
+      return requireShape(contract.output, answer, "output");
+    }
+    case "grasp.model": {
+      requireModelRequest(call);
+      return requireShape(JSON.stringify(call.outputSchema), answer, "output");
+    }
+    case "grasp.knowledge": {
+      requireKnowledgeRequest(call);
+      return boundedAnswer(answer, "output");
+    }
+    case "grasp.template": {
+      return boundedAnswer(answer, "output");
+    }
+    default: {
+      return call satisfies never;
+    }
+  }
+};
+
+/**
  * Makes `call`, a task's named call with its arguments built, as task
  * `task` of `run`, for `effect`: through the binding its start froze for
  * the call's alias, once the authority behind it was decided again
@@ -918,6 +1002,13 @@ export const makeCall = async (
   call: BuiltCall,
   effect: Effect
 ): Promise<Json> => {
+  // A test run of a draft's checkpoint calls nothing: whatever the call,
+  // its answer is the one the run's start gave its binding, before any
+  // binding, authority or receipt is looked at, so nothing of it can
+  // reach connect, a model, an App, a store or Knowledge.
+  if (run.candidate !== undefined) {
+    return await candidateAnswer(env, run.candidate, call);
+  }
   const binding = run.bindings.get(call.binding);
   if (binding?.kind !== kindOf[call.name]) {
     throw workflowResourceErrors.create("workflow.call_denied");

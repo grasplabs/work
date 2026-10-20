@@ -4,6 +4,7 @@ import {
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import {
   catalogBindingKinds,
@@ -114,6 +115,24 @@ export interface CallingRun {
    * pins (restricted.ts): what it sends an App restricts that App first.
    */
   readonly restricted: boolean;
+  /**
+   * For a test run of a draft's checkpoint (candidate-runs.ts): each
+   * binding the checkpoint declares, by alias, with the catalog contract it
+   * was checked against and the answer the start gave it, if any. Every
+   * call it makes is answered from these and goes nowhere (`makeCall`);
+   * one through a binding with no answer fails
+   * (`workflow.candidate_unfixtured`).
+   */
+  readonly candidate?: ReadonlyMap<string, CandidateBinding>;
+}
+
+/** A binding of a test run's checkpoint, and the answer its start gave it. */
+export interface CandidateBinding {
+  readonly kind: string;
+  readonly contractId: string;
+  readonly fingerprint: string;
+  /** What every call through it answers; none, and a call fails. */
+  readonly answer: Json | undefined;
 }
 
 /** Who a run's calls act as: the workflow, for its principal, as a run. */

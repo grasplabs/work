@@ -699,7 +699,7 @@ const ruleOf = async (
  * JSON: `workflow.start_invalid` with its issues (paths, never values)
  * otherwise, or when it is over the operation input limit.
  */
-const acceptedInput = (descriptor: string, input: unknown): string => {
+export const acceptedInput = (descriptor: string, input: unknown): string => {
   const schema = schemaFromDescriptor(descriptor);
   const checked = schema["~standard"].validate(input);
   if ("then" in checked) {

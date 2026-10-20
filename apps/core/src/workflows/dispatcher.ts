@@ -18,6 +18,7 @@ import { stepModelBinding } from "../resource-bindings.ts";
 import type { WorkContext } from "../restricted.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
+import { runCandidateWorkflow } from "./candidate-runs.ts";
 import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { runParamsSchema } from "./engine.ts";
@@ -421,6 +422,10 @@ export const runPinned = async (
   if (pin.type === "resource") {
     // An independent workflow's sealed build: its input is its receipt's.
     return await runResourceWorkflow(env, pin, event.instanceId, step, memory);
+  }
+  if (pin.type === "candidate") {
+    // A test run of a draft checkpoint: its input is its row's.
+    return await runCandidateWorkflow(env, pin, event.instanceId, step, memory);
   }
   const { app, workflow, version } = pin;
   return await runWorkflow(
