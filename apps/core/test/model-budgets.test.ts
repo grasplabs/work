@@ -494,7 +494,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         llama: {
           code: "model.budget_busy",
           message:
-            "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+            "Model calls still under way hold what's left of the model budget for the month of the person this call is made for. Try again once they finish.",
           details: {
             model: workersAi,
             because: "user",
@@ -619,7 +619,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         ada: {
           code: "model.budget_busy",
           message:
-            "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+            "Model calls still under way hold what's left of the model budget for the month of the person this call is made for. Try again once they finish.",
           details: {
             model: anthropic,
             because: "user",
@@ -637,7 +637,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         ben: {
           code: "model.budget_busy",
           message:
-            "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+            "Model calls still under way hold what's left of this deployment's model budget for the month. Try again once they finish.",
           details: {
             model: anthropic,
             because: "deployment",
