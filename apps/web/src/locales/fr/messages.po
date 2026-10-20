@@ -1227,6 +1227,7 @@ msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
 msgstr "Un fichier .txt, .vtt, .srt ou .docx, ou du texte collé."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/workflows/resource-params.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Une modification s’applique aux exécutions qui démarrent ensuite : celles déjà en cours gardent les valeurs de leur démarrage. Chaque modification est enregistrée, sans sa valeur."
 
@@ -1297,6 +1298,10 @@ msgstr "Un invité a ouvert sa discussion"
 #: src/activity/audit-words.ts
 msgid "A guest wrote a message"
 msgstr "Un invité a écrit un message"
+
+#: src/workflows/resource-params.tsx
+msgid "A JSON value"
+msgstr "Une valeur JSON"
 
 #: src/dashboard/signals.tsx
 msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
@@ -2536,6 +2541,11 @@ msgctxt "a run's lifecycle"
 msgid "Cancelled"
 msgstr "Annulée"
 
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
+msgid "Cancelled"
+msgstr "Annulée"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Cap reached"
 msgstr "Plafond atteint"
@@ -2958,6 +2968,11 @@ msgstr "Terminée"
 
 #: src/workflows/history-view.tsx
 msgctxt "an attempt of a step"
+msgid "Completed"
+msgstr "Terminée"
+
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
 msgid "Completed"
 msgstr "Terminée"
 
@@ -3385,6 +3400,10 @@ msgstr "Décision introuvable"
 msgid "Decisions"
 msgstr "Décisions"
 
+#: src/workflows/resource-params.tsx
+msgid "Default"
+msgstr "Par défaut"
+
 #: src/routes/_shell.landscape.index.tsx
 msgctxt "row height"
 msgid "Default"
@@ -3775,6 +3794,10 @@ msgstr "Domaines e-mail des salariés"
 msgid "Employee interviews"
 msgstr "Entretiens avec les employés"
 
+#: src/workflows/resource-runs.tsx
+msgid "Ended"
+msgstr "Terminé"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
 msgstr "Termine le workflow"
@@ -4019,6 +4042,11 @@ msgstr "Échouée"
 msgctxt "an attempt of a step"
 msgid "Failed"
 msgstr "Échouée"
+
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
+msgid "Failed"
+msgstr "En échec"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -4956,6 +4984,10 @@ msgstr "Son budget est illisible, elle ne sert donc rien."
 #: src/routes/_shell.domains.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "Son contenu n’a pas pu être lu."
+
+#: src/workflows/resource-params.tsx
+msgid "Its current version has no parameters."
+msgstr "Sa version actuelle n’a aucun paramètre."
 
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
@@ -5965,6 +5997,7 @@ msgstr "Aucune exécution cette semaine."
 
 #: src/dashboard/report.ts
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/workflows/resource-runs.tsx
 msgid "No runs yet."
 msgstr "Aucune exécution pour l’instant."
 
@@ -6609,6 +6642,10 @@ msgstr "Seulement le propriétaire"
 msgid "Only the people this decision is from can answer it."
 msgstr "Seules les personnes concernées par cette décision peuvent y répondre."
 
+#: src/workflows/resource-params.tsx
+msgid "Only the workflow's builders can change these."
+msgstr "Seuls les concepteurs du workflow peuvent les modifier."
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Only the works council can agree to this, not the sponsor. It often takes several weeks."
 msgstr "Seul le CSE peut donner son accord, pas le sponsor. Cela prend souvent plusieurs semaines."
@@ -6888,6 +6925,7 @@ msgid "Packages for {workflow}"
 msgstr "Paquets pour {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Parameters"
 msgstr "Paramètres"
@@ -7902,6 +7940,11 @@ msgctxt "an attempt of a step"
 msgid "Running"
 msgstr "En cours"
 
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
+msgid "Running"
+msgstr "En cours"
+
 #: src/brain/brain.ts
 msgctxt "workflow status"
 msgid "Running"
@@ -7916,6 +7959,7 @@ msgid "Runs"
 msgstr "Exécutions"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgctxt "tab listing the runs of workflows"
 msgid "Runs"
@@ -7995,6 +8039,7 @@ msgstr "Même version, contenu différent : {changed}"
 
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Enregistrer"
 
@@ -8012,6 +8057,7 @@ msgid "Saved as revision {0}."
 msgstr "Enregistré en révision {0}."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/workflows/resource-params.tsx
 msgid "Saved."
 msgstr "Enregistré."
 
@@ -8127,6 +8173,7 @@ msgstr "Envoyer"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/workflows/resource-params.tsx
 msgid "Sensitive"
 msgstr "Sensible"
 
@@ -8181,6 +8228,10 @@ msgstr "Défini dans {source}"
 #: src/routes/_shell.settings.profile.tsx
 msgid "Set in your organization’s directory."
 msgstr "Défini dans l’annuaire de votre organisation."
+
+#: src/workflows/resource-params.tsx
+msgid "Set. Type a new value to replace it."
+msgstr "Défini. Saisissez une nouvelle valeur pour la remplacer."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.tsx
@@ -8442,6 +8493,7 @@ msgstr "Quelqu'un a modifié ce brouillon depuis que vous l'avez lu. Votre texte
 msgid "Someone chooses their own language when they open their link."
 msgstr "Chacun choisit sa langue en ouvrant son lien."
 
+#: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
 msgid "Someone else"
 msgstr "Quelqu’un d’autre"
@@ -8515,6 +8567,7 @@ msgid "Start again from version {newerVersion}"
 msgstr "Recommencer à partir de la version {newerVersion}"
 
 #: src/dashboard/runs-widget.tsx
+#: src/workflows/resource-runs.tsx
 msgid "Started"
 msgstr "Démarrées"
 
@@ -8522,6 +8575,7 @@ msgstr "Démarrées"
 msgid "Started a chat"
 msgstr "A commencé une discussion"
 
+#: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
 msgid "Started by"
 msgstr "Démarrée par"
@@ -8533,6 +8587,11 @@ msgstr "A commencé à suivre une connexion en retard : les changements antérie
 #: src/activity/audit-words.ts
 msgid "Started following what changes at a connection"
 msgstr "A commencé à suivre ce qui change sur une connexion"
+
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
+msgid "Starting"
+msgstr "Démarrage"
 
 #: src/workflows/test-run.tsx
 msgid "Starting…"
@@ -8567,6 +8626,7 @@ msgstr "Statistiques"
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/settings/pulse-people.tsx
+#: src/workflows/resource-runs.tsx
 msgid "Status"
 msgstr "Statut"
 
@@ -8921,6 +8981,10 @@ msgstr "C’est trop court pour être une conversation."
 msgid "That isn't a file call."
 msgstr "Ce n'est pas un appel de fichier."
 
+#: src/workflows/resource-params.tsx
+msgid "That isn't a value this parameter takes."
+msgstr "Ce paramètre n’accepte pas cette valeur."
+
 #: src/onboarding/kickoff-errors.ts
 msgid "That isn't something the kickoff takes."
 msgstr "Ce n’est pas quelque chose que le lancement accepte."
@@ -9253,6 +9317,10 @@ msgstr "Le lancement a dit : {text}"
 #: src/onboarding/staff-words.ts
 msgid "The kickoff with the company"
 msgstr "Le lancement avec l’entreprise"
+
+#: src/workflows/resource-runs.tsx
+msgid "The latest runs, newest first."
+msgstr "Les dernières exécutions, les plus récentes en premier."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
@@ -10078,6 +10146,10 @@ msgstr "Utiliser une autre liste"
 msgid "Use the chat, Knowledge and the apps shared with them"
 msgstr "Utiliser le chat, les Connaissances et les applications partagées avec eux"
 
+#: src/workflows/resource-params.tsx
+msgid "Use the default"
+msgstr "Utiliser la valeur par défaut"
+
 #: src/routes/sign-in.tsx
 msgid "Use your organization’s account to go on."
 msgstr "Utilisez le compte de votre organisation pour continuer."
@@ -10163,6 +10235,7 @@ msgstr "Vérifié"
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
+#: src/workflows/resource-runs.tsx
 msgid "Version"
 msgstr "Version"
 
@@ -11004,6 +11077,7 @@ msgstr "Oui : son hachage correspond et il est lié à l’événement précéde
 #: src/connections/connection-list.tsx
 #: src/knowledge/timeline.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
 msgid "You"
 msgstr "Vous"
