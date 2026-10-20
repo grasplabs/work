@@ -291,6 +291,7 @@ describe("the App compiler on-prem", () => {
           `  return await step.do("only", { description: "${fresh}" }, async () => "done");`
         ),
       },
+      bindings: {},
     });
 
     expect({

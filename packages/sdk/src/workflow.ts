@@ -7,6 +7,7 @@ import type { ReservedAppMethod } from "@grasp-os/shared/apps";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
+import type { CollectionReader } from "@grasp-os/shared/knowledge";
 import {
   paramDeclarationSchema,
   paramDeclarationsSchema,
@@ -309,7 +310,7 @@ export interface DoOptions<Input extends StepInput = StepInput>
  * no output:
  *
  *   try {
- *     return JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
+ *     return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
  *   } catch (error) {
  *     if (error.code === resolvedDone) return { sent: true };
  *     throw error;
@@ -464,6 +465,96 @@ interface UntypedStepRunner {
   sleep: (name: string, options: unknown) => Promise<void>;
 }
 
+/**
+ * What a connection's action answered, as the run gets it: its output as
+ * JSON text, and the IDs of what it read, as its connector names them. A
+ * run's call is never held to answer later: a held call fails the step
+ * (`connect.held`) and runs again once the person decided.
+ */
+export interface ConnectionAnswer {
+  readonly output: string;
+  readonly provenance: string[];
+}
+
+/**
+ * A connection the run's App has a permission for, by its binding name:
+ * `await env.OUTLOOK.call("mail.send", mail, { idempotencyKey })`.
+ */
+export interface ConnectionBinding {
+  readonly call: (
+    action: string,
+    input: Json,
+    options?: { readonly idempotencyKey?: string }
+  ) => Promise<ConnectionAnswer>;
+}
+
+/**
+ * A Knowledge collection the run's App may read, by its binding name:
+ * `await env.HANDBOOK.search("refunds")`.
+ */
+export type CollectionBinding = Readonly<CollectionReader>;
+
+/**
+ * Another App's exports the run's App has a permission for, by its binding
+ * name; typed by that App's exports with `appExports<Crm>(env.CRM)`.
+ */
+export interface AppExportsBinding {
+  readonly call: (method: string, input: Json) => Promise<unknown>;
+}
+
+/**
+ * Which of the App's functions `callFunction` calls: its generated
+ * reference, or just its `contractId` and `kind`. The host checks the
+ * rest against the release the run is pinned to.
+ */
+export interface FunctionReferenceName {
+  readonly contractId: string;
+  readonly kind: ReferenceKind;
+  readonly resourceId?: string;
+  readonly resourceVersion?: number;
+  readonly fingerprint?: string;
+}
+
+/**
+ * The run's own App (`env.APP`): its server methods (`call`, typed with
+ * `appServer<App>(env)`) and its public functions (`callFunction`, typed
+ * with `appFunctions<Tree>(env)`).
+ */
+export interface OwnAppBinding {
+  readonly call: (method: string, ...args: Json[]) => Promise<unknown>;
+  readonly callFunction: (
+    reference: FunctionReferenceName,
+    input: Json
+  ) => Promise<FunctionResult<Json>>;
+}
+
+/**
+ * The run's bindings, by name, as its App's permissions make them. Empty
+ * here: where an App's workflows are type-checked, the host declares
+ * each binding the App holds a permission for in it, as what it is (a
+ * `ConnectionBinding`, a `CollectionBinding`, an `AppExportsBinding`),
+ * with `APP` (`OwnAppBinding`), so reading one binding's answer as
+ * another's is a type error.
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- declared per App by the host, by declaration merging
+export interface WorkflowBindings {}
+
+/**
+ * A run's `env`: each binding `WorkflowBindings` declares, typed as what
+ * it is; any other name as `WorkflowEnv` has it, its methods answering
+ * `unknown`, which the workflow narrows before it uses. Another name is no
+ * type error: a binding the App has no permission for is refused when it
+ * is called (`permission.denied`), whatever its code says, so the type
+ * check adds no order between asking for a permission and making a
+ * version current.
+ */
+export type RunEnv = Readonly<WorkflowBindings> & WorkflowEnv;
+
+/** What `appServer` and `appFunctions` read of a run's `env`: its `APP`. */
+export interface AppEnv {
+  readonly APP?: Partial<OwnAppBinding>;
+}
+
 /** Everything a workflow reads besides its steps. */
 export interface WorkflowContext<P extends Params, Input> {
   runId: RunId;
@@ -474,9 +565,12 @@ export interface WorkflowContext<P extends Params, Input> {
    * methods, by binding name; call them in a step's own function, each
    * written out as `env.NAME.method(…)`, `appServer(env).method(…)`,
    * `appFunctions(env).query(…)` (or `mutation`, `action`) or
-   * `appExports(env.NAME).method(…)` (see `WorkflowEnv`).
+   * `appExports(env.NAME).method(…)` (see `WorkflowEnv`). Where the
+   * App's workflows are type-checked, each name the App holds a permission
+   * for is typed as the binding it is (`WorkflowBindings`); any other
+   * answers `unknown` (`RunEnv`).
    */
-  env: WorkflowEnv;
+  env: RunEnv;
   /**
    * The content of attachment `index` (its place in `message.attachments`)
    * of a message an email trigger received, as it arrived. Call it inside
@@ -640,7 +734,7 @@ const methodsOf = (
  * live updates of `@grasp-os/sdk/screen`).
  */
 export const appServer = <Server = Record<string, BindingMethod>>(
-  env: WorkflowEnv
+  env: AppEnv
 ): AppServer<Server> => {
   const method =
     (name: string): BindingMethod =>
@@ -651,15 +745,16 @@ export const appServer = <Server = Record<string, BindingMethod>>(
       }
       return await app.call(name, ...args);
     };
+  const methods = methodsOf(
+    (name) =>
+      appMethodPattern.test(name) && !reserved.has(name) && name !== "toJSON",
+    method
+  );
   // SAFETY: every name `AppServer` has is one this accepts (the type keeps
   // only those), a method that calls the App's method of that name; core
   // checks the name again, and refuses one the App doesn't have.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return methodsOf(
-    (name) =>
-      appMethodPattern.test(name) && !reserved.has(name) && name !== "toJSON",
-    method
-  ) as AppServer<Server>;
+  return methods as AppServer<Server>;
 };
 
 /**
@@ -714,7 +809,7 @@ export type AppExportsStub<Exports> = {
  * gets the key.
  */
 export const appExports = <Exports = Record<string, (input: Json) => unknown>>(
-  binding: Readonly<Record<string, BindingMethod>> | undefined
+  binding: Partial<AppExportsBinding> | undefined
 ): AppExportsStub<Exports> => {
   const method =
     (name: string): BindingMethod =>
@@ -847,7 +942,7 @@ export type AppFunctionsStub<Tree> = unknown extends Tree
  * as it reads `appServer(env)`.
  */
 export const appFunctions = <Tree = unknown>(
-  env: WorkflowEnv
+  env: AppEnv
 ): AppFunctionsStub<Tree> => {
   const call =
     (kind: ReferenceKind) =>
@@ -1403,6 +1498,11 @@ export const workflow = <
         // schema of its kind, which is what ParamValues<P> describes.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         params: Object.freeze(params) as ParamValues<P>,
+        // The host builds the run's bindings from its App's permissions
+        // (connections, collections, other Apps' exports) and its App
+        // (`APP`), which is what `WorkflowBindings` declares where the App's
+        // workflows are type-checked; a binding the run doesn't have when it
+        // calls fails then (`permission.denied`).
         env: engine.env,
         readAttachment: runner.readAttachment,
       }

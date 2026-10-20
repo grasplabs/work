@@ -34,6 +34,10 @@ import {
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
+  workflowBindingsPath,
+  workflowBindingsSchema,
+  workflowEnvDeclaration,
+  workflowEnvPath,
   workflowTypeContext,
 } from "./app-code.ts";
 import { assertNoBindings } from "./authority.ts";
@@ -922,6 +926,39 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
 };
 
 /**
+ * The declaration of the App's workflow bindings its workflows are
+ * type-checked with (`workflowEnvDeclaration`), from the binding names
+ * core gave the build (`workflowBindingsPath`): none when core gave none,
+ * so `env` takes any name; a failure when what it gave isn't binding
+ * names, which is core's fault, never the App's.
+ */
+const workflowEnvOf = (
+  files: Readonly<Record<string, string>>
+): { files: Record<string, string> } | { errors: Diagnostic[] } => {
+  if (!Object.hasOwn(files, workflowBindingsPath)) {
+    return { files: {} };
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(files[workflowBindingsPath] ?? "");
+  } catch {
+    data = undefined;
+  }
+  const bindings = workflowBindingsSchema.safeParse(data);
+  return bindings.success
+    ? { files: { [workflowEnvPath]: workflowEnvDeclaration(bindings.data) } }
+    : {
+        errors: [
+          problem(
+            "build",
+            "The workflows' binding names the build was given aren't binding names.",
+            { file: workflowBindingsPath }
+          ),
+        ],
+      };
+};
+
+/**
  * Builds an App's workflows: the TypeScript files under `workflows/`,
  * their tests included, importing only those files and the SDK's
  * workflow modules (`sdkImports`), then type-checked in one program
@@ -935,7 +972,9 @@ export const buildWorkflows = (
   files: Record<string, string>
 ): WorkflowBuild => {
   const read = workflowFiles(files);
-  const context = workflowTypeContext(files);
+  // The bindings' declaration is only ever the compiler's own
+  // (`workflowEnvOf`), never a file it was given at its path.
+  const { [workflowEnvPath]: _given, ...context } = workflowTypeContext(files);
   const tooMuch = appCodeLimitErrors({ ...context, ...read });
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
@@ -961,8 +1000,14 @@ export const buildWorkflows = (
   // told why its types are missing.
   const layout = isAppLayout(context);
   const serverBuilds = layout && buildAppCode(context).ok;
+  const env = workflowEnvOf(files);
+  if ("errors" in env) {
+    return { ok: false, diagnostics: env.errors };
+  }
   const diagnostics = typeCheck(
-    serverBuilds ? { ...context, ...workflows } : workflows,
+    serverBuilds
+      ? { ...context, ...workflows, ...env.files }
+      : { ...workflows, ...env.files },
     kit.types,
     workflowTarget
   ).filter(({ file }) => file === undefined || Object.hasOwn(workflows, file));

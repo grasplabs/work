@@ -29,6 +29,8 @@
  * where a screen tries.
  */
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
+import { bindingNameSchema } from "@grasp-os/shared/permissions";
+import { z } from "zod";
 
 import { hasAppPathSegments, workflowFiles } from "./inputs.ts";
 import type { CodeFolder } from "./inputs.ts";
@@ -203,6 +205,67 @@ export const workflowTypeContext = (
   );
 
 /**
+ * Where core gives a workflow build the binding names the App has, as
+ * data: each name its permissions hold, with the kind of binding it is
+ * (`workflowBindingsSchema`). A JSON file, never code: the declaration
+ * the type check gets from it is the compiler's (`workflowEnvDeclaration`).
+ */
+export const workflowBindingsPath = ".grasp/workflow-bindings.json";
+
+/** Where the declaration of an App's workflow bindings joins its type check. */
+export const workflowEnvPath = ".grasp/workflow-env.ts";
+
+/** The SDK's type for each kind of binding a run gets from a permission. */
+const bindingTypes = {
+  connection: "ConnectionBinding",
+  collection: "CollectionBinding",
+  app: "AppExportsBinding",
+} as const;
+
+/**
+ * The binding names an App's permissions hold, by name: a connection's, a
+ * collection's or another App's exports'. Names are a permission's, so
+ * the platform's own (`APP` among them) are never one.
+ */
+export const workflowBindingsSchema = z.record(
+  bindingNameSchema,
+  z.enum(["connection", "collection", "app"])
+);
+
+/** What `workflowBindingsSchema` reads. */
+export type WorkflowBindingKinds = z.infer<typeof workflowBindingsSchema>;
+
+/**
+ * The declaration of an App's workflow bindings, from `bindings`:
+ * `WorkflowBindings` (`@grasp-os/sdk/workflow`) with the App's own `APP`
+ * and each binding as the SDK's type of its kind: a workflow's `env`
+ * types these names as what they are, and any other as answering
+ * `unknown` (`RunEnv`). Written by the compiler from validated names,
+ * never from App text.
+ */
+export const workflowEnvDeclaration = (
+  bindings: WorkflowBindingKinds
+): string => {
+  const entries = Object.entries(bindings)
+    .toSorted(([one], [other]) => one.localeCompare(other))
+    .map(([name, kind]) => `    readonly ${name}: ${bindingTypes[kind]};\n`)
+    .join("");
+  return `import type {
+  AppExportsBinding,
+  CollectionBinding,
+  ConnectionBinding,
+  OwnAppBinding,
+} from "@grasp-os/sdk/workflow";
+
+declare module "@grasp-os/sdk/workflow" {
+  interface WorkflowBindings {
+    readonly APP: OwnAppBinding;
+${entries}  }
+}
+`;
+};
+
+/**
  * The files a workflow build reads: the App's workflows and their tests,
  * and the server code their types may name (`workflowTypeContext`).
  */
@@ -211,6 +274,9 @@ export const workflowBuildFiles = (
 ): Record<string, string> => ({
   ...workflowTypeContext(files),
   ...workflowFiles(files),
+  ...(Object.hasOwn(files, workflowBindingsPath)
+    ? { [workflowBindingsPath]: files[workflowBindingsPath] ?? "" }
+    : {}),
 });
 
 /** Whether `files` are an App of spec 8's layout: a registration and a schema. */

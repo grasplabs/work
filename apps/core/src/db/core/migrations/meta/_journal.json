@@ -743,6 +743,13 @@
       "when": 1792486815934,
       "tag": "0105_wakes_for_independent_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1792487050563,
+      "tag": "0106_version_workflow_bindings",
+      "breakpoints": true
     }
   ]
 }

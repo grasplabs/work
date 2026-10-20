@@ -28,6 +28,7 @@ import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
+import { appBindingKinds, workflowBindingKinds } from "../permissions.ts";
 import {
   capability,
   noPlaceOf,
@@ -631,17 +632,33 @@ const callsOf = (files: AppFiles, id: WorkflowId): string =>
 
 /**
  * An App version's workflows built into modules (cached in R2), with the
- * SDK's modules they import.
+ * SDK's modules they import. Typed by the binding names the version keeps
+ * (`workflowBindingKinds`), or, for a chat's draft over `version`, by the
+ * App's now (`appBindingKinds`), as a version committed from it would be.
  */
 const modulesOf = async (
   env: Env,
   app: AppId,
   version: number,
   files: AppFiles,
-  /** Given up on: no compile starts, and it throws its reason. */
-  signal?: AbortSignal
+  {
+    draft = false,
+    signal,
+  }: {
+    draft?: boolean;
+    /** Given up on: no compile starts, and it throws its reason. */
+    signal?: AbortSignal;
+  } = {}
 ): Promise<Record<string, string>> => {
-  const build = await buildWorkflows(env, files, app, signal);
+  const build = await buildWorkflows(
+    env,
+    files,
+    app,
+    draft
+      ? await appBindingKinds(env, app)
+      : await workflowBindingKinds(env, app, version),
+    signal
+  );
   signal?.throwIfAborted();
   if (!build.ok) {
     throw workflowErrors.create("workflow.build_failed", {
@@ -1397,7 +1414,7 @@ export const dryRunTests = async (
         owner: app,
         mainModule: dryRunModule,
         modules: async () => ({
-          ...(await modulesOf(env, app, version, files)),
+          ...(await modulesOf(env, app, version, files, { draft })),
           [dryRunModule]: dryRunMain(id, calls),
         }),
         entrypoint: "DryRuns",
@@ -1433,11 +1450,19 @@ export const workflowTestOutcome = async (
   app: AppId,
   version: number,
   files: AppFiles,
-  /**
-   * Aborted once the tests are no one's (a build job's lease lost): the
-   * test running is given up, none starts after, and it throws its reason.
-   */
-  signal?: AbortSignal
+  {
+    draft = false,
+    signal,
+  }: {
+    /** For a chat's draft over `version` (agent-builds.ts). */
+    draft?: boolean;
+    /**
+     * Aborted once the tests are no one's (a build job's lease lost): the
+     * test running is given up, none starts after, and it throws its
+     * reason.
+     */
+    signal?: AbortSignal;
+  } = {}
 ): Promise<TestOutcome> => {
   const ids = workflowIdsIn(files);
   if (ids.length === 0) {
@@ -1446,7 +1471,10 @@ export const workflowTestOutcome = async (
   // Refused before anything is built where no sandbox may run them.
   sessionHost(env);
   signal?.throwIfAborted();
-  const modules = await modulesOf(env, app, version, files, signal);
+  const modules = await modulesOf(env, app, version, files, {
+    draft,
+    ...(signal === undefined ? {} : { signal }),
+  });
   const failures: string[] = [];
   let keep = true;
   for (const id of ids) {
@@ -1473,14 +1501,14 @@ export const workflowTestFailures = async (
   app: AppId,
   version: number,
   files: AppFiles,
-  signal?: AbortSignal
+  options: { draft?: boolean; signal?: AbortSignal } = {}
 ): Promise<string[]> => {
   const { failures } = await workflowTestOutcome(
     env,
     app,
     version,
     files,
-    signal
+    options
   );
   return failures;
 };

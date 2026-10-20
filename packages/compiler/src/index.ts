@@ -39,12 +39,14 @@ export {
   appCodeFiles,
   appCodeKind,
   appTestFiles,
+  generatedFolder,
   generatedModules,
   isAppLayout,
   isAppTestSuite,
   isUnderAppTests,
   strayTestFileMessage,
   strayTestFiles,
+  workflowBindingsPath,
   workflowBuildFiles,
 } from "./app-code.ts";
 export {

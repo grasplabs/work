@@ -42,7 +42,13 @@ import {
 } from "./db/core/schema.ts";
 import { ensureCollection } from "./knowledge/collections.ts";
 import { appMemoryPath } from "./knowledge/memory-files.ts";
-import { declarableOf, declaredRequests, toPermission } from "./permissions.ts";
+import {
+  bindingKindsOf,
+  declarableOf,
+  workflowBindingKinds,
+  declaredRequests,
+  toPermission,
+} from "./permissions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -345,6 +351,22 @@ export const createFromBlueprint = async (
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,
+    // Typed as the code it copies was: the requests it is created with,
+    // and over them the source version's binding names, which a copy
+    // keeps though it asks only for what it may declare (no connection or
+    // other App's exports), and which hold even where a name the
+    // blueprint declares is now another kind. Types grant nothing: a call
+    // is refused until the copy holds the permission.
+    workflowBindings: {
+      ...bindingKindsOf(requests.rows),
+      ...(blueprint.appId === null || blueprint.version === null
+        ? {}
+        : await workflowBindingKinds(
+            env,
+            appIdSchema.parse(blueprint.appId),
+            blueprint.version
+          )),
+    },
   };
   const db = drizzle(env.DB);
   // The App, only while the blueprint is still there and, for a marked

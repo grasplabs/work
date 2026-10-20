@@ -57,7 +57,7 @@ import {
 } from "./db/core/schema.ts";
 import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
-import { madeCurrent } from "./permissions.ts";
+import { appBindingKinds, madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
 import { requireStoreSchemaActive } from "./store-backfill.ts";
@@ -697,6 +697,7 @@ export const commitFiles = async (
   }
   const exported = exportsIn(files);
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
+  const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
 
   const row: VersionRow = {
@@ -713,6 +714,7 @@ export const commitFiles = async (
     workflowCalls,
     exports: exported,
     proposedBy: null,
+    workflowBindings,
   };
   const db = drizzle(env.DB);
   try {
@@ -743,6 +745,7 @@ export const commitFiles = async (
     app: appId,
     version: row.version,
     files: saved,
+    bindings: workflowBindings,
   });
   // What its screens build to, for what waits on an admin
   // (screen-builds.ts), in the background: only once they built just now,
@@ -868,6 +871,7 @@ export const proposeDraft = async (
   }
   const exported = exportsIn(files);
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
+  const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
   const row: VersionRow = {
     appId,
@@ -883,6 +887,7 @@ export const proposeDraft = async (
     workflowCalls,
     exports: exported,
     proposedBy: by.via ?? null,
+    workflowBindings,
   };
   const db = drizzle(env.DB);
   try {

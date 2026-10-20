@@ -51,7 +51,7 @@ import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
 import { requireResourceRole } from "./permission-resources.ts";
-import { requestPermission } from "./permissions.ts";
+import { appBindingKinds, requestPermission } from "./permissions.ts";
 import { draftSealFailures, serverProblem } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
 import { buildOnSave } from "./save-builds.ts";
@@ -423,13 +423,10 @@ const testsOf = async (
   if (!buildPassed(workflows)) {
     return { status: "not_run", failures: [] };
   }
-  const failures = await workflowTestFailures(
-    env,
-    app,
-    base ?? 0,
-    files,
-    signal
-  );
+  const failures = await workflowTestFailures(env, app, base ?? 0, files, {
+    draft: true,
+    ...(signal === undefined ? {} : { signal }),
+  });
   return {
     status: failures.length === 0 ? "passed" : "failed",
     failures: failures.slice(0, maxReported),
@@ -512,7 +509,14 @@ export const checkFiles = async (
   signal?.throwIfAborted();
   const saved = await buildOnSave(
     env,
-    { app, version: base ?? 0, files },
+    // Typed by the App's permissions now, as a version committed from it
+    // would be.
+    {
+      app,
+      version: base ?? 0,
+      files,
+      bindings: await appBindingKinds(env, app),
+    },
     signal
   );
   signal?.throwIfAborted();

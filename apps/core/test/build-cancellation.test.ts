@@ -71,6 +71,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
             app: appIdSchema.parse(crypto.randomUUID()),
             version: 0,
             files: freshServer(),
+            bindings: {},
           },
           lost()
         )
@@ -93,7 +94,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
             "workflows/intake.ts": "export default {};\n",
             "workflows/intake.test.ts": "export default [];\n",
           },
-          lost()
+          { signal: lost() }
         )
     );
     expect(watched).toStrictEqual({
@@ -201,7 +202,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
           "workflows/intake.ts": `export const built = ${JSON.stringify(crypto.randomUUID())};\n`,
           "workflows/intake.test.ts": "export default [];\n",
         },
-        giveUp.signal
+        { signal: giveUp.signal }
       );
       outcome = "ran to its end";
     } catch (error) {
