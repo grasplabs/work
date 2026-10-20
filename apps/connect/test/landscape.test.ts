@@ -4,7 +4,7 @@ import { landscapeErrors, landscapeLimits } from "@grasp-os/shared/landscape";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { connectionTokens } from "../src/db/schema.ts";
 import {
@@ -298,15 +298,25 @@ describe("a landscape read", () => {
     const connectionId = await connectLandscape(someone("admin"));
     await expired(connectionId);
     providers.state.refreshGranted = `${asAsked} Mail.ReadWrite`;
+    const logged: string[] = [];
+    const info = vi.spyOn(console, "info").mockImplementation((...args) => {
+      logged.push(JSON.stringify(args));
+    });
     const broadened = await codeOf(read(connectionId));
+    info.mockRestore();
     providers.state.refreshGranted = undefined;
     const listed = await exports.default.landscapeConnections();
     expect({
       broadened,
       status: listed.find(({ id }) => id === connectionId)?.status,
+      // Entra has no endpoint to revoke the refused token at: never kept, it lapses.
+      discarded: logged.some((line) =>
+        line.includes("oauth.discard_unavailable")
+      ),
     }).toStrictEqual({
       broadened: "landscape.inactive",
       status: "needs_reauth",
+      discarded: true,
     });
   });
 

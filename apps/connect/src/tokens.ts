@@ -132,11 +132,15 @@ export const discardMint = async (
   tokens: Pick<TokenSet, "accessToken" | "refreshToken">
 ): Promise<void> => {
   try {
-    await revokeToken(
+    const revoked = await revokeToken(
       provider,
       client,
       tokens.refreshToken ?? tokens.accessToken
     );
+    if (!revoked) {
+      // No endpoint to revoke at (Entra): kept nowhere, it lapses.
+      log.info("oauth.discard_unavailable", { provider: provider.id });
+    }
   } catch (error) {
     log.warn("oauth.discard_failed", {
       provider: provider.id,
@@ -312,6 +316,9 @@ const refreshUnderLease = async (
     // landscape's) is kept only while each renewal says so: granted more
     // or less since, it needs an admin to connect it again.
     if (!grantedAsAsked(provider, minted)) {
+      // What it minted is never kept: revoked where the provider can
+      // (Entra can't, and its refresh token lapses unused).
+      await discardMint(provider, context.client, minted);
       if (!(await markDead(env, provider.id, row, "scopes_changed"))) {
         return undefined;
       }
