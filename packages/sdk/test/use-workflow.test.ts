@@ -520,7 +520,7 @@ describe("what a hook shows", () => {
     });
   });
 
-  it("keeps following a run refused as unavailable, still shown with every capability off, until the host shows it again", async () => {
+  it("clears a run refused as unavailable, showing only why, and keeps following it until the host shows it again", async () => {
     const page = host();
     const hook = await showing(page, snapshotOf(), 2);
     const subscription = page.one("run-1");
@@ -536,8 +536,13 @@ describe("what a hook shows", () => {
       commands: page.commands,
     }).toMatchObject({
       refused: {
-        view: { status: "running", canPause: false, canCancel: false },
-        error: undefined,
+        view: {
+          status: "loading",
+          waits: [],
+          canPause: false,
+          canCancel: false,
+        },
+        error: "workflow.run_unavailable",
       },
       following: 1,
       back: { status: "running", canPause: true, canCancel: true },
@@ -574,9 +579,11 @@ describe("what a hook shows", () => {
     expect({
       following: page.open("run-1").length,
       view: hook.view(),
+      error: hook.error()?.code,
     }).toMatchObject({
       following: 1,
-      view: { status: "running", canPause: false, canCancel: false },
+      view: { status: "loading", canPause: false, canCancel: false },
+      error: "workflow.run_unavailable",
     });
   });
 

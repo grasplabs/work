@@ -1150,7 +1150,7 @@ describe(
       });
     });
 
-    it("keeps a screen's run shown, nothing permitted, while its alias is bound elsewhere, and shows it again once bound back", async () => {
+    it("shows nothing of a screen's run but why while its alias is bound elsewhere, and the run again once bound back", async () => {
       const fixture = await requestsApp("PT1H");
       const { builder, app, reference } = fixture;
       const lease = await screenOf(builder, app);
@@ -1186,7 +1186,7 @@ describe(
         other.runId
       );
       await vi.waitFor(() => {
-        expect(shown().fresh).toBeFalsy();
+        expect(shown().error?.code).toBe("workflow.run_unavailable");
       }, settles);
       const away = shown();
       // Bound back, and read again as a new run starts: shown again.
@@ -1205,9 +1205,9 @@ describe(
       expect({
         before: { revision: before.revision, control: before.value?.control },
         away: {
-          status: away.value?.status,
+          value: away.value,
+          fresh: away.fresh,
           error: away.error?.code,
-          revision: away.revision,
         },
         back: { revision: back.revision, control: back.value?.control },
       }).toStrictEqual({
@@ -1221,9 +1221,9 @@ describe(
           },
         },
         away: {
-          status: "running",
-          error: undefined,
-          revision: before.revision,
+          value: undefined,
+          fresh: false,
+          error: "workflow.run_unavailable",
         },
         back: { revision: before.revision, control: before.value?.control },
       });
