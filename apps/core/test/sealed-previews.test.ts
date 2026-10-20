@@ -1,3 +1,5 @@
+import { v } from "@grasp-os/sdk";
+import { contractFingerprint, preferenceOperations } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -9,6 +11,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { DataStore } from "../src/data-store.ts";
 import {
@@ -143,6 +146,53 @@ const notesApp = async (builder: Person): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
   await release(builder, id, notesFiles("released"));
   return appIdSchema.parse(id);
+};
+
+/** The App's preferences, as both the App and its drafts declare them. */
+const preferencesSource = `v.object({
+    compact: v.boolean().default(false),
+    theme: v.enum(["light", "dark"]).default("light"),
+  })`;
+
+/** Those preferences' descriptor, as the release's manifest holds it. */
+const preferencesDeclared = v.object({
+  compact: v.boolean().default(false),
+  theme: v.enum(["light", "dark"]).default("light"),
+}).descriptor;
+
+/** `files` with the App declaring those preferences. */
+const withPreferences = (
+  files: Record<string, string>
+): Record<string, string> => ({
+  ...files,
+  "app.ts": (files["app.ts"] ?? "")
+    .replace(
+      'import { app } from "@grasp-os/sdk";',
+      'import { app, v } from "@grasp-os/sdk";'
+    )
+    .replace(
+      "  uses: [writer],",
+      `  preferences: ${preferencesSource},\n  uses: [writer],`
+    ),
+});
+
+/**
+ * The reference to the preference operation `name` of a release of `app`
+ * at `version`, as `#grasp` generates it from those preferences.
+ */
+const preferenceReference = async (
+  app: string,
+  version: number,
+  name: "get" | "update"
+) => {
+  const operation = preferenceOperations(preferencesDeclared)[name];
+  return {
+    resourceId: app,
+    resourceVersion: version,
+    contractId: operation.path,
+    fingerprint: await contractFingerprint(operation),
+    kind: operation.kind,
+  };
 };
 
 /** The draft of `app` in a chat of the App's builder, and the App itself. */
@@ -344,6 +394,205 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     }).toStrictEqual({
       started: "contract.invalid_request",
       watched: ["contract.invalid_request"],
+    });
+  });
+
+  it("answers the draft's preferences from its own store, never its person's real ones, and refuses workflow-reference queries", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id } = await builder.api.apps.create({ name: "Notes" });
+    await release(builder, id, withPreferences(notesFiles("released")));
+    const app = appIdSchema.parse(id);
+    const asBuilder = {
+      userId: builder.userId,
+      role: "builder" as const,
+      teams: [],
+    };
+    // Their real preferences, on the App's current version.
+    const live = async (name: "get" | "update", input: unknown) => {
+      const answered = await callAppFunction(
+        env,
+        asBuilder,
+        app,
+        JSON.stringify({
+          reference: await preferenceReference(app, 1, name),
+          input,
+        })
+      );
+      return answered.result.ok
+        ? answered.result.value
+        : answered.result.error.code;
+    };
+    await live("update", { expectedRevision: 0, patch: { compact: true } });
+    const { chatId, revision, write } = await chatWithDraft(
+      builder,
+      app,
+      withPreferences(notesFiles("drafted"))
+    );
+    /** A call of the draft at `at`, of `reference`, with `input`. */
+    const previewed = async (at: number, reference: unknown, input: unknown) =>
+      outcome(
+        await builder.api.chats.previewFunction(
+          chatId,
+          app,
+          at,
+          JSON.stringify({ reference, input })
+        )
+      );
+    /** The draft release's version at `at`, from a call of its own. */
+    const versionAt = async (at: number): Promise<number> =>
+      z
+        .object({ reference: z.object({ resourceVersion: z.int() }) })
+        .parse(
+          JSON.parse(
+            await requestFor(
+              builder,
+              { chatId, app, revision: at },
+              "notes.titles"
+            )
+          )
+        ).reference.resourceVersion;
+    const draftVersion = await versionAt(revision);
+    const draft = {
+      get: await preferenceReference(app, draftVersion, "get"),
+      update: await preferenceReference(app, draftVersion, "update"),
+    };
+    const first = {
+      // The defaults, not what they chose on the App.
+      read: await previewed(revision, draft.get, {}),
+      written: await previewed(revision, draft.update, {
+        expectedRevision: 0,
+        patch: { theme: "dark" },
+      }),
+      // A version's reference names nothing in the preview.
+      versionsReference: await previewed(
+        revision,
+        await preferenceReference(app, 1, "get"),
+        {}
+      ),
+      runs: await previewed(
+        revision,
+        {
+          ...draft.get,
+          contractId: "workflows.followUp.queries.runs",
+        },
+        { pagination: {} }
+      ),
+    };
+    // Their real preferences are as they were.
+    const real = await live("get", {});
+    // A new revision starts on a new, empty store.
+    const next = await write(
+      {
+        "operations/notes.ts": notesFiles("again")["operations/notes.ts"] ?? "",
+      },
+      revision
+    );
+    const nextVersion = await versionAt(next);
+    const again = await previewed(
+      next,
+      await preferenceReference(app, nextVersion, "get"),
+      {}
+    );
+
+    expect({ first, real, again }).toStrictEqual({
+      first: {
+        read: { compact: false, theme: "light", _rev: 0 },
+        written: { compact: false, theme: "dark", _rev: 1 },
+        versionsReference: "version.mismatch",
+        runs: "resource.unavailable",
+      },
+      real: { compact: true, theme: "light", _rev: 1 },
+      again: { compact: false, theme: "light", _rev: 0 },
+    });
+  });
+
+  it("gives a draft with preferences and no tables a store of its own for them", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const files = {
+      "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+      "app.ts": `import { app, v } from "@grasp-os/sdk";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+  preferences: ${preferencesSource},
+  uses: [],
+});
+`,
+      "screens/desk.tsx": `export default function Desk() {
+  return <main>Desk</main>;
+}
+`,
+    };
+    const { id } = await builder.api.apps.create({ name: "Desk" });
+    await release(builder, id, files);
+    const app = appIdSchema.parse(id);
+    const { chatId, revision } = await chatWithDraft(builder, app, {
+      "screens/desk.tsx": `export default function Desk() {
+  return <main>Drafted desk</main>;
+}
+`,
+    });
+    // The draft release's version: the one its contracts were sealed for.
+    await chatsOf(builder).previewReferences(
+      chatId,
+      builder.userId,
+      app,
+      revision
+    );
+    const version = await runInDurableObject(
+      chatsOf(builder),
+      (_instance, state) =>
+        keptManifestSchema.parse(
+          JSON.parse(
+            state.storage.sql
+              .exec<{ manifest: string }>(
+                "SELECT manifest FROM preview_releases WHERE chat_id = ? AND app_id = ?",
+                chatId,
+                app
+              )
+              .one().manifest
+          )
+        ).resourceVersion
+    );
+    const answered = outcome(
+      await builder.api.chats.previewFunction(
+        chatId,
+        app,
+        revision,
+        JSON.stringify({
+          reference: await preferenceReference(app, version, "update"),
+          input: { expectedRevision: 0, patch: { compact: true } },
+        })
+      )
+    );
+    // No longer an active member: the preview's own gate refuses, even
+    // past the chat's checks (straight to the chat's object).
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(builder.userId)
+      .run();
+    const inactive = outcomeOfText(
+      await chatsOf(builder).previewFunction(
+        chatId,
+        builder.userId,
+        app,
+        revision,
+        JSON.stringify({
+          reference: await preferenceReference(app, version, "get"),
+          input: {},
+        })
+      )
+    );
+    expect({ answered, inactive }).toStrictEqual({
+      answered: { compact: true, theme: "light", _rev: 1 },
+      inactive: "permission.person_inactive",
     });
   });
 
