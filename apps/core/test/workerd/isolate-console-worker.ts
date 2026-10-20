@@ -1,4 +1,5 @@
 import { capability, runInSession } from "../../src/sandbox-session.ts";
+import type { ConsoleLine } from "../../src/sandbox-session.ts";
 import { callSandboxed } from "../../src/sandboxed.ts";
 import type { SandboxedEnv } from "../../src/sandboxed.ts";
 
@@ -58,6 +59,84 @@ export class App extends WorkerEntrypoint {
 }
 `;
 
+/** What a draft's preview function holds and writes, which its sink gets. */
+const previewValue = "preview-value-5a1c";
+
+/**
+ * A draft's function as a sealed preview runs it: it writes a line at each
+ * level a tail keeps, one past a line's bound and more lines than a call
+ * keeps, then answers, or throws when `fails`.
+ */
+const previewModule = (
+  fails: boolean
+): string => `import { WorkerEntrypoint } from "cloudflare:workers";
+const value = ${JSON.stringify(previewValue)};
+export class Run extends WorkerEntrypoint {
+  async run() {
+    console.log(value, { n: 1 });
+    console.info(value);
+    console.warn(value);
+    console.error(value, new Error("boom"));
+    console.debug(value);
+    console.trace(value);
+    console.log("x".repeat(5000));
+    // Nothing prints it: logging it must not throw.
+    console.log({
+      toJSON() {
+        throw new Error("no JSON");
+      },
+      toString() {
+        throw new Error("no text");
+      },
+    });
+    // Twelve lines more make 19, one short of a call's 20...
+    for (let n = 0; n < 12; n += 1) {
+      console.log(value, n);
+    }
+    // ...and printing this logs the 20th: it is kept, and this one isn't.
+    console.log({
+      toJSON() {
+        console.log("inner");
+        return "outer";
+      },
+    });
+    for (let n = 0; n < 30; n += 1) {
+      console.log(value, n);
+    }
+    if (${String(fails)}) {
+      throw new Error("The draft's function failed.");
+    }
+    return value;
+  }
+}
+`;
+
+/** Runs the preview function in a session with a console sink, as core does. */
+const preview = async (env: StandInEnv, fails: boolean) => {
+  const sunk: ConsoleLine[][] = [];
+  let answered: unknown;
+  try {
+    answered = await runInSession(env.SANDBOX_HOST, {
+      mainModule: "run.js",
+      modules: { "run.js": previewModule(fails) },
+      entrypoint: "Run",
+      method: "run",
+      args: [],
+      console: (lines) => {
+        sunk.push(lines);
+      },
+      owner: "app:preview",
+      cpuMs: 5000,
+      wallMs: 10_000,
+    });
+  } catch (error) {
+    answered = {
+      threw: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return { answered, sunk, value: previewValue };
+};
+
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
@@ -92,6 +171,9 @@ export default {
         wallMs: 10_000,
       });
       return Response.json({ answered, value: sessionValue });
+    }
+    if (pathname === "/preview" || pathname === "/preview-fails") {
+      return Response.json(await preview(env, pathname === "/preview-fails"));
     }
     return new Response("core answers");
   },

@@ -12,8 +12,13 @@ import {
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth, screenLimits } from "@grasp-os/shared/screens";
 import { RpcSession, WebSocketTransport } from "capnweb";
+import { z } from "zod";
 
 import { sessionMaxRuns } from "./call-limits.ts";
+import {
+  maxCapturedLines,
+  maxCapturedMessage,
+} from "./on-prem/quiet-isolate.ts";
 import { capabilityMarker } from "./on-prem/sandbox-capability.ts";
 import { browserMessageSize } from "./rpc-target.ts";
 import {
@@ -100,6 +105,13 @@ export interface SessionCall {
   readonly entrypoint: string;
   readonly method: string;
   readonly args: readonly SessionArgument[];
+  /**
+   * Takes what the call writes with `console`, bounded, once it settled
+   * (`consoleLinesOf`): a draft's sealed preview's, for the agent's check
+   * of it, as a Loader tail would on Cloudflare (server-logs.ts). Any
+   * other call's output is dropped (on-prem/quiet-isolate.ts).
+   */
+  readonly console?: (lines: ConsoleLine[]) => unknown;
   /** CPU time the call may use: the runtime's limit on Cloudflare. */
   readonly cpuMs: number;
   /** Wall-clock time the call may take, waits included. */
@@ -168,8 +180,45 @@ export const inOrderReader = (
 /** A call made in a session already open, in its process. */
 export type NestedCall = Pick<
   SessionCall,
-  "mainModule" | "modules" | "entrypoint" | "method" | "args"
+  "mainModule" | "modules" | "entrypoint" | "method" | "args" | "console"
 >;
+
+/** One line a call wrote with `console`, as the sandbox host records it. */
+export interface ConsoleLine {
+  /** When, in milliseconds since the epoch. */
+  at: number;
+  level: "debug" | "info" | "log" | "warn" | "error";
+  message: string;
+}
+
+const consoleLinesSchema = z
+  .array(
+    z.strictObject({
+      at: z.number(),
+      level: z.enum(["debug", "info", "log", "warn", "error"]),
+      message: z.string().max(maxCapturedMessage),
+    })
+  )
+  .max(maxCapturedLines);
+
+/**
+ * `sink` as the call's console sink: what the isolate hands it read as
+ * lines, bounded as the sandbox host bounds them, and taken once. It comes
+ * from the App's isolate, so anything else is dropped, never trusted.
+ */
+const consoleSinkOf = (
+  sink: (lines: ConsoleLine[]) => unknown
+): ((given: unknown) => Promise<void>) => {
+  let taken = false;
+  return async (given) => {
+    const lines = consoleLinesSchema.safeParse(given);
+    if (taken || !lines.success) {
+      return;
+    }
+    taken = true;
+    await sink(lines.data);
+  };
+};
 
 /**
  * Runs `call` in the open session it was given for, as the session's own
@@ -836,6 +885,14 @@ export const runInSession = async (
     const args = given.args.map((arg) =>
       "capability" in arg ? { capability: named(arg.capability) } : arg
     );
+    const sink =
+      given.console === undefined
+        ? {}
+        : {
+            consoleSink: named(
+              functionCapability(consoleSinkOf(given.console))
+            ),
+          };
     // Platform modules go as their sizes, read through a reader of their
     // own in their order: the sandbox host takes no more than they are.
     const platform = Object.entries(given.platformModules ?? {});
@@ -875,6 +932,7 @@ export const runInSession = async (
         capabilities: specs,
         nodejsCompat: given.nodejsCompat === true,
         ...chunked,
+        ...sink,
       },
       stubs,
     ]);

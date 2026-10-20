@@ -33,7 +33,12 @@ import {
 import type { RpcTarget } from "cloudflare:workers";
 
 import { sessionMaxRuns } from "../call-limits.ts";
-import { quietModules } from "./quiet-isolate.ts";
+import {
+  captureEntrypoint,
+  captureMethod,
+  capturedModules,
+  quietModules,
+} from "./quiet-isolate.ts";
 import {
   declaredMethodsOf,
   invoke,
@@ -85,6 +90,13 @@ interface SessionCall {
    */
   chunkedModules: Record<string, ChunkedModule>;
   moduleReader: string | undefined;
+  /**
+   * The function capability that takes what the call writes with
+   * `console`, bounded, once it settled: a draft's sealed preview's, for
+   * the agent's check of it (quiet-isolate.ts, `capturedModules`). None
+   * for any other call, whose output is dropped.
+   */
+  consoleSink: string | undefined;
 }
 
 /** The most capabilities a call may name. */
@@ -198,6 +210,23 @@ const platformOf = (
   return { nodejsCompat: nodejsCompat === true, chunkedModules, moduleReader };
 };
 
+/**
+ * The call's console sink (`SessionCall`): a function capability by name,
+ * none, or false when it names anything else.
+ */
+const consoleSinkOf = (
+  name: unknown,
+  specs: Readonly<Record<string, CapabilitySpec>>
+): string | undefined | false => {
+  if (name === undefined) {
+    return undefined;
+  }
+  const spec = typeof name === "string" ? specs[name] : undefined;
+  return typeof name === "string" && spec !== undefined && "function" in spec
+    ? name
+    : false;
+};
+
 /** `body` as a call, or undefined for anything else. */
 export const sessionCallOf = (body: unknown): SessionCall | undefined => {
   if (!isRecord(body)) {
@@ -240,6 +269,10 @@ export const sessionCallOf = (body: unknown): SessionCall | undefined => {
   if (platform === undefined) {
     return undefined;
   }
+  const consoleSink = consoleSinkOf(body.consoleSink, specs);
+  if (consoleSink === false) {
+    return undefined;
+  }
   return {
     mainModule,
     modules,
@@ -248,6 +281,7 @@ export const sessionCallOf = (body: unknown): SessionCall | undefined => {
     args: argSpecs,
     capabilities: specs,
     ...platform,
+    consoleSink,
   };
 };
 
@@ -354,20 +388,39 @@ class Session extends CapnwebTarget {
         ? await readChunkedModules(parsed.chunkedModules, reader)
         : {};
     const { compatibilityFlags } = this.#settings;
-    const entrypoint: unknown = this.#env.LOADER.get(null, () => ({
+    const modules = { ...parsed.modules, ...chunked };
+    // Printing nothing to the process's output, the deployment's logs;
+    // recording what it writes instead for the sink core passed, if any.
+    const sink =
+      parsed.consoleSink === undefined ? undefined : given(parsed.consoleSink);
+    const loaded =
+      sink === undefined
+        ? {
+            mainModule: parsed.mainModule,
+            modules: quietModules(parsed.mainModule, modules),
+          }
+        : capturedModules(parsed.mainModule, modules);
+    const isolate = this.#env.LOADER.get(null, () => ({
       ...this.#settings,
       compatibilityFlags: parsed.nodejsCompat
         ? [...compatibilityFlags, "nodejs_compat"]
         : compatibilityFlags,
-      mainModule: parsed.mainModule,
-      // Printing nothing to the process's output, the deployment's logs.
-      modules: quietModules(parsed.mainModule, {
-        ...parsed.modules,
-        ...chunked,
-      }),
+      ...loaded,
       env: {},
       globalOutbound: null,
-    })).getEntrypoint(
+    }));
+    if (sink !== undefined) {
+      const captured: unknown = isolate.getEntrypoint(captureEntrypoint);
+      return (
+        (await invoke(captured, captureMethod, [
+          parsed.entrypoint,
+          parsed.method,
+          args,
+          sink,
+        ])) ?? null
+      );
+    }
+    const entrypoint: unknown = isolate.getEntrypoint(
       // `default`: the module's default export, as workerd names it.
       parsed.entrypoint === "default" ? undefined : parsed.entrypoint
     );
