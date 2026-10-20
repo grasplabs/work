@@ -7,14 +7,8 @@ import type {
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
-  ArrowDownIcon,
   CheckCircleIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -26,11 +20,22 @@ import {
   TriangleAlertIcon,
   XCircleIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import { PlainMarkdown } from "../knowledge/markdown.tsx";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from "./conversation.tsx";
 import { GraspSign } from "./grasp-sign.tsx";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+  MessageResponse,
+} from "./message.tsx";
 import { signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
@@ -43,7 +48,8 @@ import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 // Grasp's sign stands under its newest answer; once it is done, the line
 // says how long it worked, and the answer has its actions in a quiet row
 // under it. It follows the answer as it streams, unless the person scrolls
-// up to read.
+// up to read (`Conversation`); each message is the prototype's AI Elements
+// message (`Message`).
 
 type Result = Extract<ChatMessage, { role: "result" }>;
 type Answer = Extract<ChatMessage, { role: "assistant" }>;
@@ -154,33 +160,6 @@ const CodeStep = ({
   );
 };
 
-/** A small button under an answer, named by its tooltip. */
-const AnswerAction = ({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) => (
-  <Tooltip>
-    <TooltipTrigger
-      render={
-        <Button
-          aria-label={label}
-          onClick={onClick}
-          size="icon-sm"
-          variant="ghost"
-        />
-      }
-    >
-      {children}
-    </TooltipTrigger>
-    <TooltipContent>{label}</TooltipContent>
-  </Tooltip>
-);
-
 /** Copies the answer's text, and says so for a moment. */
 const CopyAnswer = ({ text }: { text: string }) => {
   const { t } = useLingui();
@@ -205,14 +184,14 @@ const CopyAnswer = ({ text }: { text: string }) => {
     }
   };
   return (
-    <AnswerAction
+    <MessageAction
       label={copied ? t`Copied` : t`Copy the answer`}
       onClick={() => {
         void copy();
       }}
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
-    </AnswerAction>
+    </MessageAction>
   );
 };
 
@@ -288,9 +267,9 @@ const Reply = ({
   return (
     <div className="flex w-full min-w-0 flex-col gap-3">
       {top}
-      <div className="flex min-w-0 flex-col gap-2">
-        <div className="flex w-full min-w-0 flex-col gap-3 text-sm">
-          {answer === "" ? null : <PlainMarkdown text={reply.text} />}
+      <Message from="assistant">
+        <MessageContent>
+          {answer === "" ? null : <MessageResponse text={reply.text} />}
           {reply.code.map((code) => (
             <CodeStep
               code={code}
@@ -325,21 +304,21 @@ const Reply = ({
               )}
             </div>
           ) : null}
-        </div>
+        </MessageContent>
         {sign === undefined ? null : (
           <GraspSign said={reply.text.length} state={sign} />
         )}
         {quiet || (answer === "" && onRetry === undefined) ? null : (
-          <div className="-ml-1.5 flex items-center gap-1">
+          <MessageActions>
             {answer === "" ? null : <CopyAnswer text={answer} />}
             {onRetry === undefined || reply.end === "failed" ? null : (
-              <AnswerAction label={t`Ask again`} onClick={onRetry}>
+              <MessageAction label={t`Ask again`} onClick={onRetry}>
                 <RefreshCcwIcon />
-              </AnswerAction>
+              </MessageAction>
             )}
-          </div>
+          </MessageActions>
         )}
-      </div>
+      </Message>
     </div>
   );
 };
@@ -351,54 +330,6 @@ const Reading = () => (
     <GraspSign state="reading" />
   </div>
 );
-
-/**
- * Follows the end of `scroller` as what is in `content` grows, while the
- * person is at the end; scrolled up to read, it stays where they are.
- */
-const useFollow = (): {
-  scroller: React.RefObject<HTMLDivElement | null>;
-  content: React.RefObject<HTMLOListElement | null>;
-  atEnd: boolean;
-  toEnd: () => void;
-} => {
-  const scroller = useRef<HTMLDivElement>(null);
-  const content = useRef<HTMLOListElement>(null);
-  const [atEnd, setAtEnd] = useState(true);
-  useEffect(() => {
-    const box = scroller.current;
-    const inner = content.current;
-    if (box === null || inner === null) {
-      return () => {
-        // Nothing was followed.
-      };
-    }
-    let following = true;
-    const onScroll = (): void => {
-      following = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
-      setAtEnd(following);
-    };
-    const onGrow = new ResizeObserver(() => {
-      if (following) {
-        box.scrollTop = box.scrollHeight;
-      }
-    });
-    box.scrollTop = box.scrollHeight;
-    box.addEventListener("scroll", onScroll, { passive: true });
-    onGrow.observe(inner);
-    return () => {
-      box.removeEventListener("scroll", onScroll);
-      onGrow.disconnect();
-    };
-  }, []);
-  const toEnd = (): void => {
-    scroller.current?.scrollTo({
-      top: scroller.current.scrollHeight,
-      behavior: "smooth",
-    });
-  };
-  return { scroller, content, atEnd, toEnd };
-};
 
 /**
  * Where Grasp stands on the chat's questions: the answer being written,
@@ -458,7 +389,6 @@ export const ChatThread = ({
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
-  const { scroller, content, atEnd, toEnd } = useFollow();
   const results = new Map<string, Result>();
   for (const message of messages) {
     if (message.role === "result") {
@@ -486,12 +416,11 @@ export const ChatThread = ({
     return seconds === undefined ? undefined : <WorkedFor seconds={seconds} />;
   };
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto" ref={scroller}>
+    <Conversation>
+      <ConversationContent label={t`Messages`}>
         <ol
           aria-label={t`Messages`}
           className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
-          ref={content}
         >
           {loaded ? null : (
             <li className="flex justify-center py-8">
@@ -501,11 +430,10 @@ export const ChatThread = ({
           {messages.map((message) => {
             if (message.role === "user") {
               return (
-                <li
-                  className="bg-secondary text-foreground ml-auto w-fit max-w-11/12 rounded-lg px-4 py-3 text-sm whitespace-pre-wrap"
-                  key={message.id}
-                >
-                  {message.text}
+                <li key={message.id}>
+                  <Message from="user">
+                    <MessageContent>{message.text}</MessageContent>
+                  </Message>
                 </li>
               );
             }
@@ -559,18 +487,8 @@ export const ChatThread = ({
           ) : null}
           {children === undefined ? null : <li>{children}</li>}
         </ol>
-      </div>
-      {atEnd ? null : (
-        <Button
-          aria-label={t`Jump to the newest message`}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2"
-          onClick={toEnd}
-          size="icon"
-          variant="outline"
-        >
-          <ArrowDownIcon />
-        </Button>
-      )}
-    </div>
+      </ConversationContent>
+      <ConversationScrollButton label={t`Jump to the newest message`} />
+    </Conversation>
   );
 };
