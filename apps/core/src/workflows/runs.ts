@@ -56,7 +56,7 @@ import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
 import { ownerOf } from "./owners.ts";
-import { admitChild, lineageCreated } from "./quotas.ts";
+import { accountClaimed, admitChild, lineageCreated } from "./quotas.ts";
 import type { ChildPlace } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
@@ -559,6 +559,22 @@ const placeUnder = async (
 };
 
 /**
+ * The statements that place a run whose row is written: a root's lineage,
+ * its age counting from now (nothing for a trigger's key a run has); a
+ * run started under another joins its parent's, charged to its account
+ * there (quotas.ts, `accountClaimed`).
+ */
+const placed = (
+  db: DrizzleD1Database,
+  row: { id: string; appId: string; createdAt: Date },
+  rootRunId: string | null,
+  parent: RunId | undefined
+) =>
+  rootRunId === null
+    ? [lineageCreated(db, row.id)]
+    : accountClaimed(db, row, rootRunId, parent ?? rootRunId);
+
+/**
  * The run a trigger's key `key` already started, its start sent again
  * while the engine is still to confirm it: the engine takes it as the
  * start it has, so a key delivered twice is one run.
@@ -725,9 +741,7 @@ export const startRun = async (
           : { parent, root: rootRunId }),
       })
     ),
-    // A root's lineage, its age counting from now: nothing for a trigger's
-    // key a run has. A run started under another joins its parent's.
-    ...(rootRunId === null ? [lineageCreated(db, row.id)] : []),
+    ...placed(db, row, rootRunId, parent),
   ]);
   if (inserted.length === 0) {
     return await deliveredBefore(env, row.triggerKey ?? "", row.id);

@@ -1398,9 +1398,12 @@ export class ModelLedger extends DurableObject<Env> {
 
   /**
    * Deletes the spend and alerts of run lineages that have ended, every
-   * run of each, at least {@link settledRetentionMs} ago, as core's own
-   * records of the runs say (`endedLineages`): nothing an App or a run
-   * passes, so no lineage is ended early. A lineage any open request
+   * run of each, at least {@link settledRetentionMs} ago, and that are
+   * past the oldest any lineage may grow (the platform's
+   * `workflowAgeMs`), as core's own records of the runs say
+   * (`endedLineages`): nothing an App or a run passes, so no lineage is
+   * ended early, and none is pruned while a late delivery could still
+   * start a run in it, whose spend would then start again from nothing. A lineage any open request
    * (under way, lost or held for a person) still reserves against keeps
    * its rows, checked again as they are deleted. A page of lineages at a
    * time, in key order, so a page of live ones holds up none after it.
@@ -1414,11 +1417,14 @@ export class ModelLedger extends DurableObject<Env> {
       }
       after = page.at(-1) ?? after;
       // oxlint-disable-next-line no-await-in-loop -- a page at a time
-      const ended = await endedLineages(
-        this.env,
-        page,
-        now - settledRetentionMs
-      );
+      const ended = await endedLineages(this.env, page, {
+        endedBy: now - settledRetentionMs,
+        // Past it no run starts in the lineage again (workflows/quotas.ts,
+        // `admitChild`): a late delivery of a run's mail starts none whose
+        // spend would count from nothing. The platform's, which no quota
+        // policy raises.
+        startedBy: now - platformLimits.workflowAgeMs,
+      });
       if (ended.size > 0) {
         this.ctx.storage.transactionSync(() => {
           for (const key of this.#prunable("", [...ended])) {

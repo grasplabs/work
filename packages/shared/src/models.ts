@@ -159,9 +159,15 @@ export type ModelSpender =
       name: string | null;
     }
   | {
-      /** A run lineage, by its root run. */
+      /**
+       * A run lineage, by its root run, or an account in one: the first
+       * run of another App in it, or of the root's App under another
+       * App's run, whose runs there count on their own (`rootRunId`).
+       */
       type: "run";
       runId: string;
+      /** The lineage's root run, for an account; null when `runId` is the root. */
+      rootRunId: string | null;
       /** Null once the run's record is gone. */
       appId: string | null;
       /** Null once the App, or the run's record, is gone. */

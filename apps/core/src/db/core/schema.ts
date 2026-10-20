@@ -1146,6 +1146,19 @@ export const workflowRuns = sqliteTable(
      */
     rootRunId: text("root_run_id"),
     /**
+     * For a run of another App than its lineage root's (a run's own mail
+     * starts other Apps' runs under it, src/workflows/connector-events.ts),
+     * or of the root's App under another App's run: the run whose
+     * allowances its work is charged to, the first run of its kind in the
+     * lineage (`run_lineage_accounts`). Its attempts, host
+     * calls, model spend and share count there; its place (descendants,
+     * depth, age) stays the lineage's. Null for a root and a run of the
+     * root's App under its own runs, charged to the lineage's own
+     * (src/workflows/quotas.ts). Written once, with the row: never changed
+     * once set (migration 0112's trigger).
+     */
+    accountRunId: text("account_run_id"),
+    /**
      * The sequence of the engine's latest status notification this row
      * took (src/workflows/projection.ts): one at or below it is late, and
      * changes nothing. The engine alone decides a run's status; this row
@@ -1664,6 +1677,34 @@ export const runMailStampRefusals = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [index("run_mail_stamp_refusals_stamp_idx").on(table.stamp)]
+);
+
+/**
+ * An App's accounts in a run lineage (src/workflows/quotas.ts,
+ * `accountClaimed`): at most two per App, each the first run of its kind
+ * in the lineage of `root_run_id`, claimed once, so every run charged to
+ * it (`workflow_runs.account_run_id`) is charged to the one account, whose
+ * `run_lineages` row counts its attempts and host calls. Never changed
+ * or deleted (migration 0112's triggers).
+ */
+export const runLineageAccounts = sqliteTable(
+  "run_lineage_accounts",
+  {
+    rootRunId: text("root_run_id")
+      .notNull()
+      .references(() => runLineages.rootRunId),
+    appId: text("app_id").notNull(),
+    /**
+     * `joined` for an App's runs in a lineage another App started,
+     * `rejoined` for the root's App's runs under another App's run.
+     */
+    kind: text({ enum: ["joined", "rejoined"] }).notNull(),
+    accountRunId: text("account_run_id").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.rootRunId, table.appId, table.kind] }),
+  ]
 );
 
 /**
