@@ -549,24 +549,34 @@ const checks: Record<Family, () => void> = {
       expect(threwWith(engine, message)).toBeTruthy();
     });
 
-    test("createBatch creates an ID once, skips one that exists, and returns only what it created", async () => {
+    test("createBatch creates an ID once, and leaves a run whose ID exists as it was", async () => {
       const tag = crypto.randomUUID().slice(0, 8);
-      const params = { fixture: "throws", params: {} };
-      await env.REFERENCE.create({ id: `r-existing-${tag}`, params });
-      await engineBinding("throws").create({ id: `e-existing-${tag}` });
+      const params = { fixture: "pausable", params: {} };
+      // A run that notes each of its two steps: run again, it would note
+      // them twice.
+      const existing = await start("pausable");
+      await onBoth(existing, async (instance) => await reached(instance));
       // oxlint-disable-next-line typescript/no-deprecated -- the array form the runtime still serves, compared with the engine's
       const reference = await env.REFERENCE.createBatch([
         { id: `r-twice-${tag}`, params },
         { id: `r-twice-${tag}`, params },
-        { id: `r-existing-${tag}`, params },
+        { id: existing.reference.id, params },
       ]);
-      const engine = await engineBinding("throws").createBatch([
+      const engine = await engineBinding("pausable").createBatch([
         { id: `e-twice-${tag}` },
         { id: `e-twice-${tag}` },
-        { id: `e-existing-${tag}` },
+        { id: existing.engine.id },
       ]);
       expect(reference.map(({ id }) => id)).toStrictEqual([`r-twice-${tag}`]);
       expect(engine.map(({ id }) => id)).toStrictEqual([`e-twice-${tag}`]);
+      const created = {
+        reference: await env.REFERENCE.get(`r-twice-${tag}`),
+        engine: await engineBinding("pausable").get(`e-twice-${tag}`),
+      };
+      await onBoth(created, async (instance) => await reached(instance));
+      await onBoth(existing, async (instance) => await reached(instance));
+      expect(sameOnBoth(notes(created))).toStrictEqual(["one", "two"]);
+      expect(sameOnBoth(notes(existing))).toStrictEqual(["one", "two"]);
     });
   },
   status: () => {
