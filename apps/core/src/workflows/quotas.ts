@@ -11,6 +11,7 @@ import type {
   LowerableLimit,
   QuotaPolicy,
 } from "@grasp-os/shared/quota-policy";
+import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
 import { and, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -18,6 +19,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { outboxedIfChanged } from "../audit-outbox.ts";
 import {
   quotaPolicies,
   runLineageAccounts,
@@ -188,6 +190,7 @@ const highestRecorded = async (db: DrizzleD1Database) =>
       generation: quotaPolicies.generation,
       limits: quotaPolicies.limits,
       limitsHash: quotaPolicies.limitsHash,
+      recordedAt: quotaPolicies.recordedAt,
     })
     .from(quotaPolicies)
     .orderBy(desc(quotaPolicies.generation))
@@ -235,15 +238,32 @@ export const quotaPolicy = async (
     hash !== undefined &&
     (highest === undefined || configured.generation > highest.generation)
   ) {
-    await db
-      .insert(quotaPolicies)
-      .values({
-        generation: configured.generation,
-        limits,
-        limitsHash: hash,
-        recordedAt: new Date(),
-      })
-      .onConflictDoNothing();
+    // Recorded with its audit event, which only the isolate whose insert
+    // recorded it writes: a generation is logged once, as it is recorded.
+    await db.batch([
+      db
+        .insert(quotaPolicies)
+        .values({
+          generation: configured.generation,
+          limits,
+          limitsHash: hash,
+          recordedAt: new Date(),
+        })
+        .onConflictDoNothing(),
+      outboxedIfChanged(db, {
+        actor: { type: "system" },
+        action: "quota_policy.recorded",
+        target: {
+          type: "quota_policy",
+          id: String(configured.generation),
+        },
+        detail: {
+          generation: configured.generation,
+          limitsHash: hash,
+          ...configured.limits,
+        },
+      }),
+    ]);
     highest = await highestRecorded(db);
   }
   if (highest === undefined) {
@@ -271,6 +291,35 @@ export const quotaPolicy = async (
     });
   }
   return recordedPolicy(highest);
+};
+
+/**
+ * The policy core applies now, as the console reads it (GRA-600): its
+ * generation, each limit it lowers below the platform's, and when core
+ * recorded it. Read as any admission reads it (`quotaPolicy`), so a
+ * generation deployed and not yet seen is recorded now, as the next
+ * admission would.
+ */
+export const quotaPolicyReport = async (
+  env: Pick<Env, "DB" | "QUOTA_LIMITS">
+): Promise<QuotaPolicyReport> => {
+  const policy = await quotaPolicy(env);
+  const recorded = await highestRecorded(drizzle(env.DB));
+  const lowered = Object.fromEntries(
+    lowerableLimits.flatMap((name) =>
+      policy.limits[name] < platformLimits[name]
+        ? [[name, policy.limits[name]]]
+        : []
+    )
+  );
+  return {
+    generation: policy.generation,
+    lowered,
+    recordedAt:
+      recorded !== undefined && recorded.generation === policy.generation
+        ? recorded.recordedAt.toISOString()
+        : null,
+  };
 };
 
 /** The limits a lineage reaches, as a refusal names them. */
