@@ -519,6 +519,61 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     });
   });
 
+  it("refuse a run another test started, though its number names one of this test's own", async () => {
+    const { builder, app } = await requestsApp(
+      async (by) => await workflowOf(by, greeting()),
+      {
+        "tests/greet.test.ts": `import { workflowTest } from "@grasp-os/sdk/testing";
+import type { WorkflowTestRun } from "@grasp-os/sdk/testing";
+import { workflows } from "#grasp";
+
+let kept: WorkflowTestRun | undefined;
+
+const askedOf = async (ask: () => Promise<unknown>): Promise<string> => {
+  try {
+    await ask();
+    return "answered";
+  } catch (error) {
+    return error instanceof Error ? error.message : "thrown";
+  }
+};
+
+export default workflowTest({
+  fixtures: "desk",
+  tests: {
+    "first": async (t) => {
+      const owner = await t.as("desk-user");
+      const run = await owner.start(workflows.followUp, { who: "Ada" });
+      kept = run;
+      t.equal((await t.runs.untilTerminal(run)).status, "completed");
+    },
+    "second": async (t) => {
+      const theirs = kept;
+      if (theirs === undefined) {
+        throw new Error("the first test kept no run");
+      }
+      const owner = await t.as("desk-user");
+      const own = await owner.start(workflows.followUp, { who: "Bob" });
+      t.equal((await t.runs.untilTerminal(own)).status, "completed");
+      t.equal(
+        [
+          await askedOf(async () => await t.runs.untilTerminal(theirs)),
+          await askedOf(async () => await t.effects.completedCount(theirs, "greet")),
+        ],
+        [
+          "expected a run this test started, not one another test started",
+          "expected a run this test started, not one another test started",
+        ]
+      );
+    },
+  },
+});
+`,
+      }
+    );
+    await expect(activated(builder, app)).resolves.toBe("current");
+  });
+
   it("start at most ten runs in one test, however many it asks for at once", async () => {
     const { release, app } = await requestsApp(
       async (by) => await workflowOf(by, greeting([{ hold: { wait: "PT1H" } }]))
