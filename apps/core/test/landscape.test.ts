@@ -388,7 +388,7 @@ describe("the application landscape", () => {
     });
   });
 
-  it("ends a sync throttled past the end of its day", async () => {
+  it("ends a sync throttled past the end of its day, on the record, and starts the next day's only once Microsoft's wait is over", async () => {
     const app = appOf("app-midnight", "Midnight");
     await tenantHolds({
       apps: [app],
@@ -401,10 +401,107 @@ describe("the application landscape", () => {
     await tenantHolds({ throttle: 120 });
     await syncLandscapes(env, lateEvening);
     await tenantHolds({ throttle: null });
-    await expect(syncOf(connectionId)).resolves.toStrictEqual({
-      state: "failed",
-      reads: 0,
-      reason: "landscape.throttled",
+    const throttled = await syncOf(connectionId);
+    // Past midnight, within Microsoft's two minutes: no new sync yet.
+    await syncLandscapes(env, new Date(lateEvening.getTime() + 90_000));
+    const waiting = await syncOf(connectionId);
+    await syncLandscapes(env, new Date(lateEvening.getTime() + 150_000));
+    const events = await allEvents();
+    expect({
+      throttled,
+      waiting,
+      after: await syncOf(connectionId),
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "landscape.synced" && target?.id === connectionId
+        )
+        .map(({ detail }) => [detail?.state, detail?.reason ?? null]),
+    }).toStrictEqual({
+      throttled: { state: "failed", reads: 0, reason: "landscape.throttled" },
+      waiting: { state: "failed", reads: 0, reason: "landscape.throttled" },
+      after: { state: "done", reads: 1, reason: null },
+      audited: [
+        ["failed", "landscape.throttled"],
+        ["done", null],
+      ],
+    });
+  });
+
+  it("publishes a sync only once it has read everything: one that stops part way leaves the last whole one as it was", async () => {
+    const app = appOf("app-staged", "Staged");
+    const filler = appOf("app-staged-filler", "Filler");
+    const [ada, newcomer] = [guid(), guid()];
+    // Ada's mail grant on the first page, her profile grant on the second.
+    const pages = (first: Record<string, unknown>[]) => [
+      ...first,
+      ...Array.from(
+        { length: landscapeLimits.grantsPerRead - first.length },
+        () => grantOf(filler, "User.Read")
+      ),
+      grantOf(app, "User.Read", ada),
+    ];
+    await tenantHolds({
+      apps: [app, filler],
+      people: [
+        { id: ada, displayName: "Ada" },
+        { id: newcomer, displayName: "Newcomer" },
+      ],
+      grants: pages([grantOf(app, "Mail.ReadWrite", ada)]),
+      failing: false,
+    });
+    const { admin, connectionId } = await connected();
+    const now = new Date();
+    now.setUTCHours(10, 0, 0, 0);
+    await syncLandscapes(env, now);
+    // The next day the first page changed, and the second fails: nothing
+    // of the next day's sync is seen.
+    await tenantHolds({
+      grants: pages([grantOf(app, "User.Read", newcomer)]),
+      failing: "later",
+    });
+    await syncLandscapes(env, new Date(now.getTime() + dayMs));
+    await tenantHolds({ failing: false });
+    const people = await admin.api.landscape.people(connectionId, "app-staged");
+    expect(
+      people.map(({ personId, scopes }) => ({
+        ada: personId === ada,
+        scopes: scopes.toSorted(),
+      }))
+    ).toStrictEqual([{ ada: true, scopes: ["Mail.ReadWrite", "User.Read"] }]);
+  });
+
+  it("forgets every row of a connection no longer connected, however many are", async () => {
+    const app = appOf("app-forgotten", "Forgotten");
+    await tenantHolds({
+      apps: [app],
+      people: [],
+      grants: [grantOf(app, "User.Read")],
+    });
+    const { admin, connectionId } = await connected();
+    const now = new Date();
+    now.setUTCHours(10, 0, 0, 0);
+    await syncLandscapes(env, now);
+    const before = await appsOf(admin.api, connectionId);
+    // Connect lists more connections than one statement binds, this one not
+    // among them.
+    const others = Array.from({ length: 150 }, (_, at) => ({
+      id: `connection-other-${String(at)}`,
+      provider: "microsoft-landscape" as const,
+      tenant: acmeTenant,
+      status: "needs_reauth" as const,
+    }));
+    const connect = new Proxy(env.CONNECT, {
+      get: (target, property): unknown =>
+        property === "landscapeConnections"
+          ? async () => await Promise.resolve(others)
+          : Reflect.get(target, property),
+    });
+    await syncLandscapes({ ...env, CONNECT: connect }, now);
+    const after = await appsOf(admin.api, connectionId);
+    expect({ kept: before.length, forgotten: after.length }).toStrictEqual({
+      kept: 1,
+      forgotten: 0,
     });
   });
 
@@ -574,7 +671,10 @@ describe("the application landscape", () => {
       .bind(connectionId)
       .run();
     await syncLandscapes(env, new Date(nextDay.getTime() + dayMs + 60_000));
+    const reauth = await admin.api.landscape.status();
     expect({
+      connection: reauth.find((one) => one.connectionId === connectionId)
+        ?.connection,
       whole,
       wholeAt: status?.wholeAt,
       people: counted?.people,
@@ -585,6 +685,7 @@ describe("the application landscape", () => {
       wholeAt: now.toISOString(),
       people: pages,
       throttledPastDay: "landscape.throttled",
+      connection: "needs_reauth",
       needsReauth: {
         state: "failed",
         reads: 0,

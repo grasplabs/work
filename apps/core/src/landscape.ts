@@ -20,34 +20,25 @@ import type {
 } from "@grasp-os/shared/landscape";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
-import {
-  and,
-  eq,
-  getTableColumns,
-  inArray,
-  lt,
-  notInArray,
-  sql,
-} from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
+import type { SQL, SQLWrapper } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import {
-  appendAuditEvent,
-  outboxed,
-  outboxedIfChanged,
-} from "./audit-outbox.ts";
+import { appendAuditEvent, outboxedIfChanged } from "./audit-outbox.ts";
 import { signInConfig } from "./auth/config.ts";
 import { onOrigin, personOf, tenantOf } from "./connections.ts";
 import {
   accounts,
   landscapeAppPeople,
   landscapeApps,
+  landscapeStagedApps,
+  landscapeStagedPeople,
   landscapeSyncs,
 } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -127,105 +118,162 @@ const appsOf = (grants: readonly LandscapeGrant[]): Map<string, PageApp> => {
   return apps;
 };
 
-/**
- * Scopes as an upsert keeps them: within one sync (`sameSync`), what
- * earlier pages saw and this one, so a later page's grant never drops an
- * earlier one's scopes, and a page written twice writes the same; in a new
- * sync, only what it sees, so a revoked scope goes. Bounded as one grant's.
- */
-const sameSyncUnion = (sameSync: SQL, kept: SQL, seen: SQL): SQL =>
-  sql`CASE WHEN ${sameSync} THEN (
-    SELECT json_group_array(value) FROM (
+/** `kept`'s scopes and `seen`'s, each once, bounded as one grant's. */
+const scopesUnion = (kept: SQL, seen: SQL): SQL =>
+  sql`(SELECT json_group_array(value) FROM (
       SELECT value FROM json_each(${kept})
       UNION SELECT value FROM json_each(${seen})
       LIMIT ${landscapeLimits.scopesPerGrant}
-    )
-  ) ELSE ${seen} END`;
+    ))`;
 
 /**
- * The statements that write one page of `sync`, as seen at its start:
- * each app and person upserted, never moved back in time.
+ * The statements that stage one page of `sync`: kept apart by the sync's
+ * start, each app and person once, their scopes adding up over the
+ * sync's pages. A page staged again (two cron runs, a retry) changes
+ * nothing. Nobody sees them until the sync is whole (`published`).
  */
 const pageWrites = (
   db: Db,
   sync: SyncRow,
   grants: readonly LandscapeGrant[]
 ): BatchItem<"sqlite">[] => {
-  const seen = sync.startedAt;
   const writes: BatchItem<"sqlite">[] = [];
   for (const { app, adminScopes, people } of appsOf(grants).values()) {
     writes.push(
       db
-        .insert(landscapeApps)
+        .insert(landscapeStagedApps)
         .values({
           connectionId: sync.connectionId,
+          startedAt: sync.startedAt,
           appId: app.id,
           name: app.name,
           publisher: app.publisher,
           unverifiedPublisher: app.unverifiedPublisher,
           verified: app.verified,
           adminScopes,
-          adminSeenAt: adminScopes === null ? null : seen,
-          firstSeen: seen,
-          lastSeen: seen,
         })
         .onConflictDoUpdate({
-          target: [landscapeApps.connectionId, landscapeApps.appId],
+          target: [
+            landscapeStagedApps.connectionId,
+            landscapeStagedApps.startedAt,
+            landscapeStagedApps.appId,
+          ],
           set: {
             name: app.name,
             publisher: app.publisher,
             unverifiedPublisher: app.unverifiedPublisher,
             verified: app.verified,
-            lastSeen: sql`excluded.last_seen`,
-            ...(adminScopes === null
-              ? {}
-              : {
-                  adminScopes: sameSyncUnion(
-                    sql`${landscapeApps.adminSeenAt} = excluded.admin_seen_at`,
-                    sql`${landscapeApps.adminScopes}`,
-                    sql`excluded.admin_scopes`
-                  ),
-                  adminSeenAt: sql`excluded.admin_seen_at`,
-                }),
+            adminScopes: sql`CASE
+              WHEN excluded.admin_scopes IS NULL THEN ${landscapeStagedApps.adminScopes}
+              WHEN ${landscapeStagedApps.adminScopes} IS NULL THEN excluded.admin_scopes
+              ELSE ${scopesUnion(sql`${landscapeStagedApps.adminScopes}`, sql`excluded.admin_scopes`)}
+            END`,
           },
-          // A late write of an older sync changes nothing.
-          setWhere: sql`excluded.last_seen >= ${landscapeApps.lastSeen}`,
         })
     );
     for (const [personId, { name, scopes }] of people) {
       writes.push(
         db
-          .insert(landscapeAppPeople)
+          .insert(landscapeStagedPeople)
           .values({
             connectionId: sync.connectionId,
+            startedAt: sync.startedAt,
             appId: app.id,
             personId,
             name,
             scopes,
-            firstSeen: seen,
-            lastSeen: seen,
           })
           .onConflictDoUpdate({
             target: [
-              landscapeAppPeople.connectionId,
-              landscapeAppPeople.appId,
-              landscapeAppPeople.personId,
+              landscapeStagedPeople.connectionId,
+              landscapeStagedPeople.startedAt,
+              landscapeStagedPeople.appId,
+              landscapeStagedPeople.personId,
             ],
             set: {
               name,
-              scopes: sameSyncUnion(
-                sql`${landscapeAppPeople.lastSeen} = excluded.last_seen`,
-                sql`${landscapeAppPeople.scopes}`,
+              scopes: scopesUnion(
+                sql`${landscapeStagedPeople.scopes}`,
                 sql`excluded.scopes`
               ),
-              lastSeen: sql`excluded.last_seen`,
             },
-            setWhere: sql`excluded.last_seen >= ${landscapeAppPeople.lastSeen}`,
           })
       );
     }
   }
   return writes;
+};
+
+/** Whose staged rows these are: `sync`'s alone. */
+const stagedOf = (sync: SyncRow) => ({
+  apps: and(
+    eq(landscapeStagedApps.connectionId, sync.connectionId),
+    eq(landscapeStagedApps.startedAt, sync.startedAt)
+  ),
+  people: and(
+    eq(landscapeStagedPeople.connectionId, sync.connectionId),
+    eq(landscapeStagedPeople.startedAt, sync.startedAt)
+  ),
+});
+
+/** Drops what `sync` staged: it never becomes what anyone sees. */
+const unstaged = (db: Db, sync: SyncRow): BatchItem<"sqlite">[] => [
+  db.delete(landscapeStagedPeople).where(stagedOf(sync).people),
+  db.delete(landscapeStagedApps).where(stagedOf(sync).apps),
+];
+
+/**
+ * Publishes what `sync` staged, all of it at once, as seen at its start:
+ * each app and person upserted, never moved back in time by an older
+ * sync's publishing late; then drops the staging.
+ */
+const published = (db: Db, sync: SyncRow): BatchItem<"sqlite">[] => {
+  const seen = sync.startedAt.getTime();
+  return [
+    db
+      .insert(landscapeApps)
+      .select(
+        sql`SELECT connection_id, app_id, name, publisher, unverified_publisher, verified, admin_scopes,
+            CASE WHEN admin_scopes IS NULL THEN NULL ELSE ${seen} END, ${seen}, ${seen}
+          FROM ${landscapeStagedApps}
+          WHERE connection_id = ${sync.connectionId} AND started_at = ${seen}`
+      )
+      .onConflictDoUpdate({
+        target: [landscapeApps.connectionId, landscapeApps.appId],
+        set: {
+          name: sql`excluded.name`,
+          publisher: sql`excluded.publisher`,
+          unverifiedPublisher: sql`excluded.unverified_publisher`,
+          verified: sql`excluded.verified`,
+          adminScopes: sql`coalesce(excluded.admin_scopes, ${landscapeApps.adminScopes})`,
+          adminSeenAt: sql`coalesce(excluded.admin_seen_at, ${landscapeApps.adminSeenAt})`,
+          lastSeen: sql`excluded.last_seen`,
+        },
+        // An older sync publishing late changes nothing.
+        setWhere: sql`excluded.last_seen >= ${landscapeApps.lastSeen}`,
+      }),
+    db
+      .insert(landscapeAppPeople)
+      .select(
+        sql`SELECT connection_id, app_id, person_id, name, scopes, ${seen}, ${seen}
+          FROM ${landscapeStagedPeople}
+          WHERE connection_id = ${sync.connectionId} AND started_at = ${seen}`
+      )
+      .onConflictDoUpdate({
+        target: [
+          landscapeAppPeople.connectionId,
+          landscapeAppPeople.appId,
+          landscapeAppPeople.personId,
+        ],
+        set: {
+          name: sql`excluded.name`,
+          scopes: sql`excluded.scopes`,
+          lastSeen: sql`excluded.last_seen`,
+        },
+        setWhere: sql`excluded.last_seen >= ${landscapeAppPeople.lastSeen}`,
+      }),
+    ...unstaged(db, sync),
+  ];
 };
 
 /** The sync of `connection` to go on with now, started anew once a day. */
@@ -239,10 +287,16 @@ const syncToRun = async (
     .from(landscapeSyncs)
     .where(eq(landscapeSyncs.connectionId, connection.id))
     .get();
+  // Microsoft's wait holds, a sync under way or not, across midnight too.
+  if (
+    current?.retryAt !== undefined &&
+    current.retryAt !== null &&
+    current.retryAt > now
+  ) {
+    return undefined;
+  }
   if (current?.state === "running") {
-    return current.retryAt !== null && current.retryAt > now
-      ? undefined
-      : current;
+    return current;
   }
   const restart = {
     day: dayOf(now),
@@ -267,30 +321,44 @@ const syncToRun = async (
     .onConflictDoUpdate({
       target: landscapeSyncs.connectionId,
       set: restart,
-      setWhere: sql`${landscapeSyncs.state} <> 'running' AND ${landscapeSyncs.day} <> ${restart.day}`,
+      setWhere: sql`${landscapeSyncs.state} <> 'running' AND ${landscapeSyncs.day} <> ${restart.day}
+        AND (${landscapeSyncs.retryAt} IS NULL OR ${landscapeSyncs.retryAt} <= ${now.getTime()})`,
     })
     .run();
   return inserted.meta.changes > 0 ? started : undefined;
 };
 
-/** Ends `sync` as `state`, unless another run moved it on. */
-const ended = (
+/**
+ * Fails `sync`, unless another run moved it on: its state, its audit event
+ * (only when this changed it), its staging dropped. `retryAt`, a
+ * provider's wait, holds past the sync, so the next one waits too.
+ */
+const failed = (
   db: Db,
   sync: SyncRow,
-  state: "failed",
   reason: string,
-  now: Date
-) =>
+  now: Date,
+  retryAt: Date | null = null
+): [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] => [
   db
     .update(landscapeSyncs)
-    .set({ state, reason, finishedAt: now })
+    .set({ state: "failed", reason, finishedAt: now, retryAt })
     .where(
       and(
         eq(landscapeSyncs.connectionId, sync.connectionId),
         eq(landscapeSyncs.startedAt, sync.startedAt),
-        eq(landscapeSyncs.reads, sync.reads)
+        eq(landscapeSyncs.reads, sync.reads),
+        eq(landscapeSyncs.state, "running")
       )
-    );
+    ),
+  outboxedIfChanged(db, {
+    actor: { type: "system" },
+    action: "landscape.synced",
+    target: { type: "connection", id: sync.connectionId },
+    detail: { state: "failed", reason, reads: sync.reads },
+  }),
+  ...unstaged(db, sync),
+];
 
 /** What one sync's audit event says: counts and its outcome, never a name. */
 const syncedEntry = (sync: SyncRow, state: string, grants: number) => ({
@@ -317,8 +385,8 @@ const readFailed = async (
     const details = isExpectedError(error) ? error.details : undefined;
     const wait = z.number().safeParse(details?.retryAfterMs).data;
     const retryAt = new Date(now.getTime() + (wait ?? defaultRetryMs));
-    // Waited for only within its day: past it, the sync ends, so the next
-    // day's starts.
+    // Waited for within its day; past it, the sync ends, and the next
+    // day's waits for the same deadline.
     if (dayOf(retryAt) === sync.day) {
       await db
         .update(landscapeSyncs)
@@ -326,7 +394,7 @@ const readFailed = async (
         .where(eq(landscapeSyncs.connectionId, sync.connectionId));
       return;
     }
-    await ended(db, sync, "failed", code, now);
+    await db.batch(failed(db, sync, code, now, retryAt));
     return;
   }
   if (
@@ -334,7 +402,7 @@ const readFailed = async (
     code === "landscape.inactive" ||
     code === "landscape.cursor_invalid"
   ) {
-    await ended(db, sync, "failed", code, now);
+    await db.batch(failed(db, sync, code, now));
     return;
   }
   // Anything else may pass: tried again later the same day, and failed
@@ -344,7 +412,7 @@ const readFailed = async (
     ...errorFields(error),
   });
   if (sync.day !== dayOf(now)) {
-    await ended(db, sync, "failed", code ?? "landscape.provider_failed", now);
+    await db.batch(failed(db, sync, code ?? "landscape.provider_failed", now));
     return;
   }
   await db
@@ -379,29 +447,19 @@ const readPage = async (
   // With no tenant configured, nothing can be checked: the sync fails and
   // keeps what it had, until the deployment says whose it is.
   if (tenant === undefined) {
-    await db.batch([
-      ended(db, sync, "failed", "landscape.tenant_unknown", now),
-      outboxed(db, {
-        ...syncedEntry(sync, "failed", 0),
-        detail: { state: "failed", reason: "landscape.tenant_unknown" },
-      }),
-    ]);
+    await db.batch(failed(db, sync, "landscape.tenant_unknown", now));
     return undefined;
   }
   if (read.tenant.toLowerCase() !== tenant) {
     // Nothing of this connection is kept, from this sync or an earlier one.
     await db.batch([
-      ended(db, sync, "failed", "landscape.tenant_mismatch", now),
+      ...failed(db, sync, "landscape.tenant_mismatch", now),
       db
         .delete(landscapeAppPeople)
         .where(eq(landscapeAppPeople.connectionId, sync.connectionId)),
       db
         .delete(landscapeApps)
         .where(eq(landscapeApps.connectionId, sync.connectionId)),
-      outboxed(db, {
-        ...syncedEntry(sync, "failed", 0),
-        detail: { state: "failed", reason: "landscape.tenant_mismatch" },
-      }),
     ]);
     return undefined;
   }
@@ -443,16 +501,23 @@ const readPage = async (
         eq(landscapeSyncs.state, "running")
       )
     );
-  // The page's rows go with it. Written again by another cron run that
-  // read the same page, even after a later page, they change nothing: each
-  // row is as seen at the sync's start, and its scopes add to the sync's
-  // (`sameSyncUnion`). The cursor moves on only once, and the sync's end
-  // is recorded only by the run whose claim moved it, right after it.
+  // The page is staged with it. Staged again by another cron run that read
+  // the same page, it changes nothing. The cursor moves on only once, and
+  // the sync's end is recorded only by the run whose claim moved it,
+  // right after it. A whole sync publishes what it staged, all at once; one
+  // stopped at its bound publishes nothing, so nobody sees half of one.
   const done: BatchItem<"sqlite">[] =
     state === "running"
       ? []
       : [outboxedIfChanged(db, syncedEntry(sync, state, read.grants.length))];
-  await db.batch([moved, ...done, ...pageWrites(db, sync, read.grants)]);
+  const staged = pageWrites(db, sync, read.grants);
+  let after: BatchItem<"sqlite">[] = [];
+  if (state === "done") {
+    after = published(db, sync);
+  } else if (state === "partial") {
+    after = unstaged(db, sync);
+  }
+  await db.batch([moved, ...done, ...staged, ...after]);
   return state === "running" ? next : undefined;
 };
 
@@ -466,15 +531,19 @@ const syncOne = async (
   const db = drizzle(env.DB);
   if (connection.status !== "active") {
     // A sync under way ends: it can't go on until an admin reconnects.
-    await db
-      .update(landscapeSyncs)
-      .set({ state: "failed", reason: "landscape.inactive", finishedAt: now })
+    const running = await db
+      .select()
+      .from(landscapeSyncs)
       .where(
         and(
           eq(landscapeSyncs.connectionId, connection.id),
           eq(landscapeSyncs.state, "running")
         )
-      );
+      )
+      .get();
+    if (running !== undefined) {
+      await db.batch(failed(db, running, "landscape.inactive", now));
+    }
     return;
   }
   let sync = await syncToRun(db, connection, now);
@@ -488,6 +557,18 @@ const syncOne = async (
 };
 
 /**
+ * Staging of no sync under way: left by one that stopped, or of a
+ * connection gone.
+ */
+const abandoned = (
+  table: typeof landscapeStagedApps | typeof landscapeStagedPeople
+): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${landscapeSyncs}
+    WHERE ${landscapeSyncs.connectionId} = ${table.connectionId}
+      AND ${landscapeSyncs.startedAt} = ${table.startedAt}
+      AND ${landscapeSyncs.state} = 'running')`;
+
+/**
  * Forgets what retention no longer keeps: every row of a connection no
  * longer connected, and grants and apps not seen for
  * `landscapeRetentionDays`.
@@ -499,17 +580,15 @@ const forget = async (
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const before = new Date(now.getTime() - landscapeRetentionDays * dayMs);
-  const kept = [...connected];
+  // However many connections there are, one bound list.
+  const gone = (column: SQLWrapper): SQL =>
+    sql`NOT ${inList(column, connected)}`;
   await db.batch([
-    db
-      .delete(landscapeAppPeople)
-      .where(notInArray(landscapeAppPeople.connectionId, kept)),
-    db
-      .delete(landscapeApps)
-      .where(notInArray(landscapeApps.connectionId, kept)),
-    db
-      .delete(landscapeSyncs)
-      .where(notInArray(landscapeSyncs.connectionId, kept)),
+    db.delete(landscapeAppPeople).where(gone(landscapeAppPeople.connectionId)),
+    db.delete(landscapeApps).where(gone(landscapeApps.connectionId)),
+    db.delete(landscapeSyncs).where(gone(landscapeSyncs.connectionId)),
+    db.delete(landscapeStagedPeople).where(abandoned(landscapeStagedPeople)),
+    db.delete(landscapeStagedApps).where(abandoned(landscapeStagedApps)),
     db
       .delete(landscapeAppPeople)
       .where(lt(landscapeAppPeople.lastSeen, before)),
@@ -758,10 +837,11 @@ export class LandscapeRpc extends CoreRpcTarget implements LandscapeApi {
         this.#env.CONNECT.landscapeConnections(),
         drizzle(this.#env.DB).select().from(landscapeSyncs),
       ]);
-      return listed.map(({ id }) => {
+      return listed.map(({ id, status }) => {
         const sync = syncs.find(({ connectionId }) => connectionId === id);
         return {
           connectionId: id,
+          connection: status,
           state: sync?.state ?? null,
           reason: sync?.reason ?? null,
           startedAt: sync?.startedAt.toISOString() ?? null,

@@ -168,6 +168,8 @@ export interface LandscapePerson {
 /** A landscape connection's last sync, for admins. */
 export interface LandscapeSyncStatus {
   connectionId: string;
+  /** Whether the connection is read, or needs an admin to connect it again. */
+  connection: "active" | "needs_reauth";
   state: "running" | "done" | "partial" | "failed" | null;
   reason: string | null;
   startedAt: string | null;

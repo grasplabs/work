@@ -3593,3 +3593,51 @@ export const landscapeAppPeople = sqliteTable(
     index("landscape_app_people_last_seen_idx").on(table.lastSeen),
   ]
 );
+
+/**
+ * The apps a landscape sync under way has read so far (src/landscape.ts):
+ * kept apart, by the sync's start, and published to `landscape_apps` all
+ * at once only when the sync has read everything, so a sync that stops
+ * part way changes nothing anyone sees.
+ */
+export const landscapeStagedApps = sqliteTable(
+  "landscape_staged_apps",
+  {
+    connectionId: text("connection_id").notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    appId: text("app_id").notNull(),
+    name: text().notNull(),
+    publisher: text(),
+    unverifiedPublisher: text("unverified_publisher"),
+    verified: integer({ mode: "boolean" }).notNull(),
+    adminScopes: text("admin_scopes", { mode: "json" }).$type<string[]>(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.startedAt, table.appId],
+    }),
+  ]
+);
+
+/** The people a landscape sync under way has read so far, published with its apps. */
+export const landscapeStagedPeople = sqliteTable(
+  "landscape_staged_people",
+  {
+    connectionId: text("connection_id").notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    appId: text("app_id").notNull(),
+    personId: text("person_id").notNull(),
+    name: text(),
+    scopes: text({ mode: "json" }).$type<string[]>().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.connectionId,
+        table.startedAt,
+        table.appId,
+        table.personId,
+      ],
+    }),
+  ]
+);
