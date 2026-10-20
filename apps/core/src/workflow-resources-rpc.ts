@@ -42,6 +42,7 @@ import {
   getWorkflowResource,
   listWorkflowResources,
   publishWorkflowVersion,
+  releaseWorkflowName,
   shareWorkflowResource,
   unshareWorkflowResource,
   workflowDefinition,
@@ -207,6 +208,12 @@ export class WorkflowResourcesRpc
   async delete(id: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await deleteWorkflowResource(this.#env, person, id);
+    });
+  }
+
+  async releaseName(name: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await releaseWorkflowName(this.#env, person, name);
     });
   }
 

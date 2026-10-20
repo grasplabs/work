@@ -94,15 +94,21 @@ export const subjectNames = async (
     workflowIds.length === 0
       ? []
       : db
-          .select({ id: workflowResources.id, name: workflowResources.name })
+          .select({
+            id: workflowResources.id,
+            name: workflowResources.name,
+            deletedAt: workflowResources.deletedAt,
+          })
           .from(workflowResources)
           .where(inArray(workflowResources.id, workflowIds)),
   ]);
   return new Map([
     ...appRows.map(({ id, name }): [string, string] => [`app:${id}`, name]),
-    ...workflowRows.map(({ id, name }): [string, string] => [
+    // A deleted workflow says so: its name may have been released to a
+    // new workflow (GRA-562), which the subject isn't.
+    ...workflowRows.map(({ id, name, deletedAt }): [string, string] => [
       `workflow:${id}`,
-      name,
+      deletedAt === null ? name : `${name} (deleted)`,
     ]),
   ]);
 };
