@@ -55,6 +55,14 @@ const bytesOf = (content: unknown): Uint8Array => {
   throw new TypeError("A file's content is text or bytes.");
 };
 
+/** The text types: the only ones a file may be empty of (shared run-files.ts). */
+const textTypes: ReadonlySet<string> = new Set([
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "application/json",
+]);
+
 /** What one host call of a files use is: its operation and arguments. */
 type CallHost = (alias: string, call: unknown) => Promise<unknown>;
 
@@ -79,6 +87,16 @@ export const filesResource = (
   return {
     write: async (request: unknown): Promise<unknown> => {
       const bytes = bytesOf(field(request, "content"));
+      // A binary type shows itself by its first bytes: an empty file of
+      // one is never what it says, so it isn't sent at all.
+      if (
+        bytes.length === 0 &&
+        !textTypes.has(String(field(request, "type")))
+      ) {
+        throw new TypeError(
+          "A file of this type isn't empty: give it content."
+        );
+      }
       const opened = await call("open", {
         name: field(request, "name"),
         type: field(request, "type"),

@@ -590,7 +590,39 @@ describe("a workflow run's own files", () => {
       callFiles(failing, third, "append", { file, content: base64Of(" way") })
     );
     await callFiles(env, third, "append", { file, content: base64Of(" way") });
-    const done = await callFiles(env, caller.next(), "finish", { file });
+    const finishing = caller.next();
+    const done = await callFiles(env, finishing, "finish", { file });
+    // The whole attempt again, after it finished the file: each call
+    // answers what it did the first time.
+    const afterFinish = {
+      open: await outcome(
+        callFiles(env, caller.again(1), "open", {
+          name: "a.txt",
+          type: "text/plain",
+        })
+      ),
+      append: await outcome(
+        callFiles(env, caller.again(2), "append", {
+          file,
+          content: base64Of("half"),
+        })
+      ),
+      finish: await callFiles(env, finishing, "finish", { file }),
+    };
+    // An empty text file is one; an empty binary one isn't what it says.
+    const empty = async (type: string) => {
+      const emptyFile = await callFiles(env, caller.next(), "open", {
+        name: "empty",
+        type,
+      });
+      return await outcome(
+        callFiles(env, caller.next(), "finish", {
+          file: String(fieldOf(emptyFile.output, "file")),
+        })
+      );
+    };
+    const emptyText = await empty("text/plain");
+    const emptyPng = await empty("image/png");
     // Another task of the same run neither adds to it nor finishes it.
     const other = callerOf(caller.run, caller.workflowId);
     const secondFile = await callFiles(env, caller.next(), "open", {
@@ -609,6 +641,9 @@ describe("a workflow run's own files", () => {
       putFailed,
       done: done.output,
       read: atob(String(fieldOf(read.output, "content"))),
+      afterFinish: { ...afterFinish, finish: afterFinish.finish.output },
+      emptyText,
+      emptyPng,
       otherAppends: await outcome(
         callFiles(env, other.next(), "append", {
           file: second,
@@ -630,6 +665,19 @@ describe("a workflow run's own files", () => {
         sha256: await sha256HexOfBytes(new TextEncoder().encode("half way")),
       },
       read: "half way",
+      afterFinish: {
+        open: "ok",
+        append: "ok",
+        finish: {
+          file,
+          name: "a.txt",
+          type: "text/plain",
+          size: 8,
+          sha256: await sha256HexOfBytes(new TextEncoder().encode("half way")),
+        },
+      },
+      emptyText: "ok",
+      emptyPng: "file.content_mismatch",
       otherAppends: "file.not_writable",
       otherFinishes: "file.not_writable",
     });

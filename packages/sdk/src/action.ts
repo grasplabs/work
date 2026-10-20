@@ -211,7 +211,8 @@ export interface RunFile {
 /**
  * A files binding (the run's own files), as an action calls it: only the
  * operations its use declared. Each call moves at most 512 KiB, so a
- * large file takes several of an attempt's 32 calls.
+ * large file takes several of an attempt's 32 calls; a file is at most
+ * 15 MiB, and only a text file may be empty.
  */
 export type FilesResource<Operation extends FilesOperation> =
   ("write" extends Operation

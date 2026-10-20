@@ -16,8 +16,11 @@ const gib = 1024 * mib;
 
 /** The limits of run files (GRA-724 decision 6), by what they bound. */
 export const runFileLimits = {
-  /** One file's bytes. */
-  fileBytes: 25 * mib,
+  /**
+   * One file's bytes: what one task's attempt can write of it, in its 32
+   * calls of `callBytes` each, its open and finish among them.
+   */
+  fileBytes: 15 * mib,
   /** All of one run's files' bytes, finished or being written. */
   runBytes: 100 * mib,
   /** One run's files, finished or being written. */

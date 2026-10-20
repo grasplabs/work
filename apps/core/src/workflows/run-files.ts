@@ -304,16 +304,18 @@ const append = async (
   if (row === undefined) {
     throw notFound();
   }
-  requireWriter(row, caller);
   const sha256 = await sha256HexOfBytes(bytes);
   const earlier = await db
     .select()
     .from(workflowRunFileChunks)
     .where(eq(workflowRunFileChunks.appendKey, caller.effectKey))
     .get();
+  // The same append again answers what the first did, even once its file
+  // is finished: its effect key is its own task's, so no other writes so.
   if (earlier !== undefined) {
     return await appendedAgain(env, row, earlier, bytes, sha256);
   }
+  requireWriter(row, caller);
   const key = `run-files/${caller.runId}/${row.id}/${crypto.randomUUID()}`;
   // Reserved against every limit in the statement that adds it, before
   // its bytes reach R2; the file's size follows in the same batch.

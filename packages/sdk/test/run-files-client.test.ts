@@ -19,6 +19,26 @@ const fieldOf = (value: unknown, key: string): unknown =>
 // its pieces back; bytes survive base64 both ways.
 
 describe("a files use's client", () => {
+  test("sends an empty text file, and refuses an empty binary one before anything is sent", async () => {
+    const calls: string[] = [];
+    const files = filesResource("files", async (_alias, call) => {
+      calls.push(String(fieldOf(call, "operation")));
+      await Promise.resolve();
+      return { file: "f" };
+    });
+    await files.write({ name: "a.txt", type: "text/plain", content: "" });
+    const binary = await files
+      .write({ name: "a.png", type: "image/png", content: new Uint8Array() })
+      .then(
+        () => "sent",
+        (error: unknown) => (error instanceof TypeError ? "refused" : "failed")
+      );
+    expect({ calls, binary }).toStrictEqual({
+      calls: ["open", "finish"],
+      binary: "refused",
+    });
+  });
+
   test("keeps every byte through base64", () => {
     const bytes = Uint8Array.from({ length: 70_000 }, (_, at) => at % 256);
     expect(fromBase64(toBase64(bytes))).toStrictEqual(bytes);
