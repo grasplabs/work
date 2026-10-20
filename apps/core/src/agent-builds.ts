@@ -1239,15 +1239,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Calls the chat's draft of `app` in its preview, as a screen of the
-   * draft would. A draft of spec 8's layout: its public function at path
-   * `method`, with `args` as its input, on its draft release
-   * (sealed-previews.ts), on a store of the preview's own and with no
-   * resources; how the call failed, if it did, comes back as data. A v1
-   * draft: `method` of its server code with `args` (plain data), with its
-   * own database and stubs that read nothing real and refuse every side
-   * effect (preview-bindings.ts); what the draft's code failed with comes
-   * back as data, anything else (a refusal of the preview's, no draft) is
-   * thrown.
+   * draft would: its public function at path `method`, with `args` as its
+   * input, on its draft release (sealed-previews.ts), on a store of the
+   * preview's own and with no resources. How the draft's code failed, if
+   * it did, comes back as data. A draft not of spec 8's layout is refused
+   * (`app.preview_layout`); anything else (no draft, a refusal) is thrown.
    */
   async call(
     app: unknown,
