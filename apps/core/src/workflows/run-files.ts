@@ -270,9 +270,10 @@ const limitPassed = async (
 
 /**
  * Stores a reserved chunk's bytes, once its reservation is kept, while
- * the attempt still holds. A chunk swept while its put was under way (its
- * file deleted past the grace) has its object deleted again, so no
- * object outlives its record.
+ * the attempt still holds. A chunk is marked stored only while its file
+ * isn't deleted: one deleted while its put was under way (and maybe
+ * swept, its object deleted before the put landed) has its object
+ * deleted again, so no object outlives its record.
  */
 const store = async (
   env: Env,
@@ -286,7 +287,13 @@ const store = async (
   const kept = await drizzle(env.DB)
     .update(workflowRunFileChunks)
     .set({ stored: true })
-    .where(eq(workflowRunFileChunks.key, key))
+    .where(
+      and(
+        eq(workflowRunFileChunks.key, key),
+        sql`(SELECT ${workflowRunFiles.state} FROM ${workflowRunFiles}
+          WHERE ${workflowRunFiles.id} = ${workflowRunFileChunks.fileId}) <> 'deleted'`
+      )
+    )
     .run();
   if (kept.meta.changes === 0) {
     await env.FILES.delete(key);
@@ -485,7 +492,12 @@ const finish = async (
     await db
       .update(workflowRunFiles)
       .set({ state: "deleted", deletedAt: now })
-      .where(eq(workflowRunFiles.id, row.id));
+      .where(
+        and(
+          eq(workflowRunFiles.id, row.id),
+          eq(workflowRunFiles.state, "writing")
+        )
+      );
     throw fileErrors.create("file.content_mismatch");
   }
   // Only the file as hashed: no append can have grown it since.
@@ -681,9 +693,14 @@ export const runFilesRemoved = (
  * Sweeps run files: those never finished a day after they opened are
  * deleted, and the chunks of files deleted longer ago than
  * `sweepGraceMs` go from R2, then their rows. What
- * R2 refuses stays, for the next cron run to try again.
+ * R2 refuses stays, for the next cron run to try again. `now` is the
+ * clock as the sweep runs, never the cron's scheduled time, which a late
+ * run would make shorten the grace.
  */
-export const sweepRunFiles = async (env: Env, now: Date): Promise<void> => {
+export const sweepRunFiles = async (
+  env: Env,
+  now: Date = new Date()
+): Promise<void> => {
   const db = drizzle(env.DB);
   await db
     .update(workflowRunFiles)

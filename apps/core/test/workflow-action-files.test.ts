@@ -806,9 +806,9 @@ describe("a workflow run's own files", () => {
   });
 
   it("leave no bytes behind when a delete and a sweep land while an append is under way, and finish only the file as hashed", async () => {
-    // The file deleted and swept while its append's put is under way: the
-    // sweep waits out the grace, so the put lands, and a later sweep
-    // takes both.
+    // The file deleted, and swept within the grace, while its append's put
+    // is under way: the sweep leaves the chunk, the put lands and finds its
+    // file gone, so deletes its object again; a later sweep takes the row.
     const graced = callerOf();
     const gracedOpen = await callFiles(env, graced.next(), "open", {
       name: "a.txt",
@@ -851,6 +851,54 @@ describe("a workflow run's own files", () => {
         content: base64Of("racing"),
       })
     );
+    // A put that lands after the sweep deleted the chunk's object from R2,
+    // but before it deleted the chunk's row: kept by neither.
+    const between = callerOf();
+    const betweenOpen = await callFiles(env, between.next(), "open", {
+      name: "a.txt",
+      type: "text/plain",
+    });
+    const betweenFile = String(fieldOf(betweenOpen.output, "file"));
+    const betweenDeleter = between.next();
+    const { promise: held, resolve: release } =
+      Promise.withResolvers<boolean>();
+    const { promise: atPut, resolve: reachedPut } =
+      Promise.withResolvers<boolean>();
+    const putHeld = runningBefore("put", async () => {
+      reachedPut(true);
+      await held;
+    });
+    const betweenAppend = outcome(
+      callFiles({ ...env, FILES: putHeld }, between.next(), "append", {
+        file: betweenFile,
+        content: base64Of("racing"),
+      })
+    );
+    await atPut;
+    await callFiles(env, betweenDeleter, "delete", { file: betweenFile });
+    // The sweep's R2 delete lets the put land, and waits for the append to
+    // end, before the sweep goes on to the chunk's row.
+    const deleteThenPut = new Proxy(env.FILES, {
+      get: (target, property): unknown => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return property === "delete"
+          ? async (...args: unknown[]) => {
+              const result: unknown = await Reflect.apply(value, target, args);
+              release(true);
+              await betweenAppend;
+              return result;
+            }
+          : (...args: unknown[]): unknown => Reflect.apply(value, target, args);
+      },
+    });
+    await sweepRunFiles(
+      { ...env, FILES: deleteThenPut },
+      new Date(Date.now() + sweepGraceMs + 1000)
+    );
+    const betweenResult = await betweenAppend;
     // An append that grows the file while it is being hashed.
     const grown = callerOf();
     const grownOpen = await callFiles(env, grown.next(), "open", {
@@ -876,14 +924,19 @@ describe("a workflow run's own files", () => {
       gracedAfter,
       lateAppend,
       lateObjects: await objectsOf(late.run),
+      betweenResult,
+      betweenObjects: await objectsOf(between.run),
       grownFinish,
       grownRows: await rowsOf(grown.run),
     }).toStrictEqual({
-      gracedAppend: "ok",
-      gracedDuring: 1,
+      // Its file deleted while it was under way: nothing kept.
+      gracedAppend: "file.not_found",
+      gracedDuring: 0,
       gracedAfter: { objects: 0, rows: [] },
       lateAppend: "file.not_found",
       lateObjects: 0,
+      betweenResult: "file.not_found",
+      betweenObjects: 0,
       grownFinish: "file.incomplete",
       grownRows: ["writing"],
     });

@@ -134,7 +134,8 @@ export default {
             sweepGuestChats(env, new Date(controller.scheduledTime)),
             sweepRunDetails(env, new Date(controller.scheduledTime)),
             sweepCandidateRuns(env, new Date(controller.scheduledTime)),
-            sweepRunFiles(env, new Date(controller.scheduledTime)),
+            // The clock as it sweeps: its grace counts from real time.
+            sweepRunFiles(env),
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
             sweepPreviewStores(env, new Date(controller.scheduledTime)),
             sweepBuilds(env, new Date(controller.scheduledTime)),
