@@ -1,6 +1,7 @@
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf } from "@grasp-os/shared/audit";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import {
   workflowParamsEditSchema,
   workflowResourceErrors,
@@ -193,6 +194,22 @@ const currentContract = async (
  * The settings `values` make of `contract`, the values of parameters
  * `sensitive` names, or the contract marks, withheld.
  */
+/**
+ * A parameter's JSON Schema, as its sealed descriptor states it: what the
+ * page takes a value as. None for a descriptor this SDK can't read.
+ */
+const schemaOfParam = (descriptor: Json): Json => {
+  try {
+    const schema: unknown = jsonSchemaOf(
+      schemaFromDescriptor(JSON.stringify(descriptor)).descriptor,
+      { exact: true }
+    );
+    return z.json().parse(schema);
+  } catch {
+    return null;
+  }
+};
+
 const settingsOf = (
   contract: VersionContract,
   values: Record<string, unknown>,
@@ -209,6 +226,7 @@ const settingsOf = (
         sensitive: withheld,
         set,
         value: set && !withheld ? values[name] : null,
+        schema: schemaOfParam(declared.descriptor),
       };
     });
 

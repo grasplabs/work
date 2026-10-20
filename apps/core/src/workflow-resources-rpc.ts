@@ -52,6 +52,7 @@ import {
 import { startWorkflow } from "./workflow-starts.ts";
 import { resourceRunTrace } from "./workflows/resource-run-trace.ts";
 import {
+  listResourceRuns,
   resourceRunFor,
   terminateResourceRun,
 } from "./workflows/resource-runs.ts";
@@ -179,6 +180,13 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await resourceRunFor(this.#env, person, id, runId)
+    );
+  }
+
+  async runs(id: string): Promise<WorkflowResourceRun[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listResourceRuns(this.#env, person, id)
     );
   }
 

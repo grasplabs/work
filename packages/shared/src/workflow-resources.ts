@@ -445,6 +445,8 @@ export interface WorkflowParamSetting {
   set: boolean;
   /** The value set, for a parameter that isn't sensitive; null otherwise. */
   value: unknown;
+  /** Its JSON Schema, as the current version seals it; null if unknown. */
+  schema: unknown;
 }
 
 /** A workflow's parameter configuration at a revision. */
@@ -854,6 +856,11 @@ export interface WorkflowResourcesApi {
   start: (id: string, input: unknown) => Promise<WorkflowStart>;
   /** One of its runs, for anyone with a role (`WorkflowResourceRun`). */
   run: (id: string, runId: string) => Promise<WorkflowResourceRun>;
+  /**
+   * Its runs, newest first, the latest page: every run for its builders,
+   * a user's own for a user; never what one returned or why it failed.
+   */
+  runs: (id: string) => Promise<WorkflowResourceRun[]>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
   /** What run `runId` did, over its version's diagram, for builders. */

@@ -1711,6 +1711,8 @@ describe("parameter configuration", () => {
           sensitive: false,
           set: true,
           value: 4,
+          // As the version declares it, for the page to take a value as.
+          schema: { type: "integer", minimum: 1, maximum: 10 },
         },
         {
           name: "token",
@@ -1718,6 +1720,7 @@ describe("parameter configuration", () => {
           sensitive: true,
           set: true,
           value: null,
+          schema: { type: "string", maxLength: 64 },
         },
       ],
       inEvents: false,
@@ -1769,6 +1772,7 @@ describe("a sensitive parameter", () => {
         sensitive: true,
         set: true,
         value: null,
+        schema: { type: "string", maxLength: 64 },
       },
       leaks: false,
       leaksLater: false,

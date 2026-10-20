@@ -1,8 +1,10 @@
 import type {
   SteeredWrite,
   WorkflowDraft,
+  WorkflowParams,
   WorkflowResource,
   WorkflowActionReview,
+  WorkflowResourceRun,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -35,6 +37,8 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
+import { ResourceParams } from "../workflows/resource-params.tsx";
+import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { TestRun } from "../workflows/test-run.tsx";
 
 // One independent workflow (platform specification 13): for its builders,
@@ -44,7 +48,9 @@ import { TestRun } from "../workflows/test-run.tsx";
 // Each version shows what its own actions may call, as sealed with it
 // (GRA-709): each binding they use, and a connector's exact operations;
 // and, for one that asks a model, the writes its answers may steer
-// (GRA-718), which no reviewer should have to piece together.
+// (GRA-718), which no reviewer should have to piece together. Its
+// parameters, which its builders set, and its runs, as core lists them for
+// the reader (GRA-674).
 
 /**
  * One use whose writes a model's answers may steer (GRA-718), as its
@@ -152,10 +158,16 @@ const WorkflowResourceView = ({
   resource,
   draft,
   versions,
+  params,
+  runs,
+  me,
 }: {
   resource: WorkflowResource;
   draft: Loaded<WorkflowDraft> | undefined;
   versions: Loaded<WorkflowResourceVersion[]>;
+  params: Loaded<WorkflowParams>;
+  runs: Loaded<WorkflowResourceRun[]>;
+  me: string;
 }) => {
   const router = useRouter();
   const { currentVersion } = resource;
@@ -193,6 +205,12 @@ const WorkflowResourceView = ({
               <Trans context="tab of a workflow">Definition</Trans>
             </TabsTrigger>
           )}
+          <TabsTrigger value="parameters">
+            <Trans context="tab of a workflow">Parameters</Trans>
+          </TabsTrigger>
+          <TabsTrigger value="runs">
+            <Trans context="tab listing the runs of workflows">Runs</Trans>
+          </TabsTrigger>
           <TabsTrigger value="versions">
             <Trans context="tab of a workflow">Versions</Trans>
           </TabsTrigger>
@@ -225,6 +243,29 @@ const WorkflowResourceView = ({
           </div>
         </TabsContent>
       )}
+      {/* Kept while another tab shows: what was typed stays. */}
+      <TabsContent keepMounted value="parameters">
+        <div className="mx-auto w-full max-w-5xl p-6">
+          {params.state === "ready" ? (
+            <ResourceParams
+              editable={resource.role === "builder"}
+              loaded={params.data}
+              workflow={resource.id}
+            />
+          ) : (
+            <NotLoadedState page={params} />
+          )}
+        </div>
+      </TabsContent>
+      <TabsContent value="runs">
+        <div className="mx-auto w-full max-w-5xl p-6">
+          {runs.state === "ready" ? (
+            <ResourceRuns me={me} runs={runs.data} />
+          ) : (
+            <NotLoadedState page={runs} />
+          )}
+        </div>
+      </TabsContent>
       <TabsContent value="versions">
         <div className="mx-auto w-full max-w-5xl p-6">
           {versions.state === "ready" ? (
@@ -239,7 +280,8 @@ const WorkflowResourceView = ({
 };
 
 const WorkflowResourcePage = () => {
-  const { resource, draft, versions } = Route.useLoaderData();
+  const { resource, draft, versions, params, runs } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   const { t } = useLingui();
   const name = resource.state === "ready" ? resource.data.name : undefined;
   const crumbs = [
@@ -265,7 +307,10 @@ const WorkflowResourcePage = () => {
           // one keeps what is typed in its editor.
           key={resource.data.id}
           draft={draft}
+          me={identity.userId}
+          params={params}
           resource={resource.data}
+          runs={runs}
           versions={versions}
         />
       </div>
@@ -276,7 +321,7 @@ const WorkflowResourcePage = () => {
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   pendingComponent: PageLoading,
   loader: async ({ context: { core }, params: { workflow } }) => {
-    const [resource, versions] = await Promise.all([
+    const [resource, versions, params, runs] = await Promise.all([
       loadFromCore(
         core,
         async (session) => await session.workflowResources.get(workflow)
@@ -284,6 +329,14 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       loadFromCore(
         core,
         async (session) => await session.workflowResources.versions(workflow)
+      ),
+      loadFromCore(
+        core,
+        async (session) => await session.workflowResources.params(workflow)
+      ),
+      loadFromCore(
+        core,
+        async (session) => await session.workflowResources.runs(workflow)
       ),
     ]);
     // Only its builders read its draft.
@@ -294,7 +347,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
             async (session) => await session.workflowResources.draft(workflow)
           )
         : undefined;
-    return { resource, draft, versions };
+    return { resource, draft, versions, params, runs };
   },
   component: WorkflowResourcePage,
 });

@@ -16,7 +16,18 @@ import { namedError } from "@grasp-os/workerflow/errors";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
-import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -898,6 +909,49 @@ const resultOf = async (
     return { error: keptFailureOf(row.failureCode) };
   }
   return engine.error === undefined ? {} : { error: engine.error };
+};
+
+/** The most runs `listResourceRuns` answers: the newest. */
+const runsListed = 50;
+
+/**
+ * Workflow `id`'s runs, newest first, the latest {@link runsListed}, for
+ * anyone with a role, as `resourceRunFor` decides each: its builders (admins
+ * among them) see every run, a user only their own, and learns nothing of
+ * others'. Never what a run returned or why it failed: those are
+ * `resourceRunFor`'s, under its own rule for who sees them.
+ */
+export const listResourceRuns = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<WorkflowResourceRun[]> => {
+  const workflow = await requireWorkflowRole(env, by, id, "user");
+  const runs = workflowResourceRuns;
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(runs)
+    .where(
+      and(
+        eq(runs.workflowResourceId, workflow.id),
+        workflow.role === "builder"
+          ? undefined
+          : eq(runs.principalId, by.userId)
+      )
+    )
+    .orderBy(desc(runs.createdAt), desc(runs.id))
+    .limit(runsListed);
+  return rows.map((row) => ({
+    id: row.id,
+    workflowId: row.workflowResourceId,
+    version: row.version,
+    manifestHash: row.manifestHash,
+    buildHash: row.buildHash,
+    principal: row.principalId,
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+    endedAt: row.endedAt?.toISOString() ?? null,
+  }));
 };
 
 /**
