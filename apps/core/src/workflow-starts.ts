@@ -7,7 +7,12 @@ import {
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  ChatId,
+  WorkflowResourceId,
+  WorkspaceId,
+} from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -299,6 +304,34 @@ const appRoleSql = (
 /** That a permission allowing `start` on `id` for the invoker holds, as SQL. */
 const grantSql = (allowing: SQL): SQL =>
   sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
+
+/**
+ * That App `app`, at `appVersion`, may start workflow `workflow` for
+ * `person` now, as SQL: the App's own grant, from a version the App has
+ * (one no admin approved changes nothing) whose release isn't revoked,
+ * for someone who may use the App now. What a start by the App is
+ * admitted on, and what a screen is told it may do (screen-workflows.ts),
+ * so the two never differ.
+ */
+export const appStartHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId
+): SQL => sql`(${appRoleSql(person, app)}
+  AND EXISTS (SELECT 1 FROM app_versions AS code
+    WHERE code.app_id = ${app} AND code.version = ${appVersion})
+  AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
+    WHERE sealed.app_id = ${app} AND sealed.version = ${appVersion}
+      AND sealed.revoked_at IS NOT NULL)
+  AND ${grantSql(
+    allowingPermissionSql(
+      { type: "app", appId: app },
+      appVersion,
+      { type: "workflow", workflowId: workflow },
+      "start"
+    )
+  )})`;
 
 /** Where a version's manifest seals the approved packages its modules import. */
 const manifestPackagesSchema = z.object({
@@ -592,18 +625,12 @@ const ruleOf = async (
         triggerVersion: null,
         principal: onBehalfOf,
         actor: delegateActorOf(invoker.authority),
-        // The App's own grant, from a version the App has (one no admin
-        // approved changes nothing) whose release isn't revoked, for
-        // someone who may use the App now.
-        holds: sql`(${appRoleSql(onBehalfOf, subject.appId)}
-          AND EXISTS (SELECT 1 FROM app_versions AS code
-            WHERE code.app_id = ${subject.appId} AND code.version = ${appVersion})
-          AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
-            WHERE sealed.app_id = ${subject.appId} AND sealed.version = ${appVersion}
-              AND sealed.revoked_at IS NOT NULL)
-          AND ${grantSql(
-            allowingPermissionSql(subject, appVersion, object, "start")
-          )})`,
+        holds: appStartHoldsSql(
+          subject.appId,
+          appVersion,
+          onBehalfOf,
+          workflowId.data
+        ),
       };
     }
     case "agent": {

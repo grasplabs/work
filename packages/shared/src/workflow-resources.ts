@@ -133,6 +133,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
   "workflow.run_unavailable": "This workflow has no such run.",
+  "workflow.run_details_removed":
+    "This run ended long enough ago that what it returned is no longer kept.",
   "workflow.decision_unavailable":
     "This workflow has no such decision for you to see.",
   "workflow.run_limit":
@@ -169,6 +171,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.app_binding_invalid":
     "That isn't a workflow version this App can bind.",
   "workflow.app_binding_unavailable": "This App has no such workflow binding.",
+  "workflow.portable_unavailable":
+    "An App's workflows can't be started, controlled or followed from a portable host yet: use the App in Grasp.",
   "workflow.call_denied":
     "This run may no longer make that call: the person it acts for, the approval or permission behind the binding, or the trigger, App or agent that started it lost what it needed since the run started.",
   "workflow.call_invalid":
