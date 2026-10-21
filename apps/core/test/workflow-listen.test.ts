@@ -452,7 +452,12 @@ describe("listen tasks", { timeout: 120_000 }, () => {
     ]);
     const runId = await started(admin, workflow.id);
     await waiting(runId);
-    const event = delivery(workflow.id, runId, { note: "first" });
+    // Another job's: accepted, and taken by no listen, so the run still
+    // waits while every refusal below is checked.
+    const event = delivery(workflow.id, runId, {
+      subject: "job-2",
+      note: "first",
+    });
     await admitRunEvent(env, event);
 
     const refused = {
@@ -481,13 +486,14 @@ describe("listen tasks", { timeout: 120_000 }, () => {
         admitRunEvent(env, { ...event, data: { jobId: "job-1", note: "x" } })
       ),
     };
+    const stillWaiting = await liveStatus(runId);
     await revokeWorkflowBinding(env, admin, workflow.id, approvals.jobEvents);
     const revoked = await outcome(
       admitRunEvent(env, delivery(workflow.id, runId))
     );
     const journal = await runObject(runId).journal();
 
-    expect({ ...refused, revoked }).toStrictEqual({
+    expect({ ...refused, revoked, stillWaiting }).toStrictEqual({
       binding: "workflow.event_invalid",
       type: "workflow.event_invalid",
       data: "workflow.event_invalid",
@@ -495,6 +501,7 @@ describe("listen tasks", { timeout: 120_000 }, () => {
       relativeSource: "workflow.event_invalid",
       reusedKey: "workflow.event_conflict",
       revoked: "workflow.event_denied",
+      stillWaiting: "waiting",
     });
     expect(journal?.events).toHaveLength(1);
   });
