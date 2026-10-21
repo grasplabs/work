@@ -226,16 +226,22 @@ const answerQuotaPolicy = async (
   ) {
     return new Response("Forbidden", { status: 403 });
   }
-  // Each generation keeps the limits it was first deployed with, as core
-  // records them; a later version under it with other limits changes
-  // nothing.
+  // Only the versions that went live: core records a generation as it
+  // runs under it, never one uploaded and left without traffic. Each
+  // generation keeps the limits it first went live with, as core records
+  // them; a later version under it with other limits changes nothing.
+  const ranLive = new Set(
+    script.deployments.flatMap(({ versions }) =>
+      versions.map(({ version_id: id }) => id)
+    )
+  );
   let highest: QuotaPolicyReport = {
     generation: 0,
     lowered: {},
     limitsHash: null,
     recordedAt: null,
   };
-  for (const version of script.versions) {
+  for (const version of script.versions.filter(({ id }) => ranLive.has(id))) {
     const limits = quotaLimitsOf(version);
     if (limits !== undefined && limits.generation > highest.generation) {
       highest = {

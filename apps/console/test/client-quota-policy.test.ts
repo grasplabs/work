@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { summaryOf } from "../src/clients/quota-policy-card.tsx";
 import { clientQuotaPolicy } from "../src/clients/quota-policy.ts";
@@ -190,6 +190,38 @@ describe("a client's quota policy", () => {
     });
   });
 
+  it("waits for the next deploy while a deploy of the console's generation failed before it went live", async () => {
+    const release = await importedRelease("feat(core): quota policy not live");
+    const { clientId } = await recordClient();
+    await setQuota(clientId, 3, 100);
+    await deploy(clientId, release);
+    await setQuota(clientId, 4, 50);
+    // Its versions uploaded, the switch of traffic to them refused.
+    cloudflare.failNext(
+      (call) =>
+        call.method === "POST" &&
+        call.path.endsWith("/workers/scripts/grasp-os-core/deployments"),
+      400
+    );
+    const deployId = await startDeploy(db, staff, clientId, release);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {
+      /* the failed deploy's log line */
+    });
+    try {
+      await expect(
+        runDeploy(await deployContext(env), deployId)
+      ).rejects.toBeInstanceOf(Error);
+    } finally {
+      logged.mockRestore();
+    }
+
+    await expect(clientQuotaPolicy(env, clientId)).resolves.toMatchObject({
+      set: { generation: 4 },
+      inForce: { generation: 3, lowered: { workflowSteps: 100 } },
+      state: "pending",
+    });
+  });
+
   it("is unknown, never in sync, when core can't answer: a core from before the report, one that fails or redirects elsewhere, one not deployed", async () => {
     const release = await importedRelease("feat(core): quota policy unknown");
     const old = await recordClient();
@@ -241,6 +273,7 @@ describe("a client's quota policy", () => {
       conflict: summaryOf(policyOf(3, 3, "drifted")),
       noneSet: summaryOf(policyOf(0, 3, "drifted")),
       pending: summaryOf(policyOf(4, 3, "pending")),
+      pendingNone: summaryOf(policyOf(0, 3, "pending")),
       unknown: summaryOf(policyOf(0, null, "unknown")),
       unknownSet: summaryOf(policyOf(2, null, "unknown")),
     }).toStrictEqual({
@@ -252,6 +285,8 @@ describe("a client's quota policy", () => {
       noneSet:
         "Core applies generation 3, though the console sets none: core keeps the highest generation it recorded.",
       pending:
+        "Core applies generation 3. The console's generation 4 waits for the client's next deploy.",
+      pendingNone:
         "Core applies generation 3. The console's change waits for the client's next deploy.",
       unknown:
         "The console sets no policy. Core couldn't be asked which it applies.",

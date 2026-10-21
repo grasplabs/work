@@ -111,8 +111,8 @@ export interface AccountState {
   /**
    * `absent` for a core from before the quota policy report, which answers
    * it 404. Otherwise its core answers the policy it applies, as core does:
-   * the highest generation any of its versions was deployed with, with
-   * the limits it was first deployed with. `redirect` for one that answers
+   * the highest generation any of its versions went live with, with the
+   * limits it first went live with. `redirect` for one that answers
    * with a redirect elsewhere.
    */
   quotaPolicy?: "absent" | "redirect";

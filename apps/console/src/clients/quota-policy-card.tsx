@@ -56,7 +56,9 @@ export const summaryOf = ({
   }
   const theirs = generationText(inForce.generation);
   if (state === "pending") {
-    return `Core applies ${theirs}. The console's change waits for the client's next deploy.`;
+    const waiting =
+      set.generation === 0 ? "change" : generationText(set.generation);
+    return `Core applies ${theirs}. The console's ${waiting} waits for the client's next deploy.`;
   }
   if (state !== "drifted") {
     return `Core applies ${theirs}, as the console sets.`;
@@ -85,18 +87,24 @@ export const QuotaPolicyCard = ({ policy }: { policy: ClientQuotaPolicy }) => (
       </CardAction>
     </CardHeader>
     <CardContent>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-4">
         <p className="text-sm">{summaryOf(policy)}</p>
         {policy.inForce === null ? null : (
-          <>
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium">{`Core applies ${generationText(policy.inForce.generation)}`}</span>
             {policy.inForce.recordedAt === null ? null : (
               <p className="text-muted-foreground text-sm">
                 {`Recorded by core ${formatTime(new Date(policy.inForce.recordedAt))} (UTC).`}
               </p>
             )}
             <LoweredLimits lowered={policy.inForce.lowered} />
-          </>
+          </div>
         )}
+        {/* What the console sets, beside it: what runs now against what a deploy brings. */}
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium">{`The console sets ${policy.set.generation === 0 ? "no policy" : generationText(policy.set.generation)}`}</span>
+          <LoweredLimits lowered={policy.set.lowered} />
+        </div>
       </div>
     </CardContent>
   </Card>
