@@ -124,6 +124,10 @@ describe("the admin's Platform page", () => {
         companies.indexOf("Laggard") < companies.indexOf("Earlyco") &&
         companies.indexOf("Laggard") < companies.indexOf("Firstco"),
       opensSetup: html.includes(`href="/admin/organizations/${first}/setup"`),
+      // What staff did, as the audit log keeps it: adding a company, never a deploy's steps.
+      doneHere: text
+        .slice(text.indexOf("Done here"))
+        .includes("ops@grasp.test added Laggard"),
     }).toMatchObject({
       status: 200,
       release: true,
@@ -134,6 +138,7 @@ describe("the admin's Platform page", () => {
       laggardBehind: true,
       laggardFirst: true,
       opensSetup: true,
+      doneHere: true,
     });
     const [a, b, c] = [
       spread.indexOf(newest.id),

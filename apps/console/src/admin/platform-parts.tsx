@@ -8,6 +8,7 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { CheckIcon, PauseIcon, XIcon } from "lucide-react";
 
 import type { TargetView } from "../rollout/queries.ts";
+import type { StaffEvent } from "./platform-data.ts";
 import type { PlatformNeed, RingState, Standing } from "./platform.ts";
 import { formatPercent } from "./words.ts";
 
@@ -69,6 +70,34 @@ export const needWords = (need: PlatformNeed): string => {
       return "";
     }
   }
+};
+
+/**
+ * What someone at Grasp did, in a line: who, then what, naming the company
+ * by `nameOf` and the release or rollout by its id.
+ */
+export const eventWords = (
+  event: StaffEvent,
+  nameOf: (clientId: string) => string
+): string => {
+  const company = event.clientId === null ? "" : nameOf(event.clientId);
+  const target = event.target ?? "";
+  const what: Record<StaffEvent["action"], string> = {
+    "rollout.start": `started a rollout${target === "" ? "" : ` (${target})`}`,
+    "rollout.approve": "approved a rollout's next ring",
+    "rollout.pause": "paused a rollout",
+    "rollout.resume": "resumed a rollout",
+    "rollout.cancel": "cancelled a rollout",
+    "rollout.rollback": `rolled ${company} back`,
+    "client.create": `added ${company}`,
+    "client.ring": `moved ${company} to another ring`,
+    "client.pin": `pinned ${company} to ${target}`,
+    "client.unpin": `unpinned ${company}`,
+    "client.rotate_secrets": `rotated ${company}'s secrets`,
+    "client.apply_settings": `applied ${company}'s settings`,
+    "client.sign_in": `changed how ${company}'s people sign in`,
+  };
+  return `${event.actor} ${what[event.action]}`;
 };
 
 const standingDot: Record<Standing, string> = {

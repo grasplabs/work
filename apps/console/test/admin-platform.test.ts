@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { platformData } from "../src/admin/platform-data.ts";
+import { platformData, staffEvents } from "../src/admin/platform-data.ts";
 import {
   companiesOf,
   goingOut,
@@ -12,7 +12,12 @@ import {
 } from "../src/admin/platform.ts";
 import type { GridRow, LiveStatus } from "../src/clients/grid.ts";
 import { consoleDatabase } from "../src/db/act.ts";
-import { clients, rollouts, rolloutTargets } from "../src/db/schema.ts";
+import {
+  auditEvents,
+  clients,
+  rollouts,
+  rolloutTargets,
+} from "../src/db/schema.ts";
 import { importReleases } from "../src/releases/import.ts";
 import type { ReleaseSummary } from "../src/releases/queries.ts";
 import type { RolloutSummary, TargetView } from "../src/rollout/queries.ts";
@@ -20,6 +25,8 @@ import { publishRelease } from "./releases.ts";
 
 const db = consoleDatabase(env.DB);
 const day = (n: number) => new Date(Date.UTC(2026, 9, n));
+/** `ms` past a moment after any event a test makes now, so its events are the latest. */
+const later = (ms: number) => new Date(Date.UTC(2099, 0, 1) + ms);
 
 const summary = (
   id: string,
@@ -317,5 +324,47 @@ describe("the Platform page's data", () => {
         { clientId: clientIds[1], ring: 1, status: "pending" },
       ],
     });
+  });
+
+  it("lists what staff did to the platform, the latest first, and none of the console's own jobs or a deploy's steps", async () => {
+    const tag = crypto.randomUUID().slice(0, 8);
+    await db.insert(auditEvents).values([
+      {
+        id: `pin-${tag}`,
+        at: later(2),
+        actor: "ops@grasp.test",
+        action: "client.pin",
+        clientId: `acme-${tag}`,
+        target: "r1",
+      },
+      {
+        id: `approve-${tag}`,
+        at: later(3),
+        actor: "ops@grasp.test",
+        action: "rollout.approve",
+        target: "rollout-1",
+      },
+      {
+        id: `system-${tag}`,
+        at: later(4),
+        actor: "system",
+        action: "rollout.done",
+        target: "rollout-1",
+      },
+      {
+        id: `deploy-${tag}`,
+        at: later(5),
+        actor: "ops@grasp.test",
+        action: "deploy.start",
+        clientId: `acme-${tag}`,
+      },
+    ]);
+
+    const events = await staffEvents(db);
+
+    expect(events.slice(0, 2).map(({ id }) => id)).toStrictEqual([
+      `approve-${tag}`,
+      `pin-${tag}`,
+    ]);
   });
 });
