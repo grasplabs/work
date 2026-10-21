@@ -23,6 +23,13 @@ const lintReport = z.object({
   ),
 });
 
+/**
+ * How long a test that runs `vp lint` may take: a cold lint loads the
+ * repo's whole config and plugins, which on a busy CI runner takes longer
+ * than vitest's default 5 seconds.
+ */
+const lintTimeoutMs = 60_000;
+
 /** What `vp lint` reports for each rule of ours on `files`, planted in the repo for the run. */
 const linted = async (
   files: Record<string, string>
@@ -84,30 +91,34 @@ describe("the product's old name", () => {
     }
   );
 
-  it("fails the lint in a string or JSX text people read, never in a comment, a code name or a test", async () => {
-    const reported = await linted({
-      "apps/web/src/NAME.tsx": [
-        "// Grasp OS, in a comment, is for us.",
-        'export const title = "Welcome to Grasp OS";',
-        "export const Banner = () => <p>Grasp OS is here</p>;",
-        'export const route = "/grasp-os";',
-        "",
-      ].join("\n"),
-      "apps/core/src/NAME.ts": [
-        "export const subject = `Your Grasp OS invite`;",
-        // Escaped, it still reads as the old name.
-        "export const escaped = `Grasp\\u0020OS`;",
-        "",
-      ].join("\n"),
-      "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
-    });
-    expect(reported).toStrictEqual([
-      { file: "apps/core/src/NAME.ts", line: 1 },
-      { file: "apps/core/src/NAME.ts", line: 2 },
-      { file: "apps/web/src/NAME.tsx", line: 2 },
-      { file: "apps/web/src/NAME.tsx", line: 3 },
-    ]);
-  });
+  it(
+    "fails the lint in a string or JSX text people read, never in a comment, a code name or a test",
+    { timeout: lintTimeoutMs },
+    async () => {
+      const reported = await linted({
+        "apps/web/src/NAME.tsx": [
+          "// Grasp OS, in a comment, is for us.",
+          'export const title = "Welcome to Grasp OS";',
+          "export const Banner = () => <p>Grasp OS is here</p>;",
+          'export const route = "/grasp-os";',
+          "",
+        ].join("\n"),
+        "apps/core/src/NAME.ts": [
+          "export const subject = `Your Grasp OS invite`;",
+          // Escaped, it still reads as the old name.
+          "export const escaped = `Grasp\\u0020OS`;",
+          "",
+        ].join("\n"),
+        "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
+      });
+      expect(reported).toStrictEqual([
+        { file: "apps/core/src/NAME.ts", line: 1 },
+        { file: "apps/core/src/NAME.ts", line: 2 },
+        { file: "apps/web/src/NAME.tsx", line: 2 },
+        { file: "apps/web/src/NAME.tsx", line: 3 },
+      ]);
+    }
+  );
 
   it("fails the check in a catalog or page people read, naming where", () => {
     const files = [
