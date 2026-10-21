@@ -1437,8 +1437,11 @@ build: {
    * draft sealed as a release, on a store of its own, which keeps what
    * calls write until the next \`env.build.write\` empties it, with no
    * connections, Knowledge or models (\`resource.unavailable\`); what it
-   * wrote with \`console\`, in the next check's \`preview.logs\`. What the
-   * draft's code failed with comes back as \`ok: false\`. Only an App with
+   * wrote with \`console\`, in the next check's \`preview.logs\`. A failure
+   * the draft's to fix comes back as \`ok: false\`: a path that names none
+   * of its functions, code that doesn't seal, or a function's own failure
+   * as the preview answered it (a contract it broke, say); anything else
+   * (no draft, a refusal of the call) is thrown. Only an App with
    * \`app.ts\` and \`schema.ts\` previews (\`app.preview_layout\`, thrown).
    */
   call(app: string, method: string, args?: unknown): Promise<
