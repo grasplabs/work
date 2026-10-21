@@ -288,6 +288,98 @@ export default function Server() {
     );
   });
 
+  it("fails every other way a screen styles itself outside the kit, or loads from outside, saying what to do", async () => {
+    const built = await buildScreens(
+      env,
+      app({
+        "screens/escapes.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
+import { useEffect, useRef } from "react";
+
+export default function Escapes() {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (box.current) {
+      box.current.style.color = "red";
+      box.current.style.setProperty("--x", "1");
+      box.current.setAttribute("style", "color: red");
+    }
+    const sheet = document.createElement("style");
+    document.head.append(sheet);
+    document.adoptedStyleSheets = [new CSSStyleSheet()];
+  }, []);
+  return (
+    <div ref={box}>
+      <link rel="stylesheet" href="https://cdn.example/theme.css" />
+      <img alt="" src="https://cdn.example/logo.png" />
+      <img alt="" src="data:image/png;base64,AAAA" />
+      <div className="!p-2 gap-2" />
+      <div dangerouslySetInnerHTML={{ __html: "<b>hi</b>" }} />
+      <div className={cn("gap-2", [{ "p-4!": true }])} />
+    </div>
+  );
+}
+`,
+      }),
+      "app-test"
+    );
+
+    expect(built.ok).toBeFalsy();
+    expect(
+      built.diagnostics
+        .filter(({ file }) => file === "screens/escapes.tsx")
+        .map(({ line, rule }) => `${line} ${rule}`)
+    ).toStrictEqual([
+      "8 grasp/no-style-escapes",
+      "9 grasp/no-style-escapes",
+      "10 grasp/no-style-escapes",
+      "12 grasp/no-style-escapes",
+      "13 grasp/no-style-escapes",
+      "14 grasp/no-style-escapes",
+      "14 grasp/no-style-escapes",
+      "18 grasp/no-remote-resources",
+      "19 grasp/no-remote-resources",
+      "21 grasp/no-important",
+      "22 grasp/no-style-escapes",
+      "23 grasp/no-important",
+    ]);
+    // Each says what to do instead.
+    expect(
+      built.diagnostics.every(({ message }) =>
+        /kit|lucide-react|data: or blob:/u.test(message)
+      )
+    ).toBeTruthy();
+  });
+
+  it("passes a screen whose names only look like an escape", async () => {
+    const built = await buildScreens(
+      env,
+      app({
+        "screens/lookalikes.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
+
+const page = { head: "Tickets", style: "compact" };
+
+export default function Lookalikes() {
+  const { head, style } = page;
+  const list = { head: "first" };
+  list.head = "second";
+  const saved = "Saved!";
+  return (
+    <section aria-label={head} title={saved}>
+      <p className={cn({ "text-muted-foreground": style === "Wow!" })}>
+        {style}! {list.head} {String(new Error("Oops!").message)}
+      </p>
+      <img alt="" src="./logo.png" />
+    </section>
+  );
+}
+`,
+      }),
+      "app-test"
+    );
+
+    expect(built).toMatchObject({ ok: true, diagnostics: [] });
+  });
+
   it("checks a typical screen quickly once the isolate is warm", async () => {
     const compiler = startAppCompiler(env.LOADER, env.ASSETS);
     // The first check parses the kit's declarations; later ones reuse them.
