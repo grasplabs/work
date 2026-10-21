@@ -41,7 +41,6 @@ import {
   collections,
   documents,
   links,
-  sections,
   versions,
 } from "../db/knowledge/schema.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
@@ -57,6 +56,7 @@ import {
   parseFrontmatter,
 } from "./frontmatter.ts";
 import type { ParsedDocument } from "./frontmatter.ts";
+import { publishInline } from "./indexing.ts";
 import { extractLinks, splitSections } from "./markdown.ts";
 import type { Link, Section } from "./markdown.ts";
 import { memoryFileOf, requireWithinLimit } from "./memory-files.ts";
@@ -73,8 +73,9 @@ import type { StagedPayload } from "./payloads.ts";
 // file's size, memory-files.ts), its Markdown split into sections and its
 // links found, its text stored as an immutable payload in R2
 // (payloads.ts), and then one D1 batch (a transaction) commits the
-// payload, adds the next version, replaces the sections and links, updates
-// the document and stores the audit event. The batch commits whole or not
+// payload, adds the next version, replaces the links, updates the document
+// (queued for indexing) and stores the audit event; its sections are then
+// published to search (indexing.ts). The batch commits whole or not
 // at all, and a save from a version that is no longer current writes
 // nothing (its payload, unreferenced, is collected later).
 
@@ -275,6 +276,8 @@ export const toSummary = (row: DocumentRow): DocumentSummary => ({
   tags: tagsSchema.parse(JSON.parse(row.tags)),
   reviewDate: row.reviewDate,
   currentVersion: row.currentVersion,
+  indexedVersion: row.indexedVersion,
+  indexing: row.indexState,
   updatedAt: row.updatedAt.toISOString(),
 });
 
@@ -450,6 +453,21 @@ const admitted = async (
 };
 
 /**
+ * `row`, just saved, once its sections are published (`publishInline`):
+ * marked indexed when search holds them, queued otherwise.
+ */
+const published = async (
+  env: Env,
+  db: DrizzleD1Database,
+  row: DocumentRow,
+  found: readonly Section[],
+  required: boolean
+): Promise<DocumentRow> =>
+  (await publishInline(env, db, row.id, row.currentVersion, found, required))
+    ? { ...row, indexedVersion: row.currentVersion, indexState: "indexed" }
+    : row;
+
+/**
  * Writes the next version, if the document is still at `ifVersion`
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
  * it is at, and writes nothing otherwise.
@@ -485,12 +503,17 @@ export const writeVersion = async (
     tags: JSON.stringify(prepared.tags),
     reviewDate: prepared.reviewDate,
     currentVersion: number,
+    // The save is its version's indexing intent (indexing.ts).
+    indexState: "queued" as const,
+    indexAttempts: 0,
+    indexFailure: null,
     updatedAt: now,
   };
   const row: DocumentRow = {
     id: documentId,
     collectionId: collection.id,
     path,
+    indexedVersion: existing?.indexedVersion ?? null,
     createdAt: existing?.createdAt ?? now,
     ...changes,
   };
@@ -521,16 +544,6 @@ export const writeVersion = async (
       restoredFrom,
       createdAt: now,
     }),
-    db.delete(sections).where(eq(sections.documentId, documentId)),
-    ...inChunks(
-      prepared.sections.map((section, position) => ({
-        documentId,
-        version: number,
-        position,
-        headings: JSON.stringify(section.headings),
-        text: section.text,
-      }))
-    ).map((chunk) => db.insert(sections).values(chunk)),
     db.delete(links).where(eq(links.fromDocumentId, documentId)),
     ...inChunks(
       prepared.links.map((link) => ({
@@ -583,7 +596,10 @@ export const writeVersion = async (
     }
     await send(await stagePayload(env, db, collection.id, text));
   }
-  return toSummary(row);
+  // Saved: search has it once published, here or by its indexing run.
+  return toSummary(
+    await published(env, db, row, prepared.sections, write.purge === true)
+  );
 };
 
 /**

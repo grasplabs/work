@@ -86,10 +86,31 @@ export const documents = sqliteTable(
     /** `YYYY-MM-DD`. */
     reviewDate: text("review_date"),
     currentVersion: integer("current_version").notNull(),
+    /**
+     * The version whose sections search holds (knowledge/indexing.ts):
+     * the current one once indexed, an older one while it catches up.
+     */
+    indexedVersion: integer("indexed_version"),
+    /**
+     * Where indexing the current version stands: set `queued` by the save
+     * that makes it current, in the same batch, so the save is its durable
+     * intent; `indexed` by the batch that publishes its sections.
+     */
+    indexState: text("index_state", {
+      enum: ["queued", "retrying", "indexed", "failed"],
+    })
+      .notNull()
+      .default("queued"),
+    /** Failed attempts at indexing the current version. */
+    indexAttempts: integer("index_attempts").notNull().default(0),
+    /** The code of the error indexing the current version last failed with. */
+    indexFailure: text("index_failure"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
   (table) => [
+    // The repair sweep, and search's coverage, find what isn't indexed.
+    index("documents_index_state_idx").on(table.indexState, table.updatedAt),
     uniqueIndex("documents_collection_path_idx").on(
       table.collectionId,
       table.path
@@ -184,7 +205,11 @@ export const versions = sqliteTable(
   ]
 );
 
-/** The current version's sections, split by heading, in order. */
+/**
+ * The sections search holds of each document: those of its indexed version
+ * (`documents.indexed_version`), split by heading, in order, replaced
+ * whole by each published generation (knowledge/indexing.ts).
+ */
 export const sections = sqliteTable(
   "sections",
   {

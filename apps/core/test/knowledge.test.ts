@@ -169,6 +169,8 @@ describe("saving a document", () => {
         tags: ["hr"],
         reviewDate: "2027-03-01",
         currentVersion: 1,
+        indexedVersion: 1,
+        indexing: "indexed",
         updatedAt: first.updatedAt,
       },
       sectionsOfFirst: [

@@ -4,11 +4,13 @@ import {
   collectionSearchOptionsSchema,
   documentTypeOf,
   knowledgeErrors,
+  searchCoverageCap,
   searchOptionsSchema,
   searchQuerySchema,
 } from "@grasp-os/shared/knowledge";
 import type {
   Provenance,
+  SearchCoverage,
   SearchHit,
   SearchResults,
 } from "@grasp-os/shared/knowledge";
@@ -262,6 +264,7 @@ const toHit = (row: z.infer<typeof hitRowSchema>): SearchHit => ({
   type: documentTypeOf(row.type),
   description: row.description,
   section: row.section,
+  version: row.version,
   headings: headingsSchema.parse(JSON.parse(row.headings)),
   snippet: row.snippet,
 });
@@ -394,6 +397,35 @@ const searchRecord = async (
 };
 
 /**
+ * How many readable documents in the search's scope (`scope`, `type`)
+ * search can't see at their current version: queued or retrying, and
+ * failed. Each count stops at `searchCoverageCap`.
+ */
+const coverageOf = async (
+  db: DrizzleD1Database,
+  allowed: Allowed,
+  scope: string | undefined,
+  type: string | undefined
+): Promise<SearchCoverage> => {
+  const [row] = await db.all<{ pending: number; failed: number }>(sql`
+    SELECT
+      min(${searchCoverageCap}, coalesce(sum(state <> 'failed'), 0)) AS pending,
+      min(${searchCoverageCap}, coalesce(sum(state = 'failed'), 0)) AS failed
+    FROM (
+      SELECT documents.index_state AS state
+      FROM documents
+      JOIN collections ON collections.id = documents.collection_id
+      WHERE documents.index_state IN ('queued', 'retrying', 'failed')
+        AND ${allowed.documents()}
+        ${scope === undefined ? sql`` : sql`AND collections.id = ${scope}`}
+        ${type === undefined ? sql`` : sql`AND documents.type = ${type}`}
+      LIMIT ${2 * searchCoverageCap}
+    )
+  `);
+  return { pending: row?.pending ?? 0, failed: row?.failed ?? 0 };
+};
+
+/**
  * `search`, with each section's version, last change and whole text: what
  * a recall (recall.ts) cites and quotes. The same reads, checks and audit.
  */
@@ -409,7 +441,11 @@ export const searchSections = async (
    * recall (`searchRecord`).
    */
   recall?: { among?: readonly string[] }
-): Promise<{ sections: FoundSection[]; provenance: Provenance }> => {
+): Promise<{
+  sections: FoundSection[];
+  coverage: SearchCoverage;
+  provenance: Provenance;
+}> => {
   const terms = termsOf(
     knowledgeErrors.parse("knowledge.invalid", searchQuerySchema, query)
   );
@@ -441,9 +477,16 @@ export const searchSections = async (
       async (id) => await readableCollection(db, allowed.collections, id)
     )
   );
+  // What search can't see yet, declared to a search; a recall cites only
+  // what it found, each section with its version.
+  const coverage =
+    recall === undefined
+      ? await coverageOf(db, allowed, scope, type)
+      : { pending: 0, failed: 0 };
   if (terms.length === 0) {
     return {
       sections: [],
+      coverage,
       provenance: await noteProvenance(
         env,
         reader,
@@ -514,7 +557,9 @@ export const searchSections = async (
       documents.path, documents.title, documents.type, documents.description,
       ranked.position AS section, sections.headings,
       ${snippetSql(passes)} AS snippet,
-      documents.current_version AS version, documents.updated_at AS updatedAt,
+      -- The version search holds, which a citation pins: older than the
+      -- document's current one while indexing catches up.
+      sections.version AS version, documents.updated_at AS updatedAt,
       ${recall === undefined ? sql`''` : excerptSql(terms)} AS text
     FROM top AS ranked
     JOIN documents ON documents.id = ranked.document_id
@@ -550,6 +595,7 @@ export const searchSections = async (
       updatedAt: row.updatedAt,
       text: row.text,
     })),
+    coverage,
     provenance,
   };
 };
@@ -567,12 +613,12 @@ export const search = async (
   options?: unknown,
   only?: string
 ): Promise<SearchResults> => {
-  const { sections, provenance } = await searchSections(
+  const { sections, coverage, provenance } = await searchSections(
     env,
     reader,
     query,
     options,
     only
   );
-  return { hits: sections.map(({ hit }) => hit), provenance };
+  return { hits: sections.map(({ hit }) => hit), coverage, provenance };
 };

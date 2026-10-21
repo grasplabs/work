@@ -51,6 +51,7 @@ import {
 } from "./documents.ts";
 import type { DocumentRow } from "./documents.ts";
 import { parseBaseFields } from "./frontmatter.ts";
+import { indexVersion } from "./indexing.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
   collectPayloads,
@@ -1273,6 +1274,12 @@ const purgeDocument = async (
     // an image in a PDF, which extraction never read): its originals go
     // all the same.
     await db.batch(forgetUploads(db, uploadsNamed(document)));
+    // Search may still hold an earlier generation, with the terms, while
+    // its current version waits for indexing (a purge that failed to
+    // publish, say): published now, or the purge fails.
+    if (document.indexedVersion !== document.currentVersion) {
+      await indexVersion(env, document.id, document.currentVersion);
+    }
     return counts;
   }
   const text = changed?.text ?? current.text;
