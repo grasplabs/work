@@ -1,43 +1,14 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 
-import { retryAccessRevocations } from "./access-revocations.ts";
-import { sweepTestFixtures } from "./app-tests.ts";
-import { auditLog } from "./audit-log.ts";
-import { drainAuditOutboxes } from "./audit-outbox.ts";
-import { sweepTokenKeys } from "./auth/app-tokens.ts";
-import { refreshDailySignals } from "./daily-signals.ts";
+import { tickClock } from "./clock.ts";
 import { handleRequest } from "./entry.ts";
-import { sweepGuestChats } from "./guests.ts";
-import { indexApps } from "./knowledge/apps-collection.ts";
-import { sweepUploads } from "./knowledge/uploads.ts";
-import { retryDisconnects } from "./members.ts";
-import { sweepPackageFiles } from "./packages/cleanup.ts";
-import { recordPlatformUpdate } from "./platform-updates.ts";
-import { sweepReleases } from "./release-retention.ts";
-import { sweepScreenFrames } from "./screen-frame.ts";
-import { sweepScreenSubmissions } from "./screen-submissions.ts";
-import { sweepBuilds } from "./screens.ts";
-import { sweepPreviewStores } from "./sealed-previews.ts";
-import { sweepStatistics } from "./statistics.ts";
-import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
-import { pumpConnectorEvents } from "./workflows/connector-events.ts";
-import { repairControls } from "./workflows/controls.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
-import { deleteExpiredEmail } from "./workflows/kept-email.ts";
-import {
-  repairResourceStarts,
-  repairResourceTerminations,
-} from "./workflows/resource-runs.ts";
-import { sweepRunDetails } from "./workflows/retention.ts";
-import { sweepRunFiles } from "./workflows/run-files.ts";
-import { repairStarts } from "./workflows/runs.ts";
-import { startDueSchedules } from "./workflows/triggers.ts";
-import { repairWakes } from "./workflows/wakes.ts";
 
 /** The cron trigger that runs every 15 minutes (wrangler.jsonc). */
 const quarterHourCron = "*/15 * * * *";
 
 export { App } from "./app.ts";
+export { Clock } from "./clock.ts";
 export { AuditLog } from "./audit-log.ts";
 export { ChatApi } from "./agent-apis.ts";
 export { AppsApi } from "./agent-apps.ts";
@@ -124,52 +95,14 @@ export default {
   // src/audit-log.ts), and a deployment that appends nothing after a
   // release still gets it.
   scheduled: async (controller, env) => {
-    const jobs =
-      controller.cron === quarterHourCron
-        ? [
-            refreshDailySignals(env),
-            indexApps(env),
-            sweepStatistics(env),
-            deleteExpiredEmail(env, new Date(controller.scheduledTime)),
-            sweepGuestChats(env, new Date(controller.scheduledTime)),
-            sweepRunDetails(env, new Date(controller.scheduledTime)),
-            sweepCandidateRuns(env, new Date(controller.scheduledTime)),
-            // The clock as it sweeps: its grace counts from real time.
-            sweepRunFiles(env),
-            sweepScreenFrames(env, new Date(controller.scheduledTime)),
-            sweepPreviewStores(env, new Date(controller.scheduledTime)),
-            sweepBuilds(env, new Date(controller.scheduledTime)),
-            sweepPackageFiles(env, new Date(controller.scheduledTime)),
-            sweepReleases(env, new Date(controller.scheduledTime)),
-            sweepTestFixtures(env, new Date(controller.scheduledTime)),
-            sweepScreenSubmissions(env, new Date(controller.scheduledTime)),
-            sweepTokenKeys(env, new Date(controller.scheduledTime)),
-            auditLog(env).armRetention(),
-          ]
-        : [
-            drainAuditOutboxes(env),
-            retryDisconnects(env),
-            retryAccessRevocations(env),
-            sweepUploads(env),
-            // Deploys apply migrations first (CI's db:migrate, and the
-            // console's deploy), so `platform_versions` exists. A version
-            // running before it does records nothing, and the first run
-            // after the migration records the version then running: only a
-            // version that came and went in between goes unrecorded.
-            recordPlatformUpdate(env),
-            startDueSchedules(env, new Date(controller.scheduledTime)),
-            repairStarts(env),
-            repairResourceStarts(env, new Date(controller.scheduledTime)),
-            repairResourceTerminations(env, new Date(controller.scheduledTime)),
-            repairControls(env),
-            repairWakes(env, new Date(controller.scheduledTime)),
-            pumpConnectorEvents(env),
-          ];
-    const results = await Promise.allSettled(jobs);
-    for (const result of results) {
-      if (result.status === "rejected") {
-        log.error("cron.failed", errorFields(result.reason));
-      }
+    // The client's clock runs them (src/clock.ts): this cron is one of its
+    // explicit ticks, until the hard cut removes the crons.
+    const period =
+      controller.cron === quarterHourCron ? "quarterHour" : "minute";
+    try {
+      await tickClock(env, period, controller.scheduledTime);
+    } catch (error) {
+      log.error("cron.failed", errorFields(error));
     }
   },
 } satisfies ExportedHandler<Env>;
