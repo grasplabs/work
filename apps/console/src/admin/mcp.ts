@@ -30,8 +30,15 @@
  *   nothing.
  * - Cost. Listing reads nothing. A call reads every client once, a few
  *   at a time within the grid's deadline (`clientAdmins`), and is limited
- *   per staff member (`ADMIN_MCP_RATE_LIMIT`, 30 a minute): over it is a
- *   429 that reads nothing.
+ *   per staff member (`ADMIN_MCP_RATE_LIMIT`, 30 a minute, each call one
+ *   count): over it is a 429 that reads nothing. A request carries one
+ *   message; a batch is refused, so no request holds more than one call.
+ *   Cloudflare counts the limit per location, so a person whose requests
+ *   reach several locations gets up to that much at each.
+ * - What an answer says. It goes to an outside model, often beside tools
+ *   that can act: its text carries ids, roles and numbers, a company's
+ *   names only as data in its structured content, and no person's name
+ *   or research text at all (`callAdminTool`, decision D5 on GRA-656).
  * - Audit. Each call is recorded as `admin.mcp.call` by the staff member,
  *   before anything is read: the tool and the identifiers it was asked
  *   about, never free text beyond the organization asked for. Each core
@@ -219,11 +226,9 @@ const bodyOf = async (
 /** A JSON-RPC message, as far as whether it calls a tool. */
 const messageSchema = z.object({ method: z.unknown() }).loose();
 
-/** Whether `body`, a JSON-RPC message or a batch of them, calls a tool. */
+/** Whether `body`, one JSON-RPC message, calls a tool. */
 const callsTool = (body: unknown): boolean =>
-  (Array.isArray(body) ? body : [body]).some(
-    (message) => messageSchema.safeParse(message).data?.method === "tools/call"
-  );
+  messageSchema.safeParse(body).data?.method === "tools/call";
 
 /**
  * Answers one request to the admin's MCP from `staff`, whom Access
@@ -243,6 +248,18 @@ export const adminMcp = async (
   const read = await bodyOf(request);
   if ("refused" in read) {
     return read.refused;
+  }
+  // One message a request: the protocol dropped batches (2025-06-18), and
+  // a batch would run several calls under one of the limit's counts.
+  if (Array.isArray(read.body)) {
+    return Response.json(
+      {
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32_600, message: "Send one message a request." },
+      },
+      { status: 400, headers: { "cache-control": "no-store" } }
+    );
   }
   if (callsTool(read.body)) {
     const { success } = await env.ADMIN_MCP_RATE_LIMIT.limit({
