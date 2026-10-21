@@ -382,7 +382,9 @@ export interface VersionSummary {
   restoredFrom: number | null;
   /**
    * Its text's SHA-256, in lowercase hex: what a citation of it pins, and
-   * what every read of its text is checked against.
+   * what every read of its text is checked against. It identifies the text,
+   * so it goes only to those who may read the version: keep it out of
+   * logs, audit details and anything a reader of the document can't see.
    */
   sha256: string;
   /** ISO 8601. */

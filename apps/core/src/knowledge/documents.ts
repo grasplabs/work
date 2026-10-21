@@ -515,13 +515,16 @@ export const writeVersion = async (
       throw error;
     }
   };
+  // Checked before the text is stored too: a write it refuses never
+  // uploads it.
+  await write.lastCheck?.();
   try {
-    await send(await stagePayload(env, db, text));
+    await send(await stagePayload(env, db, collection.id, text));
   } catch (error) {
     if (!isUncommitted(error)) {
       throw error;
     }
-    await send(await stagePayload(env, db, text));
+    await send(await stagePayload(env, db, collection.id, text));
   }
   return toSummary(row);
 };

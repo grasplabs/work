@@ -59,6 +59,7 @@ const unreferenced = sql`NOT EXISTS (SELECT 1 FROM ${versions} WHERE ${versions.
 /** A text, stored and ready for a save's batch to commit. */
 export interface StagedPayload {
   readonly key: string;
+  readonly collectionId: string;
   readonly sha256: string;
   readonly bytes: number;
   /** Whether this save put the object, and its batch commits the row. */
@@ -80,13 +81,15 @@ const objectKey = (sha256: string): string =>
   `payloads/${sha256}/${crypto.randomUUID()}`;
 
 /**
- * Stores `text`, or finds it stored: a committed payload of the same hash,
- * or a new `pending` one whose object is in R2. Throws when the upload
- * fails, leaving the row for `collectPayloads`.
+ * Stores `text` for a version in `collectionId`, or finds it stored there:
+ * a committed payload of the same collection and hash, or a new `pending`
+ * one whose object is in R2. Throws when the upload fails, leaving the row
+ * for `collectPayloads`.
  */
 export const stagePayload = async (
   env: Env,
   db: DrizzleD1Database,
+  collectionId: string,
   text: string
 ): Promise<StagedPayload> => {
   const body = encoder.encode(text);
@@ -96,25 +99,33 @@ export const stagePayload = async (
     .from(brainPayloads)
     .where(
       and(
+        eq(brainPayloads.collectionId, collectionId),
         eq(brainPayloads.sha256, sha256),
         eq(brainPayloads.state, "committed")
       )
     )
     .get();
   if (committed) {
-    return { key: committed.key, sha256, bytes: body.byteLength, fresh: false };
+    return {
+      key: committed.key,
+      collectionId,
+      sha256,
+      bytes: body.byteLength,
+      fresh: false,
+    };
   }
   const key = objectKey(sha256);
   // The row first: an object is never in R2 without one to collect it by.
   await db.insert(brainPayloads).values({
     key,
+    collectionId,
     sha256,
     bytes: body.byteLength,
     state: "pending",
     createdAt: new Date(),
   });
   await env.BRAIN_OBJECTS.put(key, body, { sha256 });
-  return { key, sha256, bytes: body.byteLength, fresh: true };
+  return { key, collectionId, sha256, bytes: body.byteLength, fresh: true };
 };
 
 /**
@@ -135,19 +146,26 @@ export const commitPayload = (
             and(
               eq(brainPayloads.key, staged.key),
               eq(brainPayloads.state, "pending"),
-              sql`NOT EXISTS (SELECT 1 FROM ${brainPayloads} AS other WHERE other.sha256 = ${staged.sha256} AND other.state = 'committed')`
+              sql`NOT EXISTS (SELECT 1 FROM ${brainPayloads} AS other WHERE other.collection_id = ${staged.collectionId} AND other.sha256 = ${staged.sha256} AND other.state = 'committed')`
             )
           ),
       ]
     : [];
 
 /**
- * The key of the committed payload of a hash (`staged`'s), read in the batch
+ * The key of the committed payload of a collection and hash (`staged`'s),
+ * read in the batch
  * that writes a version with it: NULL, which a version's key refuses,
  * when there is none.
  */
-export const committedKey = ({ sha256 }: { sha256: string }): SQL =>
-  sql`(SELECT ${brainPayloads.key} FROM ${brainPayloads} WHERE ${brainPayloads.sha256} = ${sha256} AND ${brainPayloads.state} = 'committed')`;
+export const committedKey = ({
+  collectionId,
+  sha256,
+}: {
+  collectionId: string;
+  sha256: string;
+}): SQL =>
+  sql`(SELECT ${brainPayloads.key} FROM ${brainPayloads} WHERE ${brainPayloads.collectionId} = ${collectionId} AND ${brainPayloads.sha256} = ${sha256} AND ${brainPayloads.state} = 'committed')`;
 
 /**
  * Whether `error` is a batch refused because the payload it named wasn't
@@ -195,7 +213,11 @@ export const releasing = (
 
 /** Refuses a version whose text can't be read as stored. */
 const unavailable = (ref: PayloadRef, why: string) => {
-  log.error("knowledge.payload_unavailable", { key: ref.key, why });
+  // The upload's ID only: the key's hash would say what text it is.
+  log.error("knowledge.payload_unavailable", {
+    upload: ref.key.split("/").at(-1),
+    why,
+  });
   return knowledgeErrors.create("knowledge.unavailable");
 };
 

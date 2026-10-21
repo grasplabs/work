@@ -108,7 +108,9 @@ export const documents = sqliteTable(
  * bucket under `key` (knowledge/payloads.ts), written once and never
  * replaced. A row is `pending` from before its object is put until the
  * batch that first refers to it marks it `committed`; at most one row per
- * hash is committed, so identical texts share one object. Collecting an
+ * collection and hash is committed, so identical texts in a collection
+ * share one object. Never across collections: how fast a save is would
+ * otherwise tell its writer whether a text exists where they can't read. Collecting an
  * unreferenced one marks it `collecting` first, which no save takes again,
  * then deletes its object, then the row.
  */
@@ -117,6 +119,8 @@ export const brainPayloads = sqliteTable(
   {
     /** The object's key in R2: core's own, never handed out. */
     key: text().primaryKey(),
+    /** The collection whose documents' versions it may hold. */
+    collectionId: text("collection_id").notNull(),
     /** The text's SHA-256, in hex, which every read checks again. */
     sha256: text().notNull(),
     /** The text's size, in bytes of UTF-8. */
@@ -126,7 +130,7 @@ export const brainPayloads = sqliteTable(
   },
   (table) => [
     uniqueIndex("brain_payloads_committed_sha256_idx")
-      .on(table.sha256)
+      .on(table.collectionId, table.sha256)
       .where(sql`${table.state} = 'committed'`),
     index("brain_payloads_state_idx").on(table.state, table.createdAt),
   ]

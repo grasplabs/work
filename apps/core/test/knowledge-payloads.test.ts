@@ -2,12 +2,17 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { readableCollection } from "../src/knowledge/collections.ts";
+import { personWriter, writeVersion } from "../src/knowledge/documents.ts";
 import { pendingGraceMs } from "../src/knowledge/payloads.ts";
+import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { signedInApi, unique, whoami } from "./sign-in.ts";
 
 // Each version's text is an immutable object in the Brain bucket, through
 // the API people use: what the bucket holds, what a read checks, and what
@@ -252,6 +257,58 @@ describe("storing versions' texts", () => {
       objects: await objectCount(text),
       restored: await readText(api, one.id),
     }).toStrictEqual({ rows: ["committed"], objects: 1, restored: text });
+  });
+
+  it("never shares a payload across collections, so a save can't tell what exists where its writer can't read", async () => {
+    const { api } = await knowledgeOf();
+    const first = await api.createCollection(shared());
+    const second = await api.createCollection(shared());
+    const text = textOf(`Elsewhere${unique()}`);
+    for (const { id: collectionId } of [first, second]) {
+      // oxlint-disable-next-line no-await-in-loop -- one collection at a time
+      await api.saveDocument({
+        collectionId,
+        path: "same.md",
+        text,
+        ifVersion: 0,
+      });
+    }
+
+    expect({
+      rows: await statesOf(text),
+      objects: await objectCount(text),
+    }).toStrictEqual({ rows: ["committed", "committed"], objects: 2 });
+  });
+
+  it("uploads nothing for a save its last check refuses", async () => {
+    const person = await knowledgeOf();
+    const { id: collectionId } = await person.api.createCollection(shared());
+    const text = textOf(`Refused${unique()}`);
+    const identity = await whoami(person.session);
+    const collection = await readableCollection(
+      drizzle(env.KNOWLEDGE),
+      sql`1 = 1`,
+      collectionId
+    );
+    const outcome = await settled(
+      writeVersion(env, personWriter(identity), {
+        collection,
+        path: "refused.md",
+        text,
+        ifVersion: 0,
+        message: null,
+        restoredFrom: null,
+        lastCheck: async () => {
+          await Promise.reject(new Error("context restricted"));
+        },
+      })
+    );
+
+    expect({
+      outcome,
+      rows: await rowsOf(text),
+      objects: await objectCount(text),
+    }).toStrictEqual({ outcome: "refused", rows: [], objects: 0 });
   });
 
   it("refuses a version whose object is missing or isn't its text, and serves nothing of it", async () => {
@@ -630,6 +687,62 @@ describe("purges", () => {
       first: "refused",
       heldAfterFailure: true,
       heldAfterAgain: false,
+    });
+  });
+
+  it("replaces a version whose object is missing or altered by its tombstone, and audits it", async () => {
+    const { api } = await knowledgeOf();
+    const { id: collectionId } = await api.createCollection(shared());
+    const name = `Smit${unique()}`;
+    const document = await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`${name} one`),
+      ifVersion: 0,
+    });
+    await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`${name} two`),
+      ifVersion: 1,
+    });
+    await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`${name} three`),
+      ifVersion: 2,
+    });
+    const [missing] = await rowsOf(textOf(`${name} one`));
+    const [altered] = await rowsOf(textOf(`${name} two`));
+    await env.BRAIN_OBJECTS.delete(missing?.key ?? "");
+    await env.BRAIN_OBJECTS.put(altered?.key ?? "", textOf(`${name} swapped`));
+    await purgeTerm(api, document.id, name);
+    const events = await allEvents();
+
+    expect({
+      first: await readText(api, document.id, 1),
+      second: await readText(api, document.id, 2),
+      third: await readText(api, document.id, 3),
+      held: await bucketHolds(name),
+      replaced: events
+        .filter(
+          ({ action, target }) =>
+            action === "knowledge.payload.replaced" &&
+            target?.id === document.id
+        )
+        .map(({ detail }) => detail)
+        .toSorted(
+          (one, other) => Number(one?.version) - Number(other?.version)
+        ),
+    }).toStrictEqual({
+      first: "(removed)",
+      second: "(removed)",
+      third: textOf("(removed) three"),
+      held: false,
+      replaced: [
+        { version: 1, reason: "unreadable" },
+        { version: 2, reason: "unreadable" },
+      ],
     });
   });
 });

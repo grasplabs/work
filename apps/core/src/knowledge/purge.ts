@@ -1,5 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import type { AuditEntry } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import {
   fromBase64Url,
   sha256Hex,
@@ -55,6 +55,7 @@ import {
   releasing,
   stagePayload,
 } from "./payloads.ts";
+import type { PayloadRef } from "./payloads.ts";
 import {
   collectionPlan,
   eraseCollectionFromSearchIndex,
@@ -725,6 +726,44 @@ const rewritten = (
     : { text, message };
 };
 
+/**
+ * A version's text as a purge reads it: its payload's, or, when the object
+ * is missing or isn't that text (`knowledge.unavailable`), a tombstone
+ * (`purgedMarker`) marked `unreadable`, which the purge saves in its place:
+ * whatever the object holds can't be checked for the terms, so it goes.
+ */
+const purgeTextOf = async (
+  env: Env,
+  ref: PayloadRef
+): Promise<{ text: string; unreadable: boolean }> => {
+  try {
+    return { text: await readPayload(env, ref), unreadable: false };
+  } catch (error) {
+    if (knowledgeErrors.codeOf(error) !== "knowledge.unavailable") {
+      throw error;
+    }
+    return { text: purgedMarker, unreadable: true };
+  }
+};
+
+/**
+ * What a purge writes for a version (`purgeTextOf`): its tombstone when it
+ * couldn't be read, else its text and message rewritten, if they change.
+ */
+const purgeChangeOf = (
+  row: { text: string; message: string | null; unreadable: boolean },
+  matcher: Matcher
+):
+  | { text: string; message: string | null; unreadable: boolean }
+  | undefined => {
+  if (row.unreadable) {
+    const message = row.message === null ? null : without(row.message, matcher);
+    return { text: purgedMarker, message, unreadable: true };
+  }
+  const changed = rewritten(row, matcher);
+  return changed === undefined ? undefined : { ...changed, unreadable: false };
+};
+
 interface Named {
   document: DocumentRow;
   collection: CollectionRow;
@@ -775,7 +814,9 @@ const versionOf = async (
   db: DrizzleD1Database,
   document: DocumentRow,
   number: number
-): Promise<{ text: string; message: string | null } | undefined> => {
+): Promise<
+  { text: string; message: string | null; unreadable: boolean } | undefined
+> => {
   const row = await db
     .select({
       key: brainPayloads.key,
@@ -790,7 +831,7 @@ const versionOf = async (
     .get();
   return row === undefined
     ? undefined
-    : { text: await readPayload(env, row), message: row.message };
+    : { ...(await purgeTextOf(env, row)), message: row.message };
 };
 
 /**
@@ -872,7 +913,7 @@ const requireSavable = async (
   if (collection.source === "apps") {
     await requireIndexedWithout(env, document, matcher);
   }
-  const text = rewritten(current, matcher)?.text ?? current.text;
+  const text = purgeChangeOf(current, matcher)?.text ?? current.text;
   try {
     await checkedText(env, collection, document.path, text, false, true);
   } catch (error) {
@@ -911,6 +952,21 @@ const requireStorable = (
 };
 
 /**
+ * The audit event of a version a purge replaced by its tombstone because
+ * its payload couldn't be read: missing, or not the text its hash names.
+ */
+const replacedEntry = (
+  actor: AuditActor,
+  document: DocumentRow,
+  version: number
+): AuditEntry => ({
+  actor,
+  action: "knowledge.payload.replaced",
+  target: { type: "document", id: document.id },
+  detail: { version, reason: "unreadable" },
+});
+
+/**
  * Points each of `changes`' versions of `document` at a payload of its
  * rewritten text, and rewrites its message, in one batch that marks the
  * payloads left unreferenced for collecting.
@@ -921,12 +977,14 @@ const repointVersions = async (
   document: DocumentRow,
   changes: {
     number: number;
-    changed: { text: string; message: string | null };
-  }[]
+    changed: { text: string; message: string | null; unreadable: boolean };
+  }[],
+  actor: AuditActor
 ): Promise<void> => {
   const staged = await Promise.all(
     changes.map(
-      async ({ changed }) => await stagePayload(env, db, changed.text)
+      async ({ changed }) =>
+        await stagePayload(env, db, document.collectionId, changed.text)
     )
   );
   const released = releasing(
@@ -963,15 +1021,20 @@ const repointVersions = async (
   if (first === undefined) {
     return;
   }
-  await db.batch([first, ...rest, ...updates, ...released.after]);
+  const replaced = changes
+    .filter(({ changed }) => changed.unreadable)
+    .map(({ number }) => outboxed(db, replacedEntry(actor, document, number)));
+  // Its audit events drain with the purge's own (`auditedBatch`, after).
+  await db.batch([first, ...rest, ...updates, ...released.after, ...replaced]);
 };
 
 /**
  * Rewrites the versions of `document` up to `upTo` that hold a term, a
  * page at a time: each one's text as a new payload, which it is pointed
  * at, with its message rewritten in place; the payloads no version refers
- * to any more are collected after (payloads.ts). Only counts them unless
- * `write`. Returns how
+ * to any more are collected after (payloads.ts). A version whose payload
+ * can't be read is replaced by its tombstone, audited. Only counts them
+ * unless `write`. Returns how
  * many hold one, how often a term is removed from them (`removedFrom`)
  * and how often one is left in them (`leftIn`). Refuses with `knowledge.invalid`
  * when one would be too large to store (`requireStorable`): a purge scans
@@ -983,7 +1046,8 @@ const rewriteVersions = async (
   document: DocumentRow,
   upTo: number,
   matcher: Matcher,
-  write: boolean
+  /** Who the purge is by, to write; only counted without. */
+  write?: AuditActor
 ): Promise<{
   changed: number;
   removed: number;
@@ -1019,10 +1083,13 @@ const rewriteVersions = async (
       refs.map(async (ref) => ({
         number: ref.number,
         message: ref.message,
-        text: await readPayload(env, ref),
+        ...(await purgeTextOf(env, ref)),
       }))
     );
-    const rows = page.map((row) => ({ row, changed: rewritten(row, matcher) }));
+    const rows = page.map((row) => ({
+      row,
+      changed: purgeChangeOf(row, matcher),
+    }));
     beside ||= rows.some(({ row }) =>
       besideInIndexed(document.path, row.text, matcher)
     );
@@ -1044,9 +1111,9 @@ const rewriteVersions = async (
       return changed === undefined ? [] : [{ number: row.number, changed }];
     });
     changedVersions += changes.length;
-    if (write && changes.length > 0) {
+    if (write !== undefined && changes.length > 0) {
       // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
-      await repointVersions(env, db, document, changes);
+      await repointVersions(env, db, document, changes, write);
     }
     const last = page.at(-1);
     if (last === undefined || page.length < versionsPerPage) {
@@ -1079,8 +1146,7 @@ const countDocument = async (
     db,
     document,
     document.currentVersion,
-    matcher,
-    false
+    matcher
   );
   const changes = inVersions.changed > 0;
   // When anything changes, the purge saves the current text, rewritten,
@@ -1147,16 +1213,17 @@ const purgeDocument = async (
 ): Promise<Counts> => {
   const { document, collection } = named;
   const at = document.currentVersion;
+  const actor = actorOf(person);
   const earlier = await rewriteVersions(
     env,
     db,
     document,
     at - 1,
     matcher,
-    true
+    actor
   );
   const current = await versionOf(env, db, document, at);
-  const changed = current && rewritten(current, matcher);
+  const changed = current && purgeChangeOf(current, matcher);
   const changedVersions = earlier.changed + (changed === undefined ? 0 : 1);
   const counts: Counts = {
     documents: changedVersions > 0 ? 1 : 0,
@@ -1184,13 +1251,19 @@ const purgeDocument = async (
           db
             .update(versions)
             .set({
-              payloadKey: committedKey({ sha256: await sha256Hex(text) }),
+              payloadKey: committedKey({
+                collectionId: document.collectionId,
+                sha256: await sha256Hex(text),
+              }),
               message: changed.message,
             })
             .where(
               and(eq(versions.documentId, document.id), eq(versions.number, at))
             ),
           ...releasedCurrent.after,
+          ...(changed.unreadable
+            ? [outboxed(db, replacedEntry(actor, document, at))]
+            : []),
         ];
   await writeVersion(env, personWriter(person), {
     collection,

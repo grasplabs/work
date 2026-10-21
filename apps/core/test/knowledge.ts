@@ -192,8 +192,14 @@ export const storeTextUnderneath = async (
   await env.BRAIN_OBJECTS.put(key, text);
   return [
     env.KNOWLEDGE.prepare(
-      "INSERT INTO brain_payloads (key, sha256, bytes, state, created_at) VALUES (?, ?, ?, 'committed', ?)"
-    ).bind(key, sha256, new TextEncoder().encode(text).byteLength, Date.now()),
+      "INSERT INTO brain_payloads (key, collection_id, sha256, bytes, state, created_at) SELECT ?, collection_id, ?, ?, 'committed', ? FROM documents WHERE id = ?"
+    ).bind(
+      key,
+      sha256,
+      new TextEncoder().encode(text).byteLength,
+      Date.now(),
+      documentId
+    ),
     env.KNOWLEDGE.prepare(
       "UPDATE versions SET payload_key = ? WHERE document_id = ?"
     ).bind(key, documentId),

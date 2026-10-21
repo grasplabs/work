@@ -488,6 +488,7 @@ describe("immutable records", () => {
         "brain_payloads",
         {
           key: `payloads/${id}`,
+          collection_id: `col-${id}`,
           sha256: id,
           bytes: 0,
           state: "committed",

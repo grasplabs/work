@@ -153,6 +153,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "collection_id": {
+          "name": "collection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "sha256": {
           "name": "sha256",
           "type": "text",
@@ -186,6 +193,7 @@
         "brain_payloads_committed_sha256_idx": {
           "name": "brain_payloads_committed_sha256_idx",
           "columns": [
+            "collection_id",
             "sha256"
           ],
           "isUnique": true,
