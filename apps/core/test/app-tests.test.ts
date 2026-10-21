@@ -635,10 +635,11 @@ const fixtureStore = async (
   )
     .bind(id, built.app, Date.now() - ago)
     .run();
-  await openFixtureStore(env, id).defineTables(
-    manifestText(release.app.schema),
-    { resourceId: built.app, resourceVersion: 1 }
-  );
+  const store = await openFixtureStore(env, id);
+  await store.defineTables(manifestText(release.app.schema), {
+    resourceId: built.app,
+    resourceVersion: 1,
+  });
   return id;
 };
 
@@ -659,7 +660,7 @@ describe("fixture stores", () => {
   it("refuse every call once discarded, one already made included, and arm no alarm", async () => {
     const app = await sealed();
     const id = await fixtureStore(app);
-    const store = openFixtureStore(env, id);
+    const store = await openFixtureStore(env, id);
     // A read under way as the store is discarded, never awaited before.
     const late = store.generations(["notes"]);
     await discardFixtureStore(env, id);
@@ -681,6 +682,20 @@ describe("fixture stores", () => {
   it("are never opened as business stores", async () => {
     const id = await fixtureStore(await sealed());
     await expect(openStore(env, id)).rejects.toMatchObject({
+      code: "data.store_unavailable",
+    });
+  });
+
+  it("never open a store the inventory lists as a fixture, though a fixture's record names it", async () => {
+    const app = await sealed();
+    const store = await createStore(env, app.built.owner);
+    // Recorded as a test's fixture: only the open itself stands between.
+    await env.DB.prepare(
+      "INSERT INTO app_test_fixtures (store_id, app_id, version, created_at) VALUES (?, ?, 1, ?)"
+    )
+      .bind(store, app.built.app, Date.now())
+      .run();
+    await expect(openFixtureStore(env, store)).rejects.toMatchObject({
       code: "data.store_unavailable",
     });
   });

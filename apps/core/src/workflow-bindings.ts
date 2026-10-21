@@ -1,4 +1,5 @@
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import type { OperationManifest } from "@grasp-os/sdk/host";
 import { appExportsSchema } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
@@ -390,6 +391,24 @@ const requireOperationServes = async (
 };
 
 /**
+ * Whether store operation `operation` takes and returns exactly what
+ * catalog contract `contract` says: its arguments' and return's JSON
+ * Schemas the contract's input and output, exactly.
+ */
+export const storeOperationTakes = (
+  operation: Pick<OperationManifest, "args" | "returns">,
+  contract: { input?: string; output?: string } | undefined
+): boolean =>
+  sameShape(
+    jsonSchemaOf(operation.args, { exact: true }),
+    schemaOfDescriptor(contract?.input)
+  ) &&
+  sameShape(
+    jsonSchemaOf(operation.returns, { exact: true }),
+    schemaOfDescriptor(contract?.output)
+  );
+
+/**
  * The store operation `target` names, if workflow `id` may call it now
  * and it takes and returns exactly what the catalog contract `key` says:
  * the workflow's own store permission lists it, and the store's owning
@@ -424,17 +443,7 @@ const requireStoreOperationServes = async (
     throw invalid("target.operationKind: The store serves it as another kind.");
   }
   const contracts = await resolveCatalogKeys(env, [key]);
-  const contract = contracts.get(key)?.contract;
-  if (
-    !sameShape(
-      jsonSchemaOf(served.operation.args, { exact: true }),
-      schemaOfDescriptor(contract?.input)
-    ) ||
-    !sameShape(
-      jsonSchemaOf(served.operation.returns, { exact: true }),
-      schemaOfDescriptor(contract?.output)
-    )
-  ) {
+  if (!storeOperationTakes(served.operation, contracts.get(key)?.contract)) {
     throw invalid(
       "target.operation: Its arguments and return aren't the operation contract's."
     );

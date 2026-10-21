@@ -884,7 +884,7 @@ export class SealedPreviews {
     if (this.#running.get(nameOf(chatId, app)) !== running) {
       throw appErrors.create("app.preview_outdated");
     }
-    const store = openFixtureStore(this.#env, id);
+    const store = await openFixtureStore(this.#env, id);
     await store.defineTables(manifestText(release.app.schema), {
       resourceId: app,
       resourceVersion: running.version,

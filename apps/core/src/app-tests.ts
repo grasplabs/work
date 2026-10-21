@@ -372,7 +372,7 @@ const createFixtureStore = async (
     version: release.manifest.resourceVersion,
     createdAt: new Date(),
   });
-  const store = openFixtureStore(env, id);
+  const store = await openFixtureStore(env, id);
   await store.defineTables(manifestText(release.app.schema), {
     resourceId: app,
     resourceVersion: release.manifest.resourceVersion,
@@ -886,6 +886,15 @@ class FixtureSession extends TestTarget {
             deadline: this.#endsAt,
             recorded: () => {
               recorded = true;
+            },
+            // The store its principals' own calls reach: the run's store
+            // calls reach that one alone (fixture-runs.ts).
+            store: async () => {
+              if (this.#release.store === null) {
+                return null;
+              }
+              const store = await this.#storeOf();
+              return store.id;
             },
           }
         );

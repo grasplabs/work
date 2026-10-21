@@ -793,15 +793,30 @@ export const storeFiles = async (
 };
 
 /**
- * A fixture store an App's tests run on (app-tests.ts): an object of the
- * stores' namespace that core's inventory never lists, so it is opened
- * only here, never by `openStore`, and no release binds it. Core mints
- * its ID and records it (`app_test_fixtures`) before it is first opened.
+ * A fixture store an App's tests or a draft's previews run on (app-tests.ts,
+ * sealed-previews.ts): an object of the stores' namespace that core's
+ * inventory never lists, so it is opened only here, never by `openStore`,
+ * and no release binds it. Core mints its ID and records it
+ * (`app_test_fixtures`, `preview_fixture_stores`) before it is first
+ * opened. A store the inventory lists, deleted or not, is never opened as
+ * a fixture (`data.store_unavailable`), whatever its caller checked: a
+ * business store's ID that reached a fixture's record still reaches none
+ * of its data.
  */
-export const openFixtureStore = (
-  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+export const openFixtureStore = async (
+  env: Pick<Env, "DB" | "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
   id: StoreId
-): OpenStore => storeClient(env, id);
+): Promise<OpenStore> => {
+  const listed = await drizzle(env.DB)
+    .select({ id: businessStores.id })
+    .from(businessStores)
+    .where(eq(businessStores.id, id))
+    .get();
+  if (listed !== undefined) {
+    throw dataErrors.create("data.store_unavailable");
+  }
+  return storeClient(env, id);
+};
 
 /**
  * Discards fixture store `id`: its object refuses for any store the
