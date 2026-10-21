@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   clock,
+  clockCronGraceMs,
   clockLeaseMs,
   clockPeriods,
   clockStarter,
@@ -62,7 +63,9 @@ const nextQuarterHour = (from: number): number =>
 let reached = Date.now();
 /** A time in a quarter hour's slot no earlier test reached, a little into it. */
 const freshTime = (): number => {
-  reached = nextQuarterHour(reached + clockLeaseMs + clockPeriods.quarterHour);
+  reached = nextQuarterHour(
+    reached + clockCronGraceMs + clockLeaseMs + clockPeriods.quarterHour
+  );
   return reached;
 };
 
@@ -98,18 +101,24 @@ describe("the client's clock", () => {
     });
   });
 
-  it("leaves to the alarm only what no cron ran in its slot", async () => {
+  it("leaves the tasks to the crons while they tick, and takes over once they stop", async () => {
     const now = freshTime();
     at(now);
-    // The minute's cron first, as Cloudflare runs it at the slot's start.
     await runCron({}, new Date(now));
     const afterCron = await runsByTask();
-    await runDurableObjectAlarm(stub());
 
-    expect(ranSince(afterCron, await runsByTask(), all)).toStrictEqual({
-      ...each(minutes, 0),
-      ...each(quarterHours, 1),
-    });
+    // The next minute's alarm, with a cron a minute ago: it runs nothing.
+    at(now + clockPeriods.minute);
+    await runDurableObjectAlarm(stub());
+    const backup = await runsByTask();
+    expect(ranSince(afterCron, backup, all)).toStrictEqual(each(all, 0));
+
+    // No cron since, past the grace: the alarm runs everything due.
+    at(now + clockCronGraceMs + clockPeriods.minute);
+    await runDurableObjectAlarm(stub());
+    expect(ranSince(backup, await runsByTask(), all)).toStrictEqual(
+      each(all, 1)
+    );
   });
 
   it("runs the rest when one task fails, records the failure and keeps its alarm armed", async () => {
@@ -148,24 +157,36 @@ describe("the client's clock", () => {
     expect([recovered?.outcome, recovered?.failures]).toStrictEqual(["ok", 0]);
   });
 
-  it("takes over a tick that died after claiming its tasks, once its lease is over", async () => {
+  it("takes over a tick that died after claiming its tasks", async () => {
     const now = freshTime();
     at(now);
     // A cron's tick claims the minute's tasks, then its invocation dies.
     await stub().claim("minute", now);
     const claimed = await runsByTask();
 
-    // The next minute's alarm leaves them to it while the lease holds.
+    // The next minute's cron leaves them to it while its lease holds...
     at(now + clockPeriods.minute);
-    await runDurableObjectAlarm(stub());
+    await runCron({}, new Date(now + clockPeriods.minute));
     const leased = await runsByTask();
     expect(ranSince(claimed, leased, minutes)).toStrictEqual(each(minutes, 0));
 
-    // Past the lease, it runs them.
-    reached = now + clockLeaseMs + clockPeriods.minute;
-    at(reached);
-    await runDurableObjectAlarm(stub());
+    // ...and runs them once it's over.
+    const later = now + clockLeaseMs + clockPeriods.minute;
+    at(later);
+    await runCron({}, new Date(later));
     expect(ranSince(leased, await runsByTask(), minutes)).toStrictEqual(
+      each(minutes, 1)
+    );
+
+    // With the crons gone too, the alarm takes over past their grace.
+    reached = later + clockCronGraceMs + clockPeriods.minute;
+    at(reached);
+    await stub().claim("minute", reached - clockCronGraceMs);
+    const dead = await runsByTask();
+    at(reached + clockLeaseMs + clockCronGraceMs);
+    reached += clockLeaseMs + clockCronGraceMs;
+    await runDurableObjectAlarm(stub());
+    expect(ranSince(dead, await runsByTask(), minutes)).toStrictEqual(
       each(minutes, 1)
     );
   });

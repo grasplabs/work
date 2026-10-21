@@ -44,8 +44,10 @@ import { repairWakes } from "./workflows/wakes.ts";
 //
 // The crons in wrangler.jsonc stay until the hard cut (spec 47) and are
 // the same clock's explicit ticks: each runs its period's tasks at once,
-// as before. The alarm, set half a period past each slot, runs what no
-// cron ran; with the crons gone, it runs everything.
+// as before, and takes over a task whose tick died once its lease is
+// over. While they tick, the alarm is their backup and runs nothing: it
+// takes over once no cron has ticked for `clockCronGraceMs`. With the
+// crons gone, it runs everything, half a period into each slot.
 
 const minuteMs = 60_000;
 
@@ -201,6 +203,19 @@ export const clockTasks: readonly ClockTask[] = [
 export const clockLeaseMs = 10 * minuteMs;
 
 /**
+ * How long after the last cron tick the alarm leaves the tasks to the
+ * crons: well past a few missed ticks, so a cron that's late runs alone.
+ */
+export const clockCronGraceMs = 30 * minuteMs;
+
+/**
+ * How long after a deployment first starts the clock its alarm first
+ * runs: the crons run meanwhile, and a clock that starts again after its
+ * alarm was cleared catches up with what's due then.
+ */
+export const clockStartMs = 15 * minuteMs;
+
+/**
  * How long a tick waits for its tasks before it settles what ended and
  * re-arms: one still running keeps its lease and is recorded when it ends.
  */
@@ -291,17 +306,19 @@ export class Clock extends DurableObject<Env> {
       runs INTEGER NOT NULL DEFAULT 0,
       outcome TEXT,
       failures INTEGER NOT NULL DEFAULT 0,
-      running_since INTEGER
+      running_since INTEGER,
+      ticked_at INTEGER
     )`);
   }
 
   /**
-   * Arms the alarm if nothing is armed: what a request, or a deploy's
-   * first one, does, so the clock never depends on already running.
+   * Arms the alarm if nothing is armed, `clockStartMs` from now: what a
+   * request, or a deploy's first one, does, so the clock never depends on
+   * already running.
    */
   async ensure(): Promise<void> {
     if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now());
+      await this.ctx.storage.setAlarm(Date.now() + clockStartMs);
     }
   }
 
@@ -314,11 +331,16 @@ export class Clock extends DurableObject<Env> {
   async claim(period: ClockPeriod, at: number): Promise<ClockClaim> {
     const now = Date.now();
     await this.ctx.storage.setAlarm(now + clockLeaseMs);
-    const claimed = this.#claim(
-      clockTasks.filter((task) => task.period === period),
-      at,
-      now
-    );
+    const tasks = clockTasks.filter((task) => task.period === period);
+    const claimed = this.#claim(tasks, at, now);
+    for (const task of tasks) {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO clock_tasks (name, ticked_at) VALUES (?, ?)
+         ON CONFLICT (name) DO UPDATE SET ticked_at = excluded.ticked_at`,
+        task.name,
+        now
+      );
+    }
     return { names: claimed.map(({ name }) => name), started: now };
   }
 
@@ -332,9 +354,16 @@ export class Clock extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(this.#nextAlarm(Date.now()));
   }
 
-  /** Runs every task whose period moved to a slot it hasn't run for. */
+  /**
+   * Runs every task whose period moved to a slot it hasn't run for, once
+   * the crons stopped ticking.
+   */
   override async alarm(): Promise<void> {
     const now = Date.now();
+    if (now - this.#lastTick() < clockCronGraceMs) {
+      await this.rearm();
+      return;
+    }
     await this.ctx.storage.setAlarm(now + clockLeaseMs);
     try {
       const state = this.#states();
@@ -420,7 +449,20 @@ export class Clock extends DurableObject<Env> {
     );
   }
 
-  /** When the alarm should next run: the nearest slot any task is due for. */
+  /** When a cron last ticked any task; 0 when none ever did. */
+  #lastTick(): number {
+    const [row] = this.ctx.storage.sql
+      .exec<{ last: number | null }>(
+        "SELECT max(ticked_at) AS last FROM clock_tasks"
+      )
+      .toArray();
+    return row?.last ?? 0;
+  }
+
+  /**
+   * When the alarm should next run: the nearest slot any task is due for,
+   * but not before the crons' grace is over.
+   */
   #nextAlarm(now: number): number {
     const state = this.#states();
     const due = clockTasks.map((task) =>
@@ -429,7 +471,11 @@ export class Clock extends DurableObject<Env> {
         state.get(task.name)?.lastSlot ?? slotOf(task.period, now) - 1
       )
     );
-    return Math.max(now + 1000, Math.min(...due));
+    return Math.max(
+      now + 1000,
+      this.#lastTick() + clockCronGraceMs,
+      Math.min(...due)
+    );
   }
 }
 
