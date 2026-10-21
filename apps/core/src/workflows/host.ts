@@ -1439,7 +1439,7 @@ export class RunHost extends RpcTarget {
    * The attempts whose functions run now, in the order they began: the
    * last is the step running now, which every reviewed call and kind is
    * checked against as well as the step whose host it came through
-   * (`#requireReviewed`, `#requireKindIn`).
+   * (`#requireReviewed`, `#requireKindIn`, `#requireModelReviewed`).
    *
    * The SDK runs steps one after another, never inside or next to one
    * another (`exclusive`, workflow.ts), so a workflow it runs has one
@@ -2522,7 +2522,7 @@ export class RunHost extends RpcTarget {
     if (other !== undefined) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${other.step}" asked model ${binding}, which the review of this version doesn't show it asking: ask each AI step's model only as its \`step.llm\` names it.`;
-      await this.#refuseIn(attempt, error, "model", other.step);
+      await this.#refuseIn(attempt, error, "model", other.step, binding);
     }
   }
 
@@ -2534,12 +2534,13 @@ export class RunHost extends RpcTarget {
     attempt: StepAttempt,
     error: Error,
     call: string,
-    step = attempt.step
+    step = attempt.step,
+    binding?: string
   ): Promise<never> {
     const running = this.#live.at(-1) ?? attempt;
     running.refused = error;
     attempt.refused = error;
-    return await this.#refuseTampering(error, { step, call });
+    return await this.#refuseTampering(error, { step, call, binding });
   }
 
   /**
@@ -2555,7 +2556,16 @@ export class RunHost extends RpcTarget {
    */
   async #refuseTampering(
     error: Error,
-    { step, call }: { step: string | null; call: string | null }
+    {
+      step,
+      call,
+      binding,
+    }: {
+      step: string | null;
+      call: string | null;
+      /** The model binding a refused model call named. */
+      binding?: string | undefined;
+    }
   ): Promise<never> {
     if (this.#tampered === undefined) {
       this.#tampered = error;
@@ -2565,6 +2575,7 @@ export class RunHost extends RpcTarget {
         step,
         call,
         errorCode: refusal.code ?? "workflow.invalid",
+        ...(binding === undefined ? {} : { binding }),
       });
     }
     throw error;
@@ -2579,6 +2590,7 @@ export class RunHost extends RpcTarget {
     step: string | null;
     call: string | null;
     errorCode: string;
+    binding?: string;
   }): Promise<void> {
     const { app, workflow, version, runId } = this.#run;
     const db = drizzle(this.#env.DB);

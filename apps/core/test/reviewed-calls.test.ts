@@ -84,6 +84,8 @@ const refusals = async (run: string) => {
       step: detail.step,
       call: detail.call,
       errorCode: detail.errorCode,
+      // The model binding a refused model call named, if one did.
+      ...(detail.binding === undefined ? {} : { binding: detail.binding }),
     }));
 };
 
@@ -232,6 +234,22 @@ const tamperedWith = (step: string, call: string | null = null) => ({
   code: "workflow.step_not_reviewed",
   tampered: ["workflow.step_not_reviewed"],
   audited: [{ step, call, errorCode: "workflow.step_not_reviewed" }],
+});
+
+/** What a model call its AI step's review doesn't show asking leaves behind. */
+const modelRefused = (binding: string) => ({
+  refused: true,
+  step: "workflow.step_not_reviewed",
+  reached: [],
+  tampered: ["workflow.step_not_reviewed"],
+  audited: [
+    {
+      step: "write",
+      call: "model",
+      errorCode: "workflow.step_not_reviewed",
+      binding,
+    },
+  ],
 });
 
 /** A settled call's error code, or `ok`. */
@@ -1326,19 +1344,6 @@ queueMicrotask(() => {
       keyed: [],
       all: [],
     };
-    const refusedWith = {
-      refused: true,
-      step: "workflow.step_not_reviewed",
-      reached: [],
-      tampered: ["workflow.step_not_reviewed"],
-      audited: [
-        {
-          step: "write",
-          call: "model",
-          errorCode: "workflow.step_not_reviewed",
-        },
-      ],
-    };
 
     // The host of `write`, reviewed asking WRITER, borrowed by `draft`
     // nested in it, reviewed asking DRAFTER: both must ask it.
@@ -1369,7 +1374,44 @@ queueMicrotask(() => {
       };
     })();
 
+    // Two AI steps run side by side, as the SDK never runs them
+    // (`exclusive`): each is checked as if nested in the other, so a
+    // binding either may not ask ends the run as tampering.
+    const siblings = await (async () => {
+      const { host, tampered, models } = await hostHeldTo(read);
+      const started = Promise.withResolvers<null>();
+      let begun = 0;
+      const asks = async (step: string, binding: string) =>
+        await host.do(step, {}, async (attempt) => {
+          begun += 1;
+          if (begun === 2) {
+            started.resolve(null);
+          }
+          await started.promise;
+          await attempt.callModel({
+            step,
+            binding,
+            instructions: "Summarise the invoice",
+            input: "Invoice INV-7",
+            outputSchema: { type: "string" },
+          });
+          return { ok: true, value: null };
+        });
+      const done = await Promise.all([
+        asks("write", "WRITER"),
+        asks("draft", "DRAFTER"),
+      ]);
+      return {
+        steps: done.map(codeOf),
+        // `write`'s ask, checked against `draft` begun after it, never
+        // reaches a model; `draft`'s own may, before the run ends.
+        writerReached: models.includes("WRITER"),
+        tampered,
+      };
+    })();
+
     expect({
+      siblings,
       borrowed,
       // Another step's model, and one no step names.
       anotherStepsModel: await asked(read, "DRAFTER"),
@@ -1380,6 +1422,11 @@ queueMicrotask(() => {
       reviewed: await asked(read, "WRITER"),
       unreadReviewed: await asked(unread, "WRITER"),
     }).toMatchObject({
+      siblings: {
+        steps: ["workflow.step_not_reviewed", "workflow.step_not_reviewed"],
+        writerReached: false,
+        tampered: ["workflow.step_not_reviewed"],
+      },
       borrowed: {
         code: "workflow.step_not_reviewed",
         nested: "workflow.step_not_reviewed",
@@ -1391,13 +1438,14 @@ queueMicrotask(() => {
             step: "draft",
             call: "model",
             errorCode: "workflow.step_not_reviewed",
+            binding: "WRITER",
           },
         ],
       },
-      anotherStepsModel: refusedWith,
-      unreviewedModel: refusedWith,
-      unreadOtherModel: refusedWith,
-      noneKept: refusedWith,
+      anotherStepsModel: modelRefused("DRAFTER"),
+      unreviewedModel: modelRefused("PRICEY"),
+      unreadOtherModel: modelRefused("PRICEY"),
+      noneKept: modelRefused("WRITER"),
       reviewed: {
         refused: false,
         reached: ["WRITER"],
