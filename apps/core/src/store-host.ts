@@ -19,8 +19,12 @@ import type {
   SchemaManifest,
   SchemaPlan,
 } from "@grasp-os/sdk/host";
-import { auditActorSchema } from "@grasp-os/shared/audit";
-import type { AuditActor } from "@grasp-os/shared/audit";
+import {
+  auditActorSchema,
+  auditEventSchema,
+  auditProvenanceMaxItems,
+} from "@grasp-os/shared/audit";
+import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
@@ -37,6 +41,7 @@ import {
   claimSchema,
   receiptLookupSchema,
   commitSchema,
+  cascadeJobMaxRecords,
   commitMaxCascade,
   committedSchema,
   dataErrors,
@@ -48,6 +53,7 @@ import {
   stagedWritesSchema,
   storeIntentSchema,
   storeMigrationSchema,
+  receiptScopeSchema,
   storedFieldsSchema,
   tableNameSchema,
 } from "@grasp-os/shared/stores";
@@ -85,6 +91,8 @@ import {
   lte,
   max,
   min,
+  notInArray,
+  or,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -94,7 +102,10 @@ import { z } from "zod";
 import {
   abandonedTargets,
   backfills,
+  cascadeJobs,
+  cascadeMembers,
   commitWriters,
+  fileEvents,
   files,
   migrationWork,
   outbox,
@@ -303,6 +314,34 @@ interface Staged {
   filled?: ReadonlySet<string>;
 }
 
+/** A record a cascade job deletes. */
+interface CascadeMember {
+  readonly tableId: string;
+  readonly recordId: string;
+}
+
+/** A cascade past one commit's bound, as its commit plans it (`#cascade`). */
+interface CascadePlan {
+  /** The first record the commit itself deleted. */
+  readonly root: CascadeMember;
+  /** Every record it deletes, the commit's own deletions included, by key. */
+  readonly members: ReadonlyMap<string, CascadeMember>;
+}
+
+/** Who starts a cascade job, from which commit, and when. */
+interface CascadeStart {
+  readonly receiptId: string;
+  readonly principal: string;
+  /**
+   * The resource the commit came through, as its receipt's scope names it:
+   * the App whose release committed, or the consumer that called.
+   */
+  readonly resourceId: string | null;
+  /** The workflow run the commit was made in, if any. */
+  readonly runId: string | null;
+  readonly now: number;
+}
+
 /** Where a staged record is kept: its table and ID, which can't collide. */
 const keyOf = (tableId: string, recordId: string): string =>
   JSON.stringify([tableId, recordId]);
@@ -340,9 +379,67 @@ const liveRunRecheckMs = dayMs;
 /** Most receipts, tombstones or outbox entries one pass reads at a time. */
 const page = 100;
 
+/** A cascade job's row. */
+type CascadeJob = typeof cascadeJobs.$inferSelect;
+
+/** A member of a cascade batch, with its record's owner; null once gone. */
+interface CascadeBatchMember extends Record<string, SqlStorageValue> {
+  tableId: string;
+  recordId: string;
+  ownerId: string | null;
+}
+
+/**
+ * Whether another record refers to cascade member `m`, as SQL: a member
+ * that is no leaf yet (`#cascadeBatchOf`).
+ */
+const referredSql = `EXISTS (SELECT 1 FROM sdk_record_refs r
+  WHERE r.to_table_id = m.table_id AND r.to_record_id = m.record_id
+    AND NOT (r.table_id = m.table_id AND r.record_id = m.record_id))`;
+
+/**
+ * The fewest leaves a cascade batch takes alone: below it, the batch is
+ * filled up by cutting cycles and chains (`#cascadeBatchOf`).
+ */
+const cascadeLeavesAtLeast = 25;
+
+/**
+ * The stored record a cascade batch deletes, as far as a deletion reads
+ * it (`#flush`, `FileHost.index`): that it is there, and whose it is. Its
+ * document is never loaded, and a deletion never reads it.
+ */
+const deletedBase = (
+  tableId: string,
+  recordId: string,
+  ownerId: string
+): typeof records.$inferSelect => ({
+  tableId,
+  recordId,
+  ownerId,
+  revision: 1,
+  createdAt: 0,
+  updatedAt: 0,
+  valueJson: "{}",
+  schemaHash: "",
+});
+
 /** A committed receipt's outcome, which `commit` wrote from a `Committed`. */
 const outcomeOf = (stored: string): Committed =>
   committedSchema.parse(JSON.parse(stored));
+
+/**
+ * The resource a receipt's scope names (stored as JSON): what a commit
+ * made under it came through, for its cascade job's audit events.
+ */
+const resourceOfScope = (scope: string): string | null => {
+  try {
+    return (
+      receiptScopeSchema.safeParse(JSON.parse(scope)).data?.resource ?? null
+    );
+  } catch {
+    return null;
+  }
+};
 
 /** Whether a receipt's outbox owes no entry, which the sweep requires. */
 const nothingOwed = sql`NOT EXISTS (SELECT 1 FROM ${outbox} WHERE ${outbox.receiptId} = ${receipts.receiptId} AND ${outbox.settledAt} IS NULL)`;
@@ -438,10 +535,37 @@ const purgedTables = [
   "sdk_abandoned_targets",
   "sdk_change_outbox",
   "sdk_commit_writers",
+  "sdk_cascade_members",
+  "sdk_cascade_jobs",
   "sdk_mutation_receipts",
   "sdk_preferences",
   "sdk_tables",
 ] as const;
+
+/** How long one alarm goes on deleting cascade jobs' batches. */
+const cascadeBudgetMs = 5000;
+
+/**
+ * The most cascade batches one alarm deletes: the alarm comes again at
+ * once for the rest, so other work (the outbox, the sweeps) is never held
+ * up for long.
+ */
+const cascadeBatchesPerAlarm = 10;
+
+/**
+ * How often in a row a cascade job's batch may fail before the job fails:
+ * audited (`store.cascade_failed`), set aside while the store's other jobs
+ * go on, and tried again `cascadeFailedRetryMs` later. Its records stay
+ * deleting meanwhile: a batch may have cut references among them
+ * (`#cascadeBatchOf`), which only finishing the job makes whole again.
+ */
+const cascadeJobMaxAttempts = 3;
+
+/** Most referring records a cascade job's plan reads at a time. */
+const cascadePlanPage = 1000;
+
+/** How long a failed cascade job is set aside before it is tried again. */
+const cascadeFailedRetryMs = dayMs;
 
 /** The least wait before the alarm comes again, so it never spins. */
 const alarmGapMs = 1000;
@@ -2303,8 +2427,12 @@ export class StoreHost {
             reader.principal,
             reader,
             preview.writes,
-            []
+            [],
+            undefined,
+            true
           );
+          // Refused as its commit would be: a record a job is deleting.
+          this.#requireNotDeleting(staged);
           this.#flush(
             staged,
             reader.principal,
@@ -3097,7 +3225,7 @@ export class StoreHost {
       // revision of, now at another, is a conflict for its caller
       // (`data.conflict`), never a stale read set to run again for, which
       // could commit a fallback its rerun reached instead.
-      const { staged, inserted } = this.#apply(
+      const { staged, inserted, cascadeJob } = this.#apply(
         pinned,
         principal.userId,
         roles,
@@ -3112,8 +3240,26 @@ export class StoreHost {
           }
         }
       );
+      this.#requireNotDeleting(staged);
       this.#flush(staged, principal.userId, schemaHash, stagedAt);
       this.#indexReferences(pinned, staged, principal.userId, roles);
+      const cascadePending =
+        cascadeJob === undefined
+          ? undefined
+          : {
+              job: this.#startCascadeJob(cascadeJob, {
+                receiptId: held.receiptId,
+                principal: principal.userId,
+                resourceId:
+                  writer?.resourceId ?? resourceOfScope(receipt.scope),
+                runId: receipt.runId,
+                now,
+              }),
+              members: cascadeJob.members.size,
+            };
+      if (cascadePending !== undefined) {
+        this.#requireCascadeClosed(cascadePending.job);
+      }
       // The files they hold, by the same fields: the store's contract
       // fixes each field's descriptor for good, as for references.
       const contract = this.#contractNow() ?? pinned.manifest;
@@ -3155,6 +3301,7 @@ export class StoreHost {
         commit: counted.commits,
         result,
         ...(cascaded.length === 0 ? {} : { cascaded }),
+        ...(cascadePending === undefined ? {} : { cascadePending }),
       };
       this.#db
         .update(receipts)
@@ -3221,8 +3368,9 @@ export class StoreHost {
     roles: WriterRoles,
     writes: readonly StoredWrite[],
     guards: readonly { table: string; id: string; expectedRevision: number }[],
-    afterGuards?: () => void
-  ): { staged: Staged[]; inserted: string[] } {
+    afterGuards?: () => void,
+    preview = false
+  ): { staged: Staged[]; inserted: string[]; cascadeJob?: CascadePlan } {
     const tableIdOf = (table: string): string => {
       const tableId = Object.hasOwn(pinned.tableIds, table)
         ? pinned.tableIds[table]
@@ -3364,7 +3512,7 @@ export class StoreHost {
         );
       }
     }
-    this.#cascade(staged, stage);
+    const cascadeJob = this.#cascade(staged, stage, preview);
     // What the commit writes gets the contract's defaulted fields it
     // lacks, the pending target's included (store-fills.ts), whatever
     // schema the writer is pinned to: before its references are read and
@@ -3386,7 +3534,11 @@ export class StoreHost {
         );
       }
     }
-    return { staged: [...staged.values()], inserted };
+    return {
+      staged: [...staged.values()],
+      inserted,
+      ...(cascadeJob === undefined ? {} : { cascadeJob }),
+    };
   }
 
   /**
@@ -3395,25 +3547,32 @@ export class StoreHost {
    * on from those, as the schema each was written under declared it
    * (`sdk_record_refs`). The policy is the schema's, declared by the App's
    * builders: it deletes a referring record whatever the writer could
-   * write, as the record it refers to is gone. At most `commitMaxCascade`
-   * records in all; past that the commit is refused (`data.cascade_limit`,
-   * naming nothing that would have gone) for a workflow to delete them in
-   * batches. A referring record this commit writes itself is left to its
-   * write: if it still refers to a deleted record, the commit is refused
-   * as restrict refuses it (`#indexReferences`).
+   * write, as the record it refers to is gone. A referring record this
+   * commit writes itself is left to its write: if it still refers to a
+   * deleted record, the commit is refused as restrict refuses it
+   * (`#indexReferences`).
+   *
+   * At most `commitMaxCascade` records in the commit itself. Past that,
+   * the commit deletes nothing: its deletions, and everything they reach,
+   * are planned as a cascade job instead (`#planCascadeJob`), which the
+   * store's alarm deletes after the commit, in batches. Answers the plan,
+   * if there is one. A `preview` plans none: past the bound, its
+   * deletions are left pending, as its commit leaves them at once.
    */
   #cascade(
-    staged: ReadonlyMap<string, Staged>,
-    stage: (table: string, tableId: string, recordId: string) => Staged
-  ): void {
+    staged: Map<string, Staged>,
+    stage: (table: string, tableId: string, recordId: string) => Staged,
+    preview: boolean
+  ): CascadePlan | undefined {
     const pending = [...staged.values()].filter(
       ({ base, fields }) => base !== undefined && fields === null
     );
+    const added: string[] = [];
     let cascaded = 0;
     for (let gone = pending.pop(); gone !== undefined; gone = pending.pop()) {
-      // One more than the bound has room for is enough to refuse: no
-      // more is read. (Records already staged are among them, but are
-      // never more than the commit's own writes and what it cascaded.)
+      // One more than the bound has room for is enough to plan a job: no
+      // more is read here. (Records already staged are among them, but
+      // are never more than the commit's own writes and what it cascaded.)
       const referring = this.#db
         .select({ tableId: recordRefs.tableId, recordId: recordRefs.recordId })
         .from(recordRefs)
@@ -3427,21 +3586,558 @@ export class StoreHost {
         .limit(commitMaxCascade - cascaded + staged.size + 1)
         .all();
       for (const { tableId, recordId } of referring) {
-        if (staged.has(keyOf(tableId, recordId))) {
+        const key = keyOf(tableId, recordId);
+        if (staged.has(key)) {
           continue;
         }
         cascaded += 1;
         if (cascaded > commitMaxCascade) {
-          throw dataErrors.create("data.cascade_limit", {
-            limit: commitMaxCascade,
-          });
+          // What this commit cascaded so far is the job's now.
+          for (const staging of added) {
+            staged.delete(staging);
+          }
+          if (preview) {
+            // A preview plans no job: it shows what its commit leaves at
+            // once, the deletions pending, their records as they are. A
+            // record a job is deleting already is refused, as its commit's
+            // plan refuses it (`#planCascadeJob`).
+            const deletions = [...staged.values()].filter(
+              (entry) => entry.base !== undefined && entry.fields === null
+            );
+            this.#requireNotDeleting(deletions);
+            for (const entry of deletions) {
+              if (entry.base !== undefined) {
+                entry.fields = fieldsOf(entry.base);
+              }
+            }
+            return undefined;
+          }
+          return this.#planCascadeJob(staged);
         }
         const entry = stage(this.#tableName(tableId), tableId, recordId);
         entry.fields = null;
         entry.cascaded = true;
+        added.push(key);
         pending.push(entry);
       }
     }
+    return undefined;
+  }
+
+  /**
+   * The cascade job of a commit whose deletions reach more than one
+   * commit may delete (`#cascade`): those deletions (taken back from the
+   * commit, which leaves them where they are), and every record they
+   * reach through cascading references, at every level, read in this
+   * transaction. Past `cascadeJobMaxRecords` in all, refused
+   * (`data.cascade_limit`); a record another job is deleting already,
+   * refused too (`data.deleting`). A referring record the commit writes
+   * itself is no member: if it still refers to one once written, the
+   * commit is refused (`#requireCascadeClosed`). Nothing is written here.
+   */
+  #planCascadeJob(staged: Map<string, Staged>): CascadePlan {
+    const members = new Map<string, CascadeMember>();
+    const pending: CascadeMember[] = [];
+    const add = (member: CascadeMember): void => {
+      const key = keyOf(member.tableId, member.recordId);
+      if (members.has(key)) {
+        return;
+      }
+      if (this.#isDeleting(member.tableId, member.recordId)) {
+        throw dataErrors.create("data.deleting");
+      }
+      members.set(key, member);
+      if (members.size > cascadeJobMaxRecords) {
+        throw dataErrors.create("data.cascade_limit", {
+          limit: cascadeJobMaxRecords,
+        });
+      }
+      pending.push(member);
+    };
+    let root: CascadeMember | undefined;
+    for (const entry of staged.values()) {
+      if (entry.base !== undefined && entry.fields === null) {
+        // Deleted by the job instead, after the commit: the commit leaves
+        // the record as it was.
+        entry.fields = fieldsOf(entry.base);
+        const member = { tableId: entry.tableId, recordId: entry.recordId };
+        root ??= member;
+        add(member);
+      }
+    }
+    if (root === undefined) {
+      throw new Error("A cascade job planned without a deletion");
+    }
+    for (let gone = pending.pop(); gone !== undefined; gone = pending.pop()) {
+      // Every record referring to it, a page at a time in the order of
+      // their IDs: records the job has already are skipped, never counted
+      // against a page, so none it still needs is missed. Past the bound,
+      // `add` refuses at once.
+      let after: { tableId: string; recordId: string } | undefined;
+      for (;;) {
+        const referring = this.#db
+          .select({
+            tableId: recordRefs.tableId,
+            recordId: recordRefs.recordId,
+          })
+          .from(recordRefs)
+          .where(
+            and(
+              eq(recordRefs.toTableId, gone.tableId),
+              eq(recordRefs.toRecordId, gone.recordId),
+              eq(recordRefs.cascade, true),
+              after === undefined
+                ? undefined
+                : sql`(${recordRefs.tableId}, ${recordRefs.recordId}) > (${after.tableId}, ${after.recordId})`
+            )
+          )
+          .orderBy(asc(recordRefs.tableId), asc(recordRefs.recordId))
+          .limit(cascadePlanPage)
+          .all();
+        for (const { tableId, recordId } of referring) {
+          // Left to the commit's own write (`#requireCascadeClosed`).
+          const written = staged.get(keyOf(tableId, recordId));
+          if (written !== undefined && written.fields !== null) {
+            continue;
+          }
+          add({ tableId, recordId });
+        }
+        after = referring.at(-1);
+        if (referring.length < cascadePlanPage) {
+          break;
+        }
+      }
+    }
+    return { root, members };
+  }
+
+  /**
+   * Refuses (`data.referenced`, naming nothing, as a cascaded restrict is)
+   * the cascade job `jobId` if a record outside it refers to any of its
+   * members, after the commit's own writes (call it inside the commit's
+   * transaction, after `#indexReferences` and `#startCascadeJob`, whose
+   * writes the refusal rolls back): a restricting reference, or a
+   * cascading one the commit's own write kept. So the job never meets a
+   * reference it can't delete, and nothing is deleted at all.
+   */
+  #requireCascadeClosed(jobId: string): void {
+    // The first reference into the job from a record outside it, if any:
+    // at most one row read, whatever the job's size.
+    const outsider = this.ctx.storage.sql
+      .exec(
+        `SELECT 1 FROM sdk_cascade_members m
+         JOIN sdk_record_refs r
+           ON r.to_table_id = m.table_id AND r.to_record_id = m.record_id
+         WHERE m.job_id = ?
+           AND NOT EXISTS (SELECT 1 FROM sdk_cascade_members o
+             WHERE o.job_id = m.job_id
+               AND o.table_id = r.table_id AND o.record_id = r.record_id)
+         LIMIT 1`,
+        jobId
+      )
+      .toArray();
+    if (outsider.length > 0) {
+      throw dataErrors.create("data.referenced");
+    }
+  }
+
+  /**
+   * Records `plan` as a cascade job of the commit holding receipt
+   * `receiptId` (call it inside the commit's transaction): the job, every
+   * member, and its `store.cascade_started` event. Answers the job's ID.
+   * The alarm deletes its members after the commit (`#runCascadeJobs`).
+   */
+  #startCascadeJob(
+    plan: CascadePlan,
+    { receiptId, principal, resourceId, runId, now }: CascadeStart
+  ): string {
+    const jobId = crypto.randomUUID();
+    this.#db
+      .insert(cascadeJobs)
+      .values({
+        jobId,
+        receiptId,
+        principal,
+        resourceId,
+        runId,
+        rootTableId: plan.root.tableId,
+        rootRecordId: plan.root.recordId,
+        planned: plan.members.size,
+        createdAt: now,
+      })
+      .run();
+    for (const { tableId, recordId } of plan.members.values()) {
+      this.#db
+        .insert(cascadeMembers)
+        .values({ tableId, recordId, jobId })
+        .run();
+    }
+    this.#cascadeEvent("store.cascade_started", principal, {
+      job: jobId,
+      table: this.#tableName(plan.root.tableId),
+      id: plan.root.recordId,
+      members: plan.members.size,
+      app: resourceId,
+      run: runId,
+    });
+    return jobId;
+  }
+
+  /**
+   * Records a cascade job's audit event, `action` by `principal`, in the
+   * transaction the caller runs: handed to core with the store's other
+   * events (`FileHost.flushEvents`). Identifiers and counts only.
+   */
+  #cascadeEvent(
+    action: string,
+    principal: string,
+    detail: Record<string, string | number | null>,
+    provenance: readonly string[] = []
+  ): void {
+    const now = Date.now();
+    const event: AuditEvent = auditEventSchema.parse({
+      id: crypto.randomUUID(),
+      at: new Date(now).toISOString(),
+      source: "core",
+      actor: { type: "person", userId: principal },
+      action,
+      target: { type: "store", id: this.#storeId() },
+      provenance,
+      detail,
+    });
+    this.#db
+      .insert(fileEvents)
+      .values({ id: event.id, event: JSON.stringify(event), createdAt: now })
+      .run();
+  }
+
+  /**
+   * The cascade job whose batch is next: unfinished, and not failed (or
+   * set aside long enough, `cascadeFailedRetryMs`), the
+   * one whose batches failed least first, then the oldest; none of
+   * `skipped`. So a job whose batches keep failing goes behind the others,
+   * which go on.
+   */
+  #nextCascadeJob(skipped: ReadonlySet<string>): CascadeJob | undefined {
+    return this.#db
+      .select()
+      .from(cascadeJobs)
+      .where(
+        and(
+          isNull(cascadeJobs.finishedAt),
+          or(
+            isNull(cascadeJobs.failedAt),
+            lte(cascadeJobs.failedAt, Date.now() - cascadeFailedRetryMs)
+          ),
+          notInArray(cascadeJobs.jobId, [...skipped])
+        )
+      )
+      .orderBy(asc(cascadeJobs.attempts), asc(cascadeJobs.createdAt))
+      .limit(1)
+      .get();
+  }
+
+  /**
+   * The next members of `job` to delete, at most `commitMaxCascade`: those
+   * no remaining record refers to, so the records referring to a member go
+   * before it, the root last, and a reader never meets a reference to a
+   * record that's gone. Only their IDs and owners are read.
+   *
+   * Members that refer to each other in a cycle are never such leaves, and
+   * a long chain has one at a time. So when fewer than
+   * `cascadeLeavesAtLeast` are found, the batch is filled up with other
+   * members, picked at random, and the references other members of the
+   * job hold to them are dropped, so they are leaves too: a cycle or chain
+   * of any length is cut into many, each ending in a leaf, and goes a
+   * batch at a time. Nothing outside the job refers to a member
+   * (`#requireCascadeClosed`, and new references to one are refused), so
+   * only members still due for deletion can meet a reference to a record
+   * that's gone: records already deleting (`data.deleting`), deleted in a
+   * later batch.
+   */
+  #cascadeBatchOf(job: CascadeJob): {
+    members: CascadeBatchMember[];
+    cut: number;
+  } {
+    const leaves = this.ctx.storage.sql
+      .exec<CascadeBatchMember>(
+        `SELECT m.table_id AS tableId, m.record_id AS recordId,
+           rec.owner_id AS ownerId
+         FROM sdk_cascade_members m
+         LEFT JOIN sdk_records rec
+           ON rec.table_id = m.table_id AND rec.record_id = m.record_id
+         WHERE m.job_id = ? AND NOT ${referredSql}
+         LIMIT ?`,
+        job.jobId,
+        commitMaxCascade
+      )
+      .toArray();
+    if (leaves.length >= cascadeLeavesAtLeast) {
+      return { members: leaves, cut: 0 };
+    }
+    const cut = this.ctx.storage.sql
+      .exec<CascadeBatchMember>(
+        `SELECT m.table_id AS tableId, m.record_id AS recordId,
+           rec.owner_id AS ownerId
+         FROM sdk_cascade_members m
+         LEFT JOIN sdk_records rec
+           ON rec.table_id = m.table_id AND rec.record_id = m.record_id
+         WHERE m.job_id = ? AND ${referredSql}
+         ORDER BY random()
+         LIMIT ?`,
+        job.jobId,
+        commitMaxCascade - leaves.length
+      )
+      .toArray();
+    for (const { tableId, recordId } of cut) {
+      this.ctx.storage.sql.exec(
+        `DELETE FROM sdk_record_refs
+         WHERE to_table_id = ? AND to_record_id = ?
+           AND EXISTS (SELECT 1 FROM sdk_cascade_members o
+             WHERE o.job_id = ?
+               AND o.table_id = sdk_record_refs.table_id
+               AND o.record_id = sdk_record_refs.record_id)`,
+        tableId,
+        recordId,
+        job.jobId
+      );
+    }
+    // The cut first: the batch deletes all of them, whatever its deadline.
+    return { members: [...cut, ...leaves], cut: cut.length };
+  }
+
+  /**
+   * Deletes the next batch of cascade job `job` (`#cascadeBatchOf`), in
+   * one transaction, stopping early once `deadline` passes with some of it
+   * deleted. Each record goes as a commit's deletion goes (`#flush`, its
+   * references, its files), its member row with it; `store.cascade_batch`
+   * events name them, per table and owner, at most
+   * `auditProvenanceMaxItems` an event. The job finishes with its last
+   * member; a batch done clears its failures. A throw changes nothing: the
+   * transaction rolls back.
+   */
+  #deleteCascadeBatch(job: CascadeJob, deadline: number): void {
+    this.ctx.storage.transactionSync((): void => {
+      const deleted: Staged[] = [];
+      const batch = this.#cascadeBatchOf(job);
+      for (const [
+        at,
+        { tableId, recordId, ownerId },
+      ] of batch.members.entries()) {
+        // Never before the cut members are gone: what refers to them no
+        // longer says so in the index (`#cascadeBatchOf`).
+        if (at >= batch.cut && deleted.length > 0 && Date.now() >= deadline) {
+          break;
+        }
+        if (ownerId !== null) {
+          deleted.push({
+            table: this.#tableName(tableId),
+            tableId,
+            recordId,
+            // A deletion reads no more of the record than that it is there
+            // and whose it is: its document is never loaded.
+            base: deletedBase(tableId, recordId, ownerId),
+            fields: null,
+            cascaded: true,
+          });
+        }
+        this.#db
+          .delete(cascadeMembers)
+          .where(
+            and(
+              eq(cascadeMembers.tableId, tableId),
+              eq(cascadeMembers.recordId, recordId)
+            )
+          )
+          .run();
+      }
+      // As a commit's deletion: the records, their tables' generations
+      // and the live queries told; their references; their files.
+      this.#flush(deleted, job.principal, "", Date.now());
+      for (const { tableId, recordId } of deleted) {
+        this.#db
+          .delete(recordRefs)
+          .where(
+            and(
+              eq(recordRefs.tableId, tableId),
+              eq(recordRefs.recordId, recordId)
+            )
+          )
+          .run();
+      }
+      const contract = this.#contractNow();
+      this.files.index(
+        deleted,
+        job.principal,
+        (table) => contract?.tables[table]?.fields,
+        [],
+        () => false
+      );
+      this.#cascadeBatchEvents(job, deleted);
+      const done = job.deleted + deleted.length;
+      const left = this.#db
+        .select({ one: sql`1` })
+        .from(cascadeMembers)
+        .where(eq(cascadeMembers.jobId, job.jobId))
+        .get();
+      this.#db
+        .update(cascadeJobs)
+        .set({
+          deleted: done,
+          attempts: 0,
+          failedAt: null,
+          ...(left === undefined ? { finishedAt: Date.now() } : {}),
+        })
+        .where(eq(cascadeJobs.jobId, job.jobId))
+        .run();
+      if (left === undefined) {
+        this.#cascadeEvent("store.cascade_finished", job.principal, {
+          job: job.jobId,
+          deleted: done,
+          app: job.resourceId,
+          run: job.runId,
+        });
+      }
+    });
+  }
+
+  /**
+   * The `store.cascade_batch` events of `deleted`, a batch of `job`: one
+   * per table and owner, each naming at most `auditProvenanceMaxItems`
+   * records.
+   */
+  #cascadeBatchEvents(job: CascadeJob, deleted: readonly Staged[]): void {
+    const groups = new Map<
+      string,
+      { table: string; owner: string; ids: string[] }
+    >();
+    for (const { table, recordId, base } of deleted) {
+      const owner = base?.ownerId ?? "";
+      const key = `${table}\u0000${owner}`;
+      const group = groups.get(key) ?? { table, owner, ids: [] };
+      group.ids.push(recordId);
+      groups.set(key, group);
+    }
+    for (const { table, owner, ids } of groups.values()) {
+      for (let at = 0; at < ids.length; at += auditProvenanceMaxItems) {
+        const named = ids.slice(at, at + auditProvenanceMaxItems);
+        this.#cascadeEvent(
+          "store.cascade_batch",
+          job.principal,
+          {
+            job: job.jobId,
+            table,
+            owner,
+            count: named.length,
+            app: job.resourceId,
+            run: job.runId,
+          },
+          named
+        );
+      }
+    }
+  }
+
+  /**
+   * Counts a failed batch of `job`, in a transaction of its own (the
+   * batch's rolled back). Its `cascadeJobMaxAttempts`th in a row fails the
+   * job, audited (`store.cascade_failed`, with how far it got): set aside,
+   * its records still deleting, and tried again `cascadeFailedRetryMs`
+   * later. Its members are never released: references among them may have
+   * been cut (`#cascadeBatchOf`), and records written again would then
+   * disagree with the index.
+   */
+  #cascadeFailed(job: CascadeJob): void {
+    this.ctx.storage.transactionSync(() => {
+      const attempts = job.attempts + 1;
+      const failing = attempts >= cascadeJobMaxAttempts;
+      this.#db
+        .update(cascadeJobs)
+        .set({ attempts, ...(failing ? { failedAt: Date.now() } : {}) })
+        .where(eq(cascadeJobs.jobId, job.jobId))
+        .run();
+      if (!failing) {
+        return;
+      }
+      const left = this.#db
+        .select({ count: count() })
+        .from(cascadeMembers)
+        .where(eq(cascadeMembers.jobId, job.jobId))
+        .get();
+      this.#cascadeEvent("store.cascade_failed", job.principal, {
+        job: job.jobId,
+        table: this.#tableName(job.rootTableId),
+        id: job.rootRecordId,
+        deleted: job.deleted,
+        left: left?.count ?? 0,
+        app: job.resourceId,
+        run: job.runId,
+      });
+    });
+  }
+
+  /**
+   * The alarm's turn at the store's cascade jobs: batch after batch
+   * (`#deleteCascadeBatch`), each its own transaction, until none is left,
+   * `cascadeBatchesPerAlarm` are done or `cascadeBudgetMs` is spent; the
+   * next alarm, due at once (`schedule`), goes on from there. A batch that
+   * fails is counted against its job (`#cascadeFailed`), which this alarm
+   * then leaves: the next batch is another job's, if there is one.
+   */
+  #runCascadeJobs(): void {
+    const deadline = Date.now() + cascadeBudgetMs;
+    const failed = new Set<string>();
+    for (
+      let batches = 0;
+      batches < cascadeBatchesPerAlarm && Date.now() < deadline;
+      batches += 1
+    ) {
+      const job = this.#nextCascadeJob(failed);
+      if (job === undefined) {
+        return;
+      }
+      try {
+        this.#deleteCascadeBatch(job, deadline);
+      } catch (error) {
+        log.error("store.cascade_batch_failed", {
+          job: job.jobId,
+          ...errorFields(error),
+        });
+        this.#cascadeFailed(job);
+        failed.add(job.jobId);
+      }
+    }
+  }
+
+  /**
+   * Refuses (`data.deleting`) a commit that changes or deletes a record a
+   * cascade job is deleting: it is left as it is until the job deletes it.
+   */
+  #requireNotDeleting(staged: readonly Staged[]): void {
+    for (const { tableId, recordId, base, fields } of staged) {
+      const changes =
+        base !== undefined &&
+        (fields === null || storedText(fields) !== base.valueJson);
+      if (changes && this.#isDeleting(tableId, recordId)) {
+        throw dataErrors.create("data.deleting");
+      }
+    }
+  }
+
+  /** Whether a cascade job is deleting record `recordId` of `tableId`. */
+  #isDeleting(tableId: string, recordId: string): boolean {
+    return (
+      this.#db
+        .select({ jobId: cascadeMembers.jobId })
+        .from(cascadeMembers)
+        .where(
+          and(
+            eq(cascadeMembers.tableId, tableId),
+            eq(cascadeMembers.recordId, recordId)
+          )
+        )
+        .get() !== undefined
+    );
   }
 
   /** The name of the store's table `tableId`, for what a refusal says. */
@@ -3497,6 +4193,18 @@ export class StoreHost {
       return storeTables.get(name);
     };
     for (const { table, tableId, recordId, base, fields, filled } of staged) {
+      // A record the commit only read (a guard) or wrote unchanged keeps
+      // its references as they are: they are read again only for what a
+      // commit changes. One a cascade job is deleting may name a record
+      // the job has deleted already (`#cascadeBatchOf`), which must never
+      // refuse a commit that writes elsewhere.
+      if (
+        base !== undefined &&
+        fields !== null &&
+        storedText(fields) === base.valueJson
+      ) {
+        continue;
+      }
       const held = new Set<string>();
       if (base !== undefined) {
         const where = and(
@@ -3548,13 +4256,22 @@ export class StoreHost {
             tableId: toTableId ?? "",
             recordId: reference.id,
           };
-          return toTableId !== undefined &&
+          const admitted =
+            toTableId !== undefined &&
             (held.has(keyOf(toTableId, reference.id)) ||
               (read
                 ? this.#referable(pinned, byKey, principal, roles, target)
-                : this.#ownerAfter(byKey, principal, target) !== undefined))
-            ? [{ toTableId, cascade }]
-            : [];
+                : this.#ownerAfter(byKey, principal, target) !== undefined));
+          // No new reference to a record a cascade job is deleting: its
+          // plan would never delete what refers to it.
+          if (
+            admitted &&
+            !held.has(keyOf(toTableId, reference.id)) &&
+            this.#isDeleting(toTableId, reference.id)
+          ) {
+            throw dataErrors.create("data.deleting");
+          }
+          return admitted ? [{ toTableId, cascade }] : [];
         });
         if (targets.length === 0) {
           throw dataErrors.create("data.reference_invalid", {
@@ -5933,6 +6650,14 @@ export class StoreHost {
       failed = true;
       log.error("store.abandonment_audit_failed", errorFields(error));
     }
+    // Before the files' sweep, which hands the batches' audit events to
+    // core with the files' own.
+    try {
+      this.#runCascadeJobs();
+    } catch (error) {
+      failed = true;
+      log.error("store.cascade_failed", errorFields(error));
+    }
     try {
       await this.files.sweep(this.#storeId());
     } catch (error) {
@@ -6054,7 +6779,25 @@ export class StoreHost {
       .from(backfills)
       .where(and(eq(backfills.state, "running"), isNull(backfills.readyAt)))
       .get();
+    // A cascade job with members left: its next batch is due now.
+    const cascading = this.#db
+      .select({ jobId: cascadeJobs.jobId })
+      .from(cascadeJobs)
+      .where(and(isNull(cascadeJobs.finishedAt), isNull(cascadeJobs.failedAt)))
+      .get();
+    // A failed one, tried again once it has been set aside long enough.
+    const failedJob = this.#db
+      .select({ at: min(cascadeJobs.failedAt) })
+      .from(cascadeJobs)
+      .where(
+        and(isNull(cascadeJobs.finishedAt), isNotNull(cascadeJobs.failedAt))
+      )
+      .get();
     const times = [
+      cascading === undefined ? null : Date.now(),
+      typeof failedJob?.at === "number"
+        ? failedJob.at + cascadeFailedRetryMs
+        : null,
       entry?.at,
       receipt?.at,
       // A file expiring, or a deleted file's bytes due for purging.

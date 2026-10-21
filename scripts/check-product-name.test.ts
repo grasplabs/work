@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { rm, writeFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vite-plus/test";
@@ -24,15 +25,60 @@ const lintReport = z.object({
 });
 
 /**
- * How long a test that runs `vp lint` may take: a cold lint loads the
- * repo's whole config and plugins, which on a busy CI runner takes longer
- * than vitest's default 5 seconds.
+ * How long the lint test may take. It runs the repo's own `vp lint`, as
+ * `vp check` does: type-aware and type-checking, so it builds the
+ * TypeScript programs of both apps the planted files sit in, with every JS
+ * plugin loaded. About a second on an idle machine, and well past the
+ * default 5 s on a CI runner shared with the other test shards. The
+ * config's file scoping is what the test checks, so no lighter run will do.
  */
 const lintTimeoutMs = 60_000;
 
+/**
+ * What `command` printed, once it exited, whatever its exit code. Once
+ * `signal` aborts (its test timed out), it and every process it started
+ * (`vp` runs oxlint) are killed, and this rejects at once, so its caller
+ * removes the planted files before the test runner stops.
+ */
+const stdoutOf = async (
+  command: string,
+  args: string[],
+  signal: AbortSignal
+): Promise<string> => {
+  // Timed out already: no lint starts at all.
+  signal.throwIfAborted();
+  // A process group of its own, so the whole tree can be killed at once.
+  const child = spawn(command, args, {
+    stdio: ["ignore", "pipe", "ignore"],
+    detached: true,
+  });
+  const killTree = (): void => {
+    if (child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  };
+  signal.addEventListener("abort", killTree, { once: true });
+  child.stdout.setEncoding("utf-8");
+  let stdout = "";
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  try {
+    await once(child, "close", { signal });
+  } finally {
+    signal.removeEventListener("abort", killTree);
+  }
+  return stdout;
+};
+
 /** What `vp lint` reports for each rule of ours on `files`, planted in the repo for the run. */
 const linted = async (
-  files: Record<string, string>
+  files: Record<string, string>,
+  signal: AbortSignal
 ): Promise<{ file: string; line: number }[]> => {
   const tag = randomUUID().slice(0, 8);
   const planted = Object.entries(files).map(([path, text]) => ({
@@ -46,10 +92,11 @@ const linted = async (
       })
     );
     // The repo's own, whatever the shell running the tests has on its path.
-    const { stdout } = spawnSync(
+    // Not spawnSync: the worker waits on the lint without blocking.
+    const stdout = await stdoutOf(
       "node_modules/.bin/vp",
       ["lint", "--format", "json", ...planted.map(({ path }) => path)],
-      { encoding: "utf-8" }
+      signal
     );
     const { diagnostics } = lintReport.parse(JSON.parse(stdout));
     return (
@@ -93,24 +140,29 @@ describe("the product's old name", () => {
 
   it(
     "fails the lint in a string or JSX text people read, never in a comment, a code name or a test",
-    { timeout: lintTimeoutMs },
-    async () => {
-      const reported = await linted({
-        "apps/web/src/NAME.tsx": [
-          "// Grasp OS, in a comment, is for us.",
-          'export const title = "Welcome to Grasp OS";',
-          "export const Banner = () => <p>Grasp OS is here</p>;",
-          'export const route = "/grasp-os";',
-          "",
-        ].join("\n"),
-        "apps/core/src/NAME.ts": [
-          "export const subject = `Your Grasp OS invite`;",
-          // Escaped, it still reads as the old name.
-          "export const escaped = `Grasp\\u0020OS`;",
-          "",
-        ].join("\n"),
-        "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
-      });
+    {
+      timeout: lintTimeoutMs,
+    },
+    async ({ signal }) => {
+      const reported = await linted(
+        {
+          "apps/web/src/NAME.tsx": [
+            "// Grasp OS, in a comment, is for us.",
+            'export const title = "Welcome to Grasp OS";',
+            "export const Banner = () => <p>Grasp OS is here</p>;",
+            'export const route = "/grasp-os";',
+            "",
+          ].join("\n"),
+          "apps/core/src/NAME.ts": [
+            "export const subject = `Your Grasp OS invite`;",
+            // Escaped, it still reads as the old name.
+            "export const escaped = `Grasp\\u0020OS`;",
+            "",
+          ].join("\n"),
+          "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
+        },
+        signal
+      );
       expect(reported).toStrictEqual([
         { file: "apps/core/src/NAME.ts", line: 1 },
         { file: "apps/core/src/NAME.ts", line: 2 },

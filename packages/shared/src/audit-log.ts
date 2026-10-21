@@ -182,6 +182,14 @@ const typeRules: readonly {
   // and each call refused.
   { action: "store.operation.called", type: "action" },
   { action: "store.operation.refused", type: "permission" },
+  // A store's cascade job deleting, after their commit, the records a
+  // deletion reached past one commit's bound (core's src/store-host.ts):
+  // started with the commit, each batch, its end, and a job set aside
+  // after its batches kept failing.
+  { action: "store.cascade_started", type: "action" },
+  { action: "store.cascade_batch", type: "action" },
+  { action: "store.cascade_finished", type: "action" },
+  { action: "store.cascade_failed", type: "action" },
   // Guest chats (core's src/guests.ts): an App inviting someone, revoking
   // the link, and reading back what they wrote; the guest opening the
   // chat, sending a message and finishing it.
