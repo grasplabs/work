@@ -642,14 +642,14 @@ export const refusalOf = (
 interface FunctionCallOptions {
   readonly deadline: number;
   /**
-   * Told of the call once it is resolved to `path`, a public function of
-   * `release`, before it runs (a screen's, to note its keyed submission).
-   */
-  /**
    * Told the fence of the receipt the call's mutation claimed, before its
    * handler runs (`Invocation.observeClaim`).
    */
   readonly observeClaim?: (fence: number) => void;
+  /**
+   * Told of the call once it is resolved to `path`, a public function of
+   * `release`, before it runs (a screen's, to note its keyed submission).
+   */
   readonly onAdmitted?: (
     release: Release,
     call: FunctionRequest,
