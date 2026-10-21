@@ -965,31 +965,38 @@ const reconcileGraceMs = 5 * 60_000;
  * The wait a refusal for a budget held by calls under way suggests. An
  * advisory hint: asking again sooner is only refused again.
  *
- * Where every full scope is the caller's own (their user scope, their
- * run), the calls holding it are theirs: the wait runs until the soonest
- * call under way in each scope reaches its deadline (the ledger's
- * `heldUntil`), rounded up to a whole step, and no longer than the most.
- * Optimistic, as that call may not free enough on its own; bounded, so a
- * caller asks again and is told afresh rather than wait out a long call.
+ * Where the caller is the person themselves (their own request, or their
+ * chat's agent) and every full scope is their user scope, the calls
+ * holding it are made for them: the wait runs until the soonest call
+ * under way reaches its deadline (the ledger's `heldUntil`), rounded up
+ * to a whole step, and no longer than the most. Optimistic, as that call
+ * may not free enough on its own; bounded, so a caller asks again and is
+ * told afresh rather than wait out a long call.
  *
- * A shared scope (the deployment, a workflow) is held by other people's
- * calls too. A derived wait would give away when they were sent: polling
- * would show the second it drops a step. Such a refusal suggests a fixed
- * wait. That removes only the timing of when they were sent: being told
- * the budget is busy at all still says other calls are under way, and its
- * turning into an admission (or out of budget) says when they finished.
+ * Any other scope, or any other caller, is shared: the deployment and a
+ * workflow hold other people's calls; a run lineage holds its runs' calls,
+ * which may be other Apps' (a run's own mail starts other Apps' runs under
+ * it, connector-events.ts); and to an App's code, a run's or a server's,
+ * the person's user scope holds their chats' calls and other Apps'. A
+ * derived wait would give away when those were sent: polling would show
+ * the second it drops a step. Such a refusal suggests a fixed wait. That
+ * removes only the timing of when they were sent: being told the budget
+ * is busy at all still says other calls are under way, and its turning
+ * into an admission (or out of budget) says when they finished.
  */
 const busyRetry = { stepSeconds: 15, mostSeconds: 300, sharedSeconds: 60 };
 
-/** The scopes a caller's own calls alone count against. */
-const ownScopes: ReadonlySet<LedgerScopeName> = new Set(["user", "run"]);
+/** Whether `trigger` is the person themselves, whose user scope is theirs to watch. */
+const isThePerson = (trigger: Session["trigger"]): boolean =>
+  trigger.type === "person" || trigger.type === "agent";
 
-/** The seconds to wait before asking again, for a budget held until `heldUntil`. */
+/** The seconds `trigger` waits before asking again, for a budget held until `heldUntil`. */
 const retryAfterSeconds = (
+  trigger: Session["trigger"],
   heldBy: readonly LedgerScopeName[],
   heldUntil: number
 ): number => {
-  if (!heldBy.every((scope) => ownScopes.has(scope))) {
+  if (!(isThePerson(trigger) && heldBy.every((scope) => scope === "user"))) {
     return busyRetry.sharedSeconds;
   }
   const waitMs = heldUntil - Date.now();
@@ -1276,7 +1283,11 @@ const heldBecause = (
     return {
       code: "model.budget_busy",
       because: admitted.scope,
-      retryAfterSeconds: retryAfterSeconds(admitted.heldBy, admitted.heldUntil),
+      retryAfterSeconds: retryAfterSeconds(
+        call.trigger,
+        admitted.heldBy,
+        admitted.heldUntil
+      ),
     };
   }
   if (admitted.scope === "run") {
