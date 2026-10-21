@@ -181,6 +181,36 @@ export const sly = query({
   },
 });
 
+/** Calls \`broken\`, and answers anyway: nothing failed for its caller. */
+export const forgiving = action({
+  args: {},
+  returns: v.null(),
+  uses: [broken],
+  handler: async (ctx) => {
+    try {
+      await ctx.runQuery(broken, {});
+    } catch {
+      // Handled: the call goes on.
+    }
+    return null;
+  },
+});
+
+/** Calls \`broken\`, and throws on what that call failed with. */
+export const rethrows = action({
+  args: {},
+  returns: v.null(),
+  uses: [broken],
+  handler: async (ctx) => {
+    try {
+      await ctx.runQuery(broken, {});
+    } catch (error) {
+      throw error;
+    }
+    return null;
+  },
+});
+
 /** Asks the App's model: an outside system. */
 export const consult = action({
   args: {},
@@ -190,14 +220,14 @@ export const consult = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { broken, chatty, consult, create, late, list, oddly, sly, titles, writer } from "./operations/notes.ts";
+import { broken, chatty, consult, create, forgiving, late, list, oddly, rethrows, sly, titles, writer } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, late, consult, list, chatty, broken, oddly, sly } },
+  operations: { notes: { create, titles, late, consult, list, chatty, broken, oddly, sly, forgiving, rethrows } },
   internalOperations: {},
   screens: [],
   uses: [writer],
@@ -590,6 +620,61 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       rest: ["Error", "Error"],
       others: 0,
       live: { code: "internal.unexpected", said: false },
+    });
+  });
+
+  it("tells the check why the function it named failed: not a nested failure its code handled, but the one it threw on", async () => {
+    const { builder, app, chatId, revision } = await setUp();
+    const chats = chatsOf(builder);
+    const call = async (path: string) =>
+      await builder.api.chats.previewFunction(
+        chatId,
+        app,
+        revision,
+        await requestFor(builder, { chatId, app, revision }, path)
+      );
+    const asAgent = async (path: string) =>
+      z
+        .object({ thrown: z.string().optional() })
+        .loose()
+        .parse(
+          JSON.parse(
+            await chats.callDraftFunction(chatId, builder.userId, app, path, {})
+          )
+        );
+
+    // Its nested call failed, and its code went on: nothing to tell.
+    const forgiven = outcome(await call("notes.forgiving"));
+    const forgivenReports = await chats.previewReports(
+      chatId,
+      app,
+      revision,
+      0
+    );
+    const forgivenAgent = await asAgent("notes.forgiving");
+    // It threw on what its nested call failed with: why it failed is the
+    // nested call's own message, not the platform's generic text.
+    const rethrown = outcome(await call("notes.rethrows"));
+    const reports = await chats.previewReports(chatId, app, revision, 0);
+    const rethrownAgent = await asAgent("notes.rethrows");
+
+    const opening = "Error: Note 7 has no title.";
+    expect({
+      forgiven,
+      forgivenProblems: forgivenReports.problems.length,
+      forgivenAgent: forgivenAgent.thrown,
+      rethrown,
+      problems: reports.problems.map(
+        ({ at, message }) => `${at} ${message.slice(0, opening.length)}`
+      ),
+      rethrownAgent: rethrownAgent.thrown?.slice(0, opening.length),
+    }).toStrictEqual({
+      forgiven: null,
+      forgivenProblems: 0,
+      forgivenAgent: undefined,
+      rethrown: "internal.unexpected",
+      problems: [`notes.rethrows ${opening}`],
+      rethrownAgent: opening,
     });
   });
 

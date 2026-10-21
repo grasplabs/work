@@ -303,9 +303,10 @@ export interface Invocation {
    */
   readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
   /**
-   * Told what App code threw that its caller hears only as
-   * `internal.unexpected`: its name and message, when they are strings,
-   * cut to `draftFailureMaxLength`, as data. Only a chat's preview of its
+   * Told what the function the caller named threw that its caller hears
+   * only as `internal.unexpected`, at most once a call: its name and
+   * message, when they are strings, cut to `draftFailureMaxLength`, as
+   * data (`tellerOf`). Only a chat's preview of its
    * own draft (sealed-previews.ts) is told, for the agent's check to read
    * as a tool's result; every other caller's App code keeps its failures
    * to the log, and no caller's answer ever carries them.
@@ -847,26 +848,69 @@ const field = (value: unknown, key: string): unknown =>
     : undefined;
 
 /**
- * Tells a chat's preview what its draft's code threw (`draftFailure`):
- * what crossed from the sandbox, an error rebuilt there whose message a
- * non-error thrown, or one past the sandbox's size, may have lost.
+ * The message App code sees for a function it called that failed
+ * unexpectedly (`forCaller`): what a draft's code that caught it and
+ * threw it on says, never why it failed.
  */
-const tellDraft = (
-  draftFailure: Invocation["draftFailure"],
-  name: unknown,
-  message: unknown
-): void => {
-  if (draftFailure === undefined || typeof message !== "string") {
-    return;
+const callerSeesUnexpected = internalErrors.create(
+  "internal.unexpected"
+).message;
+
+/**
+ * What a draft's code threw, as the preview is told it: the name and
+ * message that crossed from the sandbox, an error rebuilt there whose
+ * message a non-error thrown, or one past the sandbox's size, may have
+ * lost. Undefined for a message that isn't text.
+ */
+const saidOf = (name: unknown, message: unknown): string | undefined => {
+  if (typeof message !== "string") {
+    return undefined;
   }
   const named = typeof name === "string" ? name : "";
-  const said =
-    named === "" || message === "" ? named || message : `${named}: ${message}`;
-  try {
-    draftFailure(said.slice(0, draftFailureMaxLength));
-  } catch (error) {
-    log.error("operation.draft_failure_unkept", errorFields(error));
+  return named === "" || message === ""
+    ? named || message
+    : `${named}: ${message}`;
+};
+
+/**
+ * Tells a chat's preview what its draft's code threw (`draftFailure`):
+ * only for the function the caller named (depth 0), whose failure is the
+ * call's, so a nested failure its code caught never stands for why the
+ * call failed. When that function only threw on what a nested call
+ * failed with (the platform's generic text), the first nested failure of
+ * the same attempt that said more is told instead (`Run.told`), or
+ * nothing.
+ */
+const tellerOf = (
+  run: Run
+): ((name: unknown, message: unknown) => void) | undefined => {
+  const { draftFailure } = run.invocation;
+  if (draftFailure === undefined) {
+    return undefined;
   }
+  return (name, message) => {
+    const said = saidOf(name, message);
+    if (said === undefined) {
+      return;
+    }
+    const generic = message === callerSeesUnexpected;
+    if (run.depth > 0) {
+      if (!generic) {
+        run.told.nested ??= said;
+      }
+      return;
+    }
+    // The generic text alone says nothing the caller's answer doesn't.
+    const told = generic ? run.told.nested : said;
+    if (told === undefined) {
+      return;
+    }
+    try {
+      draftFailure(told.slice(0, draftFailureMaxLength));
+    } catch (error) {
+      log.error("operation.draft_failure_unkept", errorFields(error));
+    }
+  };
 };
 
 /**
@@ -880,7 +924,7 @@ const failureOf = (
   open: OpenChannel,
   requestId: string,
   path: string,
-  draftFailure?: Invocation["draftFailure"]
+  tell?: (name: unknown, message: unknown) => void
 ): Error => {
   // Every read of what App code threw may run its getters: what they
   // throw is an unexpected failure, never taken for the host's.
@@ -932,6 +976,11 @@ const failureOf = (
   if (typeof code === "string" && isPlatformCode(code)) {
     const raised = open.raised(code);
     if (raised !== undefined) {
+      if (code === "internal.unexpected") {
+        // A nested call's unexpected failure, thrown on: why it failed is
+        // the nested call's (`tellerOf`).
+        tell?.(name, message);
+      }
       return hostError(raised);
     }
   }
@@ -943,7 +992,7 @@ const failureOf = (
     path,
     code: typeof code === "string" ? code : undefined,
   });
-  tellDraft(draftFailure, name, message);
+  tell?.(name, message);
   return Object.assign(new Error("Unexpected failure"), { unexpected: true });
 };
 
@@ -2234,6 +2283,13 @@ interface Run {
    * its first refusal is kept.
    */
   readonly evidence: { kept: boolean };
+  /**
+   * The first failure a nested function of the current attempt threw that
+   * said more than the platform's generic text (`tellerOf`): shared by
+   * every function in the call, and cleared as each attempt of the one
+   * the caller named starts.
+   */
+  readonly told: { nested?: string };
   /** The caller's call, as its runner knows it: the same at any depth. */
   readonly call: CallTree;
   /**
@@ -2680,6 +2736,11 @@ const runHandler = async (
   capabilities: Capabilities,
   stale?: () => Promise<boolean>
 ): Promise<Json> => {
+  if (run.depth === 0) {
+    // A new attempt: what an earlier one's nested calls threw isn't why
+    // this one fails.
+    run.told.nested = undefined;
+  }
   const calls = trackedCalls(
     keepingEvidence(run, operation, capabilities),
     run.invocation.deadline
@@ -2742,7 +2803,7 @@ const runHandler = async (
         open,
         run.invocation.requestId,
         operation.path,
-        run.invocation.draftFailure
+        tellerOf(run)
       );
     }
     if (unfinished !== undefined) {
@@ -2756,7 +2817,7 @@ const runHandler = async (
         open,
         run.invocation.requestId,
         operation.path,
-        run.invocation.draftFailure
+        tellerOf(run)
       );
     }
     return checkedReturn(run.compiled, operation, outcome.value);
@@ -3520,6 +3581,7 @@ export const callOperation = async (
         depth: 0,
         budget: options.budget ?? callBudget(),
         evidence: { kept: false },
+        told: {},
         call: new CallTree(options.parentSession),
         ...(progress === undefined ? {} : { progress }),
         ...(cancelled === undefined ? {} : { cancelled }),
