@@ -4480,10 +4480,6 @@ msgstr "Google-Anmeldung"
 msgid "Grant {who}?"
 msgstr "{who} erteilen?"
 
-#: src/landscape/usage-tab.tsx
-msgid "Granted {scopes}. Last seen {lastSeen}."
-msgstr "Gewährt: {scopes}. Zuletzt gesehen am {lastSeen}."
-
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
 msgstr "Eine Berechtigung erteilt"
@@ -5633,8 +5629,12 @@ msgstr "Nachrichten"
 msgid "Microsoft didn't answer the reads. Grasp tries again tomorrow."
 msgstr "Microsoft hat auf die Abfragen nicht geantwortet. Grasp versucht es morgen erneut."
 
+#: src/connections/integrations.ts
+msgid "Microsoft Entra (application landscape)"
+msgstr "Microsoft Entra (App-Landschaft)"
+
 #: src/landscape/sync-notice.tsx
-msgid "Microsoft Entra hasn't been read whole yet."
+msgid "Microsoft Entra hasn't been fully read yet."
 msgstr "Microsoft Entra wurde noch nicht vollständig gelesen."
 
 #: src/landscape/connect-landscape.tsx
@@ -9348,7 +9348,7 @@ msgstr "Die in Microsoft Entra gefundenen Apps sind möglicherweise unvollständ
 
 #: src/landscape/sync-notice.tsx
 msgid "The apps found in Microsoft Entra may be incomplete: its last read didn't finish."
-msgstr "Die in Microsoft Entra gefundenen Apps sind möglicherweise unvollständig: das letzte Lesen wurde nicht abgeschlossen."
+msgstr "Die in Microsoft Entra gefundenen Apps sind möglicherweise unvollständig: Das letzte Lesen wurde nicht abgeschlossen."
 
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
@@ -10052,6 +10052,10 @@ msgstr "Dieser kann nur freigegeben werden: Ein Budgeteintrag, auf den er angere
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Diese Seite wurde nicht geladen"
+
+#: src/landscape/usage-tab.tsx
+msgid "This person granted access to {scopes}. Grasp last saw the grant on {lastSeen}."
+msgstr "Diese Person hat Zugriff auf {scopes} gewährt. Grasp hat die Freigabe zuletzt am {lastSeen} gesehen."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"

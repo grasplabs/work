@@ -66,13 +66,13 @@ const SyncNotice = ({ status }: { status: LandscapeSyncStatus }) => {
   const when = wholeAt === null ? null : formatDateTime(wholeAt);
   const freshness =
     when === null
-      ? t`Microsoft Entra hasn't been read whole yet.`
+      ? t`Microsoft Entra hasn't been fully read yet.`
       : t`Apps found in Microsoft Entra as of ${when}.`;
   if (notice === null) {
     return <p className="text-muted-foreground">{freshness}</p>;
   }
   return (
-    <Alert>
+    <Alert live="polite">
       <TriangleAlertIcon />
       <AlertTitle>{i18n._(notice.title)}</AlertTitle>
       <AlertDescription>

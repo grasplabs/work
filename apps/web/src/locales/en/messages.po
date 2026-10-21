@@ -4480,10 +4480,6 @@ msgstr "Google sign-in"
 msgid "Grant {who}?"
 msgstr "Grant {who}?"
 
-#: src/landscape/usage-tab.tsx
-msgid "Granted {scopes}. Last seen {lastSeen}."
-msgstr "Granted {scopes}. Last seen {lastSeen}."
-
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
 msgstr "Granted a permission"
@@ -5633,9 +5629,13 @@ msgstr "Messages"
 msgid "Microsoft didn't answer the reads. Grasp tries again tomorrow."
 msgstr "Microsoft didn't answer the reads. Grasp tries again tomorrow."
 
+#: src/connections/integrations.ts
+msgid "Microsoft Entra (application landscape)"
+msgstr "Microsoft Entra (application landscape)"
+
 #: src/landscape/sync-notice.tsx
-msgid "Microsoft Entra hasn't been read whole yet."
-msgstr "Microsoft Entra hasn't been read whole yet."
+msgid "Microsoft Entra hasn't been fully read yet."
+msgstr "Microsoft Entra hasn't been fully read yet."
 
 #: src/landscape/connect-landscape.tsx
 msgid "Microsoft Entra needs connecting again"
@@ -10052,6 +10052,10 @@ msgstr "This one can only be released: a budget record it counts against is dama
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "This page didn't load"
+
+#: src/landscape/usage-tab.tsx
+msgid "This person granted access to {scopes}. Grasp last saw the grant on {lastSeen}."
+msgstr "This person granted access to {scopes}. Grasp last saw the grant on {lastSeen}."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"

@@ -48,6 +48,12 @@ const lineOf = (
     .replaceAll(/<[^>]+>/gu, "")
     .replaceAll("&#x27;", "'");
 
+/** How many live regions of each kind `markup` has. */
+const rolesOf = (markup: string) => ({
+  status: markup.match(/role="status"/gu)?.length ?? 0,
+  alert: markup.match(/role="alert"/gu)?.length ?? 0,
+});
+
 describe("the landscape's freshness", () => {
   it("says when the list was last read whole, and says so when the last read stopped at its limit or failed", () => {
     const whole = formatDateTime("2026-10-20T10:00:00.000Z");
@@ -63,7 +69,7 @@ describe("the landscape's freshness", () => {
     }).toStrictEqual({
       done: `Apps found in Microsoft Entra as of ${whole}.`,
       partial:
-        "The last read of Microsoft Entra stopped at its limit Your organization has more grants than one day's read takes, so some apps may be missing. Microsoft Entra hasn't been read whole yet.",
+        "The last read of Microsoft Entra stopped at its limit Your organization has more grants than one day's read takes, so some apps may be missing. Microsoft Entra hasn't been fully read yet.",
       failed: `The last read of Microsoft Entra failed The Microsoft Entra connection needs an admin to connect it again. Apps found in Microsoft Entra as of ${whole}.`,
       failedOther: `The last read of Microsoft Entra failed Microsoft didn't answer the reads. Grasp tries again tomorrow. Apps found in Microsoft Entra as of ${whole}.`,
     });
@@ -114,5 +120,19 @@ describe("the landscape's freshness", () => {
       signal:
         "Microsoft hasn't verified who publishes this app. It names its publisher Microsoft Corporation itself, unverified.",
     });
+  });
+
+  it("shows where the landscape stands as a status, never an alert that interrupts a screen reader", () => {
+    const notices = renderToStaticMarkup(
+      <I18nProvider i18n={i18n}>
+        <SyncNotices
+          syncs={{
+            state: "ready",
+            data: [status({ state: "partial", wholeAt: null })],
+          }}
+        />
+      </I18nProvider>
+    );
+    expect(rolesOf(notices)).toStrictEqual({ status: 1, alert: 0 });
   });
 });

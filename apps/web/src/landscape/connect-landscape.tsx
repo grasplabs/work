@@ -64,7 +64,7 @@ export const ConnectLandscape = ({
     );
   };
   return (
-    <Alert>
+    <Alert live="polite">
       <RadarIcon />
       <AlertTitle>
         {offer === "connect" ? (

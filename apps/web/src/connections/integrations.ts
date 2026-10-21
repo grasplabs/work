@@ -7,6 +7,8 @@ import type {
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
 import { landscapeProviderSchema } from "@grasp-os/shared/landscape";
+import { i18n } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
 
 // Integrations, as the prototype lists them (`routes/integrations`): every
 // app Grasp can work in, one per catalog entry, each with the connections
@@ -78,9 +80,11 @@ const byNewest = (one: ListedConnection, other: ListedConnection): number =>
  * then any connection's provider it doesn't list. Disconnected connections
  * are left out: they reach nothing.
  */
-/** What the landscape's own connection is called where it is listed. */
-export const landscapeConnectionName =
-  "Microsoft Entra (application landscape)";
+/**
+ * What the landscape's own connection is called where it is listed, read
+ * with `i18n._()` as the list is made.
+ */
+export const landscapeConnectionName = msg`Microsoft Entra (application landscape)`;
 
 export const integrationsOf = (
   entries: readonly Entry[],
@@ -121,7 +125,7 @@ export const integrationsOf = (
         // The catalog alone has its name: its ID stands in, but for the
         // landscape's own connection, which no catalog lists.
         name: landscapeProviderSchema.safeParse(connection.provider).success
-          ? landscapeConnectionName
+          ? i18n._(landscapeConnectionName)
           : connection.provider,
         categories: [],
         group: "Other",

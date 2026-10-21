@@ -66,7 +66,7 @@ describe("a found app's usage", () => {
     const member = textOf(null);
     const refused = textOf({ state: "refused", message: "Not allowed" });
     expect({ admin, member, refused }).toStrictEqual({
-      admin: `Usage 2 people granted this app access for themselves. Ada Granted User.Read and Mail.Read. Last seen ${formatDate(lastSeen)}. oid-unnamed Granted User.Read. Last seen ${formatDate(lastSeen)}.`,
+      admin: `Usage 2 people granted this app access for themselves. Ada This person granted access to User.Read and Mail.Read. Grasp last saw the grant on ${formatDate(lastSeen)}. oid-unnamed This person granted access to User.Read. Grasp last saw the grant on ${formatDate(lastSeen)}.`,
       member:
         "Usage 2 people granted this app access for themselves. Only admins see who they are.",
       refused:

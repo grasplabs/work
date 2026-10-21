@@ -48,7 +48,7 @@ const PersonItem = ({ person }: { person: LandscapePerson }) => {
       <ItemContent>
         <ItemTitle>{person.name ?? person.personId}</ItemTitle>
         <ItemDescription>
-          {t`Granted ${scopes}. Last seen ${lastSeen}.`}
+          {t`This person granted access to ${scopes}. Grasp last saw the grant on ${lastSeen}.`}
         </ItemDescription>
       </ItemContent>
     </Item>

@@ -4480,10 +4480,6 @@ msgstr "Inicio de sesión de Google"
 msgid "Grant {who}?"
 msgstr "¿Conceder {who}?"
 
-#: src/landscape/usage-tab.tsx
-msgid "Granted {scopes}. Last seen {lastSeen}."
-msgstr "Concedido: {scopes}. Visto por última vez el {lastSeen}."
-
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
 msgstr "Concedió un permiso"
@@ -5633,9 +5629,13 @@ msgstr "Mensajes"
 msgid "Microsoft didn't answer the reads. Grasp tries again tomorrow."
 msgstr "Microsoft no respondió a las lecturas. Grasp lo intentará de nuevo mañana."
 
+#: src/connections/integrations.ts
+msgid "Microsoft Entra (application landscape)"
+msgstr "Microsoft Entra (mapa de aplicaciones)"
+
 #: src/landscape/sync-notice.tsx
-msgid "Microsoft Entra hasn't been read whole yet."
-msgstr "Microsoft Entra aún no se ha leído completo."
+msgid "Microsoft Entra hasn't been fully read yet."
+msgstr "Aún no se ha completado la lectura de Microsoft Entra."
 
 #: src/landscape/connect-landscape.tsx
 msgid "Microsoft Entra needs connecting again"
@@ -10052,6 +10052,10 @@ msgstr "Este solo se puede liberar: un registro de presupuesto en el que cuenta 
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Esta página no se ha cargado"
+
+#: src/landscape/usage-tab.tsx
+msgid "This person granted access to {scopes}. Grasp last saw the grant on {lastSeen}."
+msgstr "Esta persona concedió acceso a {scopes}. Grasp vio este permiso por última vez el {lastSeen}."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"

@@ -4480,10 +4480,6 @@ msgstr "Inloggen met Google"
 msgid "Grant {who}?"
 msgstr "{who} verlenen?"
 
-#: src/landscape/usage-tab.tsx
-msgid "Granted {scopes}. Last seen {lastSeen}."
-msgstr "Toegang tot {scopes} verleend. Laatst gezien op {lastSeen}."
-
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
 msgstr "Een toestemming verleend"
@@ -5633,8 +5629,12 @@ msgstr "Berichten"
 msgid "Microsoft didn't answer the reads. Grasp tries again tomorrow."
 msgstr "Microsoft gaf geen antwoord op de leesacties. Grasp probeert het morgen opnieuw."
 
+#: src/connections/integrations.ts
+msgid "Microsoft Entra (application landscape)"
+msgstr "Microsoft Entra (applicatielandschap)"
+
 #: src/landscape/sync-notice.tsx
-msgid "Microsoft Entra hasn't been read whole yet."
+msgid "Microsoft Entra hasn't been fully read yet."
 msgstr "Microsoft Entra is nog niet volledig gelezen."
 
 #: src/landscape/connect-landscape.tsx
@@ -10052,6 +10052,10 @@ msgstr "Deze kan alleen worden vrijgegeven: een budgetrecord waartegen hij telt 
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Deze pagina is niet geladen"
+
+#: src/landscape/usage-tab.tsx
+msgid "This person granted access to {scopes}. Grasp last saw the grant on {lastSeen}."
+msgstr "Deze persoon gaf toegang tot {scopes}. Grasp zag deze toestemming het laatst op {lastSeen}."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"
