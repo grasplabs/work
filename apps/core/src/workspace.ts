@@ -596,6 +596,9 @@ const stopReason = (chatId: ChatId, error: unknown): string => {
  */
 const turnKeyPrefix = "turn:";
 
+/** Where the object notes that the chats' v1 preview facets are gone. */
+const v1PreviewsDroppedKey = "v1-previews-dropped";
+
 /**
  * What a chat that came through a chat platform read, as `trace:<chat>`:
  * each text value its connection reads returned, newest first, that its
@@ -835,8 +838,32 @@ export class Workspace extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
+    this.#dropV1PreviewFacets();
     this.#closeInterruptedTurns();
     this.#closeInterruptedRuns();
+  }
+
+  /**
+   * Deletes the databases of the facets the chats' v1 previews ran their
+   * drafts' server code in (`preview:<chat>:<app>`), once: a hard cut,
+   * nothing of it released (GRA-789), and nothing reads them. A preview's
+   * facet was deleted with its draft, so only a draft still held can
+   * have one left. The note is written after, so a start that dies
+   * between deletes again, which changes nothing.
+   */
+  #dropV1PreviewFacets(): void {
+    const { kv } = this.ctx.storage;
+    if (kv.get(v1PreviewsDroppedKey) === true) {
+      return;
+    }
+    const drafts = this.#db
+      .select({ chatId: chatDrafts.chatId, appId: chatDrafts.appId })
+      .from(chatDrafts)
+      .all();
+    for (const { chatId, appId } of drafts) {
+      this.ctx.facets.delete(`preview:${chatId}:${appId}`);
+    }
+    kv.put(v1PreviewsDroppedKey, true);
   }
 
   /**
