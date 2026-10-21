@@ -24,7 +24,14 @@ const SETTLE_MS = 500;
 
 const ranSchema = z.object({
   answered: z.unknown(),
-  values: z.object({ call: z.string(), js: z.string(), control: z.string() }),
+  values: z.object({
+    call: z.string(),
+    js: z.string(),
+    nested: z.string(),
+    carriage: z.string(),
+    thrown: z.string(),
+    control: z.string(),
+  }),
 });
 
 describe("isolates core loads itself off Cloudflare, on a workerd served --verbose", () => {
@@ -71,6 +78,8 @@ const core :Workerd.Worker = (
     const call = await run("/call");
     const js = await run("/js");
     const hashbang = await run("/hashbang");
+    const nested = await run("/nested");
+    const carriage = await run("/carriage");
     const control = await run("/control");
     const { values } = control;
     await sleep(SETTLE_MS);
@@ -80,17 +89,45 @@ const core :Workerd.Worker = (
         call.answered,
         js.answered,
         hashbang.answered,
+        nested.answered,
+        carriage.answered,
         control.answered,
       ],
       call: served.logs().includes(values.call),
       js: served.logs().includes(values.js),
+      nested: served.logs().includes(values.nested),
+      carriage: served.logs().includes(values.carriage),
       control: served.logs().includes(values.control),
     }).toStrictEqual({
-      answered: [values.call, values.js, values.js, values.control],
+      answered: [
+        values.call,
+        values.js,
+        values.js,
+        values.nested,
+        values.carriage,
+        values.control,
+      ],
       call: false,
       js: false,
+      nested: false,
+      carriage: false,
       control: true,
     });
+  });
+
+  // What the quiet module can't stop: workerd served `--verbose` reports
+  // an exception thrown out of a call, as it hands it to the caller. Pinned
+  // so a change to it is seen (GRA-939); without `--verbose`, as the
+  // supervisor and a deployment run, it isn't printed.
+  it("still has a call's thrown error reported by a workerd served --verbose", async () => {
+    const response = await fetch(new URL("/thrown", served.url));
+    const { answered, values } = ranSchema.parse(await response.json());
+    await sleep(SETTLE_MS);
+
+    expect({
+      answered,
+      reported: served.logs().includes(values.thrown),
+    }).toStrictEqual({ answered: "threw", reported: true });
   });
 
   it("refuses to load a main module that can't be silenced first", async () => {

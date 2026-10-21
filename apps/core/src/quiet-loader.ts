@@ -11,9 +11,13 @@ import { quietModules } from "./on-prem/quiet-isolate.ts";
 //
 // So every isolate core loads goes through `quietLoader`: its main module
 // imports the sandbox host's quiet module first (on-prem/quiet-isolate.ts),
-// which silences every console method before any other module loads and
-// keeps an uncaught error or rejection from being printed. That holds on
-// either profile; on Cloudflare it drops nothing the runtime wouldn't.
+// which silences every console method before any other module loads,
+// catches what a timer's callback throws, and keeps an unhandled error or
+// rejection from being printed. That holds on either profile; on
+// Cloudflare it drops nothing the runtime wouldn't. One thing still
+// reaches a workerd served `--verbose`: an exception thrown out of an
+// entrypoint's call, which workerd reports as it hands it to the caller
+// (GRA-939). Without `--verbose` nothing of it is printed.
 //
 // An isolate with a tail is left as it is: its tail (server-logs.ts) is how
 // a builder sees what the App's server code wrote, and a silenced console

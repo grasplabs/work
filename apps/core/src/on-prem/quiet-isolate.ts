@@ -13,13 +13,20 @@
  * platform code alike: what an isolate needs to say comes back in its
  * answer, and core logs what it decides itself.
  *
- * How: the isolate's main module imports `quietModule` first, so it is
+ * How: the isolate's main module imports `quietModule` first, from beside
+ * itself (an import resolves against the importer's name, and the quiet
+ * module takes that name over whatever an App supplied there), so it is
  * evaluated before any other module of the isolate and no module keeps a
  * console method of its own. It replaces every console method with one
  * that does nothing (`node:console` prints through them, and a method the
- * App puts back can only call the silenced ones), and prevents the
- * default of an unhandled rejection or error, which workerd served
- * `--verbose` would otherwise print with its message.
+ * App puts back can only call the silenced ones), catches what a timer's
+ * callback throws, and prevents the default of an unhandled rejection or
+ * error, which workerd served `--verbose` would otherwise print with its
+ * message. What it can't stop: workerd served `--verbose` reports an
+ * exception thrown out of an entrypoint's call (an RPC method's, a
+ * fetch's), message and stack, as it hands it to the caller as the call's
+ * answer (GRA-939). Without `--verbose`, as the supervisor and a
+ * deployment run, nothing of it is printed.
  *
  * One kind of call keeps what it writes, bounded, for whom core says: a
  * draft's sealed preview, whose lines go to the agent's next check of
@@ -40,11 +47,27 @@
 /** The quiet module's name: none an App's or the platform's module has. */
 export const quietModule = "grasp-sandbox-quiet.js";
 
-/** Every console method silenced, and nothing left for workerd to report. */
-const quietSource = `const silent = () => undefined;
-for (const name of Object.getOwnPropertyNames(console)) {
-  if (typeof console[name] === "function") {
-    console[name] = silent;
+/**
+ * What both quiet modules do besides the console: a timer's callback that
+ * throws is caught where it runs, and an unhandled rejection or error has
+ * its default prevented, so workerd served `--verbose` reports neither.
+ * (An exception thrown out of an entrypoint's call, an RPC method's or a
+ * fetch's, still is: it is the call's answer, which its caller gets.)
+ */
+const quietErrors = `const caught = (callback) =>
+  typeof callback === "function"
+    ? function (...args) {
+        try {
+          return callback.apply(this, args);
+        } catch {
+          return undefined;
+        }
+      }
+    : callback;
+for (const name of ["setTimeout", "setInterval"]) {
+  const timer = globalThis[name];
+  if (typeof timer === "function") {
+    globalThis[name] = (callback, ...rest) => timer(caught(callback), ...rest);
   }
 }
 addEventListener("unhandledrejection", (event) => {
@@ -54,6 +77,26 @@ addEventListener("error", (event) => {
   event.preventDefault();
 });
 `;
+
+/** Every console method silenced, and nothing else left for workerd to report. */
+const quietSource = `const silent = () => undefined;
+for (const name of Object.getOwnPropertyNames(console)) {
+  if (typeof console[name] === "function") {
+    console[name] = silent;
+  }
+}
+${quietErrors}`;
+
+/** Where a hashbang's line ends: at any line terminator JavaScript has. */
+const lineTerminator = /[\r\n\u2028\u2029]/u;
+
+/**
+ * Where the quiet module goes for `mainModule`: beside it, so the main's
+ * relative import names this module and no other an App's code supplied
+ * (an import resolves against the importing module's own name).
+ */
+const quietPathOf = (mainModule: string): string =>
+  `${mainModule.slice(0, mainModule.lastIndexOf("/") + 1)}${quietModule}`;
 
 /**
  * `modules` with the quiet module, imported first by `mainModule`. A main
@@ -68,17 +111,18 @@ export const quietModules = <Module>(
   if (typeof main !== "string") {
     return { ...modules };
   }
-  // A hashbang is allowed only at a module's very start: it stays there.
-  const hashbang = main.startsWith("#!")
-    ? main.slice(0, main.indexOf("\n") + 1 || main.length)
-    : "";
-  const rest = main.slice(hashbang.length);
-  const lead =
-    hashbang === "" || hashbang.endsWith("\n") ? hashbang : `${hashbang}\n`;
+  // A hashbang is allowed only at a module's very start: it stays there,
+  // its line ending wherever JavaScript ends one.
+  let hashbang = "";
+  if (main.startsWith("#!")) {
+    const end = main.search(lineTerminator);
+    hashbang = end === -1 ? `${main}\n` : main.slice(0, end + 1);
+  }
+  const rest = main.slice(Math.min(hashbang.length, main.length));
   return {
     ...modules,
-    [mainModule]: `${lead}import ${JSON.stringify(quietModule)};\n${rest}`,
-    [quietModule]: quietSource,
+    [mainModule]: `${hashbang}import ${JSON.stringify(`./${quietModule}`)};\n${rest}`,
+    [quietPathOf(mainModule)]: quietSource,
   };
 };
 
@@ -136,13 +180,7 @@ for (const name of Object.getOwnPropertyNames(console)) {
     console[name] = levels.has(name) ? recording(name) : silent;
   }
 }
-addEventListener("unhandledrejection", (event) => {
-  event.preventDefault();
-});
-addEventListener("error", (event) => {
-  event.preventDefault();
-});
-export const takeLines = () => lines.splice(0);
+${quietErrors}export const takeLines = () => lines.splice(0);
 `;
 
 /** The host's module that runs a captured call's entrypoint. */
@@ -160,7 +198,7 @@ export const captureMethod = "call";
 const captureSource = (
   mainModule: string
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
-import { takeLines } from ${JSON.stringify(quietModule)};
+import { takeLines } from ${JSON.stringify(`./${quietModule}`)};
 import * as main from ${JSON.stringify(mainModule)};
 export class ${captureEntrypoint} extends WorkerEntrypoint {
   async ${captureMethod}(entrypoint, method, args, sink) {
@@ -200,7 +238,7 @@ export const capturedModules = <Module>(
     modules: {
       ...modules,
       [quietModule]: capturingSource,
-      [captureModule]: `import ${JSON.stringify(quietModule)};\n${captureSource(mainModule)}`,
+      [captureModule]: `import ${JSON.stringify(`./${quietModule}`)};\n${captureSource(mainModule)}`,
     },
   };
 };
