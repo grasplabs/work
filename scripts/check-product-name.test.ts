@@ -45,6 +45,8 @@ const stdoutOf = async (
   args: string[],
   signal: AbortSignal
 ): Promise<string> => {
+  // Timed out already: no lint starts at all.
+  signal.throwIfAborted();
   // A process group of its own, so the whole tree can be killed at once.
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "ignore"],
