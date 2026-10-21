@@ -1,6 +1,7 @@
 import { compilerVersion } from "@grasp-os/compiler";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
+import type { VersionReview } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -357,6 +358,12 @@ const exported = (access: "read" | "write", description = "") => ({
   input: { type: "object" },
   output: { type: "object" },
 });
+
+/** Each workflow's changed steps, by name, as a review lists them. */
+const changedSteps = (workflows: VersionReview["workflows"]) =>
+  workflows.map(({ steps }) =>
+    steps?.map(({ name, change, sharedCode }) => ({ name, change, sharedCode }))
+  );
 
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("repairs a restyled button without the person, in a draft nobody else sees, and puts nothing live", async () => {
@@ -1750,6 +1757,96 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
         },
       ],
     });
+  });
+
+  it("lists a step whose option is chosen at run time when its file changed outside the steps' calls, as through a helper it reads", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const paced = workflowFiles(
+      "paced",
+      `  await step.do("fetch", { description: "Fetch it" }, async () => 1);
+  await step.sleep("pause", { description: "Wait a while", duration: wait(2) });
+  return "done";`,
+      { fetch: 1 }
+    );
+    const files = (factor: number) => ({
+      ...paced,
+      "workflows/paced.ts": (paced["workflows/paced.ts"] ?? "").replace(
+        "export default",
+        `const wait = (n: number): number => n * ${factor};\n\nexport default`
+      ),
+    });
+    const app = await appWith(builder, files(1000));
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      files(60_000),
+      "Longer"
+    );
+    // Another App whose helper changes only inside a string, which only
+    // its spaces tell apart.
+    const risky = (kind: string) => ({
+      ...paced,
+      "workflows/paced.ts": (paced["workflows/paced.ts"] ?? "").replace(
+        "export default",
+        `const wait = (n: number): number => ("${kind}" === "high risk" ? n : 2 * n);\n\nexport default`
+      ),
+    });
+    const other = await appWith(builder, risky("high risk"));
+    const { version: respaced } = await builder.api.apps.files.commit(
+      other,
+      risky("highrisk"),
+      "Respaced"
+    );
+
+    // And one whose helper's string becomes a step's very call as written:
+    // only the call itself is cut out of the comparison, never the same
+    // text elsewhere.
+    const fetchCall =
+      'step.do("fetch", { description: "Fetch it" }, async () => 1)';
+    const echoing = (text: string) => ({
+      ...paced,
+      "workflows/paced.ts": (paced["workflows/paced.ts"] ?? "").replace(
+        "export default",
+        `const wait = (n: number): number => ('${text}' === '' ? n : 2 * n);\n\nexport default`
+      ),
+    });
+    const third = await appWith(builder, echoing(""));
+    const { version: echoed } = await builder.api.apps.files.commit(
+      third,
+      echoing(fetchCall),
+      "Echoed"
+    );
+
+    const review = await builder.api.apps.versions.review(app, version);
+    const respacedReview = await builder.api.apps.versions.review(
+      other,
+      respaced
+    );
+    const echoedReview = await builder.api.apps.versions.review(third, echoed);
+
+    expect({
+      respaced: changedSteps(respacedReview.workflows),
+      echoed: changedSteps(echoedReview.workflows),
+    }).toStrictEqual({
+      respaced: [[{ name: "pause", change: "modified", sharedCode: true }]],
+      echoed: [[{ name: "pause", change: "modified", sharedCode: true }]],
+    });
+    expect(review.workflows).toMatchObject([
+      {
+        id: "paced",
+        change: "modified",
+        shared: [],
+        // Neither call changed; the helper the pause reads at run time
+        // did. `fetch` reads nothing outside its call.
+        steps: [
+          {
+            name: "pause",
+            change: "modified",
+            sharedCode: true,
+            dynamic: ["duration"],
+          },
+        ],
+      },
+    ]);
   });
 
   it("calls out new triggers, changed exports, and steps it can't read as possibly acting", async () => {

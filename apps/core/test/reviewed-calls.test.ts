@@ -833,6 +833,53 @@ queueMicrotask(() => {
     });
   });
 
+  it("hold a workflow whose step takes an option from its input to its steps by name, and refuse one its review doesn't show", async () => {
+    const admin = await personApi("admin");
+    const files = workflowFiles(
+      "paced",
+      `  await step.do("evil", { description: "Evil" }, async () => "evil");
+  await step.sleep("pause", {
+    description: "Pause as long as asked",
+    duration: typeof input === "number" ? input : 1,
+  });
+  return "done";`,
+      { evil: "evil" }
+    );
+    const app = await appWith(admin, files);
+    // Its review reads every step, the pause's duration as chosen at run
+    // time: before, one such option left the whole workflow unread.
+    const kept = await storedCalls(app);
+    // As a describer that missed `evil` would have kept it.
+    await describedAs(app, {
+      paced: {
+        steps: { pause: [] },
+        all: [],
+        dynamic: { pause: ["duration"] },
+      },
+    });
+
+    const run = await admin.api.workflows.start(app, "paced", 1);
+    await finished(run.id);
+
+    expect({
+      kept,
+      run: await outcomeOf(admin, run.id),
+      audited: await refusals(run.id),
+    }).toMatchObject({
+      kept: {
+        paced: {
+          steps: { evil: [], pause: [] },
+          all: [],
+          dynamic: { pause: ["duration"] },
+        },
+      },
+      run: { status: "failed", code: "workflow.step_not_reviewed" },
+      audited: [
+        { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
+      ],
+    });
+  });
+
   it("fail a run whose code catches the refusal of a step its review doesn't show, audit it once, and refuse every later step", async () => {
     const admin = await personApi("admin");
     const files = workflowFiles(
@@ -874,6 +921,38 @@ queueMicrotask(() => {
         { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
       ],
       tidied: 0,
+    });
+  });
+
+  it("refuse a decision a step opens under another step's name, whose reviewer the review read as fixed", async () => {
+    const { host, userId, runId, tampered } = await hostHeldTo({
+      steps: { ask: [], "sign-off": [] },
+      all: [],
+      // `ask` takes its reviewer from the run's input; `sign-off` names it.
+      dynamic: { ask: ["from"] },
+    });
+    let opened: Settled<unknown> = { ok: true, value: null };
+    await host.do("ask", {}, async (attempt) => {
+      opened = await attempt.openDecision({
+        step: "sign-off",
+        from: `person:${userId}`,
+        description: "Approve the invoice",
+        timeout: 60_000,
+      });
+      return { ok: true, value: null };
+    });
+
+    expect({
+      opened: codeOf(opened),
+      // Caught or not, it ends the run (`#refuseTampering`).
+      tampered,
+      audited: await refusals(runId),
+    }).toStrictEqual({
+      opened: "workflow.invalid",
+      tampered: ["workflow.invalid"],
+      audited: [
+        { step: "ask", call: "decision", errorCode: "workflow.invalid" },
+      ],
     });
   });
 

@@ -2837,6 +2837,10 @@ msgstr "Choisissez votre langue"
 msgid "Choose your staff list"
 msgstr "Choisir votre liste du personnel"
 
+#: src/workflows/chosen-at-run-time.tsx
+msgid "Chosen at run time: {options}"
+msgstr "Choisi pendant l’exécution : {options}"
+
 #: src/activity/audit-log.tsx
 msgid "Clear"
 msgstr "Effacer"
@@ -4693,6 +4697,10 @@ msgstr "Niveau de réflexion"
 msgid "How long does one of those take you, Tim?"
 msgstr "Combien de temps vous prend chacune, Tim ?"
 
+#: src/workflows/chosen-at-run-time.tsx
+msgid "how long it waits"
+msgstr "combien de temps il attend"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "How much has to be known before it opens"
 msgstr "Ce qu’il faut savoir avant d’ouvrir"
@@ -5095,6 +5103,10 @@ msgstr "sa sortie n'est pas ce qu'attend l'enregistrement de test"
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
 msgstr "Ses paramètres ne peuvent pas être lus dans son code."
+
+#: src/workflows/chosen-at-run-time.tsx
+msgid "its retries"
+msgstr "ses nouvelles tentatives"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
@@ -9307,6 +9319,10 @@ msgstr "Après-demain"
 msgid "The day the other teams get their links"
 msgstr "Le jour où les autres équipes reçoivent leurs liens"
 
+#: src/workflows/chosen-at-run-time.tsx
+msgid "the deadline"
+msgstr "l’échéance"
+
 #: src/chat/composer.tsx
 msgid "The default, {each}"
 msgstr "Par défaut, {each}"
@@ -9569,6 +9585,10 @@ msgstr "La personne pour qui l'exécution agit dit ce qui s'est passé sur son t
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "La plateforme est ouverte à toute l’entreprise : elle n’a jamais été fermée pour l’onboarding."
+
+#: src/workflows/chosen-at-run-time.tsx
+msgid "the reminder"
+msgstr "le rappel"
 
 #: src/dashboard/report.ts
 msgid "The report as it stands today"
@@ -10930,6 +10950,10 @@ msgstr "Qui"
 msgctxt "log filter"
 msgid "Who"
 msgstr "Qui"
+
+#: src/workflows/chosen-at-run-time.tsx
+msgid "who answers"
+msgstr "qui répond"
 
 #: src/brain/brain.ts
 msgid "Who approves a new tool"
