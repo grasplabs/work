@@ -309,7 +309,11 @@ const Dock = () => {
   );
   const drawer = mode === "drawer";
   // One tree in every mode, so the box, and the draft in it, stays as the
-  // dock opens, grows or folds away.
+  // dock opens, grows or folds away. As in the prototype's corner chat
+  // (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
+  // 416 typed in, as round as the box in it; the frame and the drawer
+  // 442 wide, the frame kept 16 pixels off every edge of the window and
+  // rising out of the bar as it opens.
   let place =
     "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
   let look =
@@ -318,12 +322,11 @@ const Dock = () => {
     place =
       "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
     look =
-      "bg-background pointer-events-auto flex h-full w-110 max-w-full flex-col border-l text-sm";
+      "bg-background pointer-events-auto flex h-full w-110.5 max-w-full flex-col border-l text-sm";
   } else if (open) {
-    place =
-      "pointer-events-none fixed inset-x-4 bottom-4 z-40 flex justify-end";
+    place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
     look =
-      "chat-glow bg-background/80 pointer-events-auto flex h-136 max-h-svh w-110 max-w-full flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md";
+      "chat-glow bg-background/80 animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-110.5 max-w-full origin-bottom-right flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md duration-300 ease-out motion-reduce:animate-none";
   }
   return (
     <div className={place}>

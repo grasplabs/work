@@ -409,10 +409,12 @@ const ChatItem = ({
       ) : (
         <Link
           aria-current={active ? "page" : undefined}
+          // The open chat as the chat switcher marks it: in weight, on the
+          // muted fill a row takes where it is pointed at.
           className={
             active
-              ? "bg-accent focus-visible:ring-ring flex w-full items-center rounded-md py-1.5 pr-9 pl-2 text-left outline-none focus-visible:ring-2"
-              : "hover:bg-muted focus-visible:ring-ring flex w-full items-center rounded-md py-1.5 pr-9 pl-2 text-left outline-none focus-visible:ring-2"
+              ? "bg-muted focus-visible:ring-ring/50 flex w-full items-center rounded-md py-1.5 pr-9 pl-2 text-left font-medium outline-none focus-visible:ring-3"
+              : "hover:bg-muted focus-visible:ring-ring/50 flex w-full items-center rounded-md py-1.5 pr-9 pl-2 text-left transition-colors duration-150 outline-none focus-visible:ring-3"
           }
           draggable
           onClick={(event) => {
@@ -456,6 +458,7 @@ const ChatItem = ({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
+              className="w-60"
               finalFocus={() => !renamingFromMenu.current}
             >
               <DropdownMenuItem
@@ -472,7 +475,7 @@ const ChatItem = ({
                   <FolderInputIcon />
                   <Trans>Move to project</Trans>
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
+                <DropdownMenuSubContent className="w-52">
                   {moves.projects.map((project) => (
                     <DropdownMenuItem
                       disabled={project.id === chat.projectId}
@@ -738,7 +741,7 @@ const ProjectGroup = ({
         ) : (
           <button
             aria-expanded={open}
-            className="hover:bg-muted focus-visible:ring-ring flex w-full items-center gap-2.5 rounded-md py-1.5 pr-9 pl-2 text-left outline-none focus-visible:ring-2"
+            className="hover:bg-muted focus-visible:ring-ring/50 flex w-full items-center gap-2.5 rounded-md py-1.5 pr-3 pl-2 text-left transition-colors duration-150 outline-none focus-visible:ring-3"
             onClick={(event) => {
               clicks.onClick(event);
             }}
@@ -753,6 +756,11 @@ const ProjectGroup = ({
               className="text-muted-foreground size-4 flex-none"
             />
             <span className="min-w-0 flex-1 truncate">{name}</span>
+            {/* How many chats it holds, as the chat switcher and the project
+                cards say it; its menu takes the place where it is pointed at. */}
+            <span className="text-muted-foreground flex-none text-xs tabular-nums group-focus-within/row:invisible group-hover/row:invisible group-has-data-popup-open/row:invisible pointer-coarse:invisible">
+              {chats.length}
+            </span>
           </button>
         )}
         {renaming ? null : (
@@ -772,6 +780,7 @@ const ProjectGroup = ({
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
+                className="w-60"
                 finalFocus={() => !renamingFromMenu.current}
               >
                 <DropdownMenuItem
