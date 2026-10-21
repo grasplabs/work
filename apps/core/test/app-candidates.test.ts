@@ -569,6 +569,34 @@ export const hello = query({
       });
     });
 
+    it("rejects a candidate whose runner was demoted to a user of the App", async () => {
+      const { owner, app } = await appWith(helloFiles());
+      const other = await person("builder");
+      await addMember(env, owner, app, {
+        type: "person",
+        id: other.userId,
+        role: "builder",
+      });
+      const frozen = await freezeCandidate(env, other, app, 1, null);
+      await addMember(env, owner, app, {
+        type: "person",
+        id: other.userId,
+        role: "user",
+      });
+      expect({
+        refused: await failure(
+          async () =>
+            await runCandidate(env, other, frozen, sealing(other, app, 1))
+        ),
+        state: await fieldOf(frozen.id, "state"),
+        outcome: await fieldOf(frozen.id, "outcome"),
+      }).toStrictEqual({
+        refused: "role.forbidden",
+        state: "rejected",
+        outcome: "role.forbidden",
+      });
+    });
+
     it("is made current only by someone who still builds the App", async () => {
       const { owner, app } = await appWith(helloFiles());
       const other = await person("builder");

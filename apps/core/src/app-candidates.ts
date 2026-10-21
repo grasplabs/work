@@ -115,6 +115,7 @@ const blockedCodes: ReadonlySet<string> = new Set([
 const rejectedCodes: ReadonlySet<string> = new Set([
   "app.conflict",
   "app.not_found",
+  "app.unreadable",
   "app.version_not_found",
   "migration.abandoned",
   "migration.metadata_corrupt",
@@ -143,7 +144,11 @@ export const outcomeOf = (
   if (blockedCodes.has(code)) {
     return { state: "operationally_blocked", code };
   }
-  if (rejectedCodes.has(code) || code.startsWith("permission.")) {
+  if (
+    rejectedCodes.has(code) ||
+    code.startsWith("permission.") ||
+    code.startsWith("role.")
+  ) {
     return { state: "rejected", code };
   }
   return { state: "repairable_failed", code };
