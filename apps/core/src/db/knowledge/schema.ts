@@ -112,6 +112,14 @@ export const documents = sqliteTable(
     indexRun: integer("index_run").notNull().default(0),
     /** When indexing the current version last failed for good. */
     indexFailedAt: timestamp("index_failed_at"),
+    /**
+     * Set when a purge couldn't wait for indexing: search may still hold
+     * a generation with what it removed, so its runs are started again for
+     * as long as it takes. Cleared once indexed.
+     */
+    indexPurgePending: integer("index_purge_pending", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

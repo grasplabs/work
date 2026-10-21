@@ -7,8 +7,9 @@ import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { indexRunId } from "../src/knowledge/indexing.ts";
+import { indexRunId, maxIndexReruns } from "../src/knowledge/indexing.ts";
 import { runEngine } from "../src/workflows/engine.ts";
+import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
@@ -587,6 +588,122 @@ describe("publishing search generations", () => {
       indexed: { indexing: "indexed", indexedVersion: 3 },
       term: [],
       clean,
+    });
+  });
+
+  it("starts a fresh run at once when a purge is run again after its indexing failed", async () => {
+    const { api } = await knowledgeOf();
+    const { id: collectionId } = await api.createCollection(shared());
+    const name = `Jong${unique()}`;
+    const document = await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`${name} signs`),
+      ifVersion: 0,
+    });
+    const first = await api.preparePurge(purgeOf(document.id, name));
+    const down = watchPublishes({ fail: () => true });
+    let failed: DocumentSummary | undefined;
+    try {
+      failed = await withRetriesAtOnce(async () => {
+        await codeOf(api.purge(purgeOf(document.id, name), first.token));
+        return await settledIndexing(api, collectionId, document.id);
+      });
+    } finally {
+      down();
+    }
+    // Run again, and its own publish fails once more: no waiting on the
+    // cron trigger's backoff for the next run.
+    const again = await api.preparePurge(purgeOf(document.id, name));
+    const once = failNextPublish();
+    let refused: unknown;
+    try {
+      refused = await codeOf(
+        api.purge(purgeOf(document.id, name), again.token)
+      );
+    } finally {
+      once();
+    }
+    const indexed = await settledIndexing(api, collectionId, document.id);
+
+    expect({
+      failed: failed?.indexing,
+      refused,
+      indexed: indexed?.indexing,
+      found: await foundVersions(api, name, collectionId),
+    }).toStrictEqual({
+      failed: "failed",
+      refused: "knowledge.purge_index_pending",
+      indexed: "indexed",
+      found: [],
+    });
+  });
+
+  it("keeps rerunning a document a purge waits on past the cap, and gives up on others, audited", async () => {
+    const { api } = await knowledgeOf();
+    const { id: collectionId } = await api.createCollection(shared());
+    const name = `Mulder${unique()}`;
+    const purged = await api.saveDocument({
+      collectionId,
+      path: "purged.md",
+      text: textOf(`${name} signs`),
+      ifVersion: 0,
+    });
+    const other = await api.saveDocument({
+      collectionId,
+      path: "other.md",
+      text: textOf(`Plain${unique()}`),
+      ifVersion: 0,
+    });
+    const { token } = await api.preparePurge(purgeOf(purged.id, name));
+    const down = watchPublishes({ fail: () => true });
+    try {
+      await withRetriesAtOnce(async () => {
+        await codeOf(api.purge(purgeOf(purged.id, name), token));
+        await api.saveDocument({
+          collectionId,
+          path: "other.md",
+          text: textOf(`Changed${unique()}`),
+          ifVersion: 1,
+        });
+        await settledIndexing(api, collectionId, purged.id);
+        await settledIndexing(api, collectionId, other.id);
+      });
+    } finally {
+      down();
+    }
+    // Both have used up their reruns, a day ago.
+    await env.KNOWLEDGE.prepare(
+      "UPDATE documents SET index_run = ?, index_failed_at = ? WHERE id IN (?, ?)"
+    )
+      .bind(maxIndexReruns, Date.now(), purged.id, other.id)
+      .run();
+    await runCron({}, new Date(Date.now() + 25 * 60 * 60_000));
+    const rerun = await settledIndexing(api, collectionId, purged.id);
+    const left = await listed(api, collectionId, other.id);
+    const events = await allEvents();
+    const actions = (documentId: string) =>
+      events
+        .filter(({ target }) => target?.id === documentId)
+        .map(({ action }) => action)
+        .filter(
+          (action) =>
+            action.startsWith("knowledge.index") ||
+            action.startsWith("knowledge.purge.")
+        );
+
+    expect({
+      rerun: rerun?.indexing,
+      other: left?.indexing,
+      found: await foundVersions(api, name, collectionId),
+      purgedEvents: actions(purged.id),
+      otherEvents: actions(other.id),
+    }).toStrictEqual({
+      rerun: "indexed",
+      other: "failed",
+      found: [],
+      purgedEvents: ["knowledge.purge.index_pending"],
+      otherEvents: ["knowledge.index_exhausted"],
     });
   });
 });

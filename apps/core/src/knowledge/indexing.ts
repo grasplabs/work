@@ -1,14 +1,16 @@
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { isExpectedCode, isExpectedError } from "@grasp-os/shared/errors";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
-import { and, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { outboxed } from "../audit-outbox.ts";
 import {
   brainPayloads,
   documents,
@@ -138,6 +140,7 @@ const publishStatements = (
         indexAttempts: 0,
         indexFailure: null,
         indexFailedAt: null,
+        indexPurgePending: false,
       })
       .where(and(eq(documents.id, documentId), guard(documentId, version))),
   ];
@@ -219,7 +222,11 @@ const stateOf = async (db: DrizzleD1Database, documentId: string) =>
     .where(eq(documents.id, documentId))
     .get();
 
-/** Starts indexing `documentId`'s current version, logging a failure. */
+/**
+ * Starts indexing `documentId`'s current version now, logging a failure:
+ * its run, unless that one is still going; once that one has ended (failed),
+ * the next run, whatever backoff the cron trigger would have kept.
+ */
 const startCurrentRun = async (
   env: Env,
   db: DrizzleD1Database,
@@ -227,8 +234,34 @@ const startCurrentRun = async (
 ): Promise<void> => {
   try {
     const state = await stateOf(db, documentId);
-    if (state !== undefined) {
-      await startRun(env, documentId, state.currentVersion, state.indexRun);
+    if (state === undefined) {
+      return;
+    }
+    const { currentVersion: version, indexRun: run } = state;
+    const status = await runEngine(env).status(
+      indexRunId(documentId, version, run)
+    );
+    if (status === undefined) {
+      await startRun(env, documentId, version, run);
+      return;
+    }
+    if (!endedStatuses.has(status.status)) {
+      return;
+    }
+    const [taken] = await db
+      .update(documents)
+      .set({ indexState: "retrying", indexRun: run + 1, indexFailedAt: null })
+      .where(
+        and(
+          eq(documents.id, documentId),
+          eq(documents.currentVersion, version),
+          eq(documents.indexRun, run),
+          ne(documents.indexState, "indexed")
+        )
+      )
+      .returning({ id: documents.id });
+    if (taken !== undefined) {
+      await startRun(env, documentId, version, run + 1);
     }
   } catch (error) {
     log.warn("knowledge.index_run_start_failed", failureFields(error));
@@ -241,6 +274,36 @@ const startCurrentRun = async (
  * again finishes it, as does the indexing run started for it.
  */
 const pending = () => knowledgeErrors.create("knowledge.purge_index_pending");
+
+/**
+ * Starts `documentId`'s indexing now, marks it as one a purge is waiting
+ * on (never dropped from the reruns, `rerunFailed`), with the purge's
+ * audit event saying it ended pending, and throws
+ * `knowledge.purge_index_pending`.
+ */
+const refusePurgePending = async (
+  env: Env,
+  db: DrizzleD1Database,
+  documentId: string,
+  actor: AuditActor
+): Promise<never> => {
+  const state = await stateOf(db, documentId);
+  // Its audit event drains with the cron trigger's next run.
+  await db.batch([
+    db
+      .update(documents)
+      .set({ indexPurgePending: true })
+      .where(eq(documents.id, documentId)),
+    outboxed(db, {
+      actor,
+      action: "knowledge.purge.index_pending",
+      target: { type: "document", id: documentId },
+      detail: { version: state?.currentVersion ?? 0 },
+    }),
+  ]);
+  await startCurrentRun(env, db, documentId);
+  throw pending();
+};
 
 /** What indexing a version that is still current sets, by `where`. */
 const whileCurrent = (documentId: string, version: number): SQL | undefined =>
@@ -299,7 +362,8 @@ const requireAttempts = 3;
 export const requireCurrentIndexed = async (
   env: Env,
   db: DrizzleD1Database,
-  documentId: string
+  documentId: string,
+  actor: AuditActor
 ): Promise<void> => {
   for (let attempt = 0; attempt < requireAttempts; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- again only after a save
@@ -313,20 +377,18 @@ export const requireCurrentIndexed = async (
     } catch (error) {
       log.warn("knowledge.index_purge_failed", failureFields(error));
       // oxlint-disable-next-line no-await-in-loop -- once, before refusing
-      await startCurrentRun(env, db, documentId);
-      throw pending();
+      await refusePurgePending(env, db, documentId, actor);
     }
   }
-  await startCurrentRun(env, db, documentId);
-  throw pending();
+  await refusePurgePending(env, db, documentId, actor);
 };
 
 /**
  * Publishes a save's version from the sections it split, right after its
  * batch. Resolves whether search holds it now. When it can't, the
  * document stays queued and its indexing run is started; that failing
- * too, the cron trigger starts it. `required` (a purge, whose erasure
- * mustn't wait on the index) makes sure search holds the current version,
+ * too, the cron trigger starts it. A purge's (`purgeBy`), whose erasure
+ * mustn't wait on the index, makes sure search holds the current version,
  * whatever saved it (`requireCurrentIndexed`), or throws.
  */
 export const publishInline = async (
@@ -335,13 +397,13 @@ export const publishInline = async (
   documentId: string,
   version: number,
   found: readonly Section[],
-  required: boolean
+  purgeBy: AuditActor | undefined
 ): Promise<boolean> => {
   try {
     const published = await publish(db, documentId, version, found);
-    if (required && !published) {
+    if (purgeBy !== undefined && !published) {
       // Saved over meanwhile: what search holds must still be current.
-      await requireCurrentIndexed(env, db, documentId);
+      await requireCurrentIndexed(env, db, documentId, purgeBy);
     }
     return published;
   } catch (error) {
@@ -349,10 +411,10 @@ export const publishInline = async (
       throw error;
     }
     log.warn("knowledge.index_inline_failed", failureFields(error));
-    await startCurrentRun(env, db, documentId);
-    if (required) {
-      throw pending();
+    if (purgeBy !== undefined) {
+      await refusePurgePending(env, db, documentId, purgeBy);
     }
+    await startCurrentRun(env, db, documentId);
     return false;
   }
 };
@@ -409,7 +471,11 @@ export const runIndexing = async (
   }
 };
 
-/** Runs the cron trigger starts again for a failed document, at most. */
+/**
+ * Runs the cron trigger starts again for a failed document, at most,
+ * unless a purge is waiting on it (`indexPurgePending`): that one's go on,
+ * a day apart, for as long as it takes.
+ */
 export const maxIndexReruns = 8;
 
 /** How long a document stays failed before run `run` is started. */
@@ -417,9 +483,48 @@ const rerunAfterMs = (run: number): number =>
   Math.min(15 * 60_000 * 2 ** run, 24 * 60 * 60_000);
 
 /**
+ * Gives up on `id`, failed for good at run {@link maxIndexReruns}: once,
+ * logged and audited as `knowledge.index_exhausted`. Search keeps the
+ * version it holds until the next save.
+ */
+const exhaust = async (
+  env: Env,
+  db: DrizzleD1Database,
+  id: string,
+  version: number
+): Promise<void> => {
+  const [given] = await db
+    .update(documents)
+    .set({ indexRun: maxIndexReruns + 1 })
+    .where(
+      and(
+        eq(documents.id, id),
+        eq(documents.currentVersion, version),
+        eq(documents.indexState, "failed"),
+        eq(documents.indexRun, maxIndexReruns),
+        eq(documents.indexPurgePending, false)
+      )
+    )
+    .returning({ id: documents.id });
+  if (given === undefined) {
+    return;
+  }
+  log.error("knowledge.index_exhausted", { documentId: id, version });
+  await db.batch([
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "knowledge.index_exhausted",
+      target: { type: "document", id },
+      detail: { version, runs: maxIndexReruns + 1 },
+    }),
+  ]);
+};
+
+/**
  * Starts the next run for documents failed for long enough (`rerunAfterMs`,
- * doubling, up to {@link maxIndexReruns}), so a text a later save replaced
- * (a removal, say) doesn't stay matchable until the next save.
+ * doubling up to a day), so a text a later save replaced (a removal, say)
+ * doesn't stay matchable until the next save: up to
+ * {@link maxIndexReruns} times, or for as long as a purge waits on it.
  */
 const rerunFailed = async (
   env: Env,
@@ -432,24 +537,33 @@ const rerunFailed = async (
       version: documents.currentVersion,
       run: documents.indexRun,
       failedAt: documents.indexFailedAt,
+      purgePending: documents.indexPurgePending,
     })
     .from(documents)
     .where(
       and(
         eq(documents.indexState, "failed"),
-        lt(documents.indexRun, maxIndexReruns)
+        or(
+          lte(documents.indexRun, maxIndexReruns),
+          eq(documents.indexPurgePending, true)
+        )
       )
     )
     .orderBy(sql`random()`)
     .limit(sweepBatch);
-  for (const { id, version, run, failedAt } of failed) {
-    if (
-      failedAt !== null &&
-      now.getTime() - failedAt.getTime() < rerunAfterMs(run)
-    ) {
-      continue;
-    }
+  for (const { id, version, run, failedAt, purgePending } of failed) {
     try {
+      if (run >= maxIndexReruns && !purgePending) {
+        // oxlint-disable-next-line no-await-in-loop -- a few at a time
+        await exhaust(env, db, id, version);
+        continue;
+      }
+      if (
+        failedAt !== null &&
+        now.getTime() - failedAt.getTime() < rerunAfterMs(run)
+      ) {
+        continue;
+      }
       // The row first, under the run it was failed by: one sweep starts it.
       // oxlint-disable-next-line no-await-in-loop -- a few at a time
       const [taken] = await db

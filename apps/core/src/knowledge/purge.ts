@@ -1277,7 +1277,7 @@ const purgeDocument = async (
     // Search may still hold an earlier generation, with the terms, while
     // its current version waits for indexing (a purge that failed to
     // publish, say): published now, or the purge fails.
-    await requireCurrentIndexed(env, db, document.id);
+    await requireCurrentIndexed(env, db, document.id, actorOf(person));
     return counts;
   }
   const text = changed?.text ?? current.text;

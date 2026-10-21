@@ -461,9 +461,9 @@ const published = async (
   db: DrizzleD1Database,
   row: DocumentRow,
   found: readonly Section[],
-  required: boolean
+  purgeBy: AuditActor | undefined
 ): Promise<DocumentRow> =>
-  (await publishInline(env, db, row.id, row.currentVersion, found, required))
+  (await publishInline(env, db, row.id, row.currentVersion, found, purgeBy))
     ? { ...row, indexedVersion: row.currentVersion, indexState: "indexed" }
     : row;
 
@@ -488,6 +488,21 @@ const stagedAndSent = async (
     await send(await stagePayload(env, db, collectionId, text));
   }
 };
+
+/**
+ * The row a save leaves: `saved`, with what it keeps of the document as it
+ * was (`existing`, none for a new one): what search holds of it, whether a
+ * purge waits on its indexing, when it was created.
+ */
+const savedRow = (
+  existing: DocumentRow | undefined,
+  saved: Omit<DocumentRow, "indexedVersion" | "indexPurgePending" | "createdAt">
+): DocumentRow => ({
+  indexedVersion: existing?.indexedVersion ?? null,
+  indexPurgePending: existing?.indexPurgePending ?? false,
+  createdAt: existing?.createdAt ?? saved.updatedAt,
+  ...saved,
+});
 
 /**
  * Writes the next version, if the document is still at `ifVersion`
@@ -533,14 +548,12 @@ export const writeVersion = async (
     indexFailedAt: null,
     updatedAt: now,
   };
-  const row: DocumentRow = {
+  const row = savedRow(existing, {
     id: documentId,
     collectionId: collection.id,
     path,
-    indexedVersion: existing?.indexedVersion ?? null,
-    createdAt: existing?.createdAt ?? now,
     ...changes,
-  };
+  });
   const entry: AuditEntry = {
     actor: by.actor,
     action:
@@ -615,7 +628,13 @@ export const writeVersion = async (
   await stagedAndSent(env, db, collection.id, text, send);
   // Saved: search has it once published, here or by its indexing run.
   return toSummary(
-    await published(env, db, row, prepared.sections, write.purge === true)
+    await published(
+      env,
+      db,
+      row,
+      prepared.sections,
+      write.purge === true ? by.actor : undefined
+    )
   );
 };
 
