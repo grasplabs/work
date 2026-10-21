@@ -60,12 +60,12 @@ const statusFor: Record<LinkRefusal | "interview.invalid", number> = {
 };
 
 /** Every answer here: never a referrer, never kept by a cache. */
-const headers = {
+export const linkHeaders = {
   "referrer-policy": "no-referrer",
   "cache-control": "no-store",
 } as const;
 
-const refusal = (
+export const linkRefusal = (
   code: LinkRefusal | "interview.invalid",
   requestId: string
 ): Response => {
@@ -74,14 +74,14 @@ const refusal = (
     interviewErrors.create(code),
     requestId
   );
-  for (const [name, value] of Object.entries(headers)) {
+  for (const [name, value] of Object.entries(linkHeaders)) {
     response.headers.set(name, value);
   }
   return response;
 };
 
 const json = (body: unknown, status = 200): Response =>
-  Response.json(body, { status, headers });
+  Response.json(body, { status, headers: linkHeaders });
 
 /** The store's answer as a response: its value, or its refusal. */
 const answer = <T>(
@@ -89,7 +89,7 @@ const answer = <T>(
   requestId: string,
   shown: (value: T) => Response
 ): Response =>
-  result.ok ? shown(result.value) : refusal(result.code, requestId);
+  result.ok ? shown(result.value) : linkRefusal(result.code, requestId);
 
 /** What a session answers the device: its key, the one time it is given. */
 const sessionOf = (
@@ -127,7 +127,7 @@ export const interviewResponse = async (
     raw === undefined ? undefined : jsonOf(raw)
   );
   if (!parsed.success) {
-    return refusal("interview.invalid", requestId);
+    return linkRefusal("interview.invalid", requestId);
   }
   const body = parsed.data;
   const store = onboardingStore(env);

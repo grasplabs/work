@@ -241,6 +241,22 @@ export const usage = sqliteTable(
 );
 
 /**
+ * Seconds of voice said today (`/api/speech`, onboarding/speech.ts), by
+ * whom they were said for: `link:<person>` for someone's interview link,
+ * `admin:<user>` for an admin. Only today's are kept: each count deletes
+ * the days before it.
+ */
+export const voiceUse = sqliteTable(
+  "voice_use",
+  {
+    who: text().notNull(),
+    day: text().notNull(),
+    seconds: real().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.who, table.day] })]
+);
+
+/**
  * Audit events of changes here, each stored in the same transaction as its
  * change, until the object has delivered it to the audit log
  * (`drainObjectOutbox` in audit-outbox.ts).

@@ -55,6 +55,7 @@ import {
   inArray,
   isNotNull,
   like,
+  lt,
   not,
   or,
   sql,
@@ -81,6 +82,7 @@ import {
   teamCounts,
   teams,
   usage,
+  voiceUse,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
@@ -787,6 +789,66 @@ export class Onboarding extends DurableObject<Env> {
         },
       })
       .run();
+  }
+
+  /**
+   * Whom a line said on someone's link is for, from the device it is on,
+   * while their interview may be saved: `link:<person>`, the key its
+   * voice is counted under (`countVoice`), and the seconds said under it
+   * today. Counted within the link's limit, as every call on it.
+   */
+  speechOnLink(
+    secretMark: string,
+    keyMark: string,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<{ who: string; said: number }> {
+    const found = this.#onLink(secretMark, now, "save");
+    if (!found.ok) {
+      return found;
+    }
+    const { person, link } = found.value;
+    if (link.keyMark === null || link.keyMark !== keyMark) {
+      return refused("interview.elsewhere");
+    }
+    const who = `link:${person.id}`;
+    return answered({ who, said: this.voiceSaid(who, now) });
+  }
+
+  /** Seconds of voice said for `who` today. */
+  voiceSaid(who: string, now: string = new Date().toISOString()): number {
+    const [row] = this.#db
+      .select({ seconds: voiceUse.seconds })
+      .from(voiceUse)
+      .where(and(eq(voiceUse.who, who), eq(voiceUse.day, now.slice(0, 10))))
+      .all();
+    return row?.seconds ?? 0;
+  }
+
+  /**
+   * Counts a line said for `who`: its seconds today, which its budget
+   * goes by, and the onboarding's use of voice by purpose (`meter`).
+   * The days before today go.
+   */
+  countVoice(
+    who: string,
+    purpose: Took["purpose"],
+    seconds: number,
+    now: string = new Date().toISOString()
+  ): void {
+    const day = now.slice(0, 10);
+    const add = counted(seconds);
+    this.ctx.storage.transactionSync(() => {
+      this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
+      this.#db
+        .insert(voiceUse)
+        .values({ who, day, seconds: add })
+        .onConflictDoUpdate({
+          target: [voiceUse.who, voiceUse.day],
+          set: { seconds: sql`${voiceUse.seconds} + ${add}` },
+        })
+        .run();
+      this.meter({ purpose, model: "voice", seconds: add }, now);
+    });
   }
 
   /** The AI used, by day, purpose and model. */

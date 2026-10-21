@@ -19,6 +19,7 @@ import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
+import { sweepSpokenLines } from "./speech-cache.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
@@ -140,6 +141,7 @@ export default {
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
             sweepPreviewStores(env, new Date(controller.scheduledTime)),
             sweepBuilds(env, new Date(controller.scheduledTime)),
+            sweepSpokenLines(env, new Date(controller.scheduledTime)),
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
             sweepReleases(env, new Date(controller.scheduledTime)),
             sweepTestFixtures(env, new Date(controller.scheduledTime)),

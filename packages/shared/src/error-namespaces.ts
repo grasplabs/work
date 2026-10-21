@@ -57,6 +57,7 @@ export const familyNamespaces = [
   "role",
   "screen",
   "signal",
+  "speech",
   "statistics",
   "submission",
   "upload",
