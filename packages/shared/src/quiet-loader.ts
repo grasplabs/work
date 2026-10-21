@@ -16,11 +16,17 @@ import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
 // main module imports the quiet module first (quiet-isolate.ts), which
 // silences every console method before any other module loads and keeps
 // what the code leaves uncaught from anything workerd served `--verbose`
-// reports for an isolate, but for what that module's header lists as
-// beyond it (GRA-939). That holds on either profile; on Cloudflare it drops
-// nothing the runtime wouldn't. Core can't tell whether its own process was
-// served `--verbose`, so under `SANDBOX_IN_PROCESS=unbounded` not doing so
-// is the operator's rule (core's env.d.ts).
+// reports for an isolate. What the module can't reach, `quietLoader` does
+// (GRA-939): the isolate's main is a wrapper (`entrySource`) that answers
+// whatever its entrypoint's call throws as a value, which the stub
+// `quietLoader` hands back throws again here, and a default export's own
+// context's `waitUntil` swallows a rejection. Isolates of App code,
+// connectors and packages have no Node.js (`isolateBase`), so no timer
+// imported by name from `node:timers`. What still reaches a workerd served
+// `--verbose` is that kind of timer's throw in the platform's own code that
+// turns Node on (the compiler, extraction), whose imports are its own
+// bundle's. That holds on either profile; on Cloudflare it drops nothing
+// the runtime wouldn't.
 //
 // An isolate with a tail is left as it is: its tail (core's server-logs.ts)
 // is how a builder sees what the App's server code wrote, and a silenced

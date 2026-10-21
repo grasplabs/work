@@ -27,15 +27,16 @@
  * unhandled rejection or error (`quietErrors`).
  *
  * What it can't stop, workerd served `--verbose` still reports, message
- * and stack (GRA-939): an exception thrown out of an entrypoint's call (an
- * RPC method's, a fetch's), as it hands it to the caller as the call's
- * answer; what the callback of a timer imported by name from `node:timers`
- * throws (the binding is the module's own); and what is handed to the
- * `waitUntil` of any context other than an entrypoint's `this.ctx`, such
- * as the one its constructor is given and keeps, or a default export's
- * handler's (the runtime passes those itself, before anything of the
- * quiet module's can wrap them). Without `--verbose` none of
- * it is printed. The supervisor refuses `--verbose`
+ * and stack: an exception thrown out of an entrypoint's call (an RPC
+ * method's, a fetch's), as it hands it to the caller as the call's answer;
+ * what the callback of a timer imported by name from `node:timers` throws
+ * (the binding is the module's own); and what is handed to the `waitUntil`
+ * of any context other than an entrypoint's `this.ctx`, such as the one its
+ * constructor is given and keeps, or a default export's handler's (the
+ * runtime passes those itself, before anything of the quiet module's can
+ * wrap them). Core's and connect's own Loader close the first and the last
+ * (quiet-loader.ts) and give App code no Node.js (`isolateBase`, GRA-939).
+ * Without `--verbose` none of it is printed. The supervisor refuses `--verbose`
  * (scripts/workerd-sandbox.ts); core loading isolates itself under
  * `SANDBOX_IN_PROCESS=unbounded` can't tell how its process was served, so
  * there not serving it `--verbose` is the operator's rule (GRA-939).
