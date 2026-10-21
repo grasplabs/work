@@ -302,7 +302,19 @@ export interface Invocation {
    * App's tests).
    */
   readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
+  /**
+   * Told what App code threw that its caller hears only as
+   * `internal.unexpected`: its name and message, when they are strings,
+   * cut to `draftFailureMaxLength`, as data. Only a chat's preview of its
+   * own draft (sealed-previews.ts) is told, for the agent's check to read
+   * as a tool's result; every other caller's App code keeps its failures
+   * to the log, and no caller's answer ever carries them.
+   */
+  readonly draftFailure?: (message: string) => void;
 }
+
+/** The most of a draft's failure a preview is told (`draftFailure`). */
+export const draftFailureMaxLength = 2000;
 
 /**
  * A use App code asked the operation host for that the running function's
@@ -835,6 +847,29 @@ const field = (value: unknown, key: string): unknown =>
     : undefined;
 
 /**
+ * Tells a chat's preview what its draft's code threw (`draftFailure`):
+ * what crossed from the sandbox, an error rebuilt there whose message a
+ * non-error thrown, or one past the sandbox's size, may have lost.
+ */
+const tellDraft = (
+  draftFailure: Invocation["draftFailure"],
+  name: unknown,
+  message: unknown
+): void => {
+  if (draftFailure === undefined || typeof message !== "string") {
+    return;
+  }
+  const named = typeof name === "string" ? name : "";
+  const said =
+    named === "" || message === "" ? named || message : `${named}: ${message}`;
+  try {
+    draftFailure(said.slice(0, draftFailureMaxLength));
+  } catch (error) {
+    log.error("operation.draft_failure_unkept", errorFields(error));
+  }
+};
+
+/**
  * What App code's failure `thrown` becomes, decided by the host (see the
  * header): a domain failure the host rebuilt from a valid `AppError`, an
  * expected error `open`'s channel raised, `contract.invalid_query` for
@@ -844,7 +879,8 @@ const failureOf = (
   thrown: unknown,
   open: OpenChannel,
   requestId: string,
-  path: string
+  path: string,
+  draftFailure?: Invocation["draftFailure"]
 ): Error => {
   // Every read of what App code threw may run its getters: what they
   // throw is an unexpected failure, never taken for the host's.
@@ -907,6 +943,7 @@ const failureOf = (
     path,
     code: typeof code === "string" ? code : undefined,
   });
+  tellDraft(draftFailure, name, message);
   return Object.assign(new Error("Unexpected failure"), { unexpected: true });
 };
 
@@ -2704,7 +2741,8 @@ const runHandler = async (
         outcome.thrown,
         open,
         run.invocation.requestId,
-        operation.path
+        operation.path,
+        run.invocation.draftFailure
       );
     }
     if (unfinished !== undefined) {
@@ -2717,7 +2755,8 @@ const runHandler = async (
         unfinished,
         open,
         run.invocation.requestId,
-        operation.path
+        operation.path,
+        run.invocation.draftFailure
       );
     }
     return checkedReturn(run.compiled, operation, outcome.value);

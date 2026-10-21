@@ -3244,15 +3244,23 @@ export class Workspace extends DurableObject<Env> {
     }
     const id = chatIdSchema.parse(chatId);
     try {
+      // What the draft's code threw, for the agent's check alone: the
+      // screen's answer stays `internal.unexpected`, with no message.
+      let thrown: string | undefined;
       const answered = await this.#sealedPreviews.call(
         id,
         personId,
         appIdSchema.parse(appId),
         draft,
         request,
-        options
+        {
+          ...options,
+          draftFailure: (message) => {
+            thrown = message;
+          },
+        }
       );
-      const problem = functionProblem(request, answered.answer.result);
+      const problem = functionProblem(request, answered.answer.result, thrown);
       if (problem !== undefined) {
         this.#previewReports.report(id, appId, draft.revision, problem);
       }
@@ -3399,14 +3407,24 @@ export class Workspace extends DurableObject<Env> {
       },
       input,
     });
+    // What the draft's code threw, for the agent's own call: as data in
+    // its tool's result, never in any screen's answer.
+    let thrown: string | undefined;
     const { answer } = await this.#sealedPreviews.call(
       id,
       personId,
       app,
       draft,
-      request
+      request,
+      {
+        draftFailure: (message) => {
+          thrown = message;
+        },
+      }
     );
-    return JSON.stringify(answer);
+    return JSON.stringify(
+      thrown === undefined ? answer : { ...answer, thrown }
+    );
   }
 
   /** Deletes the draft files and drafts the conditions name, in that order. */
