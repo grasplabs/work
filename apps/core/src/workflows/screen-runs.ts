@@ -10,7 +10,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenRun, WaitingDecision } from "@grasp-os/shared/screens";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { RunStatus, WorkflowRun } from "@grasp-os/shared/workflows";
-import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -94,11 +94,11 @@ interface OpenDecision {
 
 /**
  * What a screen reads of an open decision, of an App's run: read joined
- * to its run, whose ID it is.
+ * to its run, so its run is always an App's (`run_id`).
  */
 const openColumns = {
   id: workflowDecisions.id,
-  runId: workflowRuns.id,
+  runId: sql<string>`${workflowDecisions.runId}`,
   step: workflowDecisions.step,
   deciders: workflowDecisions.deciders,
   description: workflowDecisions.description,
