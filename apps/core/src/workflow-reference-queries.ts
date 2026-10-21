@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -31,7 +32,9 @@ import {
   workflowResourceRuns,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
+import { appHost } from "./durable-objects.ts";
 import { windowPages } from "./query-windows.ts";
+import { followableOrigins } from "./screen-workflows.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
 import { historyEntries } from "./workflows/history.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
@@ -71,6 +74,13 @@ import { detailsRemoved } from "./workflows/retention.ts";
 //   platform defines as it is, any other as `workflow.step_failed`, so no
 //   code can be made of what the run read. A task is named
 //   only by an ID the version's sealed build declares.
+// - A run offered as followable that a screen can't follow: a row's
+//   `canWatch` is true only for a run the reference's `useWorkflow` would
+//   show now (screen-workflows.ts): of the version the release pins, while
+//   the binding names it, started by an App version declaring the same
+//   contract, and a returned restricted run only through an App that is
+//   restricted itself. It tells nothing past the row: the caller already
+//   sees the run, and the list is read again as bindings and grants change.
 // - A decision's ID as an oracle: `decision` refuses alike, whatever the
 //   ID; there are no decisions of independent runs yet.
 // - Arguments or answers outside the contract: arguments are checked by
@@ -113,6 +123,8 @@ export interface ResolvedWorkflowQuery {
   readonly returns: unknown;
   /** The workflow version the release's seal resolved the alias to. */
   readonly pinned: WorkflowPin | undefined;
+  /** The release the reference was resolved in. */
+  readonly release: Release;
 }
 
 /**
@@ -160,6 +172,7 @@ export const workflowQueryOf = async (
     args: operation.args,
     returns: operation.returns,
     pinned: bound?.pinned,
+    release,
   };
 };
 
@@ -209,14 +222,17 @@ const placeOf = (cursor: unknown): { at: number; id: string } | undefined => {
   return { at: Number(groups.at), id: groups.id };
 };
 
-/** The workflow the App's binding of `alias` names now, or none. */
-const boundWorkflowId = async (
+/** The workflow version the App's binding of `alias` names now, or none. */
+const bindingOf = async (
   env: Env,
   app: string,
   alias: string
-): Promise<string> => {
+): Promise<WorkflowPin> => {
   const binding = await drizzle(env.DB)
-    .select({ workflowId: appWorkflowBindings.workflowResourceId })
+    .select({
+      workflowId: appWorkflowBindings.workflowResourceId,
+      version: appWorkflowBindings.workflowResourceVersion,
+    })
     .from(appWorkflowBindings)
     .where(
       and(
@@ -229,14 +245,96 @@ const boundWorkflowId = async (
   if (binding === undefined) {
     throw operationErrors.create("resource.unavailable");
   }
+  return binding;
+};
+
+/** The workflow the App's binding of `alias` names now, or none. */
+const boundWorkflowId = async (
+  env: Env,
+  app: string,
+  alias: string
+): Promise<string> => {
+  const binding = await bindingOf(env, app, alias);
   return binding.workflowId;
 };
 
-/** One page of the caller's runs of `workflowId` through `app`. */
+/** Whether `row` returned while restricted: shown only to a restricted App. */
+const returnedRestricted = (row: RunsRow): boolean =>
+  row.restricted && (row.status === "completed" || row.status === "failed");
+
+/**
+ * Which of `rows`, runs of the caller's on a page, their screen can follow
+ * through the reference's `useWorkflow` now, as screen-workflows.ts serves
+ * a watch: a run of exactly the version the release pins, while the App's
+ * binding names it, started by an App version whose contract the release
+ * still declares, and, once it returned, not restricted unless the App is.
+ */
+const followable = async (
+  env: Env,
+  caller: WorkflowQueryCaller,
+  { query, binding }: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
+  rows: readonly RunsRow[]
+): Promise<ReadonlySet<string>> => {
+  const { pinned } = query;
+  if (
+    pinned === undefined ||
+    binding.workflowId !== pinned.workflowId ||
+    binding.version !== pinned.version
+  ) {
+    return new Set();
+  }
+  const app = appIdSchema.parse(caller.app);
+  const candidates = rows.filter(
+    (row) =>
+      row.workflowId === pinned.workflowId && row.version === pinned.version
+  );
+  const origins = await followableOrigins(
+    env,
+    app,
+    query.release,
+    query.alias,
+    new Set(
+      candidates.flatMap((row) =>
+        row.originAppVersion === null ? [] : [row.originAppVersion]
+      )
+    )
+  );
+  const appRestricted = candidates.some(returnedRestricted)
+    ? await appHost(env, app).isRestricted()
+    : false;
+  return new Set(
+    candidates
+      .filter(
+        (row) =>
+          row.originAppVersion !== null &&
+          origins.has(row.originAppVersion) &&
+          (appRestricted || !returnedRestricted(row))
+      )
+      .map((row) => row.id)
+  );
+};
+
+/** A run as a page of the caller's runs reads it. */
+interface RunsRow {
+  readonly id: string;
+  readonly workflowId: string;
+  readonly version: number;
+  readonly manifestHash: string;
+  readonly status: keyof typeof publicStatus;
+  readonly createdAt: Date;
+  readonly endedAt: Date | null;
+  readonly restricted: boolean;
+  readonly originAppVersion: number | null;
+}
+
+/**
+ * One page of the caller's runs through `app` of the workflow the App's
+ * binding names now (`binding`).
+ */
 const runsPage = async (
   env: Env,
   caller: WorkflowQueryCaller,
-  workflowId: string,
+  from: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
   options: { status?: string; size: number; after?: { at: number; id: string } }
 ): Promise<{ items: Json[]; hasMore: boolean; last?: string }> => {
   const statuses =
@@ -247,7 +345,8 @@ const runsPage = async (
     return { items: [], hasMore: false };
   }
   const { after } = options;
-  const rows = await drizzle(env.DB)
+  const { workflowId } = from.binding;
+  const rows: RunsRow[] = await drizzle(env.DB)
     .select({
       id: workflowResourceRuns.id,
       workflowId: workflowResourceRuns.workflowResourceId,
@@ -256,6 +355,8 @@ const runsPage = async (
       status: workflowResourceRuns.status,
       createdAt: workflowResourceRuns.createdAt,
       endedAt: workflowResourceRuns.endedAt,
+      restricted: workflowResourceRuns.restricted,
+      originAppVersion: workflowStartReceipts.originAppVersion,
     })
     .from(workflowResourceRuns)
     .innerJoin(
@@ -302,6 +403,7 @@ const runsPage = async (
     )
     .limit(options.size + 1);
   const shown = rows.slice(0, options.size);
+  const watchable = await followable(env, caller, from, shown);
   const items: Json[] = shown.map((row) => {
     const status = publicStatus[row.status];
     return {
@@ -315,9 +417,9 @@ const runsPage = async (
       // Admitted is when it was started; a queued run hasn't begun.
       startedAt: status === "queued" ? null : row.createdAt.getTime(),
       finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
-      // Nothing keeps a run fresh through an App yet (GRA-696), and its
-      // history is read only for the version the release pins.
-      canWatch: false,
+      // Whether the reference's `useWorkflow` would show it now: read
+      // again with the list as runs, grants and bindings change.
+      canWatch: watchable.has(row.id),
     };
   });
   const lastRow = shown.at(-1);
@@ -683,7 +785,8 @@ const answerOf = async (
   args: Readonly<Record<string, Json | undefined>>
 ): Promise<Json> => {
   // The binding in force, for every query: none, and nothing is read.
-  const workflowId = await boundWorkflowId(env, caller.app, query.alias);
+  const binding = await bindingOf(env, caller.app, query.alias);
+  const { workflowId } = binding;
   switch (query.name) {
     case "runs": {
       const pagination = isObject(args.pagination) ? args.pagination : {};
@@ -692,11 +795,16 @@ const answerOf = async (
           ? Math.min(pagination.pageSize, maxPageSize)
           : defaultPageSize;
       const after = placeOf(pagination.cursor);
-      const page = await runsPage(env, caller, workflowId, {
-        ...(typeof args.status === "string" ? { status: args.status } : {}),
-        size,
-        ...(after === undefined ? {} : { after }),
-      });
+      const page = await runsPage(
+        env,
+        caller,
+        { query, binding },
+        {
+          ...(typeof args.status === "string" ? { status: args.status } : {}),
+          size,
+          ...(after === undefined ? {} : { after }),
+        }
+      );
       return page.hasMore && page.last !== undefined
         ? { items: page.items, nextCursor: page.last, hasMore: true }
         : { items: page.items, nextCursor: null, hasMore: false };
@@ -789,7 +897,8 @@ export const readWorkflowWindow = async (
   if (!isObject(args)) {
     throw operationErrors.create("contract.invalid_args");
   }
-  const workflowId = await boundWorkflowId(env, caller.app, query.alias);
+  const binding = await bindingOf(env, caller.app, query.alias);
+  const { workflowId } = binding;
   if (query.name === "decisions") {
     return { ok: true, value: { items: [], hasMore: false } };
   }
@@ -809,10 +918,15 @@ export const readWorkflowWindow = async (
       }
     );
   } else {
-    page = await runsPage(env, caller, workflowId, {
-      ...(typeof args.status === "string" ? { status: args.status } : {}),
-      size,
-    });
+    page = await runsPage(
+      env,
+      caller,
+      { query, binding },
+      {
+        ...(typeof args.status === "string" ? { status: args.status } : {}),
+        size,
+      }
+    );
     const owed =
       Math.ceil(page.items.length / queryMaxResults) -
       windowPages(window.extent);

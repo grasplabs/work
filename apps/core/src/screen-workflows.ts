@@ -599,6 +599,56 @@ const startedContract = async (
   return { fingerprint: started.fingerprint, output: started.declared.output };
 };
 
+/**
+ * Which of `versions`, versions of App `app` that started runs of `alias`,
+ * a screen of `release` can follow such a run of: one whose release still
+ * loads and declares `alias` under the contract `release` declares it
+ * with. A run any other version started is refused (`startedContract`),
+ * or its snapshot pins another contract than the screen's reference, which
+ * the SDK refuses.
+ */
+export const followableOrigins = async (
+  env: Env,
+  app: AppId,
+  release: Release,
+  alias: string,
+  versions: ReadonlySet<number>
+): Promise<ReadonlySet<number>> => {
+  const current = await declaredIn(release, alias);
+  if (current === undefined) {
+    return new Set();
+  }
+  const fingerprintOf = async (
+    version: number
+  ): Promise<string | undefined> => {
+    if (version === release.manifest.resourceVersion) {
+      return current.fingerprint;
+    }
+    try {
+      const origin = await originRelease(env, app, version);
+      const started = await declaredIn(origin, alias);
+      return started?.fingerprint;
+    } catch (error) {
+      if (workflowResourceErrors.codeOf(error) === undefined) {
+        throw error;
+      }
+      return undefined;
+    }
+  };
+  // One read per App version on a page: a handful at most.
+  const checked = await Promise.all(
+    [...versions].map(async (version) => ({
+      version,
+      fingerprint: await fingerprintOf(version),
+    }))
+  );
+  return new Set(
+    checked
+      .filter(({ fingerprint }) => fingerprint === current.fingerprint)
+      .map(({ version }) => version)
+  );
+};
+
 /** What a step's failure reads as when its own words can't be shown. */
 const stepFailed = workflowErrors.create("workflow.step_failed");
 

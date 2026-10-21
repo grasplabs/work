@@ -1,4 +1,5 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -23,6 +24,7 @@ import {
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { readWorkflowWatch } from "../src/screen-workflows.ts";
 import {
   readWorkflowWindow,
   workflowQueryOf,
@@ -106,13 +108,13 @@ const objectSchema = (properties: Record<string, unknown>) => ({
 });
 
 /** A greeting workflow's definition. */
-const definitionOf = (name: string): string =>
+const definitionOf = (name: string, semver = "1.0.0"): string =>
   JSON.stringify({
     document: {
       dsl: "1.0.3",
       namespace: workflowNamespace,
       name,
-      version: "1.0.0",
+      version: semver,
       title: name,
       metadata: {
         grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
@@ -801,6 +803,153 @@ const historySchema = z.object({
   items: z.array(z.looseObject({ sequence: z.number(), kind: z.string() })),
   nextCursor: z.string().nullable(),
   hasMore: z.boolean(),
+});
+
+describe("a workflow reference's run list", { timeout: 120_000 }, () => {
+  it("offer a run as watchable exactly when the reference's useWorkflow shows it", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await greetingOf(owner);
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob],
+      workflow.id,
+      owner
+    );
+    const { app } = fixture;
+    const { result: kicked } = await callAppFunction(
+      env,
+      bob,
+      app,
+      JSON.stringify({
+        reference: {
+          resourceId: release.manifest.resourceId,
+          resourceVersion: release.manifest.resourceVersion,
+          contractId: "requests.kickOff",
+          fingerprint: release.fingerprints["requests.kickOff"] ?? "",
+          kind: "action",
+        },
+        input: { who: "Ada" },
+      })
+    );
+    if (!kicked.ok) {
+      throw new Error(kicked.error.code);
+    }
+    const started = z.object({ runId: z.string() }).parse(kicked.value).runId;
+    // A run of the App's that no App version's contract accounts for: its
+    // receipt names no version that started it.
+    await startedRuns(app, workflow.id, bob.userId, 1);
+    const runs = await queryReference(release, "followUp", "runs");
+    const declared = declaredWorkflows(release.app, release.workflows).find(
+      (bound) => bound.alias === "followUp"
+    );
+    if (declared === undefined) {
+      throw new Error("No followUp");
+    }
+    const workflowRef = {
+      resourceId: release.manifest.resourceId,
+      resourceVersion: release.manifest.resourceVersion,
+      contractId: "workflows.followUp",
+      fingerprint: await workflowFingerprint(declared),
+      kind: "workflow" as const,
+    };
+    // Each listed run: what its row offers, and whether a watch shows it.
+    const offered = async () => {
+      const { result } = await callAppFunction(
+        env,
+        bob,
+        app,
+        JSON.stringify({ reference: runs, input: { pagination: {} } })
+      );
+      const items = result.ok
+        ? z
+            .object({
+              items: z.array(
+                z.object({
+                  run: z.object({ runId: z.string() }),
+                  canWatch: z.boolean(),
+                })
+              ),
+            })
+            .parse(result.value).items
+        : [];
+      const rows = await Promise.all(
+        items.map(async ({ run, canWatch }) => {
+          let watched: string;
+          try {
+            await readWorkflowWatch(env, bob, app, {
+              workflow: workflowRef,
+              watch: "run",
+              runId: run.runId,
+            });
+            watched = "shown";
+          } catch (error) {
+            watched =
+              error instanceof Error
+                ? String(Reflect.get(error, "code"))
+                : String(error);
+          }
+          return { started: run.runId === started, canWatch, watched };
+        })
+      );
+      // The run Bob started first, then the one no version accounts for.
+      return rows.toSorted((a, b) => Number(b.started) - Number(a.started));
+    };
+    const pinned = await offered();
+    // The alias bound to another version of the same workflow: its runs
+    // still listed, none of them watchable through this release.
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: definitionOf(workflow.name, "2.0.0"),
+      basedOn: 1,
+    });
+    await bindWorkflowToApp(env, owner, workflow.id, {
+      app,
+      alias: "followUp",
+      version: 2,
+    });
+    const rebound = await offered();
+    await bindWorkflowToApp(env, owner, workflow.id, {
+      app,
+      alias: "followUp",
+      version: 1,
+    });
+    const back = await offered();
+    expect({
+      pinned,
+      rebound,
+      back,
+    }).toStrictEqual({
+      pinned: [
+        { started: true, canWatch: true, watched: "shown" },
+        {
+          started: false,
+          canWatch: false,
+          watched: "workflow.run_unavailable",
+        },
+      ],
+      rebound: [
+        {
+          started: true,
+          canWatch: false,
+          watched: "workflow.run_unavailable",
+        },
+        {
+          started: false,
+          canWatch: false,
+          watched: "workflow.run_unavailable",
+        },
+      ],
+      back: [
+        { started: true, canWatch: true, watched: "shown" },
+        {
+          started: false,
+          canWatch: false,
+          watched: "workflow.run_unavailable",
+        },
+      ],
+    });
+  });
 });
 
 describe("a workflow reference's run history", { timeout: 180_000 }, () => {
