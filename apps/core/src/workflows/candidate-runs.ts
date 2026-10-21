@@ -553,9 +553,12 @@ export const projectCandidateRun = async (
   failureCode: string | null = null
 ): Promise<void> => {
   const row = await rowOf(env, id);
-  if (row === undefined || !unended.includes(row.status)) {
+  if (row === undefined) {
     return;
   }
+  // A row already ended (core cancelled it while starting) still gives up
+  // its places in the admission queue below; its update changes nothing,
+  // so nothing more is audited.
   const status = projected[engine.status];
   const ended = !unended.includes(status);
   const entry = endEntry(row, status, failureCode);

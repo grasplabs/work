@@ -1210,6 +1210,63 @@ describe("test runs of a workflow's draft", () => {
     });
   });
 
+  it("gives up a test run's places in the admission queue once the engine ends it, though core ended its row first", async () => {
+    const ada = await person("builder");
+    const { workflow, revision } = await drafted(ada, {
+      tasks: [
+        { hold: { wait: "PT10M" } },
+        { finish: { set: { status: "done" } } },
+      ],
+    });
+    const { runId } = await startCandidateRun(env, ada, workflow.id, {
+      revision,
+      input: { who: "Ada" },
+      fixtures: {},
+    });
+    await vi.waitFor(
+      async () => {
+        const going = await candidateRunFor(env, ada, workflow.id, runId);
+        if (going.status !== "running") {
+          throw new Error(`Test run ${runId} is ${going.status}`);
+        }
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    // As core leaves it stopping a run the engine hadn't confirmed: its
+    // row cancelled at core's word, a step's place still in the queue.
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE workflow_candidate_runs SET status = 'cancelled', ended_at = ? WHERE id = ?"
+      ).bind(now, runId),
+      env.DB.prepare(
+        "INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES (?, 'hold', ?, ?, ?, ?, 'person', ?, 0, ?)"
+      ).bind(runId, ada.userId, workflow.id, now, now, now, now + 60_000),
+    ]);
+    const places = async () =>
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM workflow_admission_queue WHERE run_id = ?"
+      )
+        .bind(runId)
+        .first<number>("n");
+    const before = await places();
+
+    // Stopped again, the engine ends it, and its end gives up the place.
+    await terminateCandidateRun(env, ada, workflow.id, runId);
+    await vi.waitFor(
+      async () => {
+        await expect(places()).resolves.toBe(0);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+
+    expect({ before, ends: await endsOf(runId) }).toStrictEqual({
+      before: 1,
+      // Ended at core's word, its end is recorded by the stop, not again.
+      ends: [],
+    });
+  });
+
   it("fails a test run that goes on past its lifetime, however its waits are chained", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
