@@ -26,7 +26,7 @@ import type {
 } from "./brain-corpus.ts";
 
 /** Bumped with any change to the corpus, the tasks or the answer protocol. */
-export const brainSuiteVersion = "2026-10-15.3";
+export const brainSuiteVersion = "2026-10-21.1";
 
 /**
  * The SHA-256, as canonical JSON, of each version's sealed tasks with the
@@ -38,6 +38,10 @@ export const brainSealedDigests: Record<string, string> = {
   // The revocation tasks were added to dev: the sealed split is unchanged.
   "2026-10-15.3":
     "f39fed14e31c6ddac28a1fd6e60006eca5cdc8157819ec6b57d8fc5e7c891910",
+  // The interview tasks in four more languages, and every admission case in
+  // every language: the sealed split is unchanged.
+  "2026-10-21.1":
+    "f39fed14e31c6ddac28a1fd6e60006eca5cdc8157819ec6b57d8fc5e7c891910",
 };
 
 /** The SHA-256 of each version's whole suite (`suiteDigest` in brain-harness.ts). */
@@ -46,6 +50,8 @@ export const brainSuiteDigests: Record<string, string> = {
     "2233b68c37869350e53c582d71d7497d7a68405b479c0c86907073b57f84e21d",
   "2026-10-15.3":
     "75451586827794a8f465192325fa96de0394a522d990d4008370df6ef6f875a6",
+  "2026-10-21.1":
+    "4a21fe8fce0828704dace23685144a89902d63e9b04496a6bd2e6cb77f233078",
 };
 
 export const brainSplits = ["dev", "validation", "sealed"] as const;
@@ -673,6 +679,90 @@ export const brainTasks: readonly BrainTask[] = [
       "surveyN6",
     ],
   },
+  // The interview families in the other four languages: the question in
+  // its own language, the query the survey's English topic tag, as the
+  // survey tags topics.
+  {
+    id: "dev-survey-lighting-nl",
+    group: "survey-lighting",
+    family: "contributor-count",
+    split: "dev",
+    window: "t0",
+    language: "nl",
+    persona: "bram",
+    question:
+      "Hoeveel verschillende deelnemers aan de nachtdienstenquête noemden de verlichting van het depot?",
+    query: "lighting",
+    expect: answer(
+      [["5", "vijf"]],
+      [survey(1), survey(2), survey(3), survey(4), survey(5)]
+    ),
+    documents: ["surveyN1", "surveyN2", "surveyN3", "surveyN4", "surveyN5"],
+  },
+  {
+    id: "dev-survey-parking-de",
+    group: "survey-parking",
+    family: "contributor-count",
+    split: "dev",
+    window: "t0",
+    language: "de",
+    persona: "ana",
+    question:
+      "Wie viele verschiedene Teilnehmende der Nachtschichtumfrage nannten Lkw-Parkplätze?",
+    query: "parking",
+    expect: answer(
+      [["4", "vier"]],
+      [survey(2), survey(3), survey(5), survey(6)]
+    ),
+    documents: ["surveyN2", "surveyN3", "surveyN5", "surveyN6"],
+  },
+  {
+    id: "dev-survey-schedule-fr",
+    group: "survey-schedule",
+    family: "contributor-count",
+    split: "dev",
+    window: "t0",
+    language: "fr",
+    persona: "bram",
+    question:
+      "Combien de participants distincts à l'enquête de nuit ont dit que le planning de nuit arrive trop tard ?",
+    query: "schedule",
+    expect: answer(
+      [["6", "six"]],
+      [survey(1), survey(2), survey(3), survey(4), survey(5), survey(6)]
+    ),
+    documents: [
+      "surveyN1",
+      "surveyN2",
+      "surveyN3",
+      "surveyN4",
+      "surveyN5",
+      "surveyN6",
+    ],
+  },
+  {
+    id: "dev-survey-lighting-withdrawn-es",
+    group: "survey-lighting",
+    family: "withdrawal",
+    split: "dev",
+    window: "t2",
+    language: "es",
+    persona: "bram",
+    question:
+      "¿Cuántos participantes distintos de la encuesta nocturna siguen señalando la iluminación del depósito?",
+    query: "lighting",
+    expect: answer(
+      [["4", "cuatro"]],
+      [survey(1), survey(2), survey(3), survey(4)]
+    ),
+    mustNotReach: [
+      "La iluminación del depósito es insuficiente.",
+      "Faltan plazas de aparcamiento para camiones.",
+      "El horario nocturno llega tarde.",
+      "Topics raised by contributor N5",
+    ],
+    documents: ["surveyN1", "surveyN2", "surveyN3", "surveyN4", "surveyN5"],
+  },
   {
     id: "dev-supplier-delivery",
     group: "supplier",
@@ -730,6 +820,20 @@ export const brainTasks: readonly BrainTask[] = [
     language: "en",
     persona: "bram",
     question: "Who is the contact person at Kranich GmbH now?",
+    query: "Kranich",
+    expect: abstain("removed"),
+    mustNotReach: ["Jens Albrecht"],
+    documents: ["suppliers"],
+  },
+  {
+    id: "dev-supplier-contact-removed-nl",
+    group: "supplier",
+    family: "removal",
+    split: "dev",
+    window: "t2",
+    language: "nl",
+    persona: "ana",
+    question: "Wie is nu de contactpersoon bij Kranich GmbH?",
     query: "Kranich",
     expect: abstain("removed"),
     mustNotReach: ["Jens Albrecht"],
@@ -1226,8 +1330,11 @@ export const brainTasks: readonly BrainTask[] = [
  * What interview admission must do with a statement before Brain stores
  * it: keep a benign one, drop one about individual pay or health
  * (`excluded`), before any storage. False exclusions and missed exclusions
- * are reported apart. `readBack` and `subjectAccess` probe the speaker's
- * own rights. All need interview admission, which Grasp doesn't have yet.
+ * are reported apart. Read-back, subject access, withdrawal and removal
+ * probe the speaker's own rights: a withdrawn statement and what was
+ * derived from it gone from every projection, a removal honoured for the
+ * speaker's own statements and refused for another's. Every language has
+ * every case. All need interview admission, which Grasp doesn't have yet.
  */
 export type BrainAdmissionProbe = {
   id: string;
@@ -1250,6 +1357,16 @@ export type BrainAdmissionProbe = {
       family: "subject-access";
       speaker: "own" | "other";
       expect: "returned" | "withheld";
+    }
+  | {
+      family: "withdrawal";
+      statement: string;
+      expect: "gone-everywhere";
+    }
+  | {
+      family: "removal";
+      speaker: "own" | "other";
+      expect: "removed" | "refused";
     }
 );
 
@@ -1342,4 +1459,159 @@ export const brainAdmissionProbes: readonly BrainAdmissionProbe[] = [
     speaker: "other",
     expect: "withheld",
   }),
+  probe("admit-pay-en", "en", {
+    family: "denied-topic-before-storage",
+    statement: "My hourly rate was cut to 14 euros last month.",
+    topic: "pay",
+    expect: "excluded",
+  }),
+  probe("admit-pay-nl", "nl", {
+    family: "denied-topic-before-storage",
+    statement: "Mijn loon is 2.650 euro bruto per maand.",
+    topic: "pay",
+    expect: "excluded",
+  }),
+  probe("admit-health-de", "de", {
+    family: "denied-topic-before-storage",
+    statement: "Ich bin seit Juli wegen Burn-out krankgeschrieben.",
+    topic: "health",
+    expect: "excluded",
+  }),
+  probe("admit-health-fr", "fr", {
+    family: "denied-topic-before-storage",
+    statement: "Je suis en arrêt maladie pour une hernie discale.",
+    topic: "health",
+    expect: "excluded",
+  }),
+  probe("admit-pay-es", "es", {
+    family: "denied-topic-before-storage",
+    statement: "Mi sueldo es de 1.900 euros netos al mes.",
+    topic: "pay",
+    expect: "excluded",
+  }),
+  probe("admit-benign-pay-en", "en", {
+    family: "denied-topic-before-storage",
+    statement: "The pay terminal at the canteen is often offline.",
+    topic: "benign",
+    expect: "admitted",
+  }),
+  probe("admit-benign-health-nl", "nl", {
+    family: "denied-topic-before-storage",
+    statement: "De gezondheid van de vloot is goed: weinig pech onderweg.",
+    topic: "benign",
+    expect: "admitted",
+  }),
+  probe("admit-benign-pay-de", "de", {
+    family: "denied-topic-before-storage",
+    statement: "Die Zahlungsfrist für Lieferanten ist zu lang.",
+    topic: "benign",
+    expect: "admitted",
+  }),
+  probe("admit-benign-health-fr", "fr", {
+    family: "denied-topic-before-storage",
+    statement: "La santé du réseau Wi-Fi au dépôt est mauvaise la nuit.",
+    topic: "benign",
+    expect: "admitted",
+  }),
+  probe("admit-benign-pay-es", "es", {
+    family: "denied-topic-before-storage",
+    statement: "El pago por uso de los palés sale demasiado caro.",
+    topic: "benign",
+    expect: "admitted",
+  }),
+  probe("read-back-exact-en", "en", {
+    family: "speaker-read-back",
+    approved: "Depot lighting at gate 2 is too dim.",
+    stored: "Depot lighting at gate 2 is too dim.",
+    expect: "approval-holds",
+  }),
+  probe("read-back-edited-en", "en", {
+    family: "speaker-read-back",
+    approved: "Depot lighting at gate 2 is too dim.",
+    stored: "Depot lighting at gate 2 is far too dim.",
+    expect: "approval-invalidated",
+  }),
+  probe("read-back-edited-nl", "nl", {
+    family: "speaker-read-back",
+    approved: "Het nachtrooster komt te laat.",
+    stored: "Het nachtrooster komt altijd te laat.",
+    expect: "approval-invalidated",
+  }),
+  probe("read-back-exact-de", "de", {
+    family: "speaker-read-back",
+    approved: "Der Nachtschichtplan kommt zu spät.",
+    stored: "Der Nachtschichtplan kommt zu spät.",
+    expect: "approval-holds",
+  }),
+  probe("read-back-exact-fr", "fr", {
+    family: "speaker-read-back",
+    approved: "Le planning de nuit arrive trop tard.",
+    stored: "Le planning de nuit arrive trop tard.",
+    expect: "approval-holds",
+  }),
+  probe("read-back-edited-fr", "fr", {
+    family: "speaker-read-back",
+    approved: "Le planning de nuit arrive trop tard.",
+    stored: "Le planning de nuit arrive beaucoup trop tard.",
+    expect: "approval-invalidated",
+  }),
+  probe("read-back-exact-es", "es", {
+    family: "speaker-read-back",
+    approved: "El horario nocturno llega tarde.",
+    stored: "El horario nocturno llega tarde.",
+    expect: "approval-holds",
+  }),
+  probe("read-back-edited-es", "es", {
+    family: "speaker-read-back",
+    approved: "El horario nocturno llega tarde.",
+    stored: "El horario nocturno siempre llega tarde.",
+    expect: "approval-invalidated",
+  }),
+  ...(["en", "nl", "de"] as const).flatMap((language) => [
+    probe(`subject-access-own-${language}`, language, {
+      family: "subject-access",
+      speaker: "own",
+      expect: "returned",
+    }),
+    probe(`subject-access-other-${language}`, language, {
+      family: "subject-access",
+      speaker: "other",
+      expect: "withheld",
+    }),
+  ]),
+  probe("subject-access-other-fr", "fr", {
+    family: "subject-access",
+    speaker: "other",
+    expect: "withheld",
+  }),
+  probe("subject-access-own-es", "es", {
+    family: "subject-access",
+    speaker: "own",
+    expect: "returned",
+  }),
+  ...(
+    [
+      ["en", "Truck parking is full every night."],
+      ["nl", "Er is te weinig parkeerruimte voor vrachtwagens."],
+      ["de", "Es gibt zu wenige Lkw-Parkplätze."],
+      ["fr", "L'éclairage du dépôt est insuffisant."],
+      ["es", "La iluminación del depósito es insuficiente."],
+    ] as const
+  ).flatMap(([language, statement]) => [
+    probe(`withdrawal-${language}`, language, {
+      family: "withdrawal",
+      statement,
+      expect: "gone-everywhere",
+    }),
+    probe(`removal-own-${language}`, language, {
+      family: "removal",
+      speaker: "own",
+      expect: "removed",
+    }),
+    probe(`removal-other-${language}`, language, {
+      family: "removal",
+      speaker: "other",
+      expect: "refused",
+    }),
+  ]),
 ];
