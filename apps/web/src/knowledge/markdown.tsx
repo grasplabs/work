@@ -10,10 +10,11 @@ import {
 import { Trans } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { CitedNote, citedNoteLink } from "../chat/cited-note.tsx";
 import { remarkWikiLinks } from "./wiki-links.ts";
 import type { ResolveLink } from "./wiki-links.ts";
 
@@ -130,20 +131,55 @@ const components: Components = {
 
 /**
  * The same, for text that isn't a document of a collection (the agent's
- * answers): every link leaves the page.
+ * answers): every link leaves the page, but for a note `cited` names,
+ * which opens it here (`CitedNote`). A note link to any other shows as its
+ * text, whatever the answer says.
  */
-const plainComponents: Components = {
+const plainComponents = (cited: readonly string[]): Components => ({
   ...components,
-  a: ({ href, children }) => <OutsideLink href={href}>{children}</OutsideLink>,
-};
+  a: ({ href, children }) => {
+    const note = href === undefined ? undefined : citedNoteLink.exec(href);
+    const documentId = note?.groups?.id;
+    if (documentId !== undefined) {
+      return cited.includes(documentId) ? (
+        <CitedNote documentId={documentId}>{children}</CitedNote>
+      ) : (
+        <span>{children}</span>
+      );
+    }
+    return <OutsideLink href={href}>{children}</OutsideLink>;
+  },
+});
+
+/** No note cited. */
+const noneCited: readonly string[] = [];
+
+/**
+ * A link's address as the page may follow it: a cited note's as it is,
+ * any other as react-markdown keeps safe ones (`defaultUrlTransform`).
+ */
+const plainUrl = (url: string): string =>
+  citedNoteLink.test(url) ? url : defaultUrlTransform(url);
 
 /**
  * Markdown that isn't a Knowledge document, such as the agent's answers,
- * as safely as a document: no raw HTML, safe links only, no images.
+ * as safely as a document: no raw HTML, safe links only, no images. Its
+ * links to the notes `cited` names open them; no other note link does.
  */
-export const PlainMarkdown = ({ text }: { text: string }) => (
+export const PlainMarkdown = ({
+  text,
+  cited = noneCited,
+}: {
+  text: string;
+  cited?: readonly string[];
+}) => (
   <div className="flex flex-col gap-3">
-    <Markdown components={plainComponents} remarkPlugins={[remarkGfm]} skipHtml>
+    <Markdown
+      components={plainComponents(cited)}
+      remarkPlugins={[remarkGfm]}
+      skipHtml
+      urlTransform={plainUrl}
+    >
       {text}
     </Markdown>
   </div>
