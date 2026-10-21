@@ -81,7 +81,6 @@
   "@grasp-os/core test/agent-skills.test.ts": 5.8,
   "@grasp-os/core test/agent.test.ts": 100.7,
   "@grasp-os/core test/app-blueprints.test.ts": 19.6,
-  "@grasp-os/core test/app-exports.test.ts": 2,
   "@grasp-os/core test/app-links.test.ts": 35,
   "@grasp-os/core test/app-pointers.test.ts": 3.7,
   "@grasp-os/core test/app-provenance.test.ts": 21.4,
