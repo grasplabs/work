@@ -267,7 +267,9 @@ const returnedRestricted = (row: RunsRow): boolean =>
  * through the reference's `useWorkflow` now, as screen-workflows.ts serves
  * a watch: a run of exactly the version the release pins, while the App's
  * binding names it, started by an App version whose contract the release
- * still declares, and, once it returned, not restricted unless the App is.
+ * still declares, once it returned not restricted unless the App is, and
+ * once it completed not past its retention: its watch then has no output
+ * to show, and refuses it (`workflow.run_details_removed`).
  */
 const followable = async (
   env: Env,
@@ -308,7 +310,8 @@ const followable = async (
         (row) =>
           row.originAppVersion !== null &&
           origins.has(row.originAppVersion) &&
-          (appRestricted || !returnedRestricted(row))
+          (appRestricted || !returnedRestricted(row)) &&
+          !(row.status === "completed" && detailsRemoved(env, row))
       )
       .map((row) => row.id)
   );
@@ -325,6 +328,8 @@ interface RunsRow {
   readonly endedAt: Date | null;
   readonly restricted: boolean;
   readonly originAppVersion: number | null;
+  /** When the retention sweep removed its details, if it did. */
+  readonly detailsRemovedAt: Date | null;
 }
 
 /**
@@ -357,6 +362,7 @@ const runsPage = async (
       endedAt: workflowResourceRuns.endedAt,
       restricted: workflowResourceRuns.restricted,
       originAppVersion: workflowStartReceipts.originAppVersion,
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
     })
     .from(workflowResourceRuns)
     .innerJoin(

@@ -915,10 +915,30 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
       version: 1,
     });
     const back = await offered();
+    // Completed, then its details removed, as the retention sweep removes
+    // them: its watch has no output to show.
+    await vi.waitFor(
+      async () => {
+        const { value } = await readWorkflowWatch(env, bob, app, {
+          workflow: workflowRef,
+          watch: "run",
+          runId: started,
+        });
+        expect(value).toMatchObject({ status: "completed" });
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    await env.DB.prepare(
+      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
+    )
+      .bind(Date.now(), started)
+      .run();
+    const [removed] = await offered();
     expect({
       pinned,
       rebound,
       back,
+      removed,
     }).toStrictEqual({
       pinned: [
         { started: true, canWatch: true, watched: "shown" },
@@ -948,6 +968,11 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
           watched: "workflow.run_unavailable",
         },
       ],
+      removed: {
+        started: true,
+        canWatch: false,
+        watched: "workflow.run_details_removed",
+      },
     });
   });
 });
