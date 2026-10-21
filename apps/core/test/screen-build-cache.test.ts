@@ -244,12 +244,16 @@ describe("the build cache", { timeout: 120_000 }, () => {
     });
   });
 
-  it("still answers a build R2 can't keep, and keeps nothing unreceipted", async () => {
+  it("still builds when R2 can't be read or written, and keeps nothing unreceipted", async () => {
     const files = screen();
-    // Every write to R2 fails, as in an outage; reads work.
+    // Every read and write of R2 fails, as in an outage.
     const out: Pick<R2Bucket, "get" | "put"> = {
-      get: async (...args: Parameters<R2Bucket["get"]>) =>
-        await env.FILES.get(...args),
+      get: async (...args: Parameters<R2Bucket["get"]>) => {
+        if (args[0].length > 0) {
+          throw new Error("R2 is out");
+        }
+        return await env.FILES.get(...args);
+      },
       put: async (...args: Parameters<R2Bucket["put"]>) => {
         if (args[0].length > 0) {
           throw new Error("R2 is out");

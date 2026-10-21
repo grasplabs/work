@@ -1013,10 +1013,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       const check = await env.build.check(app.id);
       return { passed: check.passed, screens: check.screens, failedInARow: check.failedInARow };
     };`;
+    // Never built before, so no build of it is in the cache to serve.
+    const unbuilt = `${fixed}\n// ${crypto.randomUUID()}\n`;
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
+        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": unbuilt })});
       };`),
       codeStep(check),
       says("It couldn't be built now."),
@@ -1024,29 +1026,23 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       says("Built."),
     ]);
     await grant();
-    // The build cache is down: no build can be read from it, or run.
-    const { FILES: files } = env;
-    const down = new Proxy(files, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "get" && typeof value === "function") {
-          return async (key: string, ...rest: unknown[]): Promise<unknown> => {
-            if (key.includes("-builds/")) {
-              throw new Error("The build cache is down");
-            }
-            return await Reflect.apply(value, target, [key, ...rest]);
-          };
+    // The compiler can't start: no build can run now. (The build cache
+    // being out is only a miss: the build runs, build-cache.ts.)
+    const { LOADER: loader } = env;
+    const down: WorkerLoader = {
+      get: (name, code) => {
+        if (name?.startsWith("compiler:") === true) {
+          throw new Error("The compiler can't start");
         }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
+        return loader.get(name, code);
       },
-    });
+      load: (code) => loader.load(code),
+    };
     try {
-      env.FILES = down;
+      env.LOADER = down;
       await chat.ask("Build an invoice desk");
     } finally {
-      env.FILES = files;
+      env.LOADER = loader;
     }
     await chat.ask("Check it again");
 

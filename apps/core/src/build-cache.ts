@@ -145,10 +145,17 @@ export const readVerified = async (
 ): Promise<CacheRead> => {
   // The receipt first, then the bytes: a build kept between the two reads
   // replaces a receipt this read no longer matches by `built_at`, so old
-  // bytes are never counted against it (`integrityFailed`). A cache that
-  // can't be read throws: the build couldn't run now, and is tried again.
+  // bytes are never counted against it (`integrityFailed`). A receipt that
+  // can't be read throws: nothing vouches for cached bytes then. Bytes that
+  // can't be read are a miss: the build runs, under the lease.
   const receipt = await receiptOf(env, key);
-  const object = await env.FILES.get(key);
+  let object: R2ObjectBody | null;
+  try {
+    object = await env.FILES.get(key);
+  } catch (error) {
+    log.warn("build.cache_read_failed", { key, ...errorFields(error) });
+    object = null;
+  }
   if (receipt?.quarantinedAt !== null && receipt?.quarantinedAt !== undefined) {
     return { state: "quarantined" };
   }
@@ -299,12 +306,15 @@ export const throughCache = async (
   signal?.throwIfAborted();
   const holder = crypto.randomUUID();
   for (;;) {
+    // Given up on while waiting: it takes no lease and serves nothing.
+    signal?.throwIfAborted();
     // oxlint-disable-next-line no-await-in-loop -- one try at a time
     if (await takeLease(env, key, holder, leaseMs)) {
       break;
     }
     // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
     await scheduler.wait(pollMs);
+    signal?.throwIfAborted();
     // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
     const now = await readVerified(env, key);
     if (now.state === "hit") {
