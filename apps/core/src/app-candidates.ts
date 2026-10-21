@@ -9,7 +9,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, desc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -180,13 +180,13 @@ export const freezeCandidate = async (
   const db = drizzle(env.DB);
   const id = crypto.randomUUID();
   const now = new Date();
-  // A repair: the App's latest candidate ended in a defect its code can
-  // fix, of this version or one before it.
+  // A repair: the App's latest candidate, of a version before this one,
+  // ended in a defect its code can fix.
   const repairs = await db
     .select({ id: appCandidates.id, state: appCandidates.state })
     .from(appCandidates)
     .where(
-      and(eq(appCandidates.appId, app), lte(appCandidates.version, version))
+      and(eq(appCandidates.appId, app), lt(appCandidates.version, version))
     )
     .orderBy(desc(appCandidates.createdAt), desc(appCandidates.id))
     .limit(1)
@@ -368,6 +368,27 @@ const end = async (
 };
 
 /**
+ * `end`, unless the run lost the candidate as it ended it: taken over or
+ * superseded meanwhile, whoever has it decides, and the run's own refusal
+ * is what its caller hears.
+ */
+const endUnlessLost = async (
+  env: Env,
+  by: Identity,
+  held: Held,
+  from: CandidateState,
+  outcome: { state: CandidateState; code: string }
+): Promise<void> => {
+  try {
+    await end(env, by, held, from, outcome);
+  } catch (error) {
+    if (!(isExpectedError(error) && error.code.startsWith("app.candidate_"))) {
+      throw error;
+    }
+  }
+};
+
+/**
  * The report of the verified candidate `row`: its identities, and for a
  * version of spec 8's layout its sealed release as loading reads it back,
  * every hash checked (`loadRelease`), with the evidence of its checks and
@@ -507,7 +528,7 @@ export const runCandidate = async (
       openStates.includes(now.state) &&
       now.state !== "verified"
     ) {
-      await end(env, by, held, now.state, outcome);
+      await endUnlessLost(env, by, held, now.state, outcome);
     } else if (now.lease === held.lease) {
       // Unexpected: let it go, to run again from where it stopped.
       await drizzle(env.DB)
