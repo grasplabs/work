@@ -493,7 +493,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
   });
 
-  it("cites in an answer only the notes its chat's code was given before it, each once", async () => {
+  it("cites in an answer only the notes its chat's code was given before it, each once, never one read after it", async () => {
     const admin = await newAdmin();
     const person = await signedInApi(idp, "user");
     const { id: collectionId } = await admin.knowledge.createCollection({
@@ -527,6 +527,8 @@ describe("a chat's Knowledge", setUpTime, () => {
     const answer = `Sixteen weeks [Parental leave](grasp:note/${read}), as [the policy](grasp:note/${read}) says; see [Travel](grasp:note/${unread}), [Minutes](grasp:note/${secret}) and [nothing](grasp:note/not-a-document).`;
     const { agent, newChat } = await personalChatsOf(
       person.userId,
+      // Before its code read anything: the note is read only after.
+      says(`Let me look [Parental leave](grasp:note/${read}).`),
       codeStep(
         "export default async (self, env) => { const { hits } = await env.knowledge.search('parental leave'); await env.knowledge.read(hits[0].documentId); return hits.length; };"
       ),
@@ -536,12 +538,13 @@ describe("a chat's Knowledge", setUpTime, () => {
     );
     await grantRead(admin, agent, collectionId);
     const reading = await newChat();
+    await reading.ask("Parental leave?");
     await reading.ask("How long is parental leave?");
     const other = await newChat();
     await other.ask("And travel?");
 
-    /** The chat's last answer, as its page is sent it. */
-    const lastAnswer = async (chatId: string) => {
+    /** The chat's answers, as its page is sent them. */
+    const answers = async (chatId: string) => {
       const sent: ChatMessage[] = [];
       const subscription = await person.api.chats.watch(
         chatId,
@@ -554,24 +557,30 @@ describe("a chat's Knowledge", setUpTime, () => {
         expect(sent.some(({ role }) => role === "assistant")).toBeTruthy();
       });
       await subscription.release();
-      const shown = sent.findLast(({ role }) => role === "assistant");
-      return shown?.role === "assistant"
-        ? { text: shown.text, citations: shown.citations }
-        : undefined;
+      return sent.flatMap((shown) =>
+        shown.role === "assistant" && shown.text !== ""
+          ? [{ text: shown.text, citations: shown.citations }]
+          : []
+      );
     };
 
     expect({
-      reading: await lastAnswer(reading.chat.id),
-      other: await lastAnswer(other.chat.id),
+      reading: await answers(reading.chat.id),
+      other: await answers(other.chat.id),
     }).toStrictEqual({
-      reading: {
-        text: `Sixteen weeks [Parental leave](grasp:note/${read}), as [the policy](grasp:note/${read}) says; see Travel, Minutes and nothing.`,
-        citations: [{ kind: "document", documentId: read }],
-      },
-      other: {
-        text: "Sixteen weeks Parental leave, as the policy says; see Travel, Minutes and nothing.",
-        citations: [],
-      },
+      reading: [
+        { text: "Let me look Parental leave.", citations: [] },
+        {
+          text: `Sixteen weeks [Parental leave](grasp:note/${read}), as [the policy](grasp:note/${read}) says; see Travel, Minutes and nothing.`,
+          citations: [{ kind: "document", documentId: read }],
+        },
+      ],
+      other: [
+        {
+          text: "Sixteen weeks Parental leave, as the policy says; see Travel, Minutes and nothing.",
+          citations: [],
+        },
+      ],
     });
   });
 

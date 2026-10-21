@@ -54,12 +54,6 @@ const ends: Record<AssistantMessage["stopReason"], ChatReplyEnd> = {
   error: "failed",
 };
 
-/** A response being written, as the person sees it so far. */
-export const partialOf = (message: AssistantMessage): ChatPartial => ({
-  text: textOf(message.content),
-  code: codeOf(message),
-});
-
 /** The provider core names its own messages by (workspace.ts). */
 const coreProvider = "grasp";
 
@@ -90,13 +84,38 @@ const usageOf = ({
 
 /**
  * An inline Markdown link to a note: its text, and the note's ID, its
- * destination in angle brackets or not, with a title or none.
+ * destination in angle brackets or not, with a title or none. Only this
+ * form, in lower case and with an ID of plain characters, is ever kept.
  */
 const noteLink =
-  /\[(?<label>[^\]\n]*)\]\(\s*<?grasp:note\/(?<id>[^\s)>]+)>?(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/gu;
+  /\[(?<label>[^\]\n]*)\]\(\s*<?grasp:note\/(?<id>[\w-]{1,128})>?(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/gu;
 
-/** The note scheme anywhere else: an autolink, a reference definition. */
-const noteScheme = /grasp:note\//gu;
+/**
+ * A character reference a Markdown renderer would read as a character
+ * (`&#58;`, `&#x3a;`), or as the scheme's own punctuation (`&colon;`,
+ * `&sol;`): kept as text, so none of them can spell the note scheme.
+ */
+const characterReference = /&(?=#\d{1,8};|#x[\da-f]{1,8};|colon;|sol;)/giu;
+
+/** A backslash escape of the scheme's punctuation, which renders as it. */
+const escapedPunctuation = /\\(?<character>[:/])/gu;
+
+/** The note scheme, in any case. */
+const noteScheme = /grasp:note\//giu;
+
+/**
+ * `text` with no note scheme left in it, in any case, however often it
+ * is nested (`grasp:grasp:note/note/`): removed until none is.
+ */
+const withoutScheme = (text: string): string => {
+  let cleaned = text;
+  while (noteScheme.test(cleaned)) {
+    noteScheme.lastIndex = 0;
+    cleaned = cleaned.replaceAll(noteScheme, "");
+  }
+  noteScheme.lastIndex = 0;
+  return cleaned;
+};
 
 /**
  * What stands for a kept link while the rest of the text is cleaned: a
@@ -112,10 +131,12 @@ const keptMarks = new RegExp(`${mark}(?<index>\\d+)${mark}`, "gu");
 /**
  * An answer's text with the notes it cites (`ChatCitation`): its links to
  * the first {@link chatCitationsMax} notes `given` holds stay, each as
- * `[label](grasp:note/<id>)`, and are its citations; any other note link
- * is its text alone, and the note scheme anywhere else is dropped, so an
- * answer never shows a link to a note that isn't one of its citations,
- * whatever the model wrote.
+ * `[label](grasp:note/<id>)`, and are its citations. Everything else loses
+ * the note scheme, wherever and however it is written: a link to any other
+ * note is its text alone, and an autolink, a reference definition, an
+ * escaped or character-referenced scheme, or one in another case or nested
+ * in itself is left without it. So the answer's only note links are its
+ * citations, whatever the model wrote.
  */
 export const citedIn = (
   text: string,
@@ -125,6 +146,8 @@ export const citedIn = (
   const kept: string[] = [];
   const marked = text
     .replaceAll(mark, "")
+    .replaceAll(characterReference, "&amp;")
+    .replaceAll(escapedPunctuation, "$<character>")
     .replaceAll(noteLink, (_link, label: string, id: string) => {
       const known = cited.includes(id);
       if (!given(id) || (!known && cited.length >= chatCitationsMax)) {
@@ -133,12 +156,13 @@ export const citedIn = (
       if (!known) {
         cited.push(id);
       }
-      kept.push(`[${label}](grasp:note/${id})`);
+      kept.push(`[${withoutScheme(label)}](grasp:note/${id})`);
       return keptMark(kept.length - 1);
     });
-  const shown = marked
-    .replaceAll(noteScheme, "")
-    .replaceAll(keptMarks, (_mark, index: string) => kept[Number(index)] ?? "");
+  const shown = withoutScheme(marked).replaceAll(
+    keptMarks,
+    (_mark, index: string) => kept[Number(index)] ?? ""
+  );
   return {
     text: shown,
     citations: cited.map((documentId) => ({ kind: "document", documentId })),
@@ -147,6 +171,16 @@ export const citedIn = (
 
 /** Cites nothing: every note link shows as its text. */
 const givenNothing = (): boolean => false;
+
+/**
+ * A response being written, as the person sees it so far: with no note
+ * link yet, each its text alone (`citedIn`, citing nothing), since what a
+ * note link may cite is decided only once the answer is stored.
+ */
+export const partialOf = (message: AssistantMessage): ChatPartial => ({
+  text: citedIn(textOf(message.content), givenNothing).text,
+  code: codeOf(message),
+});
 
 /**
  * A stored message as the person reads it; `undefined` for a system one.

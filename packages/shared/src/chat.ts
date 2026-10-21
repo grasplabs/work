@@ -251,7 +251,12 @@ export type ChatMessage =
       at: string;
     };
 
-/** What the agent is writing now, before it is stored. */
+/**
+ * What the agent is writing now, before it is stored. It holds no note
+ * link: each is its text alone until the answer is stored and its
+ * citations decided. A page makes a `grasp:note/<id>` link a link only
+ * when `<id>` is among that stored message's `citations`, never in this.
+ */
 export interface ChatPartial {
   text: string;
   code: ChatCode[];

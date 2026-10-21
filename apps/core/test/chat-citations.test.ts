@@ -40,6 +40,26 @@ describe(citedIn, () => {
     });
   });
 
+  it("leaves no note scheme spelled another way: nested, escaped, as a character reference or in capitals", () => {
+    expect(
+      citedIn(
+        [
+          "[N](grasp:grasp:note/note/x)",
+          "[E](grasp:note\\/x)",
+          "[C](grasp&#58;note/x)",
+          "[H](grasp&#x3A;note&sol;x)",
+          "[U](GRASP:Note/x)",
+          "<grasp:grasp:note/note/x>",
+          "[A <grasp:note/x>](grasp:note/a)",
+        ].join(" "),
+        given("a")
+      )
+    ).toStrictEqual({
+      text: "[N](x) E [C](grasp&amp;#58;note/x) [H](grasp&amp;#x3A;note&amp;sol;x) [U](x) <x> [A <x>](grasp:note/a)",
+      citations: [{ kind: "document", documentId: "a" }],
+    });
+  });
+
   it("cites at most the first notes it may, and shows the links past them as text", () => {
     const ids = Array.from(
       { length: chatCitationsMax + 1 },

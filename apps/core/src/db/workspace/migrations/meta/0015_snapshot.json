@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3dcb01dd-3bf7-468b-b58c-281f3f62c41b",
+  "id": "f24fcf00-5e3b-4b38-820c-3b84bdd258d4",
   "prevId": "2a75e5cf-dd92-4c26-968f-c91e833bc1d8",
   "tables": {
     "audit_outbox": {
@@ -407,8 +407,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "created_at": {
-          "name": "created_at",
+        "given_after": {
+          "name": "given_after",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -420,7 +420,7 @@
           "name": "chat_documents_age",
           "columns": [
             "chat_id",
-            "created_at"
+            "given_after"
           ],
           "isUnique": false
         }
