@@ -6,6 +6,10 @@
  * back: the ScrollBar part of a scroll area, or a class or selector that
  * shows or styles a bar (`findScrollbar`).
  *
+ * no-old-product-name: what a client or buyer reads names the product
+ * Grasp Work, never Grasp OS (GRA-143). It reads the strings and JSX text
+ * of user-facing source, never comments, which are for us.
+ *
  * no-unbounded-rpc-target: Cap'n Web's `RpcTarget` (in workerd, workerd's
  * own, from `cloudflare:workers`) may only be extended through a bounded
  * base (@grasp-os/shared/rpc-target), which `no-restricted-imports` holds
@@ -19,12 +23,13 @@
  * With `reexportsOnly` (packages), only the exports are checked.
  */
 import { findScrollbar } from "./no-scrollbars.ts";
+import { findOldProductName } from "./old-product-name.ts";
 
 interface Node {
   type: string;
   value?: unknown;
   name?: Node | string;
-  quasis?: { value: { raw: string } }[];
+  quasis?: { value: { raw: string; cooked?: string | null } }[];
   source?: Node | null;
   specifiers?: Node[];
   local?: Node;
@@ -103,6 +108,47 @@ const noScrollbars = {
       TemplateLiteral: (node: Node): void => {
         for (const quasi of node.quasis ?? []) {
           check(node, quasi.value.raw);
+        }
+      },
+    };
+  },
+};
+
+const noOldProductName = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Name the product Grasp Work in what people read.",
+    },
+    messages: {
+      found:
+        'The product is Grasp Work: "{{found}}" is its old name. Code names (grasp-os) stay as they are.',
+    },
+    schema: [],
+  },
+  create: (context: Context) => {
+    const check = (node: Node, text: string): void => {
+      const found = findOldProductName(text);
+      if (found !== undefined) {
+        context.report({ node, messageId: "found", data: { found } });
+      }
+    };
+    return {
+      Literal: (node: Node): void => {
+        if (typeof node.value === "string") {
+          check(node, node.value);
+        }
+      },
+      TemplateLiteral: (node: Node): void => {
+        // What it reads as, escapes and all; a tagged template's invalid
+        // escape has no cooked value, so its raw text then.
+        for (const { value } of node.quasis ?? []) {
+          check(node, value.cooked ?? value.raw);
+        }
+      },
+      JSXText: (node: Node): void => {
+        if (typeof node.value === "string") {
+          check(node, node.value);
         }
       },
     };
@@ -434,5 +480,6 @@ export default {
   rules: {
     "no-unbounded-rpc-target": noUnboundedRpcTarget,
     "no-scrollbars": noScrollbars,
+    "no-old-product-name": noOldProductName,
   },
 };
