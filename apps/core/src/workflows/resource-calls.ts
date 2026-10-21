@@ -715,6 +715,11 @@ const candidateAnswer = async (
     case "grasp.template": {
       return boundedAnswer(answer, "output");
     }
+    // A test run keeps no file: its files calls answer what its start
+    // gave, and nothing is written to the run's files.
+    case "grasp.files": {
+      return boundedAnswer(answer, "output");
+    }
     default: {
       return call satisfies never;
     }
