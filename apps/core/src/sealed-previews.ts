@@ -128,7 +128,9 @@ import type { Draft } from "./workspace.ts";
 //   at its next protected step (`authorize`) and forgets it; its next call
 //   starts a new, empty store, and a store kept for a revision is reused
 //   only while core still records it (`#makeStore`). Losing the builder
-//   role refuses every call at once and leaves the store to that sweep.
+//   role refuses every call at once and leaves the store to that sweep;
+//   an admin removing the person discards their stores at once
+//   (`discardPreviewStoresOf`, members.ts), as core records whose each is.
 // - What App code keeps of one invocation acts in another's: every
 //   invocation runs in a fresh isolate of the release runner, whose
 //   channel stops working once it ends, as for every call of an App.
@@ -219,6 +221,79 @@ const sweepBudgetMs = 20_000;
  * budget, so one that hangs costs that sweep little.
  */
 const storeStepMs = 5000;
+
+/** Most of a person's preview stores one removal discards (`discardPreviewStoresOf`). */
+const storesPerErasure = 50;
+
+/** How long one removal spends discarding a person's preview stores. */
+const erasureBudgetMs = 10_000;
+
+/**
+ * Discards the preview stores of person `personId`'s chats, a page of them
+ * within a budget, as the sweep
+ * discards one (`sweepPreviewStores`): each store's object first, then
+ * core's record, each step bounded. For a person who may never reach them
+ * again (an admin removed them, members.ts): what they typed into their
+ * previews goes now, not a week later. Never throws: a store whose
+ * discard fails keeps its record, for the sweep, or for the removal tried
+ * again, as is any past the page or the budget. A store recorded before
+ * core kept whose it is has none, and is left to the sweep. Answers how
+ * many stores went.
+ */
+export const discardPreviewStoresOf = async (
+  env: Env,
+  personId: string
+): Promise<number> => {
+  const db = drizzle(env.DB);
+  // Bounded, as the removal waits for it: a page of stores within a
+  // budget, the rest left to the sweep, or to the removal tried again.
+  const until = Date.now() + erasureBudgetMs;
+  const stepMs = () => Math.max(1, Math.min(storeStepMs, until - Date.now()));
+  let gone = 0;
+  try {
+    const stores = await db
+      .select({ storeId: previewFixtureStores.storeId })
+      .from(previewFixtureStores)
+      .where(
+        and(
+          eq(previewFixtureStores.personId, personId),
+          // One whose discard failed waits out its delay, so a removal
+          // tried again gets past it to the rest.
+          or(
+            isNull(previewFixtureStores.retryAfter),
+            lte(previewFixtureStores.retryAfter, new Date())
+          )
+        )
+      )
+      .orderBy(previewFixtureStores.storeId)
+      .limit(storesPerErasure);
+    for (const { storeId } of stores) {
+      if (Date.now() >= until) {
+        break;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one store after another
+        await within(
+          discardFixtureStore(env, storeIdSchema.parse(storeId)),
+          stepMs()
+        );
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await within(recordDeleted(db, storeId), stepMs());
+        gone += 1;
+      } catch (error) {
+        log.warn("preview.store_erase_failed", {
+          store: storeId,
+          ...errorFields(error),
+        });
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await retriedLater(db, storeId, new Date());
+      }
+    }
+  } catch (error) {
+    log.warn("preview.store_erase_failed", errorFields(error));
+  }
+  return gone;
+};
 
 /**
  * Discards every preview store made longer ago than core keeps one
@@ -549,7 +624,12 @@ export class SealedPreviews {
       const path = publicOperationOf(release, call.reference);
       // Before the preview's store is made or opened.
       await this.#authorizer(chatId, personId, app, running)();
-      const store = await this.#storeOf(chatId, app, running, release);
+      const store = await this.#storeOf(
+        { chatId, personId },
+        app,
+        running,
+        release
+      );
       held = { running, store };
       const invocation = this.#invocationOf(chatId, personId, app, running, {
         store,
@@ -648,7 +728,12 @@ export class SealedPreviews {
     const authorize = this.#authorizer(chatId, personId, app, running);
     // Before the preview's store is made or opened.
     await authorize();
-    const store = await this.#storeOf(chatId, app, running, release);
+    const store = await this.#storeOf(
+      { chatId, personId },
+      app,
+      running,
+      release
+    );
     let reads: PreviewAnswer["reads"];
     let result: OperationResult;
     try {
@@ -948,7 +1033,14 @@ export class SealedPreviews {
     try {
       const release = await this.#loaded(chatId, app, running);
       const path = publicOperationOf(release, call.reference);
-      const store = await this.#storeOf(chatId, app, running, release);
+      // Before the preview's store is made or opened, as a call's is.
+      await this.#authorizer(chatId, personId, app, running)();
+      const store = await this.#storeOf(
+        { chatId, personId },
+        app,
+        running,
+        release
+      );
       heldStore = store;
       const invocation = this.#invocationOf(chatId, personId, app, running, {
         store,
@@ -1166,7 +1258,7 @@ export class SealedPreviews {
    * is first touched, its tables defined with the draft's schema.
    */
   async #storeOf(
-    chatId: ChatId,
+    { chatId, personId }: { chatId: ChatId; personId: string },
     app: AppId,
     running: Running,
     release: Release
@@ -1174,7 +1266,12 @@ export class SealedPreviews {
     if (!needsStore(release)) {
       return noStore();
     }
-    running.store ??= this.#makeStore(chatId, app, running, release);
+    running.store ??= this.#makeStore(
+      { chatId, personId },
+      app,
+      running,
+      release
+    );
     const making = running.store;
     try {
       const store = await making;
@@ -1192,7 +1289,7 @@ export class SealedPreviews {
   }
 
   async #makeStore(
-    chatId: ChatId,
+    { chatId, personId }: { chatId: ChatId; personId: string },
     app: AppId,
     running: Running,
     release: Release
@@ -1243,7 +1340,7 @@ export class SealedPreviews {
       // writing it again could record one the sweep discarded meanwhile.
       await drizzle(this.#env.DB)
         .insert(previewFixtureStores)
-        .values({ storeId: id, appId: app, createdAt: new Date() })
+        .values({ storeId: id, appId: app, personId, createdAt: new Date() })
         .onConflictDoNothing();
     }
     // Dropped while that was written: its tables aren't made. The drop
