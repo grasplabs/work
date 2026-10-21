@@ -25,6 +25,16 @@ import { outcome, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
+const anthropic = "anthropic/claude-sonnet-4-5";
+
+/** The prompt tokens the onboarding counted as read from `anthropic`'s cache. */
+const cachedOf = async (): Promise<number> => {
+  const rows = await onboardingStore(env).usage();
+  return rows
+    .filter(({ model }) => model === anthropic)
+    .reduce((sum, { tokensCached }) => sum + tokensCached, 0);
+};
+
 /** A Word file holding `paragraphs`. */
 const wordFile = (paragraphs: string[]): Uint8Array<ArrayBuffer> => {
   const encoder = new TextEncoder();
@@ -153,6 +163,28 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
       brief: [true, true],
       reads: true,
     });
+  });
+
+  it("count what was read from the provider's prompt cache", async () => {
+    const { api: admin } = await signedInApi(idp, "admin");
+    const before = env.MODEL_GATEWAY;
+    env.MODEL_GATEWAY = { gateway: "grasp-os-test", models: [anthropic] };
+    try {
+      const cachedBefore = await cachedOf();
+      const { result } = await answering(
+        [{ ...answer(reading), cache: { read: 900, write: 300 } }],
+        async () =>
+          await admin.onboarding.shareDocument({
+            locale: "en",
+            name: `cached-${crypto.randomUUID()}.docx`,
+            bytes: draft,
+          })
+      );
+      await ended(admin, result.id);
+      expect((await cachedOf()) - cachedBefore).toBe(900);
+    } finally {
+      env.MODEL_GATEWAY = before;
+    }
   });
 
   it("ask nothing without answers to pick from", async () => {
