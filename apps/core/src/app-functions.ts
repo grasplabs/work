@@ -1257,6 +1257,22 @@ export const windowExtentOf = (request: unknown): number | undefined => {
 };
 
 /**
+ * Whether `request` asks for a window of an App's preferences
+ * (app-preferences.ts): one document, read whole, so no window of it is
+ * charged or read.
+ */
+export const asksPreferenceWindow = (request: unknown): boolean => {
+  try {
+    const call = readFunctionRequest(request);
+    return (
+      call.window !== undefined && isPreferencePath(call.reference.contractId)
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Whether `request` calls one of a workflow reference's queries
  * (workflow-reference-queries.ts), or watches a workflow's run or binding
  * (screen-workflows.ts): they read no store, so a live one is read again
