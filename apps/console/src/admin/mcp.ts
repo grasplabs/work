@@ -84,9 +84,23 @@ const schemaOf = (inputSchema: object): Schema =>
   // object (`type`, `properties`, `required`, `additionalProperties`).
   inputSchema;
 
-/** Each tool's argument check, compiled once per isolate. */
+/**
+ * The admin's tools whose data the console doesn't feed in yet: the
+ * integrations to build and every company's platform (GRA-971). Served,
+ * they would answer that there is nothing, which a model would take as
+ * so; until then they aren't served at all.
+ */
+const unfed: ReadonlySet<string> = new Set([
+  "integrations_to_build",
+  "platforms",
+]);
+
+/** The tools this MCP serves: the admin's, but those it can't feed yet. */
+export const servedTools = ADMIN_TOOLS.filter((tool) => !unfed.has(tool.name));
+
+/** Each served tool's argument check, compiled once per isolate. */
 const validators = new Map<string, Validator>(
-  ADMIN_TOOLS.map((tool) => [
+  servedTools.map((tool) => [
     tool.name,
     new Validator(schemaOf(tool.inputSchema), "2020-12"),
   ])
@@ -158,7 +172,7 @@ const serverFor = (
   const { server } = mcp;
   // Listing reads nothing.
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: ADMIN_TOOLS.map((tool) => ({ ...tool })),
+    tools: servedTools.map((tool) => ({ ...tool })),
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name } = request.params;
