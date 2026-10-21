@@ -13,6 +13,7 @@ import {
   platformWallMs,
   runPlatformCode,
 } from "../platform-sandbox.ts";
+import { quietLoader } from "../quiet-loader.ts";
 import {
   functionCapability,
   inOrderReader,
@@ -304,7 +305,10 @@ export const localExtractor =
     const source = await cachedSource(env.ASSETS);
     const answer =
       host === undefined
-        ? await extractedInCore(env.LOADER, source, { mediaType, bytes })
+        ? await extractedInCore(quietLoader(env.LOADER), source, {
+            mediaType,
+            bytes,
+          })
         : await extractedOnHost(
             host,
             platformWallMs(env, extractorWallMs),

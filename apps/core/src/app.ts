@@ -56,6 +56,7 @@ import type { Held, Hold } from "./app-waits-for.ts";
 import { findApp, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
+import { quietLoader } from "./quiet-loader.ts";
 import { sandbox } from "./sandbox.ts";
 import { requireBoundedHere } from "./sandboxed.ts";
 import { buildFailed, buildServer } from "./screens.ts";
@@ -762,14 +763,16 @@ export const loadServer = async (
   // isolate while the host sleeps. Another version, or a grant or revoke
   // (a new generation), starts a new one.
   const key = `app:${app}:${version}:${generation}`;
-  return env.LOADER.get(key, () => ({
-    ...sandbox,
-    mainModule: build.mainModule,
-    modules: build.modules,
-    env: bindings,
-    // What its code writes with `console` goes to its error log.
-    tails: [exports.AppTail({ props: { app, version } })],
-  })).getDurableObjectClass("App");
+  return quietLoader(env.LOADER)
+    .get(key, () => ({
+      ...sandbox,
+      mainModule: build.mainModule,
+      modules: build.modules,
+      env: bindings,
+      // What its code writes with `console` goes to its error log.
+      tails: [exports.AppTail({ props: { app, version } })],
+    }))
+    .getDurableObjectClass("App");
 };
 
 /** An error as a caller of the App may see it: ours, or `internal.unexpected`. */

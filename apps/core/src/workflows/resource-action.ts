@@ -9,6 +9,7 @@ import { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
 import { forSandbox } from "../bindings.ts";
+import { quietLoader } from "../quiet-loader.ts";
 import { capability, runInSession } from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
 import {
@@ -502,12 +503,14 @@ export const callAction = async (
   const running = (async (): Promise<unknown> => {
     const onHost = sessionHost(env);
     if (onHost === undefined) {
-      const entrypoint = env.LOADER.get(null, () => ({
-        ...sandbox,
-        mainModule: actionMainModule,
-        modules,
-        env: {},
-      })).getEntrypoint("Action");
+      const entrypoint = quietLoader(env.LOADER)
+        .get(null, () => ({
+          ...sandbox,
+          mainModule: actionMainModule,
+          modules,
+          env: {},
+        }))
+        .getEntrypoint("Action");
       return await callStub(entrypoint, "run", [host]);
     }
     return await runInSession(onHost, {

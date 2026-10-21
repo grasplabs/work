@@ -52,6 +52,7 @@ import type {
   Reader,
   SnapshotCallback,
 } from "./query-subscriptions.ts";
+import { quietLoader } from "./quiet-loader.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { capability, noPlaceOf } from "./sandbox-session.ts";
@@ -1356,12 +1357,14 @@ const suiteFailures = async (
   let answer: unknown;
   try {
     if (sandboxHost === undefined) {
-      const entry = env.LOADER.get(null, () => ({
-        ...testSandbox,
-        mainModule,
-        modules: { ...modules, [mainModule]: testsMain(path, testMs) },
-        env: {},
-      })).getEntrypoint<AppTestsEntrypoint>("AppTests");
+      const entry = quietLoader(env.LOADER)
+        .get(null, () => ({
+          ...testSandbox,
+          mainModule,
+          modules: { ...modules, [mainModule]: testsMain(path, testMs) },
+          env: {},
+        }))
+        .getEntrypoint<AppTestsEntrypoint>("AppTests");
       const { ms, overran } = suiteDeadline({ suiteMs, runMs, runEndsAt });
       answer = await within(entry.run(host), ms, overran);
     } else {

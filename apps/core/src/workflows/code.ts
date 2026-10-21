@@ -29,6 +29,7 @@ import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
 import { appBindingKinds, workflowBindingKinds } from "../permissions.ts";
+import { quietLoader } from "../quiet-loader.ts";
 import {
   capability,
   noPlaceOf,
@@ -303,12 +304,14 @@ export const isolateCall = async (
       signal === undefined ? {} : { signal }
     );
   }
-  const stub: unknown = env.LOADER.get(key, async () => ({
-    ...workflowSandbox,
-    mainModule,
-    modules: await modules(),
-    env: {},
-  })).getEntrypoint(entrypoint);
+  const stub: unknown = quietLoader(env.LOADER)
+    .get(key, async () => ({
+      ...workflowSandbox,
+      mainModule,
+      modules: await modules(),
+      env: {},
+    }))
+    .getEntrypoint(entrypoint);
   const fn: unknown =
     typeof stub === "object" || typeof stub === "function"
       ? Reflect.get(stub ?? {}, method)
@@ -997,12 +1000,14 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
       run: async (host, start) => {
         // Read before the clock starts: none of the run's code runs yet.
         const loaded = await modules();
-        const entrypoint = env.LOADER.get(null, () => ({
-          ...workflowSandbox,
-          mainModule,
-          modules: loaded,
-          env: {},
-        })).getEntrypoint<RunEntrypoint>("Run");
+        const entrypoint = quietLoader(env.LOADER)
+          .get(null, () => ({
+            ...workflowSandbox,
+            mainModule,
+            modules: loaded,
+            env: {},
+          }))
+          .getEntrypoint<RunEntrypoint>("Run");
         const clock = betweenSteps(budgetMs);
         clock.started();
         try {

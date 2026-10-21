@@ -1,3 +1,4 @@
+import { quietLoader } from "./quiet-loader.ts";
 import { sandboxDeadlineHeader, sandboxWaitHeader } from "./sandbox-headers.ts";
 import { sandbox } from "./sandbox.ts";
 
@@ -281,10 +282,12 @@ export const callSandboxed = async (
       { started: false }
     );
   }
-  const stub = env.LOADER.get(null, () => ({
-    ...sandbox,
-    ...worker,
-    env: {},
-  })).getEntrypoint(entrypoint);
+  const stub = quietLoader(env.LOADER)
+    .get(null, () => ({
+      ...sandbox,
+      ...worker,
+      env: {},
+    }))
+    .getEntrypoint(entrypoint);
   return await callStub(stub, method);
 };

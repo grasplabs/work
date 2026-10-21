@@ -135,6 +135,7 @@ import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
+import { quietLoader } from "./quiet-loader.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { SealedPreviews } from "./sealed-previews.ts";
@@ -1101,7 +1102,7 @@ export class Workspace extends DurableObject<Env> {
             this.codeRunOutput(chat.id, runId, callId, line);
           },
         },
-        loader: this.env.LOADER,
+        loader: quietLoader(this.env.LOADER),
         sandbox: () => sessionHost(this.env),
         codeTimeoutMs: codeTimeoutMs(this.env),
         signal: cancel.signal,
