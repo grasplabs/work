@@ -13,9 +13,15 @@ import type { ScreenTarget } from "@grasp-os/shared/screens";
 //   further navigations are refused without asking again, until its edits
 //   are gone or a short while passed: an App can't hold the person in a
 //   loop of the same question.
-// - Without the person's activation (a click, a key), a start navigates at
-//   most once, so a screen can't fill the history as it mounts; beside the
-//   page, never: there only the person's act in the frame itself counts.
+// - Without the person's activation (a click, a key), the page goes at most
+//   once on a screen's word, across every start in the tab (`TabBudget`):
+//   each start would otherwise get its own go, so a screen that navigates
+//   as it mounts could open the next start that does the same, filling the
+//   history, and send the person forward again each time they went Back.
+//   A navigation while the person acts gives the tab its go back. Acting
+//   means in the frame that asks (screen-frame.tsx), so the screens a click
+//   opens can't each go on its activation. Beside the page, never without
+//   it: there only the person's act in the frame itself counts.
 
 /** How the page goes to a target, pushing or replacing its entry. */
 export type PageNavigate = (
@@ -27,7 +33,7 @@ export type PageNavigate = (
 export interface PageState {
   /** Where the page is, and where it is going (the same when settled). */
   location: () => { here: string; going: string };
-  /** Whether the person just acted (transient user activation). */
+  /** Whether the person just acted, in the frame that asks. */
   activated: () => boolean;
   now: () => number;
 }
@@ -47,13 +53,39 @@ export interface NavigationPolicy {
   stayed: () => void;
 }
 
+/** The tab's one navigation without the person acting, shared by its starts. */
+export interface TabBudget {
+  /** Takes the tab's go, if it still has it. */
+  take: () => boolean;
+  /** The person acted: the tab may go once more on its own. */
+  restore: () => void;
+}
+
+/** A tab's budget, with its go. */
+export const tabBudget = (): TabBudget => {
+  let spent = false;
+  return {
+    take: () => {
+      if (spent) {
+        return false;
+      }
+      spent = true;
+      return true;
+    },
+    restore: () => {
+      spent = false;
+    },
+  };
+};
+
 const cancelled = (): Error =>
   screenErrors.create("screen.navigation_cancelled");
 
-/** The policy for one frame start, on the page it started on. */
+/** The policy for one frame start, on the page it started on, in its tab. */
 export const navigationPolicy = (
   go: PageNavigate,
   page: PageState,
+  tab: TabBudget,
   /**
    * Where the frame runs: on the page it started on (a route's screen),
    * whose navigations end once the page left it; or beside the page (the
@@ -63,7 +95,6 @@ export const navigationPolicy = (
   placement: "page" | "beside" = "page"
 ): NavigationPolicy => {
   const { here: start } = page.location();
-  let unprompted = 0;
   let stayedAt: number | undefined;
   /** What refuses each navigation waiting on the leave dialog. */
   const waiting = new Set<(error: Error) => void>();
@@ -77,12 +108,12 @@ export const navigationPolicy = (
       if (stayedAt !== undefined && page.now() - stayedAt < stayCooldownMs) {
         throw cancelled();
       }
-      if (!page.activated()) {
-        // Beside the page, never: only the person's own act in its frame.
-        if (placement === "beside" || unprompted >= 1) {
-          throw cancelled();
-        }
-        unprompted += 1;
+      if (page.activated()) {
+        tab.restore();
+      } else if (placement === "beside" || !tab.take()) {
+        // Beside the page, never, and without taking the tab's go: only
+        // the person's own act in its frame.
+        throw cancelled();
       }
       // The page's own navigation waits while the dialog asks, and may
       // never settle once the person stays: their answer settles it.
