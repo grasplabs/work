@@ -41,7 +41,7 @@ const PersonItem = ({ person }: { person: LandscapePerson }) => {
   const lastSeen = formatDate(person.lastSeen);
   const scopes = formatList(person.scopes);
   return (
-    <Item size="sm">
+    <Item render={<li />} size="sm">
       <ItemMedia variant="icon">
         <CircleUserIcon />
       </ItemMedia>

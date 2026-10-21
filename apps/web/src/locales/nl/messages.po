@@ -3105,7 +3105,7 @@ msgstr "Microsoft Entra koppelen"
 
 #: src/landscape/connect-landscape.tsx
 msgid "Connect Microsoft Entra to read which apps people and admins granted access, once a day. Grasp only reads: no mail, files or sign-ins."
-msgstr "Koppel Microsoft Entra om eens per dag te lezen welke apps mensen en beheerders toegang gaven. Grasp leest alleen: geen mail, bestanden of aanmeldingen."
+msgstr "Koppel Microsoft Entra om eens per dag te lezen tot welke apps mensen en beheerders toegang hebben verleend. Grasp leest alleen: geen mail, bestanden of aanmeldingen."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what engines may do"
@@ -4482,7 +4482,7 @@ msgstr "{who} verlenen?"
 
 #: src/landscape/usage-tab.tsx
 msgid "Granted {scopes}. Last seen {lastSeen}."
-msgstr "Gegeven: {scopes}. Laatst gezien op {lastSeen}."
+msgstr "Toegang tot {scopes} verleend. Laatst gezien op {lastSeen}."
 
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
@@ -8767,7 +8767,7 @@ msgstr "Iemand anders heeft zich in deze browser aangemeld, dus deze app is gest
 
 #: src/landscape/landscape.ts
 msgid "Someone gave it access to their mail, files, chats or the directory on their own."
-msgstr "Iemand gaf hem op eigen houtje toegang tot mail, bestanden, chats of de directory."
+msgstr "Iemand gaf de app zelf toegang tot hun mail, bestanden, chats of de directory."
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"

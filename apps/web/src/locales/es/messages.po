@@ -5655,7 +5655,7 @@ msgstr "Inicio de sesión de Microsoft"
 
 #: src/landscape/sync-notice.tsx
 msgid "Microsoft's list changed under the read. It starts over tomorrow."
-msgstr "La lista de Microsoft cambió durante la lectura. Mañana empieza de nuevo."
+msgstr "La lista de Microsoft cambió durante la lectura. La lectura empieza de nuevo mañana."
 
 #: src/chat/builds.tsx
 msgid "Migrations"

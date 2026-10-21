@@ -5655,7 +5655,7 @@ msgstr "Connexion Microsoft"
 
 #: src/landscape/sync-notice.tsx
 msgid "Microsoft's list changed under the read. It starts over tomorrow."
-msgstr "La liste de Microsoft a changé pendant la lecture. Elle reprend depuis le début demain."
+msgstr "La liste de Microsoft a changé pendant la lecture. La lecture recommence demain."
 
 #: src/chat/builds.tsx
 msgid "Migrations"

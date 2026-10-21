@@ -73,4 +73,32 @@ describe("a found app's usage", () => {
         "Usage 2 people granted this app access for themselves. Not allowed",
     });
   });
+
+  it("lists each person who granted it access as an entry of the list, for assistive technology", () => {
+    const at = "2026-10-20T08:00:00.000Z";
+    const person = (personId: string) => ({
+      personId,
+      name: null,
+      userId: null,
+      scopes: ["User.Read"],
+      firstSeen: at,
+      lastSeen: at,
+    });
+    const markup = renderToStaticMarkup(
+      <I18nProvider i18n={i18n}>
+        <UsageTab
+          app={discoveredAppOf(found)}
+          people={{
+            state: "ready",
+            data: [person("oid-ada"), person("oid-bob")],
+          }}
+        />
+      </I18nProvider>
+    );
+    expect({
+      lists: markup.match(/role="list"/gu)?.length ?? 0,
+      // Each an <li>, a list item to assistive technology.
+      entries: markup.match(/<li[\s>]/gu)?.length ?? 0,
+    }).toStrictEqual({ lists: 1, entries: 2 });
+  });
 });
