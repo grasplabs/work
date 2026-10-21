@@ -39,10 +39,12 @@ import { literalDurationMs } from "./values.ts";
  *   (`resolveTarget` throws). A `for` task is a call of the SDK's loop
  *   (`flow.for`), its list a function the SDK runs once per item of the
  *   collection its enter step recorded (sequentially; items at once and
- *   items' own keys aren't lowered yet), so every task runs at most once
- *   per item of the loops around it, and a run's steps are bounded by its
- *   tasks and its loops' recorded items; core refuses any step run twice,
- *   and any item no loop recorded, all the same (resource-host.ts).
+ *   items' own keys aren't lowered yet), and a `fork` task a call of the
+ *   SDK's fork, each branch a function it runs once, one after another; so
+ *   every task runs at most once per item or branch of the scopes around
+ *   it, and a run's steps are bounded by its tasks, its forks' branches and
+ *   its loops' recorded items; core refuses any step run twice, and any
+ *   item or branch no scope has, all the same (resource-host.ts).
  * - Expressions becoming code. An expression's source never enters the
  *   module: the module names it by its number in the expression table
  *   sealed beside it, and the host evaluates that table's entry with the
@@ -194,6 +196,7 @@ export type LoweredKind =
   | "call"
   | "do"
   | "for"
+  | "fork"
   | "listen"
   | "raise"
   | "run"
@@ -464,9 +467,10 @@ export interface GeneratedTask {
    */
   readonly timeoutMs?: number;
   /**
-   * The `for` tasks around it, outermost first: each of its steps runs in
-   * the scope of an item of each (`task:<id>@<for>.<index>/…`). Empty for
-   * a task of the workflow's own list.
+   * The `for` and `fork` tasks around it, outermost first: each of its
+   * steps runs in the scope of an item, or a branch, of each
+   * (`task:<id>@<for>.<index>/<fork>.<branch>/…`). Empty for a task of the
+   * workflow's own list.
    */
   readonly scope: readonly string[];
   /**
@@ -477,6 +481,12 @@ export interface GeneratedTask {
    * items' variables have; and the slot of its `while`, which each item's
    * `item` step evaluates.
    */
+  readonly fork?: {
+    /** How many branches it has, each a scope of its own. */
+    readonly branches: number;
+    /** Whether they race: the first that succeeds wins. */
+    readonly compete: boolean;
+  };
   readonly loop?: {
     readonly in: CallTemplate;
     readonly keys?: number;
@@ -564,6 +574,7 @@ const loweredKinds = new Set<string>([
   "call",
   "do",
   "for",
+  "fork",
   "emit",
   "listen",
   "raise",
@@ -2446,13 +2457,18 @@ const lowerTry = (
   return flag;
 };
 
-/** Lowers a task list: `lowerList`, passed to the tasks it lowers. */
+/**
+ * Lowers a task list: `lowerList`, passed to the tasks it lowers. `first`
+ * is the index of `items`' first in the list at `pointer`: a fork's branch
+ * is its one task, of a list of them all.
+ */
 type ListLowerer = (
   emitter: Emitter,
   items: readonly JsonValue[],
   pointer: string,
   indent: string,
-  list: { label: string; number: number }
+  list: { label: string; number: number },
+  first?: number
 ) => void;
 
 /** Whether task `item` sleeps: a wait, or a `grasp.sleepUntil` call. */
@@ -2561,6 +2577,37 @@ const refusedFailureTask = (
       emitter.refusals.add(pointerJoin(pointer, key), `raise:${key}`, id);
       refused = true;
     }
+    }
+  }
+  return refused;
+};
+
+/**
+ * Refuses what of `fork` task `item` isn't lowered yet: branches at once
+ * (`metadata.grasp.concurrency` above 1, GRA-956) and forks nested past
+ * the scopes a step's name holds. Whether anything was.
+ */
+const refusedFork = (emitter: Emitter, item: ListTask): boolean => {
+  const grasp = graspMetadataOf(item.task);
+  let refused = false;
+  if (
+    grasp !== undefined &&
+    typeof grasp.concurrency === "number" &&
+    grasp.concurrency > 1
+  ) {
+    emitter.refusals.add(
+      pointerJoin(
+        pointerJoin(pointerJoin(item.pointer, "metadata"), "grasp"),
+        "concurrency"
+      ),
+      "fork:concurrency",
+      item.id
+    );
+    refused = true;
+  }
+  if (emitter.scope.length >= maxLoopDepth) {
+    emitter.refusals.add(item.pointer, "fork:depth", item.id);
+    refused = true;
   }
   return refused;
 };
@@ -2604,6 +2651,9 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
     refused = refusedLoop(emitter, item) || refused;
   }
   refused = refusedFailureTask(emitter, item, kind) || refused;
+  if (kind === "fork") {
+    refused = refusedFork(emitter, item) || refused;
+  }
   // A listen's timeout is its deadline: required, and what it waits until.
   const timed =
     (timedKinds.has(kind) && !sleepsOf(task, kind)) || kind === "listen";
@@ -2829,6 +2879,92 @@ const lowerOneStep = (
   } else {
     lowerCall(emitter, item, stages, place, sealed);
   }
+/**
+ * The statements of a `fork` task: one call of the SDK's fork, with each
+ * branch a function of its own flow and data (its scope,
+ * `<fork>.<branch>`), the branch's task lowered in a block of its own that
+ * an `exit` leaves; an `end` in it ends the workflow (`end: true`, which
+ * the fork passes on). The SDK runs the branches one after another.
+ */
+const lowerFork = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  lowerList: ListLowerer
+): void => {
+  const { id, task, pointer } = item;
+  const fork = isObject(task.fork) ? task.fork : {};
+  const compete = fork.compete === true;
+  const branchesPointer = pointerJoin(pointerJoin(pointer, "fork"), "branches");
+  const branches = Array.isArray(fork.branches) ? fork.branches : [];
+  const steps: TaskStep[] = [];
+  if (stages.enter.length > 0) {
+    steps.push("enter");
+  }
+  if (compete) {
+    steps.push("task");
+  }
+  if (stages.leave.length > 0) {
+    steps.push("leave");
+  }
+  const inputFrom = inputFromOf(emitter, item);
+  emitter.tasks.push({
+    ...sealed,
+    kind: "fork",
+    steps,
+    fork: { branches: branches.length, compete },
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+  });
+  emitter.counter += 1;
+  const forked = `forked${emitter.counter}`;
+  const { indent } = place;
+  const plan = planCode([
+    ...stages.enter,
+    ...stages.leave,
+    ...(compete ? ["compete: true"] : []),
+  ]);
+  emitter.lines.push(
+    `${indent}{`,
+    `${indent}  const ${forked} = await ${emitter.flow}.fork(${literal(id)}, { input: output, context }, ${plan}, [`
+  );
+  const outer = { flow: emitter.flow, scope: emitter.scope };
+  emitter.scope = [...emitter.scope, id];
+  for (const [index, branchValue] of branches.entries()) {
+    emitter.counter += 1;
+    const number = emitter.counter;
+    const flow = `flow${number}`;
+    const state = `state${number}`;
+    emitter.flow = flow;
+    emitter.lines.push(
+      `${indent}    async (${flow}, ${state}) => {`,
+      `${indent}      let { output, context } = ${state};`
+    );
+    // A branch is a list of its one task, whose `exit` leaves it.
+    lowerList(
+      emitter,
+      [branchValue],
+      branchesPointer,
+      `${indent}      `,
+      { label: `s${number}`, number },
+      index
+    );
+    emitter.lines.push(
+      `${indent}      return { output, context };`,
+      `${indent}    },`
+    );
+  }
+  emitter.flow = outer.flow;
+  emitter.scope = outer.scope;
+  emitter.lines.push(
+    `${indent}  ]);`,
+    `${indent}  ({ output, context } = ${forked});`,
+    `${indent}  if (${forked}.end) {`,
+    `${indent}    ${endJump(emitter)}`,
+    `${indent}  }`,
+    `${indent}}`
+  );
 };
 
 /**
@@ -2936,6 +3072,8 @@ const lowerTask = (
     lowerListen(emitter, item, stages, place, sealed, before);
   } else if (kind === "run") {
     lowerRun(emitter, item, stages, place, sealed, before);
+  } else if (kind === "fork") {
+    lowerFork(emitter, item, stages, place, sealed, lowerList);
   } else {
     const steps: TaskStep[] = [];
     emitter.tasks.push({ ...sealed, kind: "do", steps });
@@ -2976,10 +3114,11 @@ const lowerList: ListLowerer = (
   items,
   pointer,
   indent,
-  { label, number }
+  { label, number },
+  first = 0
 ) => {
   const tasks: ListTask[] = items.map((item, index) => {
-    const itemPointer = pointerJoin(pointer, index);
+    const itemPointer = pointerJoin(pointer, first + index);
     const entry = isObject(item) ? onlyEntry(item) : undefined;
     if (entry === undefined || !isObject(entry[1])) {
       throw new Error(`The checked workflow has no task at ${itemPointer}`);
