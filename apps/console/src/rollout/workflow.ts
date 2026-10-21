@@ -1220,6 +1220,7 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
           );
         }
         for (const clientId of clientIds) {
+          current = clientId;
           // oxlint-disable-next-line no-await-in-loop -- one client at a time
           const goOn = await deployFleetClient(
             this.env,
@@ -1227,6 +1228,7 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
             params,
             clientId
           );
+          current = null;
           if (!goOn) {
             return result;
           }
