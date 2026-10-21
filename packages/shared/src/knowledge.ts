@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { auditProvenanceMaxItems } from "./audit.ts";
+import type { MemoryPack, RecallInput } from "./brain-api.ts";
 import { defineErrorFamily } from "./errors.ts";
 import {
   collectionIdSchema,
@@ -815,6 +816,11 @@ export interface KnowledgeApi {
    * person may read, or from one of them.
    */
   search: (query: string, options?: SearchOptions) => Promise<SearchResults>;
+  /**
+   * The Brain's recall (brain-api.ts): evidence for a question from the
+   * collections the person may read, as a bounded memory pack.
+   */
+  recall: (input: RecallInput) => Promise<MemoryPack>;
   /** The collections the person may read and their skills, as an agent's. */
   catalog: KnowledgeTools["catalog"];
   /** A document, or one section of it. */
@@ -883,6 +889,11 @@ export interface CollectionReader {
   read: KnowledgeTools["read"];
   /** A document's links and backlinks, and for a skill, its files. */
   follow: KnowledgeTools["follow"];
+  /**
+   * The Brain's recall (brain-api.ts) over this collection only: a filter
+   * naming another is refused as not found.
+   */
+  recall: (input: RecallInput) => Promise<MemoryPack>;
 }
 
 /** Why a Knowledge call was refused. */

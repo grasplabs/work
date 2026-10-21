@@ -7,7 +7,11 @@ import {
   searchOptionsSchema,
   searchQuerySchema,
 } from "@grasp-os/shared/knowledge";
-import type { SearchHit, SearchResults } from "@grasp-os/shared/knowledge";
+import type {
+  Provenance,
+  SearchHit,
+  SearchResults,
+} from "@grasp-os/shared/knowledge";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -212,7 +216,21 @@ const hitRowSchema = z.object({
   section: z.number(),
   headings: z.string(),
   snippet: z.string(),
+  version: z.number(),
+  updatedAt: z.number(),
+  text: z.string(),
 });
+
+/** A section a search found, as Knowledge holds it: its hit, and more. */
+export interface FoundSection {
+  hit: SearchHit;
+  /** The document's version the section is of. */
+  version: number;
+  /** When the document last changed, in milliseconds. */
+  updatedAt: number;
+  /** The section's whole Markdown. */
+  text: string;
+}
 
 const headingsSchema = z.array(z.string());
 
@@ -344,18 +362,16 @@ const searchRecord = async (
 };
 
 /**
- * The sections that match `query`, best first, in the collections `reader`
- * may read, or in the one `options` names, and of the document type it
- * names, if any. A collection's stub passes its
- * own as `only`, and its options can't name another.
+ * `search`, with each section's version, last change and whole text: what
+ * a recall (recall.ts) cites and quotes. The same reads, checks and audit.
  */
-export const search = async (
+export const searchSections = async (
   env: Env,
   reader: Reader,
   query: unknown,
   options?: unknown,
   only?: string
-): Promise<SearchResults> => {
+): Promise<{ sections: FoundSection[]; provenance: Provenance }> => {
   const terms = termsOf(
     knowledgeErrors.parse("knowledge.invalid", searchQuerySchema, query)
   );
@@ -387,7 +403,7 @@ export const search = async (
       : [await readableCollection(db, allowed.collections, scope)];
   if (terms.length === 0) {
     return {
-      hits: [],
+      sections: [],
       provenance: await noteProvenance(
         env,
         reader,
@@ -449,7 +465,9 @@ export const search = async (
       ranked.collection_id AS collectionId, ranked.sensitive,
       documents.path, documents.title, documents.type, documents.description,
       ranked.position AS section, sections.headings,
-      ${snippetSql(passes)} AS snippet
+      ${snippetSql(passes)} AS snippet,
+      documents.current_version AS version, documents.updated_at AS updatedAt,
+      sections.text AS text
     FROM top AS ranked
     JOIN documents ON documents.id = ranked.document_id
     JOIN sections ON sections.document_id = ranked.document_id
@@ -474,5 +492,36 @@ export const search = async (
       sensitive: row.sensitive !== 0,
     }))
   );
-  return { hits: found.map(toHit), provenance };
+  return {
+    sections: found.map((row) => ({
+      hit: toHit(row),
+      version: row.version,
+      updatedAt: row.updatedAt,
+      text: row.text,
+    })),
+    provenance,
+  };
+};
+
+/**
+ * The sections that match `query`, best first, in the collections `reader`
+ * may read, or in the one `options` names, and of the document type it
+ * names, if any. A collection's stub passes its
+ * own as `only`, and its options can't name another.
+ */
+export const search = async (
+  env: Env,
+  reader: Reader,
+  query: unknown,
+  options?: unknown,
+  only?: string
+): Promise<SearchResults> => {
+  const { sections, provenance } = await searchSections(
+    env,
+    reader,
+    query,
+    options,
+    only
+  );
+  return { hits: sections.map(({ hit }) => hit), provenance };
 };
