@@ -205,6 +205,13 @@ export const handFiles = async (
       copied.push(file);
       handed = replacedAt(handed, path, { id: runFile });
     }
+    // Read again once all are copied, just before the start is admitted:
+    // a file hidden from the person, or a role they lost, during a long
+    // copy refuses the start, its copies with it.
+    for (const { id } of slots) {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      await files.read(id);
+    }
   } catch (error) {
     // What it copied before the one it couldn't is no run's either.
     await startFilesDropped(env, target.runId);
