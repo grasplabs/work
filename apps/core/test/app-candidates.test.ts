@@ -412,6 +412,48 @@ describe(
       });
     });
 
+    it("freezes anew when the open candidate it found ended before it read it", async () => {
+      const { owner, app } = await appWith(helloFiles());
+      const open = await freezeCandidate(env, owner, app, 1, null);
+      // The open one ends just after this freeze's insert lost to it.
+      let ended = false;
+      const endsAfterInsert = new Proxy(env.DB, {
+        get: (target, property) => {
+          if (property === "batch") {
+            return async (statements: D1PreparedStatement[]) => {
+              const results = await target.batch(statements);
+              if (!ended) {
+                ended = true;
+                await target
+                  .prepare(
+                    "UPDATE app_candidates SET state = 'rejected', outcome = 'app.conflict' WHERE id = ?"
+                  )
+                  .bind(open.id)
+                  .run();
+              }
+              return results;
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      });
+      const frozen = await freezeCandidate(
+        { ...env, DB: endsAfterInsert },
+        owner,
+        app,
+        1,
+        null
+      );
+      expect({
+        another: frozen.id !== open.id,
+        state: frozen.state,
+      }).toStrictEqual({ another: true, state: "frozen" });
+    });
+
     it("freezes a version once while it is open, and runs it once at a time", async () => {
       const { owner, app } = await appWith(helloFiles());
       const first = await freezeCandidate(env, owner, app, 1, null);

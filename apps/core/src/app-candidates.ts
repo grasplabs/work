@@ -178,7 +178,9 @@ export const freezeCandidate = async (
   by: Identity,
   app: AppId,
   version: number,
-  basedOn: number | null
+  basedOn: number | null,
+  /** Whether this is the one more try after an open candidate ended. */
+  again = false
 ): Promise<CandidateRow> => {
   await appFor(env, by, app, "builder");
   const { tree } = await findVersion(env, app, version);
@@ -235,8 +237,24 @@ export const freezeCandidate = async (
       )
     )
     .get();
-  // Ended by a commit, or another request, in between: this one's own.
-  return open ?? (await candidateOf(env, id));
+  if (open !== undefined) {
+    return open;
+  }
+  // None open now: this one's own, ended by a commit in between, if it was
+  // inserted; otherwise the open one it lost to ended meanwhile, so it is
+  // frozen once more, and then refused as busy.
+  const own = await db
+    .select()
+    .from(appCandidates)
+    .where(eq(appCandidates.id, id))
+    .get();
+  if (own !== undefined) {
+    return own;
+  }
+  if (again) {
+    throw appErrors.create("app.candidate_busy");
+  }
+  return await freezeCandidate(env, by, app, version, basedOn, true);
 };
 
 /** A candidate a run holds: its row, and the run's lease token. */
