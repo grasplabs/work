@@ -148,11 +148,10 @@ const close = async (
 ): Promise<Gap> => {
   const db = drizzle(env.DB);
   const answeredBy = answer === null ? null : person.name;
-  const closedAt = new Date();
-  await auditedBatch(env, db, [
+  const [closed] = await auditedBatch(env, db, [
     db
       .insert(brainGapStates)
-      .values({ gapId: gap.id, closedAt, answer, answeredBy })
+      .values({ gapId: gap.id, closedAt: new Date(), answer, answeredBy })
       .onConflictDoUpdate({
         target: brainGapStates.gapId,
         set: {
@@ -168,16 +167,12 @@ const close = async (
       target: { type: "brain_gap", id: gap.id },
     }),
   ]);
-  const state = await stateOf(env, gap);
-  // Closed by this call only if what it wrote is what is there.
-  if (
-    state?.closedAt?.getTime() !== closedAt.getTime() ||
-    state.answer !== answer ||
-    state.answeredBy !== answeredBy
-  ) {
+  // Closed by this call only if its guarded write changed the row: of two
+  // racing closes, the second changes nothing.
+  if (closed.meta.changes === 0) {
     throw brainGapErrors.create("brain.gap_closed");
   }
-  return gapWith(gap, state);
+  return gapWith(gap, await stateOf(env, gap));
 };
 
 /** Answers the open gap `gapId` in `person`'s words and name, and closes it. */
