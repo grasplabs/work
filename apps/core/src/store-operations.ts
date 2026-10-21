@@ -294,6 +294,45 @@ export const operationsIn = (
 };
 
 /**
+ * Operation `path` as a test's run of workflow `consumer` may call it on
+ * its test's fixture store (workflows/fixture-runs.ts): the workflow's own
+ * store permission lists it, and names the very store `release`, the
+ * release under test, is bound to, which its App owns; and `release`
+ * serves it as a public query or mutation. Undefined otherwise: another
+ * App's store, or a store the release under test isn't bound to, serves a
+ * test's run nothing. Only `release` runs it, never the App's current
+ * release, and never on the store the permission names.
+ */
+export const fixtureStoreOperation = async (
+  env: Env,
+  consumer: StoreConsumer,
+  release: Release,
+  path: string
+): Promise<
+  Pick<ServedStoreOperation, "operation" | "fingerprint"> | undefined
+> => {
+  const grant = await grantOf(env, consumer);
+  const bound = release.store?.storeId;
+  if (
+    consumer.subject.type !== "workflow" ||
+    grant === undefined ||
+    bound === undefined ||
+    grant.storeId !== bound ||
+    !listsAll(grant.actions, [path])
+  ) {
+    return undefined;
+  }
+  const owner = await drizzle(env.DB)
+    .select({ appId: sdkStoreOwners.appId })
+    .from(sdkStoreOwners)
+    .where(eq(sdkStoreOwners.storeId, bound))
+    .get();
+  return owner?.appId === release.manifest.resourceId
+    ? servedIn(release, path)
+    : undefined;
+};
+
+/**
  * Operations `paths` of the store `consumer`'s permission names, each as
  * the owning App's current release serves it now, if `consumer` may call
  * every one (`storeGrantFor`, `operationsIn`). The permission, the store
@@ -509,7 +548,10 @@ export interface StoreOperationCaller {
 }
 
 /** `store`, its commits made only while `requireHolds` passes. */
-const fenced = (store: OpenStore, requireHolds?: () => void): OpenStore =>
+export const fenced = (
+  store: OpenStore,
+  requireHolds?: () => void
+): OpenStore =>
   requireHolds === undefined
     ? store
     : {

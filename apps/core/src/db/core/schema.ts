@@ -1014,6 +1014,12 @@ export const appTestRuns = sqliteTable(
      * sweep removes it once it is past.
      */
     deadline: timestamp("deadline").notNull(),
+    /**
+     * Its test's fixture store (`app_test_fixtures`), which its calls of
+     * the App's own store operations reach; null for an App with no
+     * store, whose run reaches none.
+     */
+    fixtureStoreId: text("fixture_store_id"),
   },
   (table) => [index("app_test_runs_deadline").on(table.deadline)]
 );

@@ -3,6 +3,7 @@ import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding"
 import { v } from "@grasp-os/sdk";
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
@@ -10,12 +11,21 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { activateVersion } from "../src/app-activation.ts";
+import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor, sweepTestFixtures } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { findApp } from "../src/apps.ts";
+import {
+  appFor,
+  commitFiles,
+  findApp,
+  setCurrentVersion,
+} from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { actionMainModule } from "../src/workflow-modules.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
@@ -1115,3 +1125,398 @@ export const notify = action({
     });
   });
 });
+
+// A test's run calling its App's own store operations (GRA-898), from the
+// threat model in workflows/fixture-runs.ts: the call reaches the
+// organization's business store, another App's store or an App's export;
+// it writes approvals, receipts or audit entries; a replay writes again.
+
+/** The Requests App's files with store operations of its own. */
+const storeFilesWith = (
+  tests: Record<string, string> = {},
+  revision = 1
+): Record<string, string> => ({
+  ...filesWith(tests),
+  "operations/requests.ts": `// Revision ${revision}.
+import { resource, v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+export const followUp = resource.workflow("followUp", {
+  input: v.object({ who: v.string().trim().min(1) }),
+  output: v.object({ status: v.string() }),
+});
+
+export const add = mutation({
+  args: { who: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("requests", { who: args.who });
+    return null;
+  },
+});
+
+export const list = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) =>
+    (await ctx.db.query("requests").take(100)).map(({ who }) => who).toSorted(),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { add, followUp, list } from "./operations/requests.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Requests",
+  schema,
+  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
+  operations: { requests: { add, list } },
+  screens: [],
+  uses: [followUp],
+});
+`,
+});
+
+/** Records its input's `who` through binding `record`, then greets. */
+const recording = [
+  {
+    record: {
+      call: "grasp.operation",
+      with: {
+        binding: "record",
+        arguments: { who: "${ $workflow.input.who }" },
+      },
+    },
+  },
+  // A new activation after it: the call's step is replayed, not made again.
+  { hold: { wait: "PT1S" } },
+  ...greeting(),
+];
+
+/** How `admin` names Apps and resources in a permission. */
+const rolesOf = (admin: Acting & Identity) => ({
+  app: async (named: string, role: "user" | "builder") =>
+    await appFor(env, admin, named, role),
+  resource: async (
+    ref: Parameters<typeof requireResourceRole>[2],
+    needed: Parameters<typeof requireResourceRole>[3]
+  ) => {
+    await requireResourceRole(env, admin, ref, needed);
+  },
+});
+
+/**
+ * A Requests App whose own store's `requests.add` its bound workflow calls
+ * through binding `record`, approved by an admin on the store of App
+ * `approvedOn` (the App's own, unless given), as its `tasks` (`recording`
+ * unless given): version 1 current, and version 2, with `tests`, the one
+ * under test.
+ */
+const storeApp = async (
+  tests: Record<string, string> = {},
+  approvedOn?: { app: string; store: string; owner: Acting & Identity },
+  tasks: unknown[] = recording
+) => {
+  const admin = await person("admin");
+  const builder = await person("builder");
+  const fixture = await appWith(storeFilesWith(), "Requests", builder);
+  const current = await seal(fixture);
+  await setCurrentVersion(env, builder, fixture.app, 1);
+  const on = approvedOn ?? fixture;
+  const key = `requests-${unique()}`;
+  const operation = current.app.operations["requests.add"];
+  await publishCatalogContract(env, admin, {
+    key,
+    kind: "operation",
+    input: JSON.stringify(operation?.args),
+    output: JSON.stringify(operation?.returns),
+  });
+  const workflowId = await workflowOf(builder, tasks, {
+    record: { kind: "operation", contract: key },
+  });
+  const asked = await requestPermission(
+    env,
+    admin,
+    {
+      subject: { type: "workflow", workflowId },
+      object: { type: "store", storeId: on.store },
+      actions: ["requests.add"],
+      binding: `STORE_${unique().toUpperCase().replaceAll("-", "_")}`,
+    },
+    rolesOf(admin)
+  );
+  await grantPermission(env, admin, asked.id, { version: null });
+  await approveWorkflowBinding(env, admin, workflowId, {
+    alias: "record",
+    target: {
+      kind: "storeOperation",
+      permissionId: asked.id,
+      operation: "requests.add",
+      operationKind: "mutation",
+    },
+    reviewed: { version: 1 },
+  });
+  await bindWorkflowToApp(env, builder, workflowId, {
+    app: fixture.app,
+    alias: "followUp",
+    version: 1,
+  });
+  await commitFiles(
+    env,
+    builder,
+    fixture.app,
+    storeFilesWith(tests, 2),
+    "Tests"
+  );
+  await seal(fixture, 2);
+  const release = await loadRelease(env, fixture.app, 2);
+  return { admin, builder, fixture, workflowId, release };
+};
+
+/** What `by` reads of `app`'s business store, through its current version. */
+const businessRequests = async (
+  by: Acting & Identity,
+  app: string
+): Promise<unknown> => {
+  const { currentVersion } = await findApp(env, app);
+  const release = await loadRelease(
+    env,
+    appIdSchema.parse(app),
+    currentVersion ?? 1
+  );
+  const answer = await callAppFunction(
+    env,
+    by,
+    app,
+    JSON.stringify({
+      reference: {
+        resourceId: release.manifest.resourceId,
+        resourceVersion: release.manifest.resourceVersion,
+        contractId: "requests.list",
+        fingerprint: release.fingerprints["requests.list"] ?? "",
+        kind: "query",
+      },
+      input: {},
+    })
+  );
+  return answer.result.ok ? answer.result.value : answer.result.error.code;
+};
+
+/** What `desk-user` reads of the session's fixture store. */
+const fixtureRequests = async (
+  session: Awaited<ReturnType<typeof sessionOf>>,
+  release: Release
+): Promise<unknown> => {
+  const answer: unknown = JSON.parse(
+    await session.call(
+      "desk-user",
+      JSON.stringify({
+        reference: {
+          resourceId: release.manifest.resourceId,
+          resourceVersion: release.manifest.resourceVersion,
+          contractId: "requests.list",
+          fingerprint: release.fingerprints["requests.list"] ?? "",
+          kind: "query",
+        },
+        input: {},
+      })
+    )
+  );
+  return z
+    .union([
+      z.object({ ok: z.literal(true), value: z.unknown() }),
+      z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }),
+    ])
+    .transform((result) => (result.ok ? result.value : result.error.code))
+    .parse(answer);
+};
+
+/** Rows of `table` naming workflow `workflow`. */
+const rowsNaming = async (table: string, workflow: string) => {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM ${table} WHERE workflow_resource_id = ?`
+  )
+    .bind(workflow)
+    .first<{ n: number }>();
+  return row?.n;
+};
+
+describe(
+  "an App's workflow test's run calling its App's store",
+  { timeout: 180_000 },
+  () => {
+    it("write through the App's own store operation to the test's fixture store, read back by the test, and nothing of the organization's", async () => {
+      const { builder, fixture, workflowId } = await storeApp({
+        "tests/record.test.ts": `import { workflowTest } from "@grasp-os/sdk/testing";
+import { api, workflows } from "#grasp";
+
+export default workflowTest({
+  fixtures: "desk",
+  tests: {
+    "records": async (t) => {
+      const owner = await t.as("desk-user");
+      const run = await owner.start(workflows.followUp, { who: "Ada" });
+      t.equal(await t.runs.untilTerminal(run), {
+        status: "completed",
+        output: { status: "Hello, Ada" },
+      });
+      t.equal(await owner.query(api.requests.list, {}), ["Ada"]);
+      t.equal(await t.effects.completedCount(run, "record"), 1);
+    },
+  },
+});
+`,
+      });
+      const approvals = await rowsNaming(
+        "workflow_binding_approvals",
+        workflowId
+      );
+      let outcome: unknown;
+      const events = await auditedDuring(async () => {
+        try {
+          await activateVersion(env, builder, fixture.app, 2);
+          const found = await findApp(env, fixture.app);
+          outcome = found.currentVersion;
+        } catch (error) {
+          outcome = isExpectedError(error)
+            ? (error.details?.failures ?? error.code)
+            : error;
+        }
+      });
+      expect({
+        outcome,
+        business: await businessRequests(builder, fixture.app),
+        organization: await organizationRunsOf(workflowId),
+        approvals: await rowsNaming("workflow_binding_approvals", workflowId),
+        events: events
+          .map(({ action }) => action)
+          .filter(
+            (action) =>
+              action.startsWith("workflow.") || action.startsWith("store.")
+          ),
+      }).toStrictEqual({
+        outcome: 2,
+        business: [],
+        organization: { receipts: 0, runs: 0 },
+        approvals,
+        events: [],
+      });
+    });
+
+    it("write once across the run's replay, on its own test's fixture store alone", async () => {
+      const { builder, fixture, release } = await storeApp();
+      const session = await sessionOf(release);
+      const other = await sessionOf(release);
+      const run = startedAs(
+        await session.start("desk-user", await startOf(release, { who: "Ada" }))
+      );
+      const ended = await endOf(session, run);
+      const completed = await session.completedCount(run, "record");
+      const read = {
+        own: await fixtureRequests(session, release),
+        otherTest: await fixtureRequests(other, release),
+        business: await businessRequests(builder, fixture.app),
+      };
+      await session.close();
+      await other.close();
+      expect({ ended, completed, read }).toStrictEqual({
+        ended: { status: "completed", output: { status: "Hello, Ada" } },
+        completed: 1,
+        read: { own: ["Ada"], otherTest: [], business: [] },
+      });
+    });
+
+    it("refuse another App's store operation, and one whose approval names an App's export, writing nothing", async () => {
+      const elsewhere = await appWith(
+        storeFilesWith(),
+        "Requests",
+        await person("builder")
+      );
+      await seal(elsewhere);
+      await setCurrentVersion(env, elsewhere.owner, elsewhere.app, 1);
+      const otherStore = await storeApp({}, elsewhere);
+      const exported = await storeApp();
+      await env.DB.prepare(
+        "UPDATE workflow_binding_approvals SET target = json_object('kind', 'operation', 'permissionId', json_extract(target, '$.permissionId'), 'appVersion', 1, 'export', 'lookUp') WHERE workflow_resource_id = ? AND status = 'active'"
+      )
+        .bind(exported.workflowId)
+        .run();
+      const endedOn = async ({
+        release,
+      }: Awaited<ReturnType<typeof storeApp>>) => {
+        const session = await sessionOf(release);
+        const run = startedAs(
+          await session.start(
+            "desk-user",
+            await startOf(release, { who: "Ada" })
+          )
+        );
+        const ended = await endOf(session, run);
+        const written = await fixtureRequests(session, release);
+        await session.close();
+        return { ended, written };
+      };
+      expect({
+        otherStore: await endedOn(otherStore),
+        exported: await endedOn(exported),
+        elsewhere: await businessRequests(elsewhere.owner, elsewhere.app),
+      }).toMatchObject({
+        otherStore: {
+          ended: { status: "failed", code: "resource.unavailable" },
+          written: [],
+        },
+        exported: {
+          ended: { status: "failed", code: "resource.unavailable" },
+          written: [],
+        },
+        elsewhere: [],
+      });
+    });
+
+    it("refuse its store operation once its approval is revoked, or its test's fixture store isn't the one recorded", async () => {
+      const revoked = await storeApp();
+      await env.DB.prepare(
+        "UPDATE workflow_binding_approvals SET status = 'revoked' WHERE workflow_resource_id = ?"
+      )
+        .bind(revoked.workflowId)
+        .run();
+      // Its call a moment after it starts, once its record is changed.
+      const swapped = await storeApp({}, undefined, [
+        { first: { wait: "PT1S" } },
+        ...recording,
+      ]);
+      const endedOn = async (
+        { release }: Awaited<ReturnType<typeof storeApp>>,
+        before: () => Promise<void> = async () => {
+          // As started.
+        }
+      ) => {
+        const session = await sessionOf(release);
+        const run = startedAs(
+          await session.start(
+            "desk-user",
+            await startOf(release, { who: "Ada" })
+          )
+        );
+        await before();
+        const ended = await endOf(session, run);
+        await session.close();
+        return ended;
+      };
+      expect({
+        revoked: await endedOn(revoked),
+        // Its record names a store no test made for it.
+        swapped: await endedOn(swapped, async () => {
+          await env.DB.prepare(
+            "UPDATE app_test_runs SET fixture_store_id = ? WHERE app_id = ?"
+          )
+            .bind(swapped.fixture.store, swapped.fixture.app)
+            .run();
+        }),
+      }).toMatchObject({
+        revoked: { status: "failed", code: "resource.unavailable" },
+        swapped: { status: "failed", code: "resource.unavailable" },
+      });
+    });
+  }
+);

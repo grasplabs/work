@@ -1,5 +1,11 @@
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
-import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import {
+  appIdSchema,
+  storeIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
+import type { StoreId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
@@ -9,8 +15,17 @@ import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { loadRelease } from "../app-releases.ts";
 import type { Release } from "../app-releases.ts";
-import { appTestRuns, workflowResourceVersions } from "../db/core/schema.ts";
+import { openFixtureStore } from "../data-stores.ts";
+import {
+  appTestFixtures,
+  appTestRuns,
+  workflowResourceVersions,
+} from "../db/core/schema.ts";
+import { callOperation } from "../operations.ts";
+import type { Invocation } from "../operations.ts";
+import { hostedRelease } from "../release-runner.ts";
 import {
   failureOf,
   outputOf,
@@ -18,13 +33,23 @@ import {
   readWorkflowRequest,
   resolveIn,
 } from "../screen-workflows.ts";
+import {
+  consumerFailure,
+  fenced,
+  fixtureStoreOperation,
+} from "../store-operations.ts";
+import type { StoreConsumer } from "../store-operations.ts";
+import { approvalServing, storeOperationTakes } from "../workflow-bindings.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
+import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { fixtureParams } from "../workflow-params.ts";
-import { versionContract } from "../workflow-resources.ts";
+import { bindingsOf, versionContract } from "../workflow-resources.ts";
 import { acceptedInput, pinned } from "../workflow-starts.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import type { RunStep } from "./host.ts";
+import { requireShape } from "./resource-calls.ts";
+import type { FixtureStoreCall } from "./resource-host.ts";
 import { runActivation } from "./resource-runs.ts";
 import type { ResourceRunMemory } from "./resource-runs.ts";
 
@@ -50,8 +75,21 @@ import type { ResourceRunMemory } from "./resource-runs.ts";
 // - It reaches what a test may not: the run acts for the fixture's
 //   principal, no member of anything, and its host refuses every call that
 //   leaves its own sealed modules (resource-host.ts, `fixture`): Apps,
-//   stores, models, connections, Knowledge, templates and actions. It
-//   holds no binding, approval or grant, and none is read or written.
+//   models, connections, Knowledge, templates and actions, and any store
+//   but its test's. It holds no binding, and writes no approval, grant,
+//   receipt or audit entry.
+// - Its store calls reach the organization's data, or another App's
+//   (`fixtureStoreCall`): a call of a store operation goes to its test's
+//   fixture store alone, recorded with the run and checked as the one its
+//   test made for the App and version under test, and runs through the
+//   release under test. Its alias must be one its version pinned, whose
+//   active approval names a store operation (an App's export stays
+//   refused); the workflow's own store permission must list it and name
+//   the store that release is bound to, which its App owns; and that
+//   release must serve it as a public query or mutation of the approved
+//   kind and the contract's exact shapes. Those are read, never written:
+//   the store the permission names is never opened. A retried step sends
+//   its step's key again, so it writes once.
 // - It takes the organization's quotas or shares: nothing of it is
 //   admitted against a lineage or the client's queue (`unadmitted`); its
 //   isolate takes a share of the sandbox of the App's test runs' own
@@ -131,6 +169,12 @@ export interface FixtureStart {
   readonly deadline: number;
   /** Told once its record is written: from then on, it is a run to remove. */
   readonly recorded: () => void;
+  /**
+   * Its test's fixture store, created if it wasn't yet, which the run's
+   * calls of the App's own store operations reach: null for an App with
+   * no store.
+   */
+  readonly store: () => Promise<StoreId | null>;
 }
 
 /** A test's run as its start answers it. */
@@ -177,6 +221,7 @@ export const startFixtureRun = async (
     pin.version,
     test.paramsOf(resolved.alias)
   );
+  const fixtureStoreId = await test.store();
   const runId = crypto.randomUUID();
   // Recorded before the engine hears of it, so nothing runs unrecorded.
   await drizzle(env.DB)
@@ -194,6 +239,7 @@ export const startFixtureRun = async (
       params,
       createdAt: new Date(),
       deadline: new Date(test.deadline),
+      fixtureStoreId,
     });
   test.recorded();
   try {
@@ -212,6 +258,149 @@ export const startFixtureRun = async (
 };
 
 const jsonObjectSchema = z.record(z.string(), z.json());
+
+/** A store operation call refused, as any a test's run may not make. */
+const unavailable = () => operationErrors.create("resource.unavailable");
+
+/**
+ * The store operation calls of test run `row` (`FixtureStoreCall`): only
+ * of the App under test's own store, on its test's fixture store, through
+ * the release under test (see the header). The call's alias must be one
+ * the run's version pinned, whose active approval names a store operation
+ * (an App's export, or anything else, stays refused); the workflow's own
+ * store permission must list the operation and name the store the release
+ * under test is bound to, which its App owns; and that release must serve
+ * it as a public query or mutation of exactly the approved kind and the
+ * contract's shapes. It then runs as a test's own call does, on the
+ * fixture store recorded for the run's App and version, as the fixture's
+ * principal, a member and never a builder, with no resources, under the
+ * step's key: nothing of it is audited, approved or received in the
+ * organization's records, and nothing reaches the store the permission
+ * names.
+ */
+const fixtureStoreCall = (
+  env: Env,
+  row: typeof appTestRuns.$inferSelect
+): FixtureStoreCall => {
+  let release: Promise<Release> | undefined;
+  return async (call, effect) => {
+    const storeId = storeIdSchema.safeParse(row.fixtureStoreId);
+    if (!storeId.success) {
+      throw unavailable();
+    }
+    const pinnedBindings = await bindingsOf(
+      env,
+      row.workflowResourceId,
+      row.version
+    );
+    const pinnedBinding = pinnedBindings
+      .get(row.version)
+      ?.find(({ alias }) => alias === call.binding);
+    if (
+      pinnedBinding?.kind !== "operation" ||
+      pinnedBinding.resourceId !== null
+    ) {
+      throw unavailable();
+    }
+    const approval = await approvalServing(
+      env,
+      row.workflowResourceId,
+      row.version,
+      pinnedBinding
+    );
+    const target = approval?.target;
+    // An App's export runs its server code with its own resources: wider
+    // than a test's store, so refused (GRA-898).
+    if (target?.kind !== "storeOperation") {
+      throw unavailable();
+    }
+    const contracts = await resolveCatalogKeys(env, [pinnedBinding.contractId]);
+    const contract = contracts.get(pinnedBinding.contractId);
+    if (contract?.fingerprint !== pinnedBinding.fingerprint) {
+      throw unavailable();
+    }
+    const input = requireShape(
+      contract.contract.input,
+      call.arguments,
+      "arguments"
+    );
+    release ??= loadRelease(env, appIdSchema.parse(row.appId), row.appVersion);
+    const underTest = await release;
+    const consumer: StoreConsumer = {
+      subject: { type: "workflow", id: row.workflowResourceId },
+      version: row.version,
+      permissionId: target.permissionId,
+    };
+    const served = await fixtureStoreOperation(
+      env,
+      consumer,
+      underTest,
+      target.operation
+    );
+    if (
+      served === undefined ||
+      served.operation.kind !== target.operationKind ||
+      !storeOperationTakes(served.operation, contract.contract)
+    ) {
+      throw unavailable();
+    }
+    // The fixture store its test made for this App and version, and no
+    // other: one discarded since (its test ended) is no longer recorded.
+    const fixture = await drizzle(env.DB)
+      .select({ storeId: appTestFixtures.storeId })
+      .from(appTestFixtures)
+      .where(
+        and(
+          eq(appTestFixtures.storeId, storeId.data),
+          eq(appTestFixtures.appId, row.appId),
+          eq(appTestFixtures.version, row.appVersion)
+        )
+      )
+      .get();
+    if (fixture === undefined) {
+      throw unavailable();
+    }
+    const writer = {
+      resourceId: row.workflowResourceId,
+      resourceVersion: row.version,
+    };
+    const invocation: Invocation = {
+      principal: row.principal,
+      consumer: writer,
+      writer,
+      store: fenced(openFixtureStore(env, storeId.data), effect.requireHolds),
+      requestId: crypto.randomUUID(),
+      deadline: effect.deadline,
+      runId: row.runId,
+      // Before each commit: its test still on, and its attempt current.
+      authorize: async () => {
+        const current = await drizzle(env.DB)
+          .select({ deadline: appTestRuns.deadline })
+          .from(appTestRuns)
+          .where(eq(appTestRuns.runId, row.runId))
+          .get();
+        if (current === undefined || Date.now() > current.deadline.getTime()) {
+          throw operationErrors.create("operation.cancelled");
+        }
+        effect.requireHolds();
+        // A member of the App for the operation, never a builder.
+        return { appMember: true, appBuilder: false };
+      },
+    };
+    const result = await callOperation(
+      hostedRelease(env, underTest),
+      invocation,
+      { path: served.operation.path, kind: served.operation.kind },
+      input,
+      // The step's key, hashed as a consumer's is: a retry writes once.
+      { idempotencyKey: await sha256Hex(effect.key) }
+    );
+    if (!result.ok) {
+      throw consumerFailure(result.error);
+    }
+    return requireShape(contract.contract.output, result.value, "output");
+  };
+};
 
 /**
  * Runs one activation of the test's run `runId`, as `pin` names it: its
@@ -300,6 +489,7 @@ export const runFixtureWorkflow = async (
     output: JSON.stringify(contract.output),
     owner: testRunOwnerOf(row.appId),
     admission: "fixture",
+    fixtureStoreCall: fixtureStoreCall(env, row),
   });
 };
 
