@@ -661,9 +661,16 @@ export const callsFor = async (
   if (kept === undefined) {
     throw workflowErrors.create("workflow.calls_not_kept");
   }
-  // A row kept before kinds were: no kind, so every reviewed step is
-  // refused, and audited, as running another way (`stepRunsAs`).
-  return Object.hasOwn(kept, "kinds") ? kept : { ...kept, kinds: {} };
+  // A row kept before kinds, models or keys were: none of them, so every
+  // reviewed step is refused as running another way (`stepRunsAs`), every
+  // model call as asking a model its review doesn't show (`modelReviewed`)
+  // and every keyed name (`stepReviewed`), each audited.
+  return {
+    ...kept,
+    kinds: Object.hasOwn(kept, "kinds") ? kept.kinds : {},
+    models: Object.hasOwn(kept, "models") ? kept.models : {},
+    keyed: Object.hasOwn(kept, "keyed") ? kept.keyed : [],
+  };
 };
 
 /** The screens and workflows of an App's current version. */

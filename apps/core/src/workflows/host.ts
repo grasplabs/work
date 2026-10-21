@@ -20,6 +20,7 @@ import {
   coreStepPrefix,
   executionErrors,
   reviewerChosenAtRun,
+  modelReviewed,
   stepReviewed,
   stepRunsAs,
   isRetryable,
@@ -2224,6 +2225,7 @@ export class RunHost extends RpcTarget {
         modelRequestSchema,
         request
       );
+      await this.#requireModelReviewed(attempt, binding);
       let schema: z.ZodType;
       try {
         schema = z.fromJSONSchema(outputSchema);
@@ -2498,6 +2500,29 @@ export class RunHost extends RpcTarget {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${other.step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
       await this.#refuseIn(attempt, error, call, other.step);
+    }
+  }
+
+  /**
+   * Refuses a model call of `attempt` naming a binding its review doesn't
+   * show its AI step calling (`modelReviewed`), for both it and the
+   * attempt running now (a step nested in it may borrow its host), as
+   * `#requireKindIn` holds both: code past the SDK asking another of the
+   * App's models from a reviewed AI step. Tampering, as a kind refusal is:
+   * both fail, caught or not, and the run ends.
+   */
+  async #requireModelReviewed(
+    attempt: StepAttempt,
+    binding: string
+  ): Promise<void> {
+    const running = this.#live.at(-1) ?? attempt;
+    const other = [running, attempt].find(
+      ({ step }) => !modelReviewed(this.#run.calls, step, binding)
+    );
+    if (other !== undefined) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${other.step}" asked model ${binding}, which the review of this version doesn't show it asking: ask each AI step's model only as its \`step.llm\` names it.`;
+      await this.#refuseIn(attempt, error, "model", other.step);
     }
   }
 
