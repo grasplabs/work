@@ -38,6 +38,10 @@ import type {
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
+import type {
+  LandscapeConnection,
+  LandscapeRead,
+} from "@grasp-os/shared/landscape";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   NpmAdvisories,
@@ -65,6 +69,7 @@ import {
   syncEventSources,
   takeConnectorEvents,
 } from "./events.ts";
+import { landscapeConnections, readLandscape } from "./landscape.ts";
 import { catalogLogo } from "./logos.ts";
 import {
   npmAdvisories,
@@ -371,6 +376,16 @@ export default class Connect
 
   async catalogLogo(request: unknown): Promise<CatalogLogo | null> {
     return await catalogLogo(this.env, request);
+  }
+
+  // The application landscape (src/landscape.ts): for core's sync only.
+
+  async landscapeConnections(): Promise<LandscapeConnection[]> {
+    return await landscapeConnections(this.env);
+  }
+
+  async readLandscape(request: unknown): Promise<LandscapeRead> {
+    return await readLandscape(this.env, request);
   }
 
   // Generated connector contracts (src/contracts.ts): what an App's

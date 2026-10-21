@@ -10,6 +10,7 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "./ids.ts";
+import { landscapeProviderSchema } from "./landscape.ts";
 import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
@@ -97,10 +98,13 @@ export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
 
 /**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself, and Composio, whose connections are another kind.
+ * itself; the landscape's admin connections (`./landscape.ts`), which no
+ * connector's calls may use; and Composio, whose connections are another
+ * kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
+  ...landscapeProviderSchema.options,
   "composio",
 ]);
 
@@ -163,7 +167,11 @@ export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
-  provider: connectorProviderSchema,
+  /**
+   * A connector's provider, or the landscape's read-only admin connection
+   * of a suite, which no connector's calls use.
+   */
+  provider: z.union([connectorProviderSchema, landscapeProviderSchema]),
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
@@ -1483,6 +1491,8 @@ export const connectionErrors = defineErrorFamily({
     "Grasp staff can't connect accounts in a client's deployment.",
   "connection.not_offered":
     "Your organization doesn't offer this connection. An admin can offer it.",
+  "connection.scopes_refused":
+    "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it with Grasp's landscape app, granting exactly what it asks.",
   "connection.own_auth_required":
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
 });

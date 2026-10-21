@@ -49,7 +49,7 @@ import {
 import { exchangeCode, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { dropPendingActions } from "./pending.ts";
-import { providerFor } from "./providers.ts";
+import { grantedAsAsked, providerFor } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
   OAuthClientCredentials,
@@ -209,6 +209,11 @@ export const startConnection = async (
     throw roleErrors.create("role.forbidden");
   }
   const { provider, client, vault } = await ready(env, providerId);
+  // The landscape's connection reads the whole tenant: the organization's,
+  // never a person's own.
+  if (provider.sharedOnly === true && scope !== "shared") {
+    throw connectionErrors.create("connection.invalid");
+  }
   // A suite's flow is pinned to the organization's tenant; an app's has
   // none, so it is always "" (`isTenant`).
   const tenant = provider.pinned ? (rest.tenant ?? "").toLowerCase() : "";
@@ -457,6 +462,7 @@ type Refuse = (
 ) => Promise<void>;
 
 type RefusalReason =
+  | "connection.scopes_refused"
   | "connection.wrong_account"
   | "connection.not_own_account"
   | "connection.already_connected"
@@ -586,6 +592,9 @@ const keepTokens = async (
         ? "connection.wrong_account"
         : "connection.provider_refused"
     );
+  }
+  if (!grantedAsAsked(provider, tokens)) {
+    return await refusal("connection.scopes_refused");
   }
   const { refreshToken } = tokens;
   if (refreshToken === undefined) {
