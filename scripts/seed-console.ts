@@ -114,6 +114,9 @@ const statements = [
   `DELETE FROM rollout_targets WHERE rollout_id = ${sqlString(rolloutId)}`,
   `DELETE FROM rollouts WHERE id = ${sqlString(rolloutId)}`,
   `DELETE FROM client_deploys WHERE client_id IN (${ids})`,
+  // What the admin wrote of the companies meanwhile: when it read each.
+  `DELETE FROM client_admin_reads WHERE client_id IN (${ids})`,
+  `DELETE FROM settings WHERE client_id IN (${ids})`,
   `DELETE FROM client_workers WHERE client_id IN (${ids})`,
   `DELETE FROM clients WHERE id IN (${ids})`,
   `DELETE FROM releases WHERE id IN (${releaseIds})`,
