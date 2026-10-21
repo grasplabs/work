@@ -501,7 +501,7 @@ export const searchSections = async (
       ranked.position AS section, sections.headings,
       ${snippetSql(passes)} AS snippet,
       documents.current_version AS version, documents.updated_at AS updatedAt,
-      substr(sections.text, 1, ${sectionTextMax}) AS text
+      ${recall === undefined ? sql`''` : sql`substr(sections.text, 1, ${sectionTextMax})`} AS text
     FROM top AS ranked
     JOIN documents ON documents.id = ranked.document_id
     JOIN sections ON sections.document_id = ranked.document_id

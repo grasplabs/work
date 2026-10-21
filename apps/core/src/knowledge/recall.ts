@@ -232,9 +232,10 @@ export const recall = async (
       items,
       sourceVersions: sourcesOf(items),
       conflicts: [],
-      // A read the deadline stopped proves nothing missing.
+      // Only a finished read that matched nothing is a gap: one the
+      // deadline stopped proves nothing, and one a budget cut matched.
       gaps:
-        items.length === 0 && read !== undefined
+        found.length === 0 && read !== undefined
           ? [{ about: "No evidence the caller may read matched the question." }]
           : [],
       coverage: coverageOf(read === undefined, truncated),

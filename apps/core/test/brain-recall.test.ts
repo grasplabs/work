@@ -321,7 +321,8 @@ describe("the Brain's recall", setUpTime, () => {
     }).toStrictEqual({
       all: [3, false, "complete"],
       one: [1, true, "bounded"],
-      fewTokens: [0, true, "bounded", 1],
+      // Evidence matched; the budget cut it: no gap claimed.
+      fewTokens: [0, true, "bounded", 0],
       fromTheDocument: true,
     });
   });
