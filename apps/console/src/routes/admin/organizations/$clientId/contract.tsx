@@ -9,6 +9,11 @@
  * Core holds no contract yet, so the model reads it as unknown: the page
  * says nothing is known about it, instead of a draft, dates or fees. The
  * agreements are core's own.
+ *
+ * Billing is Stripe's (src/billing/billing.ts): how the company pays, what
+ * is open or overdue, what it paid last and when the next invoice comes,
+ * and its invoices as Stripe has them, once someone at Grasp linked it to
+ * its customer there; until then, or without Stripe's key, it says so.
  */
 import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
@@ -26,7 +31,21 @@ import { CheckIcon, ChevronDownIcon, FileTextIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useOrganization } from "../../../../admin/organization.tsx";
-import { contractWords, euros, formatDate } from "../../../../admin/words.ts";
+import { StripeLink } from "../../../../admin/stripe-link.tsx";
+import {
+  contractWords,
+  euros,
+  formatDate,
+  formatList,
+  money,
+} from "../../../../admin/words.ts";
+import type {
+  Billing,
+  BillingAccount,
+  BillingInvoice,
+  Money,
+} from "../../../../billing/billing.ts";
+import type { StripeReadError } from "../../../../billing/stripe.ts";
 
 /** An invoice's amount, always to the cent. */
 const cents = new Intl.NumberFormat("en", {
@@ -524,17 +543,224 @@ const Invoices = ({ view }: { view: AdminView }) => (
   </Part>
 );
 
+/** Amounts in one or more currencies, in a phrase. */
+const moneyOf = (amounts: readonly Money[]): string =>
+  formatList(amounts.map(({ amount, currency }) => money(amount, currency)));
+
+/** Why Stripe wasn't read now, as the rest of a sentence. */
+const unreadWords: Record<StripeReadError, string> = {
+  refused: "Stripe turned the console’s key away",
+  not_found: "Stripe has no such customer",
+  tool_error: "Stripe answered with an error",
+  invalid_answer: "what Stripe answered can’t be read",
+  timeout: "Stripe didn’t answer in time",
+  no_answer: "the request to Stripe failed",
+};
+
+/** What Billing says in a line under its title. */
+const billingLine = (billing: Billing): string => {
+  switch (billing.state) {
+    case "not_connected": {
+      return notConnected("Stripe");
+    }
+    case "not_linked": {
+      return "Not linked to its customer in Stripe yet. Link it by the customer’s id, and this fills in by itself.";
+    }
+    case "unread": {
+      return `Stripe can’t be read for it now: ${unreadWords[billing.error]}.`;
+    }
+    case "read": {
+      const { open, overdue } = billing.account;
+      if (overdue.count > 0) {
+        return `${overdue.count} ${plural(overdue.count, "invoice is", "invoices are")} overdue, ${moneyOf(overdue.amount)} in all.`;
+      }
+      if (open.count > 0) {
+        return `${moneyOf(open.amount)} is still to be paid, none of it overdue.`;
+      }
+      return "Everything billed is paid.";
+    }
+    default: {
+      return billing satisfies never;
+    }
+  }
+};
+
+/** How the company pays, in a few words. */
+const paysWords = (pays: BillingAccount["pays"]): string => {
+  if (pays === null) {
+    return "Not known yet";
+  }
+  if (pays.by === "charge") {
+    return "Stripe charges it each time";
+  }
+  return pays.daysToPay === null
+    ? "It is sent each invoice to pay"
+    : `It is sent each invoice, to pay within ${pays.daysToPay} ${plural(pays.daysToPay, "day", "days")}`;
+};
+
+/** When the next invoice comes, or that none does. */
+const nextWords = (subscription: BillingAccount["subscription"]): string => {
+  if (subscription === null) {
+    return "None: no subscription runs";
+  }
+  if (subscription.next !== null) {
+    const { on, amount } = subscription.next;
+    return amount === null
+      ? formatDate(on)
+      : `${money(amount.amount, amount.currency)} on ${formatDate(on)}, before tax`;
+  }
+  return subscription.ends === null
+    ? `None: the subscription is ${subscription.status.replaceAll("_", " ")}`
+    : `None: the subscription ends on ${formatDate(subscription.ends)}`;
+};
+
+/** What Stripe says of the company, line by line. */
+const BillingLines = ({
+  account,
+  customerId,
+}: {
+  account: BillingAccount;
+  customerId: string;
+}) => (
+  <dl>
+    <Line label="Customer in Stripe">
+      <a
+        className="hover:text-foreground underline underline-offset-4"
+        href={account.url}
+        rel="noreferrer"
+        target="_blank"
+      >
+        {account.name ?? customerId}
+      </a>
+    </Line>
+    <Line label="How it pays">{paysWords(account.pays)}</Line>
+    <Line label="Open">
+      {account.open.count === 0
+        ? "Nothing"
+        : `${moneyOf(account.open.amount)}, ${account.open.count} ${plural(account.open.count, "invoice", "invoices")}`}
+    </Line>
+    <Line label="Overdue">
+      {account.overdue.count === 0 || account.overdue.since === null ? (
+        "Nothing"
+      ) : (
+        <span className="text-status-attention">
+          {`${moneyOf(account.overdue.amount)}, due since ${formatDate(account.overdue.since)}`}
+        </span>
+      )}
+    </Line>
+    <Line label="Last paid">
+      {account.lastPaid === null
+        ? "Nothing yet"
+        : `${money(account.lastPaid.amount.amount, account.lastPaid.amount.currency)} on ${formatDate(account.lastPaid.on)}`}
+    </Line>
+    <Line label="Next invoice">{nextWords(account.subscription)}</Line>
+  </dl>
+);
+
+/**
+ * Billing: what Stripe says the company pays and whether it is paid, and
+ * the customer it is linked to there, which staff link or change here.
+ */
+const BillingPart = ({
+  billing,
+  clientId,
+}: {
+  billing: Billing;
+  clientId: string;
+}) => {
+  const customerId = billing.state === "not_linked" ? null : billing.customerId;
+  return (
+    <Part
+      description={billingLine(billing)}
+      id="contract-billing"
+      title="Billing"
+    >
+      {billing.state === "read" ? (
+        <BillingLines
+          account={billing.account}
+          customerId={billing.customerId}
+        />
+      ) : null}
+      <StripeLink clientId={clientId} customerId={customerId} />
+    </Part>
+  );
+};
+
+/** Each status of an invoice in Stripe, in a word. */
+const invoiceStatusWords: Record<BillingInvoice["status"], string> = {
+  paid: "Paid",
+  open: "Due",
+  overdue: "Overdue",
+  void: "Void",
+  uncollectible: "Written off",
+  draft: "Draft",
+};
+
+/** The invoices as Stripe has them, the newest first. */
+const StripeInvoices = ({ account }: { account: BillingAccount }) => {
+  const { invoices, open } = account;
+  let description = "None yet in Stripe.";
+  if (invoices.length > 0) {
+    description =
+      open.count > 0
+        ? `From Stripe, the latest ${invoices.length}. ${open.count} ${plural(open.count, "is", "are")} still to be paid.`
+        : `From Stripe, the latest ${invoices.length}. All are paid.`;
+  }
+  return (
+    <Part description={description} id="contract-invoices" title="Invoices">
+      {invoices.length > 0 ? (
+        <ul className="flex flex-col">
+          {invoices.map((invoice) => (
+            <li
+              className="flex items-baseline justify-between gap-x-6 border-t px-5 py-2.5"
+              key={invoice.number}
+            >
+              <span className="flex min-w-0 flex-wrap items-baseline gap-x-3">
+                <span className="tabular-nums">{invoice.number}</span>
+                <span className="text-muted-foreground text-xs">
+                  {formatDate(invoice.date)}
+                </span>
+              </span>
+              <span className="flex items-baseline gap-x-6">
+                <span className="tabular-nums">
+                  {money(invoice.amount, invoice.currency)}
+                </span>
+                <span
+                  className={cn(
+                    "w-20 text-right text-xs",
+                    invoice.status === "open" || invoice.status === "overdue"
+                      ? "text-status-attention"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  {invoiceStatusWords[invoice.status]}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </Part>
+  );
+};
+
 const Contract = () => {
   const { admin, view } = useOrganization();
   // Until staff say where the agreements stand, core holds none, and the model's "no works council" is only its default.
   const recorded = admin.snapshot.agreements !== null;
+  const { billing } = admin;
   return (
     <>
       <Summary view={view} />
       <Terms view={view} />
       <Gives view={view} />
       <Agreements recorded={recorded} view={view} />
-      <Invoices view={view} />
+      <BillingPart billing={billing} clientId={admin.client.id} />
+      {billing.state === "read" ? (
+        <StripeInvoices account={billing.account} />
+      ) : (
+        <Invoices view={view} />
+      )}
     </>
   );
 };

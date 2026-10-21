@@ -14,9 +14,11 @@
     "db:migrate": "wrangler d1 migrations apply DB --remote"
   },
   "dependencies": {
+    "@cfworker/json-schema": "catalog:",
     "@fontsource-variable/geist": "catalog:",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
+    "@modelcontextprotocol/sdk": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
     "drizzle-orm": "catalog:",

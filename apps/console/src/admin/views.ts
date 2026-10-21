@@ -7,9 +7,11 @@
  * now, so nothing is shown for it but why.
  */
 import { adminOrgOf } from "@grasp-os/shared/admin/admin-snapshot-adapter";
-import { adminViewOf } from "@grasp-os/shared/admin/admin-view";
+import { adminViewOf, byUrgency } from "@grasp-os/shared/admin/admin-view";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 
+import type { Billing } from "../billing/billing.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import { formatDate } from "./words.ts";
 
@@ -19,7 +21,34 @@ export interface Organization {
   view: AdminView | null;
 }
 
-/** The view of one answered client, counted up to the day its core answered on. */
+/**
+ * What Stripe says needs Grasp: invoices past their due date, in the
+ * currency of the first (a company is billed in one).
+ */
+export const billingNeeds = (billing: Billing): Need[] => {
+  if (billing.state !== "read") {
+    return [];
+  }
+  const { overdue } = billing.account;
+  const [amount] = overdue.amount;
+  if (overdue.count === 0 || amount === undefined || overdue.since === null) {
+    return [];
+  }
+  return [
+    {
+      kind: "overdue",
+      count: overdue.count,
+      amount: amount.amount,
+      currency: amount.currency,
+      since: overdue.since,
+    },
+  ];
+};
+
+/**
+ * The view of one answered client, counted up to the day its core
+ * answered on, with what its billing says needs Grasp among its needs.
+ */
 const viewOf = (admin: ClientAdmin): AdminView | null => {
   if (admin.state !== "answered") {
     return null;
@@ -30,7 +59,11 @@ const viewOf = (admin: ClientAdmin): AdminView | null => {
     name: client.name,
   });
   // Core's clock is what the snapshot's days count to, not the console's.
-  return adminViewOf(org, state, snapshot.now.slice(0, 10));
+  const view = adminViewOf(org, state, snapshot.now.slice(0, 10));
+  const billed = billingNeeds(admin.billing);
+  return billed.length === 0
+    ? view
+    : { ...view, needs: [...view.needs, ...billed].toSorted(byUrgency) };
 };
 
 /** One client, with its view when its core answered. */

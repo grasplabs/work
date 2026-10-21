@@ -99,6 +99,13 @@
       "when": 1792266422022,
       "tag": "0013_client_admin_reads",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792603223958,
+      "tag": "0014_client_stripe_customer",
+      "breakpoints": true
     }
   ]
 }

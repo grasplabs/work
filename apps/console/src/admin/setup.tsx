@@ -1006,6 +1006,11 @@ const eventWords = ({
     case "client.apply_settings": {
       return "Applied its settings.";
     }
+    case "client.stripe_customer": {
+      return target === null
+        ? "Unlinked it from Stripe."
+        : `Linked it to ${target} in Stripe.`;
+    }
     default: {
       return action;
     }

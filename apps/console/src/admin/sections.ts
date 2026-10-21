@@ -8,7 +8,8 @@
  * And where each section's figures come from (as the prototype's
  * `lib/admin-sources.ts` had it under each title), read off what the
  * company's core answered: its own Grasp for what it holds, this console
- * for its platform, and for what core doesn't hold yet (its contacts, its
+ * for its platform, Grasp's Stripe for its billing once it is linked to a
+ * customer there, and for what core doesn't hold yet (its contacts, its
  * contract, its drawn work, its integrations) the outside system that
  * brings it, not read yet.
  */
@@ -208,6 +209,7 @@ const needSections: Record<Need["kind"], OrgSection> = {
   few: "workflows",
   contract: "contract",
   ending: "contract",
+  overdue: "contract",
   signin: "integrations",
   budget: "usage",
   read: "interviews",
@@ -252,7 +254,9 @@ const fromCore: Origin = { source: "core", read: true };
  * console's own: the deploys and releases it runs for the company.
  */
 export const originsOf = (
-  snapshot: AdminSnapshot
+  snapshot: AdminSnapshot,
+  /** Stripe was read for the company now. */
+  stripe: boolean
 ): Record<OrgSection, Origin[]> => {
   const contacts = snapshot.contacts !== null;
   const contract = snapshot.contract !== null;
@@ -266,7 +270,7 @@ export const originsOf = (
     ],
     contract: [
       { source: "rooms", what: "The contract", read: contract },
-      { source: "stripe", what: "Its invoices", read: contract },
+      { source: "stripe", what: "Its billing and invoices", read: stripe },
     ],
     members: [fromCore],
     steps: [fromCore],

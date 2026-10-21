@@ -738,9 +738,9 @@ describe("the admin's frame", () => {
         about: contract.html.includes(
           "What was signed, what it gives the company, and what is billed."
         ),
-        // Core holds no contract yet: it comes from Rooms and Stripe.
+        // Core holds no contract yet, from Rooms; nor is it linked in Stripe.
         source: contract.html.includes(
-          "The contract: from Rooms, once it is connected. Its invoices: from Stripe, once it is connected."
+          "The contract: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
         ),
         current: columnEntryOf(
           columnOf(contract.html, acme.name),
