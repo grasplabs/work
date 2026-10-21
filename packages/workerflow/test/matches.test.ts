@@ -84,6 +84,15 @@ const runInObject = async (
   });
 };
 
+/** A match's most attributes: `subject`, and 15 more. */
+const mostAttributes = (subject: string): Record<string, string> => {
+  const all: Record<string, string> = { subject };
+  for (let index = 0; index < 15; index += 1) {
+    all[`a${index}`] = "x";
+  }
+  return all;
+};
+
 describe("a wait for a match", () => {
   it("takes the oldest event of its type with every attribute it names, sent before it was reached too", async () => {
     const id = await started([job("job-1")]);
@@ -140,6 +149,30 @@ describe("a wait for a match", () => {
     await expect(ended("matches", created)).resolves.toStrictEqual({
       status: "complete",
       output: ["second job first"],
+    });
+  });
+
+  it("matches by as many entries and attributes as a match may have, past SQLite's bound-value limit", async () => {
+    const match = Array.from({ length: 16 }, (_, index) => ({
+      type: `job-${index}`,
+      attributes: mostAttributes(`job-${index}`),
+    }));
+    const id = await held(match);
+    await send(id, {
+      type: "job-15",
+      payload: "one attribute off",
+      attributes: { ...mostAttributes("job-15"), a14: "y" },
+    });
+    await send(id, {
+      type: "job-15",
+      payload: "the last entry's",
+      attributes: mostAttributes("job-15"),
+    });
+    release(id);
+
+    await expect(ended("matches", id)).resolves.toStrictEqual({
+      status: "complete",
+      output: ["the last entry's"],
     });
   });
 
