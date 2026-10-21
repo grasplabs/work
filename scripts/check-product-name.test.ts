@@ -35,24 +35,43 @@ const lintReport = z.object({
 const lintTimeoutMs = 60_000;
 
 /**
- * What `command` printed, once it exited, whatever its exit code. Killed
- * once `signal` aborts (its test timed out), so its caller still cleans up.
+ * What `command` printed, once it exited, whatever its exit code. Once
+ * `signal` aborts (its test timed out), it and every process it started
+ * (`vp` runs oxlint) are killed, and this rejects at once, so its caller
+ * removes the planted files before the test runner stops.
  */
 const stdoutOf = async (
   command: string,
   args: string[],
   signal: AbortSignal
 ): Promise<string> => {
+  // Timed out already: no lint starts at all.
+  signal.throwIfAborted();
+  // A process group of its own, so the whole tree can be killed at once.
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "ignore"],
-    signal,
+    detached: true,
   });
+  const killTree = (): void => {
+    if (child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  };
+  signal.addEventListener("abort", killTree, { once: true });
   child.stdout.setEncoding("utf-8");
   let stdout = "";
   child.stdout.on("data", (chunk: string) => {
     stdout += chunk;
   });
-  await once(child, "close");
+  try {
+    await once(child, "close", { signal });
+  } finally {
+    signal.removeEventListener("abort", killTree);
+  }
   return stdout;
 };
 

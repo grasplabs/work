@@ -16,6 +16,7 @@ const answer = (id: number, at: string, code = false): ChatMessage => ({
   id,
   role: "assistant",
   text: code ? "" : "Twelve.",
+  citations: [],
   code: code ? [{ callId: `call-${id}`, code: "return 12;" }] : [],
   end: "done",
   at,
