@@ -21,7 +21,7 @@ import {
   rolloutTargets,
   settings,
 } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
+import { clientDomain, deployContext } from "../src/deploy/context.ts";
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { startProvisioning } from "../src/provision/control.ts";
@@ -1248,6 +1248,51 @@ describe("rolling a release out", () => {
         "rollout.client_done",
         "rollout.done",
       ],
+    });
+  });
+
+  it("finishes a fleet client's deploy on a retry when it failed after its Workers went live", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const acme = await activeClient(1, before);
+    const release = await importedRelease("feat(core): live, then stopped");
+    // Another client has acme's hostname in the router's map: acme's
+    // deploy stops at its last step, after both Workers went live.
+    const hostname = `${acme.clientId}.${clientDomain(env) ?? ""}`;
+    const ours = await env.ROUTER_HOSTS.get(hostname);
+    await env.ROUTER_HOSTS.put(
+      hostname,
+      JSON.stringify({
+        clientId: "someone-else",
+        coreUrl: "https://grasp-os-core.elsewhere.workers.dev",
+        generation: 1,
+      })
+    );
+    await using run = await followRollouts();
+
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await approveRollout(env, staff, rolloutId);
+    await run.waitForStepResult({ name: "retry 1 asked" });
+    const failed = await targetsOf(rolloutId);
+    // Staff give the hostname back and retry: acme already runs the
+    // release, and its deploy still finishes rather than being skipped.
+    await env.ROUTER_HOSTS.put(hostname, ours ?? "");
+    await retryRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+    const entry = z
+      .object({ clientId: z.string() })
+      .parse(await env.ROUTER_HOSTS.get(hostname, "json"));
+
+    const retried = await targetsOf(rolloutId);
+    expect({
+      failed: failed[acme.clientId],
+      retried: retried[acme.clientId],
+      router: entry.clientId,
+    }).toStrictEqual({
+      failed: { ring: 1, status: "failed", error: "hostname_taken" },
+      retried: { ring: 1, status: "done", error: null },
+      router: acme.clientId,
     });
   });
 

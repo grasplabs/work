@@ -511,8 +511,15 @@ const claimTarget = async (
     return { state: "skipped" };
   }
   const client = await targetClient(db, clientId);
-  const skip =
-    client === undefined ? "not_active" : await skipFor(db, params, client);
+  // A deploy it started already is resumed, whatever the client runs now:
+  // one that failed after its Workers went live runs the release already,
+  // and a retry still has to finish it.
+  let skip: string | null = null;
+  if (client === undefined) {
+    skip = "not_active";
+  } else if (target.deployId === null) {
+    skip = await skipFor(db, params, client);
+  }
   if (client === undefined || (skip !== null && target.status === "pending")) {
     await skipTarget(db, rolloutId, clientId, skip ?? "not_active");
     return { state: "skipped" };
