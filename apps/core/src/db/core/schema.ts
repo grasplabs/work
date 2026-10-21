@@ -1909,6 +1909,15 @@ export const workflowDecisions = sqliteTable(
       .references(() => workflowRuns.id),
     step: text().notNull(),
     deciders: text().notNull(),
+    /**
+     * Whether the run's starter never answers it, even when it names
+     * exactly them (`person:<their id>`): set when the step takes its
+     * reviewer only at run time (`StepOutline.dynamic`), so the starter
+     * may have chosen it, and when its steps can't be read (R8).
+     */
+    starterExcluded: integer("starter_excluded", { mode: "boolean" })
+      .notNull()
+      .default(false),
     description: text().notNull(),
     status: text({
       enum: ["open", "approved", "rejected", "timed_out"],

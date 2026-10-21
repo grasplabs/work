@@ -478,15 +478,22 @@ const proposerOf = async (
 const stepChanges = (
   before: ReadonlyMap<string, StepOutline>,
   now: ReadonlyMap<string, StepOutline>,
-  shared: boolean
+  { shared, outside }: { shared: boolean; outside: boolean }
 ): NonNullable<VersionReview["workflows"][number]["steps"]> => {
   const usesBindings = [...now.values()].some(
     ({ env }) => (env ?? []).length > 0
   );
+  // A step with options chosen at run time reads them through code its
+  // call doesn't hold, which may sit anywhere in its file (a helper, say).
+  const readsOutside = (step: StepOutline): boolean =>
+    outside && (step.dynamic ?? []).length > 0;
   return differences(
     before,
     now,
-    (one, other) => !shared && sameJson(withoutLine(one), withoutLine(other))
+    (one, other) =>
+      !shared &&
+      !readsOutside(other) &&
+      sameJson(withoutLine(one), withoutLine(other))
   ).map(({ name, change, now: step, before: was }) => {
     const found = step ?? was;
     return {
@@ -502,9 +509,90 @@ const stepChanges = (
       // a call of any other binding from this step is refused
       // (`workflowCallsOf`, workflows/host.ts).
       calls: found?.env ?? [],
-      sharedCode: shared,
+      sharedCode: shared || (found !== undefined && readsOutside(found)),
+      ...(found?.dynamic === undefined ? {} : { dynamic: [...found.dynamic] }),
     };
   });
+};
+
+/**
+ * `source` without its steps' calls: each call as written (`code`), cut
+ * out where it is, from the start of its line on (`line`), never the same
+ * text elsewhere, such as inside a helper's string. A step the outline
+ * doesn't place (`keptOnly`) cuts nothing.
+ */
+const withoutCalls = (source: string, steps: Iterable<StepOutline>): string => {
+  const lineStarts = [0];
+  for (
+    let next = source.indexOf("\n");
+    next !== -1;
+    next = source.indexOf("\n", next + 1)
+  ) {
+    lineStarts.push(next + 1);
+  }
+  const spans = [...steps].flatMap(({ code, line }) => {
+    const from = lineStarts[line - 1];
+    if (code === "" || from === undefined) {
+      return [];
+    }
+    const at = source.indexOf(code, from);
+    return at === -1 ? [] : [{ at, end: at + code.length }];
+  });
+  let left = "";
+  let cursor = 0;
+  for (const { at, end } of spans.toSorted((x, y) => x.at - y.at)) {
+    if (at >= cursor) {
+      left += source.slice(cursor, at);
+      cursor = end;
+    }
+  }
+  return left + source.slice(cursor);
+};
+
+/**
+ * Whether a workflow's own file changed outside its steps' calls: its
+ * source before and now, each without its own calls (`withoutCalls`),
+ * compared exactly, so a change inside a string (`"high risk"` to
+ * `"highrisk"`) shows, and so, conservatively, does reformatting. A helper
+ * in the file that an option reads at run time (`StepOutline.dynamic`), a
+ * condition or a loop: a step may now behave differently, though no call
+ * of one changed.
+ */
+const changedOutsideSteps = (
+  before: { source: string | undefined; steps: Iterable<StepOutline> },
+  now: { source: string | undefined; steps: Iterable<StepOutline> }
+): boolean =>
+  before.source !== undefined &&
+  now.source !== undefined &&
+  withoutCalls(before.source, before.steps) !==
+    withoutCalls(now.source, now.steps);
+
+/**
+ * A workflow's steps now, and how they differ from before (`stepChanges`):
+ * every step listed as possibly changed when code it may use changed
+ * (`shared`), and every step with options chosen at run time when its own
+ * file changed outside its steps' calls; null when its steps can't be
+ * read, before or now.
+ */
+const stepsChangedIn = (
+  { before, proposed }: { before: VersionAt | undefined; proposed: VersionAt },
+  id: WorkflowId,
+  shared: boolean
+) => {
+  const stepsBefore = stepsOf(before, id);
+  const stepsNow = stepsOf(proposed, id);
+  if (stepsBefore === null || stepsNow === null) {
+    return { stepsNow, steps: null };
+  }
+  const file = workflowPaths(id).workflow;
+  const outside = changedOutsideSteps(
+    { source: before?.files[file], steps: stepsBefore.values() },
+    { source: proposed.files[file], steps: stepsNow.values() }
+  );
+  return {
+    stepsNow,
+    steps: stepChanges(stepsBefore, stepsNow, { shared, outside }),
+  };
 };
 
 /** A version's workflows that differ from the current version's. */
@@ -548,8 +636,11 @@ const workflowsOf = async (
     if (change === undefined) {
       continue;
     }
-    const stepsBefore = stepsOf(before, id);
-    const stepsNow = stepsOf(proposed, id);
+    const { stepsNow, steps } = stepsChangedIn(
+      { before, proposed },
+      id,
+      shared.length > 0
+    );
     // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
     const paramsBefore = await paramsOf(env, app, before, id);
     // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
@@ -558,10 +649,6 @@ const workflowsOf = async (
     const triggersBefore = await triggersOf(env, app, before, id);
     // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
     const triggersNow = await triggersOf(env, app, proposed, id);
-    const steps =
-      stepsBefore === null || stepsNow === null
-        ? null
-        : stepChanges(stepsBefore, stepsNow, shared.length > 0);
     const heldTo = allCallsOf(proposed, id);
     workflows.push({
       id,

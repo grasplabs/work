@@ -9,6 +9,8 @@ import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import {
   approvalApp,
+  approvalNaming,
+  approvalReadable,
   asking,
   asksOf,
   confirmedAnswer,
@@ -550,17 +552,26 @@ describe("decisions", { timeout: 60_000 }, () => {
     ).resolves.toBe("decision.closed");
   });
 
-  it("don't let whoever started the run answer it, unless it names exactly them", async () => {
+  it("don't let whoever started the run answer it, unless its code names exactly them", async () => {
     const admin = await personApi("admin");
     const anna = await personApi("user");
     const otherAdmin = await personApi("admin");
     const team = await newTeam(admin, [admin, anna]);
     const byTeam = await asking(admin, { from: `team:${team}`, timeout: week });
     const byRole = await asking(admin, { from: "role:admin", timeout: week });
-    const byThemselves = await asking(admin, {
-      from: `person:${admin.userId}`,
-      timeout: week,
-    });
+    // Named in the workflow's code, as its review shows: their own
+    // confirmation stands.
+    const byThemselves = await asking(
+      admin,
+      { from: "role:admin", timeout: week },
+      approvalNaming(`person:${admin.userId}`)
+    );
+    // Named by the run's input, which its starter wrote: never (R8).
+    const byTheirInput = await asking(
+      admin,
+      { from: `person:${admin.userId}`, timeout: week },
+      approvalReadable
+    );
 
     expect({
       team: {
@@ -582,6 +593,12 @@ describe("decisions", { timeout: 60_000 }, () => {
           confirmedAnswer(admin, byThemselves.decision, { approved: true })
         ),
       },
+      theirInput: {
+        asked: askedTo(byTheirInput.ask),
+        starter: await outcome(
+          confirmedAnswer(admin, byTheirInput.decision, { approved: true })
+        ),
+      },
     }).toStrictEqual({
       team: { asked: [anna.userId], starter: "decision.forbidden" },
       role: {
@@ -590,6 +607,7 @@ describe("decisions", { timeout: 60_000 }, () => {
         starter: "decision.forbidden",
       },
       themselves: { asked: [admin.userId], starter: "ok" },
+      theirInput: { asked: [], starter: "decision.forbidden" },
     });
     // Anyone else the decision is from still answers, and the audit log
     // has their answer, never one under the starter.
