@@ -703,6 +703,11 @@ export interface RunHostCalls<Attempt = AttemptHost> {
    * workflow's (resource-host.ts); an App's run has none.
    */
   listen?: (name: unknown) => Promise<Settled<unknown>>;
+  /**
+   * A run task's child's output, as the host waits for it: an independent
+   * workflow's (resource-host.ts); an App's run has none.
+   */
+  child?: (name: unknown) => Promise<Settled<unknown>>;
   waitForDecision: (
     name: unknown,
     options: unknown
@@ -932,6 +937,13 @@ export const sessionRunHost = <Attempt extends object = AttemptHost>(
           error: { name: "Error", message: "This run has no listen tasks." },
         }
       : await host.listen(name),
+  child: async (name) =>
+    host.child === undefined
+      ? {
+          ok: false,
+          error: { name: "Error", message: "This run has no child workflows." },
+        }
+      : await host.child(name),
   waitForDecision: async (name, options) =>
     await host.waitForDecision(name, options),
 });
@@ -1048,7 +1060,14 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
           {
             capability: capability(
               sessionRunHost(new BoundedRunHost(host, clock), session, methods),
-              ["do", "sleep", "sleepUntil", "listen", "waitForDecision"]
+              [
+                "do",
+                "sleep",
+                "sleepUntil",
+                "listen",
+                "child",
+                "waitForDecision",
+              ]
             ),
           },
           { value: start },

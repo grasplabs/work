@@ -3042,7 +3042,7 @@ export const workflowStartReceipts = sqliteTable(
   {
     id: text().primaryKey(),
     invokerType: text("invoker_type", {
-      enum: ["person", "app", "agent", "trigger"],
+      enum: ["person", "app", "agent", "trigger", "workflow"],
     }).notNull(),
     invokerId: text("invoker_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -3167,8 +3167,21 @@ export const workflowResourceRuns = sqliteTable(
      * it here (restricted.ts), so no step, retry or replay runs without it.
      */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * For a child run (a `run` task's, workflows/run-children.ts): the run
+     * that started it, its lineage's root and its depth under it (quotas.ts,
+     * `admitChild`), pinned with it. Null, null and 0 for a run its own
+     * start admitted, the root of its own lineage.
+     */
+    parentRunId: text("parent_run_id"),
+    rootRunId: text("root_run_id"),
+    depth: integer().notNull().default(0),
   },
   (table) => [
+    // A run's children that haven't ended, for its end to stop them.
+    index("workflow_resource_runs_parent_idx")
+      .on(table.parentRunId, table.status)
+      .where(sql`${table.parentRunId} IS NOT NULL`),
     // A workflow's runs that haven't ended, for its deletion check.
     index("workflow_resource_runs_workflow_idx").on(
       table.workflowResourceId,

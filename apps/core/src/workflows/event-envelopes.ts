@@ -49,3 +49,10 @@ export const envelopeOf = (
   ...stored,
   time: acceptedAt.toISOString(),
 });
+
+/**
+ * The engine's type of the event a child run's end wakes its parent with
+ * (run-children.ts): its run ID, within the engine's rule for types.
+ */
+export const childEndType = (childRunId: string): string =>
+  `child-${childRunId}`;

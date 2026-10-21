@@ -360,6 +360,15 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     ...taskBase,
+    kind: z.literal("run"),
+    // Its child: the workflow binding it starts, and its input's template.
+    run: z.strictObject({ binding: aliasSchema, input: templateSchema }),
+    inputFrom: templateSchema.optional(),
+    outputAs: templateSchema.optional(),
+    exportAs: templateSchema.optional(),
+  }),
+  z.strictObject({
+    ...taskBase,
     kind: z.literal("listen"),
     // Its timeout is its deadline: a listen never waits without one.
     timeoutMs: z.int().positive(),
@@ -567,6 +576,7 @@ export const compileWorkflow = async (
             duration,
             call,
             listen,
+            run,
             inputFrom,
             outputAs,
             exportAs,
@@ -597,6 +607,9 @@ export const compileWorkflow = async (
             ...(listen === undefined
               ? {}
               : { listen: z.json().parse(structuredClone(listen)) }),
+            ...(run === undefined
+              ? {}
+              : { run: z.json().parse(structuredClone(run)) }),
             ...(inputFrom === undefined
               ? {}
               : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),

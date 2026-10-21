@@ -80,6 +80,21 @@ const frozenBindingsSchema = z.array(
 /** A catalog binding of a run's start, its approval and target frozen. */
 export type FrozenCatalogBinding = z.infer<typeof catalogBindingSchema>;
 
+/** Another workflow a run's start froze: the exact version its `run` tasks start. */
+export type FrozenWorkflowBinding = z.infer<typeof workflowBindingSchema>;
+
+/** The workflow bindings a start froze (its receipt's `bindings`), by alias. */
+export const frozenWorkflowsOf = (
+  text: string
+): ReadonlyMap<string, FrozenWorkflowBinding> =>
+  new Map(
+    frozenBindingsSchema
+      .parse(JSON.parse(text))
+      .flatMap((binding) =>
+        binding.kind === "workflow" ? [[binding.alias, binding] as const] : []
+      )
+  );
+
 /** The catalog bindings a start froze (its receipt's `bindings`), by alias. */
 export const frozenBindingsOf = (
   text: string
@@ -104,12 +119,17 @@ export interface CallingRun {
    * start by code needs the grant that let it start still to hold.
    */
   readonly invoker: {
-    readonly type: "person" | "app" | "agent" | "trigger";
+    readonly type: "person" | "app" | "agent" | "trigger" | "workflow";
     readonly id: string;
     readonly appVersion: number | null;
   };
   /** The catalog bindings its start froze, by alias. */
   readonly bindings: ReadonlyMap<string, FrozenCatalogBinding>;
+  /**
+   * The other workflows its start froze, by alias: what its `run` tasks
+   * start (run-children.ts). None unless given.
+   */
+  readonly workflows?: ReadonlyMap<string, FrozenWorkflowBinding>;
   /**
    * Whether it runs in restricted mode, as its start decided and its row
    * pins (restricted.ts): what it sends an App restricts that App first.
@@ -200,6 +220,20 @@ const invokerSql = (run: CallingRun): SQL => {
         object,
         "start"
       )})`;
+    }
+    case "workflow": {
+      // A child run: its parent still going, and the parent workflow's own
+      // grant to start this one still active (run-children.ts).
+      return sql`EXISTS (SELECT 1 FROM workflow_resource_runs AS parent_run
+        JOIN permissions AS held
+          ON held.subject_type = 'workflow'
+            AND held.subject_id = parent_run.workflow_resource_id
+        WHERE parent_run.id = ${invoker.id}
+          AND parent_run.status IN ('starting', 'running')
+          AND held.object_type = 'workflow' AND held.object_id = ${run.workflowId}
+          AND held.resource IS NULL
+          AND held.status = 'active'
+          AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'start'))`;
     }
     case "agent": {
       // A chat's grant holds only for the person who asked for it there
@@ -303,6 +337,7 @@ export const callingRunOf = async (
       appVersion: row.originAppVersion,
     },
     bindings: frozenBindingsOf(row.bindings),
+    workflows: frozenWorkflowsOf(row.bindings),
     restricted: row.restricted,
   };
 };
