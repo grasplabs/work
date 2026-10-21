@@ -157,6 +157,8 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
     const value = `${path.loud === undefined ? "quiet" : "loud"}-${path.name}-6d1f`;
     const code = {
       ...settings,
+      // No `nodejs_compat`: its date gives the isolate `node:` modules.
+      compatibilityFlags: [],
       mainModule: "app.js",
       modules: { "app.js": pathIsolateOf(path.name, value) },
     };

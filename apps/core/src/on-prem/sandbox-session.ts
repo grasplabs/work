@@ -37,6 +37,7 @@ import {
   captureEntrypoint,
   captureMethod,
   capturedModules,
+  hasNodeModules,
   quietModules,
 } from "./quiet-isolate.ts";
 import {
@@ -388,6 +389,12 @@ class Session extends CapnwebTarget {
         ? await readChunkedModules(parsed.chunkedModules, reader)
         : {};
     const { compatibilityFlags } = this.#settings;
+    const nodejsCompat = hasNodeModules({
+      compatibilityDate: this.#settings.compatibilityDate,
+      compatibilityFlags: parsed.nodejsCompat
+        ? [...compatibilityFlags, "nodejs_compat"]
+        : compatibilityFlags,
+    });
     const modules = { ...parsed.modules, ...chunked };
     // Printing nothing to the process's output, the deployment's logs;
     // recording what it writes instead for the sink core passed, if any.
@@ -398,11 +405,11 @@ class Session extends CapnwebTarget {
         ? {
             mainModule: parsed.mainModule,
             modules: quietModules(parsed.mainModule, modules, {
-              nodejsCompat: parsed.nodejsCompat,
+              nodejsCompat,
             }),
           }
         : capturedModules(parsed.mainModule, modules, {
-            nodejsCompat: parsed.nodejsCompat,
+            nodejsCompat,
           });
     const isolate = this.#env.LOADER.get(null, () => ({
       ...this.#settings,
