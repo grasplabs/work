@@ -153,7 +153,23 @@ describe("a client's quota policy", () => {
     });
   });
 
-  it("is unknown, never in sync, when core can't answer: a core from before the report, one that fails, one not deployed", async () => {
+  it("is drifted when core applies other limits under the generation the console deployed", async () => {
+    const release = await importedRelease("feat(core): quota policy conflict");
+    const { clientId } = await recordClient();
+    await setQuota(clientId, 4, 100);
+    await deploy(clientId, release);
+    // The same generation, other limits: core keeps the ones it recorded.
+    await setQuota(clientId, 4, 50);
+    await deploy(clientId, release);
+
+    await expect(clientQuotaPolicy(env, clientId)).resolves.toMatchObject({
+      set: { generation: 4, lowered: { workflowSteps: 50 } },
+      inForce: { generation: 4, lowered: { workflowSteps: 100 } },
+      state: "drifted",
+    });
+  });
+
+  it("is unknown, never in sync, when core can't answer: a core from before the report, one that fails or redirects elsewhere, one not deployed", async () => {
     const release = await importedRelease("feat(core): quota policy unknown");
     const old = await recordClient();
     await deploy(old.clientId, release);
@@ -161,26 +177,35 @@ describe("a client's quota policy", () => {
     const failing = await recordClient();
     await deploy(failing.clientId, release);
     failing.account.unhealthy = 1000;
+    const redirecting = await recordClient();
+    await deploy(redirecting.clientId, release);
+    redirecting.account.quotaPolicy = "redirect";
     const undeployed = await recordClient();
 
     expect({
       old: await clientQuotaPolicy(env, old.clientId),
       failing: await clientQuotaPolicy(env, failing.clientId),
+      redirecting: await clientQuotaPolicy(env, redirecting.clientId),
       undeployed: await clientQuotaPolicy(env, undeployed.clientId),
       missing: await clientQuotaPolicy(env, "client-nonesuch"),
     }).toStrictEqual({
       old: {
-        set: { generation: 0, lowered: {} },
+        set: { generation: 0, lowered: {}, limitsHash: null },
         inForce: null,
         state: "unknown",
       },
       failing: {
-        set: { generation: 0, lowered: {} },
+        set: { generation: 0, lowered: {}, limitsHash: null },
+        inForce: null,
+        state: "unknown",
+      },
+      redirecting: {
+        set: { generation: 0, lowered: {}, limitsHash: null },
         inForce: null,
         state: "unknown",
       },
       undeployed: {
-        set: { generation: 0, lowered: {} },
+        set: { generation: 0, lowered: {}, limitsHash: null },
         inForce: null,
         state: "unknown",
       },

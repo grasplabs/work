@@ -50,6 +50,9 @@ const summaryOf = ({ set, inForce, state }: ClientQuotaPolicy): string => {
     return `The console sets ${ours}. Core couldn't be asked which it applies.`;
   }
   const theirs = generationText(inForce.generation);
+  if (state === "drifted" && inForce.generation === set.generation) {
+    return `Core applies ${theirs} with other limits than the console's: it refused the console's policy.`;
+  }
   if (state === "drifted") {
     return `Core applies ${theirs}, not the console's ${ours}: it refused the console's policy.`;
   }

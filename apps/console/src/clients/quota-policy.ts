@@ -19,7 +19,10 @@ import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
+import {
+  quotaLimitsHash,
+  quotaLimitsSchema,
+} from "@grasp-os/shared/quota-policy";
 import type { LowerableLimit } from "@grasp-os/shared/quota-policy";
 import {
   quotaPolicyReportPath,
@@ -46,12 +49,15 @@ export interface QuotaGeneration {
   /** 0 for the platform's own, none set. */
   generation: number;
   lowered: Partial<Record<LowerableLimit, number>>;
+  /** The hash of its limits (`quotaLimitsHash`); null for the platform's own. */
+  limitsHash: string | null;
 }
 
 /**
  * How core's policy compares with the console's:
- * - `in_sync`: core applies the generation the console set;
- * - `drifted`: core applies another, so it refused the console's;
+ * - `in_sync`: core applies the generation the console set, with its limits;
+ * - `drifted`: core applies another generation, or other limits under the
+ *   same one, so it refused the console's;
  * - `pending`: the console's setting waits for the client's next deploy,
  *   so core can't have it yet;
  * - `unknown`: core couldn't be asked, or didn't answer.
@@ -101,6 +107,9 @@ export const quotaPolicyReportOf = async ({
     },
     body,
     signal,
+    // A redirect is no answer from core: it's never followed, and reads as
+    // unknown, so a signed request never goes anywhere else.
+    redirect: "manual",
   });
   if (!response.ok) {
     await response.body?.cancel();
@@ -119,18 +128,31 @@ export const quotaPolicyReportOf = async ({
  * or the platform's own when it has none. A setting that doesn't parse is
  * never deployed (`checkDeployedConfig` refuses it), so it sets nothing.
  */
-const setPolicyOf = (value: string | undefined): QuotaGeneration => {
+const setPolicyOf = async (
+  value: string | undefined
+): Promise<QuotaGeneration> => {
+  const platform: QuotaGeneration = {
+    generation: 0,
+    lowered: {},
+    limitsHash: null,
+  };
   if (value === undefined) {
-    return { generation: 0, lowered: {} };
+    return platform;
   }
+  let json: unknown = undefined;
   try {
-    const parsed = quotaLimitsSchema.safeParse(JSON.parse(value));
-    return parsed.success
-      ? { generation: parsed.data.generation, lowered: parsed.data.limits }
-      : { generation: 0, lowered: {} };
+    json = JSON.parse(value);
   } catch {
-    return { generation: 0, lowered: {} };
+    return platform;
   }
+  const parsed = quotaLimitsSchema.safeParse(json);
+  return parsed.success
+    ? {
+        generation: parsed.data.generation,
+        lowered: parsed.data.limits,
+        limitsHash: await quotaLimitsHash(parsed.data.limits),
+      }
+    : platform;
 };
 
 /** How `inForce` compares with `set`, as `QuotaPolicyState` says. */
@@ -142,7 +164,12 @@ const stateOf = (
   if (inForce === null) {
     return "unknown";
   }
-  if (inForce.generation === set.generation) {
+  // The same generation with other limits is another policy: core kept
+  // the limits it recorded first and refused the console's.
+  if (
+    inForce.generation === set.generation &&
+    inForce.limitsHash === set.limitsHash
+  ) {
     return "in_sync";
   }
   // A change of the setting waiting for the next deploy may still bring
@@ -173,7 +200,7 @@ export const clientQuotaPolicy = async (
     .where(
       and(eq(settings.clientId, clientId), eq(settings.key, "QUOTA_LIMITS"))
     );
-  const set = setPolicyOf(setting?.value);
+  const set = await setPolicyOf(setting?.value);
   // Only a change of this setting waits to reach core: another setting's
   // change waiting for its deploy says nothing of the policy.
   const pending = await isConfigPending(

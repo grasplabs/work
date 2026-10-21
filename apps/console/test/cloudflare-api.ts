@@ -31,7 +31,10 @@ import {
   platformUpdatePurpose,
   platformUpdateSignatureHeader,
 } from "@grasp-os/shared/platform-change";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
+import {
+  quotaLimitsHash,
+  quotaLimitsSchema,
+} from "@grasp-os/shared/quota-policy";
 import {
   quotaPolicyReportPath,
   quotaPolicyReportPurpose,
@@ -190,6 +193,21 @@ const answerQuotaPolicy = async (
   if (account.quotaPolicy === "absent") {
     return new Response("Not found", { status: 404 });
   }
+  if (account.quotaPolicy === "redirect") {
+    // As fetch does: a request that follows redirects gets what the other
+    // end answers, here a policy that matches anything none is set for.
+    return request.redirect === "manual"
+      ? new Response(null, {
+          status: 302,
+          headers: { location: "https://elsewhere.test/quota" },
+        })
+      : Response.json({
+          generation: 0,
+          lowered: {},
+          limitsHash: null,
+          recordedAt: null,
+        } satisfies QuotaPolicyReport);
+  }
   const body = await request.text();
   const key = await hkdfHmacKey(
     live.secrets.get("BETTER_AUTH_SECRET") ?? "",
@@ -208,9 +226,13 @@ const answerQuotaPolicy = async (
   ) {
     return new Response("Forbidden", { status: 403 });
   }
+  // Each generation keeps the limits it was first deployed with, as core
+  // records them; a later version under it with other limits changes
+  // nothing.
   let highest: QuotaPolicyReport = {
     generation: 0,
     lowered: {},
+    limitsHash: null,
     recordedAt: null,
   };
   for (const version of script.versions) {
@@ -219,6 +241,8 @@ const answerQuotaPolicy = async (
       highest = {
         generation: limits.generation,
         lowered: limits.limits,
+        // oxlint-disable-next-line no-await-in-loop -- versions in order
+        limitsHash: await quotaLimitsHash(limits.limits),
         recordedAt: new Date().toISOString(),
       };
     }
