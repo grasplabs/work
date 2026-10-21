@@ -12,18 +12,19 @@ import {
 import {
   InputGroup,
   InputGroupAddon,
-  InputGroupButton,
   InputGroupTextarea,
 } from "@grasp-os/ui/components/input-group";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+import {
+  PromptInputBody,
+  PromptInputButton,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+} from "@grasp-os/ui/components/prompt-input";
 import { msg, select } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import {
-  ArrowUpIcon,
-  ChevronDownIcon,
-  SparklesIcon,
-  SquareIcon,
-} from "lucide-react";
+import { ChevronDownIcon, SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -35,7 +36,11 @@ import { isEffort } from "./model-choice.ts";
 // and send, or stop while Grasp answers, on the right. Enter sends;
 // Shift+Enter starts a new line. The models are core's: no keys or
 // providers are set here. One control picks the model and, for a model
-// that thinks, how hard (grasplabs/prototype `model-picker.tsx`).
+// that thinks, how hard (grasplabs/prototype `model-picker.tsx`). It is
+// laid out on the kit's prompt input parts, the prototype's AI Elements
+// prompt input; the prototype's attachments, screenshot and dictation
+// aren't here: core takes no files with a question, and dictation waits
+// on a decision about where its audio goes.
 
 /** How a model is named in the box: the last part of its ID. */
 
@@ -142,7 +147,7 @@ const ModelPicker = ({
               })}. Change model or thinking`
             : t`Model: ${name}. Change model`
         }
-        render={<InputGroupButton size="sm" variant="ghost" />}
+        render={<PromptInputButton size="sm" />}
       >
         <SparklesIcon className="text-status-attention" />
         <ChoiceLabel effort={thinks ? effort : undefined} name={name} />
@@ -201,30 +206,25 @@ const SendOrStop = ({
   onStop?: () => void;
 }) => {
   const { t } = useLingui();
-  return running ? (
-    <InputGroupButton
-      aria-label={t({ message: "Stop", context: "stop the answer" })}
-      disabled={busy}
-      onClick={onStop}
+  // While Grasp answers it stops the answer; while a question is on its
+  // way it waits; else it sends, grey until there is something to send.
+  let status: "ready" | "submitted" | "streaming" = "ready";
+  if (running) {
+    status = "streaming";
+  } else if (busy) {
+    status = "submitted";
+  }
+  return (
+    <PromptInputSubmit
+      disabled={running ? busy : !canSend}
+      // Only an answer being written can be stopped.
+      onStop={running ? onStop : undefined}
+      sendLabel={t({ message: "Send", context: "send the question" })}
       size={compact ? "icon-xs" : "icon-sm"}
-      type="button"
-      variant="default"
-    >
-      <SquareIcon />
-    </InputGroupButton>
-  ) : (
-    <InputGroupButton
-      aria-label={t({
-        message: "Send",
-        context: "send the question",
-      })}
-      disabled={!canSend}
-      size={compact ? "icon-xs" : "icon-sm"}
-      type="submit"
-      variant={canSend ? "default" : "secondary"}
-    >
-      {busy ? <Spinner /> : <ArrowUpIcon />}
-    </InputGroupButton>
+      status={status}
+      stopLabel={t({ message: "Stop", context: "stop the answer" })}
+      variant={running || canSend ? "default" : "secondary"}
+    />
   );
 };
 
@@ -244,7 +244,7 @@ const ModelChoice = ({
   effort: ModelEffort | undefined;
   onEffort: ((effort: ModelEffort) => void) | undefined;
 }) => (
-  <div className="flex min-w-0 items-center gap-1">
+  <PromptInputTools>
     {models.length === 0 ||
     model === undefined ||
     onModel === undefined ? null : (
@@ -257,22 +257,8 @@ const ModelChoice = ({
         onModel={onModel}
       />
     )}
-  </div>
+  </PromptInputTools>
 );
-
-/** How the box looks: a prompt box under the thread, or one line (compact). */
-const looks = {
-  prompt: {
-    size: "prompt",
-    align: "block-end",
-    row: "flex w-full items-center justify-between gap-1",
-  },
-  compact: {
-    size: "default",
-    align: "inline-end",
-    row: "flex items-center gap-1",
-  },
-} as const;
 
 /** What the question is typed in: Enter sends it, Shift+Enter starts a new line. */
 const QuestionField = ({
@@ -291,31 +277,45 @@ const QuestionField = ({
   maxLength: number | undefined;
 }) => {
   const { t } = useLingui();
+  const name = label ?? t`Your question`;
+  const hint = placeholder ?? t`Ask anything, or describe a process`;
+  const longest = maxLength ?? maxQuestionLength;
+  if (compact) {
+    // One line in the input group's own spacing, which the prompt box's
+    // field, spaced for the box, doesn't fit.
+    return (
+      <InputGroupTextarea
+        aria-label={name}
+        className="field-sizing-content max-h-40 min-h-0"
+        maxLength={longest}
+        name="message"
+        onChange={(event) => {
+          onText(event.target.value);
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            !event.shiftKey &&
+            !event.nativeEvent.isComposing
+          ) {
+            event.preventDefault();
+            event.currentTarget.form?.requestSubmit();
+          }
+        }}
+        placeholder={hint}
+        rows={1}
+        value={text}
+      />
+    );
+  }
   return (
-    <InputGroupTextarea
-      aria-label={label ?? t`Your question`}
-      className={
-        compact
-          ? "field-sizing-content max-h-40 min-h-0"
-          : "field-sizing-content max-h-48 min-h-16"
-      }
-      maxLength={maxLength ?? maxQuestionLength}
-      name="message"
+    <PromptInputTextarea
+      aria-label={name}
+      maxLength={longest}
       onChange={(event) => {
         onText(event.target.value);
       }}
-      onKeyDown={(event) => {
-        if (
-          event.key === "Enter" &&
-          !event.shiftKey &&
-          !event.nativeEvent.isComposing
-        ) {
-          event.preventDefault();
-          event.currentTarget.form?.requestSubmit();
-        }
-      }}
-      placeholder={placeholder ?? t`Ask anything, or describe a process`}
-      rows={compact ? 1 : undefined}
+      placeholder={hint}
       value={text}
     />
   );
@@ -394,7 +394,6 @@ export const Composer = ({
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
   const canSend = !running && !busy && !disabled && !empty && model !== "";
-  const look = looks[compact ? "compact" : "prompt"];
   return (
     <form
       className="flex flex-col gap-1.5"
@@ -405,32 +404,51 @@ export const Composer = ({
         }
       }}
     >
-      <InputGroup size={look.size}>
-        <QuestionField
-          compact={compact}
-          label={label}
-          maxLength={maxLength}
-          onText={onText}
-          placeholder={placeholder}
-          text={text}
-        />
-        <InputGroupAddon
-          align={look.align}
-          className={compact ? "self-end" : undefined}
-        >
-          <div className={look.row}>
-            {compact ? (
-              children
-            ) : (
-              <ModelChoice
-                effort={effort}
-                efforts={efforts}
-                model={model}
-                models={models}
-                onEffort={onEffort}
-                onModel={onModel}
+      {compact ? (
+        // One line, its button beside it: the chat dock and the guest page.
+        <InputGroup>
+          <QuestionField
+            compact={compact}
+            label={label}
+            maxLength={maxLength}
+            onText={onText}
+            placeholder={placeholder}
+            text={text}
+          />
+          <InputGroupAddon align="inline-end" className="self-end">
+            <div className="flex items-center gap-1">
+              {children}
+              <SendOrStop
+                busy={busy}
+                canSend={canSend}
+                compact={compact}
+                onStop={onStop}
+                running={running}
               />
-            )}
+            </div>
+          </InputGroupAddon>
+        </InputGroup>
+      ) : (
+        <InputGroup size="prompt">
+          <PromptInputBody>
+            <QuestionField
+              compact={compact}
+              label={label}
+              maxLength={maxLength}
+              onText={onText}
+              placeholder={placeholder}
+              text={text}
+            />
+          </PromptInputBody>
+          <PromptInputFooter>
+            <ModelChoice
+              effort={effort}
+              efforts={efforts}
+              model={model}
+              models={models}
+              onEffort={onEffort}
+              onModel={onModel}
+            />
             <SendOrStop
               busy={busy}
               canSend={canSend}
@@ -438,9 +456,9 @@ export const Composer = ({
               onStop={onStop}
               running={running}
             />
-          </div>
-        </InputGroupAddon>
-      </InputGroup>
+          </PromptInputFooter>
+        </InputGroup>
+      )}
       {compact || model === undefined || models.length > 0 ? null : (
         <p className="text-muted-foreground px-1 text-xs">
           {t`No model is set up for this deployment yet.`}

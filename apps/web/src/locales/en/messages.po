@@ -1582,6 +1582,10 @@ msgstr "Added: it reads and rewrites every record of {table}, whoever owns it"
 msgid "Address"
 msgstr "Address"
 
+#: src/workflows/triggers.tsx
+msgid "Address copied"
+msgstr "Address copied"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -1747,10 +1751,6 @@ msgstr "All calls"
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls together"
 msgstr "All calls together"
-
-#: src/chat/side-panel.tsx
-msgid "All domains"
-msgstr "All domains"
 
 #: src/brain/brain-atlas.ts
 msgid "All interviewed"
@@ -2869,6 +2869,7 @@ msgstr "Click to open Usage"
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
+#: src/screens/app-panel.tsx
 msgid "Close"
 msgstr "Close"
 
@@ -2880,6 +2881,10 @@ msgstr "Close {name}"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Close it for the onboarding"
 msgstr "Close it for the onboarding"
+
+#: src/screens/app-panel.tsx
+msgid "Close panel"
+msgstr "Close panel"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Closes {closes}"
@@ -3225,6 +3230,10 @@ msgstr "Copied"
 msgid "Copy"
 msgstr "Copy"
 
+#: src/workflows/triggers.tsx
+msgid "Copy address"
+msgstr "Copy address"
+
 #: src/landscape/app-table.tsx
 msgid "Copy app ID"
 msgstr "Copy app ID"
@@ -3250,6 +3259,10 @@ msgstr "Could be better"
 msgctxt "status of an uploaded policy"
 msgid "Could not be read"
 msgstr "Could not be read"
+
+#: src/workflows/triggers.tsx
+msgid "Could not copy the address"
+msgstr "Could not copy the address"
 
 #: src/landscape/audit-trail.tsx
 msgid "Could not copy the fingerprint"
@@ -3690,6 +3703,10 @@ msgstr "Domain budgets"
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Domain not found"
 msgstr "Domain not found"
+
+#: src/frame/surface-nav.tsx
+msgid "Domain shortcuts"
+msgstr "Domain shortcuts"
 
 #: src/chat/side-panel.tsx
 #: src/dashboard/widget-board.tsx
@@ -4350,6 +4367,10 @@ msgstr "From the kickoff with the sponsor. What is changed here holds from the n
 #: src/landscape/data-tab.tsx
 msgid "From the permissions people granted and how the app is classified."
 msgstr "From the permissions people granted and how the app is classified."
+
+#: src/frame/surface-nav.tsx
+msgid "From your domains"
+msgstr "From your domains"
 
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
@@ -8376,6 +8397,7 @@ msgid "Set. Type a new value to replace it."
 msgstr "Set. Type a new value to replace it."
 
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Settings"
@@ -8483,6 +8505,7 @@ msgid "Shows which apps it would flag or block, without doing it."
 msgstr "Shows which apps it would flag or block, without doing it."
 
 #: src/routes/_shell.index.tsx
+#: src/screens/app-panel.tsx
 msgid "Side panel"
 msgstr "Side panel"
 
@@ -9864,6 +9887,10 @@ msgstr "This is right"
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 
+#: src/routes/_shell.links.$app.$surface.tsx
+msgid "This link doesn't open anything you can open"
+msgstr "This link doesn't open anything you can open"
+
 #: src/routes/guest.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "This link doesn't work. Ask whoever sent it for a new one."
@@ -10869,6 +10896,10 @@ msgid "When a payment fails or the card is about to run out, so you can fix it i
 msgstr "When a payment fails or the card is about to run out, so you can fix it in time."
 
 #: src/workflows/triggers.tsx
+msgid "When an email arrives at {address}"
+msgstr "When an email arrives at {address}"
+
+#: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"
 msgstr "When an email arrives for {localPart}"
 
@@ -11161,7 +11192,7 @@ msgctxt "where a package runs"
 msgid "Workflows"
 msgstr "Workflows"
 
-#: src/chat/side-panel.tsx
+#: src/screens/app-panel.tsx
 msgid "Workflows and more"
 msgstr "Workflows and more"
 

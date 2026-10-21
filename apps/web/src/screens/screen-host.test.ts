@@ -22,7 +22,7 @@ import {
   previewTarget,
   supersededRetryMs,
 } from "./screen-host.ts";
-import type { ScreenOpening } from "./screen-host.ts";
+import type { ScreenOpening, ScreenState } from "./screen-host.ts";
 import type { FrameLink } from "./tab-link.ts";
 
 // The page relaying a screen's function call to core: whatever comes back
@@ -292,7 +292,10 @@ const bundle: ScreenBundle = {
 };
 
 /** The notes App's screen, running for Ada, with a draft she kept. */
-const runningWithDraft = async (present: () => Promise<string>) => {
+const runningWithDraft = async (
+  present: () => Promise<string>,
+  states: ScreenState[] = []
+) => {
   vi.stubGlobal("sessionStorage", tabStorage());
   const events = pageEvents();
   saveDraft("ada", bundle.app, "n1", "Ada's draft");
@@ -312,8 +315,8 @@ const runningWithDraft = async (present: () => Promise<string>) => {
     },
     cleanups
   );
-  running?.(() => {
-    // The page's state isn't looked at here.
+  running?.((state) => {
+    states.push(state);
   });
   await expect(target.drafts()).resolves.toStrictEqual({ n1: "Ada's draft" });
   return { target, cleanups, events };
@@ -473,6 +476,38 @@ describe("a running screen's drafts once core refuses the person", () => {
     for (const cleanup of cleanups) {
       cleanup();
     }
+  });
+});
+
+describe("a running screen the page's own check is refused", () => {
+  it.each([
+    ["role.forbidden", { status: "failed", reason: "forbidden" }],
+    ["app.not_found", { status: "failed", reason: "not-found" }],
+    ["app.unreadable", { status: "failed", reason: "forbidden" }],
+    ["permission.person_inactive", { status: "failed", reason: "forbidden" }],
+    [
+      "auth.principal_changed",
+      { status: "failed", reason: "principal-changed" },
+    ],
+    ["auth.unauthenticated", { status: "signed-out" }],
+    // Possibly passing: asked again at the next check, the screen runs on.
+    ["auth.token_unavailable", undefined],
+  ])("on %s, ends as %o", async (code, ended) => {
+    vi.useFakeTimers();
+    const states: ScreenState[] = [];
+    let refusing = false;
+    const { cleanups } = await runningWithDraft(async () => {
+      if (refusing) {
+        throw Object.assign(new Error("Refused."), { code });
+      }
+      return await Promise.resolve("open");
+    }, states);
+    refusing = true;
+    await vi.advanceTimersByTimeAsync(30_000);
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+    expect(states).toStrictEqual(ended === undefined ? [] : [ended]);
   });
 });
 

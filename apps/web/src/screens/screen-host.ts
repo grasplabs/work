@@ -4,6 +4,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import { authErrors, errorPayloadSchema } from "@grasp-os/shared/errors";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import {
   appFunctionPath,
@@ -142,6 +143,7 @@ const versionCheckMs = 30_000;
 const failures: Readonly<Record<string, FailureReason>> = {
   "role.forbidden": "forbidden",
   "app.unreadable": "forbidden",
+  "permission.person_inactive": "forbidden",
   "app.not_found": "not-found",
   "app.no_draft": "not-found",
   "screen.not_found": "not-found",
@@ -164,8 +166,33 @@ const failureOf = (error: unknown): FailureReason => {
     roleErrors.codeOf(error) ??
     appErrors.codeOf(error) ??
     screenErrors.codeOf(error) ??
-    authErrors.codeOf(error);
+    authErrors.codeOf(error) ??
+    permissionErrors.codeOf(error);
   return (code === undefined ? undefined : failures[code]) ?? "unknown";
+};
+
+/**
+ * The refusals of the page's own check that end a running screen: the
+ * person lost the App (their role, its share, the App itself, their being
+ * active), or is no longer who opened it, or signed out. Anything else,
+ * a token not to hand now among it, may pass, and is asked again.
+ */
+const endingCodes: ReadonlySet<string> = new Set([
+  "role.forbidden",
+  "app.not_found",
+  "app.unreadable",
+  "permission.person_inactive",
+  "auth.principal_changed",
+  "auth.unauthenticated",
+]);
+
+/** The code a refusal carries, whichever family it is of. */
+const refusalCode = (error: unknown): string | undefined => {
+  const code: unknown =
+    typeof error === "object" && error !== null
+      ? Reflect.get(error, "code")
+      : undefined;
+  return typeof code === "string" ? code : undefined;
 };
 
 /**
@@ -742,12 +769,23 @@ const appTarget = (
     // Core decides first whether the person may open the screen the frame
     // names, with that input, now: the page goes nowhere it refuses, and
     // only to what core resolved, never to anything the frame sent.
-    navigate: async ({ screen: route, input, replace }) => {
-      const target = await framedNavigation(hold, app, { route, input });
+    navigate: async (request) => {
+      const { screen: route, input } = request;
+      const surface = "surface" in request ? request.surface : undefined;
+      const target = await framedNavigation(hold, app, {
+        route,
+        input,
+        ...(surface === undefined ? {} : { surface }),
+      });
       // Stopped while core resolved it: the page stays where the person
       // went meanwhile (refused as a stopped frame).
       await hold.session();
-      await navigation.navigate(target, replace === true);
+      // Only a route replaces an entry; a surface the host places.
+      const replace = "replace" in request && request.replace === true;
+      await navigation.navigate(
+        target,
+        replace && target.surface === undefined
+      );
     },
     leaveGuard: navigation.leaveGuard,
   };
@@ -1129,7 +1167,15 @@ const runFrame = <Bundle extends FrameCode>(
       return;
     }
     onState({ status: "running" });
-    running?.(onState);
+    // A check that ends the screen stops its frame too, as any failure
+    // does: no code of the screen runs on behind the message.
+    running?.((state) => {
+      if (state.status === "failed" || state.status === "signed-out") {
+        fail(state);
+      } else {
+        onState(state);
+      }
+    });
   };
 
   const run = async (): Promise<void> => {
@@ -1253,6 +1299,15 @@ export const appScreen = (
             }
           } catch (error) {
             drafts.refused(error);
+            // The person lost the App (it was unshared, or is gone): the
+            // screen stops, as its calls would be refused from now on, and
+            // whatever holds it (the shell's panel) can let it go.
+            const code = refusalCode(error);
+            if (code === "auth.unauthenticated") {
+              setState({ status: "signed-out" });
+            } else if (code !== undefined && endingCodes.has(code)) {
+              setState({ status: "failed", reason: failureOf(error) });
+            }
             // Anything else is asked again at the next check.
           }
         };

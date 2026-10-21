@@ -1582,6 +1582,10 @@ msgstr "Añadida: lee y reescribe todos los registros de {table}, sea quien sea 
 msgid "Address"
 msgstr "Dirección"
 
+#: src/workflows/triggers.tsx
+msgid "Address copied"
+msgstr "Dirección copiada"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -1747,10 +1751,6 @@ msgstr "Todas las llamadas"
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls together"
 msgstr "Todas las llamadas juntas"
-
-#: src/chat/side-panel.tsx
-msgid "All domains"
-msgstr "Todos los dominios"
 
 #: src/brain/brain-atlas.ts
 msgid "All interviewed"
@@ -2869,6 +2869,7 @@ msgstr "Haz clic para abrir Uso"
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
+#: src/screens/app-panel.tsx
 msgid "Close"
 msgstr "Cerrar"
 
@@ -2880,6 +2881,10 @@ msgstr "Cerrar {name}"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Close it for the onboarding"
 msgstr "Cerrarla para el onboarding"
+
+#: src/screens/app-panel.tsx
+msgid "Close panel"
+msgstr "Cerrar panel"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Closes {closes}"
@@ -3225,6 +3230,10 @@ msgstr "Copiado"
 msgid "Copy"
 msgstr "Copiar"
 
+#: src/workflows/triggers.tsx
+msgid "Copy address"
+msgstr "Copiar dirección"
+
 #: src/landscape/app-table.tsx
 msgid "Copy app ID"
 msgstr "Copiar el ID de la aplicación"
@@ -3250,6 +3259,10 @@ msgstr "Podría ir mejor"
 msgctxt "status of an uploaded policy"
 msgid "Could not be read"
 msgstr "No se pudo leer"
+
+#: src/workflows/triggers.tsx
+msgid "Could not copy the address"
+msgstr "No se pudo copiar la dirección"
 
 #: src/landscape/audit-trail.tsx
 msgid "Could not copy the fingerprint"
@@ -3690,6 +3703,10 @@ msgstr "Presupuestos de dominios"
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Domain not found"
 msgstr "Dominio no encontrado"
+
+#: src/frame/surface-nav.tsx
+msgid "Domain shortcuts"
+msgstr "Accesos directos de dominios"
 
 #: src/chat/side-panel.tsx
 #: src/dashboard/widget-board.tsx
@@ -4350,6 +4367,10 @@ msgstr "Del arranque con el patrocinador. Lo que se cambie aquí vale desde el s
 #: src/landscape/data-tab.tsx
 msgid "From the permissions people granted and how the app is classified."
 msgstr "Según los permisos que concedieron las personas y cómo se clasifica la aplicación."
+
+#: src/frame/surface-nav.tsx
+msgid "From your domains"
+msgstr "De tus dominios"
 
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
@@ -8376,6 +8397,7 @@ msgid "Set. Type a new value to replace it."
 msgstr "Establecido. Escribe un valor nuevo para reemplazarlo."
 
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Ajustes"
@@ -8483,6 +8505,7 @@ msgid "Shows which apps it would flag or block, without doing it."
 msgstr "Muestra qué aplicaciones marcaría o bloquearía, sin hacerlo."
 
 #: src/routes/_shell.index.tsx
+#: src/screens/app-panel.tsx
 msgid "Side panel"
 msgstr "Panel lateral"
 
@@ -9864,6 +9887,10 @@ msgstr "Esto es correcto"
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Este es el consentimiento tal como lo redacta Grasp ahora. El registro de auditoría guarda un hash del texto exacto que se mostró."
 
+#: src/routes/_shell.links.$app.$surface.tsx
+msgid "This link doesn't open anything you can open"
+msgstr "Este enlace no abre nada que puedas abrir"
+
 #: src/routes/guest.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "Este enlace no funciona. Pide uno nuevo a quien te lo envió."
@@ -10869,6 +10896,10 @@ msgid "When a payment fails or the card is about to run out, so you can fix it i
 msgstr "Cuando un pago falla o la tarjeta está a punto de caducar, para que puedas solucionarlo a tiempo."
 
 #: src/workflows/triggers.tsx
+msgid "When an email arrives at {address}"
+msgstr "Cuando llega un correo a {address}"
+
+#: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"
 msgstr "Cuando llega un correo para {localPart}"
 
@@ -11161,7 +11192,7 @@ msgctxt "where a package runs"
 msgid "Workflows"
 msgstr "Flujos de trabajo"
 
-#: src/chat/side-panel.tsx
+#: src/screens/app-panel.tsx
 msgid "Workflows and more"
 msgstr "Flujos de trabajo y más"
 

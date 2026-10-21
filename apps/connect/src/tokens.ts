@@ -9,7 +9,7 @@ import { recordEventIf } from "./audit.ts";
 import { connections, connectionTokens } from "./db/schema.ts";
 import { isInvalidGrant, refreshTokens, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
-import { bearer, providerFor } from "./providers.ts";
+import { bearer, grantedAsAsked, providerFor } from "./providers.ts";
 import type {
   Credential,
   OAuthClientCredentials,
@@ -132,11 +132,15 @@ export const discardMint = async (
   tokens: Pick<TokenSet, "accessToken" | "refreshToken">
 ): Promise<void> => {
   try {
-    await revokeToken(
+    const revoked = await revokeToken(
       provider,
       client,
       tokens.refreshToken ?? tokens.accessToken
     );
+    if (!revoked) {
+      // No endpoint to revoke at (Entra): kept nowhere, it lapses.
+      log.info("oauth.discard_unavailable", { provider: provider.id });
+    }
   } catch (error) {
     log.warn("oauth.discard_failed", {
       provider: provider.id,
@@ -203,7 +207,7 @@ const markDead = async (
   env: Env,
   provider: string,
   row: TokenRow,
-  reason: "invalid_grant" | "unreadable"
+  reason: "invalid_grant" | "unreadable" | "scopes_changed"
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
   return await recordEventIf(
@@ -304,6 +308,18 @@ const refreshUnderLease = async (
         throw connectionErrors.create("connection.refresh_failed");
       }
       if (!(await markDead(env, provider.id, row, "invalid_grant"))) {
+        return undefined;
+      }
+      throw connectErrors.create("connect.connection_inactive");
+    }
+    // A connection that must hold exactly what it asked for (the
+    // landscape's) is kept only while each renewal says so: granted more
+    // or less since, it needs an admin to connect it again.
+    if (!grantedAsAsked(provider, minted)) {
+      // What it minted is never kept: revoked where the provider can
+      // (Entra can't, and its refresh token lapses unused).
+      await discardMint(provider, context.client, minted);
+      if (!(await markDead(env, provider.id, row, "scopes_changed"))) {
         return undefined;
       }
       throw connectErrors.create("connect.connection_inactive");

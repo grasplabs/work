@@ -164,6 +164,58 @@ describe("a screen's navigation of the page", () => {
     });
   });
 
+  it("beside the page, outlives the page's navigations but waits out one under way", async () => {
+    const went: string[] = [];
+    const state = { here: "/start", going: "/start" };
+    const policy = navigationPolicy(
+      async () => {
+        await Promise.resolve();
+        went.push(state.here);
+      },
+      {
+        location: () => ({ ...state }),
+        activated: () => true,
+        now: () => 0,
+      },
+      "beside"
+    );
+    state.here = "/inbox";
+    state.going = "/inbox";
+    const afterThePageMoved = await answerOf(policy.navigate(note, false));
+    state.going = "/brain";
+    const whileItMoves = await answerOf(policy.navigate(note, false));
+    expect({ afterThePageMoved, whileItMoves, went }).toStrictEqual({
+      afterThePageMoved: "went",
+      whileItMoves: "screen.navigation_cancelled",
+      went: ["/inbox"],
+    });
+  });
+
+  it("beside the page, never goes without the person's own act in its frame, not even once", async () => {
+    let acted = false;
+    let went = 0;
+    const policy = navigationPolicy(
+      async () => {
+        await Promise.resolve();
+        went += 1;
+      },
+      {
+        location: () => ({ here: "/start", going: "/start" }),
+        activated: () => acted,
+        now: () => 0,
+      },
+      "beside"
+    );
+    const unprompted = await answerOf(policy.navigate(note, false));
+    acted = true;
+    const clicked = await answerOf(policy.navigate(note, false));
+    expect({ unprompted, clicked, went }).toStrictEqual({
+      unprompted: "screen.navigation_cancelled",
+      clicked: "went",
+      went: 1,
+    });
+  });
+
   it("replaces the frame's own entry when asked, while the page is still on it", async () => {
     const { state, asked } = pageAt();
     await asked(true);
