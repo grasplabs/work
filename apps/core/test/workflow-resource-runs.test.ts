@@ -975,6 +975,7 @@ const evaluatedWith = async (
       await Promise.resolve();
     },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
   };
   let reads = 0;
   const runId = crypto.randomUUID();
@@ -1101,6 +1102,8 @@ describe("an activation's share of core's CPU", () => {
         await Promise.resolve();
       },
       waitForEvent: async () =>
+        await Promise.reject(new Error("No waits here")),
+      waitForMatch: async () =>
         await Promise.reject(new Error("No waits here")),
     };
     // Room for one attempt's worth: the first runs and spends some of it.
@@ -2182,6 +2185,8 @@ describe(
             await Promise.resolve();
           },
           waitForEvent: async () =>
+            await Promise.reject(new Error("No waits here")),
+          waitForMatch: async () =>
             await Promise.reject(new Error("No waits here")),
           sleepUntil: async () => {
             await Promise.resolve();

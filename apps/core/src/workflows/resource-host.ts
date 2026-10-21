@@ -39,6 +39,11 @@ import type {
 } from "../workflow-builds.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
+import {
+  envelopeOf,
+  eventTypeKey,
+  storedEventSchema,
+} from "./event-envelopes.ts";
 import { takesExactly } from "./exact-values.ts";
 import {
   busyMarker,
@@ -66,6 +71,7 @@ import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import type { CallingRun } from "./resource-authority.ts";
+import { requireCallAuthority } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
@@ -83,8 +89,9 @@ import { heldWakeType } from "./wakes.ts";
 //
 // - A step the build doesn't have. Every step is named after a task of
 //   the sealed task table and one of the steps it was sealed with
-//   (`task:<id>` for a set or switch, or a wait's sleep; `enter:<id>` and
-//   `leave:<id>` around a wait, a do or a for; `item:<id>` for a for's
+//   (`task:<id>` for a set or switch, or a wait's sleep or a listen's
+//   waits; `enter:<id>` and `leave:<id>` around a wait, a listen, a do or a
+//   for; `item:<id>` for a for's
 //   `while`), or the workflow's own `workflow:input` and `workflow:output`
 //   when it has them; a wait lasts exactly what was sealed. Anything else
 //   is refused, and fails the run.
@@ -170,6 +177,16 @@ import { heldWakeType } from "./wakes.ts";
 //   `grasp.sleepUntil`'s) are made by the host within a step that records
 //   them; a sleep must be until exactly the deadline its task's enter step
 //   recorded (`#deadlines`), however it was reached.
+// - A listen taking events the build didn't name, or the isolate made up.
+//   A listen's enter step resolves its filters (the engine's type for its
+//   sealed binding and each filter's type, and the attributes each
+//   requires, from the sealed templates) with its deadline, and journals
+//   them beside its record; its waits match exactly those, in the run's
+//   own inbox (`listen`), whatever the isolate passes. Its leave step
+//   transforms, and records, only the events the host took
+//   (`#requireListened`, `#requireRecordedEvents`). Each listen asks
+//   again that the run may still take events through its binding
+//   (`#requireListenAuthority`).
 // - A held side effect taken for a failure, or run twice. A restricted
 //   run's connector call that connect holds for its person
 //   (`connect.held`) ends its step as held, using no retry, whatever the
@@ -243,6 +260,7 @@ export class Run extends WorkerEntrypoint {
         sleepUntil: async (name, timestamp) => {
           unwrapped(await host.sleepUntil(name, timestamp));
         },
+        listen: async (name) => unwrapped(await host.listen(name)),
       };
       return await definition.run(engine, input);
     });
@@ -451,9 +469,14 @@ interface StepOf {
   loop: Readonly<Record<string, Json>>;
 }
 
-/** Whether `task` sleeps: a wait, or a `grasp.sleepUntil` call. */
-const sleepsOf = (task: SealedTask): boolean =>
+/**
+ * Whether `task`'s own step is a durable wait the host makes, not a `do`:
+ * a wait's sleep, a `grasp.sleepUntil` call's, a listen's waits for its
+ * events.
+ */
+const waitsOf = (task: SealedTask): boolean =>
   task.kind === "wait" ||
+  task.kind === "listen" ||
   (task.kind === "call" && task.call.name === "grasp.sleepUntil");
 
 /**
@@ -532,6 +555,11 @@ const workflowStep = (
         loop: {},
       }
     : undefined;
+ * Whether `task`'s enter step resolves a deadline: an expression wait's, a
+ * `grasp.sleepUntil` call's, a listen's (its timeout from then).
+ */
+const resolvesDeadline = (task: SealedTask): boolean =>
+  task.kind === "listen" || deadlineOf(task) !== undefined;
 
 /** The step of `build` that `name` names, as a `do` (`sleep` false) or a
  * sleeping task's sleep; `undefined` when the build has no such step.
@@ -551,8 +579,8 @@ const sealedStep = (
   if (!kind.success || task === undefined || typeof name !== "string") {
     return undefined;
   }
-  // A sleeping task's `task:` step is its sleep, never a `do`.
-  const isSleep = kind.data === "task" && sleepsOf(task);
+  // A waiting task's `task:` step is its wait, never a `do`.
+  const isSleep = kind.data === "task" && waitsOf(task);
   const fits = sleep ? isSleep : task.steps.includes(kind.data) && !isSleep;
   // Exactly the loops around it, as sealed: an `item` step runs in an
   // item of its own `for` too.
@@ -627,10 +655,30 @@ const recordSchema = z.union([
   }),
 ]);
 
-/** What an enter step journals: its record, and when its task started. */
+/**
+ * A listen task's filters as its enter step resolved them: each the
+ * engine's type for its binding and type (run-events.ts, `eventTypeKey`)
+ * and the attributes an event must have been sent with.
+ */
+const resolvedListenSchema = z
+  .array(
+    z.strictObject({
+      type: z.string().min(1).max(100),
+      attributes: z.record(z.string(), z.string()),
+    })
+  )
+  .min(1)
+  .max(16);
+type ResolvedListen = z.infer<typeof resolvedListenSchema>;
+
+/**
+ * What an enter step journals: its record, when its task started, and a
+ * listen's filters, as the host resolved them: never the isolate's.
+ */
 const enteredSchema = z.strictObject({
   record: z.json(),
   startedAt: z.number(),
+  listen: resolvedListenSchema.optional(),
 });
 
 /**
@@ -728,9 +776,12 @@ const triedOnce = new Set<SealedCall["name"]>([
  */
 const configOf = (step: StepOf) => {
   const { task } = step;
+  // A listen's timeout is how long it waits for its events, never how
+  // long an attempt of its steps may take.
+  const ownTimeout = task?.kind === "listen" ? undefined : task?.timeoutMs;
   const timeout = Math.min(
     stepConfig.timeout,
-    task?.timeoutMs ?? stepConfig.timeout
+    ownTimeout ?? stepConfig.timeout
   );
   const once =
     step.kind === "task" &&
@@ -846,6 +897,11 @@ interface StepAttempt {
   itemsAsked: boolean;
   /** What its `item` step's `while` answered, as the host evaluated it. */
   proceeds: boolean | undefined;
+  /**
+   * The filters it resolved for its listen task, with its deadline: what
+   * the task's waits match, journaled beside its enter step's record.
+   */
+  listen: ResolvedListen | undefined;
   /**
    * Whether connect held its call for the run's person (`connect.held`):
    * the step then ends as held, whatever the isolate made of the answer.
@@ -1009,6 +1065,12 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
       slotsOf(task.duration, slots);
     } else if (task.kind === "for") {
       slotsOf(task.loop.in, slots);
+    } else if (task.kind === "listen") {
+      for (const filter of task.listen.filters) {
+        for (const [, template] of filter.attributes) {
+          slotsOf(template, slots);
+        }
+      }
     }
   }
   return slots;
@@ -1016,6 +1078,9 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
 
 /** The furthest a deadline may be, as the engine sleeps: 365 days. */
 const maxDeadlineMs = 365 * 86_400_000;
+
+/** The longest value a listen's filter matches an attribute by. */
+const maxAttributeLength = 1024;
 
 /**
  * The deadline, in ms since the epoch, that a deadline template's `value`
@@ -1101,6 +1166,21 @@ export class ResourceRunHost
    * on, and the only items they may name.
    */
   readonly #items = new Map<string, Json[]>();
+   * The filters each listen task's enter step resolved, by task, as this
+   * activation reached it: what its waits match, exactly.
+   */
+  readonly #listens = new Map<string, ResolvedListen>();
+  /**
+   * The input each listen task's enter step recorded, as transformed, by
+   * task: what its leave step's transformations read as `$input`.
+   */
+  readonly #listenInputs = new Map<string, Json>();
+  /**
+   * The events each listen task took, as its output holds them, by task,
+   * as this activation took them or replayed them: what its leave step
+   * transforms, never what the isolate passes.
+   */
+  readonly #listened = new Map<string, Json>();
   /**
    * The model calls of the run's JSON model tasks: those its replayed steps
    * recorded, as this activation reached them, and those this activation
@@ -1392,6 +1472,9 @@ export class ResourceRunHost
           outcome = journal.record;
           if (step.task !== undefined) {
             this.#taskStarts.set(step.place, journal.startedAt);
+            if (journal.listen !== undefined) {
+              this.#listens.set(step.place, journal.listen);
+            }
           }
         }
         // Fresh or replayed alike: what the run has reached, in order.
@@ -1602,6 +1685,7 @@ export class ResourceRunHost
       items: undefined,
       itemsAsked: false,
       proceeds: undefined,
+      listen: undefined,
       held: false,
       collecting: run.collecting,
       admission,
@@ -1673,7 +1757,11 @@ export class ResourceRunHost
     if (!run.entering) {
       return value;
     }
-    const journaled = { record: value, startedAt: attempt.startedAt };
+    const journaled = {
+      record: value,
+      startedAt: attempt.startedAt,
+      ...(attempt.listen === undefined ? {} : { listen: attempt.listen }),
+    };
     // Measured as the engine measures what a step returns: the
     // record fit, but with its start beside it may not.
     try {
@@ -1741,6 +1829,9 @@ export class ResourceRunHost
     }
     if (step.kind === "enter" && record.data.items !== undefined) {
       this.#items.set(step.place, record.data.items);
+    }
+    if (step.kind === "enter" && task.kind === "listen") {
+      this.#listenInputs.set(step.place, record.data.output);
     }
     if (
       step.kind === "task" &&
@@ -1861,6 +1952,108 @@ export class ResourceRunHost
       await this.#step.sleepUntil(sleeping.name, deadline);
       return null;
     });
+  }
+
+  /**
+   * Takes the events of a listen task, as its enter step recorded what it
+   * waits for: in its run's inbox, by the filters and the deadline the
+   * step journaled, never by anything the isolate passes. `one` and `any`
+   * take the first event that matches a filter, `all` one event for each
+   * filter, in the filters' order, each wait taking none another took.
+   * Answers them in order, each its data or its envelope, as the task
+   * reads them; a replay answers the events taken before. Past the
+   * deadline, `workflow.event_timeout`.
+   */
+  async listen(name: unknown): Promise<Settled<Json>> {
+    return await settle(async () => {
+      const listening = this.#stepOf(name, true);
+      const { task } = listening;
+      const resolved =
+        task === undefined ? undefined : this.#listens.get(listening.place);
+      const deadline =
+        task === undefined ? undefined : this.#deadlines.get(listening.place);
+      if (
+        task?.kind !== "listen" ||
+        resolved === undefined ||
+        deadline === undefined
+      ) {
+        return this.#refuse(
+          `Task "${task?.id ?? ""}" listens as its enter step recorded.`
+        );
+      }
+      // From the run's start, both recorded: the same on every replay.
+      this.#requireShortSleep(deadline - this.#run.createdAt);
+      await this.#requirePerson();
+      await this.#requireListenAuthority(task.listen.binding);
+      const groups =
+        task.listen.strategy === "all"
+          ? resolved.map((filter) => [filter])
+          : [resolved];
+      const events: Json[] = [];
+      for (const [index, match] of groups.entries()) {
+        const wait =
+          index === 0 ? listening.name : `${listening.name}:${index + 1}`;
+        // One at a time, in the filters' order: waits come one at a time.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        events.push(await this.#taken(wait, match, deadline, task.listen.read));
+      }
+      this.#listened.set(listening.place, events);
+      return events;
+    });
+  }
+
+  /**
+   * The event wait `wait` takes, durably: the oldest in the run's inbox
+   * matching `match`, accepted before `deadline`, as the task reads it.
+   */
+  async #taken(
+    wait: string,
+    match: ResolvedListen,
+    deadline: number,
+    read: "data" | "envelope"
+  ): Promise<Json> {
+    let event: { payload: unknown; timestamp: Date };
+    try {
+      event = await this.#step.waitForMatch(wait, { match, until: deadline });
+    } catch (error) {
+      if (isTimeout(error)) {
+        throw workflowResourceErrors.create("workflow.event_timeout");
+      }
+      throw error;
+    }
+    const stored = storedEventSchema.parse(event.payload);
+    return read === "data"
+      ? stored.data
+      : z.json().parse(envelopeOf(stored, event.timestamp));
+  }
+
+  /**
+   * Refuses a listen through `alias` unless the run may still take its
+   * events: an event binding its start froze, its authority holding now
+   * (resource-authority.ts, `requireCallAuthority`), as a call's must
+   * (`workflow.event_denied`). A test run's binding is its checkpoint's,
+   * and nothing outside it is asked.
+   */
+  async #requireListenAuthority(alias: string): Promise<void> {
+    const { calling } = this.#run;
+    if (calling.candidate !== undefined) {
+      if (calling.candidate.get(alias)?.kind !== "event") {
+        throw workflowResourceErrors.create("workflow.event_denied");
+      }
+      return;
+    }
+    const binding = calling.bindings.get(alias);
+    if (binding?.kind !== "event") {
+      throw workflowResourceErrors.create("workflow.event_denied");
+    }
+    try {
+      await requireCallAuthority(this.#env, calling, binding);
+    } catch (error) {
+      if (workflowResourceErrors.codeOf(error) === "workflow.call_denied") {
+        throw workflowResourceErrors.create("workflow.event_denied");
+      }
+      throw error;
+    }
   }
 
   /**
@@ -2192,7 +2385,10 @@ export class ResourceRunHost
     task: SealedTask
   ): Json | undefined {
     const inputFrom =
-      task.kind === "call" || task.kind === "wait" || task.kind === "for"
+      task.kind === "call" ||
+      task.kind === "wait" ||
+      task.kind === "for" ||
+      task.kind === "listen"
         ? task.inputFrom
         : undefined;
     return inputFrom === undefined
@@ -2230,6 +2426,10 @@ export class ResourceRunHost
     const transforms =
       expression.stage === "taskOutputAs" ||
       expression.stage === "taskExportAs";
+    if (transforms && task?.kind === "listen") {
+      this.#requireListened(attempt, task, expression, { input, output });
+      return;
+    }
     if (
       !transforms ||
       task?.kind !== "call" ||
@@ -2251,6 +2451,51 @@ export class ResourceRunHost
       canonicalJson(transformed) !== canonicalJson(input)
     ) {
       this.#refuse(`Task "${task.id}" transforms only its call's answer.`);
+    }
+  }
+
+  /**
+   * The output a listen task's leave step of `attempt` records, as the
+   * host built it: the events it took, transformed by its sealed
+   * `output.as` from the host's own evaluations, where it has one;
+   * `undefined` until it can be.
+   */
+  #shapedEvents(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "listen" }>
+  ): Json | undefined {
+    const events = this.#listened.get(attempt.step.place);
+    return task.outputAs === undefined || events === undefined
+      ? events
+      : filledFrom(task.outputAs, attempt.outputAs);
+  }
+
+  /**
+   * Refuses an `output.as` or `export.as` evaluation of `attempt`'s listen
+   * task unless it reads what the host has: the events the task took for
+   * `output.as`, the output as its `output.as` made it for `export.as`,
+   * and the input its enter step recorded. So a forged module can't put
+   * events the run never took into what the task records.
+   */
+  #requireListened(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "listen" }>,
+    expression: SealedExpression,
+    { input, output }: { input: Json; output: Json }
+  ): void {
+    const expected =
+      expression.stage === "taskOutputAs"
+        ? this.#listened.get(attempt.step.place)
+        : this.#shapedEvents(attempt, task);
+    const entered = this.#listenInputs.get(attempt.step.place);
+    if (
+      attempt.step.kind !== "leave" ||
+      expected === undefined ||
+      entered === undefined ||
+      canonicalJson(expected) !== canonicalJson(output) ||
+      canonicalJson(entered) !== canonicalJson(input)
+    ) {
+      this.#refuse(`Task "${task.id}" transforms only the events it took.`);
     }
   }
 
@@ -2777,11 +3022,13 @@ export class ResourceRunHost
       }
       const { step } = attempt;
       const { task } = step;
-      const deadline =
-        step.kind === "enter" && task !== undefined
-          ? deadlineOf(task)
-          : undefined;
-      if (task === undefined || deadline === undefined) {
+      const entering = step.kind === "enter" && task !== undefined;
+      const deadline = entering ? deadlineOf(task) : undefined;
+      const listening = entering && task.kind === "listen" ? task : undefined;
+      if (
+        task === undefined ||
+        (deadline === undefined && listening === undefined)
+      ) {
         return this.#refuse(
           `Step of "${task?.id ?? "the workflow"}" resolves no deadline.`
         );
@@ -2793,6 +3040,15 @@ export class ResourceRunHost
       attempt.untilAsked = true;
       this.#requireOpen(attempt, task, frame, "resolves its deadline");
       const passed = this.#callFrame(frame);
+      if (listening !== undefined) {
+        // Its filters with its deadline, journaled beside its record.
+        attempt.listen = await this.#resolvedListen(attempt, listening, passed);
+        attempt.until = Date.now() + listening.timeoutMs;
+        return attempt.until;
+      }
+      if (deadline === undefined) {
+        return this.#refuse(`Task "${task.id}" resolves no deadline.`);
+      }
       const value = await this.#built(
         attempt,
         deadline.template,
@@ -2849,6 +3105,46 @@ export class ResourceRunHost
       attempt.items = items.data;
       return items.data;
     });
+  }
+
+  /**
+   * The filters of listen task `task`, for `attempt`'s enter step: each
+   * the engine's type for the task's binding and the filter's type, and
+   * its attributes, each built from what the build sealed on the task's
+   * transformed input (`frame`), and held to text. The step journals
+   * them, so a replay waits for exactly the same events.
+   */
+  async #resolvedListen(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "listen" }>,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<ResolvedListen> {
+    if (task.timeoutMs > maxDeadlineMs) {
+      return this.#refuse(`Task "${task.id}" waits at most a year.`);
+    }
+    const resolved: ResolvedListen = [];
+    for (const filter of task.listen.filters) {
+      const attributes: Record<string, string> = {};
+      for (const [name, template] of filter.attributes) {
+        // One at a time, in order: as the build sealed them.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const value = await this.#built(attempt, template, frame, frame.size);
+        if (typeof value !== "string" || value.length > maxAttributeLength) {
+          throw workflowResourceErrors.create("workflow.call_invalid", {
+            issues: [
+              `listen: A filter's ${name} is text of at most ${maxAttributeLength} characters.`,
+            ],
+          });
+        }
+        attributes[name] = value;
+      }
+      resolved.push({
+        // oxlint-disable-next-line no-await-in-loop -- one hash per filter
+        type: await eventTypeKey(task.listen.binding, filter.type),
+        attributes,
+      });
+    }
+    return resolved;
   }
 
   /** The descriptor text of `task`'s `which` schema, if it has one. */
@@ -3019,6 +3315,61 @@ export class ResourceRunHost
     return false;
   }
 
+  /**
+   * Refuses `record` of `attempt`'s listen task's leave step unless it is
+   * what the host built from the events the task took: its output, as its
+   * `output.as` made it, and its context, as its `export.as` made it
+   * (none without one).
+   */
+  #requireRecordedEvents(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "listen" }>,
+    record: { output: Json; context?: Json | undefined }
+  ): void {
+    const output = this.#shapedEvents(attempt, task);
+    const context =
+      task.exportAs === undefined
+        ? undefined
+        : filledFrom(task.exportAs, attempt.exportAs);
+    const sameContext =
+      context === undefined
+        ? record.context === undefined && task.exportAs === undefined
+        : record.context !== undefined &&
+          canonicalJson(context) === canonicalJson(record.context);
+    if (
+      output === undefined ||
+      canonicalJson(output) !== canonicalJson(record.output) ||
+      !sameContext
+    ) {
+      this.#refuse(`Task "${task.id}"'s step records the events it took.`);
+    }
+  }
+
+  /**
+   * Refuses `record` of `attempt`'s step of `task` unless what it records
+   * of the task's work outside the isolate is the host's: a call task's
+   * step its call's answer (a record without one, or after the call failed
+   * or before it answered, would let the isolate answer for the effect),
+   * and a listen's leave step the events the task took.
+   */
+  #requireRecordedWork(
+    attempt: StepAttempt,
+    task: SealedTask,
+    record: { output: Json; context?: Json | undefined }
+  ): void {
+    const { kind } = attempt.step;
+    if (
+      kind === "task" &&
+      task.kind === "call" &&
+      task.call.name !== "grasp.sleepUntil"
+    ) {
+      this.#requireRecordedAnswer(attempt, task, record);
+    }
+    if (kind === "leave" && task.kind === "listen") {
+      this.#requireRecordedEvents(attempt, task, record);
+    }
+  }
+
   #acceptRecord(attempt: StepAttempt, value: Json): void {
     const { step, data } = attempt;
     const { task } = step;
@@ -3063,23 +3414,14 @@ export class ResourceRunHost
     }
     if (
       step.kind === "enter" &&
-      deadlineOf(task) !== undefined &&
+      resolvesDeadline(task) &&
       record.until === undefined
     ) {
       return this.#refuse(
         `Task "${task.id}"'s enter step resolves its deadline.`
       );
     }
-    // A call task's step records its call's answer: a record without one,
-    // or after the call failed or before it answered, would let the
-    // isolate answer for the effect.
-    const callTask =
-      step.kind === "task" &&
-      task.kind === "call" &&
-      task.call.name !== "grasp.sleepUntil";
-    if (callTask) {
-      this.#requireRecordedAnswer(attempt, task, record);
-    }
+    this.#requireRecordedWork(attempt, task, record);
     const checks = checksOf[step.kind];
     const against: [DataCheck, Json][] = [
       ["input", data.input],

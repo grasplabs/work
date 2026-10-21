@@ -198,6 +198,8 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
     },
     waitForEvent: async (name, options) =>
       await step.waitForEvent(name, options),
+    waitForMatch: async (name, options) =>
+      await step.waitForMatch(name, options),
   };
 };
 

@@ -80,6 +80,15 @@ import { literalDurationMs } from "./values.ts";
  *   is called or with what. The host refuses a binding the run's start
  *   didn't freeze, and checks each call's authority again as it makes it
  *   (core's workflows/resource-calls.ts).
+ * - A listen taking events its source didn't name. Its binding, each
+ *   filter's type and the attribute names it requires are literals the
+ *   generator seals in the task table (`GeneratedListen`); an attribute's
+ *   value is a literal or a sealed expression the host evaluates in the
+ *   task's enter step. The generated code only asks the host to listen,
+ *   by its task: the host matches events in the run's own inbox by what
+ *   it recorded, never by anything the code passes. A filter's
+ *   `correlate`, which would evaluate expressions over each event's own
+ *   content, is reported as unsupported.
  * - Limits raising the host's ceilings. `document.metadata.grasp.limits`
  *   and a task's `timeout` (inline or from `use.timeouts`) are sealed as
  *   numbers, which the host only ever applies as the lower of them and its
@@ -141,7 +150,35 @@ export interface SealedExpression {
 }
 
 /** The task kinds this generator lowers. */
-export type LoweredKind = "call" | "do" | "for" | "set" | "switch" | "wait";
+export type LoweredKind =
+  | "call"
+  | "do"
+  | "for"
+  | "listen"
+  | "set"
+  | "switch"
+  | "wait";
+
+/**
+ * A `listen` task's events, as the build seals them: the event binding
+ * its `metadata.grasp.binding` names, how many of its filters it waits
+ * for (`one` and `any` an event, `all` one per filter, in their order),
+ * what of each event its output holds, and its filters: each a literal
+ * type the binding admits and the attributes it requires, each a literal
+ * or an expression the host evaluates, once, in the task's enter step.
+ */
+export interface GeneratedListen {
+  readonly binding: string;
+  readonly strategy: "one" | "any" | "all";
+  readonly read: "data" | "envelope";
+  readonly filters: readonly GeneratedFilter[];
+}
+
+/** One filter of a `listen` task (`GeneratedListen`). */
+export interface GeneratedFilter {
+  readonly type: string;
+  readonly attributes: readonly (readonly [string, CallTemplate])[];
+}
 
 /**
  * A value the host builds itself when a task's call is made, or its
@@ -277,6 +314,8 @@ export interface GeneratedTask {
   readonly duration?: CallTemplate;
   /** A `call` task's named call. */
   readonly call?: GeneratedCall;
+  /** A `listen` task's events. */
+  readonly listen?: GeneratedListen;
   /**
    * A `call` or `wait` task's `input.from`, as a template of the
    * expressions its module evaluates for it (their slots) and its
@@ -394,10 +433,17 @@ const loweredKinds = new Set<string>([
   "call",
   "do",
   "for",
+  "listen",
   "set",
   "switch",
   "wait",
 ]);
+
+/**
+ * The longest a listen may wait for its events, as the engine takes a
+ * deadline: 365 days. A host's own ceiling (a test run's) may be lower.
+ */
+export const maxListenMs = 365 * 86_400_000;
 
 /** Named calls lowered here; decisions come later. */
 const loweredCalls = new Set<string>([
@@ -1598,6 +1644,152 @@ const lowerSleep = (
   );
 };
 
+/**
+ * The filters of listen task `item`, sealed: `undefined` once one was
+ * refused. A filter's `correlate` (an expression over each event's own
+ * content) isn't lowered: a filter matches by attribute equality alone.
+ */
+const filtersOf = (
+  emitter: Emitter,
+  item: ListTask,
+  strategy: "one" | "any" | "all",
+  to: JsonObject
+): GeneratedFilter[] | undefined => {
+  const strategyPointer = pointerJoin(
+    pointerJoin(pointerJoin(item.pointer, "listen"), "to"),
+    strategy
+  );
+  const listed = strategy === "one" ? [to.one] : to[strategy];
+  if (!Array.isArray(listed)) {
+    throw new TypeError(
+      `The checked workflow has no filters at ${item.pointer}`
+    );
+  }
+  const filters: GeneratedFilter[] = [];
+  let refused = false;
+  for (const [index, filter] of listed.entries()) {
+    const pointer =
+      strategy === "one"
+        ? strategyPointer
+        : pointerJoin(strategyPointer, index);
+    if (!isObject(filter) || !isObject(filter.with)) {
+      throw new Error(`The checked workflow has no filter at ${pointer}`);
+    }
+    if (Object.hasOwn(filter, "correlate")) {
+      emitter.refusals.add(
+        pointerJoin(pointer, "correlate"),
+        "listen:correlate",
+        item.id
+      );
+      refused = true;
+      continue;
+    }
+    const withPointer = pointerJoin(pointer, "with");
+    const { type, ...rest } = filter.with;
+    if (typeof type !== "string") {
+      throw new TypeError(
+        `The checked workflow's filter at ${pointer} has no type`
+      );
+    }
+    const attributes = Object.entries(rest).map(
+      ([name, value]) =>
+        [
+          name,
+          templateOf(
+            emitter,
+            value ?? null,
+            pointerJoin(withPointer, name),
+            item.id,
+            "json"
+          ),
+        ] as const
+    );
+    filters.push({ type, attributes });
+  }
+  return refused ? undefined : filters;
+};
+
+/**
+ * The statements of a `listen` task: its enter step resolves its deadline
+ * (its timeout from then) and its filters' attributes, once, and records
+ * them; then the host takes its events, durably, holding no isolate; then
+ * its leave step, if it has stages after.
+ */
+const lowerListen = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  /** Where the task's expressions start, before its stages were compiled. */
+  taskBefore: number
+): void => {
+  const { id, task, pointer } = item;
+  const listen = isObject(task.listen) ? task.listen : {};
+  const to = isObject(listen.to) ? listen.to : {};
+  const strategy = (["one", "any", "all"] as const).find((key) =>
+    Object.hasOwn(to, key)
+  );
+  const metadata = isObject(task.metadata) ? task.metadata.grasp : undefined;
+  const binding = isObject(metadata) ? metadata.binding : undefined;
+  if (strategy === undefined || typeof binding !== "string") {
+    throw new Error(
+      `The checked workflow's listen at ${pointer} is incomplete`
+    );
+  }
+  if (sealed.timeoutMs === undefined || sealed.timeoutMs > maxListenMs) {
+    emitter.refusals.add(pointerJoin(pointer, "timeout"), "listen:timeout", id);
+    return;
+  }
+  const filters = filtersOf(emitter, item, strategy, to);
+  if (filters === undefined) {
+    return;
+  }
+  // The enter step evaluates everything of the task but its leave stages:
+  // its if, its input.from and its filters' expressions.
+  const entering = emitter.expressions
+    .slice(taskBefore)
+    .filter(
+      ({ stage }) => stage !== "taskOutputAs" && stage !== "taskExportAs"
+    ).length;
+  if (entering > maxStepExpressions) {
+    emitter.refusals.add(pointer, "step:expressions", id);
+  }
+  const inputFrom = inputFromOf(emitter, item);
+  const outputAs = sealedPartOf(emitter, item, "output", "as", "taskOutputAs");
+  const exportAs = sealedPartOf(emitter, item, "export", "as", "taskExportAs");
+  // Its `task:` step is the host's waits for its events.
+  const steps: TaskStep[] = ["task"];
+  emitter.tasks.push({
+    ...sealed,
+    kind: "listen",
+    listen: {
+      binding,
+      strategy,
+      read: listen.read === "envelope" ? "envelope" : "data",
+      filters,
+    },
+    steps,
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+    ...(outputAs === undefined ? {} : { outputAs }),
+    ...(exportAs === undefined ? {} : { exportAs }),
+  });
+  steps.push(
+    ...lowerDurable(
+      emitter,
+      item,
+      stages,
+      place,
+      (indent) => {
+        emitter.lines.push(
+          `${indent}output = await flow.listen(${literal(id)});`
+        );
+      },
+      true
+    )
+  );
+};
+
 /** Lowers a task list: `lowerList`, passed to the tasks it lowers. */
 type ListLowerer = (
   emitter: Emitter,
@@ -1721,7 +1913,9 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
   if (kind === "for") {
     refused = refusedLoop(emitter, item) || refused;
   }
-  const timed = timedKinds.has(kind) && !sleepsOf(task, kind);
+  // A listen's timeout is its deadline: required, and what it waits until.
+  const timed =
+    (timedKinds.has(kind) && !sleepsOf(task, kind)) || kind === "listen";
   if (Object.hasOwn(task, "timeout") && !timed) {
     emitter.refusals.add(
       pointerJoin(pointer, "timeout"),
@@ -1899,6 +2093,8 @@ const lowerTask = (
     lowerSleep(emitter, item, stages, place, sealed, before);
   } else if (kind === "for") {
     lowerFor(emitter, item, stages, place, sealed, lowerList);
+  } else if (kind === "listen") {
+    lowerListen(emitter, item, stages, place, sealed, before);
   } else {
     const steps: TaskStep[] = [];
     emitter.tasks.push({ ...sealed, kind: "do", steps });

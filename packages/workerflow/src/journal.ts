@@ -34,6 +34,7 @@
 // Values and errors are kept as codec text (codec.ts), never as live
 // objects; a step's stream result as chunks beside them (streams.ts).
 import { createHistory } from "./history.ts";
+import type { JournaledMatch } from "./identity.ts";
 import { journalSchemaVersion } from "./journal-schema.ts";
 import { createNotifications } from "./notifications.ts";
 import { createStreamChunks } from "./streams.ts";
@@ -61,14 +62,21 @@ const upgradedSchema = (
   const [stored] = sql
     .exec<{ schema: number | string | null }>("SELECT schema FROM run")
     .toArray();
-  if (stored?.schema === 8) {
-    // In one turn, so in one of the object's atomic writes: the column and
-    // the version move together.
+  let schema = stored?.schema;
+  // Each in one turn, so in one of the object's atomic writes: the columns
+  // and the version move together.
+  if (schema === 8) {
     sql.exec("ALTER TABLE run ADD COLUMN control_fence INTEGER");
     sql.exec("UPDATE run SET schema = 9");
-    return 9;
+    schema = 9;
   }
-  return stored?.schema;
+  if (schema === 9) {
+    sql.exec("ALTER TABLE events ADD COLUMN attributes TEXT");
+    sql.exec("ALTER TABLE steps ADD COLUMN event_match TEXT");
+    sql.exec("UPDATE run SET schema = 10");
+    schema = 10;
+  }
+  return schema;
 };
 
 /**
@@ -269,8 +277,10 @@ export interface StepRow extends Record<string, SqlStorageValue> {
    * only `resume` does, by the time the run was paused (run.ts).
    */
   deadline: number | null;
-  /** The event type a wait takes. */
+  /** The event type a `waitForEvent` takes. */
   event_type: string | null;
+  /** What a `waitForMatch` takes, as `eventMatchOf` journals it. */
+  event_match: string | null;
   /**
    * A sleep's duration or a wait's timeout as first given, which every
    * replay must give again; null for `sleepUntil`.
@@ -354,6 +364,8 @@ export interface EventRow extends Record<string, SqlStorageValue> {
   payload: string;
   /** The sender's delivery key: the same key again is the same event. */
   key: string | null;
+  /** What it was sent with, as `eventAttributesOf` keeps them. */
+  attributes: string | null;
   accepted_at: number;
   /** The wait (its step's ordinal) that took the event. */
   consumed_by: number | null;
@@ -428,6 +440,7 @@ export const createJournal = (sql: SqlStorage): void => {
       deadline INTEGER,
       event_type TEXT,
       duration_ms INTEGER,
+      event_match TEXT,
       config TEXT,
       has_rollback INTEGER NOT NULL DEFAULT 0,
       nested INTEGER NOT NULL DEFAULT 0,
@@ -451,7 +464,8 @@ export const createJournal = (sql: SqlStorage): void => {
       payload TEXT NOT NULL,
       key TEXT UNIQUE,
       accepted_at INTEGER NOT NULL,
-      consumed_by INTEGER UNIQUE REFERENCES steps (ordinal)
+      consumed_by INTEGER UNIQUE REFERENCES steps (ordinal),
+      attributes TEXT
     );
     CREATE INDEX IF NOT EXISTS events_unconsumed
       ON events (type, seq) WHERE consumed_by IS NULL;
@@ -663,7 +677,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
 };
 
 const stepColumns =
-  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config, has_rollback, nested";
+  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, event_match, duration_ms, config, has_rollback, nested";
 
 export const readStep = (
   sql: SqlStorage,
@@ -757,7 +771,8 @@ export const readGenerationOver = (sql: SqlStorage): number | undefined => {
   return row === undefined ? undefined : row.generation - row.open;
 };
 
-const eventColumns = "seq, type, payload, key, accepted_at, consumed_by";
+const eventColumns =
+  "seq, type, payload, key, attributes, accepted_at, consumed_by";
 
 /** The event a wait took, if it took one. */
 export const readConsumedEvent = (
@@ -792,6 +807,40 @@ export const readNextEvent = (
   return oldest !== undefined && oldest.accepted_at < deadline
     ? oldest
     : undefined;
+};
+
+/**
+ * The oldest event no wait has taken that matches any entry of `match`
+ * (identity.ts, `eventMatches`), if the run accepted it before
+ * `deadline`: the one a `waitForMatch` with that deadline takes. Each
+ * entry's type and attributes are compared in the query, so it reads the
+ * one row it takes; the attribute names were checked by CloudEvents' rule
+ * and go in as bound values, never as text of the query.
+ */
+export const readMatchingEvent = (
+  sql: SqlStorage,
+  match: readonly JournaledMatch[],
+  deadline: number
+): EventRow | undefined => {
+  const clauses: string[] = [];
+  const values: (string | number)[] = [];
+  for (const entry of match) {
+    const parts = ["type = ?"];
+    values.push(entry.type);
+    for (const [name, value] of Object.entries(entry.attributes)) {
+      parts.push("json_extract(attributes, ?) IS ?");
+      values.push(`$."${name}"`, value);
+    }
+    clauses.push(`(${parts.join(" AND ")})`);
+  }
+  const [oldest] = sql
+    .exec<EventRow>(
+      `SELECT ${eventColumns} FROM events WHERE consumed_by IS NULL AND accepted_at < ? AND (${clauses.join(" OR ")}) ORDER BY seq LIMIT 1`,
+      deadline,
+      ...values
+    )
+    .toArray();
+  return oldest;
 };
 
 /** A step whose rollback is still to run, or ended the rolling back. */

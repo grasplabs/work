@@ -47,8 +47,9 @@
  * from what the build sealed of the task: generated code only asks for it,
  * by its task, and passes the task's transformed input. Its answer is the
  * step's record, so a replay makes no call again. A deadline (a wait's
- * expression, a `grasp.sleepUntil` call's) is resolved once, by the host,
- * in its task's enter step, which records it.
+ * expression, a `grasp.sleepUntil` call's, a listen's) is resolved once,
+ * by the host, in its task's enter step, which records it, with a listen's
+ * filters beside it. A listen's events are the host's to take.
  *
  * It imports nothing: generated code and its type check see only this
  * module.
@@ -240,6 +241,13 @@ export interface Flow {
    * step recorded, holding no isolate: at once when it has passed.
    */
   readonly sleepUntil: (id: string, timestamp: number) => Promise<void>;
+  /**
+   * Takes the events of `listen` task `id`, durably, holding no isolate:
+   * the host matches them in the run's inbox by the filters and deadline
+   * its enter step recorded, and answers them in order, each as the task
+   * reads it. A replay answers the events taken before.
+   */
+  readonly listen: (id: string) => Promise<FlowValue>;
 }
 
 /** Which of a task's data the host checks against the task's schema. */
@@ -295,6 +303,8 @@ export interface OpenWorkflowEngine {
   ) => Promise<FlowValue>;
   readonly sleep: (name: string, milliseconds: number) => Promise<void>;
   readonly sleepUntil: (name: string, timestamp: number) => Promise<void>;
+  /** A listen task's events, as the host takes them (`Flow.listen`). */
+  readonly listen: (name: string) => Promise<FlowValue>;
 }
 
 /** What `openWorkflow` makes: frozen, so nothing puts another `run` in place. */
@@ -741,6 +751,7 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       }
       await engine.sleepUntil(step, timestamp);
     },
+    listen: async (id) => await engine.listen(stepOf("task", id)),
   };
   return freeze(flow);
 };
