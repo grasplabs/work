@@ -13,6 +13,7 @@ import {
   OutsideEuError,
 } from "../cloudflare/accounts.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
+import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
 import { clientGatewayId } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
 import type { DeployErrorCode } from "./errors.ts";
@@ -23,6 +24,11 @@ export interface AccountResources {
   databases: Map<string, string>;
   /** The R2 buckets, by name. */
   buckets: string[];
+  /**
+   * Whether the sending domain's zone is active, for a release that sends
+   * mail; undefined for one that doesn't.
+   */
+  mailDomainActive?: boolean;
 }
 
 /** Every D1 database the release's Workers bind, by name, once each. */
@@ -59,6 +65,12 @@ export const bucketNames = (manifest: ReleaseManifest): string[] => {
   return [...names];
 };
 
+/** Whether any of the release's Workers sends mail (a `send_email` binding). */
+export const sendsMail = (manifest: ReleaseManifest): boolean =>
+  Object.values(manifest.workers).some((worker) =>
+    worker.bindings.some(({ type }) => type === "send_email")
+  );
+
 /** `task`, with a resource outside the EU turned into the deploy's `code`. */
 const inEu = async <T>(
   code: DeployErrorCode,
@@ -79,13 +91,17 @@ const inEu = async <T>(
  * account, in the EU, one at a time, and the client's AI Gateway, which
  * core's `MODEL_GATEWAY` names (src/deploy/core-config.ts): so no deploy
  * points core at a gateway the account doesn't have, however the client
- * came to be. Throws a `DeployError` for a database or bucket that
- * exists, or was made, elsewhere.
+ * came to be. And, for a release that sends mail, the client's sending
+ * domain, `mailDomain` (`clientMailDomain`), with Email Sending on in the
+ * client's own account, so its `EMAIL` binding sends from the address it
+ * is locked to (src/deploy/upload.ts). Throws a `DeployError` for a
+ * database or bucket that exists, or was made, elsewhere.
  */
 export const ensureResources = async (
   api: CloudflareApi,
   accountId: string,
-  manifest: ReleaseManifest
+  manifest: ReleaseManifest,
+  mailDomain: string
 ): Promise<AccountResources> => {
   const databases = new Map<string, string>();
   for (const name of databaseNames(manifest)) {
@@ -105,5 +121,9 @@ export const ensureResources = async (
     );
   }
   await ensureAiGateway(api, accountId, clientGatewayId);
-  return { databases, buckets };
+  if (!sendsMail(manifest)) {
+    return { databases, buckets };
+  }
+  const sending = await ensureSendingDomain(api, accountId, mailDomain);
+  return { databases, buckets, mailDomainActive: sending.active };
 };

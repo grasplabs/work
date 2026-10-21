@@ -41,6 +41,15 @@ export interface ScriptState {
   migrationTag?: string;
 }
 
+/** A zone, as the API reports it, and its Email Sending domains. */
+export interface ZoneState {
+  id: string;
+  name: string;
+  /** `pending` until its name servers are delegated, then `active`. */
+  status: string;
+  sending: { tag: string; name: string; enabled: boolean }[];
+}
+
 export interface AccountState {
   id: string;
   name: string;
@@ -58,6 +67,8 @@ export interface AccountState {
   /** The jurisdiction D1 reports for a database it creates, whatever was asked. */
   d1Reports?: string;
   gateways: Json[];
+  /** Its zones, each with the domains Email Sending sends from in it. */
+  zones: ZoneState[];
   scripts: Map<string, ScriptState>;
   workflows: Map<string, { class_name: string; script_name: string }>;
   /** The hashes of the static files the account holds. */

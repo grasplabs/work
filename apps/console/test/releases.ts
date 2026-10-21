@@ -35,6 +35,11 @@ export interface ReleaseSpec {
   coreSecrets?: string[];
   /** core's Durable Object migration tags, in order: `v1` by default. */
   durableObjectMigrations?: string[];
+  /**
+   * Whether core sends mail, binding `EMAIL` (`send_email`) as the real
+   * one does; without it, a deploy sets up no sending domain.
+   */
+  sendsMail?: boolean;
 }
 
 /** A built release: its manifest and every blob, by R2 key. */
@@ -203,6 +208,9 @@ export const buildRelease = async (
             bucket_name: "grasp-os-audit-archive",
             jurisdiction: "eu",
           },
+          ...(spec.sendsMail === true
+            ? [{ type: "send_email", name: "EMAIL" }]
+            : []),
         ],
         d1Databases: [
           { binding: "DB", databaseName: "grasp-os-core", migrations },

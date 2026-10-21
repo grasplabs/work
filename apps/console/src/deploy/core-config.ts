@@ -2,14 +2,15 @@
  * The deployment config every deploy derives for a client's core:
  * `MODEL_GATEWAY`, naming the AI Gateway the deploy's resources step
  * ensures in the client's account (src/deploy/resources.ts) with the
- * models a new deployment allows, and `SIGN_IN`, from the client's
- * record, each replaced by a client setting of the same name, if it has
- * one (src/deploy/deploy.ts); and `RUNTIME_PROFILE`, `cloudflare`, which
+ * models a new deployment allows, `SIGN_IN`, from the client's record,
+ * and `MAIL_FROM`, Grasp's onboarding sender at the client's sending
+ * domain (`onboardingSender`), each replaced by a client setting of the
+ * same name, if it has one (src/deploy/deploy.ts), a `MAIL_FROM` only by
+ * one at the same address; and `RUNTIME_PROFILE`, `cloudflare`, which
  * the deploy fixes and no client setting can change (it isn't a
  * deployment config var): every client runs on Cloudflare, which enforces
  * Code Mode's CPU limit, so its run records say so (core's
- * src/code-mode.ts). Derived
- * on every deploy, so rollouts keep them. And the check every deploy makes
+ * src/code-mode.ts). Derived on every deploy, so rollouts keep them. And the check every deploy makes
  * of the config it is about to set, settings included, before it changes
  * anything (`checkDeployedConfig`).
  */
@@ -26,7 +27,10 @@ import {
   signInConfigSchema,
   unreachableAdmins,
 } from "@grasp-os/shared/deployment-config";
-import type { SignInConfig } from "@grasp-os/shared/deployment-config";
+import type {
+  MailFrom,
+  SignInConfig,
+} from "@grasp-os/shared/deployment-config";
 import { memoryLimitsSchema } from "@grasp-os/shared/memory";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { z } from "zod";
@@ -45,6 +49,30 @@ export const clientGatewayId = "grasp-os";
  * can't make its run records claim otherwise.
  */
 const clientRuntimeProfile = "cloudflare";
+
+/**
+ * The client's sending domain: `mail.<id>.<domain>`, a zone of its own in
+ * the client's account, below the client's hostname (`<id>.<domain>`)
+ * rather than at it, so delegating it never takes the hostname the router
+ * serves away from the router (src/deploy/resources.ts ensures it).
+ */
+export const clientMailDomain = (clientId: string, domain: string): string =>
+  `mail.${clientId}.${domain}`;
+
+/**
+ * Who a client's onboarding mail is from: Grasp's onboarding sender at
+ * the client's sending domain, by the product's name. Core's `MAIL_FROM`,
+ * which is also where replies go unless a mail names another address, and
+ * the only address the `EMAIL` binding may send from
+ * (`allowed_sender_addresses`, src/deploy/upload.ts).
+ */
+export const onboardingSender = (
+  clientId: string,
+  domain: string
+): MailFrom => ({
+  name: "Grasp Work",
+  address: `onboarding@${clientMailDomain(clientId, domain)}`,
+});
 
 const { domains, admins } = signInConfigSchema.shape;
 const { hostedDomain } = signInConfigSchema.shape.google.unwrap().shape;
@@ -273,12 +301,16 @@ const configSchemas: Readonly<Record<string, readonly z.ZodType[]>> = {
  * could sign in with (`checkDeployedSignIn`), `setting_invalid` for any
  * other var its schema refuses, and for an archive retention shorter than
  * the retention, which core refuses too. Core fails closed on a var it
- * can't parse (no sign-in, no model calls), so one is never deployed. The
- * error names the var, never its value.
+ * can't parse (no sign-in, no model calls), so one is never deployed. And
+ * `mail_sender_locked` for a `MAIL_FROM` at another address than
+ * `sender`, the onboarding sender's: its `EMAIL` binding sends from that
+ * address alone, so core's mail would all fail. The error names the var,
+ * never its value.
  */
 export const checkDeployedConfig = (
   clientId: string,
-  vars: Readonly<Record<string, unknown>>
+  vars: Readonly<Record<string, unknown>>,
+  sender: string
 ): void => {
   checkDeployedSignIn(clientId, vars);
   const invalid = (name: string): DeployError =>
@@ -303,6 +335,13 @@ export const checkDeployedConfig = (
   );
   if (archive.success && retention.success && archive.data < retention.data) {
     throw invalid("AUDIT_ARCHIVE_RETENTION_DAYS");
+  }
+  const from = mailFromSchema.safeParse(vars.MAIL_FROM);
+  if (from.success && from.data.address !== sender) {
+    throw new DeployError(
+      "mail_sender_locked",
+      `${clientId}'s MAIL_FROM to deploy isn't the onboarding sender's address`
+    );
   }
 };
 
@@ -339,8 +378,8 @@ export interface CoreConfigInputs {
 
 /**
  * The deployment config vars a deploy derives for a client's core:
- * `MODEL_GATEWAY` and `RUNTIME_PROFILE` always, `SIGN_IN` when its record
- * has sign-in.
+ * `MODEL_GATEWAY`, `RUNTIME_PROFILE` and `MAIL_FROM` (`onboardingSender`)
+ * always, `SIGN_IN` when its record has sign-in.
  */
 export const derivedCoreConfig = ({
   clientId,
@@ -352,6 +391,7 @@ export const derivedCoreConfig = ({
   return {
     MODEL_GATEWAY: { gateway: clientGatewayId, models: defaultGatewayModels },
     RUNTIME_PROFILE: clientRuntimeProfile,
+    MAIL_FROM: onboardingSender(clientId, domain),
     ...(config === undefined ? {} : { SIGN_IN: config }),
   };
 };

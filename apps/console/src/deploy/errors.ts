@@ -28,6 +28,11 @@ export const deployErrorCodes = [
   /** A client setting, or the config derived for it, isn't one core would take. */
   "setting_invalid",
   /**
+   * A `MAIL_FROM` setting names another address than the onboarding
+   * sender's, the only one the client's `EMAIL` binding sends from.
+   */
+  "mail_sender_locked",
+  /**
    * The client's sign-in can't be made: its record doesn't parse, or it
    * names an IdP the console has no app id for.
    */
