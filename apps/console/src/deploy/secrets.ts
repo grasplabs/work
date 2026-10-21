@@ -167,12 +167,50 @@ export interface ClientGeneration {
 }
 
 /**
+ * The secrets derived for `client` that the Worker `app` runs with: each
+ * at the client's generation, and at the previous one where the Worker
+ * takes it, until `rotationWindowMs` after the generation went live. Only
+ * the client's own: never a master key, never a shared secret.
+ */
+export const derivedWorkerSecrets = async (
+  app: string,
+  keys: Pick<DeploySecrets, "routerKey" | "clientKey">,
+  client: ClientGeneration,
+  now: Date
+): Promise<Map<string, string>> => {
+  const values = new Map<string, string>();
+  const rotating =
+    client.generation > 1 &&
+    (client.rotationLiveAt === null ||
+      now.getTime() - client.rotationLiveAt.getTime() < rotationWindowMs);
+  const derive = async (secret: DerivedSecret, generation: number) =>
+    await deriveClientSecret(
+      keys[secret.master],
+      secret.purpose,
+      client.id,
+      generation,
+      secret.encoding
+    );
+  for (const secret of derivedSecrets[app] ?? []) {
+    // oxlint-disable-next-line no-await-in-loop -- a few per Worker
+    values.set(secret.name, await derive(secret, client.generation));
+    if (secret.previous !== undefined && rotating) {
+      // oxlint-disable-next-line no-await-in-loop -- a few per Worker
+      values.set(secret.previous, await derive(secret, client.generation - 1));
+    }
+  }
+  return values;
+};
+
+/** The apps each client has derived secrets for. */
+export const derivedSecretApps: readonly string[] = Object.keys(derivedSecrets);
+
+/**
  * Every secret the Worker `app` runs with: its derived ones for the client
- * and its generation (with the previous generation's, where the Worker
- * takes it, until `rotationWindowMs` after the generation went live), and the
- * shared ones given for it. Throws `reserved_secret_name` for a shared
- * secret under a reserved name, and `missing_secret` for a required one it
- * has no value for, so nothing is uploaded without it.
+ * (`derivedWorkerSecrets`), and the shared ones given for it. Throws
+ * `reserved_secret_name` for a shared secret under a reserved name, and
+ * `missing_secret` for a required one it has no value for, so nothing is
+ * uploaded without it.
  */
 export const workerSecrets = async (
   app: string,
@@ -191,25 +229,13 @@ export const workerSecrets = async (
       `${worker.name}'s ${reserved} is derived, never given`
     );
   }
-  const rotating =
-    client.generation > 1 &&
-    (client.rotationLiveAt === null ||
-      now.getTime() - client.rotationLiveAt.getTime() < rotationWindowMs);
-  const derive = async (secret: DerivedSecret, generation: number) =>
-    await deriveClientSecret(
-      secrets[secret.master],
-      secret.purpose,
-      client.id,
-      generation,
-      secret.encoding
-    );
-  for (const secret of derivedSecrets[app] ?? []) {
-    // oxlint-disable-next-line no-await-in-loop -- a few per Worker
-    values.set(secret.name, await derive(secret, client.generation));
-    if (secret.previous !== undefined && rotating) {
-      // oxlint-disable-next-line no-await-in-loop -- a few per Worker
-      values.set(secret.previous, await derive(secret, client.generation - 1));
-    }
+  for (const [name, value] of await derivedWorkerSecrets(
+    app,
+    secrets,
+    client,
+    now
+  )) {
+    values.set(name, value);
   }
   const missing = worker.requiredSecrets.find((name) => !values.has(name));
   if (missing !== undefined) {
