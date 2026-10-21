@@ -9,6 +9,7 @@ import {
   interviewApiPath,
   interviewPagePath,
 } from "@grasp-os/shared/interview-links";
+import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
@@ -41,6 +42,7 @@ import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { interviewResponse } from "./onboarding/links.ts";
+import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import {
   packageArtifactResponse,
@@ -144,6 +146,9 @@ const linkResponse = async (
   }
   if (pathname === interviewTurnPath) {
     return await interviewTurnResponse(request, env, requestId, ctx);
+  }
+  if (pathname === interviewStoryPath) {
+    return await interviewStoryResponse(request, env, requestId, ctx);
   }
   return undefined;
 };

@@ -12,6 +12,8 @@ import type {
   InterviewSaved,
   InterviewSession,
 } from "@grasp-os/shared/interview-links";
+import { agreedFacts, agreedKey } from "@grasp-os/shared/interview-story";
+import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { visionFields } from "@grasp-os/shared/kickoff";
 import type {
   KickoffReading,
@@ -55,7 +57,9 @@ import {
   gt,
   inArray,
   isNotNull,
+  isNull,
   like,
+  lt,
   not,
   or,
   sql,
@@ -197,6 +201,15 @@ export interface Took {
 }
 
 /** What one interview turn knows of who it is with, from the store (`turnContext`). */
+/** What the drawing gets from one interview: only what its person agreed to. */
+export interface DrawInput {
+  person: string;
+  kind: "own" | "lead";
+  /** When they last agreed to something new: what `drawn` is told once it is drawn. */
+  agreedAt: string;
+  facts: { tag: FactTag; record: string }[];
+}
+
 export interface TurnContext {
   kind: InterviewKind;
   /** Their first name, their team, and their lead's first name. */
@@ -693,6 +706,14 @@ export class Onboarding extends DurableObject<Env> {
       state?.startedAt ?? (progress.startedAt === null ? null : now);
     const completedAt =
       state?.completedAt ?? (progress.person === "completed" ? now : null);
+    // Agreed to for the first time, or something added after and agreed to
+    // as well: what it was about is drawn again. Only what they agreed to
+    // counts (`agreedFacts`), so lines still being read back change nothing.
+    const agreed = agreedKey(progress.facts);
+    const newlyAgreed =
+      progress.person === "completed" &&
+      agreed !== "" &&
+      agreed !== agreedKey(this.#held(person.id)?.facts ?? []);
     this.ctx.storage.transactionSync(() => {
       this.#db
         .update(links)
@@ -725,6 +746,13 @@ export class Onboarding extends DurableObject<Env> {
       }
       if (completedAt !== null && (state?.completedAt ?? null) === null) {
         this.#noted(person.id, "interview.completed", now);
+      }
+      if (newlyAgreed) {
+        this.#db
+          .update(interviewStates)
+          .set({ agreedAt: now })
+          .where(eq(interviewStates.person, person.id))
+          .run();
       }
     });
     return answered({ saved: true, version: next });
@@ -783,6 +811,64 @@ export class Onboarding extends DurableObject<Env> {
       known: known.join("\n\n"),
       terms: [...new Set(terms)],
     });
+  }
+
+  /**
+   * Whose interviews have something agreed to that wasn't drawn yet, the
+   * longest waiting first: the drawing of what each was about (GRA-366)
+   * takes them from here.
+   */
+  drawsDue(): string[] {
+    return this.#db
+      .select({ person: interviewStates.person })
+      .from(interviewStates)
+      .where(
+        and(
+          isNotNull(interviewStates.agreedAt),
+          or(
+            isNull(interviewStates.drawnAt),
+            lt(interviewStates.drawnAt, interviewStates.agreedAt)
+          )
+        )
+      )
+      .orderBy(asc(interviewStates.agreedAt), asc(interviewStates.person))
+      .all()
+      .map(({ person }) => person);
+  }
+
+  /**
+   * What the drawing gets from someone's interview: only the facts they
+   * agreed to, as the record keeps them. Nothing before they agreed, and
+   * nothing they added after until they agreed to that too.
+   */
+  drawInput(person: string): DrawInput | null {
+    const [state] = this.#db
+      .select()
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    const facts = agreedFacts(this.#held(person)?.facts ?? []);
+    if (state === undefined || state.agreedAt === null || facts.length === 0) {
+      return null;
+    }
+    return {
+      person,
+      kind: state.kind,
+      agreedAt: state.agreedAt,
+      facts: facts.map(({ tag, record }) => ({ tag, record })),
+    };
+  }
+
+  /**
+   * Notes that what someone agreed to by `agreedAt` was drawn: what they
+   * agree to after that is due again.
+   */
+  drawn(person: string, agreedAt: string): void {
+    this.#db
+      .update(interviewStates)
+      .set({ drawnAt: agreedAt })
+      .where(eq(interviewStates.person, person))
+      .run();
   }
 
   /**

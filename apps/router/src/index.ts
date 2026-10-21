@@ -6,6 +6,7 @@ import {
   strictTransportSecurity,
 } from "@grasp-os/shared/http";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -177,11 +178,14 @@ export default {
     ) {
       return rateLimited(url, host);
     }
-    // An interview link's endpoints (core's src/onboarding/links.ts, and
-    // its turns, src/onboarding/interview.ts), the same, from one budget;
-    // core counts per link too.
+    // An interview link's endpoints (core's src/onboarding/links.ts, its
+    // turns, src/onboarding/interview.ts, and its read-back,
+    // src/onboarding/story.ts), the same, from one budget; core counts per
+    // link too.
     if (
-      (pathname === interviewApiPath || pathname === interviewTurnPath) &&
+      (pathname === interviewApiPath ||
+        pathname === interviewTurnPath ||
+        pathname === interviewStoryPath) &&
       !(await withinLimit(env.INTERVIEW_RATE_LIMIT, request, host))
     ) {
       return rateLimited(url, host);

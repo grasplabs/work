@@ -129,6 +129,14 @@ export const interviewStates = sqliteTable("interview_states", {
   startedAt: text("started_at"),
   /** When they first agreed to what was read back (ISO 8601). */
   completedAt: text("completed_at"),
+  /**
+   * When they last agreed to something new (ISO 8601): their first
+   * agreement, or what they added and agreed to after. What they agreed to
+   * is drawn from then on.
+   */
+  agreedAt: text("agreed_at"),
+  /** When what they agreed to was last drawn (ISO 8601); null before it ever was. */
+  drawnAt: text("drawn_at"),
   updatedAt: text("updated_at").notNull(),
 });
 

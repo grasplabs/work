@@ -65,6 +65,7 @@
     "./errors": "./src/errors.ts",
     "./guests": "./src/guests.ts",
     "./interview-links": "./src/interview-links.ts",
+    "./interview-story": "./src/interview-story.ts",
     "./interview-turn": "./src/interview-turn.ts",
     "./kickoff": "./src/kickoff.ts",
     "./http": "./src/http.ts",
