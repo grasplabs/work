@@ -198,6 +198,20 @@ export interface ChatReplyUsage {
 }
 
 /**
+ * A note an answer cites: a Knowledge document the chat's code was given
+ * by one of its reads before the answer, which the answer links to as
+ * `[title](grasp:note/<documentId>)`. Only its ID: who reads the answer
+ * resolves it with their own access.
+ */
+export interface ChatCitation {
+  kind: "document";
+  documentId: string;
+}
+
+/** Most citations one answer carries: the first it links to. */
+export const chatCitationsMax = 50;
+
+/**
  * One stored message of a chat, oldest first by `id`. The agent's
  * instructions and the APIs it was shown aren't among them.
  */
@@ -206,8 +220,14 @@ export type ChatMessage =
   | {
       id: number;
       role: "assistant";
-      /** Its answer, in Markdown. */
+      /**
+       * Its answer, in Markdown. A link to a note it was given stays a
+       * `grasp:note/<documentId>` link, one of `citations`; one to any
+       * other note is shown as its text alone.
+       */
       text: string;
+      /** The notes it cites, in the order it first links to them. */
+      citations: ChatCitation[];
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
       end: ChatReplyEnd;
@@ -231,7 +251,12 @@ export type ChatMessage =
       at: string;
     };
 
-/** What the agent is writing now, before it is stored. */
+/**
+ * What the agent is writing now, before it is stored. It holds no note
+ * link: each is its text alone until the answer is stored and its
+ * citations decided. A page makes a `grasp:note/<id>` link a link only
+ * when `<id>` is among that stored message's `citations`, never in this.
+ */
 export interface ChatPartial {
   text: string;
   code: ChatCode[];
