@@ -80,8 +80,9 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
     return await runApp(
       quietLoader(env.LOADER).load({
         ...settings,
-        mainModule: "app.js",
-        modules: { "app.js": { js: isolateOf(values.js) } },
+        // A name a module given as text couldn't have: `{ js }` must stay.
+        mainModule: "app.mjs",
+        modules: { "app.mjs": { js: isolateOf(values.js) } },
       })
     );
   }

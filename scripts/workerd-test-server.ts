@@ -111,11 +111,12 @@ export const serveOnWorkerd = async (
   // What workerd says, on either stream: a startup failure names it, and a
   // Worker's or an isolate's console reaches one or the other.
   let output = "";
-  const read = (chunk: Buffer) => {
-    output += chunk.toString();
+  const read = (chunk: string) => {
+    output += chunk;
   };
-  workerd.stdout?.on("data", read);
-  workerd.stderr?.on("data", read);
+  // Decoded as streams, so a character split between chunks stays whole.
+  workerd.stdout?.setEncoding("utf-8").on("data", read);
+  workerd.stderr?.setEncoding("utf-8").on("data", read);
   const url = `http://${address}/`;
   await waitUntilServing(url, workerd, () => output);
   return {
