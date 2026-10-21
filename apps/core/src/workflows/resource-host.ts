@@ -4,6 +4,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -43,6 +44,7 @@ import type {
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import {
+  childEndSchema,
   childEndType,
   envelopeOf,
   eventTypeKey,
@@ -347,13 +349,11 @@ export interface ChildRuns {
     taskId: string,
     input: Json
   ) => Promise<string>;
-  /** Tells child `childId`'s parent again that it ended, if it has. */
-  remind: (childId: string) => Promise<void>;
   /**
-   * What child `childId` of `parentId`, ended, completed with;
-   * `workflow.child_failed` for one that didn't.
+   * Tells child `childId`'s parent again that it ended, and how, if it
+   * has (resource-runs.ts, `tellParentOfEnd`).
    */
-  outcome: (parentId: string, childId: string) => Promise<Json>;
+  remind: (childId: string) => Promise<void>;
 }
 
 /** A task whose own work's output is the host's: a listen's, a run's. */
@@ -2310,9 +2310,21 @@ export class ResourceRunHost
         );
       }
       await this.#requirePerson();
-      await children.remind(child);
       try {
-        await this.#step.waitForMatch(waiting.name, {
+        // A nudge, in case its end was told while nobody waited: the
+        // engine's own telling of the end, again until core takes it,
+        // stands whether or not this gets through.
+        await children.remind(child);
+      } catch (error) {
+        log.warn("workflow.child_remind_failed", {
+          runId: this.#run.runId,
+          child,
+          ...errorFields(error),
+        });
+      }
+      let ended: { payload: unknown };
+      try {
+        ended = await this.#step.waitForMatch(waiting.name, {
           match: [{ type: childEndType(child) }],
           until: deadline,
         });
@@ -2322,9 +2334,18 @@ export class ResourceRunHost
         }
         throw error;
       }
-      const output = await children.outcome(this.#run.runId, child);
-      this.#takenOutputs.set(waiting.place, output);
-      return output;
+      // How it ended, as its end's event said and the wait journaled: the
+      // same on every replay.
+      const end = childEndSchema.parse(ended.payload);
+      if (end.status !== "completed") {
+        throw workflowResourceErrors.create("workflow.child_failed", {
+          child,
+          status: end.status,
+          code: end.code,
+        });
+      }
+      this.#takenOutputs.set(waiting.place, end.output);
+      return end.output;
     });
   }
 

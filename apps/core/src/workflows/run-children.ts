@@ -3,14 +3,11 @@ import {
   coreStartKeyPrefix,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
-import { z } from "zod";
 
 import { startWorkflow } from "../workflow-starts.ts";
-import { runEngine } from "./engine.ts";
-import { childEndType } from "./event-envelopes.ts";
 import { admitChild } from "./quotas.ts";
 import type { ChildRuns, HostedResourceRun } from "./resource-host.ts";
-import { resultOf, runOf } from "./resource-runs.ts";
+import { runOf, tellParentOfEnd } from "./resource-runs.ts";
 
 // Child runs of JSON workflows (platform specification 13.5 `run`, 14.3,
 // 18): a `run` task starts exactly the workflow version its run's start
@@ -48,7 +45,12 @@ import { resultOf, runOf } from "./resource-runs.ts";
 // - A parent waiting on an end it never hears. A child's end is told to
 //   its parent each time the engine tells core of it, until core takes the
 //   notification, and again as the parent starts to wait: an event under
-//   the child's ID as its key, taken once (`remind`).
+//   the child's ID as its key, taken once (resource-runs.ts,
+//   `tellParentOfEnd`).
+// - A parent reading another outcome on replay. The end's event carries
+//   how the child ended, and its output (`ChildEnd`); the parent's wait
+//   journals the event, so every replay reads the same, however long after
+//   the child's own details are gone.
 
 /** The start key of the child task `taskId` starts: one per task of a run. */
 const childKeyOf = (taskId: string): string =>
@@ -106,64 +108,14 @@ const startChild = async (
   return start.runId;
 };
 
-/**
- * Tells run `parentId` that its child `childId` ended: an event its wait
- * for that child takes, under the child's ID as its key, so telling it
- * again is the same event. A parent that ended takes none, which is no
- * error.
- */
-export const tellParent = async (
-  env: Env,
-  parentId: string,
-  childId: string
-): Promise<void> => {
-  await runEngine(env).sendEvent(parentId, childEndType(childId), childId);
-};
-
-/**
- * The output of `parentId`'s child `childId`, once it ended: what it
- * completed with; `workflow.child_failed` naming its code for a child that
- * failed or was cancelled.
- */
-const outcomeOf = async (
-  env: Env,
-  parentId: string,
-  childId: string
-): Promise<Json> => {
-  const row = await runOf(env, childId);
-  if (row?.parentRunId !== parentId) {
-    throw new Error(`Run ${childId} isn't run ${parentId}'s child`);
-  }
-  if (row.status === "completed") {
-    const { output } = await resultOf(env, row);
-    return z.json().parse(output ?? null);
-  }
-  if (row.status === "failed" || row.status === "cancelled") {
-    const { error } = await resultOf(env, row);
-    throw workflowResourceErrors.create("workflow.child_failed", {
-      child: childId,
-      status: row.status,
-      code: error?.code ?? null,
-    });
-  }
-  throw new Error(`Run ${childId} hasn't ended`);
-};
-
 /** Child runs as core starts them and reads how they ended. */
 export const childRunsOf = (env: Env): ChildRuns => ({
   start: async (parent, alias, taskId, input) =>
     await startChild(env, parent, alias, taskId, input),
   remind: async (childId) => {
     const row = await runOf(env, childId);
-    if (
-      row?.parentRunId !== null &&
-      row?.parentRunId !== undefined &&
-      (row.status === "completed" ||
-        row.status === "failed" ||
-        row.status === "cancelled")
-    ) {
-      await tellParent(env, row.parentRunId, childId);
+    if (row !== undefined) {
+      await tellParentOfEnd(env, row);
     }
   },
-  outcome: async (parentId, childId) => await outcomeOf(env, parentId, childId),
 });

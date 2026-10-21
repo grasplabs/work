@@ -59,6 +59,7 @@ import {
   stepLimitOf,
   unadmitted,
 } from "./host.ts";
+import type { ChildEnd } from "./event-envelopes.ts";
 import type { RunStep } from "./host.ts";
 import { admitAttempt, quotaPolicy } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
@@ -292,124 +293,6 @@ const endActions: Partial<Record<WorkflowRunStatus, string>> = {
   completed: "workflow.run.completed",
   failed: "workflow.run.failed",
   cancelled: "workflow.run.cancelled",
-};
-
-/**
- * What follows the end of run `row` in its lineage (run-children.ts): its
- * parent, if it is a child, told it ended, so the parent's wait for it
- * ends; its own children that haven't ended terminated in the engine, so
- * no child outlives its parent (each one's own end then does the same for
- * its children). A child the engine has no record of yet runs nothing
- * once it does: its activation refuses a run whose parent ended
- * (`loadedRun`), and each of its calls a parent that did
- * (resource-authority.ts). Each is the same done again, so the engine
- * telling an end again, until core takes it, repeats them safely; a
- * failure throws, for the engine to tell it again.
- */
-const afterEnd = async (env: Env, row: RunRow): Promise<void> => {
-  if (row.parentRunId !== null) {
-    await runEngine(env).sendEvent(
-      row.parentRunId,
-      childEndType(row.id),
-      row.id
-    );
-  }
-  const children = await drizzle(env.DB)
-    .select()
-    .from(workflowResourceRuns)
-    .where(
-      and(
-        eq(workflowResourceRuns.parentRunId, row.id),
-        inArray(workflowResourceRuns.status, unended)
-      )
-    );
-  for (const child of children) {
-    // oxlint-disable-next-line no-await-in-loop -- one at a time
-    await runEngine(env).terminate(child.id);
-  }
-};
-
-/**
- * Makes run `id`'s row say where the engine says it is: a notification no
- * newer than the last the row took changes nothing, and an ended run never
- * changes again. Its end is audited with the change, once. A failed end
- * keeps the engine's error code (`failureCode`), which outlives the
- * engine's record of the run.
- */
-export const projectResourceRun = async (
-  env: Env,
-  id: string,
-  engine: EngineStatus,
-  failureCode: string | null = null
-): Promise<void> => {
-  const row = await runOf(env, id);
-  if (row === undefined) {
-    return;
-  }
-  if (!unended.includes(row.status)) {
-    // Told again, as the engine tells an end until core takes it: what
-    // follows an end is done again, so none of it is lost to a failure.
-    await afterEnd(env, row);
-    return;
-  }
-  const status = projected[engine.status];
-  const ended = !unended.includes(status);
-  const action = endActions[status];
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db
-      .update(workflowResourceRuns)
-      .set({
-        status,
-        ...(engine.sequence === undefined
-          ? {}
-          : { engineSequence: engine.sequence }),
-        ...(ended ? { endedAt: new Date(engine.at) } : {}),
-        ...(status === "failed" && failureCode !== null ? { failureCode } : {}),
-      })
-      .where(
-        and(
-          eq(workflowResourceRuns.id, id),
-          inArray(workflowResourceRuns.status, unended),
-          engine.sequence === undefined
-            ? undefined
-            : lt(workflowResourceRuns.engineSequence, engine.sequence)
-        )
-      ),
-    // A failure names its code, as the run keeps it: a run that failed for
-    // packages revoked, say, says so in the audit log.
-    ...(action === undefined
-      ? []
-      : [
-          outboxedIfChanged(
-            db,
-            withFailure(runEntry(row, action), status, failureCode)
-          ),
-        ]),
-    // Ended, it waits in the admission queue for nothing more: its places
-    // go now, rather than keep others waiting until they lapse. After the
-    // audit entry, which reads what the row's update changed.
-    ...(ended
-      ? [
-          runDequeued(
-            db,
-            id,
-            sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${id} AND ${workflowResourceRuns.status} = ${status})`
-          ),
-        ]
-      : []),
-  ]);
-  if (ended) {
-    // A screen's cancel of it, settled by how it ended.
-    const now = await runOf(env, id);
-    if (now !== undefined) {
-      await settleCancels(env, now);
-      await afterEnd(env, now);
-    }
-  }
-  if (status !== row.status) {
-    await tellQueryFollowers(env, id);
-  }
 };
 
 /** Sends `row`'s start to the engine; throws when the engine didn't take it. */
@@ -1086,6 +969,147 @@ export const resultOf = async (
     return { error: keptFailureOf(row.failureCode) };
   }
   return engine.error === undefined ? {} : { error: engine.error };
+};
+
+/**
+ * Tells child run `row`'s parent that it ended, and how (`ChildEnd`): an
+ * event under the child's ID as its key, which the parent's wait for it
+ * takes, once, and journals. Told again, it is the same event; a parent
+ * that ended takes none, and an event the parent can no longer take the
+ * same (the child's details gone since) is refused, which is no error:
+ * what was told first stands. Nothing for a run that isn't a child or
+ * hasn't ended.
+ */
+export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
+  if (row.parentRunId === null || unended.includes(row.status)) {
+    return;
+  }
+  const { output, error } = await resultOf(env, row);
+  const end: ChildEnd =
+    row.status === "completed"
+      ? { status: "completed", output: z.json().parse(output ?? null) }
+      : {
+          status: row.status === "cancelled" ? "cancelled" : "failed",
+          code: error?.code ?? null,
+        };
+  await runEngine(env).admitEvent(row.parentRunId, {
+    type: childEndType(row.id),
+    payload: end,
+    key: row.id,
+    attributes: {},
+  });
+};
+
+/**
+ * What follows the end of run `row` in its lineage (run-children.ts): its
+ * parent, if it is a child, told it ended, so the parent's wait for it
+ * ends; its own children that haven't ended terminated in the engine, so
+ * no child outlives its parent (each one's own end then does the same for
+ * its children). A child the engine has no record of yet runs nothing
+ * once it does: its activation refuses a run whose parent ended
+ * (`loadedRun`), and each of its calls a parent that did
+ * (resource-authority.ts). Each is the same done again, so the engine
+ * telling an end again, until core takes it, repeats them safely; a
+ * failure throws, for the engine to tell it again.
+ */
+const afterEnd = async (env: Env, row: RunRow): Promise<void> => {
+  await tellParentOfEnd(env, row);
+  const children = await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRuns)
+    .where(
+      and(
+        eq(workflowResourceRuns.parentRunId, row.id),
+        inArray(workflowResourceRuns.status, unended)
+      )
+    );
+  for (const child of children) {
+    // oxlint-disable-next-line no-await-in-loop -- one at a time
+    await runEngine(env).terminate(child.id);
+  }
+};
+
+/**
+ * Makes run `id`'s row say where the engine says it is: a notification no
+ * newer than the last the row took changes nothing, and an ended run never
+ * changes again. Its end is audited with the change, once. A failed end
+ * keeps the engine's error code (`failureCode`), which outlives the
+ * engine's record of the run.
+ */
+export const projectResourceRun = async (
+  env: Env,
+  id: string,
+  engine: EngineStatus,
+  failureCode: string | null = null
+): Promise<void> => {
+  const row = await runOf(env, id);
+  if (row === undefined) {
+    return;
+  }
+  if (!unended.includes(row.status)) {
+    // Told again, as the engine tells an end until core takes it: what
+    // follows an end is done again, so none of it is lost to a failure.
+    await afterEnd(env, row);
+    return;
+  }
+  const status = projected[engine.status];
+  const ended = !unended.includes(status);
+  const action = endActions[status];
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(workflowResourceRuns)
+      .set({
+        status,
+        ...(engine.sequence === undefined
+          ? {}
+          : { engineSequence: engine.sequence }),
+        ...(ended ? { endedAt: new Date(engine.at) } : {}),
+        ...(status === "failed" && failureCode !== null ? { failureCode } : {}),
+      })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, id),
+          inArray(workflowResourceRuns.status, unended),
+          engine.sequence === undefined
+            ? undefined
+            : lt(workflowResourceRuns.engineSequence, engine.sequence)
+        )
+      ),
+    // A failure names its code, as the run keeps it: a run that failed for
+    // packages revoked, say, says so in the audit log.
+    ...(action === undefined
+      ? []
+      : [
+          outboxedIfChanged(
+            db,
+            withFailure(runEntry(row, action), status, failureCode)
+          ),
+        ]),
+    // Ended, it waits in the admission queue for nothing more: its places
+    // go now, rather than keep others waiting until they lapse. After the
+    // audit entry, which reads what the row's update changed.
+    ...(ended
+      ? [
+          runDequeued(
+            db,
+            id,
+            sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${id} AND ${workflowResourceRuns.status} = ${status})`
+          ),
+        ]
+      : []),
+  ]);
+  if (ended) {
+    // A screen's cancel of it, settled by how it ended.
+    const now = await runOf(env, id);
+    if (now !== undefined) {
+      await settleCancels(env, now);
+      await afterEnd(env, now);
+    }
+  }
+  if (status !== row.status) {
+    await tellQueryFollowers(env, id);
+  }
 };
 
 /** The most runs `listResourceRuns` answers: the newest. */

@@ -56,3 +56,18 @@ export const envelopeOf = (
  */
 export const childEndType = (childRunId: string): string =>
   `child-${childRunId}`;
+
+/**
+ * What a child run's end tells its parent, as the event's payload: what it
+ * completed with, or how it didn't and its error's code. The parent's wait
+ * journals it with the event, so a replay reads the same outcome, however
+ * long after the child's own details are gone.
+ */
+export const childEndSchema = z.discriminatedUnion("status", [
+  z.strictObject({ status: z.literal("completed"), output: z.json() }),
+  z.strictObject({
+    status: z.enum(["failed", "cancelled"]),
+    code: z.string().max(256).nullable(),
+  }),
+]);
+export type ChildEnd = z.infer<typeof childEndSchema>;

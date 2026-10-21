@@ -581,8 +581,12 @@ const hostOf = async (
       await Promise.resolve();
     },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+    // The child's end, as its event journaled it.
     waitForMatch: async () =>
-      await Promise.resolve({ payload: null, timestamp: new Date() }),
+      await Promise.resolve({
+        payload: { status: "completed", output: { greeting: "Hello, Ada" } },
+        timestamp: new Date(),
+      }),
   };
   const runId = crypto.randomUUID();
   return new ResourceRunHost(
@@ -620,7 +624,6 @@ const hostOf = async (
         remind: async () => {
           await Promise.resolve();
         },
-        outcome: async () => await Promise.resolve({ greeting: "Hello, Ada" }),
       },
     }
   );
