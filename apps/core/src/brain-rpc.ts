@@ -118,20 +118,31 @@ const kickoffSaid = (
     .filter((each) => each !== "")
     .join("\n");
 
-/** The onboarding's sources: the kickoff, and who works where. */
-const onboardingSources = (facts: OnboardingFacts | null): Source[] => {
+/**
+ * The onboarding's sources, each with when it came in: the kickoff when
+ * its transcript did, and who works where when the admin last saved it.
+ * The one definition of which there are and what they are called, for
+ * `brain.read` (`onboardingSources`) and `brain.changes` (`sourceChanges`)
+ * alike; none for anyone but an admin, who alone has `facts`.
+ */
+const onboardingSourcesAt = (
+  facts: OnboardingFacts | null
+): { source: Source; at: string }[] => {
   const kickoffAt = facts?.kickoff.transcript?.at;
   return [
     ...(kickoffAt === undefined
       ? []
       : [
           {
-            id: kickoffSourceId,
-            kind: "interview",
-            title: "Kickoff",
-            date: dayOf(kickoffAt),
-            step: 1,
-          } satisfies Source,
+            source: {
+              id: kickoffSourceId,
+              kind: "interview",
+              title: "Kickoff",
+              date: dayOf(kickoffAt),
+              step: 1,
+            } satisfies Source,
+            at: kickoffAt,
+          },
         ]),
     // The roster is the list of who works where the admin gave: as the
     // brain reads a directory, the source of the teams' sizes and roles.
@@ -141,35 +152,31 @@ const onboardingSources = (facts: OnboardingFacts | null): Source[] => {
       ? []
       : [
           {
-            id: rosterSourceId,
-            kind: "import",
-            connection: "directory",
-            title: "Staff list",
-            date: dayOf(facts.rosterSavedAt),
-            step: 2,
-          } satisfies Source,
+            source: {
+              id: rosterSourceId,
+              kind: "import",
+              connection: "directory",
+              title: "Staff list",
+              date: dayOf(facts.rosterSavedAt),
+              step: 2,
+            } satisfies Source,
+            at: facts.rosterSavedAt,
+          },
         ]),
   ];
 };
 
-/**
- * The onboarding's sources as changes (brain-changes.ts): the kickoff when
- * its transcript came in, the staff list when it was last saved; none for
- * anyone but an admin, who alone has `facts`, as for `brain.read`.
- */
-const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] => {
-  const kickoffAt = facts?.kickoff.transcript?.at;
-  return [
-    ...(kickoffAt === undefined
-      ? []
-      : [{ id: kickoffSourceId, title: "Kickoff", at: kickoffAt }]),
-    ...(facts === null ||
-    facts.view.roster === null ||
-    facts.rosterSavedAt === null
-      ? []
-      : [{ id: rosterSourceId, title: "Staff list", at: facts.rosterSavedAt }]),
-  ];
-};
+/** The onboarding's sources: the kickoff, and who works where. */
+const onboardingSources = (facts: OnboardingFacts | null): Source[] =>
+  onboardingSourcesAt(facts).map(({ source }) => source);
+
+/** The onboarding's sources as changes (brain-changes.ts), as `brain.read` names them. */
+const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] =>
+  onboardingSourcesAt(facts).map(({ source, at }) => ({
+    id: source.id,
+    title: source.title,
+    at,
+  }));
 
 /**
  * The roster's and the kickoff's teams, one per name: a kickoff team the
