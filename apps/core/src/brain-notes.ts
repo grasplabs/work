@@ -7,7 +7,7 @@ import type { BrainNote, BrainNotePage } from "@grasp-os/shared/brain";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import { documentTypeOf } from "@grasp-os/shared/knowledge";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 
@@ -82,34 +82,60 @@ export const brainNotes = async (
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   const ids = page.map(({ id }) => id);
-  const linked =
+  // Each note's first `brainNoteMaxLinks` links, by path, ranked in the
+  // database: a page never reads more links than it returns.
+  const ranked = db.$with("ranked").as(
+    db
+      .select({
+        from: links.fromDocumentId,
+        toCollectionId: links.toCollectionId,
+        path: links.toPath,
+        label: links.label,
+        rank: sql<number>`row_number() over (partition by ${links.fromDocumentId} order by ${links.toPath})`.as(
+          "rank"
+        ),
+      })
+      .from(links)
+      .where(inArray(links.fromDocumentId, ids))
+  );
+  const [linked, counted] =
     ids.length === 0
-      ? []
-      : await db
-          .select({
-            from: links.fromDocumentId,
-            path: links.toPath,
-            label: links.label,
-            documentId: target.id,
-          })
-          .from(links)
-          .innerJoin(documents, eq(documents.id, links.fromDocumentId))
-          .innerJoin(collections, eq(collections.id, documents.collectionId))
-          .leftJoin(
-            target,
-            and(
-              // Links name paths in their own note's collection, so the
-              // note's collections join decides access to the target too.
-              // A link to another collection would need a collections join
-              // of its own for the access check.
-              eq(target.collectionId, documents.collectionId),
-              eq(links.toCollectionId, documents.collectionId),
-              eq(target.path, links.toPath),
-              allowed.documents(target.path)
+      ? [[], []]
+      : await Promise.all([
+          db
+            .with(ranked)
+            .select({
+              from: ranked.from,
+              path: ranked.path,
+              label: ranked.label,
+              documentId: target.id,
+            })
+            .from(ranked)
+            .innerJoin(documents, eq(documents.id, ranked.from))
+            .innerJoin(collections, eq(collections.id, documents.collectionId))
+            .leftJoin(
+              target,
+              and(
+                // Links name paths in their own note's collection, so the
+                // note's collections join decides access to the target
+                // too. A link to another collection would need a
+                // collections join of its own for the access check.
+                eq(target.collectionId, documents.collectionId),
+                eq(ranked.toCollectionId, documents.collectionId),
+                eq(target.path, ranked.path),
+                allowed.documents(target.path)
+              )
             )
-          )
-          .where(inArray(links.fromDocumentId, ids))
-          .orderBy(asc(links.fromDocumentId), asc(links.toPath));
+            .where(lte(ranked.rank, brainNoteMaxLinks))
+            .orderBy(asc(ranked.from), asc(ranked.path)),
+          // How many links each note has in all, the rest counted only.
+          db
+            .select({ from: links.fromDocumentId, total: count() })
+            .from(links)
+            .where(inArray(links.fromDocumentId, ids))
+            .groupBy(links.fromDocumentId),
+        ]);
+  const totals = new Map(counted.map(({ from, total }) => [from, total]));
   const notes = page.map((row): BrainNote => {
     const its = linked.filter(({ from }) => from === row.id);
     return {
@@ -120,15 +146,13 @@ export const brainNotes = async (
       title: row.title,
       type: documentTypeOf(row.type),
       updatedAt: row.updatedAt.toISOString(),
-      links: its
-        .slice(0, brainNoteMaxLinks)
-        .map(({ path, label, documentId }) => ({
-          path,
-          label,
-          documentId:
-            documentId === null ? null : documentIdSchema.parse(documentId),
-        })),
-      moreLinks: Math.max(0, its.length - brainNoteMaxLinks),
+      links: its.map(({ path, label, documentId }) => ({
+        path,
+        label,
+        documentId:
+          documentId === null ? null : documentIdSchema.parse(documentId),
+      })),
+      moreLinks: Math.max(0, (totals.get(row.id) ?? 0) - its.length),
     };
   });
   await noteProvenance(
