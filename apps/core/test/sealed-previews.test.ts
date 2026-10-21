@@ -22,6 +22,7 @@ import {
   openStore,
 } from "../src/data-stores.ts";
 import { appMembers } from "../src/db/core/schema.ts";
+import { retryDisconnects } from "../src/members.ts";
 import { sweepPreviewStores } from "../src/sealed-previews.ts";
 import { openTestRun } from "./agent-chat.ts";
 import { release } from "./apps.ts";
@@ -37,7 +38,7 @@ import {
 } from "./previews.ts";
 import { appModulesOf, loadFrame } from "./screen-frames.ts";
 import { calledAs, failure } from "./sealed-apps.ts";
-import { auditedDuring, signedInApi } from "./sign-in.ts";
+import { auditedDuring, openRpc, signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout
 // (sealed-previews.ts): the draft sealed into a draft release, and every
@@ -1529,6 +1530,53 @@ export class App extends DurableObject {
       unownedLeft: true,
       afterwards: ["permission.person_inactive", "permission.person_inactive"],
       theirsLeft: [refused],
+    });
+  });
+
+  it("discards a removed person's preview stores even when their connections can't be disconnected, and catches up any left from the cron", async () => {
+    const removed = await setUp();
+    await createNote(removed);
+    const [store] = await previewStores(
+      removed.builder,
+      removed.chatId,
+      removed.app
+    );
+    const storeId = storeIdSchema.parse(store?.store_id);
+    const admin = await signedInApi(idp, "admin");
+    // Connect can't be reached: the removal is pending, its previews go.
+    const connectDown = new Proxy(env.CONNECT, {
+      get: (target, key): unknown =>
+        key === "disconnectPersonal"
+          ? () => {
+              throw new Error("connect unreachable");
+            }
+          : Reflect.get(target, key),
+    });
+    const { core } = await openRpc(admin.session, {
+      coreEnv: { ...env, CONNECT: connectDown },
+    });
+    const pending = await failure(
+      async () =>
+        await core.authenticate().members.remove(removed.builder.userId)
+    );
+    const afterRemoval = await recordedStore(storeId);
+    // A store of theirs left behind (a removal that ended first, say):
+    // the cron's catch-up discards it.
+    const left = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO preview_fixture_stores (store_id, app_id, person_id, created_at) VALUES (?, ?, ?, ?)"
+    )
+      .bind(left, removed.app, removed.builder.userId, Date.now())
+      .run();
+    await retryDisconnects(env);
+    expect({
+      pending,
+      afterRemoval,
+      leftAfterCron: await recordedStore(left),
+    }).toStrictEqual({
+      pending: "member.connections_pending",
+      afterRemoval: false,
+      leftAfterCron: false,
     });
   });
 
