@@ -1206,7 +1206,6 @@ const purgeDocument = async (
     purge: true,
     also: [...pointCurrent, ...forgetUploads(db, uploadsNamed(document))],
   });
-  await collectPayloads(env, db);
   return counts;
 };
 
@@ -1336,6 +1335,9 @@ const purgeContent = async (
     await owedWritesDone(db, purgeId);
   }
   await cleanUpOriginals(env);
+  // What the rewrites let go of leaves R2 now; a failure fails the purge,
+  // and running it again collects what's left (`collecting` rows).
+  await collectPayloads(env, db);
   await cleanSearchIndex(async () => {
     await eraseFromSearchIndex(db, input.terms, {
       secure,

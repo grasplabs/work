@@ -225,7 +225,7 @@ export const readPayload = async (
 /**
  * Marks `pending` rows past their grace `collecting`, then deletes the
  * objects of `collecting` rows and the rows, a page at a time. Resolves how
- * many it deleted. The cron trigger runs it; a purge runs it right after
+ * many it deleted; throws when R2 refuses a delete. The cron trigger runs it; a purge runs it right after
  * its batch, so what it erased leaves R2 too.
  */
 export const collectPayloads = async (
@@ -260,8 +260,10 @@ export const collectPayloads = async (
       // oxlint-disable-next-line no-await-in-loop -- a page at a time
       await env.BRAIN_OBJECTS.delete(keys);
     } catch (error) {
-      log.warn("knowledge.payload_collect_failed", errorFields(error));
-      return deleted;
+      // Thrown, so a purge that called it fails rather than say the text
+      // is gone; its rows stay `collecting`, for the next run or sweep.
+      log.error("knowledge.payload_collect_failed", errorFields(error));
+      throw error;
     }
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     await db

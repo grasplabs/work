@@ -599,4 +599,37 @@ describe("purges", () => {
       other,
     });
   });
+
+  it("fails a purge whose objects R2 won't delete, and a run again deletes them", async () => {
+    const { api } = await knowledgeOf();
+    const { id: collectionId } = await api.createCollection(shared());
+    const name = `Jansen${unique()}`;
+    const document = await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`${name} signs`),
+      ifVersion: 0,
+    });
+    const down = vi
+      .spyOn(env.BRAIN_OBJECTS, "delete")
+      .mockRejectedValue(new Error("R2 unavailable"));
+    let first: string;
+    try {
+      first = await settled(purgeTerm(api, document.id, name));
+    } finally {
+      down.mockRestore();
+    }
+    const heldAfterFailure = await bucketHolds(name);
+    await purgeTerm(api, document.id, name);
+
+    expect({
+      first,
+      heldAfterFailure,
+      heldAfterAgain: await bucketHolds(name),
+    }).toStrictEqual({
+      first: "refused",
+      heldAfterFailure: true,
+      heldAfterAgain: false,
+    });
+  });
 });

@@ -485,11 +485,24 @@ describe("immutable records", () => {
       ),
       insertSql(
         "INSERT",
+        "brain_payloads",
+        {
+          key: `payloads/${id}`,
+          sha256: id,
+          bytes: 0,
+          state: "committed",
+          created_at: 1,
+        },
+        "",
+        db
+      ),
+      insertSql(
+        "INSERT",
         "versions",
         {
           document_id: `doc-${id}`,
           number: 1,
-          text: "",
+          payload_key: `payloads/${id}`,
           author: "owner",
           created_at: 1,
         },
