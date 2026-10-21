@@ -56,7 +56,7 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     await admin.api.onboarding.saveRoster(roster);
     const tag = unique();
-    const team = `team-${tag}`;
+    const team = `sales-${tag}`;
     await admin.api.brain.addRecords([
       {
         type: "source",
@@ -104,6 +104,16 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
         .find(({ id }) => id === "team-finance")
         ?.counts.map(({ sourceId, people }) => ({ sourceId, people })),
       memberTeams: asMember.teams.map(({ id }) => id),
+      roster: await outcome(
+        admin.api.brain.addRecords([
+          {
+            type: "team",
+            id: "team-finance",
+            name: "Finance",
+            sourceId: `src-${tag}`,
+          },
+        ])
+      ),
     }).toStrictEqual({
       sales: {
         id: team,
@@ -128,6 +138,8 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
       ],
       // The onboarding's team is the admin's to see; the Playbook's isn't.
       memberTeams: [team],
+      // A roster team's id, now or later, is never a team record's.
+      roster: "brain.record_invalid",
     });
   });
 

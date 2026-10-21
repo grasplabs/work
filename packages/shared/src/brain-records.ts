@@ -171,7 +171,12 @@ const statementRecordSchema = z
 
 const teamRecordSchema = z.strictObject({
   type: z.literal("team"),
-  id: brainRecordIdSchema,
+  // `team-` is the onboarding's (`team-<id>` for a roster team, now or
+  // later): a team record's id never takes it, so one id is one team.
+  id: brainRecordIdSchema.refine(
+    (id) => !id.startsWith("team-"),
+    "Ids starting with team- are the onboarding's."
+  ),
   name: label,
   /** Where the team was first found. */
   sourceId: brainRecordIdSchema,
