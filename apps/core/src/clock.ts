@@ -20,6 +20,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
+import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
@@ -173,6 +174,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: sweepScreenSubmissions,
   },
   { name: "auth.token_keys", period: "quarterHour", run: sweepTokenKeys },
+  // The application landscape: each connection read once a day, a bounded
+  // number of pages a run (src/landscape.ts).
+  {
+    name: "landscape.sync",
+    period: "quarterHour",
+    run: syncLandscapes,
+  },
   // The audit log's retention alarm armed, if it isn't yet: retention
   // itself runs on that alarm (src/audit-log.ts), and a deployment that
   // appends nothing after a release still gets it.

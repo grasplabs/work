@@ -144,8 +144,11 @@ const typeRules: readonly {
   { action: "dependency.requested", type: "action" },
   { action: "dependency.admission_refused", type: "action" },
   { action: "dependency.superseded", type: "action" },
-  // A resolve refused because a package in the graph is known malware.
+  // A resolve or an approval refused because a package in the graph is
+  // known malware; and an approval refused because whether it is couldn't
+  // be checked.
   { action: "dependency.malware_refused", type: "action" },
+  { action: "dependency.approval_refused", type: "action" },
   // A build pinning an artifact of an approved graph, and the approval it
   // relied on, and each pin that dropped; and a resolve changing what a
   // target of a graph's lock is built for (its conditions or entries).

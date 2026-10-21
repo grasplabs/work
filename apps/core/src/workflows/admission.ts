@@ -143,7 +143,8 @@ import {
 //   Runs nobody started (a trigger, mail, a connector event) take a share
 //   of their own, their App's triggers' (`trigger:<app>`), held to a
 //   person's share, so outsiders sending mail never take the App owner's
-//   share; a run started under another keeps its lineage root's.
+//   share; a run started under another takes its account's
+//   (quotas.ts, `accountOf`).
 //   Starting more runs takes no more of any share.
 // - A gamed retry-after: core says when to ask again, from its backoff
 //   (`askAgainMs`), and the run waits that long (host.ts); neither a
@@ -162,8 +163,9 @@ import {
 /** Who a run's attempts count for, and its App: whose shares they take. */
 export interface AdmissionScope {
   /**
-   * The person the run counts for: who started it, or its lineage root's;
-   * `trigger:<app>` for a run nobody started (dispatcher.ts).
+   * The person the run counts for: who started it, or its account's
+   * (quotas.ts, `accountOf`); `trigger:<app>` for a run nobody started
+   * (dispatcher.ts).
    */
   subject: string;
   /** The run's App. */

@@ -1,4 +1,5 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { ChatMessage } from "@grasp-os/shared/chat";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput } from "@grasp-os/shared/knowledge";
@@ -10,6 +11,7 @@ import { refreshDailySignals } from "../src/daily-signals.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
+  personalChatsOf,
   codeResults,
   codeStep,
   gatewayConfig,
@@ -488,6 +490,97 @@ describe("a chat's Knowledge", setUpTime, () => {
       },
       result: `Returned:\n${JSON.stringify([["overdue_review", granted]])}`,
       calls: [{ method: "knowledge.signals", signals: 1, outcome: "ok" }],
+    });
+  });
+
+  it("cites in an answer only the notes its chat's code was given before it, each once, never one read after it", async () => {
+    const admin = await newAdmin();
+    const person = await signedInApi(idp, "user");
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const { id: read } = await admin.knowledge.saveDocument({
+      collectionId,
+      path: "leave.md",
+      text: leave,
+      ifVersion: 0,
+    });
+    // In a collection the agent may read, but nothing hands it over.
+    const { id: unread } = await admin.knowledge.saveDocument({
+      collectionId,
+      path: "travel.md",
+      text: "# Travel\n\nBook trains.",
+      ifVersion: 0,
+    });
+    // In a collection the agent was never granted.
+    const { id: hidden } = await admin.knowledge.createCollection({
+      name: `Board ${unique()}`,
+      access: "everyone",
+    });
+    const { id: secret } = await admin.knowledge.saveDocument({
+      collectionId: hidden,
+      path: "minutes.md",
+      text: "# Minutes\n\nLeave stays as it is.",
+      ifVersion: 0,
+    });
+    const answer = `Sixteen weeks [Parental leave](grasp:note/${read}), as [the policy](grasp:note/${read}) says; see [Travel](grasp:note/${unread}), [Minutes](grasp:note/${secret}) and [nothing](grasp:note/not-a-document).`;
+    const { agent, newChat } = await personalChatsOf(
+      person.userId,
+      // Before its code read anything: the note is read only after.
+      says(`Let me look [Parental leave](grasp:note/${read}).`),
+      codeStep(
+        "export default async (self, env) => { const { hits } = await env.knowledge.search('parental leave'); await env.knowledge.read(hits[0].documentId); return hits.length; };"
+      ),
+      says(answer),
+      // The same words in another chat of the person's, whose code read nothing.
+      says(answer)
+    );
+    await grantRead(admin, agent, collectionId);
+    const reading = await newChat();
+    await reading.ask("Parental leave?");
+    await reading.ask("How long is parental leave?");
+    const other = await newChat();
+    await other.ask("And travel?");
+
+    /** The chat's answers, as its page is sent them. */
+    const answers = async (chatId: string) => {
+      const sent: ChatMessage[] = [];
+      const subscription = await person.api.chats.watch(
+        chatId,
+        null,
+        (update) => {
+          sent.push(...update.messages);
+        }
+      );
+      await vi.waitFor(() => {
+        expect(sent.some(({ role }) => role === "assistant")).toBeTruthy();
+      });
+      await subscription.release();
+      return sent.flatMap((shown) =>
+        shown.role === "assistant" && shown.text !== ""
+          ? [{ text: shown.text, citations: shown.citations }]
+          : []
+      );
+    };
+
+    expect({
+      reading: await answers(reading.chat.id),
+      other: await answers(other.chat.id),
+    }).toStrictEqual({
+      reading: [
+        { text: "Let me look Parental leave.", citations: [] },
+        {
+          text: `Sixteen weeks [Parental leave](grasp:note/${read}), as [the policy](grasp:note/${read}) says; see Travel, Minutes and nothing.`,
+          citations: [{ kind: "document", documentId: read }],
+        },
+      ],
+      other: [
+        {
+          text: "Sixteen weeks Parental leave, as the policy says; see Travel, Minutes and nothing.",
+          citations: [],
+        },
+      ],
     });
   });
 

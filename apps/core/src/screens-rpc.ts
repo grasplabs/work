@@ -1257,7 +1257,6 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     }
   }
 
-  /** The person behind the connection, still the frame's, if it is open. */
   /** Refuses once the frame closed (`screen.invalid`). */
   #open(): void {
     if (this.#closed) {
@@ -1265,6 +1264,7 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     }
   }
 
+  /** The person behind the connection, still the frame's, if it is open. */
   async #person(): Promise<Identity> {
     this.#open();
     const by = await this.#connection.check();

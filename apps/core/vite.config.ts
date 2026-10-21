@@ -14,6 +14,7 @@ import { testVersionModule } from "./test/compiler-version.ts";
 import {
   connectClient,
   connectProvidersScript,
+  landscapeClient,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
@@ -268,6 +269,8 @@ export const coreProject = (
                 TOKEN_ENCRYPTION_KEY: btoa("test-token-key-of-exactly-32-b!!"),
                 MICROSOFT_CLIENT_ID: connectClient.id,
                 MICROSOFT_CLIENT_SECRET: connectClient.secret,
+                MICROSOFT_LANDSCAPE_CLIENT_ID: landscapeClient.id,
+                MICROSOFT_LANDSCAPE_CLIENT_SECRET: landscapeClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
               },
               d1Databases: { DB: "grasp-os-connect" },

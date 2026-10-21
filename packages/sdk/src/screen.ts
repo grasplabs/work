@@ -343,7 +343,7 @@ const followWorkflow = (workflow: string): RunFollowing => {
     `the runs of ${workflow}`,
     async (listener) => {
       const answer: unknown = await bridge().watchRuns(workflow, listener);
-      // SAFETY: core's `screens.watchRuns` answers a subscription stub.
+      // SAFETY: core's `ScreenFrameApi.watchRuns` answers a subscription stub.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       const hold = answer as RunHold;
       // Stopped while it subscribed: nobody follows it any more.
@@ -434,7 +434,7 @@ export const followRuns = (
       const runs: unknown = await bridge().runs(workflow);
       if (!stopped && mine > shown && Array.isArray(runs)) {
         shown = mine;
-        // SAFETY: core's `screens.runs` answers `ScreenRun[]`.
+        // SAFETY: core's `ScreenFrameApi.runs` answers `ScreenRun[]`.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         onRuns(runs as ScreenRun[]);
       }
@@ -520,7 +520,7 @@ export const followRun = (
     const mine = started;
     try {
       const found: unknown = await bridge().run(run);
-      // SAFETY: core's `screens.run` answers a `ScreenRun`.
+      // SAFETY: core's `ScreenFrameApi.run` answers a `ScreenRun`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       show(mine, found as ScreenRun);
     } catch (error) {
@@ -605,7 +605,7 @@ const controlled = async (
   kind: RunControl["kind"]
 ): Promise<RunControl> => {
   const receipt: unknown = await bridge().control(run, kind);
-  // SAFETY: core's `screens.control` answers a `RunControl`.
+  // SAFETY: core's `ScreenFrameApi.control` answers a `RunControl`.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return receipt as RunControl;
 };
@@ -698,13 +698,13 @@ export const useWorkflow = (
     runs: followed.workflow === workflow ? followed.runs : [],
     start: async (input) => {
       const run: unknown = await bridge().startRun(workflow, input);
-      // SAFETY: core's `screens.startRun` answers a `WorkflowRun`.
+      // SAFETY: core's `ScreenFrameApi.startRun` answers a `WorkflowRun`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       return run as WorkflowRun;
     },
     status: async (run) => {
       const found: unknown = await bridge().run(run);
-      // SAFETY: core's `screens.run` answers a `ScreenRun`.
+      // SAFETY: core's `ScreenFrameApi.run` answers a `ScreenRun`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       return found as ScreenRun;
     },
@@ -713,7 +713,7 @@ export const useWorkflow = (
     },
     summary: async (run) => {
       const found: unknown = await bridge().summary(run);
-      // SAFETY: core's `screens.summary` answers a `RunSummary`.
+      // SAFETY: core's `ScreenFrameApi.summary` answers a `RunSummary`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       return found as RunSummary;
     },

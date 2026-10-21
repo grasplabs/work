@@ -811,7 +811,7 @@ export const workflowDraftPublishSchema = z.strictObject({
 });
 
 /** Most bindings a test run's start answers for. */
-export const maxCandidateFixtures = 64;
+const maxCandidateFixtures = 64;
 
 /** Most bytes of a test run's fixtures, as JSON text, all answers together. */
 export const maxCandidateFixtureBytes = 256 * 1024;
