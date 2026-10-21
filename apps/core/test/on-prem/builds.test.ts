@@ -10,9 +10,8 @@ import { sandboxCpuHeader } from "../../src/sandbox-headers.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { buildOnSave } from "../../src/save-builds.ts";
-import { buildScreens, buildServer } from "../../src/screens.ts";
+import { buildScreens } from "../../src/screens.ts";
 import { probeModule } from "../isolate-probe.ts";
-import { v1Server } from "../v1-app-server.ts";
 import { workflowFiles } from "../workflow-apps.ts";
 
 // The App compiler on-prem: it runs on the sandbox host this project
@@ -122,18 +121,6 @@ describe("the App compiler on-prem", () => {
       ok: built.ok,
       screen: built.ok && Object.keys(built.screens),
     }).toStrictEqual({ ok: true, screen: [expect.stringContaining("desk")] });
-  });
-
-  it("builds an App's server code on the sandbox host", async () => {
-    const built = await buildServer(
-      onPrem,
-      {
-        "app/server.ts": `import { DurableObject } from "cloudflare:workers";\n\nexport class App extends DurableObject {\n  book(): string {\n    return "booked";\n  }\n}\n`,
-      },
-      "app-test"
-    );
-
-    expect(built.ok).toBeTruthy();
   });
 
   it("says what fails to type-check, as it does on Cloudflare", async () => {
@@ -324,8 +311,8 @@ describe("the App compiler on-prem", () => {
     }).toStrictEqual({ heldToItsDeadline: true, built: true });
   }, 60_000);
 
-  it("builds a fresh save's screens, server and workflows, its compiles waiting for the App's part of the builders' share", async () => {
-    // Fresh, so nothing is read from the cache: three compiles at once,
+  it("builds a fresh save's screens and workflows, its compiles waiting for the App's part of the builders' share", async () => {
+    // Fresh, so nothing is read from the cache: two compiles at once,
     // where the App's part of the share is one place.
     const fresh = crypto.randomUUID();
     const saved = await buildOnSave(onPrem, {
@@ -333,7 +320,6 @@ describe("the App compiler on-prem", () => {
       version: 1,
       files: {
         ...screen(`// ${fresh}`),
-        "app/server.ts": `${v1Server}\n// ${fresh}\n`,
         ...workflowFiles(
           "single",
           `  return await step.do("only", { description: "${fresh}" }, async () => "done");`
@@ -344,9 +330,8 @@ describe("the App compiler on-prem", () => {
 
     expect({
       screens: saved.screens.status,
-      server: saved.server.status,
       workflows: saved.workflows.status,
-    }).toStrictEqual({ screens: "ok", server: "ok", workflows: "ok" });
+    }).toStrictEqual({ screens: "ok", workflows: "ok" });
   }, 90_000);
 
   it("asks again while refused, and builds another App's same files in its own part", async () => {

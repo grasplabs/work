@@ -26,9 +26,8 @@ import type { GatewayReply } from "./ai-gateway.ts";
 import { outlook, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { notesFiles } from "./notes-client-app.ts";
 import { signedInApi } from "./sign-in.ts";
-import { connectDb } from "./test-env.ts";
-import { v1Server } from "./v1-app-server.ts";
 import { appWith, hitCall, workflowFiles } from "./workflow-apps.ts";
 
 // `env.build` in a chat's code: the chat's agent building Apps for its
@@ -349,14 +348,6 @@ import definition from "./weekly.ts";
 
 export default workflowTests(definition, [{ name: "runs", mocks: { report: "sent" }, expect: { output: "sent" } }]);
 `,
-});
-
-/** An export of the App's, with its access. */
-const exported = (access: "read" | "write", description = "") => ({
-  access,
-  description,
-  input: { type: "object" },
-  output: { type: "object" },
 });
 
 /** Each workflow's changed steps, by name, as a review lists them. */
@@ -1578,9 +1569,6 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
     });
   });
 
-  // The review of the v1 App server's code (`server`, `serverFiles`): it
-  // goes with the server (GRA-645). The test before it holds a sealed App
-  // to the same grants.
   it("reviews code a workflow may use, the steps that call the App, and the grants the version uses", async () => {
     const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");
@@ -1600,17 +1588,17 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     };
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await release(builder, app, {
-      "app/server.ts": v1Server,
-      "app/lib/books.ts": "export const twice = false;\n",
+      ...notesFiles,
+      "operations/books.ts": "export const twice = false;\n",
       ...notify,
     });
     await requestGranted(idp, builder, outlook(app));
-    // Only server code the server imports changes: the workflow's steps
-    // call the server.
+    // Only server code changes: the workflow's steps call the App's
+    // functions.
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "app/lib/books.ts": "export const twice = true;\n",
+        "operations/books.ts": "export const twice = true;\n",
       },
       "Server"
     );
@@ -1625,12 +1613,12 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     expect(review).toMatchObject({
       proposedBy: null,
       server: "modified",
-      serverFiles: [{ path: "app/lib/books.ts", change: "modified" }],
+      serverFiles: [{ path: "operations/books.ts", change: "modified" }],
       workflows: [
         {
           id: "notify",
           change: "modified",
-          shared: ["app/lib/books.ts"],
+          shared: ["operations/books.ts"],
           // Code it may use changed: it may change things through it.
           steps: [
             {
@@ -1849,25 +1837,19 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     ]);
   });
 
-  it("calls out new triggers, changed exports, and steps it can't read as possibly acting", async () => {
+  it("calls out new triggers, and steps it can't read as possibly acting", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Weekly" });
     await release(builder, app, {
       ...weekly(`[{ type: "manual" }]`),
-      "app/exports.json": JSON.stringify({
-        totals: exported("read"),
-        purge: exported("write"),
-      }),
+      "data/totals.json": JSON.stringify({ totals: "read" }),
     });
     const { version } = await builder.api.apps.files.commit(
       app,
       {
         // Now on a schedule, and its step inside a function of its own.
         ...weekly(`[{ type: "schedule", param: "every" }]`, true),
-        "app/exports.json": JSON.stringify({
-          totals: exported("write"),
-          book: exported("write"),
-        }),
+        "data/totals.json": JSON.stringify({ totals: "write" }),
       },
       "Weekly"
     );
@@ -1876,14 +1858,13 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
 
     expect({
       workflows: review.workflows,
-      exports: review.exports,
     }).toStrictEqual({
       workflows: [
         {
           id: "weekly",
           change: "modified",
           // Code it may import: JSON too.
-          shared: ["app/exports.json"],
+          shared: ["data/totals.json"],
           sideEffect: true,
           steps: null,
           calls: [],
@@ -1904,21 +1885,6 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
               countAfter: 0,
             },
           ],
-        },
-      ],
-      exports: [
-        { name: "book", change: "added", access: "write", accessBefore: null },
-        {
-          name: "purge",
-          change: "removed",
-          access: null,
-          accessBefore: "write",
-        },
-        {
-          name: "totals",
-          change: "modified",
-          access: "write",
-          accessBefore: "read",
         },
       ],
     });
@@ -1963,98 +1929,6 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
         ],
       },
     ]);
-  });
-
-  it("lists nothing naming an App its reviewer may not open, role or not", async () => {
-    const owner = await signedInApi(idp, "builder");
-    const reviewer = await signedInApi(idp, "builder");
-    const { id: app } = await owner.api.apps.create({ name: "Invoicing" });
-    const { id: unreadable } = await owner.api.apps.create({ name: "Inbox" });
-    await owner.api.apps.members.add(app, {
-      type: "person",
-      id: reviewer.userId,
-      role: "builder",
-    });
-    await owner.api.apps.members.add(unreadable, {
-      type: "person",
-      id: reviewer.userId,
-      role: "user",
-    });
-    // The Inbox then reads the owner's own mailbox, which the reviewer
-    // can't read: they keep their role in it, but may no longer open it.
-    const mailbox = `connection-mailbox-${crypto.randomUUID()}`;
-    const now = Date.now();
-    await connectDb()
-      .prepare(
-        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?)"
-      )
-      .bind(mailbox, owner.userId, now, now)
-      .run();
-    await requestGranted(idp, owner, {
-      ...outlook(unreadable, "MAILBOX"),
-      object: { type: "connection", connectionId: mailbox },
-    });
-    // Invoicing asks to call it: waiting for an admin, so Invoicing reads
-    // nothing of it, and stays open to the reviewer.
-    await owner.api.permissions.request({
-      subject: { type: "app", appId: app },
-      object: { type: "app", appId: unreadable },
-      actions: ["read"],
-      binding: "INBOX",
-    });
-    const { version } = await owner.api.apps.files.commit(
-      app,
-      { "notes.md": "new" },
-      "Notes"
-    );
-
-    const [ownReview, theirs, listed] = await Promise.all([
-      owner.api.apps.versions.review(app, version),
-      reviewer.api.apps.versions.review(app, version),
-      reviewer.api.permissions.list({ type: "app", appId: app }),
-    ]);
-
-    // As the permissions API shows them to the reviewer, no more.
-    expect({
-      owner: ownReview.permissions.map(({ binding }) => binding),
-      reviewer: theirs.permissions.map(({ binding }) => binding),
-      api: listed.map(({ binding }) => binding),
-      named: JSON.stringify(theirs).includes(unreadable),
-    }).toStrictEqual({ owner: ["INBOX"], reviewer: [], api: [], named: false });
-  });
-
-  it("lists no grant naming an App its reviewer can't see", async () => {
-    const owner = await signedInApi(idp, "builder");
-    const reviewer = await signedInApi(idp, "builder");
-    const { id: app } = await owner.api.apps.create({ name: "Invoicing" });
-    const { id: hidden } = await owner.api.apps.create({ name: "Ledger" });
-    await requestGranted(idp, owner, {
-      subject: { type: "app", appId: app },
-      object: { type: "app", appId: hidden },
-      actions: ["read"],
-      binding: "LEDGER",
-    });
-    await owner.api.apps.members.add(app, {
-      type: "person",
-      id: reviewer.userId,
-      role: "builder",
-    });
-    const { version } = await owner.api.apps.files.commit(
-      app,
-      { "notes.md": "new" },
-      "Notes"
-    );
-
-    const [ownReview, theirs] = await Promise.all([
-      owner.api.apps.versions.review(app, version),
-      reviewer.api.apps.versions.review(app, version),
-    ]);
-
-    expect({
-      owner: ownReview.grants.map(({ permission }) => permission.binding),
-      reviewer: theirs.grants.map(({ permission }) => permission.binding),
-      named: JSON.stringify(theirs).includes(hidden),
-    }).toStrictEqual({ owner: ["LEDGER"], reviewer: [], named: false });
   });
 
   it("runs a version's tests once", async () => {

@@ -43,119 +43,6 @@ import { openRawRpc, openRpc, outcome, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const serverCode = `import { DurableObject } from "cloudflare:workers";
-
-type Caller = { userId: string };
-type Watcher = ((notes: string[]) => Promise<void>) & Disposable & { dup(): Watcher };
-
-export class App extends DurableObject {
-  #watchers = new Set<Watcher>();
-
-  whoami(caller: Caller): string {
-    return caller.userId;
-  }
-
-  echo(_caller: Caller, value: unknown): unknown {
-    return value;
-  }
-
-  chatty(_caller: Caller, note: string): string {
-    console.error("could not file", { note });
-    for (let line = 1; line <= 25; line += 1) {
-      console.log("line", line);
-    }
-    return "logged";
-  }
-
-  notes(): string[] {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS notes (note TEXT)");
-    return this.ctx.storage.sql
-      .exec("SELECT note FROM notes")
-      .toArray()
-      .map((row) => String(row.note));
-  }
-
-  addNote(_caller: Caller, note: string): string[] {
-    this.notes();
-    this.ctx.storage.sql.exec("INSERT INTO notes VALUES (?)", note);
-    const notes = this.notes();
-    for (const watcher of this.#watchers) {
-      void this.#send(watcher, notes);
-    }
-    return notes;
-  }
-
-  watchNotes(_caller: Caller, onChange: Watcher): void {
-    const watcher = onChange.dup();
-    this.#watchers.add(watcher);
-    void this.#send(watcher, this.notes());
-  }
-
-  watching(): number {
-    return this.#watchers.size;
-  }
-
-  ignore(_caller: Caller, _onChange: Watcher): string {
-    return "not kept";
-  }
-
-  async callBoth(
-    _caller: Caller,
-    first: (value: string) => Promise<void>,
-    note: string,
-    second: (value: string) => Promise<void>
-  ): Promise<string> {
-    await first("first: " + note);
-    await second("second: " + note);
-    return "called both";
-  }
-
-  keepThenFail(_caller: Caller, first: Watcher, _note: string, second: Watcher): never {
-    first.dup();
-    second.dup();
-    throw new Error("Failed after keeping its callbacks");
-  }
-
-  dropWatchers(): void {
-    for (const watcher of this.#watchers) {
-      watcher[Symbol.dispose]();
-    }
-    this.#watchers.clear();
-  }
-
-  async #send(watcher: Watcher, notes: string[]): Promise<void> {
-    try {
-      await watcher(notes);
-    } catch {
-      this.#watchers.delete(watcher);
-      watcher[Symbol.dispose]();
-    }
-  }
-
-  async handOver(_caller: Caller, onChange: (value: unknown) => Promise<unknown>): Promise<string> {
-    try {
-      const back = await onChange(() => "a way into the App");
-      return back === undefined ? "sent" : "got something back";
-    } catch (error) {
-      return (error as { code?: string }).code ?? String(error);
-    }
-  }
-
-  async askScreen(_caller: Caller, onChange: (value: unknown) => Promise<unknown>): Promise<string> {
-    const back = await onChange("anything to hand back?");
-    return back === undefined ? "nothing" : typeof back;
-  }
-
-  failure(_caller: Caller, length: number): { failed: Error } {
-    return { failed: new Error("A".repeat(length)) };
-  }
-
-  lookLikeThePlatform(): Error {
-    return Object.assign(new Error("Sign in to continue."), { code: "auth.unauthenticated" });
-  }
-}
-`;
-
 const screenCode = `import { useWorkflow } from "@grasp-os/sdk/screen";
 import { Button } from "@grasp-os/ui/components/button";
 
@@ -171,7 +58,6 @@ export default function Notes() {
 `;
 
 const sampleFiles = {
-  "app/server.ts": serverCode,
   "screens/notes.tsx": screenCode,
 };
 
@@ -596,7 +482,6 @@ describe("screens", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Closing" });
     await release(builder, app, {
-      "app/server.ts": serverCode,
       "screens/notes.tsx": `export default function Notes() {
   return <p className="p-2 [--probe:'</script>'] text-sm">Notes</p>;
 }

@@ -111,10 +111,11 @@ const typeRules: readonly {
   // them, and a staff member signing in to the deployment.
   { action: "context.restricted", type: "permission" },
   { action: "staff.session", type: "permission" },
-  // A call of another App's export, by the calling App (`app.call`) and
-  // as the called App records it (`app.called`): a read for an export
-  // that only reads, and an action for one that writes, or one refused
-  // before its access was known.
+  // A call of another App's function through an app resource, by the
+  // calling App (`app.call`), and as the v1 server's called App recorded
+  // it (`app.called`, read from older entries): a read for one that only
+  // reads, and an action for one that writes, or one refused before its
+  // access was known.
   // An App's server code refused a use its sealed manifest doesn't allow
   // (core's src/operations.ts): a function, resource or workflow it
   // doesn't list, or a request its declaration doesn't allow.

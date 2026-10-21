@@ -1,4 +1,4 @@
-import { buildFiles, serverFiles, workflowFiles } from "@grasp-os/compiler";
+import { buildFiles, workflowFiles } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
 import type {
   BuildDiagnostic,
@@ -11,12 +11,7 @@ import { log } from "@grasp-os/shared/log";
 
 import { withDraftReferences } from "./draft-references.ts";
 import type { WorkflowBindingKind } from "./permissions.ts";
-import {
-  buildScreens,
-  buildServer,
-  buildWorkflows,
-  withinBuildWait,
-} from "./screens.ts";
+import { buildScreens, buildWorkflows, withinBuildWait } from "./screens.ts";
 
 type SavedBuilds = CommittedVersion["builds"];
 
@@ -103,9 +98,9 @@ const savedBuild = async (
 };
 
 /**
- * Builds a saved version's screens, server code and workflows, all at
- * once, into the build cache (screens.ts), so the version opens, answers
- * and runs without building. Answers once all three are done with how each
+ * Builds a saved version's screens and workflows, both at once, into the
+ * build cache (screens.ts), so the version opens and runs without
+ * building. Answers once both are done with how each
  * went, for whoever saved (an agent repairs what failed); none takes
  * longer than the build wait (`buildWaitMs` in screens.ts). Never throws, unless `signal` gave up on it: a build is never a reason
  * for a save to fail.
@@ -122,7 +117,7 @@ export const buildOnSave = async (
   signal?: AbortSignal
 ): Promise<SavedBuilds> => {
   const { files } = source;
-  const [screens, server, workflows] = await Promise.all([
+  const [screens, workflows] = await Promise.all([
     savedBuild(
       "screens",
       source,
@@ -146,14 +141,6 @@ export const buildOnSave = async (
       signal
     ),
     savedBuild(
-      "server",
-      source,
-      serverFiles,
-      async () => await buildServer(env, files, source.app, signal),
-      env,
-      signal
-    ),
-    savedBuild(
       "workflows",
       source,
       workflowFiles,
@@ -163,5 +150,5 @@ export const buildOnSave = async (
       signal
     ),
   ]);
-  return { screens, server, workflows };
+  return { screens, workflows };
 };

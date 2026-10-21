@@ -75,8 +75,9 @@ import type { Draft } from "./workspace.ts";
 // version when it began. A draft reaches the App only as a version, and
 // never over a version that changed the same files since it began, so
 // the agent's edits and a builder's can't overwrite each other. It checks
-// a draft as a save does (screens,
-// server code and workflows: type errors, @shadcn/lint and build errors)
+// a draft as a save does (screens and
+// workflows: type errors, @shadcn/lint and build errors; its server code
+// is sealed by the preview, which reports what fails)
 // and runs its workflows' tests, and dry-runs them with the values it
 // gives. A workflow must call the App's bindings where its step list can
 // name each call (`checkWorkflowBindings`): the review of what the agent
@@ -86,9 +87,9 @@ import type { Draft } from "./workspace.ts";
 // what the preview of the draft in the person's side panel ran into so far
 // (preview-reports.ts): runtime errors fail it as build errors do, so the
 // repair loop fixes them within the same limits. The agent can also call
-// the draft's server code itself (`call`), in that same preview: its own
-// facet and empty database, with stubs that allow nothing, never the
-// App's live data (preview.ts). Tests and dry runs run in isolates with
+// the draft's server code itself (`call`), in that same preview: the draft
+// sealed into a draft release, with its own empty store, never the App's
+// live data (sealed-previews.ts). Tests and dry runs run in isolates with
 // an empty env: nothing they do leaves them. Once a draft passes, the
 // agent proposes it: it becomes the App's next version, pending review,
 // with a review of what
@@ -319,7 +320,6 @@ export interface DraftCheck {
    */
   passed: boolean;
   screens: SavedBuild;
-  server: SavedBuild;
   workflows: SavedBuild;
   tests: {
     /** `not_run` while the workflows don't build. */
@@ -531,13 +531,12 @@ export const checkFiles = async (
   const tests = await testsOf(env, app, base, files, builds.workflows, signal);
   signal?.throwIfAborted();
   const built =
-    [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
+    [builds.screens, builds.workflows].every(buildPassed) &&
     tests.status !== "failed";
   const preview = await previewOf(env, scope, app, revision, built);
   return {
     passed: built && preview.problems.length === 0,
     screens: reported(builds.screens),
-    server: reported(builds.server),
     workflows: reported(builds.workflows),
     tests,
     preview,
@@ -917,8 +916,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Checks the chat's draft of `app`: builds its screens, server code and
-   * workflows, and runs its workflows' tests. Refused once
+   * Checks the chat's draft of `app`: builds its screens and workflows,
+   * and runs its workflows' tests. Refused once
    * {@link maxFailedChecks} checks of it failed in a row this turn, those
    * still running counted.
    */
@@ -1030,8 +1029,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Asks for a permission for `app` (a connection, a collection, a
-   * workflow or another App's exports), as its builders do: it allows
+   * Asks for a permission for `app` (a connection, a collection or a
+   * workflow), as its builders do: it allows
    * nothing until an admin grants it.
    */
   async requestPermission(app: unknown, request: unknown): Promise<Permission> {
@@ -1383,8 +1382,8 @@ build: {
   /** Drops the draft: the next write starts again from the App's latest version. */
   discard(app: string): Promise<void>;
   /**
-   * Builds the draft's screens, server code and workflows (type errors,
-   * lint and build errors) and runs its workflows' tests, and reads what its
+   * Builds the draft's screens and workflows (type errors, lint and build
+   * errors) and runs its workflows' tests, and reads what its
    * screens ran into so far in the person's preview (runtime errors). Fix what fails
    * and check again; after ${maxFailedChecks} checks in a row that didn't pass, checking
    * refuses: stop and tell the person what still fails.
@@ -1392,7 +1391,6 @@ build: {
   check(app: string): Promise<{
     passed: boolean;
     screens: Build;
-    server: Build;
     workflows: Build;
     tests: { status: "passed" | "failed" | "none" | "not_run"; failures: string[] };
     /**
@@ -1460,12 +1458,12 @@ build: {
    */
   propose(app: string, message: string): Promise<{
     version: number | null;
-    check: { passed: boolean; screens: Build; server: Build; workflows: Build; tests: { status: string; failures: string[] }; preview: { problems: { at: string; message: string }[]; seen: boolean; note: string } };
+    check: { passed: boolean; screens: Build; workflows: Build; tests: { status: string; failures: string[] }; preview: { problems: { at: string; message: string }[]; seen: boolean; note: string } };
     /** What the version changes, as its reviewer reads it; null when not proposed. */
     review: {
       current: number | null;
       files: { path: string; change: "added" | "modified" | "removed" }[];
-      /** How the server code (app/**.ts) changed: it acts for whoever uses the App. */
+      /** How the server code (app.ts, schema.ts, values.ts, operations/, migrations/) changed: it acts for whoever uses the App. */
       server: "added" | "modified" | "removed" | null;
       serverFiles: { path: string; change: "added" | "modified" | "removed" }[];
       /** Its migrations new or changed: each reads and rewrites every record of its table, whoever owns it; null when they can't be read. */
@@ -1483,8 +1481,6 @@ build: {
         /** It can change something outside Grasp (any step may, or its steps can't be read). */
         sideEffect: boolean;
       }[];
-      /** What other Apps may call (app/exports.json), with read/write access. */
-      exports: { name: string; change: string; access: "read" | "write" | null; accessBefore: "read" | "write" | null }[];
       permissions: { id: string; object: Record<string, unknown>; actions: string[]; binding: string }[];
       /** What the App holds, and which making it current asks an admin for again. */
       grants: { permission: { id: string; binding: string; actions: string[] }; askedAgain: boolean }[];
@@ -1538,8 +1534,7 @@ build: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
       | { type: "collection"; collectionId: string }
-      | { type: "workflow"; workflowId: string }
-      | { type: "app"; appId: string };
+      | { type: "workflow"; workflowId: string };
     actions: string[];
     binding: string;
   }): Promise<{ id: string; status: string }>;

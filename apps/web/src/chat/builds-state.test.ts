@@ -4,7 +4,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   changedScreens,
-  exportChangeText,
   migrationFixturesText,
   pendingToShow,
   previewedScreen,
@@ -173,73 +172,13 @@ describe("the Being built section", () => {
       "No longer runs when someone starts it",
     ]);
   });
-
-  it("says what other Apps may call, and highlights what now changes the domain's data", () => {
-    expect([
-      exportChangeText({
-        name: "book",
-        change: "added",
-        access: "write",
-        accessBefore: null,
-      }),
-      exportChangeText({
-        name: "totals",
-        change: "added",
-        access: "read",
-        accessBefore: null,
-      }),
-      exportChangeText({
-        name: "purge",
-        change: "removed",
-        access: null,
-        accessBefore: "write",
-      }),
-      exportChangeText({
-        name: "totals",
-        change: "modified",
-        access: "write",
-        accessBefore: "read",
-      }),
-      exportChangeText({
-        name: "totals",
-        change: "modified",
-        access: "read",
-        accessBefore: "read",
-      }),
-      exportChangeText({
-        name: "purge",
-        change: "modified",
-        access: "read",
-        accessBefore: "write",
-      }),
-    ]).toStrictEqual([
-      {
-        text: "Other domains may now call book, which changes the domain's data",
-        widens: true,
-      },
-      {
-        text: "Other domains may now call totals, which reads the domain's data",
-        widens: false,
-      },
-      { text: "Other domains may no longer call purge", widens: false },
-      {
-        text: "totals now changes the domain's data (read → write)",
-        widens: true,
-      },
-      { text: "totals changed: it reads the domain's data", widens: false },
-      {
-        text: "purge no longer changes the domain's data (write → read)",
-        widens: false,
-      },
-    ]);
-  });
 });
 
 describe("the screen a draft's preview shows", () => {
   it("is the one picked while the draft still changes it, otherwise the first it changes", () => {
     const changed = changedScreens({
       changed: [
-        "app/server.ts",
+        "operations/notes.ts",
         "screens/zeta.tsx",
         "screens/alpha.tsx",
         "screens/lib/format.ts",

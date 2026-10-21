@@ -14,7 +14,6 @@ import {
   computeModuleErrors,
   computePackagesFile,
   openWorkflowErrors,
-  serverFiles,
   workflowBindingsPath,
   workflowBuildFiles,
 } from "@grasp-os/compiler";
@@ -26,7 +25,6 @@ import type {
   ComputeModulesBuild,
   OpenWorkflowBuild,
   ScreenBuild,
-  ServerBuild,
   WorkflowBuild,
 } from "@grasp-os/compiler";
 import {
@@ -101,7 +99,7 @@ type AppFiles = Record<string, string>;
  * compiler or kit builds every App again) and a hash of the files it
  * reads. Nothing else goes into a build, so the same files build the same
  * whichever App or version they are in: an App made from a blueprint, or
- * a version that changed only its screens, takes the server build it
+ * a version that changed only its screens, takes the workflow build it
  * already has.
  */
 export const buildKey = async (files: AppFiles): Promise<string> =>
@@ -147,7 +145,6 @@ export type BuildEnv = PlatformEnv & {
  */
 const compilerCalls = {
   screen: ["build", "screens"],
-  server: ["build", "server"],
   workflow: ["build", "workflows"],
   app: ["inspect", "app"],
   "app-check": ["build", "app"],
@@ -441,26 +438,6 @@ export const buildScreens = async (
     "screen",
     appFiles,
     buildFiles,
-    whose,
-    signal
-  );
-
-/**
- * Builds an App's server code (`app/**.ts`) into ES modules, in the
- * compiler's isolate. A build is cached in R2, like the screens'.
- */
-export const buildServer = async (
-  env: BuildEnv,
-  appFiles: AppFiles,
-  /** Whose build it is: the App's ID. */
-  whose: string,
-  signal?: AbortSignal
-): Promise<ServerBuild> =>
-  await cachedBuild<ServerBuild>(
-    env,
-    "server",
-    appFiles,
-    serverFiles,
     whose,
     signal
   );

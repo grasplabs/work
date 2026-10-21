@@ -219,15 +219,13 @@ export type Grantee =
  * grantee, however many steps away, through what lets it use another's
  * reach (`reached(kind, id)`, Apps and workflows alike):
  *
- * - an App or a workflow holding an active permission on an App's exports
- *   reaches that App;
  * - an App or a workflow holding an active `start` grant on a workflow
  *   reaches that workflow, and so does a live workflow any of whose
  *   versions binds it: what it reads comes back to what started it.
  *
- * So more for an App reaches the Apps starting a workflow that calls its
- * exports, and more for a workflow the Apps calling it, or starting one
- * that runs it.
+ * So more for a workflow reaches the Apps starting it, or starting one
+ * that runs it. App resources (resource-apps.ts) aren't followed yet:
+ * GRA-954.
  */
 const reachingSql = (grantee: Grantee): SQL => {
   const seed =
@@ -236,11 +234,6 @@ const reachingSql = (grantee: Grantee): SQL => {
       : sql`SELECT 'workflow', ${grantee.workflowId}`;
   return sql`reached(kind, id) AS (
   ${seed}
-  UNION
-  SELECT held.subject_type, held.subject_id FROM permissions AS held
-    JOIN reached ON reached.kind = 'app' AND held.object_type = 'app'
-      AND held.object_id = reached.id
-  WHERE held.status = 'active' AND held.subject_type IN ('app', 'workflow')
   UNION
   SELECT held.subject_type, held.subject_id FROM permissions AS held
     JOIN reached ON reached.kind = 'workflow' AND held.object_type = 'workflow'

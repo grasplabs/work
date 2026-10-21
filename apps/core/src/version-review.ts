@@ -1,12 +1,11 @@
 import {
+  appCodeFiles,
   compilerVersion,
-  serverFiles,
   workflowPaths,
 } from "@grasp-os/compiler";
 import { readOutline } from "@grasp-os/sdk/describe";
 import type { AppManifest } from "@grasp-os/sdk/host";
 import type {
-  AppExports,
   AppFiles,
   ReviewChange,
   VersionReview,
@@ -120,7 +119,8 @@ const migrationsOf = async (
 const maxFailures = 50;
 
 /**
- * How an App's server code changed, from its files that did (`changes`)
+ * How an App's server code changed (`appCodeFiles`: what its seal
+ * builds), from its files that did (`changes`)
  * and how many there were before and are now: added from none, removed
  * to none, modified otherwise; null when none changed.
  */
@@ -347,26 +347,6 @@ const triggerChanges = (
     ];
   });
 };
-
-/**
- * How a version's exports (what other Apps may call, `app/exports.json`)
- * differ from the current version's: each by name, with its access now
- * and before.
- */
-const exportChanges = (
-  before: AppExports,
-  now: AppExports
-): VersionReview["exports"] =>
-  differences(
-    new Map(Object.entries(before)),
-    new Map(Object.entries(now)),
-    sameJson
-  ).map(({ name, change, now: after, before: was }) => ({
-    name,
-    change,
-    access: after?.access ?? null,
-    accessBefore: was?.access ?? null,
-  }));
 
 /** Where a version's tests are kept, by its files' hash and the compiler. */
 const testsKey = (app: AppId, tree: string): string =>
@@ -691,8 +671,7 @@ export const reviewVersion = async (
   const row = await findVersion(env, found.id, version);
   const files = await versionFiles(env, found.id, row.version);
   const { currentVersion: current } = found;
-  // What the current version's row keeps, its exports and what its
-  // workflows call; the current version itself changes nothing against
+  // What the current version's row keeps, what its workflows call; the current version itself changes nothing against
   // itself.
   const currentRow =
     current === null ? undefined : await findVersion(env, found.id, current);
@@ -716,14 +695,14 @@ export const reviewVersion = async (
     changedPaths,
   });
   const serverChanges = differences(
-    new Map(Object.entries(serverFiles(before?.files ?? {}))),
-    new Map(Object.entries(serverFiles(files))),
+    new Map(Object.entries(appCodeFiles(before?.files ?? {}))),
+    new Map(Object.entries(appCodeFiles(files))),
     (one, other) => one === other
   );
   const server = serverChangeOf(
     serverChanges,
-    Object.keys(serverFiles(before?.files ?? {})).length,
-    Object.keys(serverFiles(files)).length
+    Object.keys(appCodeFiles(before?.files ?? {})).length,
+    Object.keys(appCodeFiles(files)).length
   );
   const migrations = await migrationsOf(
     env,
@@ -743,8 +722,6 @@ export const reviewVersion = async (
   // Asked for again only if not kept, as `madeCurrent` says: an App's
   // first version copied from a blueprint, made current for the first time.
   const keep = current === null && row.approved === 1;
-  // What other Apps may call of the current version, from its row.
-  const exportsBefore = currentRow?.exports ?? {};
   // What the App holds, as the permissions API shows it to this reviewer.
   const held = await permissionsOpenTo(
     env,
@@ -758,7 +735,6 @@ export const reviewVersion = async (
     current,
     files: fileChanges.map(({ name, change }) => ({ path: name, change })),
     server,
-    exports: exportChanges(exportsBefore, row.exports),
     serverFiles: serverChanges.map(({ name, change }) => ({
       path: name,
       change,

@@ -1043,45 +1043,6 @@ describe("screen trust", { timeout: 60_000 }, () => {
     });
   });
 
-  it("ends a live query of an App a grant to another makes sensitive again, with nothing written after", async () => {
-    const admin = await personApi("admin");
-    const builder = await personApi("builder");
-    // Near reaches Granted's exports: more for Granted is more for Near.
-    const [granted, near] = await Promise.all([
-      sampleApp(builder),
-      sampleApp(builder),
-    ]);
-    const { id: reach } = await builder.api.permissions.request({
-      subject: { type: "app", appId: near },
-      object: { type: "app", appId: granted },
-      actions: ["read"],
-      binding: "GRANTED",
-    });
-    await admin.api.permissions.grant(reach, { version: 1 });
-    await classifyAs(admin, near, "ordinary");
-    const live = await following(builder, near);
-    const { id: collectionId } = await admin.api.knowledge.createCollection({
-      name: `Ledger ${crypto.randomUUID()}`,
-      access: "everyone",
-    });
-    const { id: more } = await builder.api.permissions.request({
-      subject: { type: "app", appId: granted },
-      object: { type: "collection", collectionId },
-      actions: ["read"],
-      binding: "LEDGER",
-    });
-    const events = await auditedDuring(async () => {
-      await admin.api.permissions.grant(more, { version: 1 });
-      await vi.waitFor(() => {
-        expect(live.refused).toStrictEqual(["screen.unreviewed"]);
-      }, pushWait);
-    });
-    expect({ pushed: live.values, refused: refusals(events) }).toStrictEqual({
-      pushed: [[secret]],
-      refused: ["watchQuery/push: unreviewed"],
-    });
-  });
-
   it("ends a build's live query when the release it runs is revoked, with nothing written after", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
@@ -1678,14 +1639,12 @@ describe("screen trust", { timeout: 60_000 }, () => {
     });
   });
 
-  it("makes ordinary data sensitive again for every App that reaches a granted App through exports or workflows, however far", async () => {
+  it("makes ordinary data sensitive again for the granted App, and for no App that doesn't reach it", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
-    // Far reaches Near's exports, Near reaches Granted's workflows;
-    // Apart reaches nothing.
-    const [granted, near, far, apart] = await Promise.all([
-      sampleApp(builder),
-      sampleApp(builder),
+    // Apart reaches nothing of Granted. What reaches it through an app
+    // resource isn't followed yet (GRA-954).
+    const [granted, apart] = await Promise.all([
       sampleApp(builder),
       sampleApp(builder),
     ]);
@@ -1696,20 +1655,8 @@ describe("screen trust", { timeout: 60_000 }, () => {
       await admin.api.permissions.grant(id, { version: 1 });
       return id;
     };
-    await grantNow({
-      subject: { type: "app", appId: near },
-      object: { type: "app", appId: granted },
-      actions: ["read"],
-      binding: "GRANTED",
-    });
-    await grantNow({
-      subject: { type: "app", appId: far },
-      object: { type: "app", appId: near },
-      actions: ["read"],
-      binding: "NEAR",
-    });
     await Promise.all(
-      [granted, near, far, apart].map(async (app) => {
+      [granted, apart].map(async (app) => {
         await classifyAs(admin, app, "ordinary");
       })
     );
@@ -1728,7 +1675,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
       });
     });
     const outputs = await Promise.all(
-      [granted, near, far, apart].map(async (app) => {
+      [granted, apart].map(async (app) => {
         const { output } = await admin.api.screenTrust.review(app);
         return output;
       })
@@ -1745,8 +1692,8 @@ describe("screen trust", { timeout: 60_000 }, () => {
         }))
         .toSorted((a, b) => String(a.app).localeCompare(String(b.app))),
     }).toStrictEqual({
-      outputs: ["sensitive", "sensitive", "sensitive", "ordinary"],
-      classified: [granted, near, far].toSorted().map((app) => ({
+      outputs: ["sensitive", "ordinary"],
+      classified: [granted].map((app) => ({
         actor: { type: "person", userId: admin.userId },
         app,
         detail: {
