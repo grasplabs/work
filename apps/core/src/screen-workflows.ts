@@ -28,6 +28,7 @@ import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
+import { appStartFiles } from "./app-start-files.ts";
 import { startAppBinding } from "./app-workflow-bindings.ts";
 import { appFor } from "./apps.ts";
 import {
@@ -39,7 +40,6 @@ import {
 import { isUniqueViolation } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
-import { screenStartFiles } from "./screen-start-files.ts";
 import { coreStartKey } from "./workflow-start-intents.ts";
 import { appStartHoldsSql } from "./workflow-starts.ts";
 import {
@@ -669,7 +669,7 @@ const started = async (
     undefined,
     null,
     // The App's files the person may read now, which its run gets copies of.
-    screenStartFiles(env, asking.by, asking.app, asking.release)
+    appStartFiles(env, asking.by.userId, asking.app, asking.release)
   );
   return {
     runId: start.id,

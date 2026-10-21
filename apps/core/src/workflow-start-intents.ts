@@ -20,6 +20,8 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { chatAuthority, chatContext } from "./agent-scope.ts";
+import { loadRelease } from "./app-releases.ts";
+import { appStartFiles } from "./app-start-files.ts";
 import { startAppBinding } from "./app-workflow-bindings.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { permissions } from "./db/core/schema.ts";
@@ -168,6 +170,8 @@ const startAsApp = async (
     throw workflowResourceErrors.create("workflow.start_denied");
   }
   requireGoing?.();
+  const { appId } = authority.subject;
+  const { appVersion } = authority;
   return await startAppBinding(
     env,
     authority,
@@ -176,9 +180,19 @@ const startAsApp = async (
     notedOf(agent),
     agent === null
       ? undefined
-      : agentAllowedSql(authority.subject.appId, authority.onBehalfOf, agent),
+      : agentAllowedSql(appId, authority.onBehalfOf, agent),
     requireGoing,
-    agent
+    agent,
+    // The App's files the person may read as the start is decided: for a
+    // commit's start, at its dispatch, never as it committed (GRA-976).
+    appVersion === undefined
+      ? undefined
+      : appStartFiles(
+          env,
+          authority.onBehalfOf,
+          appId,
+          async () => await loadRelease(env, appId, appVersion)
+        )
   );
 };
 
