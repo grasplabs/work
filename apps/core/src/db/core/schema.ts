@@ -1142,7 +1142,8 @@ export const workflowRuns = sqliteTable(
      * root, so every descendant names the same one. Null for a run that
      * is its own root. Written once, with the row, and never from what the
      * run is given: the model gateway counts the lineage's model calls and
-     * spend by it (src/model-budgets.ts).
+     * spend by it, unless the run is charged to an account
+     * (`accountRunId`, src/model-budgets.ts).
      */
     rootRunId: text("root_run_id"),
     /**
@@ -1152,10 +1153,12 @@ export const workflowRuns = sqliteTable(
      * allowances its work is charged to, the first run of its kind in the
      * lineage (`run_lineage_accounts`). Its attempts, host
      * calls, model spend and share count there; its place (descendants,
-     * depth, age) stays the lineage's. Null for a root and a run of the
-     * root's App under its own runs, charged to the lineage's own
-     * (src/workflows/quotas.ts). Written once, with the row: never changed
-     * once set (migration 0112's trigger).
+     * depth, age) stays the lineage's. A run of its parent's App takes its
+     * parent's: so a run of the root's App under a run charged to an
+     * account is charged there too. Null for a root, and for a run of the
+     * root's App whose parent is charged to the lineage's own
+     * (src/workflows/quotas.ts, `accountClaimed`). Written once, with the
+     * row: never changed once set (migration 0112's trigger).
      */
     accountRunId: text("account_run_id"),
     /**
@@ -2779,7 +2782,7 @@ export const workflowResources = sqliteTable(
      * When an admin released the name of this deleted workflow, and who: it
      * no longer holds the name, which a new workflow may take. Set once, on
      * a deleted row only, and never cleared; the row is never live again
-     * (migration 0105's triggers).
+     * (migration 0107's triggers).
      */
     nameReleasedAt: timestamp("name_released_at"),
     nameReleasedBy: text("name_released_by"),
