@@ -249,7 +249,7 @@ describe("the client pages", () => {
       ),
       resume: html.includes("Resume"),
       quota: html.includes(
-        "The console sets the platform&#x27;s own. Core couldn&#x27;t be asked which it applies."
+        "The console sets no policy. Core couldn&#x27;t be asked which it applies."
       ),
       inSync: html.includes("In sync"),
     }).toStrictEqual({

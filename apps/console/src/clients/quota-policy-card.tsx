@@ -51,7 +51,8 @@ export const summaryOf = ({
 }: ClientQuotaPolicy): string => {
   const ours = generationText(set.generation);
   if (inForce === null) {
-    return `The console sets ${ours}. Core couldn't be asked which it applies.`;
+    const sets = set.generation === 0 ? "sets no policy" : `sets ${ours}`;
+    return `The console ${sets}. Core couldn't be asked which it applies.`;
   }
   const theirs = generationText(inForce.generation);
   if (state === "pending") {

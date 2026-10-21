@@ -242,6 +242,7 @@ describe("a client's quota policy", () => {
       noneSet: summaryOf(policyOf(0, 3, "drifted")),
       pending: summaryOf(policyOf(4, 3, "pending")),
       unknown: summaryOf(policyOf(0, null, "unknown")),
+      unknownSet: summaryOf(policyOf(2, null, "unknown")),
     }).toStrictEqual({
       inSync: "Core applies generation 3, as the console sets.",
       refused:
@@ -253,7 +254,9 @@ describe("a client's quota policy", () => {
       pending:
         "Core applies generation 3. The console's change waits for the client's next deploy.",
       unknown:
-        "The console sets the platform's own. Core couldn't be asked which it applies.",
+        "The console sets no policy. Core couldn't be asked which it applies.",
+      unknownSet:
+        "The console sets generation 2. Core couldn't be asked which it applies.",
     });
   });
 });
