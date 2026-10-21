@@ -81,6 +81,36 @@ const freeModuleName = (
 const identifier = /^[A-Za-z_$][\w$]*$/u;
 
 /**
+ * The module the wrapper imports first, so it is evaluated before the
+ * original main and anything it imports: it keeps the built-ins the
+ * wrapper uses, as they are before any of the isolate's own code can
+ * replace one (`Reflect.get`, `JSON.stringify`, `Array.prototype` setters
+ * and the like), so nothing the code does as it loads makes the wrapper
+ * itself throw, or answer for it.
+ */
+const builtinsSource = `import { WorkerEntrypoint } from "cloudflare:workers";
+export const builtins = Object.freeze({
+  apply: Reflect.apply,
+  get: Reflect.get,
+  define: Reflect.defineProperty,
+  keys: Object.keys,
+  isPrototypeOf: Object.prototype.isPrototypeOf,
+  stringOf: String,
+  slice: String.prototype.slice,
+  stringify: JSON.stringify,
+  Proxy,
+  Response,
+  resolve: Promise.resolve.bind(Promise),
+  then: Promise.prototype.then,
+  bind: Function.prototype.bind,
+  entrypointPrototype: WorkerEntrypoint.prototype,
+});
+`;
+
+/** The built-ins module's name: none the isolate's modules have. */
+const builtinsModule = "grasp-sandbox-builtins.js";
+
+/**
  * The wrapper main module of an isolate whose entrypoint `entrypoint` is
  * called (`default` for its default export): it imports the original main
  * and exports that entrypoint wrapped, so whatever the entrypoint's call
@@ -96,14 +126,21 @@ const identifier = /^[A-Za-z_$][\w$]*$/u;
  *   quiet module covers a `WorkerEntrypoint`'s own `ctx`).
  * - `fetch` answers a thrown error as a Response under `thrownHeader`.
  * - Anything else is exported as it is.
+ *
+ * It uses only the built-ins `builtinsSource` kept, never a global or a
+ * prototype's method the isolate's code could have replaced: no spread,
+ * destructuring or `instanceof`, which read those.
  */
 const entrySource = (
   mainModule: string,
+  builtins: string,
   entrypoint: string,
   brand: string
-): string => `import { WorkerEntrypoint } from "cloudflare:workers";
+): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
+const { apply, get, define, keys, isPrototypeOf, stringOf, slice, stringify, Proxy, Response, resolve, then, bind, entrypointPrototype } = builtins;
 const brand = ${JSON.stringify(brand)};
+const cut = (text, most) => apply(slice, text, [0, most]);
 const textOf = (read, fallback) => {
   try {
     const value = read();
@@ -113,96 +150,103 @@ const textOf = (read, fallback) => {
   }
 };
 const thrownOf = (error) => {
-  const isError = error instanceof Error;
-  const name = isError ? textOf(() => error.name, "Error") : "Error";
-  const message = isError
-    ? textOf(() => error.message, "")
-    : textOf(() => String(error), "[unprintable]");
+  const isObject = (typeof error === "object" && error !== null) || typeof error === "function";
+  const name = isObject ? textOf(() => get(error, "name"), "Error") : "Error";
+  const message = isObject
+    ? textOf(() => get(error, "message"), "")
+    : textOf(() => stringOf(error), "[unprintable]");
   let code;
   try {
-    const given = error?.code;
+    const given = isObject ? get(error, "code") : undefined;
     code = typeof given === "string" || typeof given === "number" ? given : undefined;
   } catch {
     code = undefined;
   }
-  return {
-    name: name.slice(0, ${maxThrownName}),
-    message: message.slice(0, ${maxThrownMessage}),
-    ...(code === undefined ? {} : { code }),
-  };
+  return { name: cut(name, ${maxThrownName}), message: cut(message, ${maxThrownMessage}), code };
 };
-const answered = (method) =>
-  async function (...args) {
+const answered = (method, self, args) =>
+  (async () => {
     try {
-      return await method.apply(this, args);
+      return await apply(method, self, args);
     } catch (error) {
       return { [brand]: thrownOf(error) };
     }
-  };
-const fetched = (method) =>
-  async function (...args) {
+  })();
+const fetched = (method, self, args) =>
+  (async () => {
     try {
-      return await method.apply(this, args);
+      return await apply(method, self, args);
     } catch (error) {
-      return new Response(JSON.stringify(thrownOf(error)), {
+      return new Response(stringify(thrownOf(error)), {
         status: 500,
         headers: { ${JSON.stringify(thrownHeader)}: brand },
       });
     }
-  };
-const wrapped = (key, method) => (key === "fetch" ? fetched(method) : answered(method));
-const quietContext = (ctx) =>
-  ctx === null || typeof ctx !== "object" || typeof ctx.waitUntil !== "function"
-    ? ctx
-    : new Proxy(ctx, {
-        get: (target, property) => {
-          if (property === "waitUntil") {
-            return (promise) =>
-              target.waitUntil(Promise.resolve(promise).catch(() => undefined));
-          }
-          const value = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
+  })();
+const call = (key, method, self, args) =>
+  key === "fetch" ? fetched(method, self, args) : answered(method, self, args);
+const swallowed = () => undefined;
+const quietContext = (ctx) => {
+  if (ctx === null || typeof ctx !== "object") {
+    return ctx;
+  }
+  return new Proxy(ctx, {
+    get: (target, property) => {
+      const value = get(target, property, target);
+      if (property === "waitUntil" && typeof value === "function") {
+        return (promise) => apply(value, target, [apply(then, resolve(promise), [undefined, swallowed])]);
+      }
+      return typeof value === "function" ? apply(bind, value, [target]) : value;
+    },
+  });
+};
 const quietClass = (Base) => {
-  const methods = new Map();
   const handler = {
     get: (target, property) => {
-      const value = Reflect.get(target, property, target);
+      const value = get(target, property, target);
       if (typeof property !== "string" || property === "constructor" || typeof value !== "function") {
         return value;
       }
-      let method = methods.get(value);
-      if (method === undefined) {
-        method = wrapped(property, value);
-        methods.set(value, method);
-      }
-      return (...args) => method.apply(target, args);
+      return (...args) => call(property, value, target, args);
     },
   };
   return class extends Base {
-    constructor(...args) {
-      super(...args);
+    constructor(ctx, env) {
+      super(ctx, env);
       return new Proxy(this, handler);
     }
   };
 };
 const quietHandlers = (handlers) => {
   const quiet = {};
-  for (const key of Object.keys(handlers)) {
-    const value = handlers[key];
-    quiet[key] =
-      typeof value === "function"
-        ? (...args) => {
-            const [first, second, ctx, ...rest] = args;
-            return wrapped(key, value).apply(handlers, args.length >= 3 ? [first, second, quietContext(ctx), ...rest] : args);
-          }
-        : value;
+  const names = keys(handlers);
+  for (let index = 0; index < names.length; index += 1) {
+    const key = names[index];
+    const value = get(handlers, key);
+    define(quiet, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value:
+        typeof value === "function"
+          ? (...args) => {
+              // A handler's context comes third: fetch(request, env, ctx).
+              if (args.length >= 3) {
+                args[2] = quietContext(args[2]);
+              }
+              return call(key, value, handlers, args);
+            }
+          : value,
+    });
   }
   return quiet;
 };
 const quietEntrypoint = (value) => {
-  if (typeof value === "function" && value.prototype instanceof WorkerEntrypoint) {
+  if (
+    typeof value === "function" &&
+    typeof get(value, "prototype") === "object" &&
+    apply(isPrototypeOf, entrypointPrototype, [get(value, "prototype")])
+  ) {
     return quietClass(value);
   }
   if (value !== null && typeof value === "object") {
@@ -351,7 +395,8 @@ const quietCode = <Code extends QuietableCode>(
     }
   );
   const quieted = modules[code.mainModule];
-  const entry = freeModuleName(modules, entryModule);
+  const builtins = freeModuleName(modules, builtinsModule);
+  const entry = freeModuleName({ ...modules, [builtins]: "" }, entryModule);
   return {
     ...code,
     mainModule: entry,
@@ -359,7 +404,8 @@ const quietCode = <Code extends QuietableCode>(
       ...(typeof main === "string" || typeof quieted !== "string"
         ? modules
         : { ...modules, [code.mainModule]: { js: quieted } }),
-      [entry]: entrySource(code.mainModule, entrypoint, brand),
+      [builtins]: builtinsSource,
+      [entry]: entrySource(code.mainModule, builtins, entrypoint, brand),
     },
   };
 };
