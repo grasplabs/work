@@ -1,10 +1,3 @@
-import {
-  captureEntrypoint,
-  captureMethod,
-  capturedModules,
-  hasNodeModules,
-  quietModules,
-} from "@grasp-os/shared/quiet-isolate";
 /**
  * A session on the on-prem sandbox host (sandbox-host.ts): one call of an
  * isolate whose code reaches back into core through capabilities, such as
@@ -32,6 +25,14 @@ import {
  * workerd refuses an RpcTarget in a loaded Worker's env ("Remote RPC
  * references can only be serialized for RPC").
  */
+
+import {
+  captureEntrypoint,
+  captureMethod,
+  capturedModules,
+  hasNodeModules,
+  quietModules,
+} from "@grasp-os/shared/quiet-isolate";
 import {
   // oxlint-disable-next-line no-restricted-imports -- its only caller is core, over the supervisor's private socket: nothing untrusted calls it
   RpcTarget as CapnwebTarget,
