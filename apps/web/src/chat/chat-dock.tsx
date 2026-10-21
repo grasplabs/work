@@ -394,8 +394,9 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
 
 /**
  * The dock where it belongs: on every page in the frame but Chat's own,
- * which is the chat at full size. Over the brain's atlas (`/brain`, a
- * region of it too) it is the brain's own chat, as in the prototype
+ * which is the chat at full size. In the brain (its atlas, a region of
+ * it, a note or a part's page) it is the brain's own chat, kept as the
+ * person moves about the brain, as in the prototype
  * (`knowledge/brain-chat.tsx`): its own conversation, apart from the one
  * Chat shows, asked of Grasp's agent through core's chat like any other,
  * whose answers cite the notes they used (`ChatCitation`, opening them as
@@ -412,7 +413,7 @@ export const ChatDock = () => {
   if (pathname === "/") {
     return null;
   }
-  if (pathname === "/brain") {
+  if (pathname === "/brain" || pathname.startsWith("/brain/")) {
     return (
       <Dock
         key="brain"

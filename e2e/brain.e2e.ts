@@ -137,8 +137,11 @@ test("a person asks the brain on its atlas, in a chat of its own apart from the 
   await ask("Ask Grasp", elsewhere);
   await expect(firstQuestion("Ask Grasp")).toHaveText(elsewhere);
 
-  // Back on the atlas, the brain's conversation goes on.
+  // Back in the brain, on a part's page too, the brain's conversation goes on.
   await page.goto("/brain");
+  await page.getByRole("button", { name: "Open the chat" }).click();
+  await expect(firstQuestion("Ask the brain")).toHaveText(ofTheBrain);
+  await page.goto("/brain/sections/vision");
   await page.getByRole("button", { name: "Open the chat" }).click();
   await expect(firstQuestion("Ask the brain")).toHaveText(ofTheBrain);
 });
