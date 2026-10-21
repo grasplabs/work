@@ -11,7 +11,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vite-plus/test";
 
-import { SidebarBrandOf } from "./sidebar-brand.tsx";
+import { organizationRenamed, SidebarBrandOf } from "./sidebar-brand.tsx";
 
 // The sidebar's header against core's answer to its read of the
 // organization, faked: the organization's name over "Grasp" once core
@@ -40,9 +40,13 @@ const settled = async (): Promise<void> => {
   }
 };
 
-/** The header's lines of text once core answered `organization`'s read. */
+/**
+ * The header's lines of text once core answered `organization`'s read, and
+ * `then` (a rename on the page, say) ran.
+ */
 const textWith = async (
-  organization: () => Promise<Organization>
+  organization: () => Promise<Organization>,
+  then?: () => void
 ): Promise<string> => {
   const host = document.createElement("div");
   document.body.append(host);
@@ -57,6 +61,9 @@ const textWith = async (
     );
     await settled();
   });
+  if (then !== undefined) {
+    act(then);
+  }
   // Each line of the header on its own: its name, then "Grasp".
   const text = [...host.querySelectorAll("span")]
     .filter((span) => span.children.length === 0)
@@ -71,7 +78,7 @@ const textWith = async (
 };
 
 describe("the sidebar's header", () => {
-  it("names the organization over Grasp once core says it, and says Grasp alone when it has none or core can't say", async () => {
+  it("names the organization over Grasp once core says it, and its new name once renamed, and says Grasp alone when it has none or core can't say", async () => {
     expect({
       named: await textWith(async () => {
         await settled();
@@ -85,10 +92,20 @@ describe("the sidebar's header", () => {
         await settled();
         throw new Error("Core couldn't say just now.");
       }),
+      renamed: await textWith(
+        async () => {
+          await settled();
+          return organizationNamed("Noordkade Finance");
+        },
+        () => {
+          organizationRenamed("Noordkade Group");
+        }
+      ),
     }).toStrictEqual({
       named: "Noordkade Finance Grasp",
       unnamed: "Grasp",
       unanswered: "Grasp",
+      renamed: "Noordkade Group Grasp",
     });
   });
 });
