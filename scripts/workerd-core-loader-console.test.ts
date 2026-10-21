@@ -116,19 +116,59 @@ const core :Workerd.Worker = (
   });
 
   // What the quiet module can't stop: workerd served `--verbose` reports
-  // an exception thrown out of a call, as it hands it to the caller. Pinned
-  // so a change to it is seen (GRA-939); without `--verbose`, as the
-  // supervisor and a deployment run, it isn't printed.
-  it("still has a call's thrown error reported by a workerd served --verbose", async () => {
-    const response = await fetch(new URL("/thrown", served.url));
-    const { answered, values } = ranSchema.parse(await response.json());
+  // an exception thrown out of a call, as it hands it to the caller, and
+  // what a callback of a timer imported by name from `node:timers` throws
+  // (the binding is the module's own, which nothing loaded first can
+  // change). Pinned so a change to either is seen (GRA-939); without
+  // `--verbose`, as the supervisor and a deployment run, neither is
+  // printed.
+  it("still has a call's thrown error and a named node:timers timer's reported by a workerd served --verbose", async () => {
+    const thrown = await fetch(new URL("/thrown", served.url));
+    const { answered, values } = ranSchema.parse(await thrown.json());
+    const named = await fetch(new URL("/path/nodeNamedSetTimeout", served.url));
+    const namedValue = z
+      .object({ answered: z.string() })
+      .parse(await named.json()).answered;
     await sleep(SETTLE_MS);
 
     expect({
       answered,
       reported: served.logs().includes(values.thrown),
-    }).toStrictEqual({ answered: "threw", reported: true });
+      named: served.logs().includes(namedValue),
+    }).toStrictEqual({ answered: "threw", reported: true, named: true });
   });
+
+  // Each way an isolate's code can have workerd report an error with its
+  // message: the same isolate loaded as it is reports it, which shows the
+  // path is read; silenced, it reports nothing.
+  it.each([
+    ["setImmediate"],
+    ["nodeSetTimeout"],
+    ["nodeSetImmediate"],
+    ["waitUntil"],
+  ])(
+    "prints nothing an isolate's %s leaves uncaught, where the isolate loaded as it is does",
+    async (name) => {
+      const run = async (route: string) => {
+        const response = await fetch(new URL(route, served.url));
+        return z.object({ answered: z.string() }).parse(await response.json())
+          .answered;
+      };
+      const quiet = await run(`/path/${name}`);
+      const loud = await run(`/loud-path/${name}`);
+      await sleep(SETTLE_MS);
+
+      expect({
+        answered: [quiet, loud],
+        quiet: served.logs().includes(quiet),
+        loud: served.logs().includes(loud),
+      }).toStrictEqual({
+        answered: [`quiet-${name}-6d1f`, `loud-${name}-6d1f`],
+        quiet: false,
+        loud: true,
+      });
+    }
+  );
 
   it("refuses to load a main module that can't be silenced first", async () => {
     const response = await fetch(new URL("/cjs", served.url));
