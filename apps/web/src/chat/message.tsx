@@ -90,7 +90,15 @@ export const MessageAction = ({
   </Tooltip>
 );
 
-/** An answer's words, as Markdown. */
-export const MessageResponse = ({ text }: { text: string }) => (
-  <PlainMarkdown text={text} />
-);
+/**
+ * An answer's words, as Markdown, its links to the notes it cites
+ * (`cited`, a stored answer's citations) opening them; one still being
+ * written cites none.
+ */
+export const MessageResponse = ({
+  text,
+  cited,
+}: {
+  text: string;
+  cited?: readonly string[];
+}) => <PlainMarkdown cited={cited} text={text} />;

@@ -4449,6 +4449,7 @@ msgid "Grasp access"
 msgstr "Grasp access"
 
 #: src/chat/chat-dock.tsx
+#: src/chat/cited-note.tsx
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
@@ -5044,6 +5045,10 @@ msgstr "It was charged {amount} on {when}."
 #: src/routes/_shell.settings.spend.tsx
 msgid "It was released on {when}, charging nothing."
 msgstr "It was released on {when}, charging nothing."
+
+#: src/chat/cited-note.tsx
+msgid "It's gone, or you can't read it."
+msgstr "It's gone, or you can't read it."
 
 #: src/knowledge/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
@@ -9914,6 +9919,10 @@ msgstr "This month"
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
 msgstr "This month so far"
+
+#: src/chat/cited-note.tsx
+msgid "This note can't be opened"
+msgstr "This note can't be opened"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
