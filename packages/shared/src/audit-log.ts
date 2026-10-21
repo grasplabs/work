@@ -144,8 +144,11 @@ const typeRules: readonly {
   { action: "dependency.requested", type: "action" },
   { action: "dependency.admission_refused", type: "action" },
   { action: "dependency.superseded", type: "action" },
-  // A resolve refused because a package in the graph is known malware.
+  // A resolve or an approval refused because a package in the graph is
+  // known malware; and an approval refused because whether it is couldn't
+  // be checked.
   { action: "dependency.malware_refused", type: "action" },
+  { action: "dependency.approval_refused", type: "action" },
   // A build pinning an artifact of an approved graph, and the approval it
   // relied on, and each pin that dropped; and a resolve changing what a
   // target of a graph's lock is built for (its conditions or entries).
@@ -179,6 +182,14 @@ const typeRules: readonly {
   // and each call refused.
   { action: "store.operation.called", type: "action" },
   { action: "store.operation.refused", type: "permission" },
+  // A store's cascade job deleting, after their commit, the records a
+  // deletion reached past one commit's bound (core's src/store-host.ts):
+  // started with the commit, each batch, its end, and a job set aside
+  // after its batches kept failing.
+  { action: "store.cascade_started", type: "action" },
+  { action: "store.cascade_batch", type: "action" },
+  { action: "store.cascade_finished", type: "action" },
+  { action: "store.cascade_failed", type: "action" },
   // Guest chats (core's src/guests.ts): an App inviting someone, revoking
   // the link, and reading back what they wrote; the guest opening the
   // chat, sending a message and finishing it.

@@ -10,6 +10,7 @@ import { handleRequest } from "./entry.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
+import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
@@ -144,6 +145,9 @@ export default {
             sweepTestFixtures(env, new Date(controller.scheduledTime)),
             sweepScreenSubmissions(env, new Date(controller.scheduledTime)),
             sweepTokenKeys(env, new Date(controller.scheduledTime)),
+            // The application landscape: each connection read once a day,
+            // a bounded number of pages a run (src/landscape.ts).
+            syncLandscapes(env, new Date(controller.scheduledTime)),
             auditLog(env).armRetention(),
           ]
         : [

@@ -87,6 +87,17 @@ const ringStateOf = (
   if (stopped > 0) {
     return "stopped";
   }
+  // A rollout that failed before it reached one of the ring's companies
+  // (reading its targets, say) leaves them pending: the ring failed too.
+  // One that failed with the ring done (waiting to approve the next) leaves
+  // the ring done.
+  if (
+    rollout.status === "failed" &&
+    ring === rollout.ring &&
+    waiting + moving > 0
+  ) {
+    return "failed";
+  }
   if (
     ring < rollout.ring ||
     (ring === rollout.ring && waiting + moving === 0)
@@ -232,7 +243,26 @@ export const needsOf = (
 };
 
 /** How a company stands, as one word. */
-export type Standing = "attention" | "setup" | "healthy" | "offboarded";
+/**
+ * How a company stands, as one word. `unread`: active, nothing recorded
+ * needs a look, but its account wasn't read (yet, or the read failed or
+ * timed out), so whether it drifted or errs isn't known; never called
+ * healthy unread.
+ */
+export type Standing =
+  | "attention"
+  | "setup"
+  | "unread"
+  | "healthy"
+  | "offboarded";
+
+/**
+ * Whether the account was read for what a standing needs: its drift and
+ * its last day's requests. A read that failed or timed out comes back with
+ * them unknown (`gridLive`), which says nothing about either.
+ */
+const wasRead = (live: LiveStatus | undefined): boolean =>
+  live !== undefined && live.drift !== "unknown" && live.day !== null;
 
 export const standingOf = (
   row: GridRow,
@@ -245,14 +275,18 @@ export const standingOf = (
   if (needsOf(row, live, releases).length > 0) {
     return "attention";
   }
-  return row.status === "provisioning" ? "setup" : "healthy";
+  if (row.status === "provisioning") {
+    return "setup";
+  }
+  return wasRead(live) ? "healthy" : "unread";
 };
 
 const standingOrder: Record<Standing, number> = {
   attention: 0,
   setup: 1,
-  healthy: 2,
-  offboarded: 3,
+  unread: 2,
+  healthy: 3,
+  offboarded: 4,
 };
 
 /** Every company, the ones that need a look first, then by name. */

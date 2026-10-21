@@ -64,7 +64,7 @@ import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
-import { and, asc, count, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNull, max, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
@@ -118,6 +118,7 @@ import {
   chatCodeRuns,
   chatDraftFiles,
   maxToolCallIdChars,
+  chatDocuments,
   chatDrafts,
   chatMessages,
   chatProjectDocuments,
@@ -371,6 +372,24 @@ export interface CodeRunOpening {
  * a few collections or a connection, each an identifier.
  */
 const sourcesSchema = z.array(identifierSchema).max(auditProvenanceMaxItems);
+
+/** Most documents one read hands a chat's code: a page of hits or links. */
+const givenMaxPerRead = 1000;
+
+/**
+ * The documents one read hands a chat's code, by ID: the first
+ * {@link givenMaxPerRead}, as a read past them is still handed over (its
+ * answers then cite no more of it).
+ */
+const givenSchema = z
+  .array(identifierSchema)
+  .transform((ids) => ids.slice(0, givenMaxPerRead));
+
+/**
+ * Most documents a chat keeps as given (`chatDocuments`): its answers may
+ * cite those, the newest; an older one is dropped as a newer comes in.
+ */
+export const chatDocumentsMax = 500;
 
 /**
  * Most chats a person's list shows: their newest. Older ones are still
@@ -715,7 +734,12 @@ export class Workspace extends DurableObject<Env> {
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
-    const shown = chatMessageOf(id, message, createdAt);
+    const shown = chatMessageOf(
+      id,
+      message,
+      createdAt,
+      message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined
+    );
     // A step's result shows all it logged: its output goes in the same update.
     if (message.role === "toolResult") {
       const output = this.#outputs.get(chatId);
@@ -1839,14 +1863,73 @@ export class Workspace extends DurableObject<Env> {
   recordSources(
     chatId: ChatId,
     runId: string,
-    ids: readonly string[]
+    ids: readonly string[],
+    documentIds: readonly string[] = []
   ): CodeRunAdmission["call"] {
     const { call } = this.admitFromCodeRun(chatId, runId);
     if (call !== "open") {
       return call;
     }
-    this.#keepSources(chatId, sourcesSchema.parse(ids));
+    const sources = sourcesSchema.parse(ids);
+    const given = givenSchema.parse(documentIds);
+    this.ctx.storage.transactionSync(() => {
+      this.#keepSources(chatId, sources);
+      this.#keepGiven(chatId, given);
+    });
     return call;
+  }
+
+  /**
+   * Keeps `documentIds` as given to the chat's code: each once, after the
+   * chat's last message when it first was, then drops the oldest past
+   * {@link chatDocumentsMax}: given after an earlier message, or in an
+   * earlier read since the same one (insertion order, `rowid`).
+   */
+  #keepGiven(chatId: ChatId, documentIds: readonly string[]): void {
+    if (documentIds.length === 0) {
+      return;
+    }
+    const last = this.#db
+      .select({ id: max(chatMessages.id) })
+      .from(chatMessages)
+      .where(eq(chatMessages.chatId, chatId))
+      .get();
+    // The WHERE keeps SQLite from reading ON CONFLICT as a join.
+    this.#db
+      .insert(chatDocuments)
+      .select(
+        sql`SELECT ${chatId}, value, ${last?.id ?? 0} FROM json_each(${JSON.stringify([...new Set(documentIds)])}) WHERE true`
+      )
+      .onConflictDoNothing()
+      .run();
+    this.#db.run(
+      sql`DELETE FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} AND ${chatDocuments.documentId} NOT IN (SELECT ${chatDocuments.documentId} FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} ORDER BY ${chatDocuments.givenAfter} DESC, rowid DESC LIMIT ${chatDocumentsMax})`
+    );
+  }
+
+  /**
+   * Whether the chat's message `messageId` may cite a document: one given
+   * to the chat's code before it was stored (after an earlier message),
+   * that the chat still keeps.
+   */
+  #givenBy(
+    chatId: ChatId
+  ): (messageId: number) => (documentId: string) => boolean {
+    const given = new Map(
+      this.#db
+        .select({
+          documentId: chatDocuments.documentId,
+          givenAfter: chatDocuments.givenAfter,
+        })
+        .from(chatDocuments)
+        .where(eq(chatDocuments.chatId, chatId))
+        .all()
+        .map(({ documentId, givenAfter }) => [documentId, givenAfter])
+    );
+    return (messageId) => (documentId) => {
+      const givenAfter = given.get(documentId);
+      return givenAfter !== undefined && messageId > givenAfter;
+    };
   }
 
   /**
@@ -2415,6 +2498,10 @@ export class Workspace extends DurableObject<Env> {
         this.#jobs.deleteChat(id);
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
+        this.#db
+          .delete(chatDocuments)
+          .where(eq(chatDocuments.chatId, id))
+          .run();
         this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
         this.#db
           .delete(chatAttachments)
@@ -3385,6 +3472,7 @@ export class Workspace extends DurableObject<Env> {
 
   /** The chat's messages stored after the one with ID `after`, as shown. */
   #shownAfter(chatId: ChatId, after: number): ChatMessage[] {
+    const givenBy = this.#givenBy(chatId);
     return this.#db
       .select()
       .from(chatMessages)
@@ -3395,7 +3483,8 @@ export class Workspace extends DurableObject<Env> {
         const shown = chatMessageOf(
           id,
           storedMessageSchema.parse(JSON.parse(message)),
-          createdAt
+          createdAt,
+          givenBy(id)
         );
         return shown === undefined ? [] : [shown];
       });

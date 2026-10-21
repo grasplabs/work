@@ -1,5 +1,9 @@
 import type { ChatProject, ChatSummary } from "@grasp-os/shared/chat";
-import { chatTitleSchema, projectNameSchema } from "@grasp-os/shared/chat";
+import {
+  chatTitleSchema,
+  projectNameMaxLength,
+  projectNameSchema,
+} from "@grasp-os/shared/chat";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -304,9 +308,6 @@ const useButtonClicks = (onClick: () => void, onDoubleClick: () => void) => {
     },
   };
 };
-
-/** The longest name a project takes, as core checks it. */
-const projectNameMaxLength = 100;
 
 /** The data type a dragged chat carries: its ID. */
 const chatDragType = "application/x-grasp-chat";

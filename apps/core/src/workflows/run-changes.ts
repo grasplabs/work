@@ -12,7 +12,7 @@ import { appHost } from "../durable-objects.ts";
 // Run status, live, on an App's screens: each time one of its runs
 // starts, waits for a decision, has it answered or closed, or ends, core
 // tells the App's host (app.ts, `runChanged`), which tells the screens
-// following that workflow (`screens.watchRuns`), each push checked by
+// following that workflow (`ScreenFrameApi.watchRuns`), each push checked by
 // screens-rpc.ts as every push to a screen is. A push says only which run
 // changed: the screen reads it again, as its person, with what they may
 // see of it. Reading again, rather than taking a status from the push,
