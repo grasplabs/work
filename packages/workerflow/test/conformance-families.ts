@@ -166,30 +166,6 @@ export const discrepancies = {
     reference: "TypeError for a locked stream, DataCloneError for text chunks",
     resolution: toOracle,
   },
-  "duplicate-create": {
-    family: "binding-create-get",
-    verdict: "unresolved",
-    workerflow:
-      "create with an ID that exists throws instance.already_exists, as Cloudflare's types say",
-    reference: "returns the existing instance",
-    resolution: toOracle,
-  },
-  "batch-limit": {
-    family: "batch-operations",
-    verdict: "decided",
-    workerflow: "createBatch refuses more than 100 instances",
-    reference: "takes 101",
-    resolution: "Cloudflare's documented and typed limit of 100 (binding.ts)",
-  },
-  "batch-duplicates": {
-    family: "batch-operations",
-    verdict: "unresolved",
-    workerflow:
-      "createBatch creates an ID once, skips one that exists, and returns only what it created",
-    reference:
-      "returns an instance per entry, duplicates and existing IDs included; Cloudflare's types say an existing ID throws",
-    resolution: toOracle,
-  },
   "rolling-back-status": {
     family: "status",
     verdict: "unresolved",
