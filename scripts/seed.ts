@@ -2,7 +2,7 @@
  * `vp run seed`: fills the local stack `vp run dev` runs with the
  * prototype's demo company, Noordkade Finance (scripts/seed/company.ts),
  * so every page has something to show and shows what the prototype does:
- * people in teams and roles, the onboarding's roster and plan, the
+ * the company's name, people in teams and roles, the onboarding's roster and plan, the
  * prototype's domains with the workflows core can run, 30 days of their
  * runs and apps over them (scripts/seed/screens.ts), Knowledge, and
  * chats. Run it while `vp run dev` runs.
@@ -23,13 +23,14 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
+import { organizationErrors } from "@grasp-os/shared/organization";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { chats, writeTranscript } from "./seed/chats.ts";
-import { people, roster, teamNames } from "./seed/company.ts";
+import { companyName, people, roster, teamNames } from "./seed/company.ts";
 import type { Person, PersonKey, TeamName } from "./seed/company.ts";
 import { engines } from "./seed/engines.ts";
 import type { EngineSeed, WorkflowSeed } from "./seed/engines.ts";
@@ -540,6 +541,21 @@ const seedOnboarding = async (adminSession: Session): Promise<boolean> => {
   return true;
 };
 
+/**
+ * Names the organization after the company, as its admin does in the
+ * Workspace settings, while it has another name (core's default is
+ * "Organization"). Returns whether it renamed it.
+ */
+const seedOrganization = async (adminSession: Session): Promise<boolean> => {
+  const { organization } = adminSession.api;
+  const { name } = await organization.get();
+  if (name === companyName) {
+    return false;
+  }
+  await organization.update({ name: companyName });
+  return true;
+};
+
 /** The chats, each in its person's Workspace object. */
 const seedChats = async (
   sessions: ReadonlyMap<PersonKey, Session>
@@ -571,6 +587,13 @@ const main = async (): Promise<void> => {
   const { sessions, teams } = await seedPeople();
   try {
     console.info(`${people.length} people in ${teams.size} teams`);
+
+    const renamed = await seedOrganization(sessionFor(sessions, admin.key));
+    console.info(
+      renamed
+        ? `The organization is named ${companyName}`
+        : `The organization is ${companyName} already`
+    );
 
     const planned = await seedOnboarding(sessionFor(sessions, admin.key));
     console.info(
@@ -623,6 +646,7 @@ try {
     appErrors.codeOf(error) ??
     knowledgeErrors.codeOf(error) ??
     onboardingErrors.codeOf(error) ??
+    organizationErrors.codeOf(error) ??
     workflowErrors.codeOf(error);
   console.error(
     `The seed stopped${coded === undefined ? "" : ` (${coded})`}: ${error instanceof Error ? error.message : String(error)}`
