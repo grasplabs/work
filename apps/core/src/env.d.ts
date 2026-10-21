@@ -30,6 +30,8 @@ interface __BaseEnv_Env {
   AUDIT_ARCHIVE_RETENTION_DAYS?: unknown;
   /** Days an ended workflow run keeps its details (src/workflows/retention.ts). */
   RUN_RETENTION_DAYS?: unknown;
+  /** The domain the deployment receives mail at (src/workflows/overview.ts). */
+  INBOUND_MAIL_DOMAIN?: unknown;
   /**
    * The limits the operator lowered, with the policy's generation
    * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;
