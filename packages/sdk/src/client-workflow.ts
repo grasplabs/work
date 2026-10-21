@@ -56,10 +56,11 @@ import { v } from "./values.ts";
 //   moves on with the binding's policy generation, never back.
 //
 // A value is shown only if its revision is newer than the subscription's
-// last and not older than what is shown. A refusal is heard whatever its
-// revision: one that fences (revocation, expiry, a role taken away)
-// clears the whole client; a binding's refusal that doesn't fence only
-// turns `canRun` off, and never hides a run being shown.
+// last (or the same, while a refusal that keeps following holds what is
+// shown stale) and not older than what is shown. A refusal is heard
+// whatever its revision: one that fences (revocation, expiry, a role
+// taken away) clears the whole client; a binding's refusal that doesn't
+// fence only turns `canRun` off, and never hides a run being shown.
 //
 // A command's key is the client's, sent again unchanged while its answer
 // is lost, so the host answers the same receipt rather than admit it
@@ -1104,14 +1105,22 @@ export class WorkflowChannel {
     }
     // Each value is one revision of the run or binding: within this
     // subscription only a newer one, and from an earlier subscription
-    // never one older than what is shown.
+    // never one older than what is shown. The one exception is the same
+    // revision again while what is shown isn't fresh: a refusal that
+    // keeps following (the request budget, say) turns its capabilities
+    // off without moving the revision, and the host sends the snapshot
+    // of that revision again once the refusal clears. A revision is one
+    // snapshot, so nothing older or mixed can show this way.
     if (
       typeof push.revision !== "number" ||
       !Number.isSafeInteger(push.revision) ||
       push.revision < 1 ||
-      push.revision <= live.revision ||
       push.revision < entry.state.revision
     ) {
+      return;
+    }
+    const recovered = push.revision === live.revision && !entry.state.fresh;
+    if (push.revision <= live.revision && !recovered) {
       return;
     }
     live.revision = push.revision;
@@ -1155,6 +1164,9 @@ export class WorkflowChannel {
 
   /** Core, or the connection, let go of `live`: follow again, later. */
   #lost(entry: Watched<unknown>, live: Live, atLeastMs = 0): void {
+    // Over: a push it still delivers late is heard no more, so nothing it
+    // sent before it was lost shows as fresh, or as a recovery, again.
+    live.stopped = true;
     live.release = undefined;
     const failures =
       Date.now() - live.since >= steadyMs ? 0 : live.failures + 1;
@@ -1164,7 +1176,7 @@ export class WorkflowChannel {
     clearTimeout(live.retry);
     live.retry = setTimeout(
       () => {
-        if (WorkflowChannel.#current(entry, live) && entry.listeners.size > 0) {
+        if (entry.live === live && entry.listeners.size > 0) {
           this.#subscribe(entry, failures);
         }
       },
