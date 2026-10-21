@@ -22,6 +22,11 @@
     "connect": {
       "bindings": [
         {
+          "class_name": "Clock",
+          "name": "CLOCK",
+          "type": "durable_object_namespace"
+        },
+        {
           "name": "LOADER",
           "type": "worker_loader"
         },
@@ -52,7 +57,14 @@
           ]
         }
       ],
-      "durableObjectMigrations": [],
+      "durableObjectMigrations": [
+        {
+          "new_sqlite_classes": [
+            "Clock"
+          ],
+          "tag": "v1"
+        }
+      ],
       "keepVars": true,
       "mainModule": "index.js",
       "modules": [

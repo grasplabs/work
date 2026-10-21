@@ -55,10 +55,9 @@ import type { CallOutcome, CallRecord } from "./audit.ts";
 import { carryOut, connectionFor, heldOutcome } from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
+import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
-  purgeExpiredToolkitFlows,
-  retryComposioCleanups,
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
@@ -84,8 +83,6 @@ import {
   disconnectPersonal,
   finishConnection,
   listConnections,
-  purgeExpiredFlows,
-  resealFlows,
   startConnection,
 } from "./oauth.ts";
 import {
@@ -114,7 +111,6 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
-import { resealTokens } from "./tokens.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
 export { ConnectorEgress } from "./egress.ts";
@@ -221,6 +217,8 @@ const codeOf = (error: unknown): string | undefined =>
  * capability core made for exactly that call, and connect checks it first.
  * Every call goes into the audit log, refused ones too.
  */
+export { Clock } from "./clock.ts";
+
 export default class Connect
   extends WorkerEntrypoint<Env>
   implements ConnectApi
@@ -235,23 +233,25 @@ export default class Connect
   }
 
   /**
-   * Every minute: drops OAuth and Composio flows nobody finished, deletes
-   * at Composio what earlier tries couldn't, and seals what a rotated key
-   * sealed again.
+   * Every minute: the clock's explicit tick (src/clock.ts), which drops
+   * OAuth and Composio flows nobody finished, deletes at Composio what
+   * earlier tries couldn't, and seals what a rotated key sealed again.
    */
-  override async scheduled(): Promise<void> {
-    const results = await Promise.allSettled([
-      purgeExpiredFlows(this.env),
-      purgeExpiredToolkitFlows(this.env),
-      retryComposioCleanups(this.env),
-      resealTokens(this.env),
-      resealFlows(this.env),
-    ]);
-    for (const result of results) {
-      if (result.status === "rejected") {
-        log.error("cron.failed", errorFields(result.reason));
-      }
+  override async scheduled(controller?: ScheduledController): Promise<void> {
+    try {
+      await tickClock(this.env, controller?.scheduledTime ?? Date.now());
+    } catch (error) {
+      log.error("cron.failed", errorFields(error));
     }
+  }
+
+  /**
+   * Arms connect's clock if nothing has: core's clock asks every minute
+   * (core's src/clock.ts), the repair path that starts it on a new
+   * deployment and after anything cleared its alarm.
+   */
+  async ensureClock(): Promise<void> {
+    await clock(this.env).ensure();
   }
 
   // The audit outbox (src/audit.ts). Core's cron trigger takes the events

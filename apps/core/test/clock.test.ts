@@ -1,4 +1,10 @@
 import {
+  clockCronGraceMs,
+  clockLeaseMs,
+  clockPeriods,
+} from "@grasp-os/workerflow/clock";
+import type { ClockTaskState } from "@grasp-os/workerflow/clock";
+import {
   createExecutionContext,
   runDurableObjectAlarm,
   runInDurableObject,
@@ -7,15 +13,7 @@ import {
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  clock,
-  clockCronGraceMs,
-  clockLeaseMs,
-  clockPeriods,
-  clockStarter,
-  clockTasks,
-} from "../src/clock.ts";
-import type { ClockTaskState } from "../src/clock.ts";
+import { clock, clockStarter, clockTasks } from "../src/clock.ts";
 import { runCron, runQuarterHourCron, whileLogDown } from "./cron.ts";
 
 // The client's clock (src/clock.ts) runs core's maintenance on its own

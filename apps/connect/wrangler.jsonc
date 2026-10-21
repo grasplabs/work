@@ -53,4 +53,10 @@
   // what earlier tries couldn't, and seals what a rotated key sealed again
   // (src/index.ts).
   "triggers": { "crons": ["* * * * *"] },
+  // The client's clock for connect: its cleanup and rotation on its own
+  // alarm (src/clock.ts).
+  "durable_objects": {
+    "bindings": [{ "name": "CLOCK", "class_name": "Clock" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Clock"] }],
 }
