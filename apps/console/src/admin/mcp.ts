@@ -66,7 +66,9 @@ import { z } from "zod";
 import type { Staff } from "../access.ts";
 import { clientAdmins } from "../clients/admin.ts";
 import type { AdminReadOptions } from "../clients/admin.ts";
+import type { LiveOptions } from "../clients/grid.ts";
 import { audit, consoleDatabase } from "../db/act.ts";
+import { platformsAnswer } from "./platform-answer.ts";
 import { organizationsOf } from "./views.ts";
 
 /** Where the admin's MCP is served. */
@@ -85,15 +87,12 @@ const schemaOf = (inputSchema: object): Schema =>
   inputSchema;
 
 /**
- * The admin's tools whose data the console doesn't feed in yet: the
- * integrations to build and every company's platform (GRA-971). Served,
- * they would answer that there is nothing, which a model would take as
- * so; until then they aren't served at all.
+ * The admin's tools whose data the console doesn't hold yet: the
+ * integrations to build, which nothing records until GRA-689 S1. Served,
+ * it would answer that there is nothing, which a model would take as so;
+ * until then it isn't served at all.
  */
-const unfed: ReadonlySet<string> = new Set([
-  "integrations_to_build",
-  "platforms",
-]);
+const unfed: ReadonlySet<string> = new Set(["integrations_to_build"]);
 
 /** The tools this MCP serves: the admin's, but those it can't feed yet. */
 export const servedTools = ADMIN_TOOLS.filter((tool) => !unfed.has(tool.name));
@@ -137,6 +136,8 @@ const toolError = (text: string): CallToolResult => ({
 export interface AdminMcpOptions {
   /** How every client is read: the grid's limits, unless a test says otherwise. */
   reads?: AdminReadOptions;
+  /** How the platforms tool reads each account's live columns: the grid's, unless a test says otherwise. */
+  live?: LiveOptions;
   /** The day the digest counts to; today, in UTC, unless a test says otherwise. */
   today?: () => string;
 }
@@ -196,6 +197,11 @@ const serverFor = (
       target: name,
       detail: auditedArguments(input),
     });
+    // Every company's platform comes from the console's own records, as
+    // the Platform page reads them: it reads no core.
+    if (name === "platforms") {
+      return resultOf(await platformsAnswer(env, new Date(), options.live));
+    }
     const views = await viewsNow(env, staff, options.reads);
     const today = options.today?.() ?? new Date().toISOString().slice(0, 10);
     return resultOf(callAdminTool(name, input, views, today));
