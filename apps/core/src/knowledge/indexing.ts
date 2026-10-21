@@ -133,16 +133,22 @@ const publishStatements = (
   ];
 };
 
-/** Whether `error` is a publish refused for a version no longer current. */
-const isSuperseded = (error: unknown): boolean =>
-  error instanceof Error &&
-  (error.message.includes("NOT NULL constraint failed: sections.version") ||
-    isSuperseded(error.cause));
+/** The current and indexed versions of `documentId`, if it exists. */
+const versionsOf = async (db: DrizzleD1Database, documentId: string) =>
+  await db
+    .select({
+      currentVersion: documents.currentVersion,
+      indexedVersion: documents.indexedVersion,
+    })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .get();
 
 /**
  * Publishes `found` as `version` of `documentId`, if it may be (`guard`).
  * Resolves whether search holds that version now; a newer version that
- * became current meanwhile is the save's that made it to publish.
+ * became current meanwhile is the save's that made it to publish. A batch
+ * that fails while the version is still current throws, to retry.
  */
 export const publish = async (
   db: DrizzleD1Database,
@@ -150,19 +156,23 @@ export const publish = async (
   version: number,
   found: readonly Section[]
 ): Promise<boolean> => {
+  let failure: Error | undefined;
   try {
     await db.batch(publishStatements(db, documentId, version, found));
   } catch (error) {
-    if (!isSuperseded(error)) {
-      throw error;
-    }
+    failure =
+      error instanceof Error
+        ? error
+        : new Error("The publish batch failed", { cause: error });
   }
-  const row = await db
-    .select({ indexedVersion: documents.indexedVersion })
-    .from(documents)
-    .where(eq(documents.id, documentId))
-    .get();
-  return (row?.indexedVersion ?? 0) >= version;
+  // Read after the batch, however it went: a stale generation's batch
+  // fails on the guard, which says nothing of why in a way to rely on.
+  const now = await versionsOf(db, documentId);
+  const indexed = (now?.indexedVersion ?? 0) >= version;
+  if (failure !== undefined && !indexed && now?.currentVersion === version) {
+    throw failure;
+  }
+  return indexed;
 };
 
 /** Starts the indexing run of `version` of `documentId`. */
@@ -323,17 +333,22 @@ export const sweepIndexing = async (env: Env, now: Date): Promise<void> => {
     .limit(sweepBatch);
   const engine = runEngine(env);
   for (const { id, version } of stale) {
-    // oxlint-disable-next-line no-await-in-loop -- a few at a time
-    const run = await engine.status(indexRunId(id, version));
-    if (run === undefined) {
+    try {
       // oxlint-disable-next-line no-await-in-loop -- a few at a time
-      await startRun(env, id, version);
-    } else if (endedStatuses.has(run.status)) {
-      // oxlint-disable-next-line no-await-in-loop -- a few at a time
-      await db
-        .update(documents)
-        .set({ indexState: "failed", indexFailure: "internal.unexpected" })
-        .where(whileCurrent(id, version));
+      const run = await engine.status(indexRunId(id, version));
+      if (run === undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- a few at a time
+        await startRun(env, id, version);
+      } else if (endedStatuses.has(run.status)) {
+        // oxlint-disable-next-line no-await-in-loop -- a few at a time
+        await db
+          .update(documents)
+          .set({ indexState: "failed", indexFailure: "internal.unexpected" })
+          .where(whileCurrent(id, version));
+      }
+    } catch (error) {
+      // One document's trouble doesn't keep the sweep from the rest.
+      log.warn("knowledge.index_sweep_failed", errorFields(error));
     }
   }
 };
