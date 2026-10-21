@@ -1,8 +1,6 @@
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   DefinitionIdentity,
@@ -12,7 +10,6 @@ import { WorkflowRun } from "@grasp-os/workerflow/run";
 import type { RunNotification } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
-import { appHost } from "../durable-objects.ts";
 import { projectCandidateRun } from "./candidate-runs.ts";
 import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
@@ -233,28 +230,6 @@ export const modelCallsIn = (sql: SqlStorage): ActionModelCalls => ({
  */
 const cancelTable = "grasp_run_cancelled";
 
-/** Revokes App calls (`revoke`), logging rather than failing the run. */
-const revokeOrLog = async (
-  runId: string,
-  revoke: () => Promise<void>
-): Promise<void> => {
-  try {
-    await revoke();
-  } catch (error) {
-    log.error("workflow.revoke_calls_failed", {
-      runId,
-      ...errorFields(error),
-    });
-  }
-};
-
-/**
- * The Apps an attempt of the run started a method of (`attemptHolds`),
- * whose calls for the run a cancel revokes (`revokeCalls`): a table the
- * engine drops with the run, as `cancelTable`.
- */
-const appsTable = "grasp_run_apps";
-
 /**
  * The newest generation of the run whose attempts' shares this object has
  * given back (`WorkflowRuns.#sharesReleased`): a table the engine drops
@@ -295,15 +270,13 @@ const cancelledIn = (sql: SqlStorage): boolean =>
 
 /**
  * The cancel a run is marked with (`markCancelled`): whether it is done
- * (`settled`), whether the App calls of the run were revoked
- * (`revoked`), and when the object next tries what isn't (`due`).
+ * (`settled`), and when the object next tries it if it isn't (`due`).
  */
 interface CancelMark {
   runId: string;
   actor: AuditActor;
   at: number;
   settled?: boolean;
-  revoked?: boolean;
   due?: number;
 }
 
@@ -318,11 +291,8 @@ const cancelMarkIn = (sql: SqlStorage): CancelMark | undefined => {
       actor: string;
       at: number;
       settled: number;
-      revoked: number;
       due: number;
-    }>(
-      `SELECT run_id, actor, at, settled, revoked, due FROM ${cancelTable} LIMIT 1`
-    )
+    }>(`SELECT run_id, actor, at, settled, due FROM ${cancelTable} LIMIT 1`)
     .toArray();
   return row === undefined
     ? undefined
@@ -331,14 +301,13 @@ const cancelMarkIn = (sql: SqlStorage): CancelMark | undefined => {
         actor: auditActorSchema.parse(JSON.parse(row.actor)),
         at: row.at,
         settled: row.settled === 1,
-        revoked: row.revoked === 1,
         due: row.due,
       };
 };
 
 /** Whether `mark` leaves the object something to do (`alarm`). */
 const unfinished = (mark: CancelMark | undefined): mark is CancelMark =>
-  mark !== undefined && (mark.settled !== true || mark.revoked !== true);
+  mark !== undefined && mark.settled !== true;
 
 // The object every workflow run lives in (`WORKFLOW_RUNS`): Workerflow's
 // run object, one per run, which core reaches only through engine.ts. It
@@ -377,21 +346,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     }
     return {
       run: async (event, step) => {
-        // A new activation: whatever an older one started in an App is let
-        // go of there too, before this one runs anything. Should an App
-        // not hear of it, the run goes on: its older attempts hold no
-        // lease, so every check of the run's object refuses them still;
-        // only a call already past that check, awaiting the App's, isn't
-        // refused there as well.
-        // Not awaited: the run doesn't wait on its Apps.
+        // The activation this execution runs in: an older one taken over
+        // runs nothing more (`current`).
         const generation = this.generation();
-        if (generation !== undefined) {
-          this.ctx.waitUntil(
-            revokeOrLog(event.instanceId, async () => {
-              await this.revokeCalls(event.instanceId, generation);
-            })
-          );
-        }
         // Marked cancelled: an activation that starts now (an event came,
         // a wait's alarm fired) runs nothing of the run, and finishes the
         // cancel instead (`#finishCancel`).
@@ -430,9 +387,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * Should the rest of the cancel fail, or its request die, the object
    * finishes it on its next alarm (`alarm`), which is armed here. A run
    * the engine has no journal of yet has no attempt to fence, and nothing
-   * is kept: its start, should it come, finds its row cancelled. Once
-   * marked, the App calls the run's attempts started are revoked
-   * (`revokeCalls`). Answers the cancel the run is marked with.
+   * is kept: its start, should it come, finds its row cancelled. Answers
+   * the cancel the run is marked with.
    */
   async markCancelled(
     runId: string,
@@ -450,7 +406,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       return { runId, actor, at };
     }
     sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${cancelTable} (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL)`
+      `CREATE TABLE IF NOT EXISTS ${cancelTable} (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL)`
     );
     if (cancelMarkIn(sql) === undefined) {
       sql.exec(
@@ -468,44 +424,16 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     // Armed for the cancel's repair, should its request not finish it;
     // the engine's own alarms keep it (`extraAlarm`).
     await this.#armRepair(mark.due ?? Date.now() + cancelRepairMs);
-    // Then, before the cancel is recorded anywhere else, every call the
-    // run's attempts started in an App is revoked there (`revokeCalls`):
-    // a stub call that passed this object's check before the mark, and
-    // awaits the App's own, is refused by it. Should an App not hear of
-    // it, the cancel goes on, and the object revokes again on its alarm:
-    // this object's own check refuses those calls meanwhile.
-    await this.#revokeForCancel(mark);
     return mark;
   }
 
   /**
-   * Revokes the run's App calls for its cancel (`revokeCalls`), and keeps
-   * that it did; should an App not hear of it, logs, and has the object's
-   * alarm try again (`alarm`). Never throws.
-   */
-  async #revokeForCancel(mark: CancelMark): Promise<void> {
-    try {
-      await this.revokeCalls(mark.runId, null);
-      this.ctx.storage.sql.exec(`UPDATE ${cancelTable} SET revoked = 1`);
-    } catch (error) {
-      log.error("workflow.revoke_calls_failed", {
-        runId: mark.runId,
-        ...errorFields(error),
-      });
-      await this.#repairLater();
-    }
-  }
-
-  /**
-   * Finishes the cancel `mark` records, as its request does: the App
-   * calls revoked (`#revokeForCancel`), the run's row tombstoned and the
+   * Finishes the cancel `mark` records, as its request does: the run's
+   * row tombstoned and the
    * cancel audited, once whoever gets there first (runs.ts,
    * `completeCancel`), the run terminated and the mark settled.
    */
   async #finishCancel(mark: CancelMark): Promise<void> {
-    if (mark.revoked !== true) {
-      await this.#revokeForCancel(mark);
-    }
     if (mark.settled === true) {
       return;
     }
@@ -597,74 +525,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     return cancelledIn(this.ctx.storage.sql)
       ? undefined
       : this.attemptLease(key, attempt);
-  }
-
-  /**
-   * Whether the attempt `attempt` of the step whose key is `key` still
-   * holds its lease under `generation`, and its deadline hasn't passed
-   * (attempt-fence.ts). Read from the journal; tells nothing else. No
-   * workflow run starts a call it fences any more: a run's calls of its
-   * App's code are sealed functions, held by the run host's own lease
-   * checks. What remains asks of v1 App calls, which slice 4 of GRA-789
-   * removes with this.
-   */
-  attemptHolds(
-    key: string,
-    attempt: number,
-    generation: number,
-    app?: string
-  ): boolean {
-    const lease = this.#leaseOf(key, attempt);
-    const holds =
-      lease !== undefined &&
-      lease.generation === generation &&
-      Date.now() < lease.deadline;
-    if (holds && app !== undefined) {
-      // An App whose method an attempt of the run starts: its calls for
-      // the run are revoked should the run be cancelled (`revokeCalls`).
-      const { sql } = this.ctx.storage;
-      sql.exec(
-        `CREATE TABLE IF NOT EXISTS ${appsTable} (app TEXT PRIMARY KEY)`
-      );
-      sql.exec(`INSERT OR IGNORE INTO ${appsTable} (app) VALUES (?)`, app);
-    }
-    return holds;
-  }
-
-  /**
-   * Revokes, in every App an attempt of run `runId` started a method of,
-   * the App's calls for it: of every attempt (`below` null), once it is
-   * cancelled, or of the activations before generation `below`, once
-   * another took over (App.ts, `revokeRunCalls`). The App's own
-   * synchronous checks then refuse them, so nothing awaited between a
-   * check here and one there lets such a call act. Repeating it changes
-   * nothing.
-   */
-  async revokeCalls(runId: string, below: number | null): Promise<void> {
-    await Promise.all(
-      this.#appsCalled().map(async (app) => {
-        await appHost(this.env, app).revokeRunCalls(runId, below);
-      })
-    );
-  }
-
-  /** The Apps an attempt of the run started a method of (`attemptHolds`). */
-  #appsCalled(): AppId[] {
-    const { sql } = this.ctx.storage;
-    const known =
-      sql
-        .exec(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-          appsTable
-        )
-        .toArray().length > 0;
-    if (!known) {
-      return [];
-    }
-    return sql
-      .exec<{ app: string }>(`SELECT app FROM ${appsTable}`)
-      .toArray()
-      .map(({ app }) => appIdSchema.parse(app));
   }
 
   /**

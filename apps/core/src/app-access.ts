@@ -113,40 +113,6 @@ export const requireAppRole = async (
 };
 
 /**
- * Refuses `by` unless they still have a role in the App `app` names, as
- * `requireAppRole` decides it: for checking again, on each step of
- * something already under way, that someone let in on their role still
- * has it. Whom the App is shared with, its owner and the teams `by` is in
- * are read now; their role in the organization is the session's that let
- * them in (Grasp staff are admins only by their session), which the
- * session's own checks follow within seconds. Not `appFor` (apps.ts):
- * apps.ts imports this file, and the App's stubs (app-bindings.ts), which
- * call this, are reached from apps.ts through its workflow imports, so it
- * would close a cycle. The role check is the same `requireAppRole`; only
- * the App's row is read here.
- */
-export const requireStillOpen = async (
-  env: Env,
-  by: Person,
-  app: AppId
-): Promise<void> => {
-  const row = await drizzle(env.DB)
-    .select({ id: apps.id, owner: apps.ownerId })
-    .from(apps)
-    .where(eq(apps.id, app))
-    .get();
-  if (row === undefined) {
-    throw appErrors.create("app.not_found");
-  }
-  await requireAppRole(
-    env,
-    { ...by, teams: await teamsOf(env.DB, by.userId) },
-    { id: appIdSchema.parse(row.id), owner: row.owner },
-    "user"
-  );
-};
-
-/**
  * Of the Apps `ids`, those `by` may open now as far as what each App read
  * goes (app-provenance.ts): every one for an admin, their own, and any
  * other only while they can read everything it read. That they have a

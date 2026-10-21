@@ -41,9 +41,9 @@ import {
 import { inList } from "./db/d1.ts";
 import { authorize } from "./permissions.ts";
 
-// Statistics (@grasp-os/shared/statistics): an App's server code records
-// named measures with a few dimensions, and reads aggregates of them over
-// the last days, through its `STATISTICS` stub (app-bindings.ts). Points
+// Statistics (@grasp-os/shared/statistics): an App's functions record
+// named measures with a few dimensions, and read aggregates of them over
+// the last days, through their statistics resource (resource-statistics.ts). Points
 // are added up as they come, by the UTC day (`app_statistics`), so a read
 // never counts more rows than a day holds for each day it covers.
 //

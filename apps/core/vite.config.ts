@@ -51,7 +51,6 @@ const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
  */
 export const screenTests = [
   "test/screen*.test.ts",
-  "test/app-sandbox.test.ts",
   "test/app-releases.test.ts",
   "test/migration-transform.test.ts",
   "test/custom-migration-runs.test.ts",
