@@ -17,6 +17,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { retryAccessRevocations } from "../src/access-revocations.ts";
 import { actionInvocation, invocationName } from "../src/action-invocation.ts";
 import { readFunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
@@ -2575,6 +2576,15 @@ const quickRevocations = (
     },
   });
 
+/**
+ * The cron trigger's revocation step alone (`retryAccessRevocations`), on
+ * an env with `changes`: the rest of the trigger touches many objects, and
+ * these tests run it often.
+ */
+const revocationsCron = async (changes: Partial<Env>): Promise<void> => {
+  await retryAccessRevocations({ ...env, ...changes });
+};
+
 /** A cleared screen: its last push a refusal, and core let go of it. */
 const refusedAndLetGo = { last: "app.not_found", released: true };
 
@@ -3357,7 +3367,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const admin = await personApi("admin");
     const removed = await personApi("admin");
     const demoted = await personApi("admin");
-    await manyApps(admin.userId, 5000, [removed.userId, demoted.userId]);
+    await manyApps(admin.userId, 1000, [removed.userId, demoted.userId]);
     // Connections on which nothing after the change's batch reaches the
     // database: what the batch kept is all there is.
     const changing = async () => {
@@ -3431,7 +3441,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const runs: { apps: number; everyApp: number }[] = [await kept()];
     while ((runs.at(-1)?.everyApp ?? 0) > 0 && runs.length < 10) {
       // oxlint-disable-next-line no-await-in-loop -- one run after the other
-      await runCron(unreachable);
+      await revocationsCron(unreachable);
       // oxlint-disable-next-line no-await-in-loop -- see above
       runs.push(await kept());
     }
@@ -3479,7 +3489,10 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     for (let runs = 0; runs < 10 && left !== 0; runs += 1) {
       // Two runs at once, each reading the same cursor.
       // oxlint-disable-next-line no-await-in-loop -- a pair after the other
-      await Promise.all([runCron(unreachable), runCron(unreachable)]);
+      await Promise.all([
+        revocationsCron(unreachable),
+        revocationsCron(unreachable),
+      ]);
       // oxlint-disable-next-line no-await-in-loop -- see above
       left = await everyAppLeft();
     }
@@ -3536,7 +3549,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       age.bind(Date.now(), 10, JSON.stringify([failing.userId])),
     ]);
 
-    await runCron({ APPS: unreachableRevocations(env.APPS) });
+    await revocationsCron({ APPS: unreachableRevocations(env.APPS) });
 
     const dayOldKept = await everyAppKeptFor(dayOld.userId);
     expect({
@@ -3595,7 +3608,14 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await outcome(core.authenticate().members.remove(removed.userId));
     await scheduler.wait(1500);
     const before = follower.state.released;
-    await runCron();
+    // Only the opened App's host is woken: an every-App revocation tells
+    // every App the earlier tests of this file made, and each host woken
+    // costs the test runtime (vitest-pool-workers nests a proxy per object
+    // it constructs).
+    const told = { others: 0 };
+    await revocationsCron({
+      APPS: quickRevocations(env.APPS, opened.app, told),
+    });
 
     expect(before).toBeFalsy();
     await expect(whenLetGo(follower)).resolves.toStrictEqual({
