@@ -11,6 +11,8 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 //   or a migration's batch here.
 // - `/js`: an isolate whose main module is given as `{ js }`, through the
 //   loader core reads its `LOADER` through (`quietLoader`).
+// - `/hashbang`: a main module that starts with a hashbang, which must stay
+//   its first line.
 // - `/cjs`: a main module that can't import the quiet module first.
 // - `/control`: the same code in the Loader as it is, which shows workerd's
 //   output is read at all.
@@ -97,6 +99,19 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
     } catch (error) {
       return error instanceof TypeError ? "refused" : "failed";
     }
+  }
+  if (route === "/hashbang") {
+    return await runApp(
+      quietLoader(env.LOADER).load({
+        ...settings,
+        mainModule: "app.js",
+        modules: { "app.js": `#!/usr/bin/env node\n${isolateOf(values.js)}` },
+      })
+    );
+  }
+  if (route !== "/control") {
+    // workerd's readiness probe, and anything else: no isolate.
+    return null;
   }
   return await runApp(
     env.LOADER.load({

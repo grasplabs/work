@@ -68,9 +68,16 @@ export const quietModules = <Module>(
   if (typeof main !== "string") {
     return { ...modules };
   }
+  // A hashbang is allowed only at a module's very start: it stays there.
+  const hashbang = main.startsWith("#!")
+    ? main.slice(0, main.indexOf("\n") + 1 || main.length)
+    : "";
+  const rest = main.slice(hashbang.length);
+  const lead =
+    hashbang === "" || hashbang.endsWith("\n") ? hashbang : `${hashbang}\n`;
   return {
     ...modules,
-    [mainModule]: `import ${JSON.stringify(quietModule)};\n${main}`,
+    [mainModule]: `${lead}import ${JSON.stringify(quietModule)};\n${rest}`,
     [quietModule]: quietSource,
   };
 };

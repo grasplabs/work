@@ -70,17 +70,23 @@ const core :Workerd.Worker = (
     };
     const call = await run("/call");
     const js = await run("/js");
+    const hashbang = await run("/hashbang");
     const control = await run("/control");
     const { values } = control;
     await sleep(SETTLE_MS);
 
     expect({
-      answered: [call.answered, js.answered, control.answered],
+      answered: [
+        call.answered,
+        js.answered,
+        hashbang.answered,
+        control.answered,
+      ],
       call: served.logs().includes(values.call),
       js: served.logs().includes(values.js),
       control: served.logs().includes(values.control),
     }).toStrictEqual({
-      answered: [values.call, values.js, values.control],
+      answered: [values.call, values.js, values.js, values.control],
       call: false,
       js: false,
       control: true,
