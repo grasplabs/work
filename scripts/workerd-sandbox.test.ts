@@ -36,6 +36,7 @@ import {
 import { z } from "zod";
 
 import { isolateSettings } from "../apps/core/src/on-prem/sandbox-settings.ts";
+import { platformLimits } from "../packages/shared/src/platform-limits.ts";
 import { isolateBase } from "../packages/shared/src/runtime.ts";
 import {
   deadlineHeader,
@@ -632,7 +633,7 @@ describe("the sandbox supervisor", () => {
   it("runs every isolate as core's sandbox does, set by the sandbox host itself", () => {
     expect(isolateSettings).toStrictEqual({
       ...isolateBase,
-      limits: { cpuMs: 10_000 },
+      limits: { cpuMs: platformLimits.serverInvocationCpuMs },
     });
   });
 
