@@ -34,9 +34,19 @@ const lintReport = z.object({
  */
 const lintTimeoutMs = 60_000;
 
-/** What `command` printed, once it exited, whatever its exit code. */
-const stdoutOf = async (command: string, args: string[]): Promise<string> => {
-  const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
+/**
+ * What `command` printed, once it exited, whatever its exit code. Killed
+ * once `signal` aborts (its test timed out), so its caller still cleans up.
+ */
+const stdoutOf = async (
+  command: string,
+  args: string[],
+  signal: AbortSignal
+): Promise<string> => {
+  const child = spawn(command, args, {
+    stdio: ["ignore", "pipe", "ignore"],
+    signal,
+  });
   child.stdout.setEncoding("utf-8");
   let stdout = "";
   child.stdout.on("data", (chunk: string) => {
@@ -48,7 +58,8 @@ const stdoutOf = async (command: string, args: string[]): Promise<string> => {
 
 /** What `vp lint` reports for each rule of ours on `files`, planted in the repo for the run. */
 const linted = async (
-  files: Record<string, string>
+  files: Record<string, string>,
+  signal: AbortSignal
 ): Promise<{ file: string; line: number }[]> => {
   const tag = randomUUID().slice(0, 8);
   const planted = Object.entries(files).map(([path, text]) => ({
@@ -63,12 +74,11 @@ const linted = async (
     );
     // The repo's own, whatever the shell running the tests has on its path.
     // Not spawnSync: the worker waits on the lint without blocking.
-    const stdout = await stdoutOf("node_modules/.bin/vp", [
-      "lint",
-      "--format",
-      "json",
-      ...planted.map(({ path }) => path),
-    ]);
+    const stdout = await stdoutOf(
+      "node_modules/.bin/vp",
+      ["lint", "--format", "json", ...planted.map(({ path }) => path)],
+      signal
+    );
     const { diagnostics } = lintReport.parse(JSON.parse(stdout));
     return (
       diagnostics
@@ -114,23 +124,26 @@ describe("the product's old name", () => {
     {
       timeout: lintTimeoutMs,
     },
-    async () => {
-      const reported = await linted({
-        "apps/web/src/NAME.tsx": [
-          "// Grasp OS, in a comment, is for us.",
-          'export const title = "Welcome to Grasp OS";',
-          "export const Banner = () => <p>Grasp OS is here</p>;",
-          'export const route = "/grasp-os";',
-          "",
-        ].join("\n"),
-        "apps/core/src/NAME.ts": [
-          "export const subject = `Your Grasp OS invite`;",
-          // Escaped, it still reads as the old name.
-          "export const escaped = `Grasp\\u0020OS`;",
-          "",
-        ].join("\n"),
-        "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
-      });
+    async ({ signal }) => {
+      const reported = await linted(
+        {
+          "apps/web/src/NAME.tsx": [
+            "// Grasp OS, in a comment, is for us.",
+            'export const title = "Welcome to Grasp OS";',
+            "export const Banner = () => <p>Grasp OS is here</p>;",
+            'export const route = "/grasp-os";',
+            "",
+          ].join("\n"),
+          "apps/core/src/NAME.ts": [
+            "export const subject = `Your Grasp OS invite`;",
+            // Escaped, it still reads as the old name.
+            "export const escaped = `Grasp\\u0020OS`;",
+            "",
+          ].join("\n"),
+          "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
+        },
+        signal
+      );
       expect(reported).toStrictEqual([
         { file: "apps/core/src/NAME.ts", line: 1 },
         { file: "apps/core/src/NAME.ts", line: 2 },
