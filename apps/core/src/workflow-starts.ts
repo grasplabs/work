@@ -1,4 +1,4 @@
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { descriptorFromText, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -25,6 +25,7 @@ import {
 import type { WorkflowStart } from "@grasp-os/shared/workflow-resources";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -56,6 +57,9 @@ import {
 } from "./workflows/package-seal.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
+import { startFilesDropped } from "./workflows/run-files.ts";
+import { handFiles } from "./workflows/start-files.ts";
+import type { StartFiles } from "./workflows/start-files.ts";
 
 // Starting an independent workflow (platform specification 13.2, 15.1, 24):
 // who may, for whom, and on which exact version. Every start is admitted
@@ -226,6 +230,18 @@ export interface StartAuthorization {
    * that seals none.
    */
   packages: SQL;
+  /**
+   * The ID its receipt and run are admitted under, minted with the
+   * decision when its start hands the run files (GRA-885), so the copies
+   * are the run's; minted as it is admitted otherwise.
+   */
+  id?: string | undefined;
+  /**
+   * What else its admitting batch writes, only while `admitted` (its
+   * receipt written) holds: the files its start handed the run, done and
+   * audited.
+   */
+  alsoAdmitted?: ((admitted: SQL) => BatchItem<"sqlite">[]) | undefined;
 }
 
 /**
@@ -931,7 +947,9 @@ export const decideWorkflowStart = async (
   env: Env,
   invoker: StartInvoker,
   id: unknown,
-  request: unknown
+  request: unknown,
+  /** The App files the start may hand its run: an App's screen's only. */
+  files?: StartFiles
 ): Promise<StartDecision> => {
   const { version, input, key } = workflowResourceErrors.parse(
     "workflow.start_invalid",
@@ -1077,8 +1095,20 @@ export const decideWorkflowStart = async (
     });
     throw await deniedAt(env, id, version, { generation, configRevision });
   }
+  // Its files, copied last, once everything else said yes: under the ID
+  // its run will have, and no run's until it is admitted.
+  const runId = crypto.randomUUID();
+  const handed = await handFiles(
+    env,
+    descriptorFromText(inputDescriptor),
+    text,
+    { runId, workflowId: id, runs: buildHash !== null },
+    files
+  );
   return {
     authorization: {
+      id: handed.runId,
+      alsoAdmitted: handed.admitted,
       workflowId: id,
       version,
       manifestHash,
@@ -1088,7 +1118,9 @@ export const decideWorkflowStart = async (
       principal: rule.principal,
       generation,
       key,
-      input: text,
+      // As the run reads it; its hash is of the input as it was sent, so
+      // the same start sent again is the same start.
+      input: handed.input,
       inputHash,
       params,
       paramsRevision: configRevision,
@@ -1136,9 +1168,11 @@ export const admitWorkflowStart = async (
    */
   beforeAdmit?: () => void
 ): Promise<WorkflowStart> => {
-  const id = crypto.randomUUID();
+  const id = authorization.id ?? crypto.randomUUID();
   const createdAt = new Date();
   const bindingsHash = await sha256Hex(authorization.bindings);
+  const receiptWritten = sql`EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${id})`;
+  const alsoAdmitted = authorization.alsoAdmitted?.(receiptWritten) ?? [];
   const db = drizzle(env.DB);
   const values = [
     id,
@@ -1213,6 +1247,8 @@ export const admitWorkflowStart = async (
               createdAt: createdAt.getTime(),
             }),
           ]),
+      // The files its start handed its run: theirs once it is admitted.
+      ...alsoAdmitted,
       // Only once the receipt is written, read as such: never inferred from
       // the statement just before it, whichever that is.
       outboxedWhere(
@@ -1302,19 +1338,36 @@ export const startWorkflow = async (
    * Asked just before a new start is admitted, nothing awaited between:
    * throws to start nothing (a caller that may no longer act).
    */
-  beforeAdmit?: () => void
+  beforeAdmit?: () => void,
+  /** The App files the start may hand its run: an App's screen's only. */
+  files?: StartFiles
 ): Promise<WorkflowStart> => {
-  const decision = await decideWorkflowStart(env, invoker, id, request);
-  const start =
-    "start" in decision
-      ? decision.start
-      : await admitWorkflowStart(
-          env,
-          decision.authorization,
-          also,
-          noted,
-          beforeAdmit
-        );
+  const decision = await decideWorkflowStart(env, invoker, id, request, files);
+  let start: WorkflowStart;
+  if ("start" in decision) {
+    ({ start } = decision);
+  } else {
+    const copiedFor = decision.authorization.id;
+    try {
+      start = await admitWorkflowStart(
+        env,
+        decision.authorization,
+        also,
+        noted,
+        beforeAdmit
+      );
+    } catch (error) {
+      if (copiedFor !== undefined) {
+        await startFilesDropped(env, copiedFor);
+      }
+      throw error;
+    }
+    // Another start admitted under the same key meanwhile: these copies
+    // are no run's.
+    if (copiedFor !== undefined && start.id !== copiedFor) {
+      await startFilesDropped(env, copiedFor);
+    }
+  }
   // Its run, sent to the engine while it is still starting: a start sent
   // again finishes one core stopped in the middle of (resource-runs.ts).
   return { ...start, runId: await startResourceRun(env, start.id) };

@@ -39,6 +39,7 @@ import {
 import { isUniqueViolation } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
+import { screenStartFiles } from "./screen-start-files.ts";
 import { coreStartKey } from "./workflow-start-intents.ts";
 import { appStartHoldsSql } from "./workflow-starts.ts";
 import {
@@ -664,7 +665,11 @@ const started = async (
     },
     undefined,
     // The binding still names the version the reference was made for.
-    bindingPinnedSql(asking.app, resolved.alias, pin)
+    bindingPinnedSql(asking.app, resolved.alias, pin),
+    undefined,
+    null,
+    // The App's files the person may read now, which its run gets copies of.
+    screenStartFiles(env, asking.by, asking.app, asking.release)
   );
   return {
     runId: start.id,

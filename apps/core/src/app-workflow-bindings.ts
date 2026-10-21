@@ -29,6 +29,7 @@ import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
 import type { StartingAgent } from "./workflow-starts.ts";
+import type { StartFiles } from "./workflows/start-files.ts";
 
 // Apps binding independent workflows (platform specification 3, 13.1,
 // 15.1): an App names an exact version of a workflow by an alias of its
@@ -289,7 +290,9 @@ export const startAppBinding = async (
   /** Asked just before the start is admitted: throws to start nothing. */
   beforeAdmit?: () => void,
   /** The agent whose call made it, whose chat's restricted mode it takes. */
-  agent: StartingAgent | null = null
+  agent: StartingAgent | null = null,
+  /** The App files it may hand its run: a screen's start's only (GRA-885). */
+  files?: StartFiles
 ): Promise<WorkflowStart> => {
   if (authority.subject.type !== "app" || typeof alias !== "string") {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
@@ -321,6 +324,7 @@ export const startAppBinding = async (
     sql`EXISTS (SELECT 1 FROM app_workflow_bindings
       WHERE id = ${row.id} AND status = 'active') AND ${requires}`,
     noted,
-    beforeAdmit
+    beforeAdmit,
+    files
   );
 };
