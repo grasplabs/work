@@ -417,7 +417,8 @@ const cachedBuild = async <Build>(
       }
       return { text: JSON.stringify(answer.built), cache: answer.cache };
     },
-    usedNow
+    usedNow,
+    signal
   );
   // Assembly, transforms and execution are the compiler's own; this is
   // the cache's part: how a build came about, and how long it took.
