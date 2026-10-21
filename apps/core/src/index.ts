@@ -62,13 +62,6 @@ export { CollectionBinding } from "./knowledge/binding.ts";
 export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 export { ActionInvocation } from "./action-invocation.ts";
 export { WorkflowRuns } from "./workflows/run-object.ts";
-export {
-  PreviewCollection,
-  PreviewConnection,
-  PreviewExports,
-  PreviewGuests,
-  PreviewStatistics,
-} from "./preview-bindings.ts";
 export { Workspace } from "./workspace.ts";
 
 export default {

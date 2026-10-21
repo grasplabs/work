@@ -27,8 +27,8 @@ import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
-import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
+import { isolateArgumentDepth } from "@grasp-os/shared/stores";
 import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -375,7 +375,7 @@ const discardFixture = async (env: Env, id: StoreId): Promise<void> => {
  * the bounds of one call's request, however it was sent.
  */
 const TestTarget = boundedRpcTarget({
-  depth: rpcArgumentDepth,
+  depth: isolateArgumentDepth,
   size: functionRequestMaxBytes,
 });
 

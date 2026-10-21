@@ -1,5 +1,6 @@
 import type { Role } from "@grasp-os/shared/roles";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -186,6 +187,29 @@ describe("navigating between an App's screens", () => {
       otherFile: "screen.not_found",
       openMissingId: "screen.input_invalid",
       openByFile: "screen.input_invalid",
+    });
+  });
+
+  it("takes a target whose input nests as deep as values may, and refuses it by the route's schema, not by its depth", async () => {
+    const { app, builder } = await routedApp();
+    // An input `valueDepth` levels deep (`{ id }` around the rest), inside
+    // the `{ route, input }` target: within the connection's bound
+    // (screen-limits.ts).
+    let deep: unknown = "leaf";
+    for (let level = 1; level < valueDepth - 1; level += 1) {
+      deep = [deep];
+    }
+    expect({
+      navigated: await navigated(builder, app, "note", { id: deep }),
+      opened: await outcome(
+        builder.api.screens.open(app, "note", {
+          route: "note",
+          input: { id: deep },
+        })
+      ),
+    }).toStrictEqual({
+      navigated: "screen.input_invalid",
+      opened: "screen.input_invalid",
     });
   });
 

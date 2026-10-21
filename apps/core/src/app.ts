@@ -488,16 +488,13 @@ const appFailure = (error: unknown, { app, version, method }: RanAt): Error => {
  * Calls `method` of the App's server code running in `facet`, with
  * `caller` first in its arguments: only the App's own methods, never what
  * every stub has, and only plain data back. An error of the App's code
- * comes back as `app.failed`; `failedWith`, if given, sees the error as
- * the App's code threw it first, for core's own use (a draft's preview,
- * preview.ts), never its caller's.
+ * comes back as `app.failed`.
  */
 export const invokeServer = async (
   facet: Fetcher,
   caller: AppCaller,
   args: unknown[],
-  at: RanAt,
-  failedWith?: (error: unknown) => void
+  at: RanAt
 ): Promise<AppAnswer> => {
   const { method, version } = at;
   if (method in Object.getPrototypeOf(facet)) {
@@ -512,7 +509,6 @@ export const invokeServer = async (
     // Not `invoke.apply(...)`: on a stub, that calls a method "apply".
     answer = await Reflect.apply(invoke, facet, [caller, ...args]);
   } catch (error) {
-    failedWith?.(error);
     throw appFailure(error, at);
   }
   return plainAnswer(answer, version, method);
