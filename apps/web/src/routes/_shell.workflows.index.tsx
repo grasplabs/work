@@ -238,7 +238,7 @@ const Workflows = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
+      <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm">
         <h1 className="sr-only">
           <Trans>Workflows</Trans>
         </h1>
@@ -251,7 +251,7 @@ const Workflows = () => {
           }}
           value={search.tab ?? "workflows"}
         >
-          <TabsList>
+          <TabsList variant="line">
             <TabsTrigger value="workflows">
               <Trans context="tab listing every workflow">All</Trans>
             </TabsTrigger>

@@ -547,30 +547,40 @@ const Versions = ({ versions }: { versions: Loaded<AppVersion[]> }) => {
     return <NotLoaded page={versions} />;
   }
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>
-            <Trans>Version</Trans>
-          </TableHead>
-          <TableHead>
-            <Trans>What changed</Trans>
-          </TableHead>
-          <TableHead>
-            <Trans>Committed</Trans>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {versions.data.map((version) => (
-          <TableRow key={version.version}>
-            <TableCell>{version.version}</TableCell>
-            <TableCell>{version.message}</TableCell>
-            <TableCell>{formatDateTime(version.createdAt)}</TableCell>
+    <div className="bg-card overflow-hidden rounded-xl border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-24" variant="card">
+              <Trans>Version</Trans>
+            </TableHead>
+            <TableHead variant="card">
+              <Trans>What changed</Trans>
+            </TableHead>
+            <TableHead className="w-44" variant="card">
+              <Trans>Committed</Trans>
+            </TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {versions.data.map((version) => (
+            <TableRow key={version.version}>
+              <TableCell variant="roomy">
+                <span className="tabular-nums">{version.version}</span>
+              </TableCell>
+              <TableCell className="whitespace-normal" variant="roomy">
+                {version.message}
+              </TableCell>
+              <TableCell variant="roomy">
+                <span className="text-muted-foreground tabular-nums">
+                  {formatDateTime(version.createdAt)}
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 };
 
@@ -596,7 +606,7 @@ const WorkflowView = ({
       ? `${runs.data.runs.length}${runs.data.more ? "+" : ""}`
       : undefined;
   return (
-    <Tabs defaultValue="steps">
+    <Tabs defaultValue="steps" spacing="none">
       {/* As the prototype's workflow page: the title with where it is and
           who owns it, its one action beside it, and the tabs under them. */}
       <div className="flex flex-col gap-3 border-b px-6 pt-5">
@@ -666,19 +676,19 @@ const WorkflowView = ({
         </TabsList>
       </div>
       <TabsContent value="steps">
-        <div className="mx-auto w-full max-w-5xl p-6">
+        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
           <Steps steps={steps} />
         </div>
       </TabsContent>
       <TabsContent value="triggers">
-        <div className="mx-auto w-full max-w-5xl p-6">
+        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
           <WorkflowTriggers triggers={triggers} />
         </div>
       </TabsContent>
       {/* Kept while another tab shows: what was saved or typed stays. */}
       {params === null ? null : (
         <TabsContent keepMounted value="parameters">
-          <div className="mx-auto w-full max-w-5xl p-6">
+          <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
             <Parameters
               app={summary.app}
               editable={setsParams}
@@ -689,7 +699,7 @@ const WorkflowView = ({
         </TabsContent>
       )}
       <TabsContent value="runs">
-        <div className="mx-auto w-full max-w-5xl p-6">
+        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
           {runs.state === "ready" ? (
             <RunsLog
               me={identity.userId}
@@ -705,7 +715,7 @@ const WorkflowView = ({
       </TabsContent>
       {versions === undefined ? null : (
         <TabsContent value="versions">
-          <div className="mx-auto w-full max-w-5xl p-6">
+          <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
             <Versions versions={versions} />
           </div>
         </TabsContent>

@@ -11,7 +11,6 @@ import { Badge } from "@grasp-os/ui/components/badge";
 import {
   Table,
   TableBody,
-  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -26,6 +25,7 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
+import { useId } from "react";
 
 import { formatDateTime, formatList } from "../format.ts";
 import {
@@ -101,56 +101,65 @@ const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
 
 const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
   const { t } = useLingui();
+  const captionId = useId();
   if (versions.length === 0) {
     return (
-      <p className="text-muted-foreground">
+      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
         <Trans>Nothing is published yet.</Trans>
       </p>
     );
   }
   return (
-    <Table>
-      <TableCaption>
+    <div className="flex flex-col gap-2">
+      <div className="bg-card overflow-hidden rounded-xl border">
+        <Table aria-describedby={captionId}>
+          <TableHeader>
+            <TableRow>
+              <TableHead variant="card">{t`Version`}</TableHead>
+              <TableHead variant="card">{t`Definition version`}</TableHead>
+              <TableHead variant="card">{t`Published`}</TableHead>
+              <TableHead variant="card">{t`Actions`}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {versions.map((version) => (
+              <TableRow key={version.version}>
+                <TableCell variant="roomy">{version.version}</TableCell>
+                <TableCell variant="roomy">
+                  {version.definitionVersion}
+                </TableCell>
+                <TableCell variant="roomy">
+                  {formatDateTime(version.createdAt)}
+                </TableCell>
+                <TableCell variant="roomy">
+                  <div className="flex flex-col gap-1">
+                    {version.modelSteeredWrites.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="text-muted-foreground">
+                          <Trans>Its model tasks</Trans>
+                        </span>
+                        {version.modelSteeredWrites.map((write) => (
+                          <SteeredWriteBadge key={write.alias} write={write} />
+                        ))}
+                      </div>
+                    )}
+                    <ActionEffects actions={version.actions} />
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <p className="text-muted-foreground" id={captionId}>
         <Trans>
           Writes a model may steer cover each action&apos;s own model uses and
           the workflow&apos;s own model tasks. An action&apos;s model uses reach
           only that action; each of the workflow&apos;s model tasks is taken to
           reach every call the workflow makes.
         </Trans>
-      </TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t`Version`}</TableHead>
-          <TableHead>{t`Definition version`}</TableHead>
-          <TableHead>{t`Published`}</TableHead>
-          <TableHead>{t`Actions`}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {versions.map((version) => (
-          <TableRow key={version.version}>
-            <TableCell>{version.version}</TableCell>
-            <TableCell>{version.definitionVersion}</TableCell>
-            <TableCell>{formatDateTime(version.createdAt)}</TableCell>
-            <TableCell>
-              <div className="flex flex-col gap-1">
-                {version.modelSteeredWrites.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1">
-                    <span className="text-muted-foreground">
-                      <Trans>Its model tasks</Trans>
-                    </span>
-                    {version.modelSteeredWrites.map((write) => (
-                      <SteeredWriteBadge key={write.alias} write={write} />
-                    ))}
-                  </div>
-                )}
-                <ActionEffects actions={version.actions} />
-              </div>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+      </p>
+    </div>
   );
 };
 
@@ -172,7 +181,10 @@ const WorkflowResourceView = ({
   const router = useRouter();
   const { currentVersion } = resource;
   return (
-    <Tabs defaultValue={draft === undefined ? "versions" : "definition"}>
+    <Tabs
+      defaultValue={draft === undefined ? "versions" : "definition"}
+      spacing="none"
+    >
       <div className="flex flex-col gap-3 border-b px-6 pt-5">
         <div className="flex min-w-0 flex-col gap-2">
           <h1 className="text-2xl font-medium tracking-tight">
@@ -219,7 +231,7 @@ const WorkflowResourceView = ({
       {draft === undefined ? null : (
         // Kept while another tab shows: what was typed stays.
         <TabsContent keepMounted value="definition">
-          <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6">
+          <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-6">
             {draft.state === "ready" ? (
               <DefinitionEditor
                 currentVersion={currentVersion}
@@ -245,7 +257,7 @@ const WorkflowResourceView = ({
       )}
       {/* Kept while another tab shows: what was typed stays. */}
       <TabsContent keepMounted value="parameters">
-        <div className="mx-auto w-full max-w-5xl p-6">
+        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
           {params.state === "ready" ? (
             <ResourceParams
               editable={resource.role === "builder"}
@@ -258,7 +270,7 @@ const WorkflowResourceView = ({
         </div>
       </TabsContent>
       <TabsContent value="runs">
-        <div className="mx-auto w-full max-w-5xl p-6">
+        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
           {runs.state === "ready" ? (
             <ResourceRuns me={me} runs={runs.data} />
           ) : (
@@ -267,7 +279,7 @@ const WorkflowResourceView = ({
         </div>
       </TabsContent>
       <TabsContent value="versions">
-        <div className="mx-auto w-full max-w-5xl p-6">
+        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
           {versions.state === "ready" ? (
             <Versions versions={versions.data} />
           ) : (
