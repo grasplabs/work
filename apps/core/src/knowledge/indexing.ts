@@ -10,7 +10,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { outboxed } from "../audit-outbox.ts";
+import { outboxedIfChanged } from "../audit-outbox.ts";
 import {
   brainPayloads,
   documents,
@@ -287,20 +287,31 @@ const refusePurgePending = async (
   documentId: string,
   actor: AuditActor
 ): Promise<never> => {
-  const state = await stateOf(db, documentId);
-  // Its audit event drains with the cron trigger's next run.
-  await db.batch([
-    db
-      .update(documents)
-      .set({ indexPurgePending: true })
-      .where(eq(documents.id, documentId)),
-    outboxed(db, {
-      actor,
-      action: "knowledge.purge.index_pending",
-      target: { type: "document", id: documentId },
-      detail: { version: state?.currentVersion ?? 0 },
-    }),
-  ]);
+  try {
+    const state = await stateOf(db, documentId);
+    // Only while search doesn't hold its current version; its audit event
+    // with it, in one batch, and drained with the cron trigger's next run.
+    await db.batch([
+      db
+        .update(documents)
+        .set({ indexPurgePending: true })
+        .where(
+          and(
+            eq(documents.id, documentId),
+            sql`coalesce(${documents.indexedVersion}, 0) <> ${documents.currentVersion}`
+          )
+        ),
+      outboxedIfChanged(db, {
+        actor,
+        action: "knowledge.purge.index_pending",
+        target: { type: "document", id: documentId },
+        detail: { version: state?.currentVersion ?? 0 },
+      }),
+    ]);
+  } catch (error) {
+    // Pending all the same: the purge says so, whatever this failed with.
+    log.warn("knowledge.index_purge_mark_failed", failureFields(error));
+  }
   await startCurrentRun(env, db, documentId);
   throw pending();
 };
@@ -493,31 +504,32 @@ const exhaust = async (
   id: string,
   version: number
 ): Promise<void> => {
-  const [given] = await db
-    .update(documents)
-    .set({ indexRun: maxIndexReruns + 1 })
-    .where(
-      and(
-        eq(documents.id, id),
-        eq(documents.currentVersion, version),
-        eq(documents.indexState, "failed"),
-        eq(documents.indexRun, maxIndexReruns),
-        eq(documents.indexPurgePending, false)
+  // The claim and its audit event in one batch: recorded once, or not at
+  // all and claimed again by the next sweep.
+  const [claimed] = await db.batch([
+    db
+      .update(documents)
+      .set({ indexRun: maxIndexReruns + 1 })
+      .where(
+        and(
+          eq(documents.id, id),
+          eq(documents.currentVersion, version),
+          eq(documents.indexState, "failed"),
+          eq(documents.indexRun, maxIndexReruns),
+          eq(documents.indexPurgePending, false)
+        )
       )
-    )
-    .returning({ id: documents.id });
-  if (given === undefined) {
-    return;
-  }
-  log.error("knowledge.index_exhausted", { documentId: id, version });
-  await db.batch([
-    outboxed(db, {
+      .returning({ id: documents.id }),
+    outboxedIfChanged(db, {
       actor: { type: "system" },
       action: "knowledge.index_exhausted",
       target: { type: "document", id },
       detail: { version, runs: maxIndexReruns + 1 },
     }),
   ]);
+  if (claimed.length > 0) {
+    log.error("knowledge.index_exhausted", { documentId: id, version });
+  }
 };
 
 /**
