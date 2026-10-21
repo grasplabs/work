@@ -1340,7 +1340,37 @@ queueMicrotask(() => {
       ],
     };
 
+    // The host of `write`, reviewed asking WRITER, borrowed by `draft`
+    // nested in it, reviewed asking DRAFTER: both must ask it.
+    const borrowed = await (async () => {
+      const { host, runId, tampered, models } = await hostHeldTo(read);
+      let within: Settled<unknown> = { ok: true, value: null };
+      let nested: Settled<unknown> = { ok: true, value: null };
+      const done = await host.do("write", {}, async (outer) => {
+        nested = await host.do("draft", {}, async () => {
+          within = await outer.callModel({
+            step: "write",
+            binding: "WRITER",
+            instructions: "Summarise the invoice",
+            input: "Invoice INV-7",
+            outputSchema: { type: "string" },
+          });
+          return { ok: true, value: null };
+        });
+        return { ok: true, value: null };
+      });
+      return {
+        code: codeOf(within),
+        nested: codeOf(nested),
+        step: codeOf(done),
+        reached: models,
+        tampered,
+        audited: await refusals(runId),
+      };
+    })();
+
     expect({
+      borrowed,
       // Another step's model, and one no step names.
       anotherStepsModel: await asked(read, "DRAFTER"),
       unreviewedModel: await asked(read, "PRICEY"),
@@ -1350,6 +1380,20 @@ queueMicrotask(() => {
       reviewed: await asked(read, "WRITER"),
       unreadReviewed: await asked(unread, "WRITER"),
     }).toMatchObject({
+      borrowed: {
+        code: "workflow.step_not_reviewed",
+        nested: "workflow.step_not_reviewed",
+        step: "workflow.step_not_reviewed",
+        reached: [],
+        tampered: ["workflow.step_not_reviewed"],
+        audited: [
+          {
+            step: "draft",
+            call: "model",
+            errorCode: "workflow.step_not_reviewed",
+          },
+        ],
+      },
       anotherStepsModel: refusedWith,
       unreviewedModel: refusedWith,
       unreadOtherModel: refusedWith,
