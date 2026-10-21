@@ -193,14 +193,24 @@ export interface PreferencesCaller {
     storeId: StoreId,
     readSet: Record<string, number>
   ) => void;
+  /**
+   * The store a draft preview answers from instead (sealed-previews.ts):
+   * the preview's own fixture store, never the App's. A draft release
+   * binds none, so without it there is no store to answer from.
+   */
+  readonly previewStore?: StoreId;
 }
 
-/** The store of `release`, which an App with preferences always has. */
-const storeOfRelease = (env: Env, release: Release) => {
-  if (release.store === null) {
+/**
+ * Where `caller`'s preferences are: a preview's own store, or the store
+ * of the release, which an App with preferences always has.
+ */
+const storeOf = (env: Env, caller: PreferencesCaller) => {
+  const bound = caller.release.store?.storeId;
+  if (caller.previewStore === undefined && bound === undefined) {
     throw versionErrors.create("version.store_unbound");
   }
-  const storeId = storeIdSchema.parse(release.store.storeId);
+  const storeId = storeIdSchema.parse(caller.previewStore ?? bound);
   return {
     storeId,
     stub: inJurisdiction(env, env.DATA_STORES).getByName(storeId),
@@ -330,7 +340,7 @@ export const answerPreferences = async (
     operationErrors.create("contract.invalid_args")
   );
   await caller.gate();
-  const { storeId, stub } = storeOfRelease(env, caller.release);
+  const { storeId, stub } = storeOf(env, caller);
   // With the release's preferences, which the store's contract takes in
   // the same transaction, or refuses (store-host.ts, `readPreferences`).
   const stored = await stub.readPreferences(

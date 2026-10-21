@@ -14,6 +14,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { jsonBytes } from "@grasp-os/shared/screens";
 import { dataErrors } from "@grasp-os/shared/stores";
+import type { WriterRoles } from "@grasp-os/shared/stores";
 import {
   idempotencyKeySchema,
   submissionErrors,
@@ -39,6 +40,11 @@ import {
   refusalOf,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
+import {
+  answerPreferences,
+  isPreferencePath,
+  preferenceOperationOf,
+} from "./app-preferences.ts";
 import { loadDraftRelease, sealDraftRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { draftFiles } from "./apps.ts";
@@ -56,6 +62,7 @@ import type { Invocation } from "./operations.ts";
 import { readWindow } from "./query-windows.ts";
 import { within } from "./release-retention.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
+import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
 import type { Draft } from "./workspace.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout: the draft
@@ -74,6 +81,15 @@ import type { Draft } from "./workspace.ts";
 //   fixture store that core's inventory never lists (`openFixtureStore`),
 //   so no release binds it and `openStore` never opens it. It starts
 //   empty, with the draft's schema, for the draft's revision alone.
+// - The draft reads or writes its person's real preferences: the draft's
+//   `preferences.get` and `update` are answered by core as on a version
+//   (app-preferences.ts), but only from the preview's own store, named by
+//   the running preview, never by the release or the request; an App with
+//   preferences and no tables gets one too (`needsStore`). The App's
+//   store, where the real ones are, is opened by nothing here.
+// - A workflow reference's queries read runs through the App's binding of
+//   the workflow; a preview binds no resource, so they are refused
+//   (`resource.unavailable`) before anything is read, whatever the alias.
 // - The draft reaches outside systems: no resource is bound for its
 //   invocations (no connection, Knowledge, model or other App), so every
 //   resource request is refused by the operation host
@@ -405,9 +421,16 @@ const heard = async (work: Promise<unknown>): Promise<void> => {
 const noCharge = async (): Promise<never> =>
   await Promise.reject(operationErrors.create("contract.invalid_request"));
 
-/** Whether `release`'s App declares tables, and so has a store. */
+/** Whether `release`'s App declares tables, which its store holds. */
 const hasTables = (release: Release): boolean =>
   Object.keys(release.app.schema.tables).length > 0;
+
+/**
+ * Whether `release`'s App has a store: it declares tables, or preferences,
+ * which its store keeps (app-preferences.ts).
+ */
+const needsStore = (release: Release): boolean =>
+  hasTables(release) || release.app.preferences !== null;
 
 /** How many leftover stores one preview's start discards. */
 const leftoversPage = 20;
@@ -508,15 +531,30 @@ export class SealedPreviews {
     try {
       const running = this.#runningFor(chatId, app, draft);
       const release = await this.#loaded(chatId, app, running);
+      // A workflow reference's queries read runs through the App's
+      // binding of the workflow; a preview binds no resource, so there is
+      // none to read through, whatever the alias.
+      if (isWorkflowQueryPath(call.reference.contractId)) {
+        throw operationErrors.create("resource.unavailable");
+      }
+      const deadline =
+        options.deadline ?? Date.now() + platformLimits.serverInvocationWallMs;
+      if (isPreferencePath(call.reference.contractId)) {
+        return await this.#preferences(chatId, personId, app, running, {
+          release,
+          call,
+          deadline,
+        });
+      }
       const path = publicOperationOf(release, call.reference);
+      // Before the preview's store is made or opened.
+      await this.#authorizer(chatId, personId, app, running)();
       const store = await this.#storeOf(chatId, app, running, release);
       held = { running, store };
       const invocation = this.#invocationOf(chatId, personId, app, running, {
         store,
         requestId,
-        deadline:
-          options.deadline ??
-          Date.now() + platformLimits.serverInvocationWallMs,
+        deadline,
       });
       const observe = hasTables(release)
         ? (readSet: Record<string, number>) => {
@@ -580,10 +618,126 @@ export class SealedPreviews {
   }
 
   /**
+   * The draft's preferences, as `preferences.get` and `update` answer
+   * them on a version (app-preferences.ts), from the preview's own store:
+   * never the App's, which a draft release doesn't bind and nothing here
+   * opens. Gated as the preview's every call is (`#invocationOf`), with
+   * its deadline, before the store is read and again before it is
+   * written. Throws for a refusal; `call` answers it.
+   */
+  async #preferences(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    running: Running,
+    {
+      release,
+      call,
+      deadline,
+    }: {
+      release: Release;
+      call: FunctionRequest;
+      deadline: number;
+    }
+  ): Promise<PreviewAnswer> {
+    // Read whole: there is no window of one document.
+    if (call.window !== undefined) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const preference = await preferenceOperationOf(release, call.reference);
+    const authorize = this.#authorizer(chatId, personId, app, running);
+    // Before the preview's store is made or opened.
+    await authorize();
+    const store = await this.#storeOf(chatId, app, running, release);
+    let reads: PreviewAnswer["reads"];
+    let result: OperationResult;
+    try {
+      result = await answerPreferences(
+        this.#env,
+        {
+          userId: personId,
+          release,
+          previewStore: storeIdSchema.parse(store.id),
+          gate: async () => {
+            // The store this call holds still one core records, as every
+            // call's gate checks (`#invocationOf`): the sweep may have
+            // taken it, and then this call is out of date.
+            await this.#requireRecorded(chatId, app, running, store);
+            await authorize();
+            if (Date.now() >= deadline) {
+              throw operationErrors.create("operation.deadline_exceeded");
+            }
+          },
+          observeReads: (storeId, readSet) => {
+            reads = { storeId, readSet };
+          },
+        },
+        preference,
+        call.input,
+        call.idempotencyKey
+      );
+    } catch (error) {
+      // Discarded while core still recorded it, or while this call ran:
+      // forgotten, and out of date, as any call on it is.
+      if (dataErrors.codeOf(error) === "data.fixture_discarded") {
+        this.#forgetStore(chatId, app, running, store.id);
+        throw appErrors.create("app.preview_outdated");
+      }
+      throw error;
+    }
+    return {
+      answer: {
+        result,
+        provenance: null,
+        fingerprint: call.reference.fingerprint,
+        manifestHash: release.manifestHash,
+      },
+      reads,
+    };
+  }
+
+  /**
+   * The gate of every call of `running`, for `personId`: the preview is
+   * still the draft's, and the person still an active member who builds
+   * the App. Run before the preview's store is made or opened, so a
+   * caller who may not use the preview makes none, and again before
+   * each protected step (`#invocationOf`).
+   */
+  #authorizer(
+    chatId: ChatId,
+    personId: string,
+    app: AppId,
+    running: Running
+  ): () => Promise<WriterRoles> {
+    const name = nameOf(chatId, app);
+    const requireCurrent = (): void => {
+      if (this.#running.get(name) !== running) {
+        throw appErrors.create("app.preview_outdated");
+      }
+    };
+    return async () => {
+      requireCurrent();
+      const role = await memberRole(this.#env.DB, personId);
+      if (role === undefined) {
+        throw permissionErrors.create("permission.person_inactive");
+      }
+      const roles = await operationRoles(
+        this.#env,
+        { userId: personId, role },
+        app
+      );
+      if (!roles.appBuilder) {
+        throw roleErrors.create("role.forbidden");
+      }
+      requireCurrent();
+      return roles;
+    };
+  }
+
+  /**
    * The invocation of a call of `running`, for `personId`, on `store`:
-   * its one gate, before the call starts and each commit, checks the
-   * preview is still the draft's, and the person still a member who
-   * builds the App. No resources: a preview reaches no outside system.
+   * its one gate (`#authorizer`), before the call starts and each commit.
+   * No resources: a preview reaches no outside system.
    */
   #invocationOf(
     chatId: ChatId,
@@ -596,12 +750,6 @@ export class SealedPreviews {
       deadline,
     }: { store: OpenStore; requestId: string; deadline: number }
   ): Invocation {
-    const name = nameOf(chatId, app);
-    const requireCurrent = (): void => {
-      if (this.#running.get(name) !== running) {
-        throw appErrors.create("app.preview_outdated");
-      }
-    };
     return {
       principal: personId,
       consumer: { resourceId: app, resourceVersion: running.version },
@@ -609,23 +757,11 @@ export class SealedPreviews {
       requestId,
       deadline,
       runId: null,
+      // The preview's gate, after the store this call holds is checked
+      // to be one core still records (the sweep may have taken it).
       authorize: async () => {
-        requireCurrent();
         await this.#requireRecorded(chatId, app, running, store);
-        const role = await memberRole(this.#env.DB, personId);
-        if (role === undefined) {
-          throw permissionErrors.create("permission.person_inactive");
-        }
-        const roles = await operationRoles(
-          this.#env,
-          { userId: personId, role },
-          app
-        );
-        if (!roles.appBuilder) {
-          throw roleErrors.create("role.forbidden");
-        }
-        requireCurrent();
-        return roles;
+        return await this.#authorizer(chatId, personId, app, running)();
       },
     };
   }
@@ -1035,7 +1171,7 @@ export class SealedPreviews {
     running: Running,
     release: Release
   ): Promise<OpenStore> {
-    if (!hasTables(release)) {
+    if (!needsStore(release)) {
       return noStore();
     }
     running.store ??= this.#makeStore(chatId, app, running, release);
