@@ -207,6 +207,20 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                   <dd className="truncate font-mono text-xs leading-5">
                     {current.run}
                   </dd>
+                  {current.input === undefined ? null : (
+                    <>
+                      <dt className="text-muted-foreground">
+                        <Trans context="what a decision is about, as its workflow run passed it">
+                          About
+                        </Trans>
+                      </dt>
+                      <dd className="min-w-0">
+                        <pre className="max-h-48 overflow-auto font-mono text-xs break-all whitespace-pre-wrap">
+                          {JSON.stringify(current.input, undefined, 2)}
+                        </pre>
+                      </dd>
+                    </>
+                  )}
                   {open ? (
                     <>
                       <dt className="text-muted-foreground">

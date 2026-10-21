@@ -1517,6 +1517,12 @@ msgctxt "note property: what a note is about"
 msgid "About"
 msgstr "Tema"
 
+#: src/decision-confirmation.tsx
+#: src/routes/decisions.$decision.tsx
+msgctxt "what a decision is about, as its workflow run passed it"
+msgid "About"
+msgstr "Sobre"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "About {ending}"
 msgstr "Unos {ending}"

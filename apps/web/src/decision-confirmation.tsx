@@ -124,6 +124,31 @@ const PayloadText = ({
   );
 };
 
+/**
+ * What a decision is about, as its run passed it (an independent
+ * workflow's call `input`): part of the review context the person
+ * confirms, so always shown where they review it. Nothing without one.
+ */
+export const DecisionInputText = ({
+  input,
+}: {
+  input: DecisionView["input"];
+}) =>
+  input === undefined ? null : (
+    <div className="flex gap-4">
+      <dt className="text-muted-foreground w-24 flex-none">
+        <Trans context="what a decision is about, as its workflow run passed it">
+          About
+        </Trans>
+      </dt>
+      <dd className="min-w-0 flex-1">
+        <pre className="max-h-48 overflow-auto font-mono text-xs break-all whitespace-pre-wrap">
+          {JSON.stringify(input, undefined, 2)}
+        </pre>
+      </dd>
+    </div>
+  );
+
 /** The person's confirmation of `pending`, in Grasp's own dialog. */
 export const DecisionConfirmDialog = ({
   pending,
@@ -197,6 +222,7 @@ export const DecisionConfirmDialog = ({
                   {decision.description}
                 </dd>
               </div>
+              <DecisionInputText input={decision.input} />
               <div className="flex gap-4">
                 <dt className="text-muted-foreground w-24 flex-none">
                   <Trans context="where a decision comes from">From</Trans>
