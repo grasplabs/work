@@ -596,7 +596,7 @@ const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
   return [...onboarding, ...records.teams];
 };
 
-/** The Playbook's gaps, with what became of each. */
+/** `records`' gaps, with what became of each. */
 const gapsOf = async (env: Env, records: HeldRecords): Promise<Gap[]> => {
   const states = await gapStatesOf(
     env,
@@ -604,6 +604,13 @@ const gapsOf = async (env: Env, records: HeldRecords): Promise<Gap[]> => {
   );
   return records.gaps.map((gap) => gapWith(gap, states.get(gap.id)));
 };
+
+/**
+ * The Playbook's gaps, with what became of each, as every member reads
+ * them: what `brain.read` serves, and what a chat's agent reads too.
+ */
+export const brainGaps = async (env: Env): Promise<Gap[]> =>
+  await gapsOf(env, await readBrainRecords(env));
 
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
