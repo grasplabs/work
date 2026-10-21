@@ -132,6 +132,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's result doesn't match its output schema, so the run failed.",
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
+  "workflow.collection_invalid":
+    "A for task's collection isn't a list of at most 1,000 items, so the run failed.",
   "workflow.run_unavailable": "This workflow has no such run.",
   "workflow.run_details_removed":
     "This run ended long enough ago that what it returned is no longer kept.",
@@ -711,7 +713,7 @@ export interface WorkflowBinders {
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 6;
+export const openWorkflowProtocol = 7;
 
 /**
  * Something of a definition the code generator doesn't lower yet: its

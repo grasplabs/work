@@ -33,11 +33,16 @@ import { literalDurationMs } from "./values.ts";
  * - Control flow that loops. Generated code has no loop statement: a
  *   transition is a `break` out of a labelled block, which can only move
  *   forward, to a later sibling (a block that closes before it), out of
- *   its list (`exit`) or out of the workflow (`end`). A target that isn't
- *   strictly later in the same list is never emitted, whatever validation
- *   said (`resolveTarget` throws), so every task runs at most once, and a
- *   run's steps are bounded by its tasks; core refuses any step run twice
- *   all the same (resource-host.ts).
+ *   its list (`exit`) or out of the workflow (`end`, or, inside a loop's
+ *   item, a return that tells the loop so). A target that isn't strictly
+ *   later in the same list is never emitted, whatever validation said
+ *   (`resolveTarget` throws). A `for` task is a call of the SDK's loop
+ *   (`flow.for`), its list a function the SDK runs once per item of the
+ *   collection its enter step recorded (sequentially; items at once and
+ *   items' own keys aren't lowered yet), so every task runs at most once
+ *   per item of the loops around it, and a run's steps are bounded by its
+ *   tasks and its loops' recorded items; core refuses any step run twice,
+ *   and any item no loop recorded, all the same (resource-host.ts).
  * - Expressions becoming code. An expression's source never enters the
  *   module: the module names it by its number in the expression table
  *   sealed beside it, and the host evaluates that table's entry with the
@@ -103,7 +108,7 @@ export const maxTaskExpressions = 64;
 export const maxStepExpressions = 128;
 
 /** The generator's identity: part of every build it makes. */
-export const generatorVersion = "grasp-open-workflow-ts/6";
+export const generatorVersion = "grasp-open-workflow-ts/7";
 
 /** Where the generated module is among a version's files. */
 export const generatedPath = ".grasp/workflow.ts";
@@ -128,10 +133,15 @@ export interface SealedExpression {
   /** A condition (`if`, a case's `when`) must answer a boolean. */
   readonly result: ExpressionResult;
   readonly source: string;
+  /**
+   * The variables of the loops around it, as it was compiled: its `for`
+   * tasks' `each` and `at`, outermost first. Empty outside any loop.
+   */
+  readonly loopVariables: readonly string[];
 }
 
 /** The task kinds this generator lowers. */
-export type LoweredKind = "call" | "do" | "set" | "switch" | "wait";
+export type LoweredKind = "call" | "do" | "for" | "set" | "switch" | "wait";
 
 /**
  * A value the host builds itself when a task's call is made, or its
@@ -205,8 +215,11 @@ export interface WorkflowLimits {
   readonly maxModelCalls?: number;
 }
 
-/** A step a task runs as, besides a `wait`'s sleep. */
-export type TaskStep = "task" | "enter" | "leave";
+/**
+ * A step a task runs as, besides a `wait`'s sleep: an `item` step is a
+ * `for` task's check of its `while`, before each item.
+ */
+export type TaskStep = "task" | "enter" | "leave" | "item";
 
 /** A task's data the host checks against the task's own schema. */
 export type TaskSchemas = Readonly<
@@ -285,6 +298,26 @@ export interface GeneratedTask {
    */
   readonly timeoutMs?: number;
   /**
+   * The `for` tasks around it, outermost first: each of its steps runs in
+   * the scope of an item of each (`task:<id>@<for>.<index>/…`). Empty for
+   * a task of the workflow's own list.
+   */
+  readonly scope: readonly string[];
+  /**
+   * A `for` task's loop: its collection (`for.in`), which the host
+   * resolves in its enter step, and its items' keys
+   * (`metadata.grasp.key`), each built by the host on the item; the names
+   * its items' variables have; and the slot of its `while`, which each
+   * item's `item` step evaluates.
+   */
+  readonly loop?: {
+    readonly in: CallTemplate;
+    readonly key?: CallTemplate;
+    readonly each: string;
+    readonly at: string;
+    readonly while?: number;
+  };
+  /**
    * Its durable steps (`task:<id>` for a `set`, `switch` or call; `enter:<id>`
    * and `leave:<id>` around a wait's sleep or a `do`'s list, when it has
    * stages there, and always an `enter:<id>` that resolves a deadline).
@@ -357,7 +390,14 @@ const supportedTaskKeys = new Set([
 ]);
 
 /** Task kinds lowered here; the profile's others come later. */
-const loweredKinds = new Set<string>(["call", "do", "set", "switch", "wait"]);
+const loweredKinds = new Set<string>([
+  "call",
+  "do",
+  "for",
+  "set",
+  "switch",
+  "wait",
+]);
 
 /** Named calls lowered here; decisions come later. */
 const loweredCalls = new Set<string>([
@@ -621,6 +661,10 @@ interface Emitter {
   readonly usedLabels: Set<string>;
   /** Counts lists and tasks, for labels and variables of their own. */
   counter: number;
+  /** The flow the code being written runs its tasks on: its variable. */
+  flow: string;
+  /** The `for` tasks around the code being written, outermost first. */
+  scope: string[];
 }
 
 /**
@@ -650,6 +694,7 @@ const valueCode = (
       stage: compiled.stage,
       result,
       source: compiled.source,
+      loopVariables: Object.freeze([...compiled.loopVariables]),
     });
     return `await task.evaluate(${slot})`;
   }
@@ -768,6 +813,7 @@ const templateOf = (
       stage: compiled.stage,
       result,
       source: compiled.source,
+      loopVariables: Object.freeze([...compiled.loopVariables]),
     });
     return { slot };
   }
@@ -1064,7 +1110,7 @@ const lowerSet = (
   }
   const plan = planCode([...stages.enter, `set: ${value}`, ...stages.leave]);
   emitter.lines.push(
-    `${place.indent}({ output, context } = await flow.set(${literal(item.id)}, { input: output, context }, ${plan}));`
+    `${place.indent}({ output, context } = await ${emitter.flow}.set(${literal(item.id)}, { input: output, context }, ${plan}));`
   );
 };
 
@@ -1124,7 +1170,7 @@ const lowerSwitch = (
   ]);
   emitter.lines.push(
     `${place.indent}{`,
-    `${place.indent}  const chosen = await flow.switch(${literal(item.id)}, { input: output, context }, ${plan});`,
+    `${place.indent}  const chosen = await ${emitter.flow}.switch(${literal(item.id)}, { input: output, context }, ${plan});`,
     `${place.indent}  ({ output, context } = chosen);`,
     ...jumps,
     `${place.indent}}`
@@ -1170,7 +1216,7 @@ const lowerDurable = (
     steps.push("enter");
     const plan = planCode([...stages.enter, ...(until ? ["until: true"] : [])]);
     emitter.lines.push(
-      `${inner}const ${entered} = await flow.enter(${id}, { input: output, context }, ${plan});`,
+      `${inner}const ${entered} = await ${emitter.flow}.enter(${id}, { input: output, context }, ${plan});`,
       `${inner}if (!${entered}.skipped) {`,
       `${inner}  output = ${entered}.input;`
     );
@@ -1181,7 +1227,7 @@ const lowerDurable = (
     steps.push("leave");
     const enteredInput = hasEnter ? `${entered}.input` : raw;
     emitter.lines.push(
-      `${inner}({ output, context } = await flow.leave(${id}, { input: ${raw}, context }, ${enteredInput}, output, ${planCode(stages.leave)}));`
+      `${inner}({ output, context } = await ${emitter.flow}.leave(${id}, { input: ${raw}, context }, ${enteredInput}, output, ${planCode(stages.leave)}));`
     );
   }
   if (hasEnter) {
@@ -1194,7 +1240,7 @@ const lowerDurable = (
 /** What every task the generator seals has, whatever its kind. */
 type TaskBase = Pick<
   GeneratedTask,
-  "id" | "pointer" | "line" | "schemas" | "timeoutMs"
+  "id" | "pointer" | "line" | "schemas" | "timeoutMs" | "scope"
 >;
 
 /**
@@ -1466,7 +1512,7 @@ const lowerCall = (
   });
   const plan = planCode([...stages.enter, ...stages.leave]);
   emitter.lines.push(
-    `${place.indent}({ output, context } = await flow.call(${literal(item.id)}, { input: output, context }, ${plan}));`
+    `${place.indent}({ output, context } = await ${emitter.flow}.call(${literal(item.id)}, { input: output, context }, ${plan}));`
   );
 };
 
@@ -1493,7 +1539,7 @@ const lowerSleep = (
     steps.push(
       ...lowerDurable(emitter, item, stages, place, (indent) => {
         emitter.lines.push(
-          `${indent}await flow.wait(${literal(id)}, ${literal(ms)});`
+          `${indent}await ${emitter.flow}.wait(${literal(id)}, ${literal(ms)});`
         );
       })
     );
@@ -1544,7 +1590,7 @@ const lowerSleep = (
       place,
       (indent, entered) => {
         emitter.lines.push(
-          `${indent}await flow.sleepUntil(${literal(id)}, ${entered}.until);`
+          `${indent}await ${emitter.flow}.sleepUntil(${literal(id)}, ${entered}.until);`
         );
       },
       true
@@ -1564,6 +1610,53 @@ type ListLowerer = (
 /** Whether task `item` sleeps: a wait, or a `grasp.sleepUntil` call. */
 const sleepsOf = (task: JsonObject, kind: string): boolean =>
   kind === "wait" || (kind === "call" && task.call === "grasp.sleepUntil");
+
+/** The most `for` tasks one inside another (spec 18: eight levels). */
+export const maxLoopDepth = 8;
+
+/** Task `task`'s `metadata.grasp`, if it has one. */
+const graspMetadataOf = (task: JsonObject): JsonObject | undefined =>
+  isObject(task.metadata) && isObject(task.metadata.grasp)
+    ? task.metadata.grasp
+    : undefined;
+
+/**
+ * Refuses what of `for` task `item` isn't lowered yet: items at once
+ * (`metadata.grasp.concurrency` above 1, GRA-276's next slice) and items'
+ * own keys (`metadata.grasp.key`): its items are identified by their
+ * index in the collection its enter step records. Whether anything was.
+ */
+const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
+  const grasp = graspMetadataOf(item.task);
+  const graspPointer = pointerJoin(
+    pointerJoin(item.pointer, "metadata"),
+    "grasp"
+  );
+  let refused = false;
+  if (
+    grasp !== undefined &&
+    typeof grasp.concurrency === "number" &&
+    grasp.concurrency > 1
+  ) {
+    emitter.refusals.add(
+      pointerJoin(graspPointer, "concurrency"),
+      "for:concurrency",
+      item.id
+    );
+    refused = true;
+  }
+  if (grasp !== undefined && Object.hasOwn(grasp, "key")) {
+    emitter.refusals.add(pointerJoin(graspPointer, "key"), "for:key", item.id);
+    refused = true;
+  }
+  // Loops inside one another, at most spec 18's eight levels: what the
+  // host reads of a step's name.
+  if (emitter.scope.length >= maxLoopDepth) {
+    emitter.refusals.add(item.pointer, "for:depth", item.id);
+    refused = true;
+  }
+  return refused;
+};
 
 /**
  * Refuses, by pointer, what of task `item` (of `kind`) isn't lowered: its
@@ -1586,10 +1679,14 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
     refused = true;
   }
   for (const key of Object.keys(task)) {
-    if (key !== kind && !supportedTaskKeys.has(key)) {
+    const own = kind === "for" && (key === "while" || key === "do");
+    if (key !== kind && !own && !supportedTaskKeys.has(key)) {
       emitter.refusals.add(pointerJoin(pointer, key), key, id);
       refused = true;
     }
+  }
+  if (kind === "for") {
+    refused = refusedLoop(emitter, item) || refused;
   }
   const timed = timedKinds.has(kind) && !sleepsOf(task, kind);
   if (Object.hasOwn(task, "timeout") && !timed) {
@@ -1601,6 +1698,119 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
     refused = true;
   }
   return refused;
+};
+
+/**
+ * The statement `end` is where code is being written: a `break` out of
+ * the workflow's list, or, inside an item's list, a return that tells its
+ * loop the workflow ended.
+ */
+const endJump = (emitter: Emitter): string => {
+  if (emitter.scope.length > 0) {
+    return "return { output, context, end: true };";
+  }
+  emitter.usedLabels.add(workflowLabel);
+  return `break ${workflowLabel};`;
+};
+
+/**
+ * The statements of a `for` task: one call of the SDK's loop, whose enter
+ * step records the items the host resolves from the sealed collection,
+ * with its list as a function of the item's own flow and data, in which
+ * `exit` ends the item and `end` the workflow (`end: true`, which the loop
+ * passes on). Its items run one after another; generated code has still
+ * no loop statement: the SDK runs the list once per recorded item, and
+ * the host refuses any item the record doesn't have.
+ */
+const lowerFor = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  lowerList: ListLowerer
+): void => {
+  const { id, task, pointer } = item;
+  const loop = isObject(task.for) ? task.for : {};
+  const forPointer = pointerJoin(pointer, "for");
+  const each = typeof loop.each === "string" ? loop.each : "item";
+  const at = typeof loop.at === "string" ? loop.at : "index";
+  const steps: TaskStep[] = ["enter"];
+  const collection = templateOf(
+    emitter,
+    loop.in ?? null,
+    pointerJoin(forPointer, "in"),
+    id,
+    "json"
+  );
+  const members = [...stages.enter];
+  let whileSlot: number | undefined;
+  if (Object.hasOwn(task, "while")) {
+    const condition = stageCode(
+      emitter,
+      task.while ?? null,
+      pointerJoin(pointer, "while"),
+      id,
+      "while",
+      "boolean"
+    );
+    if (condition === undefined) {
+      return;
+    }
+    whileSlot = emitter.expressions.length - 1;
+    members.push(`while: ${condition}`);
+    steps.push("item");
+  }
+  if (stages.leave.length > 0) {
+    steps.push("leave");
+  }
+  members.push(...stages.leave);
+  const inputFrom = inputFromOf(emitter, item);
+  emitter.tasks.push({
+    ...sealed,
+    kind: "for",
+    steps,
+    loop: {
+      in: collection,
+      each,
+      at,
+      ...(whileSlot === undefined ? {} : { while: whileSlot }),
+    },
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+  });
+  emitter.counter += 1;
+  const number = emitter.counter;
+  const looped = `looped${number}`;
+  const flow = `flow${number}`;
+  const state = `state${number}`;
+  const { indent } = place;
+  emitter.lines.push(
+    `${indent}{`,
+    `${indent}  const ${looped} = await ${emitter.flow}.for(${literal(id)}, { input: output, context }, ${planCode(members)}, async (${flow}, ${state}) => {`,
+    `${indent}    let { output, context } = ${state};`
+  );
+  const outer = { flow: emitter.flow, scope: emitter.scope };
+  emitter.flow = flow;
+  emitter.scope = [...emitter.scope, id];
+  emitter.counter += 1;
+  lowerList(
+    emitter,
+    Array.isArray(task.do) ? task.do : [],
+    pointerJoin(pointer, "do"),
+    `${indent}    `,
+    { label: `s${emitter.counter}`, number: emitter.counter }
+  );
+  emitter.flow = outer.flow;
+  emitter.scope = outer.scope;
+  emitter.lines.push(
+    `${indent}    return { output, context };`,
+    `${indent}  });`,
+    `${indent}  ({ output, context } = ${looped});`,
+    `${indent}  if (${looped}.end) {`,
+    `${indent}    ${endJump(emitter)}`,
+    `${indent}  }`,
+    `${indent}}`
+  );
 };
 
 /** Lowers one task, or says why it can't be. */
@@ -1628,6 +1838,7 @@ const lowerTask = (
     pointer,
     line,
     schemas: Object.freeze({ ...stages.schemas }),
+    scope: Object.freeze([...emitter.scope]),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   };
   if (kind === "set" || kind === "switch" || (kind === "call" && !sleeps)) {
@@ -1647,6 +1858,8 @@ const lowerTask = (
     }
   } else if (sleeps) {
     lowerSleep(emitter, item, stages, place, sealed, before);
+  } else if (kind === "for") {
+    lowerFor(emitter, item, stages, place, sealed, lowerList);
   } else {
     const steps: TaskStep[] = [];
     emitter.tasks.push({ ...sealed, kind: "do", steps });
@@ -1731,10 +1944,11 @@ const lowerList: ListLowerer = (
       if (target === "continue") {
         return null;
       }
-      let to: string | undefined = label;
       if (target === "end") {
-        to = workflowLabel;
-      } else if (target !== "exit") {
+        return endJump(emitter);
+      }
+      let to: string | undefined = label;
+      if (target !== "exit") {
         to = targetLabels.get(resolveTarget(positions, target, position));
       }
       if (to === undefined) {
@@ -1866,6 +2080,8 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
     spans: [],
     usedLabels: new Set(),
     counter: 0,
+    flow: "flow",
+    scope: [],
   };
   emitter.lines.push(
     "// Generated by Grasp from workflow.json: read-only, rebuilt from it.",
