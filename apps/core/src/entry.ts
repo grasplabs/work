@@ -9,6 +9,7 @@ import {
   interviewApiPath,
   interviewPagePath,
 } from "@grasp-os/shared/interview-links";
+import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
@@ -38,6 +39,7 @@ import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
+import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { interviewResponse } from "./onboarding/links.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import {
@@ -131,13 +133,17 @@ const linkResponse = async (
   pathname: string,
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response | undefined> => {
   if (pathname === guestApiPath) {
     return await guestResponse(request, env, requestId);
   }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
+  }
+  if (pathname === interviewTurnPath) {
+    return await interviewTurnResponse(request, env, requestId, ctx);
   }
   return undefined;
 };
@@ -243,7 +249,8 @@ const consoleRoutes: ReadonlyMap<
 const route = async (
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response> => {
   const url = new URL(request.url);
   const { pathname } = url;
@@ -281,7 +288,7 @@ const route = async (
   if (pathname === auditExportPath) {
     return await auditExportResponse(request, env, requestId);
   }
-  const linked = await linkResponse(pathname, request, env, requestId);
+  const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {
     return linked;
   }
@@ -327,7 +334,7 @@ const respond = async (
     const checked = await checkRouterSecret(request, env);
     if (checked.ok) {
       installBuiltinsOnce(env, ctx);
-      const response = await route(checked.request, env, requestId);
+      const response = await route(checked.request, env, requestId, ctx);
       return { response, level: "info" };
     }
     const response = errorResponse(

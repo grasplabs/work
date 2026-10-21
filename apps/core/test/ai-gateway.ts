@@ -51,6 +51,8 @@ export type GatewayReply =
       noUsage?: boolean;
       /** Prompt tokens written to a one-hour cache (Anthropic). */
       cacheWrite1h?: number;
+      /** The model declined to answer (Anthropic's `refusal` stop). */
+      refused?: true;
       /**
        * Prompt tokens read from and written to the five-minute cache
        * (Anthropic), besides `inputTokens`.
@@ -295,7 +297,10 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
       data: {
         type: "message_delta",
         delta: {
-          stop_reason: stopOf(answer, ["end_turn", "max_tokens", "tool_use"]),
+          stop_reason:
+            answer.refused === true
+              ? "refusal"
+              : stopOf(answer, ["end_turn", "max_tokens", "tool_use"]),
           stop_sequence: null,
         },
         usage: { output_tokens: outputTokens },

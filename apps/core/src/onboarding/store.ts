@@ -22,6 +22,7 @@ import { log } from "@grasp-os/shared/log";
 import { agreementsSchema, planSchema } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
+  InterviewKind,
   OnboardingView,
   Plan,
   Roster,
@@ -161,6 +162,24 @@ const answered = <T>(value: T) => ({ ok: true, value }) as const;
 /** A person's first name, as Stephen calls them. */
 const firstName = (name: string): string => name.trim().split(/\s+/u)[0] ?? "";
 
+/** What a lead's interview knows of their team: its size, and who is in it by name and job. */
+const teamKnown = (
+  leadName: string,
+  team: string,
+  members: readonly Roster["people"][number][]
+): string[] => [
+  `${firstName(leadName)} leads ${team}, a team of ${members.length + 1}.`,
+  ...(members.length === 0
+    ? []
+    : [
+        `The people in the team, by name and job: ${members
+          .map(({ name, title }) =>
+            title === "" ? name : `${name} (${title})`
+          )
+          .join("; ")}.`,
+      ]),
+];
+
 /** How long the alarm waits, at most, before it looks for due links again. */
 const linkCheckMs = 60 * 60 * 1000;
 /** And how long before it retries delivering audit events, first and at most. */
@@ -175,6 +194,21 @@ export interface Took {
   tokensCached?: number;
   tokensOut?: number;
   seconds?: number;
+}
+
+/** What one interview turn knows of who it is with, from the store (`turnContext`). */
+export interface TurnContext {
+  kind: InterviewKind;
+  /** Their first name, their team, and their lead's first name. */
+  name: string;
+  team: string;
+  lead: string | null;
+  /** The piece of work Stephen learns about; empty until the team's map names it. */
+  work: string;
+  /** What Stephen knows beforehand: a lead's team, his setup, the kickoff and the documents. */
+  known: string;
+  /** Names and words to listen for. */
+  terms: string[];
 }
 
 /** One interview as Grasp's admin reads it from the store: no word of it. */
@@ -694,6 +728,61 @@ export class Onboarding extends DurableObject<Env> {
       }
     });
     return answered({ saved: true, version: next });
+  }
+
+  /**
+   * What one turn of someone's interview may know, from the device it is
+   * on, while the interviews run: who they are, their team and lead, and
+   * what Stephen knows of the company beforehand. Never from the page,
+   * which could say anything. `work` stays empty until the team's map
+   * names their piece of work: Stephen then asks which one it is.
+   */
+  turnContext(
+    secretMark: string,
+    keyMark: string,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<TurnContext> {
+    const found = this.#onLink(secretMark, now, "save");
+    if (!found.ok) {
+      return found;
+    }
+    const { person, link, roster } = found.value;
+    if (link.keyMark === null || link.keyMark !== keyMark) {
+      return refused("interview.elsewhere");
+    }
+    const team = roster.teams.find(({ id }) => id === person.team);
+    const lead = roster.people.find(
+      ({ id }) => id === team?.lead && id !== person.id
+    );
+    const kind = leads(roster, person.id) ? "lead" : "own";
+    const members =
+      kind === "lead"
+        ? roster.people.filter(
+            (each) =>
+              each.team === person.team && each.id !== person.id && !each.away
+          )
+        : [];
+    const teamName = team?.name ?? "";
+    const known = [
+      ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
+      this.interviewBrief(),
+      this.documentsBrief(teamName),
+    ].filter((part) => part !== "");
+    const terms = [
+      ...(lead === undefined ? [] : [firstName(lead.name)]),
+      ...members.map((each) => firstName(each.name)),
+      ...(this.#stephen()?.terms ?? []),
+      ...this.documents().flatMap(({ reading }) => reading.tools),
+    ];
+    return answered({
+      kind,
+      name: firstName(person.name),
+      team: teamName,
+      lead: lead === undefined ? null : firstName(lead.name),
+      work: "",
+      known: known.join("\n\n"),
+      terms: [...new Set(terms)],
+    });
   }
 
   /**
