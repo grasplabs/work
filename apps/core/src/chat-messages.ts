@@ -88,29 +88,57 @@ const usageOf = ({
         contextWindow: contextWindowOf(model) ?? null,
       };
 
-/** A Markdown link to a note: its text, and the note's ID. */
-const noteLink = /\[(?<label>[^\]\n]*)\]\(grasp:note\/(?<id>[^\s)]+)\)/gu;
+/**
+ * An inline Markdown link to a note: its text, and the note's ID, its
+ * destination in angle brackets or not, with a title or none.
+ */
+const noteLink =
+  /\[(?<label>[^\]\n]*)\]\(\s*<?grasp:note\/(?<id>[^\s)>]+)>?(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/gu;
+
+/** The note scheme anywhere else: an autolink, a reference definition. */
+const noteScheme = /grasp:note\//gu;
+
+/**
+ * What stands for a kept link while the rest of the text is cleaned: a
+ * private-use character (U+E000) around the link's place, which no answer
+ * keeps.
+ */
+const mark = String.fromCodePoint(0xe0_00);
+
+const keptMark = (index: number): string => `${mark}${index}${mark}`;
+
+const keptMarks = new RegExp(`${mark}(?<index>\\d+)${mark}`, "gu");
 
 /**
  * An answer's text with the notes it cites (`ChatCitation`): its links to
- * notes `given` holds stay, the first {@link chatCitationsMax} of them as
- * its citations; any other note link is its text alone, so an answer never
- * shows a citation of what its chat wasn't given, whatever the model wrote.
+ * the first {@link chatCitationsMax} notes `given` holds stay, each as
+ * `[label](grasp:note/<id>)`, and are its citations; any other note link
+ * is its text alone, and the note scheme anywhere else is dropped, so an
+ * answer never shows a link to a note that isn't one of its citations,
+ * whatever the model wrote.
  */
 export const citedIn = (
   text: string,
   given: (documentId: string) => boolean
 ): { text: string; citations: ChatCitation[] } => {
   const cited: string[] = [];
-  const shown = text.replaceAll(noteLink, (link, label: string, id: string) => {
-    if (!given(id)) {
-      return label;
-    }
-    if (!cited.includes(id) && cited.length < chatCitationsMax) {
-      cited.push(id);
-    }
-    return link;
-  });
+  const kept: string[] = [];
+  const marked = text
+    .replaceAll(mark, "")
+    .replaceAll(noteLink, (_link, label: string, id: string) => {
+      const known = cited.includes(id);
+      if (!given(id) || (!known && cited.length >= chatCitationsMax)) {
+        return label;
+      }
+      if (!known) {
+        cited.push(id);
+      }
+      kept.push(`[${label}](grasp:note/${id})`);
+      return keptMark(kept.length - 1);
+    });
+  const shown = marked
+    .replaceAll(noteScheme, "")
+    .replaceAll(keptMarks, (_mark, index: string) => kept[Number(index)] ?? "");
   return {
     text: shown,
     citations: cited.map((documentId) => ({ kind: "document", documentId })),
