@@ -63,6 +63,12 @@ export interface ClientSecretMaterial {
   version: 1;
   clientId: string;
   generation: number;
+  /**
+   * When a deploy made the generation live; null until one has. The
+   * previous generation's keys are needed for `rotationWindowMs` after it
+   * (src/deploy/secrets.ts), and no longer.
+   */
+  rotationLiveAt: string | null;
   exportedAt: string;
   /** By app (`core`, `connect`), then by secret name. */
   secrets: Record<string, Record<string, string>>;
@@ -124,6 +130,7 @@ export const exportClientSecrets = async (
     version: 1,
     clientId: client.id,
     generation: client.generation,
+    rotationLiveAt: client.rotationLiveAt?.toISOString() ?? null,
     exportedAt: request.now.toISOString(),
     secrets,
   };

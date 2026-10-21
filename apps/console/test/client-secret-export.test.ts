@@ -119,6 +119,7 @@ describe("exporting a client's key material", () => {
       version: 1,
       clientId,
       generation: 3,
+      rotationLiveAt: now.toISOString(),
       exportedAt: now.toISOString(),
       // What each Worker runs with, but the secret every client shares.
       secrets: {
