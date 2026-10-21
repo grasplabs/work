@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
@@ -27,7 +27,9 @@ import { ErrorText } from "../error-text.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { useWide } from "../frame/wide.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { usePageSidePanel } from "../screens/app-panel-context.tsx";
 
 // Chat with the organization's agent, in the prototype's layout
 // (grasplabs/prototype `routes/index.tsx`): the person's chats in the page
@@ -145,19 +147,6 @@ const crumbsOf = (
   ];
 };
 
-/** From this width (Tailwind's lg) the side panel sits beside the chat. */
-const wideQuery = "(min-width: 64rem)";
-
-const onWide = (onChange: () => void): (() => void) => {
-  const query = matchMedia(wideQuery);
-  query.addEventListener("change", onChange);
-  return () => {
-    query.removeEventListener("change", onChange);
-  };
-};
-
-const isWide = (): boolean => matchMedia(wideQuery).matches;
-
 /** Characters a file name can't hold on some system, and runs of space. */
 const unsafeInFileName = /[\s"*/:<>?\\|]+/gu;
 
@@ -194,7 +183,7 @@ const OpenChat = ({
   const { i18n, t } = useLingui();
   const { composer, ask } = useAsk(chat.id, models, efforts);
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
-  const wide = useSyncExternalStore(onWide, isWide);
+  const wide = useWide();
   const builds = useChatBuilds(chat.id, view.running, view.drafts);
   const drafts = draftsOf(builds);
   const building = drafts.length > 0;
@@ -216,10 +205,10 @@ const OpenChat = ({
     setPlaced(undefined);
   }
   const aside = wide && (panel ? placed === "aside" : !building);
-  const [openedApp, setOpenedApp] = useState<string>();
-  const sidePanel = (
-    <SidePanel builds={builds} onOpened={setOpenedApp} opened={openedApp} />
-  );
+  const sidePanel = <SidePanel builds={builds} />;
+  // An App open in the shell's panel slot stands where this panel stood:
+  // one panel at a time beside the chat.
+  const showPanel = usePageSidePanel(panel);
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
       <ChatStudio chatId={chat.id} drafts={drafts} wide={wide}>
@@ -302,7 +291,7 @@ const OpenChat = ({
       {/* Beside the chat on a wide window, as wide as a page sidebar; over it,
           in a sheet, on a narrower one, and beside an App being built,
           which takes the room, unless it was already open beside the chat. */}
-      {panel && aside ? (
+      {showPanel && aside ? (
         <aside
           aria-label={t`Side panel`}
           className="bg-background flex w-72 flex-none flex-col overflow-y-auto border-l p-4"
@@ -311,7 +300,7 @@ const OpenChat = ({
         </aside>
       ) : null}
       {aside ? null : (
-        <Sheet onOpenChange={onPanel} open={panel}>
+        <Sheet onOpenChange={onPanel} open={showPanel}>
           <SheetContent closeLabel={t`Close`} side="right">
             <SheetTitle className="sr-only">
               <Trans>Side panel</Trans>

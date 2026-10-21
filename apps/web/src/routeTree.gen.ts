@@ -72,6 +72,7 @@ import { Route as ShellLandscapeAppIdAuditRouteImport } from './routes/_shell.la
 import { Route as ShellLandscapeAppIdConnectionsRouteImport } from './routes/_shell.landscape.$appId.connections'
 import { Route as ShellLandscapeAppIdDataRouteImport } from './routes/_shell.landscape.$appId.data'
 import { Route as ShellLandscapeAppIdOverviewRouteImport } from './routes/_shell.landscape.$appId.overview'
+import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
 import { Route as ShellPoliciesDocumentsPolicyIdRouteImport } from './routes/_shell.policies.documents.$policyId'
 import { Route as ShellPoliciesRulesRuleIdRouteImport } from './routes/_shell.policies.rules.$ruleId'
 import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
@@ -409,6 +410,11 @@ const ShellLandscapeAppIdOverviewRoute =
     path: '/overview',
     getParentRoute: () => ShellLandscapeAppIdRoute,
   } as any)
+const ShellLinksAppSurfaceRoute = ShellLinksAppSurfaceRouteImport.update({
+  id: '/links/$app/$surface',
+  path: '/links/$app/$surface',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellPoliciesDocumentsPolicyIdRoute =
   ShellPoliciesDocumentsPolicyIdRouteImport.update({
     id: '/policies/documents/$policyId',
@@ -547,6 +553,7 @@ export interface FileRoutesByFullPath {
   '/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
   '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
+  '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -620,6 +627,7 @@ export interface FileRoutesByTo {
   '/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
   '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
+  '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -699,6 +707,7 @@ export interface FileRoutesById {
   '/_shell/landscape/$appId/connections': typeof ShellLandscapeAppIdConnectionsRoute
   '/_shell/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/_shell/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
+  '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/_shell/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/_shell/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -778,6 +787,7 @@ export interface FileRouteTypes {
     | '/landscape/$appId/connections'
     | '/landscape/$appId/data'
     | '/landscape/$appId/overview'
+    | '/links/$app/$surface'
     | '/policies/documents/$policyId'
     | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
@@ -851,6 +861,7 @@ export interface FileRouteTypes {
     | '/landscape/$appId/connections'
     | '/landscape/$appId/data'
     | '/landscape/$appId/overview'
+    | '/links/$app/$surface'
     | '/policies/documents/$policyId'
     | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
@@ -929,6 +940,7 @@ export interface FileRouteTypes {
     | '/_shell/landscape/$appId/connections'
     | '/_shell/landscape/$appId/data'
     | '/_shell/landscape/$appId/overview'
+    | '/_shell/links/$app/$surface'
     | '/_shell/policies/documents/$policyId'
     | '/_shell/policies/rules/$ruleId'
     | '/_shell/workflows/$app/$workflow'
@@ -1404,6 +1416,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellLandscapeAppIdOverviewRouteImport
       parentRoute: typeof ShellLandscapeAppIdRoute
     }
+    '/_shell/links/$app/$surface': {
+      id: '/_shell/links/$app/$surface'
+      path: '/links/$app/$surface'
+      fullPath: '/links/$app/$surface'
+      preLoaderRoute: typeof ShellLinksAppSurfaceRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/policies/documents/$policyId': {
       id: '/_shell/policies/documents/$policyId'
       path: '/policies/documents/$policyId'
@@ -1628,6 +1647,7 @@ interface ShellRouteChildren {
   ShellLandscapeIndexRoute: typeof ShellLandscapeIndexRoute
   ShellPoliciesIndexRoute: typeof ShellPoliciesIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
+  ShellLinksAppSurfaceRoute: typeof ShellLinksAppSurfaceRoute
   ShellPoliciesDocumentsPolicyIdRoute: typeof ShellPoliciesDocumentsPolicyIdRoute
   ShellPoliciesRulesRuleIdRoute: typeof ShellPoliciesRulesRuleIdRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
@@ -1664,6 +1684,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellLandscapeIndexRoute: ShellLandscapeIndexRoute,
   ShellPoliciesIndexRoute: ShellPoliciesIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
+  ShellLinksAppSurfaceRoute: ShellLinksAppSurfaceRoute,
   ShellPoliciesDocumentsPolicyIdRoute: ShellPoliciesDocumentsPolicyIdRoute,
   ShellPoliciesRulesRuleIdRoute: ShellPoliciesRulesRuleIdRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,

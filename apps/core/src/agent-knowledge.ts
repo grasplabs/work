@@ -59,12 +59,19 @@ export class KnowledgeApi
     );
   }
 
-  /** Hands over what a read returned once the chat has recorded its sources. */
-  async #recorded<T extends { provenance: Provenance }>(result: T): Promise<T> {
+  /**
+   * Hands over what a read returned once the chat has recorded its sources
+   * and the documents it hands over (`given`), which its answers may cite.
+   */
+  async #recorded<T extends { provenance: Provenance }>(
+    result: T,
+    given: readonly string[]
+  ): Promise<T> {
     await recordSources(
       this.env,
       this.ctx.props,
-      result.provenance.collectionIds
+      result.provenance.collectionIds,
+      given
     );
     return result;
   }
@@ -99,30 +106,36 @@ export class KnowledgeApi
   }
 
   async search(query: unknown, options?: unknown): Promise<SearchResults> {
+    const found = await this.#asAgent(
+      "knowledge.search",
+      async (reader) => await search(this.env, reader, query, options)
+    );
     return await this.#recorded(
-      await this.#asAgent(
-        "knowledge.search",
-        async (reader) => await search(this.env, reader, query, options)
-      )
+      found,
+      found.hits.map(({ documentId }) => documentId)
     );
   }
 
   async read(documentId: unknown, options?: unknown): Promise<KnowledgeRead> {
-    return await this.#recorded(
-      await this.#asAgent(
-        "knowledge.read",
-        async (reader) => await read(this.env, reader, documentId, options)
-      )
+    const document = await this.#asAgent(
+      "knowledge.read",
+      async (reader) => await read(this.env, reader, documentId, options)
     );
+    return await this.#recorded(document, [document.id]);
   }
 
   async follow(documentId: unknown): Promise<FollowResult> {
-    return await this.#recorded(
-      await this.#asAgent(
-        "knowledge.follow",
-        async (reader) => await follow(this.env, reader, documentId)
-      )
+    const followed = await this.#asAgent(
+      "knowledge.follow",
+      async (reader) => await follow(this.env, reader, documentId)
     );
+    return await this.#recorded(followed, [
+      ...followed.links.flatMap(({ documentId: linked }) =>
+        linked === null ? [] : [linked]
+      ),
+      ...followed.backlinks.map(({ documentId: linking }) => linking),
+      ...followed.files.map(({ documentId: file }) => file),
+    ]);
   }
 
   /**

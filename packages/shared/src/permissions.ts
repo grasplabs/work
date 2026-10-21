@@ -256,11 +256,16 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "FILES",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
+  // Where the deployment receives mail (core's src/workflows/overview.ts).
+  "INBOUND_MAIL_DOMAIN",
   "KNOWLEDGE",
   "LOADER",
   "MEMORY_LIMITS",
   "MICROSOFT_CLIENT_ID",
   "MICROSOFT_CLIENT_SECRET",
+  // The landscape's Entra app (connect's providers.ts).
+  "MICROSOFT_LANDSCAPE_CLIENT_ID",
+  "MICROSOFT_LANDSCAPE_CLIENT_SECRET",
   "MODEL_GATEWAY",
   "MODEL_LEDGER",
   "ONBOARDING",

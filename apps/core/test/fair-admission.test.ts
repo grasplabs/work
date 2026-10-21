@@ -1214,11 +1214,18 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         try {
           run = await builder.api.workflows.start(app, "work");
           // In its second round, ten seconds long, the share comes free.
-          wakesAt = await eventually2(async () => {
-            const wakes = await loadWakesOf(run.id);
-            expect(wakes).toHaveLength(2);
-            return wakes[1] ?? 0;
-          });
+          // That round begins some five seconds in, as the first ends, but
+          // a busy runner can hold the first round's wake back: waited for
+          // up to 45 seconds, inside the step's 60 seconds queued, as the
+          // third round can only begin ten seconds after the second.
+          wakesAt = await vi.waitFor(
+            async () => {
+              const wakes = await loadWakesOf(run.id);
+              expect(wakes).toHaveLength(2);
+              return wakes[1] ?? 0;
+            },
+            { timeout: 45_000, interval: 200 }
+          );
         } finally {
           await stop();
         }
