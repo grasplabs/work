@@ -996,6 +996,36 @@ export type StepUse =
   | "decision"
   | "recipients";
 
+/** A decision's parts the SDK asks who it asks in (workflow.ts). */
+const decisionAskParts = new Set(["ask", "remind"]);
+
+/** A decision's parts the SDK runs as steps: asking, and when it asked. */
+const decisionDoParts = new Set(["ask", "remind", "asked", "reminded"]);
+
+/** A decision's parts the SDK waits for its answer in. */
+const decisionWaitParts = new Set(["answer", "answer-after-reminder"]);
+
+/**
+ * Each use, by the kind kept for a step and the decision part (`name#…`,
+ * null for none) its engine name runs.
+ */
+const runsAs: Record<
+  StepUse,
+  (kind: StepKind, part: string | null) => boolean
+> = {
+  do: (kind, part) =>
+    part === null
+      ? kind !== "wait"
+      : kind === "decision" && decisionDoParts.has(part),
+  sleep: (kind, part) => kind === "wait" && part === null,
+  waitForDecision: (kind, part) =>
+    kind === "decision" && part !== null && decisionWaitParts.has(part),
+  recipients: (kind, part) =>
+    kind === "decision" && part !== null && decisionAskParts.has(part),
+  decision: (kind, part) => kind === "decision" && part === null,
+  model: (kind, part) => kind === "ai" && part === null,
+};
+
 /**
  * Whether a step of engine name `engineStep` may be run as `use`: as the
  * kind its review keeps (`WorkflowCalls.kinds`) runs it, so a reviewed
@@ -1010,37 +1040,18 @@ export const stepRunsAs = (
   use: StepUse
 ): boolean => {
   if (calls.steps === null) {
-    return true;
+    // Held to all its calls; a model only if its code has an AI step at
+    // all (`aiStepCalls`, kept as `kinds`).
+    return use !== "model" || Object.values(calls.kinds).includes("ai");
   }
   if (engineStep === paramsStep) {
     return use === "do";
   }
   const name = outlineNameOf(engineStep);
   const kind = Object.hasOwn(calls.kinds, name) ? calls.kinds[name] : undefined;
-  const part = engineStep.includes("#");
-  switch (use) {
-    case "do": {
-      return part ? kind === "decision" : kind !== undefined && kind !== "wait";
-    }
-    case "sleep": {
-      return kind === "wait" && !part;
-    }
-    case "waitForDecision": {
-      return kind === "decision" && part;
-    }
-    case "recipients": {
-      return kind === "decision";
-    }
-    case "decision": {
-      return kind === "decision" && !part;
-    }
-    case "model": {
-      return kind === "ai" && !part;
-    }
-    default: {
-      return false;
-    }
-  }
+  const hash = engineStep.indexOf("#");
+  const part = hash === -1 ? null : engineStep.slice(hash + 1);
+  return kind !== undefined && runsAs[use](kind, part);
 };
 
 /**

@@ -213,6 +213,16 @@ const hit = { contractId: "counter.hit", kind: "action" } as const;
 const ranOne = async (): Promise<Settled<unknown>> =>
   await Promise.resolve({ ok: true, value: 1 });
 
+/** Asks a decision's recipients from inside a step. */
+const recipients = async (attempt: AttemptHost) =>
+  await attempt.decisionRecipients(crypto.randomUUID(), false);
+
+/** A refusal inside a step that caught it and returned: the step failed. */
+const failedStep = (refused: ReturnType<typeof tamperedWith>) => ({
+  ...refused,
+  step: "workflow.step_not_reviewed",
+});
+
 /** What a step run as another kind than its review keeps leaves behind. */
 const tamperedWith = (step: string, call: string | null = null) => ({
   code: "workflow.step_not_reviewed",
@@ -992,15 +1002,21 @@ queueMicrotask(() => {
         attempt: AttemptHost,
         userId: string
       ) => Promise<Settled<unknown>>
-    ) =>
-      await refusedAs(async (host, userId) => {
-        let within: Settled<unknown> = { ok: true, value: null };
-        await host.do(step, {}, async (attempt) => {
-          within = await inside(attempt, userId);
-          return { ok: true, value: null };
-        });
-        return within;
+    ) => {
+      const { host, runId, tampered, userId } = await hostHeldTo(calls);
+      let within: Settled<unknown> = { ok: true, value: null };
+      // The step catches the refusal and returns: it fails all the same.
+      const done = await host.do(step, {}, async (attempt) => {
+        within = await inside(attempt, userId);
+        return { ok: true, value: null };
       });
+      return {
+        code: codeOf(within),
+        step: codeOf(done),
+        tampered,
+        audited: await refusals(runId),
+      };
+    };
     const refused = {
       // A wait's name run as code.
       waitAsCode: await refusedAs(
@@ -1019,6 +1035,23 @@ queueMicrotask(() => {
       codeAsDecisionPart: await refusedAs(
         async (host) => await host.do("tidy#ask", {}, ranOne)
       ),
+      // A decision's parts only as the SDK runs each.
+      unknownPart: await refusedAs(
+        async (host) => await host.do("ask#bogus", {}, ranOne)
+      ),
+      answerAsCode: await refusedAs(
+        async (host) => await host.do("ask#answer", {}, ranOne)
+      ),
+      askedAsWait: await refusedAs(
+        async (host) =>
+          await host.waitForDecision("ask#asked", {
+            decision: crypto.randomUUID(),
+            timeout: 1000,
+            last: true,
+          })
+      ),
+      codeAsksPeople: await inStep("tidy", recipients),
+      askedAsksPeople: await inStep("ask#asked", recipients),
       // Code asking a model, or opening a decision.
       codeAsksModel: await inStep(
         "tidy",
@@ -1056,10 +1089,78 @@ queueMicrotask(() => {
         codeAsWait: tamperedWith("tidy"),
         codeAsDecisionWait: tamperedWith("tidy#answer"),
         codeAsDecisionPart: tamperedWith("tidy#ask"),
-        codeAsksModel: tamperedWith("tidy", "model"),
-        codeOpensDecision: tamperedWith("tidy", "decision"),
+        unknownPart: tamperedWith("ask#bogus"),
+        answerAsCode: tamperedWith("ask#answer"),
+        askedAsWait: tamperedWith("ask#asked"),
+        codeAsksPeople: failedStep(tamperedWith("tidy", "decision")),
+        askedAsksPeople: failedStep(tamperedWith("ask#asked", "decision")),
+        codeAsksModel: failedStep(tamperedWith("tidy", "model")),
+        codeOpensDecision: failedStep(tamperedWith("tidy", "decision")),
       },
       asKind: { ran: "ok", part: "ok", tampered: [] },
+    });
+  });
+
+  it("let a workflow whose steps can't be read ask a model only if its code has an AI step", async () => {
+    const asked = async (kinds: WorkflowCalls["kinds"]) => {
+      const { host, tampered } = await hostHeldTo({
+        steps: null,
+        kinds,
+        all: [],
+      });
+      let model: Settled<unknown> = { ok: true, value: null };
+      await host.do("tidy", {}, async (attempt) => {
+        model = await attempt.callModel({
+          step: "tidy",
+          model: "default",
+          instructions: "Summarise the invoice",
+          input: "Invoice INV-7",
+          outputSchema: { type: "string" },
+        });
+        return { ok: true, value: null };
+      });
+      return {
+        refused: codeOf(model) === "workflow.step_not_reviewed",
+        tampered,
+      };
+    };
+
+    expect({
+      none: await asked({}),
+      // Past the kind: refused later, by this test's host, for another reason.
+      some: await asked({ $ai: "ai" }),
+    }).toStrictEqual({
+      none: { refused: true, tampered: ["workflow.step_not_reviewed"] },
+      some: { refused: false, tampered: [] },
+    });
+  });
+
+  it("refuse, as tampering and audited, every step of a version kept without kinds", async () => {
+    const admin = await personApi("admin");
+    const files = workflowFiles(
+      "tidy",
+      `  return await step.do("tidy", { description: "Tidy" }, async () => "tidied");`,
+      { tidy: "tidied" }
+    );
+    const app = await appWith(admin, files);
+    // As a row kept before kinds were.
+    await env.DB.prepare(
+      "UPDATE app_versions SET workflow_calls = ? WHERE app_id = ? AND version = 1"
+    )
+      .bind(JSON.stringify({ tidy: { steps: { tidy: [] }, all: [] } }), app)
+      .run();
+
+    const run = await admin.api.workflows.start(app, "tidy");
+    await finished(run.id);
+
+    expect({
+      run: await outcomeOf(admin, run.id),
+      audited: await refusals(run.id),
+    }).toMatchObject({
+      run: { status: "failed", code: "workflow.step_not_reviewed" },
+      audited: [
+        { step: "tidy", call: null, errorCode: "workflow.step_not_reviewed" },
+      ],
     });
   });
 
@@ -1072,7 +1173,7 @@ queueMicrotask(() => {
       dynamic: { ask: ["from"] },
     });
     let opened: Settled<unknown> = { ok: true, value: null };
-    await host.do("ask", {}, async (attempt) => {
+    const done = await host.do("ask", {}, async (attempt) => {
       opened = await attempt.openDecision({
         step: "sign-off",
         from: `person:${userId}`,
@@ -1084,11 +1185,13 @@ queueMicrotask(() => {
 
     expect({
       opened: codeOf(opened),
-      // Caught or not, it ends the run (`#refuseTampering`).
+      // Caught and returned from, the step still fails.
+      done: codeOf(done),
       tampered,
       audited: await refusals(runId),
     }).toStrictEqual({
       opened: "workflow.invalid",
+      done: "workflow.invalid",
       tampered: ["workflow.invalid"],
       audited: [
         { step: "ask", call: "decision", errorCode: "workflow.invalid" },

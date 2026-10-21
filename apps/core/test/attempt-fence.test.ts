@@ -203,12 +203,25 @@ const actionsOf = async (run: string): Promise<string[]> => {
  * when absent), with the run's host as `host` makes it from the run's
  * collection bindings; what it answered, and the run's ID.
  */
+type InStep = (
+  attempt: AttemptHost,
+  arm: () => void
+) => Promise<Settled<unknown>>;
+
+/**
+ * A call made in `tidy`'s attempt, or in the attempt of a later step
+ * `next.step`, as a decision's `tidy#ask` asks after `tidy` opened it.
+ */
+type CalledIn =
+  | InStep
+  | { first: InStep; next: { step: string; call: InStep } };
+
 const cancelledAt = async (
   app: string,
   userId: string,
   calls: WorkflowCalls,
   stage: number | undefined,
-  call: (attempt: AttemptHost, arm: () => void) => Promise<Settled<unknown>>,
+  called: CalledIn,
   collections?: (
     bindings: Record<string, Fetcher<CollectionBinding>>,
     cancel: () => Promise<void>
@@ -218,13 +231,25 @@ const cancelledAt = async (
   const run = await runOf(app, userId, calls, stage, leaseKept);
   let answered: Settled<unknown> = { ok: true, value: null };
   let atReturn = 0;
-  await run
-    .host(collections?.(run.bindings, run.cancel) ?? run.bindings)
-    .do("tidy", { description: "Tidy" }, async (attempt) => {
-      answered = await call(attempt, run.arm);
-      atReturn = run.stages();
+  const host = run.host(
+    collections?.(run.bindings, run.cancel) ?? run.bindings
+  );
+  let step = "tidy";
+  let call: InStep;
+  if (typeof called === "function") {
+    call = called;
+  } else {
+    await host.do("tidy", { description: "Tidy" }, async (attempt) => {
+      await called.first(attempt, run.arm);
       return { ok: true, value: null };
     });
+    ({ step, call } = called.next);
+  }
+  await host.do(step, { description: "Tidy" }, async (attempt) => {
+    answered = await call(attempt, run.arm);
+    atReturn = run.stages();
+    return { ok: true, value: null };
+  });
   await run.settled();
   return { answered, run: run.runId, stages: atReturn };
 };
@@ -276,19 +301,29 @@ describe(
         kinds: { tidy: "decision" },
         all: [],
       };
-      // Opens the decision, then asks who it asks, armed only for the asking.
-      const ask = async (attempt: AttemptHost, arm: () => void) => {
-        const opened = await attempt.openDecision({
-          step: "tidy",
-          from: `person:${admin.userId}`,
-          description: "Approve the invoice",
-          timeout: 60_000,
-        });
-        if (!opened.ok) {
+      // Opens the decision, then asks who it asks in its `#ask` part, as
+      // the SDK does, armed only for the asking.
+      let decision = "";
+      const ask: CalledIn = {
+        first: async (attempt) => {
+          const opened = await attempt.openDecision({
+            step: "tidy",
+            from: `person:${admin.userId}`,
+            description: "Approve the invoice",
+            timeout: 60_000,
+          });
+          if (opened.ok) {
+            ({ decision } = opened.value);
+          }
           return opened;
-        }
-        arm();
-        return await attempt.decisionRecipients(opened.value.decision, false);
+        },
+        next: {
+          step: "tidy#ask",
+          call: async (attempt, arm) => {
+            arm();
+            return await attempt.decisionRecipients(decision, false);
+          },
+        },
       };
       const uncancelled = await cancelledAt(
         app,

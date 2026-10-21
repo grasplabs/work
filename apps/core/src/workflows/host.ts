@@ -2190,7 +2190,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "model");
       requireUnrefused(attempt);
-      await this.#requireKind(attempt.step, "model", "model");
+      await this.#requireKindIn(attempt, "model", "model");
       await this.#requirePerson();
       const { binding, instructions, input, outputSchema } = checked(
         modelRequestSchema,
@@ -2448,6 +2448,36 @@ export class RunHost extends RpcTarget {
       error.message = `Step "${step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
       await this.#refuseTampering(error, { step, call });
     }
+  }
+
+  /**
+   * `#requireKind` for a call inside `attempt`: refused, the attempt (and
+   * the one running now) is failed too (`StepAttempt.refused`), as a call
+   * its review doesn't show is (`#requireReviewed`), so a step that
+   * catches the refusal and returns still fails, never completes.
+   */
+  async #requireKindIn(
+    attempt: StepAttempt,
+    use: StepUse,
+    call: string
+  ): Promise<void> {
+    if (!stepRunsAs(this.#run.calls, attempt.step, use)) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${attempt.step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
+      await this.#refuseIn(attempt, error, call);
+    }
+  }
+
+  /** Fails `attempt` (and the one running now) with `error`, as tampering. */
+  async #refuseIn(
+    attempt: StepAttempt,
+    error: Error,
+    call: string
+  ): Promise<never> {
+    const running = this.#live.at(-1) ?? attempt;
+    running.refused = error;
+    attempt.refused = error;
+    return await this.#refuseTampering(error, { step: attempt.step, call });
   }
 
   /**
@@ -2744,7 +2774,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
-      await this.#requireKind(attempt.step, "decision", "decision");
+      await this.#requireKindIn(attempt, "decision", "decision");
       const { step, from, description, timeout } = checked(
         decisionSchema,
         request
@@ -2755,10 +2785,7 @@ export class RunHost extends RpcTarget {
       if (step !== attempt.step) {
         const error = workflowErrors.create("workflow.invalid");
         error.message = `A decision opens only in the step that asks it: step "${attempt.step}" can't open one for "${step}".`;
-        await this.#refuseTampering(error, {
-          step: attempt.step,
-          call: "decision",
-        });
+        await this.#refuseIn(attempt, error, "decision");
       }
       return await openDecision(this.#env, this.#run, {
         step,
@@ -2785,7 +2812,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
-      await this.#requireKind(attempt.step, "recipients", "decision");
+      await this.#requireKindIn(attempt, "recipients", "decision");
       return await decisionRecipients(
         this.#env,
         this.#run,
