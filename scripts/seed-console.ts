@@ -106,16 +106,18 @@ const row = (values: (string | number | null)[]): string =>
     .join(", ")})`;
 
 const ids = companies.map(({ id }) => sqlString(id)).join(", ");
+// Only the deploys the seed wrote: anything else a local console deployed
+// for these companies, and the rollouts that name it, stay.
+const deployIds = companies
+  .map(({ id }) => sqlString(`seed-deploy-${id}`))
+  .join(", ");
 
 const statements = [
   // What the last run wrote, children first.
   `DELETE FROM audit_events WHERE id LIKE 'seed-%'`,
   `DELETE FROM rollout_targets WHERE rollout_id = ${sqlString(rolloutId)}`,
   `DELETE FROM rollouts WHERE id = ${sqlString(rolloutId)}`,
-  `DELETE FROM client_deploys WHERE client_id IN (${ids})`,
-  // What the admin wrote of the companies meanwhile: when it read each.
-  `DELETE FROM client_admin_reads WHERE client_id IN (${ids})`,
-  `DELETE FROM settings WHERE client_id IN (${ids})`,
+  `DELETE FROM client_deploys WHERE id IN (${deployIds})`,
   `DELETE FROM client_workers WHERE client_id IN (${ids})`,
   // The companies and releases in place, as anything else a local console
   // made of them (another rollout's targets, say) may name them.
