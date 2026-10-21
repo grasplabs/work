@@ -166,6 +166,8 @@ export const runFileErrors = defineErrorFamily({
   "file.run_full": `A run keeps at most ${runFileLimits.runFiles} files and ${runFileLimits.runBytes / mib} MB of them.`,
   "file.writes_open": `A run writes at most ${runFileLimits.openWrites} files at once: finish one first.`,
   "file.workflow_quota": `This workflow's runs keep at most ${runFileLimits.workflowBytes / gib} GB of files: older runs' files go with their details.`,
+  "file.run_type_unsupported":
+    "A run's file is a PNG, JPEG, GIF or WebP image, a PDF, a Word or Excel document, or plain text, CSV, Markdown or JSON.",
   "file.not_writable":
     "That file isn't being written by this task: only the task that started it writes it, until it is finished.",
   "file.not_finished": "That file isn't finished yet.",
