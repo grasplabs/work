@@ -7,7 +7,7 @@ import { setCurrentVersion } from "../src/apps.ts";
 import { setParam } from "../src/workflows/params.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { startDueSchedules } from "../src/workflows/triggers.ts";
-import { release } from "./apps.ts";
+import { racingDb as racingAppsDb, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -125,6 +125,17 @@ const answerLost = (writes: RegExp): D1Database => {
     withSession: (constraint) => real.withSession(constraint),
   };
 };
+
+/**
+ * Core's database, with `first` run just before the batch that makes a
+ * version current lands, and before no other: the candidate's own
+ * batches before it (app-candidates.ts) aren't what these races are about.
+ */
+const racingBatch = (first: (db: D1Database) => Promise<unknown>) =>
+  racingAppsDb(
+    async () => await first(env.DB),
+    /update "apps" set "current_version"/iu
+  );
 
 const currentVersionOf = async (app: string): Promise<unknown> =>
   await env.DB.prepare("SELECT current_version FROM apps WHERE id = ?")
@@ -565,7 +576,7 @@ describe("activations racing", () => {
     const winner = crypto.randomUUID();
     // The other activation lands just before this one's batch: after this
     // one read which version was current and worked out its schedules.
-    const racing = racingDb(
+    const racing = racingBatch(
       async (db) =>
         await db.batch([
           db
@@ -635,7 +646,7 @@ describe("activations racing", () => {
     });
 
     // Set just before the activation's batch: after it read the value.
-    const racing = racingDb(
+    const racing = racingBatch(
       async (db) =>
         await db
           .prepare(

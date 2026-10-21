@@ -188,6 +188,12 @@ interface SealRequest {
   readonly store?: StoreId;
   /** Who seals it: they must manage `store`, if one is given. */
   readonly by: Acting;
+  /**
+   * Called once its code is inspected and checked, before it is built
+   * and stored: a candidate's move from checking to building
+   * (app-candidates.ts). Not called for a version sealed already.
+   */
+  readonly building?: () => Promise<void>;
 }
 
 /** A release as the host runs it: verified, every hash checked. */
@@ -1389,6 +1395,7 @@ export const sealRelease = async (
   const built = await inspectForSeal(env, { app, version }, files);
   const bound = await boundStore(env, request, built.manifest, built.schema);
   const store = bound?.binding ?? null;
+  await request.building?.();
   const { artifacts, releaseManifest, text, hash } = await packaged(
     env,
     { app, version },
