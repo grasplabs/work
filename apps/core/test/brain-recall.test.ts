@@ -190,7 +190,7 @@ describe("the Brain's recall", setUpTime, () => {
     });
   });
 
-  it("answers an agent only from what it was granted that its person may read, and stops at revocation", async () => {
+  it("answers an agent only under its brain grant, only from the collections it was granted, and stops when either is revoked", async () => {
     const admin = await personOf("admin");
     const agent = newAgent();
     const word = rareWord();
@@ -204,7 +204,7 @@ describe("the Brain's recall", setUpTime, () => {
       "everyone",
       `# Ungranted\n${word} lives here too.`
     );
-    const grant = await requestGranted(
+    const collectionGrant = await requestGranted(
       idp,
       admin,
       readCollection(agent, granted.collectionId)
@@ -217,6 +217,18 @@ describe("the Brain's recall", setUpTime, () => {
     if (!stub) {
       throw new Error("No HANDBOOK binding");
     }
+    // A collection grant alone gives no recall: Apps and agents start
+    // without the Brain.
+    const withoutBrain = await Promise.all([
+      outcome(tools.recall({ query: word })),
+      outcome(stub.recall({ query: word })),
+    ]);
+    const brainGrant = await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
     const before = cited(await tools.recall({ query: word })).sources;
     const throughStub = cited(await stub.recall({ query: word })).sources;
     const widened = await Promise.all([
@@ -233,28 +245,39 @@ describe("the Brain's recall", setUpTime, () => {
         })
       ),
     ]);
-    await admin.api.permissions.revoke(grant);
-    const afterTools = cited(await tools.recall({ query: word })).sources;
-    const afterStub = await outcome(stub.recall({ query: word }));
-    const only = (id: string) => ({
+    await admin.api.permissions.revoke(collectionGrant);
+    const afterCollection = [
+      cited(await tools.recall({ query: word })).sources,
+      await outcome(stub.recall({ query: word })),
+    ];
+    await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, granted.collectionId)
+    );
+    await admin.api.permissions.revoke(brainGrant);
+    const afterBrain = await outcome(tools.recall({ query: word }));
+    const only = {
       kind: "document",
-      documentId: id,
+      documentId: granted.documentId,
       collectionId: granted.collectionId,
       version: 1,
       section: 0,
-    });
+    };
     expect({
+      withoutBrain,
       before,
       throughStub,
       widened,
-      afterTools,
-      afterStub,
+      afterCollection,
+      afterBrain,
     }).toStrictEqual({
-      before: [only(granted.documentId)],
-      throughStub: [only(granted.documentId)],
+      withoutBrain: ["brain.denied", "brain.denied"],
+      before: [only],
+      throughStub: [only],
       widened: ["brain.not_found", "brain.not_found"],
-      afterTools: [],
-      afterStub: "brain.denied",
+      afterCollection: [[], "brain.denied"],
+      afterBrain: "brain.denied",
     });
   });
 

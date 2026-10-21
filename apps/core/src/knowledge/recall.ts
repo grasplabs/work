@@ -216,6 +216,10 @@ export const recall = async (
       recallInputSchema,
       input
     );
+    // An App, run or agent recalls only under its `brain` grant, and only
+    // from the collections it was granted (the design: a binding can't
+    // search the whole company because its name is "Brain").
+    await store.requireBrainGrant(reader);
     const limits = clampBudget(budget);
     const named = filters?.collectionIds;
     if (only !== undefined && named?.some((id) => id !== only) === true) {

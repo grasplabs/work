@@ -1,7 +1,9 @@
+import { brainErrors } from "@grasp-os/shared/brain-api";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import type { Provenance } from "@grasp-os/shared/knowledge";
 import { drizzle } from "drizzle-orm/d1";
 
+import { grantedPermissions } from "../permissions.ts";
 import type { Reader } from "./access.ts";
 import { collectionsAllowed } from "./access.ts";
 import { readableCollection } from "./collections.ts";
@@ -26,6 +28,12 @@ export interface EvidenceQuery {
 /** The Brain's store, as recall reads it. */
 export interface BrainStore {
   /**
+   * Refuses, as `brain.denied`, an App, run or agent without an active
+   * `brain` grant, read now: a person needs none. The grant lets it recall;
+   * what it recalls from is still only the collections it was granted.
+   */
+  requireBrainGrant: (reader: Reader) => Promise<void>;
+  /**
    * Refuses, as `knowledge.not_found`, unless `reader` may read every one
    * of `collectionIds`: the same answer whether one is missing or hidden.
    * Reads nothing of what they hold.
@@ -49,6 +57,19 @@ export interface BrainStore {
 
 /** The Brain's store over Knowledge's D1 database. */
 export const d1BrainStore = (env: Env): BrainStore => ({
+  requireBrainGrant: async (reader) => {
+    if (reader.type === "person") {
+      return;
+    }
+    const granted = await grantedPermissions(env, reader.authority);
+    const allowed = granted.some(
+      ({ object, actions }) =>
+        object.type === "platform" && actions.includes("brain")
+    );
+    if (!allowed) {
+      throw brainErrors.create("brain.denied");
+    }
+  },
   requireReadable: async (reader, collectionIds) => {
     const db = drizzle(env.KNOWLEDGE);
     const { condition } = await collectionsAllowed(env, db, reader);
