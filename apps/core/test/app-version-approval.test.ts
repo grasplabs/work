@@ -6,13 +6,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { setCurrentVersion } from "../src/apps.ts";
-import {
-  grantReviewed,
-  racingDb,
-  release,
-  reviewedOf,
-  serverBuilt,
-} from "./apps.ts";
+import { grantReviewed, racingDb, release, reviewedOf } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -38,47 +32,9 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-/** Each stub call's outcome: `{ ok }` with its answer, or `{ error }` with its code. */
-const serverCode = `import { DurableObject } from "cloudflare:workers";
-
-type Caller = { userId: string; token: string };
-type Stub = Record<string, (caller: Caller, ...args: unknown[]) => Promise<unknown>>;
-
-const outcome = async (run: () => Promise<unknown>): Promise<unknown> => {
-  try {
-    return { ok: await run() };
-  } catch (error) {
-    return { error: (error as { code?: string }).code ?? "failed" };
-  }
-};
-
-export class App extends DurableObject {
-  stub(binding: string): Stub {
-    return (this.env as Record<string, Stub>)[binding] ?? {};
-  }
-
-  async list(caller: Caller, binding: string): Promise<unknown> {
-    return await outcome(async () => {
-      const page = (await this.stub(binding).listDocuments(caller)) as { documents: unknown[] };
-      return page.documents.length;
-    });
-  }
-
-  async guests(caller: Caller, binding: string): Promise<unknown> {
-    return await outcome(async () => ((await this.stub(binding).list(caller)) as unknown[]).length);
-  }
-
-  async write(caller: Caller, binding: string, method: string, input: unknown): Promise<unknown> {
-    return await outcome(async () => await this.stub(binding)[method]?.(caller, input));
-  }
-
-  async read(caller: Caller, binding: string, id: string): Promise<unknown> {
-    return await outcome(async () => await this.stub(binding).getDocument(caller, id));
-  }
-
-  bindings(): string[] {
-    return Object.keys(this.env as object).toSorted();
-  }
+/** The App's one screen: what a version changes to differ from the last. */
+const deskScreen = `export default function Desk() {
+  return <main>Desk</main>;
 }
 `;
 
@@ -116,16 +72,13 @@ const mailFor = (app: AppId, binding: string): PermissionRequest => ({
 });
 
 /**
- * An App `builder` built and released, which `admin` granted guests, and
+ * An App `builder` released, which `admin` granted guests, and
  * the collection to read.
  */
 const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name: `Map ${unique()}` });
   const app = appIdSchema.parse(id);
-  await serverBuilt(
-    id,
-    await release(builder, id, { "app/server.ts": serverCode })
-  );
+  await release(builder, id, { "screens/desk.tsx": deskScreen });
   for (const request of [guestsFor(app), collectionFor(app)]) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
     const { id: permission } = await builder.api.permissions.request(request);
@@ -135,16 +88,15 @@ const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   return app;
 };
 
-/** `by` releases other server code for `app`, built ahead. */
+/** `by` releases another version of `app`. */
 const changedBy = async (
   by: Pick<Person, "api">,
   app: AppId,
   change: string
 ): Promise<void> => {
-  await serverBuilt(
-    app,
-    await release(by, app, { "app/server.ts": `${serverCode}\n// ${change}\n` })
-  );
+  await release(by, app, {
+    "screens/desk.tsx": `${deskScreen}\n// ${change}\n`,
+  });
 };
 
 /** The detail of each `action` event in `events`, by its target's ID. */
@@ -316,7 +268,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "app/server.ts": `${serverCode}\n// Asks for more.\n`,
+        "screens/desk.tsx": `${deskScreen}\n// Asks for more.\n`,
       },
       "More"
     );
@@ -407,7 +359,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const source = appIdSchema.parse(id);
     const { version } = await builder.api.apps.files.commit(
       source,
-      { "app/server.ts": serverCode },
+      { "screens/desk.tsx": deskScreen },
       "Never run"
     );
     await builder.api.permissions.request(guestsFor(source));
@@ -454,7 +406,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "app/server.ts": `${serverCode}\n// Reviewed.\n`,
+        "screens/desk.tsx": `${deskScreen}\n// Reviewed.\n`,
       },
       "Reviewed"
     );
@@ -494,7 +446,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "app/server.ts": `${serverCode}\n// Demoted.\n`,
+        "screens/desk.tsx": `${deskScreen}\n// Demoted.\n`,
       },
       "Demoted"
     );

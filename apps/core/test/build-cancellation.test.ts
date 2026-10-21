@@ -56,9 +56,9 @@ const watchingFiles = async (
   }
 };
 
-/** Server code no one built yet: unique, so no build of it is cached. */
-const freshServer = (): Record<string, string> => ({
-  "app/server.ts": `export const built = ${JSON.stringify(crypto.randomUUID())};\n`,
+/** A screen no one built yet: unique, so no build of it is cached. */
+const freshScreen = (): Record<string, string> => ({
+  "screens/fresh.tsx": `export default function Fresh() {\n  return <main>${crypto.randomUUID()}</main>;\n}\n`,
 });
 
 describe("a build given up on", { timeout: 60_000 }, () => {
@@ -70,7 +70,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
           {
             app: appIdSchema.parse(crypto.randomUUID()),
             version: 0,
-            files: freshServer(),
+            files: freshScreen(),
             bindings: {},
           },
           lost()

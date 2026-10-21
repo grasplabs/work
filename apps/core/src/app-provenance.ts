@@ -1,7 +1,7 @@
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -17,11 +17,9 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // anyone who couldn't read that where it comes from.
 //
 // What an App may have read: every connection it was ever granted, and
-// every collection it was ever granted to read; and, through calls between
-// Apps, what the Apps it was ever granted to call may have read (their
-// answers carry it), and what the Apps ever granted to write into it may
-// have read (their input carries it), whatever the depth
-// (`reachedThroughCalls`). Once granted counts for
+// every collection it was ever granted to read. What reaches it through
+// calls between Apps (app resources, resource-apps.ts) and store grants
+// isn't followed yet: GRA-954. Once granted counts for
 // good, revoked or not: the App may still hold what it read. Who may read
 // each: a personal connection (such as a mailbox) only its owner; a shared
 // connection everyone in the organization, who may all use it; a
@@ -107,97 +105,16 @@ const accessOf = async (
 };
 
 /**
- * The Apps whose data each of `apps` may hold through v1 calls between
- * Apps by their exports, itself included, following every permission on
- * another App's exports ever granted, as sources are: an App may hold what the
- * Apps it calls answered, so what they may have read; and what the Apps
- * that may write into it (any permission beyond `read`) sent it, so what
- * they may have read. Both on, whatever the depth. A few queries a level
- * of the graph, both directions at once; the permissions of an App
- * by their subject's index, and those on it by their object's.
- */
-const reachedThroughCalls = async (
-  env: Env,
-  apps: readonly AppId[]
-): Promise<Map<AppId, Set<AppId>>> => {
-  const db = drizzle(env.DB);
-  const holds = new Map<AppId, Set<AppId>>();
-  const edge = (from: AppId, to: AppId): void => {
-    holds.set(from, (holds.get(from) ?? new Set()).add(to));
-  };
-  const explored = new Set<AppId>();
-  let frontier = [...new Set(apps)];
-  const everGranted = and(
-    eq(permissions.subjectType, "app"),
-    eq(permissions.objectType, "app"),
-    isNotNull(permissions.grantedAt)
-  );
-  while (frontier.length > 0) {
-    for (const app of frontier) {
-      explored.add(app);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one level at a time
-    const [called, writers] = await Promise.all([
-      db
-        .select({ from: permissions.subjectId, to: permissions.objectId })
-        .from(permissions)
-        .where(and(everGranted, inList(permissions.subjectId, frontier))),
-      db
-        .select({ from: permissions.objectId, to: permissions.subjectId })
-        .from(permissions)
-        .where(
-          and(
-            everGranted,
-            inList(permissions.objectId, frontier),
-            // Anything beyond reading, as permissions.ts's changesThingsSql.
-            sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value <> 'read')`
-          )
-        ),
-    ]);
-    const next = new Set<AppId>();
-    for (const { from, to } of [...called, ...writers]) {
-      const [holder, held] = [appIdSchema.parse(from), appIdSchema.parse(to)];
-      edge(holder, held);
-      if (!explored.has(held)) {
-        next.add(held);
-      }
-    }
-    frontier = [...next];
-  }
-  return new Map(
-    apps.map((app) => {
-      const reached = new Set<AppId>([app]);
-      const queue = [app];
-      for (let at = queue.shift(); at !== undefined; at = queue.shift()) {
-        for (const held of holds.get(at) ?? []) {
-          if (!reached.has(held)) {
-            reached.add(held);
-            queue.push(held);
-          }
-        }
-      }
-      return [app, reached];
-    })
-  );
-};
-
-/**
- * The sources each of the Apps `apps` may have read, as they are now, and
- * those of the Apps whose data they may hold through calls between Apps
- * (`reachedThroughCalls`), in a few queries whatever their number: those
- * that follow the calls, one for all their permissions, one series of
- * pages to connect for all their connections, and one Knowledge batch for
- * all their collections.
+ * The sources each of the Apps `apps` may have read, as they are now, in
+ * a few queries whatever their number: one for all their permissions, one
+ * series of pages to connect for all their connections, and one Knowledge
+ * batch for all their collections.
  */
 export const sourcesOfApps = async (
   env: Env,
   apps: readonly AppId[]
 ): Promise<Map<AppId, AppSources>> => {
-  const reach =
-    apps.length === 0
-      ? new Map<AppId, Set<AppId>>()
-      : await reachedThroughCalls(env, apps);
-  const all = [...new Set([...reach.values()].flatMap((of) => [...of]))];
+  const all = [...new Set(apps)];
   const rows =
     all.length === 0
       ? []
@@ -232,20 +149,13 @@ export const sourcesOfApps = async (
     }
   }
   const granted = new Map(
-    apps.map((app) => {
-      const reached = [...(reach.get(app) ?? [app])];
-      return [
-        app,
-        {
-          connected: new Set(
-            reached.flatMap((of) => [...(own.get(of)?.connected ?? [])])
-          ),
-          read: new Set(
-            reached.flatMap((of) => [...(own.get(of)?.read ?? [])])
-          ),
-        },
-      ];
-    })
+    apps.map((app) => [
+      app,
+      {
+        connected: new Set(own.get(app)?.connected),
+        read: new Set(own.get(app)?.read),
+      },
+    ])
   );
   const connectionIds = [
     ...new Set(
