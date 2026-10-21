@@ -1,4 +1,6 @@
+import { appErrors } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { screenLimits } from "@grasp-os/shared/screen-limits";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import { screenErrors } from "@grasp-os/shared/screens";
 import type { ScreenBundle, ScreenRoute } from "@grasp-os/shared/screens";
@@ -16,7 +18,9 @@ import {
   appScreen,
   callFunction,
   fileRefusal,
+  openPreview,
   previewTarget,
+  supersededRetryMs,
 } from "./screen-host.ts";
 import type { ScreenOpening } from "./screen-host.ts";
 import type { FrameLink } from "./tab-link.ts";
@@ -1072,5 +1076,56 @@ describe("a screen's navigation, as the page takes it", () => {
         () => true
       );
     expect({ stopped, went }).toStrictEqual({ stopped: true, went: [] });
+  });
+});
+
+describe("opening a preview a newer load replaced", () => {
+  /** Opens with `answers` in turn, on a clock only pauses move. */
+  const opened = async (
+    answers: readonly ("loaded" | "app.preview_superseded" | "app.no_draft")[]
+  ) => {
+    let at = 0;
+    let asked = 0;
+    const result = await outcome(
+      openPreview(
+        async () => {
+          await Promise.resolve();
+          const answer =
+            answers.at(Math.min(asked, answers.length - 1)) ?? "loaded";
+          asked += 1;
+          if (answer !== "loaded") {
+            throw appErrors.create(answer);
+          }
+          return answer;
+        },
+        async (ms) => {
+          await Promise.resolve();
+          at += ms;
+        },
+        () => at
+      )
+    );
+    return { result, asked };
+  };
+
+  it("asks again until it loads", async () => {
+    await expect(
+      opened(["app.preview_superseded", "app.preview_superseded", "loaded"])
+    ).resolves.toStrictEqual({ result: { answered: "loaded" }, asked: 3 });
+  });
+
+  it("gives up once the page's wait for a build is spent", async () => {
+    const tries = Math.ceil(screenLimits.openMs / supersededRetryMs);
+    await expect(opened(["app.preview_superseded"])).resolves.toStrictEqual({
+      result: { code: "app.preview_superseded" },
+      asked: tries,
+    });
+  });
+
+  it("asks no more after any other refusal", async () => {
+    await expect(opened(["app.no_draft", "loaded"])).resolves.toStrictEqual({
+      result: { code: "app.no_draft" },
+      asked: 1,
+    });
   });
 });

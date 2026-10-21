@@ -7,6 +7,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { callApp } from "../src/app.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
+import {
+  previewUpdateConfirmMs,
+  previewUpdateLeaseMs,
+} from "../src/preview-updates.ts";
 import { readStatistics } from "../src/statistics.ts";
 import { openTestRun } from "./agent-chat.ts";
 import {
@@ -288,6 +292,10 @@ const setUp = async () => {
   return { admin, builder, app, mail, noteId, ...draft };
 };
 
+/** A preview's outcome: `loaded`, or the code it was refused with. */
+const named = (outcome: unknown): unknown =>
+  typeof outcome === "string" ? outcome : "loaded";
+
 /** What a call answered, or the code of the error it failed with. */
 const answer = async (promise: Promise<unknown>): Promise<unknown> => {
   try {
@@ -296,6 +304,54 @@ const answer = async (promise: Promise<unknown>): Promise<unknown> => {
     return typeof error === "object" && error !== null && "code" in error
       ? error.code
       : String(error);
+  }
+};
+
+/**
+ * Runs `during` with every read of core's files held until it calls
+ * `release`: a preview's load (which reads the draft's base version) waits
+ * there for as long as the test needs. `calls` names each call to core's
+ * files made since the release, and `held` counts the reads held before
+ * it. Set back however it ends.
+ */
+const heldReadsDuring = async <T>(
+  during: (
+    letGo: () => void,
+    calls: string[],
+    held: { reads: number }
+  ) => Promise<T>
+): Promise<T> => {
+  const { FILES: files } = env;
+  const gate = Promise.withResolvers<boolean>();
+  let open = false;
+  const calls: string[] = [];
+  const held = { reads: 0 };
+  env.FILES = new Proxy(files, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof property === "string" && typeof value === "function") {
+        return async (...args: unknown[]): Promise<unknown> => {
+          if (open) {
+            calls.push(property);
+          } else if (property === "get") {
+            held.reads += 1;
+            await gate.promise;
+          }
+          return await Reflect.apply(value, target, args);
+        };
+      }
+      return value;
+    },
+  });
+  const letGo = () => {
+    open = true;
+    gate.resolve(true);
+  };
+  try {
+    return await during(letGo, calls, held);
+  } finally {
+    letGo();
+    env.FILES = files;
   }
 };
 
@@ -632,5 +688,350 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     // Each push was refused by core, as a screen's is once its person may
     // no longer use the App.
     expect(unshared).toBe("app.not_found");
+  });
+
+  it("loads one update of a preview at a time, keeping the newest waiting and refusing the one it replaces", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const { chats } = builder.api;
+    /** `count` loads at once, the first held at its read until `releaseWhen` says. */
+    const loadedAtOnce = async (
+      count: number,
+      releaseWhen: (outcomes: Promise<unknown>[]) => Promise<unknown>
+    ): Promise<unknown[]> =>
+      await heldReadsDuring(async (letGo) => {
+        const outcomes = Array.from(
+          { length: count },
+          async () => await answer(chats.preview(chatId, app))
+        );
+        await releaseWhen(outcomes);
+        letGo();
+        const settled = await Promise.all(outcomes);
+        return settled
+          .map(named)
+          .toSorted((a, b) => String(a).localeCompare(String(b)));
+      });
+
+    expect({
+      // One loads and one waits for it: both load.
+      two: await loadedAtOnce(2, async () => {
+        await scheduler.wait(300);
+      }),
+      // The third replaces the one waiting: that refusal comes first, while
+      // the first load is still held.
+      three: await loadedAtOnce(
+        3,
+        async (outcomes) => await Promise.race(outcomes)
+      ),
+    }).toStrictEqual({
+      two: ["loaded", "loaded"],
+      three: ["app.preview_superseded", "loaded", "loaded"],
+    });
+  });
+
+  it("frees the place of an update that never settles once its lease is over, waking the one waiting by itself", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const started = Date.parse("2026-10-20T09:00:00Z");
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(started);
+        try {
+          // Taken, and never settled: its isolate went away mid-load.
+          await take();
+          vi.setSystemTime(started + previewUpdateLeaseMs);
+          let next = "waiting";
+          const waiting = take().then((token) => {
+            next = token === null ? "superseded" : "loading";
+            return token;
+          });
+          await scheduler.wait(50);
+          const atLease = next;
+          // A millisecond past, nothing else happens: its own wait wakes it.
+          vi.setSystemTime(started + previewUpdateLeaseMs + 1);
+          await waiting;
+          return { atLease, past: next };
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
+
+    // Exactly at its lease the stuck update still holds its place.
+    expect(outcome).toStrictEqual({ atLease: "waiting", past: "loading" });
+  });
+
+  it("refuses the waiting update a newer one replaces, and loads the newer one next", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        const settle = (token: string | null) => {
+          instance.settlePreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            token ?? ""
+          );
+        };
+        const order: string[] = [];
+        const loading = await take();
+        const older = take().then((token) => {
+          order.push(token === null ? "older superseded" : "older loads");
+          return token;
+        });
+        const newer = take().then((token) => {
+          order.push(token === null ? "newer superseded" : "newer loads");
+          return token;
+        });
+        await older;
+        order.push("first settles");
+        settle(loading);
+        settle(await newer);
+        // Settled, the session is free again: the next loads at once.
+        const free = await take();
+        settle(free);
+        return { order, free: free !== null };
+      }
+    );
+
+    expect(outcome).toStrictEqual({
+      order: ["older superseded", "first settles", "newer loads"],
+      free: true,
+    });
+  });
+
+  it("frees the place of an update that waited and whose caller never confirms it, soon", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const started = Date.parse("2026-10-20T09:00:00Z");
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(started);
+        try {
+          const first = await take();
+          // Its caller went away while it waited: given the place, it
+          // never confirms it.
+          const abandoned = take();
+          instance.settlePreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            first ?? ""
+          );
+          await abandoned;
+          let next = "waiting";
+          const waiting = take().then((token) => {
+            next = token === null ? "superseded" : "loading";
+            return token;
+          });
+          vi.setSystemTime(started + previewUpdateConfirmMs);
+          await scheduler.wait(50);
+          const atLimit = next;
+          vi.setSystemTime(started + previewUpdateConfirmMs + 1);
+          await waiting;
+          // Its caller, slow and not gone after all, may not load now.
+          const late = instance.confirmPreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            (await abandoned) ?? ""
+          );
+          return { atLimit, past: next, late };
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
+
+    expect(outcome).toStrictEqual({
+      atLimit: "waiting",
+      past: "loading",
+      late: false,
+    });
+  });
+
+  it("keeps a confirmed update's place for its whole lease", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const started = Date.parse("2026-10-20T09:00:00Z");
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(started);
+        try {
+          const first = await take();
+          const waited = take();
+          instance.settlePreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            first ?? ""
+          );
+          const confirmed = instance.confirmPreviewUpdate(
+            chatId,
+            builder.userId,
+            app,
+            (await waited) ?? ""
+          );
+          let next = "waiting";
+          void take().then((token) => {
+            next = token === null ? "superseded" : "loading";
+            return token;
+          });
+          vi.setSystemTime(started + previewUpdateConfirmMs + 1);
+          await scheduler.wait(50);
+          return { confirmed, next };
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
+
+    expect(outcome).toStrictEqual({ confirmed: true, next: "waiting" });
+  });
+
+  it("settles nothing with a token from before the object restarted", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const before = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) =>
+        await instance.takePreviewUpdate(chatId, builder.userId, app)
+    );
+    await runInDurableObject(chatsOf(builder), (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+
+    const outcome = await runInDurableObject(
+      chatsOf(builder),
+      async (instance) => {
+        const take = async () =>
+          await instance.takePreviewUpdate(chatId, builder.userId, app);
+        const loading = await take();
+        // The load from before the restart ends late.
+        instance.settlePreviewUpdate(chatId, builder.userId, app, before ?? "");
+        let next = "waiting";
+        const waiting = take().then((token) => {
+          next = token === null ? "superseded" : "loading";
+          return token;
+        });
+        await scheduler.wait(50);
+        const afterOld = next;
+        instance.settlePreviewUpdate(
+          chatId,
+          builder.userId,
+          app,
+          loading ?? ""
+        );
+        await waiting;
+        return { afterOld, afterOwn: next };
+      }
+    );
+
+    expect(outcome).toStrictEqual({ afterOld: "waiting", afterOwn: "loading" });
+  });
+
+  it("stops a load that outlives its time before it builds, and frees its place", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const { chats } = builder.api;
+
+    env.PREVIEW_LOAD_MS = "500";
+    try {
+      const outcome = await heldReadsDuring(async (letGo, calls) => {
+        // Its read of the draft's base stalls past its time.
+        const stalled = await answer(chats.preview(chatId, app));
+        letGo();
+        // Let go, the read finishes: nothing is built or staged after it.
+        await scheduler.wait(2000);
+        return {
+          stalled,
+          after: calls.filter((method) => method !== "get"),
+        };
+      });
+      expect({
+        ...outcome,
+        next: named(await answer(chats.preview(chatId, app))),
+      }).toStrictEqual({
+        stalled: "screen.build_slow",
+        after: [],
+        next: "loaded",
+      });
+    } finally {
+      delete env.PREVIEW_LOAD_MS;
+    }
+  });
+
+  it("keeps the place of a load refused as slow until it stops", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder, "Invoice desk", released);
+    const { chatId } = await chatWithDraft(builder, app, {
+      "screens/list.tsx": screen,
+    });
+    const { chats } = builder.api;
+
+    env.PREVIEW_LOAD_MS = "500";
+    try {
+      const outcome = await heldReadsDuring(async (letGo, _calls, held) => {
+        const stalled = await answer(chats.preview(chatId, app));
+        // Refused, it still reads: the next load waits for its place,
+        // reading nothing yet.
+        const readsBefore = held.reads;
+        const next = answer(chats.preview(chatId, app));
+        await scheduler.wait(500);
+        const nextRead = held.reads > readsBefore;
+        letGo();
+        return { stalled, nextRead, next: named(await next) };
+      });
+      expect(outcome).toStrictEqual({
+        stalled: "screen.build_slow",
+        nextRead: false,
+        next: "loaded",
+      });
+    } finally {
+      delete env.PREVIEW_LOAD_MS;
+    }
   });
 });
