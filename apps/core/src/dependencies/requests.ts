@@ -90,6 +90,7 @@ import {
   lockStatements,
   unusedLockStatements,
 } from "../packages/locks.ts";
+import { osvMalwareIn } from "../packages/malware.ts";
 import { holdsApprove, holdsApproveSql } from "./approvers.ts";
 import { peerIssues } from "./peers.ts";
 import { dropPending } from "./pending.ts";
@@ -977,6 +978,39 @@ export const dependencyReview = async (
 };
 
 /**
+ * Refuses approving `found`'s graph when OSV.dev now reports a package of
+ * it as malware (GRA-913): one reported after the graph was proposed,
+ * when it was checked (`findingsOf`, packages/resolve.ts), is refused all
+ * the same, audited as at a resolve (`refuseMalware`); the request stays
+ * pending, for an admin to deny. Fails closed when OSV.dev can't be read
+ * (`package.malware_unchecked`). Asked only to approve: saying no never
+ * waits on OSV.dev.
+ */
+const refuseReportedMalware = async (
+  env: Env,
+  by: Identity,
+  found: Listed
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ snapshot: dependencyRequests.snapshot })
+    .from(dependencyRequests)
+    .where(eq(dependencyRequests.id, found.id))
+    .get();
+  if (!row) {
+    throw notFound();
+  }
+  const { graph } = snapshotSchema.parse(JSON.parse(row.snapshot));
+  const reported = await osvMalwareIn(
+    env,
+    graph.packages.map(({ name, version }) => ({ name, version }))
+  );
+  const [first, ...rest] = reported;
+  if (first !== undefined) {
+    await refuseMalware(env, by, subjectOfRow(found), [first, ...rest]);
+  }
+};
+
+/**
  * Approves or denies a pending request for `by`, once. One conditional
  * update is the decision: it lands only while the request is pending, its
  * graph is the one reviewed, the policy generation is the one reviewed,
@@ -1016,6 +1050,9 @@ export const decideDependency = async (
     : undefined;
   if (!found) {
     throw notFound();
+  }
+  if (approved) {
+    await refuseReportedMalware(env, by, found);
   }
   const status = approved ? "approved" : "denied";
   const [[decided]] = await auditedBatch(env, db, [

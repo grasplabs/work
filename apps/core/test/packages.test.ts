@@ -60,6 +60,13 @@ const advisory = (more: Record<string, unknown>) => ({
   vulnerable_versions: "<1.2.1",
   ...more,
 });
+/** How a decision went: `ok`, or the code and details it was refused with. */
+type Decided = "ok" | { code: string; details: Record<string, unknown> };
+
+/** A decision's outcome as its code, `ok` when it went through. */
+const decidedCode = (decided: Decided | undefined) =>
+  typeof decided === "object" ? decided.code : decided;
+
 /** A builder with a new App of theirs. */
 const builderWithApp = async () => {
   const builder = await personApi("builder");
@@ -672,6 +679,112 @@ describe("the platform's own packages", () => {
       proposed: "pending",
       unchecked: "package.malware_unchecked",
       pending: request.id,
+    });
+  });
+
+  it("refuses to approve a graph OSV.dev reported as malware after it was proposed, fails closed when OSV can't be read, and still lets an admin deny it", async () => {
+    const { builder, app } = await builderWithApp();
+    const admin = await personApi("admin");
+    await admin.api.dependencies.grantApprover({
+      type: "person",
+      userId: admin.userId,
+    });
+    const decide = async (
+      request: { id: string; graphHash: string },
+      approved: boolean
+    ): Promise<Decided> => {
+      const { policyGeneration } = await admin.api.dependencies.waiting();
+      try {
+        await admin.api.dependencies.decide(request.id, {
+          approved,
+          reviewed: { graphHash: request.graphHash, policyGeneration },
+        });
+        return "ok";
+      } catch (error) {
+        const { code, details } = z
+          .object({
+            code: z.string(),
+            details: z.record(z.string(), z.unknown()).optional(),
+          })
+          .parse(error);
+        return { code, details: details ?? {} };
+      }
+    };
+    // Proposed while OSV.dev knew nothing of it; reported before the
+    // admin looked.
+    const turned = named("turned");
+    const dates = named("dates");
+    await publish(
+      plain(turned, "1.0.0", { dependencies: { [dates]: "^1.0.0" } })
+    );
+    await publish(plain(dates, "1.0.0"));
+    const { request: reported } = await builder.api.dependencies.resolve(
+      intentFor(app, { [turned]: "1.0.0" })
+    );
+    await reportToOsv(dates, "1.0.0", "MAL-2026-20001");
+    let refused: Decided | undefined;
+    const events = await auditedDuring(async () => {
+      refused = await decide(reported, true);
+    });
+    const afterRefusal = await builder.api.dependencies.status({ app });
+    // OSV.dev unread at approval: never taken as no report.
+    const other = await builderWithApp();
+    const unread = named("unread");
+    await publish(plain(unread, "1.0.0"));
+    const { request: unchecked } = await other.builder.api.dependencies.resolve(
+      intentFor(other.app, { [unread]: "1.0.0" })
+    );
+    await osvAnswers(unread, 503);
+    let unreadApproval: Decided | undefined;
+    let denial: Decided | undefined;
+    try {
+      unreadApproval = await decide(unchecked, true);
+      // Saying no never needs OSV.dev.
+      denial = await decide(unchecked, false);
+    } finally {
+      await osvAnswers(unread, null);
+    }
+    // A graph nobody reported is approved as before.
+    const third = await builderWithApp();
+    const clean = named("clean");
+    await publish(plain(clean, "1.0.0"));
+    const { request: cleanRequest } =
+      await third.builder.api.dependencies.resolve(
+        intentFor(third.app, { [clean]: "1.0.0" })
+      );
+    const approved = await decide(cleanRequest, true);
+
+    expect({
+      refused,
+      audited: events
+        .filter(({ action }) => action === "dependency.malware_refused")
+        .map(({ detail }) => detail),
+      approvedEvents: events.filter(
+        ({ action }) => action === "dependency.approved"
+      ).length,
+      stillPending: afterRefusal.pending?.id,
+      unreadApproval: decidedCode(unreadApproval),
+      denial: decidedCode(denial),
+      approved: decidedCode(approved),
+    }).toStrictEqual({
+      refused: {
+        code: "dependency.malware",
+        details: { packages: [`${dates}@1.0.0 (MAL-2026-20001)`] },
+      },
+      audited: [
+        {
+          app,
+          package: dates,
+          version: "1.0.0",
+          advisory: "MAL-2026-20001",
+          found: 1,
+        },
+      ],
+      approvedEvents: 0,
+      stillPending: reported.id,
+      unreadApproval: "package.malware_unchecked",
+      denial: "ok",
+      approved: "ok",
     });
   });
 
