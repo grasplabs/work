@@ -145,6 +145,34 @@ export interface Chosen extends FlowState {
   readonly branch: number;
 }
 
+/**
+ * A `for` task: the stages before and after its loop, and its `while`,
+ * evaluated before each item. Its collection (`for.in`) and its items'
+ * keys (`metadata.grasp.key`) are the host's to evaluate, from what the
+ * build sealed of the task, once, in its enter step, which records the
+ * items: generated code never passes them.
+ */
+export interface ForPlan extends EnterPlan, LeavePlan {
+  readonly while?: Stage;
+}
+
+/**
+ * Where a scope's list (an item of a `for`) leaves the run: its output
+ * and the context after it, and whether an `end` in it ended the
+ * workflow.
+ */
+export interface ScopeEnd extends FlowState {
+  readonly end?: boolean;
+}
+
+/** A scope's list: its tasks on `flow`, the scope's own, from `state`. */
+export type ScopeBody = (flow: Flow, state: FlowState) => Promise<ScopeEnd>;
+
+/** Where a `for` task leaves the run, and whether its list ended it. */
+export interface Looped extends FlowState {
+  readonly end: boolean;
+}
+
 /** The tasks generated code runs, one after the other. */
 export interface Flow {
   /** The workflow's `input.from`, on its raw input. */
@@ -191,6 +219,20 @@ export interface Flow {
     output: FlowValue,
     plan: LeavePlan
   ) => Promise<FlowState>;
+  /**
+   * Runs `for` task `id` on `data`: its enter step records the items the
+   * host resolved; then, one item after another while its `while` holds
+   * (each check a recorded step of the item's), `body` on a flow of the
+   * item's own scope, from the task's transformed input and the context
+   * the item before left; then its leave step on the last item's output.
+   * An `end` in the list ends the loop, and says so.
+   */
+  readonly for: (
+    id: string,
+    data: TaskData,
+    plan: ForPlan,
+    body: ScopeBody
+  ) => Promise<Looped>;
   /** Durably waits `milliseconds` as task `id`, holding no isolate. */
   readonly wait: (id: string, milliseconds: number) => Promise<void>;
   /**
@@ -230,6 +272,11 @@ export interface AttemptHost {
   readonly call: (frame: CallFrame) => Promise<FlowValue>;
   /** Resolves the task's deadline, once, in ms since the epoch. */
   readonly until: (frame: CallFrame) => Promise<number>;
+  /**
+   * Resolves a `for` task's collection, once, on its transformed input:
+   * its items, which the step records.
+   */
+  readonly items: (frame: CallFrame) => Promise<FlowValue[]>;
 }
 
 /**
@@ -289,9 +336,21 @@ const requireTaskId = (id: unknown): string => {
   return id;
 };
 
-/** A step's name, as the host checks it: its kind of step, then its task. */
-const stepOf = (kind: "task" | "enter" | "leave", id: string): string =>
-  `${kind}:${requireTaskId(id)}`;
+/**
+ * A step's name, as the host checks it: its kind of step, its task, then
+ * the scope it runs in, if not the workflow's own: each `for` around it
+ * and the item of it (`<for>.<index>`), outermost first, as
+ * `@<for>.<index>/…`.
+ */
+const stepOf = (
+  kind: "task" | "enter" | "leave" | "item",
+  id: string,
+  scope: string
+): string => `${kind}:${requireTaskId(id)}${scope === "" ? "" : `@${scope}`}`;
+
+/** Scope `scope` with the item `index` of `for` task `id` inside it. */
+const itemScope = (scope: string, id: string, index: number): string =>
+  `${scope === "" ? "" : `${scope}/`}${requireTaskId(id)}.${index}`;
 
 // `Array.isArray` doesn't narrow a readonly array type.
 const isStageList = (value: readonly Stage[]): value is readonly Stage[] =>
@@ -345,6 +404,8 @@ interface StepRecord {
   readonly branch?: number;
   /** The deadline an enter step resolved, in ms since the epoch. */
   readonly until?: number;
+  /** The items a `for` task's enter step resolved. */
+  readonly items?: readonly FlowValue[];
 }
 
 const readRecord = (value: FlowValue): StepRecord => {
@@ -357,7 +418,10 @@ const readRecord = (value: FlowValue): StepRecord => {
   if (!hasOwn(value, "output")) {
     throw new TypeError("A task's step records its output");
   }
-  const { branch, until } = value;
+  const { branch, until, items } = value;
+  if (items !== undefined && !isArray(items)) {
+    throw new TypeError("A for task's enter step records its items");
+  }
   if (
     branch !== undefined &&
     (typeof branch !== "number" || !isSafeInteger(branch) || branch < 0)
@@ -376,6 +440,7 @@ const readRecord = (value: FlowValue): StepRecord => {
     ...(hasOwn(value, "context") ? { context: value.context ?? null } : {}),
     ...(branch === undefined ? {} : { branch }),
     ...(until === undefined ? {} : { until }),
+    ...(items === undefined ? {} : { items }),
   };
 };
 
@@ -443,8 +508,10 @@ const stateAfter = (data: TaskData, record: StepRecord): FlowState =>
         context: record.context === undefined ? data.context : record.context,
       };
 
-/** The flow generated code runs on, over `engine`. */
-const flowOf = (engine: OpenWorkflowEngine): Flow => {
+/** The flow generated code runs on, over `engine`, in scope `within`. */
+const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
+  const named = (kind: "task" | "enter" | "leave" | "item", id: string) =>
+    stepOf(kind, id, within);
   const flow: Flow = {
     input: async (input, from) => {
       const record = readRecord(
@@ -471,7 +538,7 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
     },
     set: async (id, data, plan) => {
       const record = readRecord(
-        await engine.do(stepOf("task", id), captured(data), async (attempt) => {
+        await engine.do(named("task", id), captured(data), async (attempt) => {
           const frame = frameOf(data.input);
           if ((await enterStages(attempt, frame, plan)) === null) {
             return { skipped: true };
@@ -488,7 +555,7 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
         throw new TypeError("A switch has its cases' conditions, in order");
       }
       const record = readRecord(
-        await engine.do(stepOf("task", id), captured(data), async (attempt) => {
+        await engine.do(named("task", id), captured(data), async (attempt) => {
           const frame = frameOf(data.input);
           await enterStages(attempt, frame, plan);
           const scope = scopeOf(attempt, frame);
@@ -518,7 +585,7 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
     },
     call: async (id, data, plan) => {
       const record = readRecord(
-        await engine.do(stepOf("task", id), captured(data), async (attempt) => {
+        await engine.do(named("task", id), captured(data), async (attempt) => {
           const frame = frameOf(data.input);
           if ((await enterStages(attempt, frame, plan)) === null) {
             return { skipped: true };
@@ -534,7 +601,7 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
     enter: async (id, data, plan) => {
       const record = readRecord(
         await engine.do(
-          stepOf("enter", id),
+          named("enter", id),
           captured(data),
           async (attempt): Promise<FlowValue> => {
             const frame = frameOf(data.input);
@@ -565,7 +632,7 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
     leave: async (id, data, entered, output, plan) => {
       const record = readRecord(
         await engine.do(
-          stepOf("leave", id),
+          named("leave", id),
           captured(data),
           async (attempt) =>
             await leaveStages(
@@ -581,8 +648,83 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
       }
       return stateAfter(data, record);
     },
+    for: async (id, data, plan, body) => {
+      const record = readRecord(
+        await engine.do(
+          named("enter", id),
+          captured(data),
+          async (attempt): Promise<FlowValue> => {
+            const frame = frameOf(data.input);
+            const entered = await enterStages(attempt, frame, plan);
+            if (entered === null) {
+              return { skipped: true };
+            }
+            return {
+              output: entered.input,
+              items: await attempt.items({ input: entered.input }),
+            };
+          }
+        )
+      );
+      if (record.skipped) {
+        return { output: data.input, context: data.context, end: false };
+      }
+      const { items } = record;
+      if (items === undefined) {
+        throw new TypeError("A for task's enter step records its items");
+      }
+      const input = record.output;
+      let state: FlowState = { output: input, context: data.context };
+      for (const index of items.keys()) {
+        const scoped = itemScope(within, id, index);
+        const itemData = { input, context: state.context };
+        if (plan.while !== undefined) {
+          const { while: condition } = plan;
+          // One item after another: each item's check, then its list.
+          // oxlint-disable-next-line no-await-in-loop -- see above
+          const recorded = await engine.do(
+            stepOf("item", id, scoped),
+            captured(itemData),
+            async (attempt) => ({
+              output: holds(await condition(scopeOf(attempt, frameOf(input)))),
+            })
+          );
+          const checked = readRecord(recorded);
+          if (checked.output !== true) {
+            break;
+          }
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one item at a time
+        const done = await body(flowOf(engine, scoped), {
+          output: input,
+          context: state.context,
+        });
+        state = { output: done.output, context: done.context };
+        if (done.end === true) {
+          return { ...state, end: true };
+        }
+      }
+      const hasLeave =
+        plan.outputAs !== undefined ||
+        plan.outputSchema === true ||
+        plan.exportAs !== undefined ||
+        plan.exportSchema === true;
+      if (!hasLeave) {
+        return { ...state, end: false };
+      }
+      return {
+        ...(await flow.leave(
+          id,
+          { input: data.input, context: state.context },
+          input,
+          state.output,
+          plan
+        )),
+        end: false,
+      };
+    },
     wait: async (id, milliseconds) => {
-      const step = stepOf("task", id);
+      const step = named("task", id);
       if (
         !isSafeInteger(milliseconds) ||
         milliseconds <= 0 ||
@@ -593,7 +735,7 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
       await engine.sleep(step, milliseconds);
     },
     sleepUntil: async (id, timestamp) => {
-      const step = stepOf("task", id);
+      const step = named("task", id);
       if (!isSafeInteger(timestamp) || timestamp < 0) {
         throw new TypeError("A deadline is a time in milliseconds");
       }
