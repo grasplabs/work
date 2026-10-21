@@ -671,9 +671,9 @@ export const requireFilesArguments = (
 };
 
 /**
- * Makes one call of a files use for `caller`'s run: `operation`, with
- * `args` checked here, as the host's own contract has them. The action
- * host has already checked the use declares the operation it needs.
+ * Makes one files call for `caller`'s run: `operation`, its `args`
+ * checked here against that operation's schema. The action host has
+ * already checked that the files use declares the operation.
  */
 export const callFiles = async (
   env: Env,
