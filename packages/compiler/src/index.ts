@@ -9,6 +9,7 @@
  * (`compilerAssets`), read when a build starts an isolate; core itself
  * imports only the version.
  */
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { isolateBase } from "@grasp-os/shared/runtime";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
@@ -175,16 +176,17 @@ export const serverSdkModules = async (assets: Fetcher): Promise<KitModules> =>
 
 /**
  * How the compiler's isolate runs: no bindings, no importable env, no
- * network (`globalOutbound: null` and no subrequests), and at most 20 s of
- * CPU per call, many times what a large App takes. `nodejs_compat` is for
- * the React Compiler, which is written for Node.
+ * network (`globalOutbound: null` and no subrequests), and at most one
+ * build task's CPU per call (spec 18.1, `compilerTaskCpuMs`: 20 s), many
+ * times what a large App takes. `nodejs_compat` is for the React
+ * Compiler, which is written for Node.
  */
 export const isolateSettings = {
   ...isolateBase,
   compatibilityFlags: [...isolateBase.compatibilityFlags, "nodejs_compat"],
   env: {},
   globalOutbound: null,
-  limits: { cpuMs: 20_000, subRequests: 0 },
+  limits: { cpuMs: platformLimits.compilerTaskCpuMs, subRequests: 0 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
 /** The compiler's isolate as a Loader takes it, its code read from the assets. */
@@ -319,13 +321,14 @@ export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
 /**
  * How the package builder's isolate runs: no bindings, no importable env,
  * no network (`globalOutbound: null` and no subrequests), no Node.js
- * compatibility, and at most 30 s of CPU per call.
+ * compatibility, and at most one build task's CPU per call (spec 18.1,
+ * `compilerTaskCpuMs`: 20 s), as the compiler's.
  */
 export const packageBuilderSettings = {
   ...isolateBase,
   env: {},
   globalOutbound: null,
-  limits: { cpuMs: 30_000, subRequests: 0 },
+  limits: { cpuMs: platformLimits.compilerTaskCpuMs, subRequests: 0 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
 /**

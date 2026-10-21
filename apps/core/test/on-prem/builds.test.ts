@@ -1,8 +1,12 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { packageLimitsOf } from "@grasp-os/shared/packages";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { packageBuilder } from "../../src/packages/builder.ts";
 import { builderOwner, platformRunner } from "../../src/platform-sandbox.ts";
+import { sandboxCpuHeader } from "../../src/sandbox-headers.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { buildOnSave } from "../../src/save-builds.ts";
@@ -65,6 +69,50 @@ const answerTime = async (): Promise<number> => {
   await response.text();
   return Date.now() - started;
 };
+
+describe("a build task's CPU on-prem", () => {
+  it("gives the compiler and the package builder each one build task's CPU, spec 18.1's 20 s, on the sandbox host", async () => {
+    const host = env.SANDBOX_HOST;
+    if (host === undefined) {
+      throw new Error("The on-prem project binds SANDBOX_HOST.");
+    }
+    // What core asks of the sandbox host for each call it starts.
+    const asked: string[] = [];
+    const recording: Fetcher = {
+      ...host,
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const cpu = new Request(input, init).headers.get(sandboxCpuHeader);
+        if (cpu !== null) {
+          asked.push(cpu);
+        }
+        return await host.fetch(input, init);
+      },
+      connect: host.connect.bind(host),
+    };
+    const watched = { ...onPrem, SANDBOX_HOST: recording };
+    const built = await buildScreens(
+      watched,
+      screen(`// fresh ${crypto.randomUUID()}`),
+      "app-test"
+    );
+    const compiled = asked.length;
+    const inspected = await packageBuilder(watched)("app:cpu-test").inspect(
+      packageLimitsOf({}),
+      []
+    );
+    expect({
+      built: built.ok,
+      inspected,
+      compiler: asked.slice(0, compiled),
+      builder: asked.slice(compiled),
+    }).toStrictEqual({
+      built: true,
+      inspected: [],
+      compiler: [String(platformLimits.compilerTaskCpuMs)],
+      builder: [String(platformLimits.compilerTaskCpuMs)],
+    });
+  });
+});
 
 describe("the App compiler on-prem", () => {
   it("builds an App's screens on the sandbox host, not in core", async () => {
