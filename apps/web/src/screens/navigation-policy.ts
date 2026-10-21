@@ -18,8 +18,10 @@ import type { ScreenTarget } from "@grasp-os/shared/screens";
 //   each start would otherwise get its own go, so a screen that navigates
 //   as it mounts could open the next start that does the same, filling the
 //   history, and send the person forward again each time they went Back.
-//   A navigation while the person acts gives the tab its go back. Beside
-//   the page, never: there only the person's act in the frame itself counts.
+//   A navigation while the person acts gives the tab its go back. Acting
+//   means in the frame that asks (screen-frame.tsx), so the screens a click
+//   opens can't each go on its activation. Beside the page, never without
+//   it: there only the person's act in the frame itself counts.
 
 /** How the page goes to a target, pushing or replacing its entry. */
 export type PageNavigate = (
@@ -31,7 +33,7 @@ export type PageNavigate = (
 export interface PageState {
   /** Where the page is, and where it is going (the same when settled). */
   location: () => { here: string; going: string };
-  /** Whether the person just acted (transient user activation). */
+  /** Whether the person just acted, in the frame that asks. */
   activated: () => boolean;
   now: () => number;
 }

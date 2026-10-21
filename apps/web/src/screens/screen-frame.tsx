@@ -206,9 +206,10 @@ const policedNavigation = (
 ): FrameNavigation => {
   // Read as each navigation is asked for. Where the page is: its history
   // entry, which differs for each, even at one address. Whether the person
-  // just acted: on the page, for a screen that is the page's; beside it,
-  // only in its own frame, so a click anywhere else on the page is never
-  // the panel's to use.
+  // just acted: in this frame, which then holds the page's focus. The
+  // browser keeps a click's activation for a few seconds, whichever frame
+  // asks, so a screen that mounted after it, never clicked, can't spend it
+  // as its own; and a click anywhere else on the page is never a panel's.
   const page: PageState = {
     location: () => ({
       here: router.state.location.state.__TSR_key ?? router.state.location.href,
@@ -217,7 +218,7 @@ const policedNavigation = (
     }),
     activated: () =>
       (navigator.userActivation?.isActive ?? false) &&
-      (!beside || document.activeElement === frame),
+      document.activeElement === frame,
     now: () => Date.now(),
   };
   const policy = navigationPolicy(

@@ -198,3 +198,34 @@ test("screens that navigate as they mount go once in the tab, so they can't fill
   await expect(takeoff.getByRole("heading", { name: "Takeoff" })).toBeVisible();
   await expect(page).toHaveURL(/\/apps\/takeoff\/full$/u);
 });
+
+test("the screens a click opens can't each go on its activation: one click leaves at most one entry of the person's and one of the screen's own", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("screenNavigation");
+  const name = `Hops ${crypto.randomUUID().slice(0, 8)}`;
+  const { core, api } = apiOf(builder);
+  let app: string;
+  try {
+    ({ id: app } = await api.apps.create({ name }));
+    await release(api, app, hoppingFiles(), name);
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(builder);
+  await page.goto(`/domains/${app}/apps/launch/full`);
+  await page
+    .frameLocator('iframe[title="launch app"]')
+    .getByRole("button", { name: "Start hopping" })
+    .click({ timeout: 20_000 });
+  // The click opens Hop 1, still within its activation as Hop 1 mounts and
+  // asks for Hop 2, which goes as the tab's one go on its own; Hop 2 may
+  // not go on, however soon after the click it asks.
+  const hop = page.frameLocator('iframe[title="hop app"]');
+  await expect(hop.getByRole("heading", { name: "Hop 2" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.waitForTimeout(3000);
+  await expect(hop.getByRole("heading", { name: "Hop 2" })).toBeVisible();
+  await expect(page).not.toHaveURL(/%5C%223%5C%22/u);
+});
