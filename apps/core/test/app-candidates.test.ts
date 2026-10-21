@@ -22,6 +22,7 @@ import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import { commitFiles, findApp, findVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
+import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, failure, person } from "./sealed-apps.ts";
 
@@ -375,6 +376,39 @@ describe(
         refused: "app.candidate_superseded",
         state: "superseded",
         report: 0,
+      });
+    });
+
+    it("stores no report for a run that lost its candidate just before verifying it", async () => {
+      const { owner, app } = await appWith(helloFiles());
+      const frozen = await freezeCandidate(env, owner, app, 1, null);
+      // Another run takes it over just before this one's move to verified.
+      const racing = racingDb(
+        async () =>
+          await env.DB.prepare(
+            "UPDATE app_candidates SET lease = 'other', lease_until = ? WHERE id = ?"
+          )
+            .bind(Date.now() + 60_000, frozen.id)
+            .run(),
+        /insert into "app_candidate_reports"/iu
+      );
+      const refused = await failure(
+        async () =>
+          await runCandidate(
+            { ...env, DB: racing },
+            owner,
+            frozen,
+            sealing(owner, app, 1)
+          )
+      );
+      expect({
+        refused,
+        state: await fieldOf(frozen.id, "state"),
+        reports: await reportCount(frozen.id),
+      }).toStrictEqual({
+        refused: "app.candidate_busy",
+        state: "verifying",
+        reports: 0,
       });
     });
 

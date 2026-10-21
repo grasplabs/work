@@ -330,16 +330,18 @@ const move = async (
   if (report === undefined) {
     [moved] = await auditedBatch(env, db, [update, recorded]);
   } else {
-    // The report first: a candidate is verified only with it stored.
+    // The report first, as a candidate is verified only with it stored,
+    // and only while the move can land: a run that lost its candidate
+    // stores no report for it.
     [, moved] = await auditedBatch(env, db, [
       db
         .insert(appCandidateReports)
-        .values({
-          candidateId: id,
-          report: report.text,
-          hash: report.hash,
-          createdAt: new Date(),
-        })
+        .select(
+          sql`SELECT ${id}, ${report.text}, ${report.hash}, ${Date.now()}
+            WHERE EXISTS (SELECT 1 FROM ${appCandidates}
+              WHERE ${appCandidates.id} = ${id} AND ${appCandidates.state} = ${from}
+                AND ${appCandidates.lease} = ${held.lease})`
+        )
         .onConflictDoNothing(),
       update,
       recorded,
