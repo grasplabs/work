@@ -1686,8 +1686,11 @@ export class Activation {
    * a wait the journal holds still waiting, or a step waiting to retry,
    * that its replay never reached. Waits and retries may wait together,
    * but one of them the definition no longer reaches isn't the run the
-   * journal recorded. Undefined when every one was reached. A compensating
-   * activation replays only to get rollbacks back: none applies.
+   * journal recorded. Undefined when every one was reached. Only the
+   * definition's own steps count: one called from inside another step's
+   * callback (`nested`) is never reached again once that step's outcome
+   * is journaled. A compensating activation replays only to get rollbacks
+   * back: none applies.
    */
   #strayedIn(sql: SqlStorage): string | undefined {
     if (this.#compensating) {
@@ -1700,7 +1703,7 @@ export class Activation {
         occurrence: number;
         state: string;
       }>(
-        "SELECT type, name, occurrence, state FROM steps WHERE state IN ('waiting', 'retrying') AND type != 'rollback'"
+        "SELECT type, name, occurrence, state FROM steps WHERE state IN ('waiting', 'retrying') AND type != 'rollback' AND nested = 0"
       )
       .toArray();
     const missed = waiting.find((step) => !this.#seen.has(seenKey(step)));

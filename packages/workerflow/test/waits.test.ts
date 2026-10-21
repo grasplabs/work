@@ -819,6 +819,20 @@ describe("waits raced or awaited together", () => {
     expect(effectsOf(id, "slow")).toHaveLength(1);
   });
 
+  it("take no step called from inside another's callback, which a replay never reaches again, for a replay that strayed", async () => {
+    const id = newId();
+    await workflow("nested-retry").create({ id });
+
+    const status = await ended("nested-retry", id);
+
+    const { steps } = await journalOf("nested-retry", id);
+    expect(status).toStrictEqual({ status: "complete", output: "done" });
+    expect(steps.find(({ name }) => name === "inner")).toMatchObject({
+      state: "retrying",
+      nested: 1,
+    });
+  });
+
   it("end the run with a WorkflowParallelWaitError for a sleep reached inside a step's callback, which would hold its step out", async () => {
     const id = newId();
     await workflow("sleep-in-step").create({ id });

@@ -1044,6 +1044,26 @@ export const definitions: Record<string, WorkflowDefinition> = {
       ]);
     },
   },
+  // A step whose callback starts another that fails and parks for a
+  // retry an hour away, then returns without it; then two sleeps, each a
+  // suspension of its own.
+  "nested-retry": {
+    run: async (_event, step) => {
+      await step.do("outer", async () => {
+        // Left to park: the outer step's outcome doesn't wait for it.
+        void step
+          .do("inner", { retries: { limit: 1, delay: "1 hour" } }, () => {
+            throw namedError("FlakyError", "attempt 1 failed");
+          })
+          .catch(() => null);
+        await scheduler.wait(100);
+        return "outer";
+      });
+      await step.sleep("first", 200);
+      await step.sleep("second", 200);
+      return "done";
+    },
+  },
   // A sleep called from inside a step's callback.
   "sleep-in-step": {
     run: async (_event, step) =>
