@@ -7,6 +7,7 @@ import {
   operationSegmentPattern,
 } from "@grasp-os/shared/operation-limits";
 
+import { assignable } from "./descriptor-assignable.ts";
 import { isMigration } from "./migration.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
 import { referenceData } from "./references.ts";
@@ -32,6 +33,7 @@ import { functionState, isServerFunction } from "./server.ts";
 import type { AnyFunction, FunctionKind, Visibility } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
+import { validateValue } from "./value-interpreter.ts";
 import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 
@@ -117,6 +119,25 @@ export interface ScreenDefinition {
   readonly input?: AnySchema;
 }
 
+/** Where the host places a surface (spec 34.1). */
+export type SurfaceKind = "sidebar" | "panel" | "settings" | "deepLink";
+
+/**
+ * One of an App's surfaces (spec 34.1): a place the host opens one of its
+ * screens, with input of its own, which must be assignable to the screen's.
+ */
+export interface SurfaceDefinition {
+  /** Its name, unique in the App: an identifier. */
+  readonly name: string;
+  readonly kind: SurfaceKind;
+  /** The name of the screen it opens. */
+  readonly screen: string;
+  /** What the host calls it, 1 to 100 characters. */
+  readonly title: string;
+  /** What it is opened with: a required `v.object`. */
+  readonly input: AnySchema;
+}
+
 /** What an App registers. */
 export interface AppDefinition<
   Tables extends Readonly<Record<string, AnyTable>>,
@@ -136,6 +157,8 @@ export interface AppDefinition<
   readonly screens: readonly ScreenDefinition[];
   /** Its people's preferences (spec 10.7.7): a strict object, when declared. */
   readonly preferences?: AnySchema;
+  /** Where the host places its screens besides their routes (spec 34.1). */
+  readonly surfaces?: readonly SurfaceDefinition[];
   /**
    * The resources it needs, each by a distinct alias: those its actions
    * use, those its screens use (files, links), and the workflows its
@@ -199,6 +222,16 @@ export interface ScreenManifest {
   readonly input: ValueDescriptor;
 }
 
+/** One surface, as data. */
+export interface SurfaceManifest {
+  readonly name: string;
+  readonly kind: SurfaceKind;
+  readonly screen: string;
+  readonly title: string;
+  /** The strict object its input is validated with. */
+  readonly input: ValueDescriptor;
+}
+
 /** A registered App, as data. */
 export interface AppManifest {
   readonly name: string;
@@ -214,6 +247,8 @@ export interface AppManifest {
   readonly workflows: Readonly<Record<string, WorkflowResource>>;
   /** Its screens, by name, in the order declared. */
   readonly screens: Readonly<Record<string, ScreenManifest>>;
+  /** Its surfaces, by name, in the order declared. */
+  readonly surfaces: Readonly<Record<string, SurfaceManifest>>;
   /** Its preferences' strict object, or null when it declares none. */
   readonly preferences: ValueDescriptor | null;
   /** Its migrations, by name, in the order declared. */
@@ -265,6 +300,7 @@ const appKeys: ReadonlySet<string> = new Set([
   "internalOperations",
   "operationAccess",
   "screens",
+  "surfaces",
   "preferences",
   "uses",
   "migrations",
@@ -564,6 +600,139 @@ const screensOf = (screens: unknown): Record<string, ScreenManifest> => {
         path: String(path),
         source: String(source),
         input: screenInput(input, parameters, name),
+      },
+    });
+  }
+  return byName;
+};
+
+/** The kinds a surface may be, until file and mention surfaces come. */
+const surfaceKinds: ReadonlySet<unknown> = new Set<SurfaceKind>([
+  "sidebar",
+  "panel",
+  "settings",
+  "deepLink",
+]);
+
+/** The kinds the host opens with nothing: their input takes `{}`. */
+const openedEmpty: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>([
+  "sidebar",
+  "settings",
+]);
+
+/** The most surfaces an App declares. */
+export const surfaceLimits = { surfaces: 32, titleLength: 100 };
+
+/** One surface's input: a required strict object its screen takes. */
+const surfaceInput = (
+  input: unknown,
+  kind: SurfaceKind,
+  screen: ScreenManifest,
+  name: string
+): ValueDescriptor => {
+  if (input === undefined) {
+    return refuse(
+      `Surface \`${name}\` declares its \`input\`, a \`v.object\`.`
+    );
+  }
+  // Throws for anything but a `v` schema.
+  const descriptor = descriptorOf(input);
+  if (
+    descriptor.kind !== "object" ||
+    descriptor.nullable ||
+    descriptor.presence !== "required"
+  ) {
+    return refuse(
+      `Surface \`${name}\`'s \`input\` is a required \`v.object\`.`
+    );
+  }
+  if (!assignable(descriptor, screen.input)) {
+    return refuse(
+      `Surface \`${name}\`'s \`input\` isn't one screen \`${screen.name}\` takes.`
+    );
+  }
+  if (openedEmpty.has(kind) && !("value" in validateValue(descriptor, {}))) {
+    return refuse(
+      `Surface \`${name}\` is a ${kind}, which opens with nothing: its \`input\` takes \`{}\`.`
+    );
+  }
+  return descriptor;
+};
+
+/** The App's surfaces, by name, in the order declared, each checked. */
+const surfacesOf = (
+  surfaces: unknown,
+  screens: Readonly<Record<string, ScreenManifest>>
+): Record<string, SurfaceManifest> => {
+  if (surfaces === undefined) {
+    return {};
+  }
+  if (!Array.isArray(surfaces) || surfaces.length > surfaceLimits.surfaces) {
+    return refuse(
+      `An App's \`surfaces\` is a list of at most ${surfaceLimits.surfaces}.`
+    );
+  }
+  const declared: readonly unknown[] = surfaces;
+  const byName: Record<string, SurfaceManifest> = {};
+  let settings = 0;
+  for (const surface of declared) {
+    if (
+      !isPlainObject(surface) ||
+      !Object.keys(surface).every((key) =>
+        ["name", "kind", "screen", "title", "input"].includes(key)
+      )
+    ) {
+      refuse("A surface is `{ name, kind, screen, title, input }`.");
+      continue;
+    }
+    const { name, kind, screen, title, input } = surface;
+    if (typeof name !== "string" || !screenNamePattern.test(name)) {
+      refuse("A surface's `name` is an identifier, at most 64 characters.");
+      continue;
+    }
+    if (Object.hasOwn(byName, name)) {
+      refuse(`Two surfaces are named \`${name}\`.`);
+    }
+    if (!surfaceKinds.has(kind)) {
+      refuse(
+        `Surface \`${name}\`'s \`kind\` is \`sidebar\`, \`panel\`, \`settings\` or \`deepLink\`.`
+      );
+      continue;
+    }
+    // SAFETY: checked against the kinds just above.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const surfaceKind = kind as SurfaceKind;
+    if (surfaceKind === "settings") {
+      settings += 1;
+      if (settings > 1) {
+        refuse("An App declares at most one `settings` surface.");
+      }
+    }
+    if (
+      typeof title !== "string" ||
+      title.trim().length === 0 ||
+      title.length > surfaceLimits.titleLength
+    ) {
+      refuse(
+        `Surface \`${name}\`'s \`title\` is 1 to ${surfaceLimits.titleLength} characters.`
+      );
+    }
+    const target =
+      typeof screen === "string" && Object.hasOwn(screens, screen)
+        ? screens[screen]
+        : undefined;
+    if (target === undefined) {
+      refuse(`Surface \`${name}\` opens a screen the App doesn't declare.`);
+      continue;
+    }
+    Object.defineProperty(byName, name, {
+      enumerable: true,
+      value: {
+        name,
+        kind: surfaceKind,
+        screen: target.name,
+        title: String(title),
+        input: surfaceInput(input, surfaceKind, target, name),
       },
     });
   }
@@ -953,6 +1122,7 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
     workflows,
   } = resourcesOf(definition.uses);
   const screens = screensOf(definition.screens);
+  const surfaces = surfacesOf(definition.surfaces, screens);
   const preferences = preferencesOf(definition.preferences);
 
   const publicFound = new Map<string, unknown>();
@@ -1024,6 +1194,7 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
       browserResources: Object.fromEntries(browser),
       workflows: Object.fromEntries(workflows),
       screens,
+      surfaces,
       preferences,
       migrations,
     }),

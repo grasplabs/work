@@ -701,14 +701,29 @@ describe("deploying safely", () => {
   it("sets a client's settings as core's vars, and refuses a setting that isn't a deployment config var", async () => {
     const { account, clientId, deployId } = await setUp();
     const now = new Date();
-    await db.insert(settings).values({
-      clientId,
-      key: "AUDIT_RETENTION_DAYS",
-      value: JSON.stringify(90),
-      updatedBy: staff.email,
-      updatedAt: now,
-    });
+    await db.insert(settings).values(
+      [
+        ["AUDIT_RETENTION_DAYS", JSON.stringify(90)],
+        // Where the client receives mail, for its email triggers' addresses.
+        ["INBOUND_MAIL_DOMAIN", JSON.stringify("mail.acme.test")],
+      ].map(([key = "", value = ""]) => ({
+        clientId,
+        key,
+        value,
+        updatedBy: staff.email,
+        updatedAt: now,
+      }))
+    );
     await runDeploy(context, deployId);
+    expect(
+      bindingsOf(liveVersionOf(account, "grasp-os-core")).get(
+        "INBOUND_MAIL_DOMAIN"
+      )
+    ).toStrictEqual({
+      type: "json",
+      name: "INBOUND_MAIL_DOMAIN",
+      json: "mail.acme.test",
+    });
     await db.insert(settings).values({
       clientId,
       key: "DB",
@@ -801,6 +816,10 @@ describe("deploying safely", () => {
       ["AUDIT_ARCHIVE_RETENTION_DAYS", "30"],
       // Longer than the engine keeps an ended run.
       ["RUN_RETENTION_DAYS", "31"],
+      // Not a domain mail can be sent to: upper case, or a part too long.
+      ["INBOUND_MAIL_DOMAIN", JSON.stringify("Mail.Acme.test")],
+      ["INBOUND_MAIL_DOMAIN", JSON.stringify(`${"a".repeat(64)}.acme.test`)],
+      ["INBOUND_MAIL_DOMAIN", JSON.stringify("mail-.acme.test")],
       ["MEMORY_LIMITS", "{not json"],
       // A quota above the platform's: only a release raises one.
       [

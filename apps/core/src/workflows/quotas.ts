@@ -11,6 +11,7 @@ import type {
   LowerableLimit,
   QuotaPolicy,
 } from "@grasp-os/shared/quota-policy";
+import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
 import { and, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -18,6 +19,8 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
+import type { OutboxEnv } from "../audit-outbox.ts";
 import {
   quotaPolicies,
   runLineageAccounts,
@@ -188,6 +191,7 @@ const highestRecorded = async (db: DrizzleD1Database) =>
       generation: quotaPolicies.generation,
       limits: quotaPolicies.limits,
       limitsHash: quotaPolicies.limitsHash,
+      recordedAt: quotaPolicies.recordedAt,
     })
     .from(quotaPolicies)
     .orderBy(desc(quotaPolicies.generation))
@@ -196,6 +200,103 @@ const highestRecorded = async (db: DrizzleD1Database) =>
 
 /** The refusals of a `QUOTA_LIMITS` logged in this isolate, once each. */
 const refusalsLogged = new Set<string>();
+
+/**
+ * Records `generation` with its `limits` (canonical) and their `hash`,
+ * and its audit event, unless a generation as high or higher is recorded
+ * already: an isolate that read the highest before a newer one went in
+ * records, and logs, nothing. The event holds the limits as deployed; what
+ * applies is each no higher than the platform's (`recordedPolicy`).
+ */
+export const recordGeneration = async (
+  env: QuotaEnv,
+  configured: z.output<typeof quotaLimitsSchema>,
+  limits: string,
+  hash: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  // Recorded with its audit event, which only the isolate whose insert
+  // recorded it writes: a generation is logged once, as it is recorded.
+  await auditedBatch(env, db, [
+    db
+      .insert(quotaPolicies)
+      .select(
+        sql`SELECT ${configured.generation}, ${limits}, ${hash}, ${Date.now()}
+          WHERE NOT EXISTS (SELECT 1 FROM ${quotaPolicies}
+            WHERE ${quotaPolicies.generation} >= ${configured.generation})`
+      )
+      .onConflictDoNothing(),
+    outboxedIfChanged(db, {
+      actor: { type: "system" },
+      action: "quota_policy.recorded",
+      target: {
+        type: "quota_policy",
+        id: String(configured.generation),
+      },
+      detail: {
+        generation: configured.generation,
+        limitsHash: hash,
+        ...configured.limits,
+      },
+    }),
+  ]);
+};
+
+/**
+ * The policy core applies now, and the recorded generation it decided on
+ * (none for the platform's own, or before any is recorded).
+ */
+const decidedPolicy = async (
+  env: QuotaEnv
+): Promise<{
+  policy: QuotaPolicy;
+  recorded: Awaited<ReturnType<typeof highestRecorded>>;
+}> => {
+  const configured = deploymentConfig(
+    quotaLimitsSchema,
+    "QUOTA_LIMITS",
+    env.QUOTA_LIMITS
+  );
+  const db = drizzle(env.DB);
+  const limits =
+    configured === undefined ? undefined : canonicalLimits(configured.limits);
+  const hash = limits === undefined ? undefined : await sha256Hex(limits);
+  let highest = await highestRecorded(db);
+  if (
+    configured !== undefined &&
+    limits !== undefined &&
+    hash !== undefined &&
+    (highest === undefined || configured.generation > highest.generation)
+  ) {
+    await recordGeneration(env, configured, limits, hash);
+    highest = await highestRecorded(db);
+  }
+  if (highest === undefined) {
+    return { policy: quotaPolicyOf(configured), recorded: undefined };
+  }
+  if (
+    configured !== undefined &&
+    highest.generation === configured.generation &&
+    highest.limitsHash === hash
+  ) {
+    return { policy: quotaPolicyOf(configured), recorded: highest };
+  }
+  const refusal = `${String(configured?.generation)}:${hash ?? ""}:${String(highest.generation)}`;
+  if (!refusalsLogged.has(refusal)) {
+    refusalsLogged.add(refusal);
+    const behind =
+      configured !== undefined && configured.generation < highest.generation;
+    log.error("config.invalid", {
+      var: "QUOTA_LIMITS",
+      reason: behind ? "generation_behind" : "generation_conflict",
+      ...(configured === undefined
+        ? {}
+        : { generation: configured.generation }),
+      kept: highest.generation,
+    });
+  }
+  return { policy: recordedPolicy(highest), recorded: highest };
+};
 
 /**
  * The deployment's quota policy now: the platform's, as its operator
@@ -216,62 +317,43 @@ const refusalsLogged = new Set<string>();
  * With nothing recorded and no var, or one that doesn't parse
  * (`deploymentConfig` logs it), the platform's own policy applies.
  */
-export const quotaPolicy = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">
-): Promise<QuotaPolicy> => {
-  const configured = deploymentConfig(
-    quotaLimitsSchema,
-    "QUOTA_LIMITS",
-    env.QUOTA_LIMITS
-  );
-  const db = drizzle(env.DB);
-  const limits =
-    configured === undefined ? undefined : canonicalLimits(configured.limits);
-  const hash = limits === undefined ? undefined : await sha256Hex(limits);
-  let highest = await highestRecorded(db);
-  if (
-    configured !== undefined &&
-    limits !== undefined &&
-    hash !== undefined &&
-    (highest === undefined || configured.generation > highest.generation)
-  ) {
-    await db
-      .insert(quotaPolicies)
-      .values({
-        generation: configured.generation,
-        limits,
-        limitsHash: hash,
-        recordedAt: new Date(),
-      })
-      .onConflictDoNothing();
-    highest = await highestRecorded(db);
-  }
-  if (highest === undefined) {
-    return quotaPolicyOf(configured);
-  }
-  if (
-    configured !== undefined &&
-    highest.generation === configured.generation &&
-    highest.limitsHash === hash
-  ) {
-    return quotaPolicyOf(configured);
-  }
-  const refusal = `${String(configured?.generation)}:${hash ?? ""}:${String(highest.generation)}`;
-  if (!refusalsLogged.has(refusal)) {
-    refusalsLogged.add(refusal);
-    const behind =
-      configured !== undefined && configured.generation < highest.generation;
-    log.error("config.invalid", {
-      var: "QUOTA_LIMITS",
-      reason: behind ? "generation_behind" : "generation_conflict",
-      ...(configured === undefined
-        ? {}
-        : { generation: configured.generation }),
-      kept: highest.generation,
-    });
-  }
-  return recordedPolicy(highest);
+export const quotaPolicy = async (env: QuotaEnv): Promise<QuotaPolicy> => {
+  const { policy } = await decidedPolicy(env);
+  return policy;
 };
+
+/**
+ * The policy core applies now, as the console reads it (GRA-600): its
+ * generation, each limit it lowers below the platform's, as applied
+ * (where its audit event holds them as deployed), and when core recorded
+ * it. Read as any admission reads it (`quotaPolicy`), so a
+ * generation deployed and not yet seen is recorded now, as the next
+ * admission would.
+ */
+export const quotaPolicyReport = async (
+  env: QuotaEnv
+): Promise<QuotaPolicyReport> => {
+  // From the row the policy was decided on, never a second read.
+  const { policy, recorded } = await decidedPolicy(env);
+  const lowered = Object.fromEntries(
+    lowerableLimits.flatMap((name) =>
+      policy.limits[name] < platformLimits[name]
+        ? [[name, policy.limits[name]]]
+        : []
+    )
+  );
+  return {
+    generation: policy.generation,
+    lowered,
+    recordedAt: recorded?.recordedAt.toISOString() ?? null,
+  };
+};
+
+/**
+ * What reading the quota policy takes: its database and var, and the audit
+ * log a newly recorded generation is written to.
+ */
+export type QuotaEnv = Pick<Env, "DB" | "QUOTA_LIMITS"> & OutboxEnv;
 
 /** The limits a lineage reaches, as a refusal names them. */
 const lineageLimits = {
@@ -554,7 +636,7 @@ const admittedKeyed = async (
 
 /** `admitChild` under `policy`; `retried` once read again (`policyStill`). */
 const admitChildOnce = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   parent: { id: string; rootRunId: string | null; depth: number },
   key: string | undefined,
   policy: QuotaPolicy,
@@ -607,7 +689,7 @@ const admitChildOnce = async (
  * nothing; a slot taken is never given back.
  */
 export const admitChild = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   parent: { id: string; rootRunId: string | null; depth: number },
   key?: string
 ): Promise<ChildPlace> =>
@@ -800,7 +882,7 @@ const hostCallBlockMax = 32;
  * left, or `execution.stale_attempt` for a settled attempt.
  */
 const reserveHostCallsOnce = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   lineage: { root: string; identity: ReturnType<typeof and> },
   block: number,
   policy: QuotaPolicy,
@@ -894,7 +976,7 @@ const reserveHostCallsOnce = async (
  * side, as the lineage never makes more than it may.
  */
 const hostCallsOf = (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   root: string,
   identity: ReturnType<typeof and>
 ): { take: () => Promise<void>; close: () => Promise<number> } => {
@@ -1068,7 +1150,7 @@ const outOfHostCalls = (
 
 /** `admitAttempt` under `policy`; `retried` once read again (`policyStill`). */
 const admitAttemptOnce = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   owner: AttemptOwner,
   attempt: QuotaAttempt,
   policy: QuotaPolicy,
@@ -1320,7 +1402,7 @@ const placeGivenUp = async (
  * the queue, unless a newer attempt of the step wrote it (`placeGivenUp`).
  */
 export const admitAttempt = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   owner: AttemptOwner,
   attempt: QuotaAttempt
 ): Promise<AttemptAdmission> => {

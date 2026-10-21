@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { ScreenFrame } from "../screens/screen-frame.tsx";
 import {
-  screenSearchSchema,
   useScreenNavigate,
+  useScreenOpening,
 } from "../screens/screen-navigate.ts";
 
 // One of an engine's apps (core's screens), full page, outside the frame:
@@ -14,7 +14,7 @@ import {
 
 const FullPage = () => {
   const { engine, screen } = Route.useParams();
-  const { route, input } = Route.useSearch();
+  const opening = useScreenOpening(engine, screen);
   const navigate = useScreenNavigate(
     engine,
     "/domains/$engine/apps/$screen/full"
@@ -23,11 +23,18 @@ const FullPage = () => {
     <main className="flex h-svh flex-col">
       <ScreenFrame
         app={engine}
-        key={`${engine}/${screen}/${route ?? ""}/${input ?? ""}`}
+        key={`${engine}/${screen}/${opening === undefined ? "" : JSON.stringify(opening)}`}
         onNavigate={navigate}
         screen={screen}
-        {...(route === undefined ? {} : { route })}
-        {...(input === undefined ? {} : { input })}
+        {...(opening === undefined
+          ? {}
+          : {
+              route: opening.route,
+              input: opening.input,
+              ...(opening.surface === undefined
+                ? {}
+                : { surface: opening.surface }),
+            })}
       />
     </main>
   );
@@ -35,5 +42,4 @@ const FullPage = () => {
 
 export const Route = createFileRoute("/domains/$engine/apps/$screen/full")({
   component: FullPage,
-  validateSearch: screenSearchSchema,
 });

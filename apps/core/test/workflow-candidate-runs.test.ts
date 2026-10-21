@@ -223,7 +223,7 @@ const aroundTrigger = async (
 /** A catalog contract of `kind` published by `admin`: its key. */
 const contract = async (
   admin: Identity,
-  kind: "connector" | "operation" | "model" | "knowledge" | "template"
+  kind: "connector" | "operation" | "model" | "knowledge" | "template" | "files"
 ): Promise<string> => {
   const key = `${kind}-${unique()}`;
   if (kind === "connector") {
@@ -340,6 +340,59 @@ const notifying = (key: string): Definition => ({
   ],
 });
 
+/** The module of action `listFiles`, listing the run's own files. */
+const listFilesModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+
+export const listFiles = action({
+  args: { who: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [resource.files("files", { operations: ["list"] })],
+  handler: async (ctx) => {
+    const listed = await ctx.resources.files.list();
+    return { status: JSON.stringify(listed) };
+  },
+});
+`;
+
+/** The module of action `deleteFile`, deleting the file its input names. */
+const deleteFileModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+
+export const deleteFile = action({
+  args: { who: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [resource.files("files", { operations: ["delete"] })],
+  handler: async (ctx, args) => {
+    await ctx.resources.files.delete({ file: args.who });
+    return { status: "deleted" };
+  },
+});
+`;
+
+/**
+ * A definition calling action `contract` (by default `listFiles`, which
+ * lists through `files`) with the run's input.
+ */
+const listing = (
+  key: string,
+  action = "local:code/list-files.ts#listFiles"
+): Definition => ({
+  bindings: {
+    lister: { kind: "operation", contract: action },
+    files: { kind: "files", contract: key },
+  },
+  tasks: [
+    {
+      list: {
+        call: "grasp.operation",
+        with: {
+          binding: "lister",
+          arguments: { who: "${ $workflow.input.who }" },
+        },
+      },
+    },
+  ],
+});
+
 /** A definition calling action `look`, which reads Knowledge or a template. */
 const reading = (keys: {
   knowledge: string;
@@ -373,6 +426,7 @@ describe("test runs of a workflow's draft", () => {
       model: await contract(admin, "model"),
       knowledge: await contract(admin, "knowledge"),
       template: await contract(admin, "template"),
+      files: await contract(admin, "files"),
     };
     const direct: {
       kind: string;
@@ -429,7 +483,15 @@ describe("test runs of a workflow's draft", () => {
         status: JSON.stringify({ greeting: "Dear" }),
       },
     ] as const;
-    const cases = [
+    const cases: {
+      kind: string;
+      who: string;
+      alias: string;
+      answer: Record<string, unknown>;
+      status: string;
+      definition: Definition;
+      modules: Record<string, string>;
+    }[] = [
       ...direct.map((each) => ({
         ...each,
         who: "Ada",
@@ -442,6 +504,17 @@ describe("test runs of a workflow's draft", () => {
         // are calls.
         modules: { "code/look.ts": lookModule },
       })),
+      // A files call an action makes: its answer is the fixture, and the
+      // run keeps no file.
+      {
+        kind: "files",
+        who: "Ada",
+        alias: "files",
+        answer: { files: [] },
+        status: JSON.stringify({ files: [] }),
+        definition: listing(keys.files),
+        modules: { "code/list-files.ts": listFilesModule },
+      },
       // A connector call an action makes, answered as a task's is.
       {
         kind: "connector (an action's)",
@@ -497,6 +570,34 @@ describe("test runs of a workflow's draft", () => {
         calls: [],
       }))
     );
+  });
+
+  it("refuses a files call a real call would refuse, its fixture notwithstanding, and keeps no file", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await contract(admin, "files");
+    const { workflow, revision } = await drafted(
+      ada,
+      listing(key, "local:code/delete-file.ts#deleteFile"),
+      { modules: { "code/delete-file.ts": deleteFileModule } }
+    );
+    const run = async (who: string) => {
+      const { runId } = await startCandidateRun(env, ada, workflow.id, {
+        revision,
+        input: { who },
+        fixtures: { files: { output: null } },
+      });
+      return endOf(await ended(ada, workflow.id, runId));
+    };
+    expect({
+      // No file's ID: refused as a real call is.
+      invalid: await run("not-a-file"),
+      // A file's ID: answered from the fixture, though no such file is.
+      valid: await run(crypto.randomUUID()),
+    }).toStrictEqual({
+      invalid: { status: "failed", code: "workflow.call_invalid" },
+      valid: { status: "completed", output: { status: "deleted" } },
+    });
   });
 
   it("refuses a model request a real call would refuse, its fixture notwithstanding", async () => {

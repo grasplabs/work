@@ -47,6 +47,7 @@ jobs:
       - run: vp check
       - run: vp run check:secrets
       - run: vp run check:docs
+      - run: vp run check:product-name
       - run: vp run check:migrations
       - run: vp run check:wrangler-configs
       - run: vp run -r build

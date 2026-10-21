@@ -1,7 +1,9 @@
 import type { ChatProject, ProjectDocument } from "@grasp-os/shared/chat";
 import {
+  projectDocumentMaxKb,
   projectDocumentsMax,
   projectGoalMaxLength,
+  projectNameMaxLength,
   projectNameSchema,
 } from "@grasp-os/shared/chat";
 import { Button } from "@grasp-os/ui/components/button";
@@ -36,9 +38,6 @@ import type { DocumentProblem } from "./chat-projects.ts";
 // `components/chat/project-dialog.tsx`): its name, what the person is
 // trying to achieve, and the documents its chats' agent reads. Nothing is
 // sent until Save; then core takes each change, and checks each again.
-
-/** The longest name a project takes, as core checks it. */
-const projectNameMaxLength = 100;
 
 /** A document picked here, read as text, not yet sent. */
 interface Picked {
@@ -87,9 +86,10 @@ const withoutKey = (before: ReadonlySet<string>, key: string): Set<string> =>
 const useProblemText = (): Record<FormProblem, string> => {
   const { t } = useLingui();
   const most = projectDocumentsMax;
+  const maxKb = projectDocumentMaxKb;
   return {
     type: t`A project takes Markdown, text, CSV and JSON files.`,
-    size: t`Each document holds up to 100 KB.`,
+    size: t`Each document holds up to ${maxKb} KB.`,
     unreadable: t`A picked file couldn't be read. Pick it again.`,
     count: t`${plural(most, {
       one: "A project holds up to # document.",
@@ -293,7 +293,7 @@ const ProjectForm = ({
         <FieldDescription>
           <Trans>
             Every chat in this project reads them. Markdown, text, CSV or JSON,
-            up to 100 KB each.
+            up to {projectDocumentMaxKb} KB each.
           </Trans>
         </FieldDescription>
         {listed.length === 0 ? null : (

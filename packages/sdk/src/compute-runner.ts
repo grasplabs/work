@@ -5,6 +5,7 @@ import "./compute-lockdown.ts";
 import { actionHandler } from "./action.ts";
 import { lockedDown } from "./compute-locked.ts";
 import { computeHandler } from "./compute.ts";
+import { filesResource } from "./run-files-client.ts";
 
 // What core runs in the isolate of a workflow's own modules
 // (workflow-modules.ts): never imported by a workflow's own code
@@ -261,6 +262,10 @@ const resourceOf = (
       // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
       read: () => callHost(alias, {}),
     };
+  }
+  if (kind === "files") {
+    // Every method; the host refuses one the use didn't declare.
+    return filesResource(alias, callHost);
   }
   if (kind === "model") {
     return {

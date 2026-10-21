@@ -139,12 +139,15 @@ export const runRefusal = (call: keyof typeof refusalCodes) =>
 export const recordSources = async (
   env: Env,
   { workspaceId, chatId, runId }: AgentScope,
-  sources: readonly string[]
+  sources: readonly string[],
+  /** The Knowledge documents the call hands over, which answers may cite. */
+  documentIds: readonly string[] = []
 ): Promise<void> => {
   const recorded = await workspace(env, workspaceId).recordSources(
     chatId,
     runId,
-    sources
+    sources,
+    documentIds
   );
   if (recorded !== "open") {
     throw runRefusal(recorded);
