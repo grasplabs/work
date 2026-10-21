@@ -1,4 +1,5 @@
-import { quietLoader } from "../../src/quiet-loader.ts";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
+
 import { callSandboxed } from "../../src/sandboxed.ts";
 import type { SandboxedEnv } from "../../src/sandboxed.ts";
 

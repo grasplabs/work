@@ -14,6 +14,7 @@ import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import {
   paramDeclarationSchema,
   paramDeclarationsSchema,
@@ -30,7 +31,6 @@ import { z } from "zod";
 
 import { putCached, readCached } from "../cache-macs.ts";
 import { appBindingKinds, workflowBindingKinds } from "../permissions.ts";
-import { quietLoader } from "../quiet-loader.ts";
 import {
   capability,
   noPlaceOf,
