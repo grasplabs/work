@@ -260,8 +260,8 @@ test("a screen reaches nothing but its own App's functions", async ({
       // `toString`), and one of a single string reads as that string to
       // anything that coerces it.
       return {
-        // A method name that isn't text: refused, never read as its text.
-        nameObject: await tried(async () => await toPage.call(["notes"], [])),
+        // A call of the App's server: the bridge has none.
+        serverCall: await tried(async () => await toPage.call("notes", [])),
         // The valid request as text runs (its key answers the kept answer)...
         control: await called(async () => await toPage.callFunction(valid)),
         // ...and the same request in an array is refused before core.
@@ -279,7 +279,7 @@ test("a screen reaches nothing but its own App's functions", async ({
     { runtime: "@grasp-os~sdk~screen-runtime.js", valid: validRequest }
   );
   expect(bridge).toStrictEqual({
-    nameObject: "screen.invalid",
+    serverCall: "refused",
     control: "ran",
     request: "screen.invalid",
     session: "refused",

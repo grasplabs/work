@@ -322,9 +322,8 @@ export interface RunSubscriptionApi {
  * `screen.unreviewed` or `screen.revoked` unless that build gets the data
  * now, read before the call, before its answer and before each push.
  * `close` (or letting go of the stub) releases everything the frame
- * follows through it, its live queries, its runs' updates and the
- * callbacks its server calls passed, at once; a closed frame is refused
- * every call (`screen.invalid`).
+ * follows through it, its live queries and its runs' updates, at once;
+ * a closed frame is refused every call (`screen.invalid`).
  */
 export interface ScreenFrameApi {
   /** Whether the frame's build gets the App's data now. */
@@ -335,12 +334,6 @@ export interface ScreenFrameApi {
    * recovery index. Anything else is forgotten nothing.
    */
   received: (request: string) => Promise<void>;
-  /**
-   * Calls `method` of the App's server with `args`, as the person. Plain
-   * data, and functions (callbacks the server may keep and call later
-   * with plain data). The answer is plain data, whatever it holds.
-   */
-  call: (method: string, args: unknown[]) => Promise<unknown>;
   /**
    * Starts a run of the App's workflow, for the person: anyone with a role
    * in the App. Audited as started on a screen (`via: "screen"`).

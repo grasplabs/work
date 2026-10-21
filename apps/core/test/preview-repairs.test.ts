@@ -20,7 +20,6 @@ import {
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
-import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { keptManifestSchema } from "./previews.ts";
@@ -702,98 +701,6 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     await expect(
       stub.previewReports(id, app, second, 0)
     ).resolves.toMatchObject({ logs: { length: 5 } });
-  });
-
-  it("lets the agent call its draft's server code in the preview, never the App's live data", async () => {
-    const drafted = { "screens/desk.tsx": screen, "app/server.ts": mailing };
-    const { builder, app, chatId, stub, gateway } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-        await env.build.write(app.id, ${JSON.stringify(drafted)});
-        const first = await env.build.call(app.id, "count");
-        const second = await env.build.call(app.id, "count", []);
-        const broken = await env.build.call(app.id, "broken");
-        let refused = null;
-        try {
-          await env.build.call(app.id, "send");
-        } catch (error) {
-          refused = String(error.message).startsWith("A preview changes nothing");
-        }
-        const checked = await env.build.check(app.id);
-        return {
-          first,
-          second,
-          broken: { ok: broken.ok, code: broken.code, message: broken.message },
-          refused,
-          problems: checked.preview.problems.length,
-          seen: checked.preview.seen,
-        };
-      };`),
-      says("Called."),
-    ]);
-    const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection();
-    await requestGranted(idp, admin, {
-      subject: { type: "app", appId: appIdSchema.parse(app) },
-      object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.send"],
-      binding: "MAIL",
-    });
-    // The App live, with the same server code, and a count of its own.
-    await release(builder, app, { "app/server.ts": mailing });
-    await buildServer(env, { "app/server.ts": mailing }, "app-test");
-    const live = async () =>
-      await builder.api.screens.frame(app, "").call("count", []);
-    const before = [await live(), await live()];
-
-    await stub.ask(chatIdSchema.parse(chatId), {
-      text: "Try the invoice desk's count",
-      model,
-    });
-
-    const results = await codeResults(stub, chatId);
-    const audited = await vi.waitFor(
-      async () => {
-        const events = await allEvents();
-        const calls = events.filter(
-          ({ action, detail }) =>
-            action === "agent.call" && detail.method === "build.call"
-        );
-        expect(calls).toHaveLength(4);
-        return calls.map(({ detail }) => detail.ok);
-      },
-      { timeout: 10_000, interval: 50 }
-    );
-    expect({
-      called: returned(results[0]?.text),
-      before,
-      after: await live(),
-      mail: await mail.did(),
-      // The failure's text reaches the model only inside a tool's result.
-      inResult: JSON.stringify(gateway.requests.at(-1)?.body).includes(attack),
-      audited,
-    }).toStrictEqual({
-      called: {
-        first: { ok: true, answer: 1 },
-        second: { ok: true, answer: 2 },
-        broken: {
-          ok: false,
-          code: "app.failed",
-          message: `Invoice 7 has no total. ${attack}`,
-        },
-        refused: true,
-        // The agent heard of its own calls: nothing kept for the check,
-        // and with no side panel open, its screens weren't seen.
-        problems: 0,
-        seen: false,
-      },
-      before: [1, 2],
-      after: 3,
-      mail: { calls: 0, sent: [] },
-      inResult: true,
-      // Each audited as the agent's call, the refused one too.
-      audited: [true, true, false, undefined],
-    });
   });
 
   it("lets the agent call a function of its spec 8 draft by its path, and hears what it got wrong as data", async () => {
