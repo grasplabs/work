@@ -128,7 +128,7 @@ describe("the Platform page's model", () => {
     ]);
   });
 
-  it("marks the ring a rollout failed on as failed, though its companies still wait", () => {
+  it("marks the ring a rollout failed on as failed while its companies still wait, and done once they were all on it", () => {
     const rings = ringsOf(summary("f", "failed", 1), [
       target("acme", 0, "done"),
       target("beta", 1, "pending"),
@@ -140,6 +140,13 @@ describe("the Platform page's model", () => {
       "failed",
       "todo",
     ]);
+    // Failed after its ring was done, waiting to approve the next: done.
+    expect(
+      ringsOf(summary("w", "failed", 0), [
+        target("acme", 0, "done"),
+        target("beta", 1, "pending"),
+      ]).map(({ state }) => state)
+    ).toStrictEqual(["done", "todo"]);
   });
 
   it("says which active companies run each release, the newest first, then the ones the page doesn't list", () => {
