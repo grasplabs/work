@@ -51,11 +51,12 @@ import {
   collectPayloads,
   commitPayload,
   committedKey,
+  isUncommitted,
   readPayload,
   releasing,
   stagePayload,
 } from "./payloads.ts";
-import type { PayloadRef } from "./payloads.ts";
+import type { PayloadRef, StagedPayload } from "./payloads.ts";
 import {
   collectionPlan,
   eraseCollectionFromSearchIndex,
@@ -981,12 +982,13 @@ const repointVersions = async (
   }[],
   actor: AuditActor
 ): Promise<void> => {
-  const staged = await Promise.all(
-    changes.map(
-      async ({ changed }) =>
-        await stagePayload(env, db, document.collectionId, changed.text)
-    )
-  );
+  const stage = async () =>
+    await Promise.all(
+      changes.map(
+        async ({ changed }) =>
+          await stagePayload(env, db, document.collectionId, changed.text)
+      )
+    );
   const released = releasing(
     db,
     and(
@@ -997,35 +999,54 @@ const repointVersions = async (
       )
     ) ?? sql`0`
   );
-  const updates = changes.flatMap(({ number, changed }, index) => {
-    const payload = staged[index];
-    return payload === undefined
-      ? []
-      : [
-          ...commitPayload(db, payload),
-          db
-            .update(versions)
-            .set({
-              payloadKey: committedKey(payload),
-              message: changed.message,
-            })
-            .where(
-              and(
-                eq(versions.documentId, document.id),
-                eq(versions.number, number)
-              )
-            ),
-        ];
-  });
-  const [first, ...rest] = released.before;
-  if (first === undefined) {
-    return;
-  }
   const replaced = changes
     .filter(({ changed }) => changed.unreadable)
     .map(({ number }) => outboxed(db, replacedEntry(actor, document, number)));
-  // Its audit events drain with the purge's own (`auditedBatch`, after).
-  await db.batch([first, ...rest, ...updates, ...released.after, ...replaced]);
+  const send = async (staged: StagedPayload[]): Promise<void> => {
+    const updates = changes.flatMap(({ number, changed }, index) => {
+      const payload = staged[index];
+      return payload === undefined
+        ? []
+        : [
+            ...commitPayload(db, payload),
+            db
+              .update(versions)
+              .set({
+                payloadKey: committedKey(payload),
+                message: changed.message,
+              })
+              .where(
+                and(
+                  eq(versions.documentId, document.id),
+                  eq(versions.number, number)
+                )
+              ),
+          ];
+    });
+    const [first, ...rest] = released.before;
+    if (first === undefined) {
+      return;
+    }
+    // Its audit events drain with the purge's own (`auditedBatch`, after).
+    await db.batch([
+      first,
+      ...rest,
+      ...updates,
+      ...released.after,
+      ...replaced,
+    ]);
+  };
+  // A payload it reuses can be let go of and collected before the batch
+  // (another purge, say): the batch is refused (`isUncommitted`), and the
+  // texts are stored again, once, as a save's are.
+  try {
+    await send(await stage());
+  } catch (error) {
+    if (!isUncommitted(error)) {
+      throw error;
+    }
+    await send(await stage());
+  }
 };
 
 /**

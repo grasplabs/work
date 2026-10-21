@@ -1,7 +1,7 @@
-import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import { sha256HexOfBytes, toHex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -26,8 +26,10 @@ import {
 // Saving a text (`stagePayload`, then the statements below in the save's
 // own batch):
 //
-// 1. A committed payload with the same SHA-256 is taken as it is: the same
-//    text is stored once, whichever documents and versions hold it.
+// 1. A committed payload of the same collection and SHA-256 is taken, once
+//    its object is checked to be there as stored (`intact`): the same text
+//    is stored once in a collection. One that isn't is marked `broken`,
+//    never taken again, and the text is stored anew.
 // 2. Otherwise a `pending` row is written first, then the object, which R2
 //    checks against the hash as it takes it.
 // 3. The save's batch marks the row `committed` (unless another save of
@@ -81,6 +83,26 @@ const objectKey = (sha256: string): string =>
   `payloads/${sha256}/${crypto.randomUUID()}`;
 
 /**
+ * Whether the object `key` is there as stored: its size, and the SHA-256
+ * R2 checked as it took it, from its metadata alone (no body read).
+ */
+const intact = async (
+  env: Env,
+  key: string,
+  sha256: string,
+  bytes: number
+): Promise<boolean> => {
+  const head = await env.BRAIN_OBJECTS.head(key);
+  const stored = head?.checksums.sha256;
+  return (
+    head !== null &&
+    head.size === bytes &&
+    stored !== undefined &&
+    toHex(new Uint8Array(stored)) === sha256
+  );
+};
+
+/**
  * Stores `text` for a version in `collectionId`, or finds it stored there:
  * a committed payload of the same collection and hash, or a new `pending`
  * one whose object is in R2. Throws when the upload fails, leaving the row
@@ -105,7 +127,10 @@ export const stagePayload = async (
       )
     )
     .get();
-  if (committed) {
+  if (
+    committed &&
+    (await intact(env, committed.key, sha256, body.byteLength))
+  ) {
     return {
       key: committed.key,
       collectionId,
@@ -113,6 +138,19 @@ export const stagePayload = async (
       bytes: body.byteLength,
       fresh: false,
     };
+  }
+  if (committed) {
+    // Missing, or not the text: never taken again, and a new object is
+    // stored, so no save (a purge's tombstone neither) points at it anew.
+    await db
+      .update(brainPayloads)
+      .set({ state: "broken" })
+      .where(
+        and(
+          eq(brainPayloads.key, committed.key),
+          eq(brainPayloads.state, "committed")
+        )
+      );
   }
   const key = objectKey(sha256);
   // The row first: an object is never in R2 without one to collect it by.
@@ -203,7 +241,7 @@ export const releasing = (
       .where(
         and(
           sql`${brainPayloads.key} IN (SELECT key FROM ${brainPayloadReleases})`,
-          eq(brainPayloads.state, "committed"),
+          inArray(brainPayloads.state, ["committed", "broken"]),
           unreferenced
         )
       ),

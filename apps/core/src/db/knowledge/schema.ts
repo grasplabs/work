@@ -125,7 +125,14 @@ export const brainPayloads = sqliteTable(
     sha256: text().notNull(),
     /** The text's size, in bytes of UTF-8. */
     bytes: integer().notNull(),
-    state: text({ enum: ["pending", "committed", "collecting"] }).notNull(),
+    /**
+     * `broken`: committed, but its object turned out missing or not its
+     * text (knowledge/payloads.ts). Never taken by a save again; collected
+     * once no version refers to it.
+     */
+    state: text({
+      enum: ["pending", "committed", "broken", "collecting"],
+    }).notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [

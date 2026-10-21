@@ -161,6 +161,36 @@ const aroundVersionBatch = (hooks: {
   };
 };
 
+const insertsReleases = /^insert into "brain_payload_releases"/iu;
+
+/**
+ * Runs `before` once, just before the next batch that lets payloads go (a
+ * purge's): another writer that gets in between. Returns what restores it.
+ */
+const beforeReleasingBatch = (before: () => Promise<void>): (() => void) => {
+  const db = env.KNOWLEDGE;
+  const realPrepare = db.prepare.bind(db);
+  const realBatch = db.batch.bind(db);
+  let releasing = false;
+  let done = false;
+  const prepare = vi.spyOn(db, "prepare").mockImplementation((query) => {
+    releasing ||= insertsReleases.test(query);
+    return realPrepare(query);
+  });
+  const batch = vi.spyOn(db, "batch").mockImplementation(async (statements) => {
+    if (releasing && !done) {
+      done = true;
+      prepare.mockRestore();
+      await before();
+    }
+    return await realBatch(statements);
+  });
+  return () => {
+    prepare.mockRestore();
+    batch.mockRestore();
+  };
+};
+
 /** The cron trigger, once a staged payload's grace is over. */
 const afterGrace = async (): Promise<void> => {
   await runCron({}, new Date(Date.now() + pendingGraceMs + 60_000));
@@ -743,6 +773,108 @@ describe("purges", () => {
         { version: 1, reason: "unreadable" },
         { version: 2, reason: "unreadable" },
       ],
+    });
+  });
+
+  it("never reuses an object that's gone or altered, a purge's tombstone neither", async () => {
+    const { api } = await knowledgeOf();
+    const { id: collectionId } = await api.createCollection(shared());
+    const text = textOf(`Reused${unique()}`);
+    const first = await api.saveDocument({
+      collectionId,
+      path: "first.md",
+      text,
+      ifVersion: 0,
+    });
+    const [original] = await rowsOf(text);
+    await env.BRAIN_OBJECTS.delete(original?.key ?? "");
+    const second = await api.saveDocument({
+      collectionId,
+      path: "second.md",
+      text,
+      ifVersion: 0,
+    });
+    // Two documents whose objects go missing are purged one after the
+    // other: the first's tombstone, altered meanwhile, isn't the second's.
+    const one = `Bos${unique()}`;
+    const two = `Kok${unique()}`;
+    const purgedFirst = await api.saveDocument({
+      collectionId,
+      path: "purged-1.md",
+      text: textOf(one),
+      ifVersion: 0,
+    });
+    const purgedSecond = await api.saveDocument({
+      collectionId,
+      path: "purged-2.md",
+      text: textOf(two),
+      ifVersion: 0,
+    });
+    for (const word of [one, two]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const [row] = await rowsOf(textOf(word));
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await env.BRAIN_OBJECTS.delete(row?.key ?? "");
+    }
+    await purgeTerm(api, purgedFirst.id, one);
+    const [tombstone] = await rowsOf("(removed)");
+    await env.BRAIN_OBJECTS.put(tombstone?.key ?? "", "# Swapped");
+    await purgeTerm(api, purgedSecond.id, two);
+
+    expect({
+      first: await codeOf(api.getDocument(first.id)),
+      second: await readText(api, second.id),
+      rows: await statesOf(text),
+      purgedSecond: await readText(api, purgedSecond.id, 1),
+    }).toStrictEqual({
+      first: "knowledge.unavailable",
+      second: text,
+      rows: ["broken", "committed"],
+      purgedSecond: "(removed)",
+    });
+  });
+
+  it("stores a purge's rewritten text again when the payload it reused is collected before its batch", async () => {
+    const { api } = await knowledgeOf();
+    const { id: collectionId } = await api.createCollection(shared());
+    const one = `Peters${unique()}`;
+    const two = `Smits${unique()}`;
+    const document = await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`${one} and ${two}`),
+      ifVersion: 0,
+    });
+    await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`Kept${unique()}`),
+      ifVersion: 1,
+    });
+    // Another document holds what version 1 becomes once `one` is purged,
+    // so the purge reuses its payload; it is purged itself meanwhile.
+    const other = await api.saveDocument({
+      collectionId,
+      path: "other.md",
+      text: textOf(`(removed) and ${two}`),
+      ifVersion: 0,
+    });
+    const restore = beforeReleasingBatch(async () => {
+      await purgeTerm(api, other.id, two);
+    });
+    let outcome: string;
+    try {
+      outcome = await settled(purgeTerm(api, document.id, one));
+    } finally {
+      restore();
+    }
+
+    expect({
+      outcome,
+      first: await readText(api, document.id, 1),
+    }).toStrictEqual({
+      outcome: "fulfilled",
+      first: textOf(`(removed) and ${two}`),
     });
   });
 });
