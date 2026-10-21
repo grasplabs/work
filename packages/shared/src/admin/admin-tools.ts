@@ -424,7 +424,7 @@ export const needText = (
     }
     case "transcript": {
       return view.state.conversation === "in"
-        ? "The first conversation is in, and Stephen has not read it yet."
+        ? "The first conversation is in, and Grasp has not read it yet."
         : "The first conversation with the sponsor is not brought in yet.";
     }
     case "ask": {
