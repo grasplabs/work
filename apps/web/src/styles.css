@@ -37,6 +37,16 @@
   }
 }
 
+/*
+ * What Stephen's tour points at (tour/tour-layer.tsx): the sidebar's way
+ * to the page he shows. Inside its edge, as the sidebar clips what is
+ * outside it.
+ */
+[data-tour-target] {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
 /* The frame's sizes: the app's sidebar and the bar above each page. */
 @layer base {
   [data-slot="sidebar-wrapper"] {

@@ -240,6 +240,7 @@ const cast = {
   pageRecovery: { member: "user" },
   brain: { member: "user" },
   contexts: { member: "user" },
+  tour: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;

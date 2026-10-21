@@ -860,6 +860,10 @@ msgstr "{place} sur {count}"
 msgid "{points} of {weight}"
 msgstr "{points} sur {weight}"
 
+#: src/tour/tour-layer.tsx
+msgid "{position} of {count}"
+msgstr "{position} sur {count}"
+
 #: src/policies/policies-table.tsx
 msgid "{proposed, plural, one {# proposed} other {# proposed}}"
 msgstr "{proposed, plural, one {# proposée} other {# proposées}}"
@@ -2268,6 +2272,7 @@ msgstr "Disponible, via Composio"
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/tour/tour-layer.tsx
 msgid "Back"
 msgstr "Retour"
 
@@ -3738,6 +3743,11 @@ msgctxt "inbox tab: what someone dealt with"
 msgid "Done"
 msgstr "Traité"
 
+#: src/tour/tour-layer.tsx
+msgctxt "tour"
+msgid "Done"
+msgstr "Terminé"
+
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
 msgstr "Télécharger {name}"
@@ -3860,6 +3870,10 @@ msgstr "Domaines e-mail des salariés"
 #: src/brain/brain.ts
 msgid "Employee interviews"
 msgstr "Entretiens avec les employés"
+
+#: src/tour/tour-layer.tsx
+msgid "End the tour"
+msgstr "Terminer la visite"
 
 #: src/workflows/resource-runs.tsx
 msgid "Ended"
@@ -4647,6 +4661,10 @@ msgstr "Retenu pour examen"
 msgid "Here’s the plan"
 msgstr "Voici le plan"
 
+#: src/tour/tour-script.ts
+msgid "Hey, great to have you here. This can all be a little overwhelming, so I’ll bring you up to speed in just one minute. Are you ready?"
+msgstr "Bonjour, ravi de vous voir ici. Tout cela peut sembler beaucoup, alors je vous mets à niveau en une minute. On y va ?"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Bonjour {admin}, je suis Stephen"
@@ -4782,6 +4800,10 @@ msgstr "Je l’ai envoyé"
 #: src/onboarding/setup-steps.tsx
 msgid "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."
 msgstr "Je parle d’abord à chaque responsable d’équipe, pour qu’il entende parler de moi avant son équipe. Vérifiez qui dirige quelle équipe, et quelles équipes participent."
+
+#: src/tour/tour-script.ts
+msgid "I’m ready"
+msgstr "C’est parti"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ve handled everything else."
@@ -5853,6 +5875,10 @@ msgctxt "inbox sort"
 msgid "Newest first"
 msgstr "Plus récents d’abord"
 
+#: src/tour/tour-layer.tsx
+msgid "Next"
+msgstr "Suivante"
+
 #: src/settings/pulse-people.tsx
 msgctxt "page"
 msgid "Next"
@@ -6426,6 +6452,10 @@ msgstr "Non éditée par {vendors}"
 msgid "Not named by the provider"
 msgstr "Non nommé par le fournisseur"
 
+#: src/tour/tour-script.ts
+msgid "Not now"
+msgstr "Pas maintenant"
+
 #: src/connections/integration-row.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
@@ -6729,6 +6759,10 @@ msgstr "En route"
 msgctxt "links: drawn workflows, opened on the Workflows page"
 msgid "On the Workflows page"
 msgstr "Sur la page Workflows"
+
+#: src/tour/tour-script.ts
+msgid "On this page you connect the applications your organization works in. They are the platform’s instruments to build what you need."
+msgstr "Sur cette page, vous connectez les outils avec lesquels votre organisation travaille. Ce sont les instruments de la plateforme pour construire ce dont vous avez besoin."
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.onboarding.tsx
@@ -8731,6 +8765,10 @@ msgstr "Lancer une exécution de test"
 msgid "Start again from version {newerVersion}"
 msgstr "Recommencer à partir de la version {newerVersion}"
 
+#: src/tour/tour-script.ts
+msgid "Start the tour"
+msgstr "Commencer la visite"
+
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/resource-runs.tsx
 msgid "Started"
@@ -8964,6 +9002,14 @@ msgstr "Retirer du projet"
 msgid "Take the go back"
 msgstr "Retirer le feu vert"
 
+#: src/frame/person-menu.tsx
+msgid "Take the tour"
+msgstr "Faire la visite"
+
+#: src/frame/person-menu.tsx
+msgid "Take the tour again"
+msgstr "Refaire la visite"
+
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
 msgstr "Reprendre la sienne"
@@ -9181,6 +9227,10 @@ msgstr "Ce mode de connexion n’est pas configuré ici."
 #: src/onboarding/setup-steps.tsx
 msgid "That’s everything from you. Now I’ll talk to your team."
 msgstr "C’est tout pour vous. Maintenant, je vais parler à votre équipe."
+
+#: src/tour/tour-script.ts
+msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
+msgstr "Voilà pour la visite. Posez-moi vos questions, sur n’importe quelle page. Je reste ici."
 
 #: src/brain/brain.ts
 msgid "the {role}"
@@ -9757,6 +9807,10 @@ msgstr "Il n’y a pas de règle de données : tout modèle autorisé peut recev
 msgid "There is nobody in this list."
 msgstr "Il n’y a personne dans cette liste."
 
+#: src/tour/tour-script.ts
+msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."
+msgstr "Voici vos domaines. Chacun est une partie de votre entreprise, avec ses workflows, ses applications et ses intégrations réunis."
+
 #: src/engines/store-changes.tsx
 msgid "These fields stay reserved with their current meaning: {reserved}."
 msgstr "Ces champs restent réservés avec leur sens actuel : {reserved}."
@@ -9883,9 +9937,17 @@ msgstr "Ce domaine n’a pas encore de version à exécuter."
 msgid "This is right"
 msgstr "C’est correct"
 
+#: src/tour/tour-script.ts
+msgid "This is the Brain. Everything I learn about your company comes together here. Every answer and every workflow is built on it."
+msgstr "Voici le Cerveau. Tout ce que j’apprends sur votre entreprise se retrouve ici. Chaque réponse et chaque workflow s’appuie dessus."
+
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Voici le consentement tel que Grasp le formule aujourd’hui. Le journal d’audit conserve un hachage du texte exact qui a été affiché."
+
+#: src/tour/tour-script.ts
+msgid "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
+msgstr "Voici le travail lui-même, un workflow par tâche. Vous voyez où part le temps, et ce que je peux prendre en charge pour vous."
 
 #: src/routes/_shell.links.$app.$surface.tsx
 msgid "This link doesn't open anything you can open"
@@ -10107,6 +10169,10 @@ msgstr "Sujets"
 #: src/policies/policy.ts
 msgid "Touches {kinds}"
 msgstr "Traite {kinds}"
+
+#: src/tour/tour-layer.tsx
+msgid "Tour of Grasp"
+msgstr "Visite de Grasp"
 
 #: src/policies/policy.ts
 msgid "Training not stated"
@@ -10648,6 +10714,10 @@ msgstr "Semaine {week} sur {weeks} · {stage}"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "Weekly summary"
 msgstr "Récapitulatif hebdomadaire"
+
+#: src/tour/tour-script.ts
+msgid "Welcome to Grasp. Shall I show you around? It takes about a minute."
+msgstr "Bienvenue sur Grasp. Je vous fais visiter ? Il y en a pour une minute."
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"

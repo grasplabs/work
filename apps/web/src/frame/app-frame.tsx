@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { keepFolded, readFolded } from "../fold.ts";
+import { TourLayer } from "../tour/tour-layer.tsx";
 import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
 
@@ -48,6 +49,7 @@ export const AppFrame = ({
             <InFrame value>{children}</InFrame>
           </SidebarInset>
           {aside}
+          <TourLayer identity={identity} />
         </SidebarProvider>
       </TooltipProvider>
     </Toaster>
