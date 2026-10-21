@@ -81,7 +81,10 @@ export const hasNodeModules = (settings: {
     return false;
   }
   return (
-    flags.some((flag) => flag.startsWith("nodejs_compat")) ||
+    // Only the flags that turn them on: `nodejs_compat_populate_process_env`
+    // and its like tune them, and give none by themselves.
+    flags.includes("nodejs_compat") ||
+    flags.includes("nodejs_compat_v2") ||
     settings.compatibilityDate >= nodejsByDefaultFrom
   );
 };
