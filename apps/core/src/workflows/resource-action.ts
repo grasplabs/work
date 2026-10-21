@@ -25,6 +25,7 @@ import {
 } from "../workflow-modules.ts";
 import type { AdmissionReason, BuiltCall } from "./resource-calls.ts";
 import { requireShape } from "./resource-calls.ts";
+import { filesCallOperations } from "./run-files.ts";
 
 // A run's call of one of its workflow's own actions (platform
 // specification 13.6; GRA-666 has the threat model): a `grasp.operation`
@@ -68,6 +69,9 @@ import { requireShape } from "./resource-calls.ts";
 //   attempt begins; each of its calls admits them again before it is made
 //   (resource-host.ts, `#action`), so a graph revoked mid-attempt makes no
 //   call more.
+// - Doing more with the run's own files than its files uses name
+//   (GRA-724): only the operations a use declares, on files of its own
+//   run, each written only by the task that opened it (run-files.ts).
 // - Model calls past the run's cap, or uncounted once its step replays
 //   (GRA-700). A model use's calls send the binding's own model the
 //   sealed output shape, never one the action makes up, and the host
@@ -109,6 +113,15 @@ const modelRequestSchema = z.strictObject({
  */
 const knowledgeRequestSchema = z.strictObject({
   operation: z.enum(["search", "read"]),
+  arguments: jsonSchema,
+});
+
+/**
+ * What an action asks of a files binding: one call on its run's own files,
+ * and its request (GRA-724), which run-files.ts checks.
+ */
+const filesRequestSchema = z.strictObject({
+  operation: z.enum(["open", "append", "finish", "read", "list", "delete"]),
   arguments: jsonSchema,
 });
 
@@ -202,7 +215,9 @@ class ActionHost extends RpcTarget {
         {
           kind: use.kind,
           operations: new Set(
-            use.kind === "connector" || use.kind === "knowledge"
+            use.kind === "connector" ||
+              use.kind === "knowledge" ||
+              use.kind === "files"
               ? use.operations
               : []
           ),
@@ -249,6 +264,61 @@ class ActionHost extends RpcTarget {
       this.#state.admission ??= { reason, call };
     }
     throw error;
+  }
+
+  /**
+   * One call of a files use (GRA-724): only what its sealed use declares,
+   * opening, adding to and finishing a file all being writing it.
+   */
+  async #files(
+    alias: string,
+    operations: ReadonlySet<string>,
+    request: unknown,
+    ordinal: number
+  ): Promise<Json> {
+    const parsed = filesRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      return this.#refuse(
+        "request_invalid",
+        alias,
+        workflowResourceErrors.create("workflow.call_invalid")
+      );
+    }
+    if (!operations.has(filesCallOperations[parsed.data.operation])) {
+      return this.#refuse(
+        "operation_undeclared",
+        alias,
+        workflowResourceErrors.create("workflow.call_denied")
+      );
+    }
+    return await this.#effects.make(
+      {
+        name: "grasp.files",
+        binding: alias,
+        operation: parsed.data.operation,
+        arguments: parsed.data.arguments,
+      },
+      ordinal
+    );
+  }
+
+  /** Reading a template use's pinned version: an empty request (GRA-700). */
+  async #template(
+    alias: string,
+    request: unknown,
+    ordinal: number
+  ): Promise<Json> {
+    if (!templateRequestSchema.safeParse(request).success) {
+      return this.#refuse(
+        "request_invalid",
+        alias,
+        workflowResourceErrors.create("workflow.call_invalid")
+      );
+    }
+    return await this.#effects.make(
+      { name: "grasp.template", binding: alias },
+      ordinal
+    );
   }
 
   async #call(alias: unknown, request: unknown): Promise<Json> {
@@ -340,18 +410,11 @@ class ActionHost extends RpcTarget {
         ordinal
       );
     }
+    if (kind === "files") {
+      return await this.#files(alias, use.operations, request, ordinal);
+    }
     if (kind === "template") {
-      if (!templateRequestSchema.safeParse(request).success) {
-        return this.#refuse(
-          "request_invalid",
-          alias,
-          workflowResourceErrors.create("workflow.call_invalid")
-        );
-      }
-      return await this.#effects.make(
-        { name: "grasp.template", binding: alias },
-        ordinal
-      );
+      return await this.#template(alias, request, ordinal);
     }
     if (kind === "model") {
       const asked = modelRequestSchema.safeParse(request);
