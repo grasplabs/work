@@ -227,12 +227,19 @@ const statements = [
 
 /** Runs Wrangler in the console's folder, in its local mode; throws if it fails. */
 const wrangler = (args: string[]): void => {
-  const result = spawnSync("wrangler", args, {
-    cwd: consoleDir,
-    stdio: "inherit",
-  });
+  // The console's own Wrangler, whatever is on PATH.
+  const result = spawnSync(
+    path.join(consoleDir, "node_modules/.bin/wrangler"),
+    args,
+    {
+      cwd: consoleDir,
+      stdio: "inherit",
+    }
+  );
   if (result.status !== 0) {
-    throw new Error(`wrangler ${args.join(" ")} failed`);
+    throw new Error(`wrangler ${args.join(" ")} failed`, {
+      cause: result.error,
+    });
   }
 };
 
