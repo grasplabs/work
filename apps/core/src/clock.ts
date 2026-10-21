@@ -260,7 +260,8 @@ const runClaimed = async (
   env: Env,
   tasks: readonly ClockTask[],
   at: number,
-  settle: (name: string, failed: boolean) => unknown
+  settle: (name: string, failed: boolean) => unknown,
+  waitUntil: (promise: Promise<unknown>) => void
 ): Promise<void> => {
   const runs = tasks.map(async (task) => {
     let failed = false;
@@ -282,11 +283,15 @@ const runClaimed = async (
       });
     }
   });
+  // Kept alive past the wait: a task that outlives it still ends, and
+  // settles, on its own invocation.
+  const all = Promise.allSettled(runs);
+  waitUntil(all);
   const { promise: waited, resolve } = Promise.withResolvers<"waited">();
   const timer = setTimeout(() => {
     resolve("waited");
   }, clockTickWaitMs);
-  await Promise.race([Promise.allSettled(runs), waited]);
+  await Promise.race([all, waited]);
   clearTimeout(timer);
 };
 
@@ -375,9 +380,17 @@ export class Clock extends DurableObject<Env> {
         now,
         now
       );
-      await runClaimed(this.env, claimed, now, (name, failed) => {
-        this.#settle(name, now, failed);
-      });
+      await runClaimed(
+        this.env,
+        claimed,
+        now,
+        (name, failed) => {
+          this.#settle(name, now, failed);
+        },
+        (promise) => {
+          this.ctx.waitUntil(promise);
+        }
+      );
     } finally {
       await this.rearm();
     }
@@ -492,6 +505,7 @@ export const clock = (
  */
 export const tickClock = async (
   env: Env,
+  ctx: Pick<ExecutionContext, "waitUntil">,
   period: ClockPeriod,
   at: number
 ): Promise<void> => {
@@ -503,9 +517,17 @@ export const tickClock = async (
     return task === undefined ? [] : [task];
   });
   try {
-    await runClaimed(env, tasks, at, async (name, failed) => {
-      await stub.settle(name, claim.started, failed);
-    });
+    await runClaimed(
+      env,
+      tasks,
+      at,
+      async (name, failed) => {
+        await stub.settle(name, claim.started, failed);
+      },
+      (promise) => {
+        ctx.waitUntil(promise);
+      }
+    );
   } finally {
     await stub.rearm();
   }
