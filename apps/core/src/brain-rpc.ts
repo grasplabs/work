@@ -13,6 +13,10 @@ import type {
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
+import type {
+  BrainRecordInput,
+  BrainRecordsAdded,
+} from "@grasp-os/shared/brain-records";
 import type { CatalogSource } from "@grasp-os/shared/connect";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
@@ -26,6 +30,7 @@ import { organizationId } from "./auth/auth.ts";
 import { brainChanges } from "./brain-changes.ts";
 import type { SourceChange } from "./brain-changes.ts";
 import { brainNotes } from "./brain-notes.ts";
+import { addBrainRecords, readBrainRecords } from "./brain-records.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { mondayOf } from "./onboarding/rules.ts";
@@ -51,10 +56,11 @@ import type { SessionCheck } from "./session-check.ts";
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
-// | goals, statements, | nothing core can read holds them yet: empty              |
-// | workflows,         |                                                          |
-// | candidates, gaps,  |                                                          |
-// | landscape,         |                                                          |
+// | sources, tools,    | the Playbook's records (brain-records.ts), for everyone  |
+// | candidates,        | signed in, after the onboarding's                        |
+// | statements         |                                                          |
+// | goals, workflows,  | nothing core can read holds them yet: empty              |
+// | gaps, landscape,   |                                                          |
 // | policies           |                                                          |
 //
 // The onboarding (who works where, the kickoff, the interviews' progress,
@@ -72,10 +78,11 @@ import type { SessionCheck } from "./session-check.ts";
 // the tools its reading names, used by the teams it names: what the
 // admin's own list of them shows, never its text.
 //
-// The Intake's statements and sources and the workflow map's workflows
-// are in each App's own store, which only its builders reach, since
-// Knowledge stopped keeping App records (#716). Until core has a read of
-// them the brain may make for a person, they stay out.
+// The Playbook's records are company facts with no person in them (no
+// author, no transcript), added by admins (`brain.addRecords`), so every
+// member reads them. The Intake App's statements and sources and the
+// workflow map's workflows stay in each App's own store, which only its
+// builders reach (#716): they reach the brain only as records added here.
 
 /** The kickoff, as the source the vision was set in. */
 const kickoffSourceId = "src-kickoff";
@@ -537,10 +544,11 @@ export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [facts, name, connections] = await Promise.all([
+  const [facts, name, connections, records] = await Promise.all([
     onboardingFacts(env, person),
     organizationName(env),
     connectionsOf(env, person),
+    readBrainRecords(env),
   ]);
 
   const company: Company = {
@@ -556,10 +564,13 @@ export const readBrain = async (
     vision: visionOf(facts),
     goals: [],
     teams,
-    tools: documentTools(facts, teamsByName(teams)),
-    sources: onboardingSources(facts).map(({ source }) => source),
-    statements: [],
-    candidates: [],
+    tools: [...documentTools(facts, teamsByName(teams)), ...records.tools],
+    sources: [
+      ...onboardingSources(facts).map(({ source }) => source),
+      ...records.sources,
+    ],
+    statements: records.statements,
+    candidates: records.candidates,
     gaps: [],
     workflows: [],
     connections,
@@ -571,7 +582,8 @@ export const readBrain = async (
 /**
  * The company brain over `/rpc`: for anyone signed in. Its workspace isn't
  * audited itself: it reads nothing from Knowledge. Its changes are, as the
- * Knowledge read they are (brain-changes.ts).
+ * Knowledge read they are (brain-changes.ts). Adding records is, with the
+ * records it added.
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
   readonly #env: Env;
@@ -607,6 +619,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
           options,
           sourceChanges(await onboardingFacts(this.#env, person))
         )
+    );
+  }
+
+  async addRecords(records: BrainRecordInput[]): Promise<BrainRecordsAdded> {
+    return await withPerson(
+      this.#check,
+      async (person) => await addBrainRecords(this.#env, person, records)
     );
   }
 }
