@@ -3658,7 +3658,16 @@ export const brainRecords = sqliteTable(
     /** The order records were added in: `brain.read` keeps it. */
     position: integer().primaryKey({ autoIncrement: true }),
     type: text({
-      enum: ["source", "tool", "candidate", "statement"],
+      enum: [
+        "source",
+        "tool",
+        "candidate",
+        "statement",
+        "team",
+        "teamCount",
+        "stakeholder",
+        "gap",
+      ],
     }).notNull(),
     id: text().notNull(),
     body: text().notNull(),
@@ -3691,3 +3700,19 @@ export const admissionTopics = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.id, table.revision] })]
 );
+
+/**
+ * What became of the Playbook's gaps (brain-records.ts): one row once a
+ * gap was asked about, answered or closed, each set once, never cleared.
+ * A gap with no row is open and nobody was asked.
+ */
+export const brainGapStates = sqliteTable("brain_gap_states", {
+  /** The gap's record id. */
+  gapId: text("gap_id").primaryKey(),
+  askedAt: timestamp("asked_at"),
+  closedAt: timestamp("closed_at"),
+  /** The answer, in the words of who gave it; null when closed without one. */
+  answer: text(),
+  /** Their name when they answered, as they chose to give it. */
+  answeredBy: text("answered_by"),
+});

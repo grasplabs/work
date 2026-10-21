@@ -212,6 +212,8 @@ export interface Gap {
   sourceId: string;
   /** Brain note ids, statement ids or workflow ids this gap is about. */
   about: string[];
+  /** ISO date Grasp asked the owner. Empty while nobody was asked. */
+  askedAt?: string;
   closedAt?: string;
   /** The answer in the words of who gave it, and who that was. */
   answer?: string;
@@ -341,6 +343,15 @@ export interface BrainApi {
    * admins. A record core holds already, exactly so, is left as it is.
    */
   addRecords: (records: BrainRecordInput[]) => Promise<BrainRecordsAdded>;
+  /** Records that the gap's owner was asked, once: for admins. */
+  askAboutGap: (gapId: string) => Promise<Gap>;
+  /**
+   * Answers an open gap in the person's own words, with their name, and
+   * closes it: for every member.
+   */
+  answerGap: (gapId: string, answer: string) => Promise<Gap>;
+  /** Closes an open gap without an answer: for admins. */
+  closeGap: (gapId: string) => Promise<Gap>;
 }
 
 /** Why a brain call was refused. */

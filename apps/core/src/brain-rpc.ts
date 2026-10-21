@@ -5,6 +5,7 @@ import type {
   BrainNotePage,
   Company,
   Connection,
+  Gap,
   Source,
   Stakeholder,
   Team,
@@ -29,8 +30,16 @@ import { drizzle } from "drizzle-orm/d1";
 import { organizationId } from "./auth/auth.ts";
 import { brainChanges } from "./brain-changes.ts";
 import type { SourceChange } from "./brain-changes.ts";
+import {
+  answerGap,
+  askAboutGap,
+  closeGap,
+  gapStatesOf,
+  gapWith,
+} from "./brain-gaps.ts";
 import { brainNotes } from "./brain-notes.ts";
 import { addBrainRecords, readBrainRecords } from "./brain-records.ts";
+import type { HeldRecords } from "./brain-records.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { mondayOf } from "./onboarding/rules.ts";
@@ -57,10 +66,11 @@ import type { SessionCheck } from "./session-check.ts";
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
 // | sources, tools,    | the Playbook's records (brain-records.ts), for everyone  |
-// | candidates,        | signed in, after the onboarding's                        |
-// | statements         |                                                          |
+// | candidates,        | signed in, after the onboarding's; a record's counts and |
+// | statements, teams, | stakeholders for an onboarding team join that team, for  |
+// | gaps               | whoever reads it; gaps with what became of them          |
 // | goals, workflows,  | nothing core can read holds them yet: empty              |
-// | gaps, landscape,   |                                                          |
+// | landscape,         |                                                          |
 // | policies           |                                                          |
 //
 // The onboarding (who works where, the kickoff, the interviews' progress,
@@ -571,6 +581,30 @@ const connectionsOf = async (
   return [...offered, ...unlisted];
 };
 
+/**
+ * The onboarding's teams, with what the Playbook added for each, then the
+ * Playbook's own. A value for a team the person can't see is left out.
+ */
+const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
+  const byId = new Map(onboarding.map((team) => [team.id, team]));
+  for (const { teamId, value } of records.teamCounts) {
+    byId.get(teamId)?.counts.push(value);
+  }
+  for (const { teamId, value } of records.stakeholders) {
+    byId.get(teamId)?.stakeholders.push(value);
+  }
+  return [...onboarding, ...records.teams];
+};
+
+/** The Playbook's gaps, with what became of each. */
+const gapsOf = async (env: Env, records: HeldRecords): Promise<Gap[]> => {
+  const states = await gapStatesOf(
+    env,
+    records.gaps.map(({ id }) => id)
+  );
+  return records.gaps.map((gap) => gapWith(gap, states.get(gap.id)));
+};
+
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
@@ -608,12 +642,12 @@ export const readBrain = async (
     company,
     vision: visionOf(facts),
     goals: [],
-    teams,
+    teams: teamsOf(teams, records),
     tools: [...documentTools(facts, teamsByName(teams)), ...records.tools],
     sources: [...sources, ...records.sources],
     statements: records.statements,
     candidates: records.candidates,
-    gaps: [],
+    gaps: await gapsOf(env, records),
     workflows: [],
     connections,
     landscape: [],
@@ -668,6 +702,27 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await addBrainRecords(this.#env, person, records)
+    );
+  }
+
+  async askAboutGap(gapId: string): Promise<Gap> {
+    return await withPerson(
+      this.#check,
+      async (person) => await askAboutGap(this.#env, person, gapId)
+    );
+  }
+
+  async answerGap(gapId: string, answer: string): Promise<Gap> {
+    return await withPerson(
+      this.#check,
+      async (person) => await answerGap(this.#env, person, gapId, answer)
+    );
+  }
+
+  async closeGap(gapId: string): Promise<Gap> {
+    return await withPerson(
+      this.#check,
+      async (person) => await closeGap(this.#env, person, gapId)
     );
   }
 }
