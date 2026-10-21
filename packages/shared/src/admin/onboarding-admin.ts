@@ -1916,7 +1916,19 @@ export type Need =
   /** An integration stopped until someone at the company signs in again. */
   | { kind: "signin"; integration: Integration }
   /** More AI was used in a month than the contract covers, in euros. */
-  | { kind: "budget"; month: string; spend: number; included: number };
+  | { kind: "budget"; month: string; spend: number; included: number }
+  /**
+   * Invoices past their due date and not paid, as Stripe has them: how
+   * many, what they come to together (in `currency`'s units, not cents),
+   * and the day the oldest was due.
+   */
+  | {
+      kind: "overdue";
+      count: number;
+      amount: number;
+      currency: string;
+      since: string;
+    };
 
 /** Where what Grasp knows about an organization comes from: the same sources, with the same weights, as the company's own onboarding counts. */
 export const KNOWLEDGE_SOURCES = [

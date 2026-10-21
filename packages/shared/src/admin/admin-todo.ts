@@ -84,6 +84,7 @@ const NEED_STAGE: Record<Need["kind"], Stage | null> = {
   ending: null,
   signin: null,
   budget: null,
+  overdue: null,
 };
 
 /** What one stage asks for. */

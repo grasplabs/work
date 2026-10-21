@@ -47,6 +47,7 @@ export const WITH_COMPANY: readonly Need["kind"][] = [
   "conflict",
   "ask",
   "budget",
+  "overdue",
   "signin",
   "split",
 ];

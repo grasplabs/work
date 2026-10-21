@@ -263,6 +263,12 @@ const euros = (value: number) =>
   `€${Math.round(value).toLocaleString("en-GB")}`;
 const euroCents = (value: number) =>
   `€${value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** An amount in a currency Stripe names, such as `eur`. */
+const money = (value: number, currency: string) =>
+  value.toLocaleString("en-GB", {
+    style: "currency",
+    currency: currency.toUpperCase(),
+  });
 const hours = (value: number) => `${Math.round(value * 10) / 10}`;
 /** So many of a thing, in the right number: "1 thing", "2 things". */
 const many = (count: number, one: string, other: string) =>
@@ -273,7 +279,7 @@ const given = (text: string | null | undefined): text is string =>
 
 type AccountNeed = Extract<
   Need,
-  { kind: "contract" | "ending" | "signin" | "budget" }
+  { kind: "contract" | "ending" | "signin" | "budget" | "overdue" }
 >;
 
 const ACCOUNT_NEEDS: ReadonlySet<Need["kind"]> = new Set([
@@ -281,6 +287,7 @@ const ACCOUNT_NEEDS: ReadonlySet<Need["kind"]> = new Set([
   "ending",
   "signin",
   "budget",
+  "overdue",
 ]);
 
 const isAccountNeed = (need: Need): need is AccountNeed =>
@@ -302,6 +309,9 @@ const accountNeedText = (need: AccountNeed): string => {
     }
     case "budget": {
       return `More AI than the contract covers in ${need.month}: ${euros(need.spend)} against ${euros(need.included)}.`;
+    }
+    case "overdue": {
+      return `${many(need.count, "invoice is", "invoices are")} overdue in Stripe, ${money(need.amount, need.currency)} in all, the oldest due on ${need.since}.`;
     }
     default: {
       return need satisfies never;
