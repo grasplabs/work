@@ -399,7 +399,11 @@ const searchRecord = async (
 /**
  * How many readable documents in the search's scope (`scope`, `type`)
  * search can't see at their current version: queued or retrying, and
- * failed. Each count stops at `searchCoverageCap`.
+ * failed, each counted up to `searchCoverageCap`. Unscoped, only
+ * collections that aren't sensitive are counted: a count says something of
+ * what it counts, and a sensitive collection isn't among an unscoped
+ * read's sources unless a hit is from it. A scoped search's collection is
+ * among them, whatever it is.
  */
 const coverageOf = async (
   db: DrizzleD1Database,
@@ -407,20 +411,20 @@ const coverageOf = async (
   scope: string | undefined,
   type: string | undefined
 ): Promise<SearchCoverage> => {
-  const [row] = await db.all<{ pending: number; failed: number }>(sql`
-    SELECT
-      min(${searchCoverageCap}, coalesce(sum(state <> 'failed'), 0)) AS pending,
-      min(${searchCoverageCap}, coalesce(sum(state = 'failed'), 0)) AS failed
-    FROM (
-      SELECT documents.index_state AS state
-      FROM documents
+  const counted = (states: SQL) => sql`(
+    SELECT count(*) FROM (
+      SELECT 1 FROM documents
       JOIN collections ON collections.id = documents.collection_id
-      WHERE documents.index_state IN ('queued', 'retrying', 'failed')
+      WHERE documents.index_state IN ${states}
         AND ${allowed.documents()}
-        ${scope === undefined ? sql`` : sql`AND collections.id = ${scope}`}
+        ${scope === undefined ? sql`AND collections.sensitive = 0` : sql`AND collections.id = ${scope}`}
         ${type === undefined ? sql`` : sql`AND documents.type = ${type}`}
-      LIMIT ${2 * searchCoverageCap}
+      LIMIT ${searchCoverageCap}
     )
+  )`;
+  const [row] = await db.all<{ pending: number; failed: number }>(sql`
+    SELECT ${counted(sql`('queued', 'retrying')`)} AS pending,
+      ${counted(sql`('failed')`)} AS failed
   `);
   return { pending: row?.pending ?? 0, failed: row?.failed ?? 0 };
 };

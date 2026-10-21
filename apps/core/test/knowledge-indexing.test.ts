@@ -11,6 +11,7 @@ import { indexRunId } from "../src/knowledge/indexing.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { newTeam } from "./knowledge.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Search holds one generation of each document, published after the save
@@ -417,6 +418,47 @@ describe("publishing search generations", () => {
       userScoped: "knowledge.not_found",
       admin: [1],
       adminCoverage: { pending: 1, failed: 0 },
+    });
+  });
+
+  it("counts a sensitive collection's waiting documents only in a search of that collection", async () => {
+    const admin = await knowledgeOf("admin");
+    const teamId = await newTeam(admin, [admin]);
+    const word = `Sensitive${unique()}`;
+    const { id: collectionId } = await admin.api.createCollection({
+      name: `Payroll ${unique()}`,
+      access: "teams",
+      teams: [teamId],
+      sensitive: true,
+    });
+    const { coverage: before } = await admin.api.search(word);
+    const restore = failNextPublish();
+    try {
+      await withEngineDown(
+        async () =>
+          await admin.api.saveDocument({
+            collectionId,
+            path: "salaries.md",
+            text: textOf(word),
+            ifVersion: 0,
+          })
+      );
+    } finally {
+      restore();
+    }
+    const unscoped = await admin.api.search(word);
+    const scoped = await admin.api.search(word, { collectionId });
+
+    expect({
+      unscoped: unscoped.coverage,
+      unscopedRestricted: unscoped.provenance.restricted,
+      scoped: scoped.coverage,
+      scopedSensitive: scoped.provenance.sensitive,
+    }).toStrictEqual({
+      unscoped: before,
+      unscopedRestricted: false,
+      scoped: { pending: 1, failed: 0 },
+      scopedSensitive: true,
     });
   });
 
