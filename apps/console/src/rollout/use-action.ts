@@ -6,6 +6,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   domain_not_set:
     "The console has no CLIENT_DOMAIN yet, so no client can be deployed.",
   release_not_imported: "That release isn't imported.",
+  limit_evidence_missing:
+    "That release raises a platform limit without capacity and security evidence for a client in scope, so it can't reach that client.",
   no_targets: "No active client is in that scope.",
   ring_zero_only:
     "No active client past ring 0 is in that scope, so it would reach only our own deployments: pick a ring or client that has one.",

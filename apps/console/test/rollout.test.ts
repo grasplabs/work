@@ -46,7 +46,8 @@ import { checkRevocation } from "../src/rollout/shared-secrets.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api.ts";
 import { racingDb } from "./racing-db.ts";
-import { publishRelease } from "./releases.ts";
+import { evidenceFor, publishRelease, testLimits } from "./releases.ts";
+import type { ReleaseSpec } from "./releases.ts";
 import {
   emptyStoreSecret,
   setStoreSecret,
@@ -60,8 +61,11 @@ const db = consoleDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 
 /** A release, published and imported. */
-const importedRelease = async (notes: string): Promise<string> => {
-  const release = await publishRelease({ notes });
+const importedRelease = async (
+  notes: string,
+  spec: Omit<ReleaseSpec, "notes"> = {}
+): Promise<string> => {
+  const release = await publishRelease({ notes, ...spec });
   await importReleases(env.RELEASES, db);
   return release.id;
 };
@@ -3983,6 +3987,114 @@ describe("applying a client's settings now", () => {
       },
       events: 0,
       runner: "rollout",
+    });
+  });
+});
+
+describe("rolling out a release that raises a platform limit", () => {
+  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  beforeEach(setAsideEarlierTests);
+
+  const raised = { ...testLimits, workflowSteps: 2000 };
+
+  /** A release raising `workflowSteps` over `previous`, with evidence on `profiles`. */
+  const raising = async (
+    previous: string,
+    profiles: ("cloudflare" | "workerd")[]
+  ): Promise<string> =>
+    await importedRelease("feat(core): more workflow steps", {
+      platformLimits: raised,
+      previousRelease: { releaseId: previous, platformLimits: testLimits },
+      limitEvidence: (release) =>
+        profiles.map((profile) =>
+          evidenceFor(release, "workflowSteps", 2000, profile)
+        ),
+    });
+
+  /** A release after `previous` that keeps its limits. */
+  const keeping = async (previous: string): Promise<string> =>
+    await importedRelease("feat(core): keeps the limits", {
+      platformLimits: raised,
+      previousRelease: { releaseId: previous, platformLimits: raised },
+    });
+
+  const rolloutCount = async (): Promise<number> => {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(rollouts);
+    return row?.count ?? 0;
+  };
+
+  it("refuses to start one whose raise has evidence only for another profile than its clients', starting nothing", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const onPremOnly = await raising(before, ["workerd"]);
+    const created = await rolloutCount();
+
+    const refused = await codeOf(rollOut(onPremOnly, { scope: "all" }));
+
+    expect({
+      refused,
+      created: (await rolloutCount()) - created,
+    }).toStrictEqual({ refused: "limit_evidence_missing", created: 0 });
+  });
+
+  it("refuses one that skips the release whose raise has no evidence for the client's profile", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const skipped = await raising(before, ["workerd"]);
+    const later = await keeping(skipped);
+
+    const refused = await codeOf(rollOut(later, { scope: "all" }));
+
+    expect(refused).toBe("limit_evidence_missing");
+  });
+
+  it("rolls out a release past a raise it skips when the skipped release's evidence covers the client's profile", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    const { clientId } = await activeClient(0, before);
+    const covered = await raising(before, ["cloudflare", "workerd"]);
+    const later = await keeping(covered);
+    await using run = await followRollouts();
+
+    const rolloutId = await rollOut(later, { scope: "all" });
+    await run.waitForStatus("complete");
+
+    const targets = await targetsOf(rolloutId);
+    expect({
+      target: targets[clientId],
+      releases: await releasesOf(clientId),
+    }).toStrictEqual({
+      target: { ring: 0, status: "done", error: null },
+      releases: [later, later],
+    });
+  });
+
+  it("refuses a release's first deploy to a client past a raise without evidence for its profile, raised before the client existed", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    const onPremOnly = await raising(before, ["workerd"]);
+    const later = await keeping(onPremOnly);
+    const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
+    const now = new Date();
+    await db.insert(clients).values({
+      id: clientId,
+      name: clientId,
+      accountId: cloudflare.addAccount().id,
+      ring: 0,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const refused = await codeOf(startDeploy(db, staff, clientId, later));
+
+    const deploys = await db
+      .select({ id: clientDeploys.id })
+      .from(clientDeploys)
+      .where(eq(clientDeploys.clientId, clientId));
+    expect({ refused, deploys }).toStrictEqual({
+      refused: "limit_evidence_missing",
+      deploys: [],
     });
   });
 });

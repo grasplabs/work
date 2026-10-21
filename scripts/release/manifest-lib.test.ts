@@ -299,4 +299,22 @@ describe("a written release", () => {
     writeFileSync(path.join(out, "manifest.json"), moved);
     await expect(verifyRelease(out)).rejects.toThrow(/content address/u);
   });
+
+  it("fails verification when it raises a platform limit without evidence, so it's never published", async () => {
+    const raising = generateManifest(
+      {
+        ...info,
+        platformLimits: { ...info.platformLimits, workflowSteps: 2000 },
+        previousRelease: {
+          releaseId: "r000000-0000000",
+          platformLimits: info.platformLimits,
+        },
+      },
+      fixture
+    );
+    writeRelease(out, raising, fixture);
+    await expect(verifyRelease(out)).rejects.toThrow(
+      /raises workflowSteps to 2000 without/u
+    );
+  });
 });

@@ -4,6 +4,11 @@ export const rolloutErrorCodes = [
   "domain_not_set",
   /** The release isn't imported. */
   "release_not_imported",
+  /**
+   * The release raises a platform limit over what a client in scope runs
+   * without capacity and security evidence for the client's profile.
+   */
+  "limit_evidence_missing",
   /** No active client is in what the rollout was started for. */
   "no_targets",
   /**

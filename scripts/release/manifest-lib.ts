@@ -28,6 +28,7 @@ import {
   moduleKey,
   observabilitySchema,
   releaseManifestSchema,
+  verifyLimitEvidence,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
@@ -286,15 +287,23 @@ const workerEntry = (
   };
 };
 
-/** Release metadata that isn't read from the Workers' builds. */
-export interface ReleaseInfo {
-  releaseId: string;
-  commit: string;
-  createdAt: string;
-  notes: string;
-  wranglerVersion: string;
-  packages: Record<string, string>;
-}
+/**
+ * Release metadata that isn't read from the Workers' builds: among it, the
+ * platform limits the Workers were built with, the release published
+ * before this one, and the evidence for each limit raised over it.
+ */
+export type ReleaseInfo = Pick<
+  ReleaseManifest,
+  | "releaseId"
+  | "commit"
+  | "createdAt"
+  | "notes"
+  | "wranglerVersion"
+  | "packages"
+  | "platformLimits"
+  | "previousRelease"
+  | "limitEvidence"
+>;
 
 /** Assembles the manifest from each Worker's build. */
 export const generateManifest = (
@@ -398,8 +407,10 @@ export interface VerifiedRelease {
 
 /**
  * Checks a release directory against its manifest, as the console checks
- * a release in R2 (`verifyReleaseBlobs`). Each file is read once, and
- * those bytes are returned, so what's published is what was checked.
+ * a release in R2: its limit evidence (`verifyLimitEvidence`), so a
+ * release that raises a limit without it is never published, and its
+ * blobs (`verifyReleaseBlobs`). Each file is read once, and those bytes
+ * are returned, so what's published is what was checked.
  */
 export const verifyRelease = async (
   outDir: string
@@ -408,6 +419,7 @@ export const verifyRelease = async (
   const manifest = releaseManifestSchema.parse(
     JSON.parse(manifestBytes.toString("utf-8"))
   );
+  verifyLimitEvidence(manifest);
   const blobs = new Map<string, Buffer>();
   // Keys are content addresses under blobs/ by the time they're read:
   // `verifyReleaseBlobs` refuses any other, so none names a path outside

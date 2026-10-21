@@ -22,6 +22,7 @@
     "test:durations": "node scripts/test-durations.ts",
     "release:build": "node scripts/release/build-release.ts",
     "release:upload": "node scripts/release/upload-release.ts",
+    "release:previous": "node scripts/release/previous-release.ts",
     "package:definition": "node scripts/package-definition.ts",
     "parity": "node scripts/parity/run.ts"
   },

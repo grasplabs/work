@@ -26,10 +26,12 @@ import type { ReleaseStore } from "../src/releases/import.ts";
 import worker from "../src/server.ts";
 import {
   buildRelease,
+  evidenceFor,
   nextReleaseId,
   publishRelease,
   putBlobs,
   putManifest,
+  testLimits,
 } from "./releases.ts";
 import type { TestRelease } from "./releases.ts";
 
@@ -494,5 +496,136 @@ CREATE TABLE t (id TEXT);`,
     );
 
     await expect(releaseRow(release.id)).resolves.toBeDefined();
+  });
+});
+
+describe("importing a release that raises a platform limit", () => {
+  /** A published, imported release with `testLimits`: what the next ones raise over. */
+  const importedPrevious = async () => {
+    const previous = await publishRelease({ notes: "feat(core): before" });
+    await runImport();
+    await expect(releaseRow(previous.id)).resolves.toBeDefined();
+    return {
+      releaseId: previous.id,
+      platformLimits: previous.manifest.platformLimits,
+    };
+  };
+
+  const raised = { ...testLimits, workflowSteps: 2000 };
+
+  it("refuses one without evidence, with evidence made for another commit, release or capacity run, or for another value", async () => {
+    const previousRelease = await importedPrevious();
+    const otherCommit = "f".repeat(40);
+    const refused = await Promise.all(
+      [
+        () => [],
+        (release: { id: string; commit: string }) => [
+          evidenceFor(
+            { ...release, commit: otherCommit },
+            "workflowSteps",
+            2000
+          ),
+        ],
+        (release: { id: string; commit: string }) => [
+          evidenceFor(
+            { ...release, id: previousRelease.releaseId },
+            "workflowSteps",
+            2000
+          ),
+        ],
+        (release: { id: string; commit: string }) => [
+          {
+            ...evidenceFor(release, "workflowSteps", 2000),
+            capacityRun: {
+              jobId: 1,
+              commit: otherCommit,
+              profile: "cloudflare" as const,
+            },
+          },
+        ],
+        (release: { id: string; commit: string }) => [
+          evidenceFor(release, "workflowSteps", 1500),
+        ],
+      ].map(
+        async (limitEvidence, index) =>
+          await publishRelease({
+            notes: `feat(core): raised ${index}`,
+            platformLimits: raised,
+            previousRelease,
+            limitEvidence,
+          })
+      )
+    );
+
+    const result = await runImport();
+
+    const ids = refused.map((release) => release.id);
+    expect(result.failed).toStrictEqual(expect.arrayContaining(ids));
+    const rows = await Promise.all(ids.map(releaseRow));
+    expect(rows.filter((row) => row !== undefined)).toStrictEqual([]);
+    const failures = await Promise.all(
+      ids.map(async (id) => await eventsFor("release.import_failed", id))
+    );
+    expect(failures.map((events) => events.length)).toStrictEqual(
+      ids.map(() => 1)
+    );
+  });
+
+  it("refuses one that raises over other limits than the release it names as previous has", async () => {
+    const previousRelease = await importedPrevious();
+    // Claims the raise was already there, so it would need no evidence.
+    const hiding = await publishRelease({
+      notes: "feat(core): hides a raise",
+      platformLimits: raised,
+      previousRelease: { ...previousRelease, platformLimits: raised },
+    });
+
+    const result = await runImport();
+
+    expect(result.failed).toContain(hiding.id);
+    await expect(releaseRow(hiding.id)).resolves.toBeUndefined();
+  });
+
+  it("refuses one that names a release built after it as previous", async () => {
+    const early = await buildRelease({ notes: "feat(core): built first" });
+    const later = await publishRelease({ notes: "feat(core): built later" });
+    await runImport();
+    const named = await buildRelease(
+      {
+        notes: "feat(core): names a later one",
+        previousRelease: {
+          releaseId: later.id,
+          platformLimits: later.manifest.platformLimits,
+        },
+      },
+      early.id
+    );
+    await putBlobs(named);
+    await putManifest(named);
+
+    const result = await runImport();
+
+    expect(result.failed).toContain(named.id);
+  });
+
+  it("imports one whose evidence is its own, and audits what it raises on which profiles", async () => {
+    const previousRelease = await importedPrevious();
+    const release = await publishRelease({
+      notes: "feat(core): raised with evidence",
+      platformLimits: raised,
+      previousRelease,
+      limitEvidence: (own) => [
+        evidenceFor(own, "workflowSteps", 2000, "cloudflare"),
+        evidenceFor(own, "workflowSteps", 2000, "workerd"),
+      ],
+    });
+
+    const result = await runImport();
+
+    expect(result.imported).toContain(release.id);
+    const [event] = await importEvents(release.id);
+    expect(JSON.parse(event?.detail ?? "{}")).toMatchObject({
+      raised: "workflowSteps to 2000 on cloudflare+workerd",
+    });
   });
 });

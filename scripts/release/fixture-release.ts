@@ -48,6 +48,9 @@ export const info: ReleaseInfo = {
   notes: "feat(core): a fixture",
   wranglerVersion: "0.0.0-fixture",
   packages: { zod: "0.0.0-fixture" },
+  platformLimits: { authoringFiles: 200, workflowSteps: 1000 },
+  previousRelease: null,
+  limitEvidence: [],
 };
 
 export const builds = async (): Promise<WorkerBuild[]> =>
