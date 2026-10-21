@@ -988,8 +988,9 @@ export const dependencyReview = async (
  * one reported after the graph was proposed is refused all the same,
  * audited as at a resolve (`refuseMalware`), saying the request and that
  * it was its approval; the request stays pending, for an admin to deny.
- * Fails closed when either source can't be read, audited as an approval
- * refused (`dependency.approval_refused`, with its error code). Asked only
+ * Fails closed when either source can't be read, or the check fails any
+ * other way, audited as an approval refused (`dependency.approval_refused`,
+ * with connect's error code, or `internal.unexpected`). Asked only
  * to approve: saying no never waits on either.
  */
 const refuseKnownMalware = async (
@@ -1014,17 +1015,17 @@ const refuseKnownMalware = async (
       graph.packages.map(({ name, version }) => ({ name, version }))
     );
   } catch (error) {
-    const code = packageErrors.codeOf(error);
-    if (code !== undefined) {
-      await auditedBatch(env, db, [
-        outboxed(
-          db,
-          requestEntry(actorOf(by), "approval_refused", found, {
-            errorCode: code,
-          })
-        ),
-      ]);
-    }
+    // Every failure of the check refuses the approval, and is audited so:
+    // connect's own refusal by its code, anything else (connect out of
+    // reach, a call that broke) as unexpected.
+    await auditedBatch(env, db, [
+      outboxed(
+        db,
+        requestEntry(actorOf(by), "approval_refused", found, {
+          errorCode: packageErrors.codeOf(error) ?? "internal.unexpected",
+        })
+      ),
+    ]);
     throw error;
   }
   const [first, ...rest] = known;
