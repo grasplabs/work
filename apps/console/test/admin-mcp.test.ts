@@ -1,11 +1,10 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import { ADMIN_TOOLS } from "@grasp-os/shared/admin/admin-tools";
 import { env, exports } from "cloudflare:workers";
 import { and, eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { adminMcp } from "../src/admin/mcp.ts";
+import { adminMcp, servedTools } from "../src/admin/mcp.ts";
 import { act, consoleDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
@@ -236,7 +235,7 @@ describe("the admin's MCP", () => {
     });
   });
 
-  it("lists every tool of the admin, each read-only, reading nothing", async () => {
+  it("lists the admin's tools the console can feed, each read-only, reading nothing", async () => {
     const acme = await liveClient();
     acme.account.admin = readySnapshot("Acme");
 
@@ -271,7 +270,7 @@ describe("the admin's MCP", () => {
         instructions: "string",
       },
       status: 200,
-      tools: ADMIN_TOOLS.map(({ name }) => name),
+      tools: servedTools.map(({ name }) => name),
       readOnly: true,
       readers: [],
       audited: [],
@@ -343,6 +342,9 @@ describe("the admin's MCP", () => {
         { name: "get_organization", arguments: {} },
         { name: "list_organizations", arguments: { phase: "open", drop: 1 } },
         { name: "delete_organization", arguments: {} },
+        // Not fed by the console yet (GRA-971): not served.
+        { name: "platforms", arguments: {} },
+        { name: "integrations_to_build", arguments: {} },
       ].map(async (params) => {
         const { answer } = await asStaff(rpc("tools/call", params));
         return answer.result?.isError;
@@ -354,7 +356,7 @@ describe("the admin's MCP", () => {
       readers: acme.account.adminReaders,
       audited: await mcpCalls(),
     }).toStrictEqual({
-      answers: [true, true, true, true],
+      answers: [true, true, true, true, true, true],
       readers: [],
       audited: [],
     });
