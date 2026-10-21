@@ -222,37 +222,53 @@ const sweepBudgetMs = 20_000;
  */
 const storeStepMs = 5000;
 
+/** Most of a person's preview stores one removal discards (`discardPreviewStoresOf`). */
+const storesPerErasure = 50;
+
+/** How long one removal spends discarding a person's preview stores. */
+const erasureBudgetMs = 10_000;
+
 /**
- * Discards every preview store of person `personId`'s chats, as the sweep
+ * Discards the preview stores of person `personId`'s chats, a page of them
+ * within a budget, as the sweep
  * discards one (`sweepPreviewStores`): each store's object first, then
  * core's record, each step bounded. For a person who may never reach them
  * again (an admin removed them, members.ts): what they typed into their
  * previews goes now, not a week later. Never throws: a store whose
  * discard fails keeps its record, for the sweep, or for the removal tried
- * again. A store recorded before core kept whose it is has none, and is
- * left to the sweep. Answers how many stores went.
+ * again, as is any past the page or the budget. A store recorded before
+ * core kept whose it is has none, and is left to the sweep. Answers how
+ * many stores went.
  */
 export const discardPreviewStoresOf = async (
   env: Env,
   personId: string
 ): Promise<number> => {
   const db = drizzle(env.DB);
+  // Bounded, as the removal waits for it: a page of stores within a
+  // budget, the rest left to the sweep, or to the removal tried again.
+  const until = Date.now() + erasureBudgetMs;
+  const stepMs = () => Math.max(1, Math.min(storeStepMs, until - Date.now()));
   let gone = 0;
   try {
     const stores = await db
       .select({ storeId: previewFixtureStores.storeId })
       .from(previewFixtureStores)
       .where(eq(previewFixtureStores.personId, personId))
-      .orderBy(previewFixtureStores.storeId);
+      .orderBy(previewFixtureStores.storeId)
+      .limit(storesPerErasure);
     for (const { storeId } of stores) {
+      if (Date.now() >= until) {
+        break;
+      }
       try {
         // oxlint-disable-next-line no-await-in-loop -- one store after another
         await within(
           discardFixtureStore(env, storeIdSchema.parse(storeId)),
-          storeStepMs
+          stepMs()
         );
         // oxlint-disable-next-line no-await-in-loop -- as above
-        await within(recordDeleted(db, storeId), storeStepMs);
+        await within(recordDeleted(db, storeId), stepMs());
         gone += 1;
       } catch (error) {
         log.warn("preview.store_erase_failed", {
