@@ -254,7 +254,17 @@ export const discardPreviewStoresOf = async (
     const stores = await db
       .select({ storeId: previewFixtureStores.storeId })
       .from(previewFixtureStores)
-      .where(eq(previewFixtureStores.personId, personId))
+      .where(
+        and(
+          eq(previewFixtureStores.personId, personId),
+          // One whose discard failed waits out its delay, so a removal
+          // tried again gets past it to the rest.
+          or(
+            isNull(previewFixtureStores.retryAfter),
+            lte(previewFixtureStores.retryAfter, new Date())
+          )
+        )
+      )
       .orderBy(previewFixtureStores.storeId)
       .limit(storesPerErasure);
     for (const { storeId } of stores) {
@@ -275,6 +285,8 @@ export const discardPreviewStoresOf = async (
           store: storeId,
           ...errorFields(error),
         });
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await retriedLater(db, storeId, new Date());
       }
     }
   } catch (error) {
@@ -1021,6 +1033,8 @@ export class SealedPreviews {
     try {
       const release = await this.#loaded(chatId, app, running);
       const path = publicOperationOf(release, call.reference);
+      // Before the preview's store is made or opened, as a call's is.
+      await this.#authorizer(chatId, personId, app, running)();
       const store = await this.#storeOf(
         { chatId, personId },
         app,
