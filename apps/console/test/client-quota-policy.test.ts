@@ -2,7 +2,9 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
+import { summaryOf } from "../src/clients/quota-policy-card.tsx";
 import { clientQuotaPolicy } from "../src/clients/quota-policy.ts";
+import type { ClientQuotaPolicy } from "../src/clients/quota-policy.ts";
 import { act, consoleDatabase } from "../src/db/act.ts";
 import { clients, settings } from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
@@ -84,6 +86,25 @@ const deploy = async (clientId: string, releaseId: string): Promise<void> => {
     await startDeploy(db, staff, clientId, releaseId)
   );
 };
+
+/** A policy in state `state`: the console's generation, and core's, if read. */
+const policyOf = (
+  set: number,
+  inForce: number | null,
+  state: ClientQuotaPolicy["state"]
+): ClientQuotaPolicy => ({
+  set: { generation: set, lowered: {}, limitsHash: null },
+  inForce:
+    inForce === null
+      ? null
+      : {
+          generation: inForce,
+          lowered: {},
+          limitsHash: null,
+          recordedAt: null,
+        },
+  state,
+});
 
 describe("a client's quota policy", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
@@ -210,6 +231,29 @@ describe("a client's quota policy", () => {
         state: "unknown",
       },
       missing: null,
+    });
+  });
+
+  it("says what each state means, naming the platform's own never as the console's", () => {
+    expect({
+      inSync: summaryOf(policyOf(3, 3, "in_sync")),
+      refused: summaryOf(policyOf(2, 3, "drifted")),
+      conflict: summaryOf(policyOf(3, 3, "drifted")),
+      noneSet: summaryOf(policyOf(0, 3, "drifted")),
+      pending: summaryOf(policyOf(4, 3, "pending")),
+      unknown: summaryOf(policyOf(0, null, "unknown")),
+    }).toStrictEqual({
+      inSync: "Core applies generation 3, as the console sets.",
+      refused:
+        "Core applies generation 3, not the console's generation 2: it refused the console's policy.",
+      conflict:
+        "Core applies generation 3 with other limits than the console's: it refused the console's policy.",
+      noneSet:
+        "Core applies generation 3, though the console sets none: core keeps the highest generation it recorded.",
+      pending:
+        "Core applies generation 3. The console's change waits for the client's next deploy.",
+      unknown:
+        "The console sets the platform's own. Core couldn't be asked which it applies.",
     });
   });
 });

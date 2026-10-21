@@ -44,22 +44,31 @@ const LoweredLimits = ({ lowered }: Pick<QuotaGeneration, "lowered">) => {
 };
 
 /** What the state means, in one sentence. */
-const summaryOf = ({ set, inForce, state }: ClientQuotaPolicy): string => {
+export const summaryOf = ({
+  set,
+  inForce,
+  state,
+}: ClientQuotaPolicy): string => {
   const ours = generationText(set.generation);
   if (inForce === null) {
     return `The console sets ${ours}. Core couldn't be asked which it applies.`;
   }
   const theirs = generationText(inForce.generation);
-  if (state === "drifted" && inForce.generation === set.generation) {
+  if (state === "pending") {
+    return `Core applies ${theirs}. The console's change waits for the client's next deploy.`;
+  }
+  if (state !== "drifted") {
+    return `Core applies ${theirs}, as the console sets.`;
+  }
+  if (set.generation === 0) {
+    // Core never goes back to an older policy: it keeps the highest it
+    // recorded, whatever the console sets now.
+    return `Core applies ${theirs}, though the console sets none: core keeps the highest generation it recorded.`;
+  }
+  if (inForce.generation === set.generation) {
     return `Core applies ${theirs} with other limits than the console's: it refused the console's policy.`;
   }
-  if (state === "drifted") {
-    return `Core applies ${theirs}, not the console's ${ours}: it refused the console's policy.`;
-  }
-  if (state === "pending") {
-    return `Core applies ${theirs}. The console's ${ours} waits for the client's next deploy.`;
-  }
-  return `Core applies ${theirs}, as the console sets.`;
+  return `Core applies ${theirs}, not the console's ${ours}: it refused the console's policy.`;
 };
 
 export const QuotaPolicyCard = ({ policy }: { policy: ClientQuotaPolicy }) => (
