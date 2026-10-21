@@ -27,9 +27,9 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { DashboardItem } from "../dashboard/nav-item.tsx";
-import { GraspMark } from "../grasp-mark.tsx";
 import { IntegrationsIcon } from "./integrations-icon.tsx";
 import { PersonMenu } from "./person-menu.tsx";
+import { SidebarBrand } from "./sidebar-brand.tsx";
 import { SurfaceNav } from "./surface-nav.tsx";
 
 // The product's sections, down the left beside every signed-in page. What
@@ -81,7 +81,7 @@ const SectionItem = ({ section }: { section: Section }) => {
   );
 };
 
-/** The app's sidebar: the mark, the sections and the person signed in. */
+/** The app's sidebar: the mark and the organization, the sections and the person signed in. */
 export const AppSidebar = ({
   core,
   identity,
@@ -104,16 +104,7 @@ export const AppSidebar = ({
   return (
     <Sidebar collapsible="offcanvas" label={t`Sidebar`} variant="inset">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton render={<Link to="/" />} size="lg">
-              <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-8 items-center justify-center rounded-lg">
-                <GraspMark className="size-4" />
-              </span>
-              <span className="truncate font-medium">Grasp</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <SidebarBrand core={core} />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

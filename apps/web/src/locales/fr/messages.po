@@ -3785,8 +3785,8 @@ msgid "Dropped an event no workflow could take"
 msgstr "A abandonné un événement qu’aucun workflow n’a pu recevoir"
 
 #: src/chat/project-dialog.tsx
-msgid "Each document holds up to 100 KB."
-msgstr "Chaque document fait au plus 100 Ko."
+msgid "Each document holds up to {maxKb} KB."
+msgstr "Chaque document fait au plus {maxKb} Ko."
 
 #: src/routes/_shell.domains.index.tsx
 msgid "Each domain runs one part of the business: its workflows, apps and connections."
@@ -3940,8 +3940,8 @@ msgid "Every chat in this project reads it."
 msgstr "Chaque chat de ce projet le lit."
 
 #: src/chat/project-dialog.tsx
-msgid "Every chat in this project reads them. Markdown, text, CSV or JSON, up to 100 KB each."
-msgstr "Chaque chat de ce projet les lit. Markdown, texte, CSV ou JSON, jusqu’à 100 Ko chacun."
+msgid "Every chat in this project reads them. Markdown, text, CSV or JSON, up to {projectDocumentMaxKb} KB each."
+msgstr "Chaque chat de ce projet les lit. Markdown, texte, CSV ou JSON, jusqu’à {projectDocumentMaxKb} Ko chacun."
 
 #: src/chat/chat-list.tsx
 msgid "Every chat is in a project."

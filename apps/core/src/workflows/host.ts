@@ -122,8 +122,11 @@ export interface HostedRun {
   rootRunId?: RunId;
   /**
    * The run its work is charged to, for a run of another App than its
-   * lineage root's (quotas.ts, `accountClaimed`): from its row, as the
-   * root is. None for a run charged to its lineage's own.
+   * lineage root's, or of the root's App under another App's run, or of
+   * the root's App under a run of that App charged to either, which it
+   * inherits (quotas.ts, `accountClaimed`):
+   * from its row, as the root is. None for a run charged to its lineage's
+   * own.
    */
   accountRunId?: RunId;
   /** Who the run acts for in this execution. */
