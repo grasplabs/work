@@ -158,7 +158,11 @@ const referencesOf = (record: BrainRecord): Reference[] => {
 interface OnboardingHeld {
   /** Its sources: the kickoff once brought in, the staff list once saved. */
   sources: ReadonlySet<string>;
-  /** Its teams, by the ids brain-rpc.ts gives them. */
+  /**
+   * Its teams a value may be for: the roster's, by the ids the admin gave
+   * them. Never a kickoff-only team: its id is its place in the reading
+   * (`team.kickoff-<n>`), which reading the kickoff again moves.
+   */
   teams: ReadonlySet<string>;
 }
 
@@ -167,13 +171,9 @@ const nothingOnboarded: OnboardingHeld = {
   teams: new Set(),
 };
 
-/** A team's name as two sources can both mean it: trimmed, any case. */
-const nameKey = (name: string): string => name.trim().toLowerCase();
-
 /**
  * What the onboarding gives the brain, read only when a record may name
- * it: a team, or one of its source ids. Its teams' ids are brain-rpc.ts's:
- * a roster team's, and a kickoff team's the roster doesn't have.
+ * it: a team, or one of its source ids.
  */
 const onboardingHeld = async (
   env: Env,
@@ -195,18 +195,12 @@ const onboardingHeld = async (
     store.rosterSavedAt(),
   ]);
   const rosterTeams = view.roster?.teams ?? [];
-  const inRoster = new Set(rosterTeams.map(({ name }) => nameKey(name)));
   return {
     sources: new Set([
       ...(kickoff.transcript === null ? [] : ["src-kickoff"]),
       ...(view.roster === null || rosterSavedAt === null ? [] : ["src-roster"]),
     ]),
-    teams: new Set([
-      ...rosterTeams.map(({ id }) => `team-${id}`),
-      ...(kickoff.reading?.teams ?? []).flatMap(({ name }, position) =>
-        inRoster.has(nameKey(name)) ? [] : [`team.kickoff-${position}`]
-      ),
-    ]),
+    teams: new Set(rosterTeams.map(({ id }) => `team-${id}`)),
   };
 };
 

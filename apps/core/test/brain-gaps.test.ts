@@ -1,9 +1,22 @@
+import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import { purgedMarker } from "@grasp-os/shared/knowledge";
+import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
-import { describe, expect, it } from "vite-plus/test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import { fakeGateway } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
-import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
 
 // The Playbook's teams and gaps (core's brain-records.ts and brain-gaps.ts):
 // a team's sizes and stakeholders added as dated values, joining the
@@ -20,6 +33,56 @@ const idp = mockIdp();
 const roster: RosterInput = {
   teams: [{ id: "finance", name: "Finance", lead: null }],
   people: [{ id: "ann", name: "Ann", team: "finance", title: "Accountant" }],
+};
+
+/** Grasp's staff, signed in to the deployment. */
+const staff = async () => {
+  const session = await signedIn(idp, "grasp-staff", staffPerson());
+  const { core } = await openRpc(session);
+  return await core.authenticate();
+};
+
+/** Staff bring a kickoff in that names a team the roster doesn't have. */
+const bringInKickoff = async (): Promise<void> => {
+  const api = await staff();
+  const fake = fakeGateway({
+    text: JSON.stringify({
+      fields: [],
+      teams: [{ name: "Legal", does: "Contracts", people: 3 }],
+    }),
+    inputTokens: 900,
+    outputTokens: 300,
+  });
+  const ai: AiBinding = env.AI;
+  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
+  try {
+    await api.onboardingStaff.saveKickoff({
+      locale: "en",
+      transcript: {
+        text: `Anna (CEO): We are an accounting firm in Utrecht with two teams.
+Jakob (Grasp): Where do you want to be in two years?
+Anna (CEO): We want every client to get their numbers within a week, and AI should help us get there.
+Anna (CEO): Our Finance team has 8 people and spends days copying invoices by hand.
+Anna (CEO): Our Legal team of 3 handles the contracts.`,
+      },
+    });
+  } finally {
+    spy.mockRestore();
+  }
+};
+
+/** Saves `text` as a note in `person`'s Personal collection. */
+const noteOf = async (
+  person: Awaited<ReturnType<typeof signedInApi>>,
+  text: string
+) => {
+  const { personal } = await person.api.memory.collections();
+  return await person.api.knowledge.saveDocument({
+    collectionId: personal,
+    path: `notes/${unique()}.md`,
+    text,
+    ifVersion: 0,
+  });
 };
 
 /** A source, and a gap noticed in it, about a candidate. */
@@ -197,7 +260,29 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
       ),
     };
 
-    expect(outcomes).toStrictEqual({
+    // A kickoff-only team takes no values: its id is its place in the
+    // reading, which reading the kickoff again moves.
+    await bringInKickoff();
+    const withKickoff = await admin.api.brain.read();
+    const kickoffTeams = withKickoff.teams
+      .map(({ id }) => id)
+      .filter((id) => id.startsWith("team.kickoff-"));
+    const kickoffCount = await outcome(
+      admin.api.brain.addRecords([
+        {
+          type: "teamCount",
+          id: `${ids.source}-kickoff`,
+          teamId: kickoffTeams[0] ?? "team.kickoff-0",
+          sourceId: ids.source,
+          date: "2026-10-20",
+          people: 3,
+        },
+      ])
+    );
+
+    expect({ ...outcomes, kickoffTeams, kickoffCount }).toStrictEqual({
+      kickoffTeams: ["team.kickoff-0"],
+      kickoffCount: "brain.record_missing",
       teamCount: "brain.record_missing",
       statementTeam: "brain.record_missing",
       workflow: "brain.record_invalid",
@@ -324,6 +409,124 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
       },
       closed: { answer: undefined, closedAt: true },
       answerAfter: "brain.gap_closed",
+    });
+  });
+});
+
+describe("the Playbook's gap answers", { timeout: 120_000 }, () => {
+  it("show who answered by their name now, and are never answered, asked about or closed by Grasp's staff", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const { ids, records } = gapRecords(unique());
+    await admin.api.brain.addRecords(records);
+    const grasp = await staff();
+
+    const byStaff = {
+      ask: await outcome(grasp.brain.askAboutGap(ids.gap)),
+      answer: await outcome(grasp.brain.answerGap(ids.gap, "About 400.")),
+      close: await outcome(grasp.brain.closeGap(ids.gap)),
+    };
+    await member.api.brain.answerGap(ids.gap, "About 400.");
+    await env.DB.prepare("UPDATE users SET name = ? WHERE id = ?")
+      .bind("Renamed Person", member.userId)
+      .run();
+    const read = await admin.api.brain.read();
+
+    expect({
+      byStaff,
+      answeredBy: read.gaps.find(({ id }) => id === ids.gap)?.answeredBy,
+    }).toStrictEqual({
+      byStaff: {
+        ask: "role.forbidden",
+        answer: "role.forbidden",
+        close: "role.forbidden",
+      },
+      answeredBy: "Renamed Person",
+    });
+  });
+
+  it("are redacted by the company's admins alone, keeping the gap closed, and audited", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const { ids, records } = gapRecords(unique());
+    await admin.api.brain.addRecords(records);
+    await member.api.brain.answerGap(ids.gap, "Ask Ann, she knows.");
+
+    const byMember = await outcome(member.api.brain.redactGapAnswer(ids.gap));
+    let redacted: unknown;
+    const events = await auditedDuring(async () => {
+      redacted = await admin.api.brain.redactGapAnswer(ids.gap);
+    });
+    const read = await member.api.brain.read();
+    const gap = read.gaps.find(({ id }) => id === ids.gap);
+
+    expect({
+      byMember,
+      redacted,
+      gap,
+      events: events
+        .filter(({ action }) => action.startsWith("brain.gap"))
+        .map(({ action, target }) => ({ action, target })),
+    }).toStrictEqual({
+      byMember: "role.forbidden",
+      redacted: gap,
+      gap: {
+        id: ids.gap,
+        question: "How many invoices come in a month?",
+        owner: "Head of finance",
+        sourceId: ids.source,
+        about: [ids.candidate],
+        closedAt: new Date().toISOString().slice(0, 10),
+      },
+      events: [
+        {
+          action: "brain.gap.redacted",
+          target: { type: "brain_gap", id: ids.gap },
+        },
+      ],
+    });
+  });
+
+  it("lose a purged term, and who gave them once that person is purged", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const leaver = await signedInApi(idp, "user");
+    const tag = unique();
+    const name = `Visser${tag}`;
+    const { ids, records } = gapRecords(tag);
+    await admin.api.brain.addRecords(records);
+    await leaver.api.brain.answerGap(ids.gap, `Ask ${name}, she knows.`);
+    const note = await noteOf(leaver, `# Leaving\n${name} hands over.`);
+
+    const content: PurgeInput = {
+      type: "content",
+      documentIds: [note.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const contentPlan = await admin.api.knowledge.preparePurge(content);
+    await admin.api.knowledge.purge(content, contentPlan.token);
+    const readAfterContent = await admin.api.brain.read();
+    const afterContent = readAfterContent.gaps.find(({ id }) => id === ids.gap);
+    const personal: PurgeInput = {
+      type: "personal",
+      userId: leaver.userId,
+      reason: "offboarding",
+    };
+    const personalPlan = await admin.api.knowledge.preparePurge(personal);
+    await admin.api.knowledge.purge(personal, personalPlan.token);
+    const readAfterPersonal = await admin.api.brain.read();
+    const afterPersonal = readAfterPersonal.gaps.find(
+      ({ id }) => id === ids.gap
+    );
+
+    expect({
+      contentAnswer: afterContent?.answer,
+      answeredBy: afterPersonal?.answeredBy,
+      answer: afterPersonal?.answer,
+    }).toStrictEqual({
+      contentAnswer: `Ask ${purgedMarker}, she knows.`,
+      answeredBy: undefined,
+      answer: `Ask ${purgedMarker}, she knows.`,
     });
   });
 });

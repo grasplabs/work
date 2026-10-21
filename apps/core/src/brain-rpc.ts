@@ -34,8 +34,8 @@ import {
   answerGap,
   askAboutGap,
   closeGap,
-  gapStatesOf,
-  gapWith,
+  gapsWith,
+  redactGapAnswer,
 } from "./brain-gaps.ts";
 import { brainNotes } from "./brain-notes.ts";
 import { addBrainRecords, readBrainRecords } from "./brain-records.ts";
@@ -596,21 +596,19 @@ const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
   return [...onboarding, ...records.teams];
 };
 
-/** `records`' gaps, with what became of each. */
-const gapsOf = async (env: Env, records: HeldRecords): Promise<Gap[]> => {
-  const states = await gapStatesOf(
-    env,
-    records.gaps.map(({ id }) => id)
-  );
-  return records.gaps.map((gap) => gapWith(gap, states.get(gap.id)));
-};
-
 /**
  * The Playbook's gaps, with what became of each, as every member reads
  * them: what `brain.read` serves, and what a chat's agent reads too.
  */
-export const brainGaps = async (env: Env): Promise<Gap[]> =>
-  await gapsOf(env, await readBrainRecords(env));
+export const brainGaps = async (
+  env: Env,
+  // The one access point the brain page and an agent share: per-team gaps
+  // would be filtered here for both. Today every member reads every gap.
+  _person: Pick<Identity, "userId" | "role" | "teams">
+): Promise<Gap[]> => {
+  const { gaps } = await readBrainRecords(env);
+  return await gapsWith(env, gaps);
+};
 
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
@@ -654,7 +652,7 @@ export const readBrain = async (
     sources: [...sources, ...records.sources],
     statements: records.statements,
     candidates: records.candidates,
-    gaps: await gapsOf(env, records),
+    gaps: await brainGaps(env, person),
     workflows: [],
     connections,
     landscape: [],
@@ -723,6 +721,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await answerGap(this.#env, person, gapId, answer)
+    );
+  }
+
+  async redactGapAnswer(gapId: string): Promise<Gap> {
+    return await withPerson(
+      this.#check,
+      async (person) => await redactGapAnswer(this.#env, person, gapId)
     );
   }
 

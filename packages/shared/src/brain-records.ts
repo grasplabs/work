@@ -14,8 +14,8 @@ import { defineErrorFamily } from "./errors.ts";
 //
 // A record names only what the brain holds or its call adds before it:
 // its source, tools, candidate, the statement it follows up, the records
-// a gap is about, and its teams (a team record, or a team the onboarding
-// gives the brain, once it exists).
+// a gap is about, and its teams (a team record, or a roster team, once
+// it exists).
 // A record is never written over: once added, its id holds it for good,
 // whatever type it is sent as.
 // A statement that changes is followed up by a new one (`followsUp`); a
@@ -71,8 +71,9 @@ export const brainRecordIdSchema = z
 const ids = z.array(brainRecordIdSchema).max(listMax).default([]);
 
 /**
- * A team's id: a team record's, or one the onboarding gives the brain
- * (`team-<id>` for the roster's, `team.kickoff-<n>` for the kickoff's).
+ * A team's id: a team record's, or a roster team's (`team-<id>`). A
+ * kickoff-only team (`team.kickoff-<n>`) takes no values: its id is its
+ * place in the kickoff's reading, which reading it again moves.
  */
 export const brainTeamIdSchema = z
   .string()

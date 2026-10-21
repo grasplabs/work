@@ -24,6 +24,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { eraseGapAnswerer, rewriteGapAnswers } from "../brain-gaps.ts";
 import { inList } from "../db/d1.ts";
 import {
   brainPayloads,
@@ -91,6 +92,10 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 //   saved as the next version, which makes its sections, links, search
 //   rows and the document's title and description again, and fails for
 //   anyone who saved meanwhile from text not yet purged.
+//
+// Both reach the brain's gap answers too (brain-gaps.ts): a personal
+// purge forgets the person as anyone's answerer, a content purge rewrites
+// every answer holding a term, whatever documents it names.
 //
 // Both delete the originals of the files uploaded as the documents they
 // purge (uploads.ts), and forget those uploads: an original holds the data
@@ -401,6 +406,8 @@ const purgePersonal = async (
   await cleanSearchIndex(async () => {
     await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
   });
+  // The brain's gaps keep who answered them: never the person erased.
+  await eraseGapAnswerer(env, person, input.userId);
   return { purgeId, ...counts };
 };
 
@@ -1428,6 +1435,9 @@ const purgeContent = async (
     // them failed: it writes no more.
     await owedWritesDone(db, purgeId);
   }
+  // The brain's gap answers hold people's words too: every one is
+  // rewritten, whatever documents the purge names.
+  await rewriteGapAnswers(env, person, (text) => without(text, matcher));
   await cleanUpOriginals(env);
   // What the rewrites let go of leaves R2 now; a failure fails the purge,
   // and running it again collects what's left (`collecting` rows).
