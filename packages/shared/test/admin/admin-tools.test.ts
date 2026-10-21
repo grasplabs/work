@@ -273,9 +273,9 @@ describe("every company’s platform, in a chat", () => {
 });
 
 describe("the sources of the admin", () => {
-  it("has the admin’s own MCP live, and every source in an order of its own", () => {
+  it("has the admin’s own MCP still to connect until the console serves it, and every source in an order of its own", () => {
     expect(ADMIN_SOURCES.find((source) => source.id === "grasp")?.state).toBe(
-      "live"
+      "planned"
     );
     expect(new Set(ADMIN_SOURCES.map((source) => source.order)).size).toBe(
       ADMIN_SOURCES.length
