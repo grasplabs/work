@@ -736,11 +736,17 @@ describe("the application landscape", () => {
 
   it("writes a page again as it was, never a day's sync twice, and forgets grants past retention and a disconnected connection's all", async () => {
     const app = appOf("app-kept", "Kept");
+    // Bob's alone, until he revokes it.
+    const gone = appOf("app-gone", "Gone");
     const [ada, bob] = [guid(), guid()];
     await tenantHolds({
-      apps: [app],
+      apps: [app, gone],
       people: [],
-      grants: [grantOf(app, "User.Read", ada), grantOf(app, "Files.Read", bob)],
+      grants: [
+        grantOf(app, "User.Read", ada),
+        grantOf(app, "Files.Read", bob),
+        grantOf(gone, "User.Read", bob),
+      ],
     });
     const { admin, connectionId } = await connected();
     // Mid-morning, UTC: "later that day" stays within the day.
@@ -788,11 +794,12 @@ describe("the application landscape", () => {
     await admin.api.connections.disconnect(connectionId);
     await syncLandscapes(env, pastRetention);
     expect({
-      once: once.map(({ people }) => people),
+      once: once.map(({ name, people }) => [name, people]),
       syncedOnce,
       sync,
       sameDay,
-      afterRevoke: afterRevoke.map(({ people, signals }) => ({
+      afterRevoke: afterRevoke.map(({ name, people, signals }) => ({
+        name,
         people,
         highPrivilege: signals.includes("person_high_privilege"),
       })),
@@ -804,13 +811,17 @@ describe("the application landscape", () => {
         sync: await syncOf(connectionId),
       },
     }).toStrictEqual({
-      once: [2],
+      once: [
+        ["Gone", 1],
+        ["Kept", 2],
+      ],
       syncedOnce: 1,
       sync: { state: "done", reads: 1, reason: null },
       sameDay: { state: "done", reads: 1, reason: null },
-      // Bob's grant is no longer current: counted out, kept until retention.
-      afterRevoke: [{ people: 1, highPrivilege: false }],
-      keptBob: 2,
+      // Bob's grants are no longer current: counted out, kept until
+      // retention. The app only he granted is no longer the landscape's.
+      afterRevoke: [{ name: "Kept", people: 1, highPrivilege: false }],
+      keptBob: 3,
       afterRetention: [ada],
       afterDisconnect: { apps: [], people: [], sync: null },
     });

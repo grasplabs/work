@@ -707,9 +707,20 @@ export const landscapeAppsOf = async (
 ): Promise<LandscapeAppSummary[]> => {
   const db = drizzle(env.DB);
   const [apps, people, since] = await Promise.all([
-    db.select().from(landscapeApps),
-    // Only the grants current for their connection, chosen in SQL: the
-    // ones retention keeps after they went aren't read at all.
+    // Only the apps and grants current for their connection, chosen in
+    // SQL: an app a whole sync no longer saw, as every grant of it was
+    // revoked, is no longer the landscape's, and the rows retention keeps
+    // after they went aren't read at all.
+    db
+      .select(getTableColumns(landscapeApps))
+      .from(landscapeApps)
+      .leftJoin(
+        landscapeSyncs,
+        eq(landscapeSyncs.connectionId, landscapeApps.connectionId)
+      )
+      .where(
+        sql`${landscapeApps.lastSeen} >= coalesce(${landscapeSyncs.currentSince}, 0)`
+      ),
     db
       .select(getTableColumns(landscapeAppPeople))
       .from(landscapeAppPeople)
