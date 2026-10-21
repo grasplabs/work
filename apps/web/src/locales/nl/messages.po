@@ -5279,6 +5279,10 @@ msgstr "Behoud de regels die zeggen wat je beleid bedoelt, pas ze aan waar nodig
 msgid "Keeps failing"
 msgstr "Mislukt steeds"
 
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Iets wat de chat niet meer kan lezen, voor het model weggehouden"
+
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
 msgstr "Sleutels, tokens, secrets, inloggegevens of runbooks die toegang kunnen geven."

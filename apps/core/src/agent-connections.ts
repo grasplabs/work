@@ -111,9 +111,9 @@ const callOutcome = (outcome: HeldOutcome): AgentCallOutcome => {
 const pendingIdSchema = z.uuid();
 
 /** The chat's connection grants, as its agent holds them now. */
-const connectionGrants = async (
+export const connectionGrants = async (
   env: Env,
-  scope: AgentScope
+  scope: Omit<AgentScope, "runId">
 ): Promise<(ConnectionGrant & { name: string; actions: string[] })[]> => {
   const context = chatContext(scope);
   const grantOf = connectionGrantOf(context);

@@ -1,5 +1,8 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { delegateActorOf } from "@grasp-os/shared/audit";
+import {
+  auditProvenanceMaxItems,
+  delegateActorOf,
+} from "@grasp-os/shared/audit";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
@@ -151,6 +154,38 @@ export const recordSources = async (
   );
   if (recorded !== "open") {
     throw runRefusal(recorded);
+  }
+};
+
+/**
+ * Records with the run alone what a call read that isn't the chat's
+ * provenance (an App's answer or files, the Knowledge catalog), before the
+ * call hands it over, so the run's result is withheld from the model once
+ * the agent may no longer read it for its person (history-access.ts). A
+ * run that ended since the call began records nothing, and the call is
+ * refused.
+ */
+export const recordRunReads = async (
+  env: Env,
+  { workspaceId, chatId, runId }: AgentScope,
+  reads: readonly string[]
+): Promise<void> => {
+  const unique = [...new Set(reads)];
+  // A few at a time, as the object takes them (`sourcesSchema`).
+  for (
+    let at = 0;
+    at < Math.max(unique.length, 1);
+    at += auditProvenanceMaxItems
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, each admitted
+    const recorded = await workspace(env, workspaceId).recordRunReads(
+      chatId,
+      runId,
+      unique.slice(at, at + auditProvenanceMaxItems)
+    );
+    if (recorded !== "open") {
+      throw runRefusal(recorded);
+    }
   }
 };
 

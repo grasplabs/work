@@ -5279,6 +5279,10 @@ msgstr "Gardez les règles qui traduisent votre politique, modifiez-les si besoi
 msgid "Keeps failing"
 msgstr "Échoue sans cesse"
 
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "A caché au modèle quelque chose que le chat ne peut plus lire"
+
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
 msgstr "Clés, jetons, secrets, identifiants ou procédures d’exploitation susceptibles de donner accès."

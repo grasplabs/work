@@ -17,6 +17,7 @@ import {
   auditedCall,
   chatAuthority,
   chatContext,
+  recordRunReads,
   recordSources,
   requireOpenRun,
 } from "./agent-scope.ts";
@@ -100,7 +101,16 @@ export class KnowledgeApi
           chatAuthority(scope),
           chatContext(scope),
           undefined,
-          async (reader) => await catalog(this.env, reader)
+          async (reader) => {
+            const listed = await catalog(this.env, reader);
+            // What it names rests on those collections: withheld once
+            // they can't be read (history-access.ts), never provenance.
+            await recordRunReads(this.env, scope, [
+              ...listed.collections.map(({ id }) => id),
+              ...listed.skills.map(({ collectionId }) => collectionId),
+            ]);
+            return listed;
+          }
         )
     );
   }
@@ -162,8 +172,19 @@ export class KnowledgeApi
           chatAuthority(scope),
           chatContext(scope),
           undefined,
-          async (reader) =>
-            await agentKnowledgeSignals(this.env, reader, scope.personId)
+          async (reader) => {
+            const found = await agentKnowledgeSignals(
+              this.env,
+              reader,
+              scope.personId
+            );
+            await recordRunReads(
+              this.env,
+              scope,
+              found.signals.map(({ collection }) => collection.id)
+            );
+            return found;
+          }
         )
     );
   }

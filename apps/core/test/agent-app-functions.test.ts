@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { withheldResult } from "../src/agent.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
@@ -599,6 +600,47 @@ describe(
         text: "contract.invalid_request",
         padded: "contract.input_too_large",
       });
+    });
+
+    it("withholds an App's earlier answer from the model once the agent loses the App", async () => {
+      const notes = await notesApp();
+      const secret = `CANARY-${crypto.randomUUID().slice(0, 8)}`;
+      await noteAs(notes, secret);
+      const titles = JSON.stringify(callOf(notes.release, "notes.titles", {}));
+      const chat = await chatOf(
+        notes.builder.userId,
+        codeStep(
+          `export default async (self, env) => (await env.apps.call(${JSON.stringify(notes.app)}, new Blob([${titles}]).stream())).result;`
+        ),
+        says(`The App holds ${secret}.`),
+        says("I can't see it any more.")
+      );
+      const grant = await requestGranted(idp, notes.builder, {
+        subject: chat.agent,
+        object: { type: "app", appId: notes.app },
+        actions: ["read"],
+        binding: "NOTES",
+      });
+      await chat.ask("What's in the Notes App?");
+      const admin = await signedInApi(idp, "admin");
+      await admin.api.permissions.revoke(grant);
+      await chat.ask("And now?");
+
+      // The answer reached the model while the agent held the App, and no
+      // request after the revocation carries it.
+      expect(
+        chat.gateway.requests.map(({ body }) => {
+          const sent = JSON.stringify(body);
+          return {
+            secret: sent.includes(secret),
+            withheld: sent.includes(withheldResult),
+          };
+        })
+      ).toStrictEqual([
+        { secret: false, withheld: false },
+        { secret: true, withheld: false },
+        { secret: false, withheld: true },
+      ]);
     });
   }
 );

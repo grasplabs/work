@@ -12,7 +12,12 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import { asPerson, readDenied } from "./agent-person.ts";
-import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
+import {
+  admitEffect,
+  chatAuthority,
+  chatContext,
+  recordRunReads,
+} from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { callAppFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
@@ -26,6 +31,7 @@ import {
   readFiles,
 } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
+import { appRead } from "./history-access.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { isRestricted, restrict } from "./restricted.ts";
@@ -90,7 +96,11 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
     return await asPerson(this.env, this.ctx.props, {
       allowed: readsApps,
       method: "apps.files",
-      read: async (person) => await readFiles(this.env, person, app, version),
+      read: async (person) => {
+        const files = await readFiles(this.env, person, app, version);
+        await this.#recorded("build", app);
+        return files;
+      },
       detail: (files) => ({
         app: typeof app === "string" ? app : null,
         version: typeof version === "number" ? version : null,
@@ -110,7 +120,11 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
     return await asPerson(this.env, this.ctx.props, {
       allowed: readsApps,
       method: "apps.exports",
-      read: async (person) => await appExports(this.env, person, app),
+      read: async (person) => {
+        const found = await appExports(this.env, person, app);
+        await this.#recorded("exports", app);
+        return found;
+      },
       detail: (found) => ({
         app: typeof app === "string" ? app : null,
         version: found.version,
@@ -218,6 +232,9 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
                   [`app:${appId}`]
                 );
               }
+              // Recorded with the run before it is handed over: withheld
+              // from the model once the agent or the person loses the App.
+              await recordRunReads(this.env, scope, [appRead("call", appId)]);
               return answer;
             }
           );
@@ -245,6 +262,19 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
               reason: result.error.code,
             },
     });
+  }
+
+  /**
+   * Records with the run that it read App `app` so (history-access.ts),
+   * before the read is handed over. `app` was found, so it is an App ID.
+   */
+  async #recorded(
+    read: Parameters<typeof appRead>[0],
+    app: unknown
+  ): Promise<void> {
+    await recordRunReads(this.env, this.ctx.props, [
+      appRead(read, appIdSchema.parse(app)),
+    ]);
   }
 
   /**
@@ -278,7 +308,11 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
     return await asPerson(this.env, this.ctx.props, {
       allowed: readsApps,
       method: "apps.versions",
-      read: async (person) => await listVersions(this.env, person, app, before),
+      read: async (person) => {
+        const listed = await listVersions(this.env, person, app, before);
+        await this.#recorded("build", app);
+        return listed;
+      },
       detail: (listed) => ({
         app: typeof app === "string" ? app : null,
         versions: listed.length,

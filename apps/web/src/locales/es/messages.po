@@ -5279,6 +5279,10 @@ msgstr "Conserva las reglas que expresan lo que dice tu política, edítalas don
 msgid "Keeps failing"
 msgstr "Falla una y otra vez"
 
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Ocultó al modelo algo que el chat ya no puede leer"
+
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
 msgstr "Claves, tokens, secretos, credenciales o manuales de operaciones que podrían dar acceso."
