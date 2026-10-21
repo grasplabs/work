@@ -199,8 +199,8 @@ const integrationsOf = ({
     "The company’s own Grasp doesn’t report what it connected yet."
   ),
   stillToConnect: html.includes("Still to connect</h2>"),
-  fromComposio: html.includes(
-    "Once Composio is connected, this fills in by itself."
+  needsNotReported: html.includes(
+    "The company’s own Grasp doesn’t report what its workflows need yet."
   ),
   source: html.includes(
     "What the company connected: the company’s own Grasp doesn’t hold it yet. What its workflows still need connected: from Composio, once it is connected."
@@ -949,7 +949,7 @@ describe("the admin's frame", () => {
         connected: false,
         notReported: false,
         stillToConnect: true,
-        fromComposio: true,
+        needsNotReported: true,
         source: true,
         toCome: false,
       },
@@ -960,10 +960,117 @@ describe("the admin's frame", () => {
         connected: true,
         notReported: true,
         stillToConnect: true,
-        fromComposio: true,
+        needsNotReported: true,
         source: true,
         toCome: false,
       },
+    });
+  });
+
+  it("shows what a company connected, the app a workflow is bound to that isn't connected any more, and the workflow waiting on it", async () => {
+    const acme = await liveClient();
+    const empty = emptyAdminSnapshot("Acme");
+    const crmSync = { id: "workflow-crm", name: "CRM sync" };
+    acme.account.admin = {
+      ...empty,
+      // Past its sign-in: its directory is in, every team's lead named.
+      roster: {
+        teams: [
+          { id: "sales", name: "Sales", lead: "lea", does: "", off: false },
+        ],
+        people: [
+          {
+            id: "lea",
+            name: "Lea Lund",
+            email: "",
+            team: "sales",
+            title: "",
+            away: false,
+          },
+        ],
+      },
+      // As core sends it once a workflow's HubSpot was disconnected.
+      integrations: {
+        connected: [
+          {
+            source: "composio",
+            provider: "google_drive",
+            state: "works",
+            hidden: false,
+            connectedBy: "Anna de Vries",
+            connectedAt: daysAgo(3),
+            account: null,
+            tools: ["GOOGLEDRIVE_LIST_FILES"],
+          },
+        ],
+        personal: [
+          { source: "native", provider: "microsoft", people: 4, again: 1 },
+        ],
+        needed: [
+          {
+            workflow: crmSync,
+            alias: "crm",
+            app: { source: "composio", provider: "hubspot" },
+            state: "missing",
+          },
+          { workflow: crmSync, alias: "mail", app: null, state: "unbound" },
+        ],
+        requests: [
+          {
+            source: "native",
+            provider: "microsoft",
+            decidedBy: "person",
+            waiting: 2,
+            since: daysAgo(1),
+          },
+        ],
+      },
+    };
+
+    const integrations = await page(
+      `/admin/organizations/${acme.clientId}/integrations`
+    );
+    const workflows = await page(
+      `/admin/organizations/${acme.clientId}/workflows`
+    );
+    const overview = await page(`/admin/organizations/${acme.clientId}`);
+
+    const { html } = integrations;
+    expect({
+      status: [integrations.status, workflows.status, overview.status],
+      drive: html.includes(
+        `Connected by Anna de Vries on ${formatDate(daysAgo(3))}.`
+      ),
+      microsoft: html.includes("4 people connected their own"),
+      again: html.includes("1 needs signing in again"),
+      // Core sends the toolkit's slug, not the catalog's name for it.
+      hubspot: html.includes("Hubspot"),
+      forCrmSync: html.includes("For CRM sync"),
+      notConnected: html.includes("Not connected"),
+      asked: html.includes(
+        `Asked for in 2 chats since ${formatDate(daysAgo(1))}, waiting on the person in the chat`
+      ),
+      notReported: html.includes("doesn’t report"),
+      source: html.includes("From the company’s own Grasp and Composio."),
+      waiting: workflows.html.includes("Waiting on a connection</h2>"),
+      crm: workflows.html.includes("crm: Hubspot, not connected"),
+      mail: workflows.html.includes("mail: No connection approved yet"),
+      health: overview.html.includes("1 stopped: someone must sign in again"),
+    }).toStrictEqual({
+      status: [200, 200, 200],
+      drive: true,
+      microsoft: true,
+      again: true,
+      hubspot: true,
+      forCrmSync: true,
+      notConnected: true,
+      asked: true,
+      notReported: false,
+      source: true,
+      waiting: true,
+      crm: true,
+      mail: true,
+      health: true,
     });
   });
 

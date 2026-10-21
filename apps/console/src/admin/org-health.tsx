@@ -5,13 +5,18 @@
  *
  * What core doesn't hold yet isn't counted as nothing: the contract and
  * the work drawn from the interviews are unknown to the model
- * (`view.unknown`), and what the company connected comes as null in its
- * snapshot, so the account says its contract isn't known yet, the
- * workflows say none is found yet and the connections say only whether
- * the sign-in is in, never a draft or a count of zero standing for "not
- * read".
+ * (`view.unknown`), so the account says its contract isn't known yet
+ * and the workflows say none is found yet, never a draft or a count of
+ * zero standing for "not read". What the company connected comes from its
+ * snapshot, not the model: a core that doesn't send it has the
+ * connections say only whether the sign-in is in; one that does counts
+ * what is connected and what stopped, and a workflow it built that works
+ * in an app whose connection stopped needs Grasp.
  */
-import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type {
+  AdminIntegrations,
+  AdminSnapshot,
+} from "@grasp-os/shared/admin-snapshot";
 import { healthOf } from "@grasp-os/shared/admin/admin-health";
 import type {
   HealthArea,
@@ -52,8 +57,34 @@ const levelWords: Record<HealthLevel, string> = {
 interface Held {
   contract: boolean;
   works: boolean;
-  integrations: boolean;
+  integrations: Connections | null;
 }
+
+/** What core says of the company's connections, as the signals count them. */
+interface Connections {
+  /** Its shared connections, and the apps its people connected their own of. */
+  connected: number;
+  /** Of those, how many someone must sign in to again, or Composio says stopped. */
+  stopped: number;
+  /** Its workflows that work in an app whose connection stopped. */
+  stuck: number;
+}
+
+const connectionsOf = ({
+  connected,
+  personal,
+  needed,
+}: AdminIntegrations): Connections => ({
+  connected: connected.length + personal.length,
+  stopped:
+    connected.filter(({ state }) => state === "again" || state === "stopped")
+      .length + personal.filter(({ again }) => again > 0).length,
+  stuck: new Set(
+    needed
+      .filter(({ state }) => state === "stopped")
+      .map(({ workflow }) => workflow.id)
+  ).size,
+});
 
 /** Where each signal is dealt with: once open, the workflows are about the hours they free. */
 const sectionOf = (signal: HealthSignal): OrgSection => {
@@ -121,8 +152,9 @@ const accountLine = (
 const lineOf = (signal: HealthSignal, view: AdminView, held: Held): string => {
   switch (signal.area) {
     case "connections": {
-      if (signal.stopped > 0) {
-        return `${signal.stopped} stopped: someone must sign in again`;
+      const stopped = held.integrations?.stopped ?? signal.stopped;
+      if (stopped > 0) {
+        return `${stopped} stopped: someone must sign in again`;
       }
       // The model's sign-in signal is the whole Connected step, leads named too: people in through the sign-in already say it is connected.
       if (!signal.signIn) {
@@ -130,9 +162,9 @@ const lineOf = (signal: HealthSignal, view: AdminView, held: Held): string => {
           ? "Sign-in connected, team leads not named yet"
           : "Sign-in not connected yet";
       }
-      return held.integrations
-        ? `${signal.connected} connected`
-        : "Sign-in connected";
+      return held.integrations === null
+        ? "Sign-in connected"
+        : `${held.integrations.connected} connected`;
     }
     case "interviews": {
       return interviewsLine(signal, view);
@@ -141,6 +173,9 @@ const lineOf = (signal: HealthSignal, view: AdminView, held: Held): string => {
       return `${signal.percent}% known, opens at ${signal.threshold}%`;
     }
     case "workflows": {
+      if ((held.integrations?.stuck ?? 0) > 0) {
+        return "A connection they work in stopped";
+      }
       if (!held.works) {
         return "No workflows found yet";
       }
@@ -166,6 +201,13 @@ const lineOf = (signal: HealthSignal, view: AdminView, held: Held): string => {
  * would count the work's absence as none live once the company is open.
  */
 const levelOf = (signal: HealthSignal, held: Held): HealthLevel => {
+  // What core says stopped needs Grasp, whatever the model counts without it.
+  const stopped =
+    (signal.area === "connections" && (held.integrations?.stopped ?? 0) > 0) ||
+    (signal.area === "workflows" && (held.integrations?.stuck ?? 0) > 0);
+  if (stopped) {
+    return "attention";
+  }
   if (
     (signal.area === "workflows" && !held.works) ||
     (signal.area === "account" && !held.contract)
@@ -193,7 +235,10 @@ export const OrgHealth = ({
   const held: Held = {
     contract: !view.unknown.contract,
     works: !view.unknown.works,
-    integrations: snapshot.integrations !== null,
+    integrations:
+      snapshot.integrations === null
+        ? null
+        : connectionsOf(snapshot.integrations),
   };
   return (
     <section

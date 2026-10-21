@@ -25,7 +25,9 @@ import { roleSchema } from "./roles.ts";
 // Interviews are here as numbers only: what anyone said, the facts Stephen
 // wrote down and the transcripts stay behind the audited staff transcript
 // read (`OnboardingStaffApi.transcript`). Nor is any interview link here:
-// a link is a credential.
+// a link is a credential. Nor any connection's: what the company connected
+// comes without tokens, server URLs or what Composio knows an account by,
+// and people's own connections, and chats' requests, only as counts by app.
 //
 // Objects in the answer are read with `z.object`, which drops what it
 // doesn't know: the console asks cores on several releases, and a newer
@@ -143,6 +145,99 @@ const rosterReadSchema = z.object({
 const planReadSchema = z.object(planSchema.shape);
 const agreementsReadSchema = z.object(agreementsSchema.shape);
 
+/** Who carries out a connection's actions: a native connector, or Composio. */
+const sourceSchema = z.enum(["native", "composio"]);
+
+/**
+ * How a connection stands: it `works`; it needs someone at the company to
+ * sign in `again`; Composio says its account `stopped`; or Composio
+ * couldn't be asked now (`unread`).
+ */
+export const adminConnectionStates = [
+  "works",
+  "again",
+  "stopped",
+  "unread",
+] as const;
+
+/**
+ * One shared connection the company made: a service account, or an app an
+ * admin consented to. What it is and how it stands, never its tokens, its
+ * server's URL or anything Composio knows it by.
+ */
+export const adminConnectionSchema = z.object({
+  source: sourceSchema,
+  /** A native provider (`microsoft`), or a Composio toolkit's slug. */
+  provider: z.string(),
+  state: z.enum(adminConnectionStates),
+  /** An admin took it out of what the company's people may connect. */
+  hidden: z.boolean(),
+  /** Who connected it, by name, while they are a member. */
+  connectedBy: z.string().nullable(),
+  connectedAt: isoTime,
+  /** The account at the provider, such as a service mailbox's address. */
+  account: z.string().nullable(),
+  /** A Composio connection's allowed tools, by name: what Grasp may do there. */
+  tools: z.array(z.string()).nullable(),
+});
+export type AdminConnection = z.output<typeof adminConnectionSchema>;
+
+/** People's own connections to one app: how many, and how many stopped. */
+export const adminPersonalConnectionsSchema = z.object({
+  source: sourceSchema,
+  provider: z.string(),
+  people: count,
+  again: count,
+});
+
+/**
+ * Why a workflow can't run as it is: one of its current version's
+ * connector bindings has no connection an admin approved (`unbound`), or
+ * the approved one isn't connected any more (`missing`), stopped
+ * (`stopped`: someone must sign in again, or Composio says its account
+ * stopped), or is of an app an admin hid (`hidden`).
+ */
+export const adminNeedStates = [
+  "unbound",
+  "missing",
+  "stopped",
+  "hidden",
+] as const;
+
+/** One connector binding of a workflow that no working connection serves. */
+export const adminNeededSchema = z.object({
+  workflow: z.object({ id: z.string(), name: z.string() }),
+  /** The binding's alias in the workflow. */
+  alias: z.string(),
+  /** The app it was approved with; null while none was. */
+  app: z.object({ source: sourceSchema, provider: z.string() }).nullable(),
+  state: z.enum(adminNeedStates),
+});
+export type AdminNeeded = z.output<typeof adminNeededSchema>;
+
+/**
+ * Connections chats' agents asked for that wait on a decision, by app: on
+ * the person in the chat for their own personal one, on an admin for a
+ * shared one. Never what the agent said, whose chat, or who.
+ */
+export const adminConnectionRequestsSchema = z.object({
+  source: sourceSchema,
+  provider: z.string(),
+  decidedBy: z.enum(["person", "admin"]),
+  waiting: count,
+  /** When the oldest of them was asked. */
+  since: isoTime,
+});
+
+/** What the company connected, and what its workflows and chats still need. */
+export const adminIntegrationsSchema = z.object({
+  connected: z.array(adminConnectionSchema),
+  personal: z.array(adminPersonalConnectionsSchema),
+  needed: z.array(adminNeededSchema),
+  requests: z.array(adminConnectionRequestsSchema),
+});
+export type AdminIntegrations = z.output<typeof adminIntegrationsSchema>;
+
 /**
  * What core doesn't hold yet: null from this core, and whatever a newer
  * one sends is read as null too, for this schema can't say what it is.
@@ -220,10 +315,10 @@ export const adminSnapshotSchema = z.object({
     })
   ),
   /**
-   * What the company connected: null until core can ask connect for the
-   * organization's shared connections, with the issue that adds it.
+   * What the company connected, and what its workflows still need: null
+   * from a core that doesn't send it yet, and when connect didn't answer.
    */
-  integrations: notYetHeld,
+  integrations: adminIntegrationsSchema.nullable(),
   /** The AI the onboarding used, day by day, oldest first. */
   usage: z.array(adminUsageDaySchema),
 });

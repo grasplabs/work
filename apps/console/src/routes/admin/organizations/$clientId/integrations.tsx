@@ -6,17 +6,20 @@
  *
  * Only what the company's core answered is shown. A company that hasn't
  * signed in has nothing connected, as the model has it. Once it has, core
- * doesn't report its connections yet (its snapshot's `integrations` is
- * null), so the prototype's list of them, with who connected each, what
- * Grasp may do there and which needs signing in again, waits for core to
- * send them; so does what the company skipped in its own onboarding,
- * which core doesn't send either. What the workflows still need connected
- * comes from Composio, which the console doesn't read yet.
+ * sends its shared connections, its people's own counted by app, and what
+ * its workflows and chats still need (`integrations`); a core on an older
+ * release, or one whose connect didn't answer, sends none, and the panels
+ * say so. What the company skipped in its own onboarding core doesn't
+ * send yet.
  */
 import { Badge } from "@grasp-os/ui/components/badge";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import {
+  ConnectedRows,
+  StillToConnectRows,
+} from "../../../../admin/connections.tsx";
 import { useOrganization } from "../../../../admin/organization.tsx";
 import { sourceNames } from "../../../../admin/sections.ts";
 
@@ -46,10 +49,11 @@ const Panel = ({
 
 /**
  * What the company connected: nothing before it has signed in, in its own
- * onboarding; after that, whatever core reports, which it doesn't yet.
+ * onboarding; after that, whatever core reports.
  */
 const Connected = () => {
-  const { view } = useOrganization();
+  const { view, admin } = useOrganization();
+  const { integrations } = admin.snapshot;
   if (view.org.made || view.state.client === "none") {
     return (
       <Panel
@@ -69,27 +73,39 @@ const Connected = () => {
       description="Where its people sign in, its HR platform, where its documents live, Pulse on its laptops, and the apps its work runs in."
       title="What the company connected"
     >
-      <p className="text-muted-foreground border-t px-5 py-4">
-        The company’s own Grasp doesn’t report what it connected yet. Once it
-        does, each connection is here with who connected it, when, and what
-        Grasp may do there.
-      </p>
+      {integrations === null ? (
+        <p className="text-muted-foreground border-t px-5 py-4">
+          The company’s own Grasp doesn’t report what it connected yet. Once it
+          does, each connection is here with who connected it, when, and what
+          Grasp may do there.
+        </p>
+      ) : (
+        <ConnectedRows integrations={integrations} />
+      )}
     </Panel>
   );
 };
 
-/** What the workflows need that the company hasn't connected, from Composio once it is read. */
-const StillToConnect = () => (
-  <Panel
-    action={<Badge variant="outline">{sourceNames.composio}</Badge>}
-    description="What the workflows need that the company has not connected: worth reaching out about."
-    title="Still to connect"
-  >
-    <p className="text-muted-foreground border-t px-5 py-4">
-      {`Once ${sourceNames.composio} is connected, this fills in by itself.`}
-    </p>
-  </Panel>
-);
+/** What the workflows need that the company hasn't connected, once core reports it. */
+const StillToConnect = () => {
+  const { integrations } = useOrganization().admin.snapshot;
+  return (
+    <Panel
+      action={<Badge variant="outline">{sourceNames.composio}</Badge>}
+      description="What the workflows need that the company has not connected: worth reaching out about."
+      title="Still to connect"
+    >
+      {integrations === null ? (
+        <p className="text-muted-foreground border-t px-5 py-4">
+          The company’s own Grasp doesn’t report what its workflows need yet.
+          Once it does, this fills in by itself.
+        </p>
+      ) : (
+        <StillToConnectRows integrations={integrations} />
+      )}
+    </Panel>
+  );
+};
 
 const Integrations = () => (
   <>

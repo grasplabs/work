@@ -9,6 +9,7 @@ import {
   startToolkitConnectionSchema,
 } from "@grasp-os/shared/connect";
 import type {
+  ComposioAccountState,
   ComposioToolRule,
   ConnectionPerson,
 } from "@grasp-os/shared/connect";
@@ -881,6 +882,55 @@ export const finishToolkitFlow = async (
     return undefined;
   }
   return await finishToolkitConnection(env, person, flow);
+};
+
+/** What connect reads of a connected account to say whether it works. */
+const accountStatusSchema = z.object({ status: z.string() });
+
+/** Most Composio accounts one read asks Composio about: one per toolkit. */
+const askedAccountsMax = 50;
+
+/**
+ * Whether Composio says each Composio connection's account still works,
+ * by connection ID, for Grasp's staff (`organizationConnections`): its
+ * tokens are Composio's, so an account that expired or failed there, or
+ * that Composio no longer has, still reads `active` in connect's own
+ * table. Only the status is read, never kept, and nothing of the account
+ * goes further: not its ID, which with connect's key opens it. `unread`
+ * for each one Composio wasn't asked about or didn't answer for, and for
+ * all while connect has no key.
+ */
+export const composioAccountStates = async (
+  env: Env,
+  held: readonly { id: string; accountId: string | null }[]
+): Promise<Map<string, ComposioAccountState>> => {
+  const key = composioKey(env);
+  const asked = key === undefined ? [] : held.slice(0, askedAccountsMax);
+  const states = new Map<string, ComposioAccountState>(
+    held.map(({ id }) => [id, "unread"])
+  );
+  await Promise.all(
+    asked.map(async ({ id, accountId }) => {
+      if (key === undefined || accountId === null) {
+        return;
+      }
+      try {
+        const { status } = await composioRequest(key, {
+          path: `/connected_accounts/${encodeURIComponent(accountId)}`,
+          schema: accountStatusSchema,
+        });
+        states.set(id, status === "ACTIVE" ? "active" : "stopped");
+      } catch (error) {
+        if (error instanceof ComposioError && error.status === 404) {
+          // Composio no longer has it: it takes no call there.
+          states.set(id, "stopped");
+          return;
+        }
+        log.warn("composio.account_unread", errorFields(error));
+      }
+    })
+  );
+  return states;
 };
 
 /**

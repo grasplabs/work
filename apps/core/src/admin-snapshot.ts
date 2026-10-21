@@ -12,9 +12,10 @@ import type {
 } from "@grasp-os/shared/admin-snapshot";
 import { dayOf, METER_PURPOSES } from "@grasp-os/shared/admin/org-record";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import type { Plan } from "@grasp-os/shared/onboarding";
 
+import { adminIntegrationsOf } from "./admin-integrations.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -50,6 +51,10 @@ import { readOrganization } from "./organization.ts";
 //   refused too, until the console opens a new staff window. It names
 //   people and their emails, and ending staff access is the company's
 //   one way to say no.
+// - A credential of the company's leaving through it: what it connected
+//   comes from connect without tokens, server URLs or anything Composio
+//   knows an account by (admin-integrations.ts), and of personal
+//   connections and chats' requests only counts by app.
 
 /** How long after its last save an interview still counts as going on. */
 const talkingMs = 15 * 60 * 1000;
@@ -153,20 +158,45 @@ const usageOf = (
   return [...days].map(([day, use]) => ({ day, use }));
 };
 
+/**
+ * What the company connected and what its workflows still need, or null
+ * when connect doesn't answer: the rest of the snapshot is core's own and
+ * still worth reading.
+ */
+const integrationsOf = async (
+  env: Env
+): Promise<AdminSnapshot["integrations"]> => {
+  try {
+    return await adminIntegrationsOf(env);
+  } catch (error) {
+    log.warn("admin.snapshot.integrations_unread", errorFields(error));
+    return null;
+  }
+};
+
 /** Everything the admin reads of this client, from what core holds, at `now`. */
 const snapshotOf = async (env: Env, now: string): Promise<AdminSnapshot> => {
   const store = onboardingStore(env);
   const view = await store.view(now);
-  const [facts, agreements, usage, kickoff, gate, organization, members] =
-    await Promise.all([
-      store.adminFacts(),
-      store.agreements(),
-      store.usage(),
-      store.kickoffFacts(),
-      gateView(env, view, now),
-      readOrganization(env),
-      membersOf(env),
-    ]);
+  const [
+    facts,
+    agreements,
+    usage,
+    kickoff,
+    gate,
+    organization,
+    members,
+    integrations,
+  ] = await Promise.all([
+    store.adminFacts(),
+    store.agreements(),
+    store.usage(),
+    store.kickoffFacts(),
+    gateView(env, view, now),
+    readOrganization(env),
+    membersOf(env),
+    integrationsOf(env),
+  ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
   const held = new Map(facts.interviews.map((one) => [one.person, one]));
@@ -216,7 +246,7 @@ const snapshotOf = async (env: Env, now: string): Promise<AdminSnapshot> => {
     },
     contract: null,
     members,
-    integrations: null,
+    integrations,
     usage: usageOf(usage),
   };
 };

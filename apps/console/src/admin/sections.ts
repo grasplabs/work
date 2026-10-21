@@ -281,7 +281,7 @@ export const originsOf = (
       {
         source: "composio",
         what: "What its workflows still need connected",
-        read: false,
+        read: integrations,
       },
     ],
     setup: [{ source: "console", read: true }],
@@ -294,7 +294,7 @@ export const originsOf = (
       {
         source: "composio",
         what: "What its workflows still need connected",
-        read: false,
+        read: integrations,
       },
     ],
     usage: [fromCore],
