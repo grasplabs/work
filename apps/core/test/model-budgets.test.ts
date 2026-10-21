@@ -4,7 +4,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { budgetPeriods } from "../src/model-budgets.ts";
@@ -646,6 +646,79 @@ describe("model budgets", { timeout: 60_000 }, () => {
         },
       },
       answered: ["ok", "ok"],
+    });
+  });
+
+  it("suggest a run of an App a fixed wait where its person's own calls hold their budget, and their chat the wait those calls leave", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, workflowFiles("idle", "  return null;"));
+    const run = await builder.api.workflows.start(app, "idle");
+    await finished(run.id);
+    const appId = appIdSchema.parse(app);
+    const release = Promise.withResolvers<boolean>();
+    const paused = {
+      ...pricedAnswer,
+      text: "Hello there.",
+      pause: { at: 3, until: release.promise },
+    };
+    // Sonnet 4.5 reserves some $0.56: $1 has no room for a second beside it.
+    const { call, month } = withRules({ budgets: { user: { limit: 1 } } }, [
+      paused,
+    ]);
+    const ada = { type: "person", userId: builder.userId } as const;
+    const sonnet = (more: Partial<ModelCall<undefined>>) =>
+      hello({ model: anthropic, maxTokens: undefined, ...more });
+    // Ada's own call may take 15 minutes: her wait is capped at five.
+    const answering = outcome(
+      call(sonnet({ trigger: ada, timeoutMs: 15 * 60_000 }))
+    );
+    // Released however the checks go, so no call is left open.
+    const told: Record<string, unknown[]> = {};
+    try {
+      // Until Ada's call is under way: a setup that fails says so, and
+      // still releases it.
+      await vi.waitFor(
+        async () => {
+          const mine = await ledgerOf(month, ada.userId);
+          expect(mine.reservedMicros).toBeGreaterThan(0);
+        },
+        { timeout: 10_000, interval: 10 }
+      );
+      const retryAfter = async (more: Partial<ModelCall<undefined>>) => {
+        const { code, details } = await toldBy(call(sonnet(more)));
+        return [code, details.because, details.retryAfterSeconds];
+      };
+      Object.assign(told, {
+        // Her chat: the calls holding her budget are made for her.
+        chat: await retryAfter({
+          trigger: { type: "agent", agentId: "chat", onBehalfOf: ada.userId },
+        }),
+        // A run of an App: its code is told nothing of when her chats' (or
+        // other Apps') calls were sent.
+        run: await retryAfter({
+          purpose: "workflow.step",
+          trigger: runActorOf({ runId: run.id, app, workflow: "idle" }),
+          work: {
+            authority: {
+              subject: { type: "app", appId },
+              onBehalfOf: ada.userId,
+              mode: "workflow",
+              appVersion: 1,
+            },
+            context: { type: "run", appId, runId: runIdSchema.parse(run.id) },
+          },
+        }),
+      });
+    } finally {
+      release.resolve(true);
+    }
+
+    expect({ told, answered: await answering }).toStrictEqual({
+      told: {
+        chat: ["model.budget_busy", "user", 300],
+        run: ["model.budget_busy", "user", 60],
+      },
+      answered: "ok",
     });
   });
 
