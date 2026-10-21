@@ -258,6 +258,14 @@ describe("what an answer names, as it goes to an outside model", () => {
         "The research disagrees with the company’s own account; the admin shows where.",
       ].join("\n")
     );
+    const [integration] = SAMPLE_ORGS.flatMap((org) => org.integrations);
+    expect(integration).toBeTruthy();
+    if (!integration) {
+      return;
+    }
+    expect(needText({ kind: "signin", integration }, view)).toBe(
+      `integration ${integration.id} stopped working until someone at the company signs in again.`
+    );
     const people = needs.flatMap((need) =>
       need.kind === "lead" || need.kind === "split" ? [need.lead] : []
     );
@@ -290,12 +298,15 @@ describe("what an answer names, as it goes to an outside model", () => {
     const written = views.flatMap((view) => [
       view.org.name,
       ...view.org.teams.map((team) => team.name),
+      ...view.integrations.map((integration) => integration.name),
       ...needs.flatMap((need) =>
         need.kind === "blocked" || need.kind === "split" ? [need.work.name] : []
       ),
     ]);
-    // An app's name (Exact Online) is the platform's catalog's, not the company's: it may stand.
-    for (const name of written) {
+    for (const name of [
+      ...written,
+      ...SAMPLE_BUILDS.map((build) => build.app),
+    ]) {
       expect(named(text, name) ? name : null).toBeNull();
     }
     const one = call("get_organization", { organization: "noordkade" });
