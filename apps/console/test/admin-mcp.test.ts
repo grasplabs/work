@@ -6,7 +6,12 @@ import { z } from "zod";
 
 import { adminMcp, servedTools } from "../src/admin/mcp.ts";
 import { act, consoleDatabase } from "../src/db/act.ts";
-import { auditEvents, clients } from "../src/db/schema.ts";
+import {
+  auditEvents,
+  clients,
+  rollouts,
+  rolloutTargets,
+} from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { importReleases } from "../src/releases/import.ts";
@@ -342,8 +347,7 @@ describe("the admin's MCP", () => {
         { name: "get_organization", arguments: {} },
         { name: "list_organizations", arguments: { phase: "open", drop: 1 } },
         { name: "delete_organization", arguments: {} },
-        // Not fed by the console yet (GRA-971): not served.
-        { name: "platforms", arguments: {} },
+        // Nothing records integrations to build yet (GRA-689): not served.
         { name: "integrations_to_build", arguments: {} },
       ].map(async (params) => {
         const { answer } = await asStaff(rpc("tools/call", params));
@@ -356,7 +360,7 @@ describe("the admin's MCP", () => {
       readers: acme.account.adminReaders,
       audited: await mcpCalls(),
     }).toStrictEqual({
-      answers: [true, true, true, true, true, true],
+      answers: [true, true, true, true, true],
       readers: [],
       audited: [],
     });
@@ -450,6 +454,144 @@ describe("the admin's MCP", () => {
       nameInText: false,
       idInText: true,
       names: [{ id: acme.clientId, name: "Acme" }],
+    });
+  });
+
+  it("answers every company's platform as the Platform page shows it, by id, reading no core", async () => {
+    const [oldest, older, newest] = [
+      await publishRelease({ notes: "feat(core): the oldest" }),
+      await publishRelease({ notes: "feat(core): the older" }),
+      await publishRelease({ notes: "feat(core): the newest" }),
+    ];
+    await importReleases(env.RELEASES, db);
+    const ringClient = async (
+      name: string,
+      ring: number,
+      releaseId: string
+    ) => {
+      const clientId = `${name.toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`;
+      const account = cloudflare.addAccount(name);
+      account.admin = readySnapshot(name);
+      const now = new Date();
+      await act(
+        db,
+        staff,
+        [
+          db.insert(clients).values({
+            id: clientId,
+            name,
+            accountId: account.id,
+            ring,
+            status: "active",
+            createdAt: now,
+            updatedAt: now,
+          }),
+        ],
+        { action: "client.create", clientId }
+      );
+      await runDeploy(
+        await deployContext(env),
+        await startDeploy(db, staff, clientId, releaseId)
+      );
+      return { clientId, account };
+    };
+    const first = await ringClient("Firstco", 0, newest.id);
+    const early = await ringClient("Earlyco", 1, older.id);
+    const laggard = await ringClient("Laggard", 2, oldest.id);
+    const rolloutId = crypto.randomUUID();
+    const now = new Date();
+    await db.insert(rollouts).values({
+      id: rolloutId,
+      kind: "release",
+      releaseId: newest.id,
+      status: "waiting",
+      ring: 0,
+      startedBy: staff.email,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(rolloutTargets).values([
+      {
+        rolloutId,
+        clientId: first.clientId,
+        ring: 0,
+        status: "done",
+        updatedAt: now,
+      },
+      {
+        rolloutId,
+        clientId: early.clientId,
+        ring: 1,
+        status: "pending",
+        updatedAt: now,
+      },
+    ]);
+
+    const { answer } = await asStaff(
+      rpc("tools/call", { name: "platforms", arguments: {} })
+    );
+    // Before the page, whose frame reads every core for its sidebar.
+    const readers = [first, early, laggard].flatMap(
+      ({ account }) => account.adminReaders
+    );
+    const { html } = await page("/admin/platform", staff.email);
+    const text = answer.result?.content?.[0]?.text ?? "";
+    const { platforms, names } = z
+      .object({
+        platforms: z.array(
+          z.object({
+            organization: z.string(),
+            standing: z.string(),
+            needs: z.array(z.string()),
+          })
+        ),
+        names: z.object({
+          organizations: z.array(
+            z.object({ id: z.string(), name: z.string() })
+          ),
+        }),
+      })
+      .parse(answer.result?.structuredContent);
+
+    expect({
+      // The one that needs a look first, as the page lists it.
+      platforms: platforms.map(({ organization, standing, needs }) => ({
+        organization,
+        standing,
+        needs,
+      }))[0],
+      pageSaysBehind: html.includes("2 releases behind the newest."),
+      laggardLine: text.includes(
+        `- ${laggard.clientId}: attention; ring 2; runs ${oldest.id};`
+      ),
+      behind: text.includes("2 releases behind"),
+      goingOut: text.includes(`Going out now: ${newest.id}, waiting`),
+      ring0: text.includes("Ring 0: 1 of 1 on it (done)"),
+      // A company's name only as data.
+      namesInText: ["Firstco", "Earlyco", "Laggard"].some((name) =>
+        text.includes(name)
+      ),
+      named: names.organizations.filter(({ id }) =>
+        [first.clientId, early.clientId, laggard.clientId].includes(id)
+      ).length,
+      // No core was asked: the console's records and the accounts' live columns only.
+      readers,
+      audited: await mcpCalls(),
+    }).toStrictEqual({
+      platforms: {
+        organization: laggard.clientId,
+        standing: "attention",
+        needs: ["behind"],
+      },
+      pageSaysBehind: true,
+      laggardLine: true,
+      behind: true,
+      goingOut: true,
+      ring0: true,
+      namesInText: false,
+      named: 3,
+      readers: [],
+      audited: [{ actor: staff.email, target: "platforms", detail: {} }],
     });
   });
 
