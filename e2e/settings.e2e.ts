@@ -7,8 +7,7 @@ import { peopleIn } from "./people.ts";
 // Settings, as in the prototype: the workspace's sections for admins, the
 // account's for everyone, listed beside the section where the page has the
 // room and as one control above it where it hasn't. The sections core
-// keeps nothing for yet (the workspace's name, Pulse, billing, the link for
-// AI apps) show the prototype's empty state, and nothing in them can be
+// keeps nothing for yet (Pulse, billing, the link for AI apps) show the prototype's empty state, and nothing in them can be
 // changed. The emails a person picks are kept, so their switches work. Members, Models, AI spend and the audit trail have tests
 // of their own (web, models, activity).
 
@@ -25,13 +24,14 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await expect(page).toHaveURL(/\/settings\/workspace$/u);
   const nav = page.getByRole("navigation", { name: "Settings" });
 
+  // The name and time zone are the admin's to change (e2e/web.e2e.ts
+  // changes them, so this test doesn't pin their values).
   const workspace = sectionOf(page, "Workspace");
-  await expect(workspace.getByLabel("Name")).toBeDisabled();
-  await expect(workspace.getByLabel("Company domain")).toBeDisabled();
+  await expect(workspace.getByLabel("Name")).toBeEnabled();
   await expect(sectionOf(page, "Region")).toContainText("European Union");
   await expect(
     sectionOf(page, "Region").getByRole("combobox", { name: "Time zone" })
-  ).toContainText("UTC");
+  ).toBeEnabled();
 
   await nav.getByRole("link", { name: "Pulse" }).click();
   await expect(page).toHaveURL(/\/settings\/pulse$/u);

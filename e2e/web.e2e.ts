@@ -239,6 +239,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   const name = page.getByRole("textbox", { name: "Name" });
   const zone = page.getByRole("combobox", { name: "Time zone" });
   const before = await name.inputValue();
+  const zoneBefore = await zone.textContent();
   const renamed = `Acme ${crypto.randomUUID().slice(0, 6)}`;
 
   await name.fill(renamed);
@@ -264,6 +265,11 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   await name.fill(before);
   await name.press("Enter");
   await expect(name).toHaveValue(before);
+  await zone.click();
+  await page
+    .getByRole("option", { name: zoneBefore ?? "UTC", exact: true })
+    .click();
+  await expect(zone).toHaveText(zoneBefore ?? "UTC");
 });
 
 test("shows the members page only to someone signed in, and never signs them out for core failing", async ({
