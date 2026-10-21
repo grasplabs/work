@@ -92,10 +92,13 @@ interface OpenDecision {
   expiresAt: Date;
 }
 
-/** What a screen reads of an open decision. */
+/**
+ * What a screen reads of an open decision, of an App's run: read joined
+ * to its run, whose ID it is.
+ */
 const openColumns = {
   id: workflowDecisions.id,
-  runId: workflowDecisions.runId,
+  runId: workflowRuns.id,
   step: workflowDecisions.step,
   deciders: workflowDecisions.deciders,
   description: workflowDecisions.description,

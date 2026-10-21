@@ -30,6 +30,8 @@ import { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
 import { memberRole } from "../auth/identity.ts";
+import { decisionEventType, decisionOutcome } from "../decisions/decisions.ts";
+import type { DecisionOutcome } from "../decisions/decisions.ts";
 import { generatedModule } from "../workflow-builds.ts";
 import type {
   LoadedBuild,
@@ -76,6 +78,13 @@ import { requireCallAuthority } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
+import {
+  candidateDecision,
+  checkCandidateDecision,
+  decisionRunOf,
+  openRunDecision,
+  takeDecision,
+} from "./resource-decisions.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -197,6 +206,17 @@ import { heldWakeType } from "./wakes.ts";
 // - Limits raising the host's ceilings. A task's timeout and the
 //   workflow's model calls are held to the lower of the build's sealed
 //   limit and the host's own (`configOf`, `HostedResourceRun`).
+// - A decision answered by anyone but its recipient, or by the isolate.
+//   A `grasp.decision` task opens its decision in its enter step, the
+//   host building it from the build's seal (resource-decisions.ts), and
+//   records its deadline, the decision's ID in the host's own journal
+//   entry beside it. Its call step runs only on the input that enter step
+//   recorded, and only once the host has waited, durably and in steps of
+//   its own, for the decision's outcome (`#awaitDecision`), read from the
+//   decision itself, never from the event that wakes the run; its call
+//   answers that outcome, its authority decided again, and its record,
+//   output.as and export.as are held to it as any call's are. A decision
+//   nobody answered fails the call: no outcome is made up for it.
 
 /** The main module of a run of a sealed build (`openRunMain`). */
 export const openRunModule = "grasp-open-run.js";
@@ -643,6 +663,38 @@ const checksOf: Readonly<Record<StepKind, readonly DataCheck[]>> = {
 type DataCheck = "input" | "output" | "export";
 const dataCheckSchema = z.enum(["input", "output", "export"]);
 
+/**
+ * Whether `task`'s enter step resolves a deadline: an expression wait's,
+ * a `grasp.sleepUntil` call's, or its decision's, which it opens.
+ */
+const resolvesDeadline = (task: SealedTask): boolean =>
+  deadlineOf(task) !== undefined ||
+  (task.kind === "call" && task.call.name === "grasp.decision");
+
+/** A `grasp.decision` call task, whose decision the host opens and takes. */
+type DecisionTask = Extract<SealedTask, { kind: "call" }> & {
+  call: Extract<SealedCall, { name: "grasp.decision" }>;
+};
+
+const isDecisionTask = (task: SealedTask | undefined): task is DecisionTask =>
+  task?.kind === "call" && task.call.name === "grasp.decision";
+
+/**
+ * Whether `step` is a decision task's call step: its enter step took the
+ * task's if and input, so it runs only what comes after its call, as a
+ * leave step does.
+ */
+const takesDecision = (step: StepOf): boolean =>
+  step.kind === "task" && isDecisionTask(step.task);
+
+/** The stages of its task's expressions `step` evaluates (`stagesOf`). */
+const stagesFor = (step: StepOf): readonly Stage[] =>
+  takesDecision(step) ? stagesOf.leave : stagesOf[step.kind];
+
+/** The schemas of its task `step` checks (`checksOf`). */
+const checksFor = (step: StepOf): readonly DataCheck[] =>
+  takesDecision(step) ? checksOf.leave : checksOf[step.kind];
+
 /** What a step captures: its raw input and the context. */
 const capturedSchema = z.strictObject({
   input: z.strictObject({ input: z.json(), context: z.json() }),
@@ -683,14 +735,30 @@ const resolvedListenSchema = z
 type ResolvedListen = z.infer<typeof resolvedListenSchema>;
 
 /**
- * What an enter step journals: its record, when its task started, and a
- * listen's filters, as the host resolved them: never the isolate's.
+ * What an enter step journals: its record, when its task started, a
+ * listen's filters, as the host resolved them, and for a decision task,
+ * the decision it opened: never the isolate's.
  */
 const enteredSchema = z.strictObject({
   record: z.json(),
   startedAt: z.number(),
   listen: resolvedListenSchema.optional(),
+  decision: z.string().min(1).max(128).optional(),
 });
+
+/** What a decision's look recorded: when, and whether it was answered. */
+const lookSchema = z.strictObject({ at: z.number(), answered: z.boolean() });
+
+/** How a decision ended, as its step recorded it (`DecisionOutcome`). */
+const outcomeSchema = z.discriminatedUnion("answered", [
+  z.strictObject({
+    answered: z.literal(true),
+    approved: z.boolean(),
+    by: z.string(),
+    payload: z.json().nullable(),
+  }),
+  z.strictObject({ answered: z.literal(false) }),
+]);
 
 /**
  * The most a step's capture or an evaluation's data may take as JSON: two
@@ -900,6 +968,14 @@ interface StepAttempt {
   exportAs: Map<number, Json>;
   /** The deadline it resolved for its task, once (`until`). */
   until: number | undefined;
+  /** The decision it opened for its decision task, with that deadline. */
+  decision: string | undefined;
+  /**
+   * For a decision task's call step: how its decision ended, as the host
+   * recorded it before the step ran (`#awaitDecision`); none for a test
+   * run, whose start's fixtures answer it.
+   */
+  decided: DecisionOutcome | undefined;
   /** Whether it asked for its deadline: once, however it went. */
   untilAsked: boolean;
   /** The items it resolved for its `for` task, once (`items`). */
@@ -944,6 +1020,8 @@ interface StepRun {
    * though it has none left (quotas.ts, `QuotaAttempt.collecting`).
    */
   collecting: boolean;
+  /** For a decision task's call step: its decision's outcome. */
+  decided: DecisionOutcome | undefined;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
@@ -1017,6 +1095,9 @@ const templatesOf = (call: SealedCall): SealedTemplate[] => {
     }
     case "grasp.sleepUntil": {
       return [call.timestamp];
+    }
+    case "grasp.decision": {
+      return [call.recipients, call.prompt, call.input];
     }
     default: {
       return call satisfies never;
@@ -1193,6 +1274,14 @@ export class ResourceRunHost
    * transforms, never what the isolate passes.
    */
   readonly #listened = new Map<string, Json>();
+  /**
+   * The decision each decision task's enter step opened, and the input it
+   * recorded, by its place, as this activation reached it (fresh or
+   * replayed): its call step takes that decision, on exactly that input,
+   * so each item of a loop takes its own.
+   */
+  readonly #decisions = new Map<string, string>();
+  readonly #decisionInputs = new Map<string, Json>();
   /**
    * The model calls of the run's JSON model tasks: those its replayed steps
    * recorded, as this activation reached them, and those this activation
@@ -1414,7 +1503,13 @@ export class ResourceRunHost
           entering,
           wait: loadWaitStart,
           collecting: false,
+          decided: undefined,
         };
+        // A decision task's call step runs once its decision has an
+        // outcome, waited for durably before it, fresh or replayed.
+        if (isDecisionTask(step.task) && takesDecision(step)) {
+          run.decided = await this.#awaitDecision(step, step.task, data);
+        }
         const attemptStep = async (context: unknown): Promise<unknown> =>
           await this.#attempt(run, context, fn, stepDone.promise);
         let recorded = await this.#step.do(
@@ -1492,6 +1587,9 @@ export class ResourceRunHost
             this.#taskStarts.set(step.place, journal.startedAt);
             if (journal.listen !== undefined) {
               this.#listens.set(step.place, journal.listen);
+            }
+            if (journal.decision !== undefined) {
+              this.#decisions.set(step.place, journal.decision);
             }
           }
         }
@@ -1689,7 +1787,9 @@ export class ResourceRunHost
       evaluated: new Set(),
       checked: new Set(),
       capturedSize: run.capturedSize,
-      condition: "unevaluated",
+      // A decision task's call step runs only once its enter step took the
+      // task's if (`#awaitDecision`): it holds.
+      condition: takesDecision(run.step) ? "held" : "unevaluated",
       inputFrom: new Map(),
       checkedInput: undefined,
       budget: { fuel: attemptFuel },
@@ -1704,6 +1804,8 @@ export class ResourceRunHost
       itemsAsked: false,
       proceeds: undefined,
       listen: undefined,
+      decision: undefined,
+      decided: run.decided,
       held: false,
       collecting: run.collecting,
       admission,
@@ -1779,6 +1881,9 @@ export class ResourceRunHost
       record: value,
       startedAt: attempt.startedAt,
       ...(attempt.listen === undefined ? {} : { listen: attempt.listen }),
+      // The decision it opened, beside the deadline its record holds: the
+      // host's own, never the isolate's.
+      ...(attempt.decision === undefined ? {} : { decision: attempt.decision }),
     };
     // Measured as the engine measures what a step returns: the
     // record fit, but with its start beside it may not.
@@ -1851,6 +1956,9 @@ export class ResourceRunHost
     if (step.kind === "enter" && task.kind === "listen") {
       this.#listenInputs.set(step.place, record.data.output);
     }
+    if (step.kind === "enter" && isDecisionTask(task)) {
+      this.#decisionInputs.set(step.place, record.data.output);
+    }
     if (
       step.kind === "task" &&
       task.kind === "call" &&
@@ -1919,6 +2027,87 @@ export class ResourceRunHost
         }
       }
     }
+  }
+
+  /**
+   * Waits, before the call step `stepName` of decision task `task` runs on
+   * `data`, for the outcome of the decision its enter step opened, and
+   * answers it: none for a test run, which opened nothing. The step runs
+   * only on the input that enter step recorded, after its deadline, both
+   * as this activation reached them. Each look at the decision is a step
+   * of its own, whether it was answered and when recorded, so a replay
+   * waits as the first activation did; between them, a durable wait for
+   * the decision's wake (decisions.ts), holding no isolate, until its
+   * deadline. A wake only makes the run look again: a stray or forged
+   * event of its type, which answered nothing, makes it wait again for the
+   * time it had left. Then the outcome, read from the decision and
+   * recorded, a decision still open closed as timed out in the same
+   * conditional update an answer uses, so an answer that lands first is
+   * the outcome instead.
+   */
+  async #awaitDecision(
+    step: StepOf,
+    task: DecisionTask,
+    data: { input: Json }
+  ): Promise<DecisionOutcome | undefined> {
+    const { name: stepName, place } = step;
+    const entered = this.#decisionInputs.get(place);
+    const deadline = this.#deadlines.get(place);
+    if (
+      entered === undefined ||
+      deadline === undefined ||
+      canonicalJson(entered) !== canonicalJson(data.input)
+    ) {
+      return this.#refuse(
+        `Task "${task.id}" takes its decision on the input its enter step recorded.`
+      );
+    }
+    if (this.#run.calling.candidate !== undefined) {
+      return undefined;
+    }
+    const decision = this.#decisions.get(place);
+    if (decision === undefined) {
+      return this.#refuse(`Task "${task.id}" takes the decision it opened.`);
+    }
+    const run = decisionRunOf(this.#run.calling);
+    const look = async (name: string) =>
+      lookSchema.parse(
+        await this.#step.do(name, {}, async () => {
+          const at = Date.now();
+          const { answered } = await decisionOutcome(
+            this.#env,
+            run,
+            decision,
+            false
+          );
+          return { at, answered };
+        })
+      );
+    let seen = await look(`${stepName}:decision:reached`);
+    for (let round = 0; !seen.answered && seen.at < deadline; round += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+        await this.#step.waitForEvent(`${stepName}:decision:wait:${round}`, {
+          type: decisionEventType(decision),
+          timeout: deadline - seen.at,
+        });
+      } catch (error) {
+        if (!isTimeout(error)) {
+          throw error;
+        }
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one look per wake
+      seen = await look(`${stepName}:decision:woken:${round}`);
+    }
+    // Recorded: an answer after it can't change what a replay hears.
+    return outcomeSchema.parse(
+      await this.#step.do(
+        `${stepName}:decision:outcome`,
+        {},
+        async () => await decisionOutcome(this.#env, run, decision, true)
+      )
+    );
   }
 
   /** Runs a `wait` task: a durable sleep of exactly its sealed length. */
@@ -2137,7 +2326,7 @@ export class ResourceRunHost
       expression === undefined ||
       expression.taskId !== owner ||
       this.#hostSlots.has(expression.slot) !== forHost ||
-      (!forHost && !stagesOf[step.kind].includes(expression.stage)) ||
+      (!forHost && !stagesFor(step).includes(expression.stage)) ||
       !whileFits(step, expression.slot)
     ) {
       return this.#refuse(
@@ -2402,6 +2591,11 @@ export class ResourceRunHost
     attempt: StepAttempt,
     task: SealedTask
   ): Json | undefined {
+    // A decision's call step captured the input its enter step made
+    // (`#awaitDecision`): its input.from ran there.
+    if (takesDecision(attempt.step)) {
+      return attempt.data.input;
+    }
     const inputFrom =
       task.kind === "call" ||
       task.kind === "wait" ||
@@ -2642,8 +2836,24 @@ export class ResourceRunHost
     attempt: StepAttempt,
     task: SealedTask,
     frame: unknown,
-    doing: "makes its call" | "resolves its deadline" | "resolves its items"
+    doing:
+      | "makes its call"
+      | "resolves its deadline"
+      | "resolves its items"
+      | "opens its decision"
   ): void {
+    // A decision's call step: its enter step took the task's if, input
+    // schema and input.from, and recorded the input it made, which the
+    // step captured (`#awaitDecision`). Its call is on exactly that.
+    if (takesDecision(attempt.step)) {
+      if (
+        canonicalJson(this.#callFrame(frame).input) !==
+        canonicalJson(attempt.data.input)
+      ) {
+        this.#refuse(`Task "${task.id}" ${doing} on its own input.`);
+      }
+      return;
+    }
     const stages = new Set(
       this.#run.build.expressions
         .filter(({ taskId }) => taskId === task.id)
@@ -2797,6 +3007,9 @@ export class ResourceRunHost
     }
     if (call.name === "grasp.action") {
       return await this.#action(attempt, task, call, passed);
+    }
+    if (call.name === "grasp.decision") {
+      return await this.#decided(attempt, task, call);
     }
     const built = await this.#builtCall(attempt, call, passed);
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
@@ -2983,7 +3196,8 @@ export class ResourceRunHost
           | "grasp.random"
           | "grasp.sleepUntil"
           | "grasp.compute"
-          | "grasp.action";
+          | "grasp.action"
+          | "grasp.decision";
       }
     >,
     frame: { input: Json; output: Json; size: number }
@@ -3031,6 +3245,92 @@ export class ResourceRunHost
   }
 
   /**
+   * What decision task `task`'s call answers in `attempt` of its call
+   * step: its decision's outcome, as the host waited for it before the
+   * step ran, its authority decided again (resource-decisions.ts); for a
+   * test run, the outcome its start gave the binding.
+   */
+  async #decided(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    call: Extract<SealedCall, { name: "grasp.decision" }>
+  ): Promise<Json> {
+    const { calling } = this.#run;
+    const { candidate } = calling;
+    let answer: Awaited<ReturnType<typeof takeDecision>>;
+    if (candidate !== undefined) {
+      answer = await candidateDecision(this.#env, candidate, call.binding);
+    } else if (attempt.decided === undefined) {
+      return this.#refuse(`Task "${task.id}" takes its decision's outcome.`);
+    } else {
+      answer = await takeDecision(
+        this.#env,
+        calling,
+        task.id,
+        call.binding,
+        attempt.decided
+      );
+    }
+    this.#requireCurrent(attempt);
+    const { approved, by, value } = answer;
+    return { answered: true, approved, by, value };
+  }
+
+  /**
+   * Opens decision task `task`'s decision in `attempt` of its enter step,
+   * once, as the build sealed its call, its parts built on the task's
+   * transformed input (`frame`), and answers its deadline, which the step
+   * records, with the decision's ID in the host's own journal entry beside
+   * it (resource-decisions.ts). A test run opens nothing: its deadline is
+   * now, and its call answers what its start gave the binding.
+   */
+  async #opened(
+    attempt: StepAttempt,
+    task: DecisionTask,
+    frame: unknown
+  ): Promise<number> {
+    if (attempt.untilAsked || attempt.condition === "failed") {
+      return this.#refuse(`Task "${task.id}" opens its decision once.`);
+    }
+    attempt.untilAsked = true;
+    this.#requireOpen(attempt, task, frame, "opens its decision");
+    const passed = this.#callFrame(frame);
+    this.#requireCurrent(attempt);
+    // One of its lineage's host calls, before anything of it is built.
+    await ResourceRunHost.#hostCall(attempt);
+    this.#requireCurrent(attempt);
+    const { call } = task;
+    const part = async (template: SealedTemplate) =>
+      await this.#built(attempt, template, passed, passed.size);
+    const built = {
+      binding: call.binding,
+      recipients: await part(call.recipients),
+      prompt: await part(call.prompt),
+      input: await part(call.input),
+      ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
+    };
+    const { candidate } = this.#run.calling;
+    if (candidate !== undefined) {
+      await checkCandidateDecision(this.#env, candidate, built);
+      attempt.until = Date.now();
+      return attempt.until;
+    }
+    this.#requireCurrent(attempt);
+    const opened = await openRunDecision(
+      this.#env,
+      { ...this.#run.calling, createdAt: this.#run.createdAt },
+      task.id,
+      // Its call step's name, in its scope: one decision per item of a loop.
+      attempt.step.name.replace(/^enter:/u, "task:"),
+      built
+    );
+    this.#requireCurrent(attempt);
+    attempt.decision = opened.decision;
+    attempt.until = opened.deadline;
+    return attempt.until;
+  }
+
+  /**
    * `ResourceAttemptHost.until`, for `attempt`: its task's deadline, once,
    * in its enter step: an expression wait's duration from now, or a
    * `grasp.sleepUntil` call's timestamp, built from what the build sealed
@@ -3044,6 +3344,10 @@ export class ResourceRunHost
       }
       const { step } = attempt;
       const { task } = step;
+      // A decision's deadline is its decision's, which its enter step opens.
+      if (step.kind === "enter" && isDecisionTask(task)) {
+        return await this.#opened(attempt, task, frame);
+      }
       const entering = step.kind === "enter" && task !== undefined;
       const deadline = entering ? deadlineOf(task) : undefined;
       const listening = entering && task.kind === "listen" ? task : undefined;
@@ -3223,7 +3527,7 @@ export class ResourceRunHost
     const schema =
       kind.success &&
       task !== undefined &&
-      checksOf[attempt.step.kind].includes(kind.data)
+      checksFor(attempt.step).includes(kind.data)
         ? ResourceRunHost.#schemaOf(task, kind.data)
         : undefined;
     if (!kind.success || schema === undefined) {
@@ -3249,7 +3553,7 @@ export class ResourceRunHost
   /** Whether `step`, of task `taskId`, evaluates the task's `if`. */
   #hasIf(step: StepOf, taskId: string): boolean {
     return (
-      stagesOf[step.kind].includes("taskIf") &&
+      stagesFor(step).includes("taskIf") &&
       this.#run.build.expressions.some(
         (expression) =>
           expression.taskId === taskId && expression.stage === "taskIf"
@@ -3444,7 +3748,7 @@ export class ResourceRunHost
       );
     }
     this.#requireRecordedWork(attempt, task, record);
-    const checks = checksOf[step.kind];
+    const checks = checksFor(step);
     const against: [DataCheck, Json][] = [
       ["input", data.input],
       ["output", record.output],
