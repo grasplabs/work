@@ -83,4 +83,36 @@ const connect :Workerd.Worker = (
       control: true,
     });
   });
+
+  // Each way a connector's code can have workerd report an error with its
+  // message: the same connector loaded as it is reports it, which shows the
+  // path is read; through `loadConnector`, nothing. What a default
+  // export's handler hands its own context's `waitUntil` is still
+  // reported: pinned so a change is seen (GRA-939).
+  it.each([
+    ["setImmediate", false],
+    ["waitUntil", true],
+  ])(
+    "reports %s from a connector loaded as it is, and from one loadConnector loads: %s",
+    async (name, reported) => {
+      const run = async (route: string) => {
+        const response = await fetch(new URL(route, served.url));
+        return z.object({ answered: z.string() }).parse(await response.json())
+          .answered;
+      };
+      const quiet = await run(`/path/${name}`);
+      const loud = await run(`/loud-path/${name}`);
+      await sleep(SETTLE_MS);
+
+      expect({
+        answered: [quiet, loud],
+        quiet: served.logs().includes(quiet),
+        loud: served.logs().includes(loud),
+      }).toStrictEqual({
+        answered: [`quiet-${name}-2c8e`, `loud-${name}-2c8e`],
+        quiet: reported,
+        loud: true,
+      });
+    }
+  );
 });
