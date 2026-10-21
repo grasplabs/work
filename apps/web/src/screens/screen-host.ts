@@ -792,11 +792,10 @@ const appTarget = (
 };
 
 /**
- * What a preview refuses: starting, reading or answering a workflow run.
- * The same refusal as core's for a call a preview stub refused
- * (`app.preview_side_effect`), and handled alike: the refusal itself
- * fails no check, and what the screen reports of it is the draft's, as
- * of any failed call (core's preview-reports.ts).
+ * What a preview refuses: starting, reading or answering a workflow run,
+ * here in the page before core is asked (`app.preview_side_effect`): the
+ * refusal itself fails no check, and what the screen reports of it is the
+ * draft's, as of any failed call (core's preview-reports.ts).
  */
 const refusedInPreview = async (): Promise<never> => {
   await Promise.resolve();

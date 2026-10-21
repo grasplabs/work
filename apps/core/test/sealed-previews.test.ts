@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { ChatsRpc } from "../src/chats-rpc.ts";
 import type { DataStore } from "../src/data-store.ts";
 import {
   discardFixtureStore,
@@ -771,10 +772,10 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     });
   });
 
-  it("never runs a draft of spec 8's layout as v1 server code, whatever server code it has", async () => {
+  it("never runs a draft's server code, whatever server code it has", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
-    const { chatId, revision } = await chatWithDraft(builder, app, {
+    const { chatId } = await chatWithDraft(builder, app, {
       "app/server.ts": `import { DurableObject } from "cloudflare:workers";
 
 export class App extends DurableObject {
@@ -784,10 +785,6 @@ export class App extends DurableObject {
 }
 `,
     });
-    const called = await failure(
-      async () =>
-        await builder.api.chats.previewCall(chatId, app, revision, "ran", [])
-    );
     const asAgent = await failure(
       async () =>
         await chatsOf(builder).callDraftFunction(
@@ -798,10 +795,11 @@ export class App extends DurableObject {
           {}
         )
     );
-    expect({ called, asAgent }).toStrictEqual({
-      called: "app.method_invalid",
-      asAgent: "operation.not_found",
-    });
+    expect({
+      // No page reaches a draft's server code: there is no such call.
+      called: "previewCall" in ChatsRpc.prototype,
+      asAgent,
+    }).toStrictEqual({ called: false, asAgent: "operation.not_found" });
   });
 
   it("commits nothing once its draft changed under a call already running", async () => {
