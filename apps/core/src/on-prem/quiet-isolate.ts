@@ -6,10 +6,12 @@
  * shares with the deployment's logs: whatever App code logs (a record, a
  * caller's input, another owner's data handed to it) would land there,
  * unbounded and read by whoever reads those logs. On Cloudflare the same
- * output is dropped unless a Tail Worker is attached, and core attaches
- * none. So on-prem drops it too (GRA-776), for every isolate the host
- * loads, App and platform code alike: what an isolate needs to say comes
- * back in its answer, and core logs what it decides itself.
+ * output never reaches the deployment's logs either: it is dropped, or,
+ * where core names `AppTail` as the isolate's tail (server-logs.ts), it
+ * goes bounded to a builder-visible log, never the platform's. So on-prem
+ * drops it too (GRA-776), for every isolate the host loads, App and
+ * platform code alike: what an isolate needs to say comes back in its
+ * answer, and core logs what it decides itself.
  *
  * How: the isolate's main module imports `quietModule` first, so it is
  * evaluated before any other module of the isolate and no module keeps a
@@ -21,8 +23,10 @@
  *
  * One kind of call keeps what it writes, bounded, for whom core says: a
  * draft's sealed preview, whose lines go to the agent's next check of
- * that draft, as a Loader tail hands them over on Cloudflare
- * (server-logs.ts, GRA-689). Its isolate is loaded with the quiet module
+ * that draft, as `AppTail` hands them over on Cloudflare
+ * (server-logs.ts, GRA-689). The only other isolates core gives a tail
+ * are a v1 App server's and its draft preview's (app.ts, preview.ts),
+ * whose lines on-prem drops: the v1 server is being removed (GRA-789). Its isolate is loaded with the quiet module
  * recording instead (`capturedModules`): the first `maxCapturedLines`
  * lines of the call, each held to `maxCapturedMessage` characters, with
  * their level and time, still printing nothing. A module of the host's
