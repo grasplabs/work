@@ -1,5 +1,7 @@
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
+import { chatCitationsMax } from "@grasp-os/shared/chat";
 import type {
+  ChatCitation,
   ChatCode,
   ChatMessage,
   ChatPartial,
@@ -86,11 +88,48 @@ const usageOf = ({
         contextWindow: contextWindowOf(model) ?? null,
       };
 
-/** A stored message as the person reads it; `undefined` for a system one. */
+/** A Markdown link to a note: its text, and the note's ID. */
+const noteLink = /\[(?<label>[^\]\n]*)\]\(grasp:note\/(?<id>[^\s)]+)\)/gu;
+
+/**
+ * An answer's text with the notes it cites (`ChatCitation`): its links to
+ * notes `given` holds stay, the first {@link chatCitationsMax} of them as
+ * its citations; any other note link is its text alone, so an answer never
+ * shows a citation of what its chat wasn't given, whatever the model wrote.
+ */
+export const citedIn = (
+  text: string,
+  given: (documentId: string) => boolean
+): { text: string; citations: ChatCitation[] } => {
+  const cited: string[] = [];
+  const shown = text.replaceAll(noteLink, (link, label: string, id: string) => {
+    if (!given(id)) {
+      return label;
+    }
+    if (!cited.includes(id) && cited.length < chatCitationsMax) {
+      cited.push(id);
+    }
+    return link;
+  });
+  return {
+    text: shown,
+    citations: cited.map((documentId) => ({ kind: "document", documentId })),
+  };
+};
+
+/** Cites nothing: every note link shows as its text. */
+const givenNothing = (): boolean => false;
+
+/**
+ * A stored message as the person reads it; `undefined` for a system one.
+ * An answer cites the notes `given` holds (`citedIn`): the documents its
+ * chat's code was given before it.
+ */
 export const chatMessageOf = (
   id: number,
   message: Message,
-  createdAt: Date
+  createdAt: Date,
+  given: (documentId: string) => boolean = givenNothing
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
@@ -101,7 +140,8 @@ export const chatMessageOf = (
     return {
       id,
       role: "assistant",
-      ...partialOf(message),
+      ...citedIn(textOf(message.content), given),
+      code: codeOf(message),
       end: ends[message.stopReason],
       ...(message.stopReason === "error" && message.errorMessage !== undefined
         ? { error: message.errorMessage }
