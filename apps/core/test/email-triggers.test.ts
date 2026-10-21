@@ -1,4 +1,18 @@
+import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import {
+  mailFromHeader,
+  mailIngressPath,
+  mailSentAtHeader,
+  mailSha256Header,
+  mailSignatureHeader,
+  mailSizeHeader,
+  mailToHeader,
+  signMail,
+} from "@grasp-os/shared/mail-ingress";
+import type { SignedMail } from "@grasp-os/shared/mail-ingress";
 import type { Role } from "@grasp-os/shared/roles";
+import { routerSecretHeader } from "@grasp-os/shared/router";
+import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -210,6 +224,63 @@ const deliver = async (
   };
   await worker.email(message, { ...env, ...changes });
   return delivery;
+};
+
+/**
+ * How a delivery to the raw-mail ingress is sent: signed with `secret`
+ * (core's router secret unless said) for `signed`, which is what's sent
+ * unless a test sends something else than it signed.
+ */
+interface Posting {
+  secret?: string;
+  signed?: Partial<SignedMail>;
+  sent?: Partial<SignedMail>;
+  body?: string;
+  changes?: Partial<Env>;
+  /** Leave the signature out. */
+  unsigned?: boolean;
+}
+
+/**
+ * Posts `raw` for `to` to core's raw-mail ingress, as the router's mail
+ * sorter does: through the router-secret check, signed for its recipient,
+ * sender, hash, size and time.
+ */
+const post = async (
+  to: string,
+  raw: string,
+  posting: Posting = {}
+): Promise<Response> => {
+  const bytes = new TextEncoder().encode(raw);
+  const mail: SignedMail = {
+    to,
+    from: "bounces@acme.test",
+    sha256: await sha256HexOfBytes(bytes),
+    size: bytes.byteLength,
+    sentAt: new Date().toISOString(),
+    ...posting.signed,
+  };
+  const sent = { ...mail, ...posting.sent };
+  const signature = await signMail(posting.secret ?? env.ROUTER_SECRET, mail);
+  return await worker.fetch(
+    new Request(`https://core${mailIngressPath}`, {
+      method: "POST",
+      headers: {
+        [routerSecretHeader]: env.ROUTER_SECRET,
+        [mailToHeader]: sent.to,
+        [mailFromHeader]: sent.from,
+        [mailSha256Header]: sent.sha256,
+        [mailSizeHeader]: String(sent.size),
+        [mailSentAtHeader]: sent.sentAt,
+        ...(posting.unsigned === true
+          ? {}
+          : { [mailSignatureHeader]: signature }),
+      },
+      body: posting.body ?? raw,
+    }),
+    { ...env, ...posting.changes },
+    createExecutionContext()
+  );
 };
 
 /** The App's runs, as its builder sees them. */
@@ -1171,5 +1242,98 @@ describe("attachments of mail", () => {
         },
       ])
     );
+  });
+});
+
+/** The time `n` minutes from now, ISO 8601. */
+const minutes = (n: number): string =>
+  new Date(Date.now() + n * 60_000).toISOString();
+
+describe("mail posted to core's raw-mail ingress", () => {
+  afterEach(endLiveRuns);
+
+  it("starts a run as mail from Email Routing does", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("posted"));
+
+    const response = await post("posted@grasp.test", invoiceMail());
+    const read = await readByRun(builder, app);
+
+    expect(response.status).toBe(202);
+    expect(read).toMatchObject({
+      from: "ben@acme.test",
+      subject: "Invoice INV-7",
+      attachments: ["inv-7.pdf:5"],
+    });
+  });
+
+  it("answers a bounce with core's reason", async () => {
+    const response = await post("nobody-here@grasp.test", invoiceMail());
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toStrictEqual({
+      reason: "No such address.",
+    });
+  });
+
+  it("takes the previous router secret's signature only while rotating", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("rotated"));
+    const previous = "previous-router-secret";
+
+    const before = await post("rotated@grasp.test", invoiceMail(), {
+      secret: previous,
+    });
+    const rotating = await post("rotated@grasp.test", invoiceMail(), {
+      secret: previous,
+      changes: { ROUTER_SECRET_PREVIOUS: previous },
+    });
+
+    expect([before.status, rotating.status]).toStrictEqual([403, 202]);
+    await expect(runsOf(builder, app)).resolves.toHaveLength(1);
+  });
+
+  it("refuses a delivery that isn't signed for exactly what it carries, and starts nothing", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("guarded"));
+    const to = "guarded@grasp.test";
+    const mail = invoiceMail();
+    // Same length, other bytes: what a message swapped on the way looks like.
+    const swapped = mail.replace("Friday", "Monday");
+
+    const refusals = {
+      // The router secret alone: any public request through the router.
+      unsigned: await post(to, mail, { unsigned: true }),
+      otherKey: await post(to, mail, { secret: "another-client-secret" }),
+      // Signed for one address, sent to another.
+      otherRecipient: await post("someone-else@grasp.test", mail, {
+        sent: { to },
+      }),
+      otherSender: await post(to, mail, {
+        sent: { from: "ceo@acme.test" },
+      }),
+      otherBody: await post(to, mail, { body: swapped }),
+      shorterBody: await post(to, mail, { body: mail.slice(0, -10) }),
+      stale: await post(to, mail, {
+        signed: { sentAt: minutes(-10) },
+      }),
+      ahead: await post(to, mail, { signed: { sentAt: minutes(10) } }),
+      notConfigured: await post(to, mail, {
+        changes: { ROUTER_SECRET: "" },
+        secret: "",
+      }),
+    };
+
+    expect(
+      Object.fromEntries(
+        Object.entries(refusals).map(([name, response]) => [
+          name,
+          response.status,
+        ])
+      )
+    ).toStrictEqual(
+      Object.fromEntries(Object.keys(refusals).map((name) => [name, 403]))
+    );
+    await expect(runsOf(builder, app)).resolves.toHaveLength(0);
   });
 });

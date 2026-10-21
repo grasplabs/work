@@ -381,13 +381,23 @@ const loopOf = (
 };
 
 /**
+ * A message as core takes it: from Email Routing's `email` handler, or
+ * from the raw-mail ingress (src/mail-ingress.ts), which answers what this
+ * rejects it with.
+ */
+export type InboundMessage = Pick<
+  ForwardableEmailMessage,
+  "from" | "to" | "raw" | "setReject"
+>;
+
+/**
  * Takes a message Email Routing delivers: starts a run of each workflow
  * that receives mail at its recipient's address, with the message as
  * input, bounces it, or fails it for now. A message that may loop
  * (`loopOf`) is dropped, and its refusal audited.
  */
 export const receiveEmail = async (
-  message: ForwardableEmailMessage,
+  message: InboundMessage,
   env: Env
 ): Promise<void> => {
   // Who receives it first: mail nobody receives is never read. A token

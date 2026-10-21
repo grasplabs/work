@@ -11,6 +11,7 @@ import {
 } from "@grasp-os/shared/interview-links";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
+import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
@@ -37,6 +38,7 @@ import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
+import { mailIngressResponse } from "./mail-ingress.ts";
 import { interviewResponse } from "./onboarding/links.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import {
@@ -226,6 +228,19 @@ const appCallResponse = async (
     : await appFileResponse(request, env, fileRoute, requestId);
 };
 
+/** The routes at one path whose handler takes the request alone. */
+const pathHandlers: ReadonlyMap<
+  string,
+  (request: Request, env: Env, requestId: string) => Promise<Response>
+> = new Map([
+  [auditExportPath, auditExportResponse],
+  [errorReportPath, errorReportResponse],
+  [onboardingSummaryPath, onboardingSummaryResponse],
+  [adminSnapshotPath, adminSnapshotResponse],
+  [platformUpdatePath, platformUpdateResponse],
+  [mailIngressPath, mailIngressResponse],
+]);
+
 /** Routes a request that has passed the router-secret check. */
 const route = async (
   request: Request,
@@ -265,24 +280,13 @@ const route = async (
   if (connection !== undefined) {
     return connection;
   }
-  if (pathname === auditExportPath) {
-    return await auditExportResponse(request, env, requestId);
+  const handler = pathHandlers.get(pathname);
+  if (handler !== undefined) {
+    return await handler(request, env, requestId);
   }
   const linked = await linkResponse(pathname, request, env, requestId);
   if (linked !== undefined) {
     return linked;
-  }
-  if (pathname === errorReportPath) {
-    return await errorReportResponse(request, env, requestId);
-  }
-  if (pathname === onboardingSummaryPath) {
-    return await onboardingSummaryResponse(request, env, requestId);
-  }
-  if (pathname === adminSnapshotPath) {
-    return await adminSnapshotResponse(request, env, requestId);
-  }
-  if (pathname === platformUpdatePath) {
-    return await platformUpdateResponse(request, env, requestId);
   }
   const appCall = await appCallResponse(pathname, request, env, requestId);
   if (appCall !== undefined) {

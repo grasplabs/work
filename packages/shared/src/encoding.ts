@@ -23,6 +23,18 @@ export const fromBase64Url = (text: string): Uint8Array<ArrayBuffer> => {
 export const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
+const HEX = /^(?:[0-9a-f]{2})*$/u;
+
+/** The bytes lowercase hex `text` spells; undefined for anything else. */
+export const fromHex = (text: string): Uint8Array<ArrayBuffer> | undefined => {
+  if (!HEX.test(text)) {
+    return undefined;
+  }
+  return Uint8Array.from({ length: text.length / 2 }, (_, index) =>
+    Number.parseInt(text.slice(index * 2, index * 2 + 2), 16)
+  );
+};
+
 /** SHA-256 of `bytes`, in lowercase hex. */
 export const sha256HexOfBytes = async (
   bytes: ArrayBuffer | Uint8Array

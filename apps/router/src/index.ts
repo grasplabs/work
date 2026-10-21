@@ -1,12 +1,27 @@
+import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { requestErrors } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { guestApiPath } from "@grasp-os/shared/guests";
 import {
+  readAtMost,
   requestIdHeader,
   strictTransportSecurity,
 } from "@grasp-os/shared/http";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { errorFields, log } from "@grasp-os/shared/log";
+import {
+  mailFromHeader,
+  mailIngressHeaders,
+  mailIngressMaxBytes,
+  mailIngressPath,
+  mailRejectedStatus,
+  mailSentAtHeader,
+  mailSha256Header,
+  mailSignatureHeader,
+  mailSizeHeader,
+  mailToHeader,
+  signMail,
+} from "@grasp-os/shared/mail-ingress";
 import {
   deriveRouterSecret,
   routerHostKey,
@@ -70,6 +85,25 @@ const routeFor = async (host: string, env: Env): Promise<Route | null> => {
   const route = await loadRoute(host, env);
   routes.set(host, route, Date.now());
   return route;
+};
+
+/** The most of core's reason for a bounce the sender is told. */
+const maxBounceReason = 500;
+
+/**
+ * The reason the sender reads for a message core bounced: core's own, as
+ * its answer gives it, or a plain one when that isn't a short string.
+ */
+const bounceReason = (answer: unknown): string => {
+  const reason: unknown =
+    typeof answer === "object" && answer !== null
+      ? Reflect.get(answer, "reason")
+      : undefined;
+  return typeof reason === "string" &&
+    reason !== "" &&
+    reason.length <= maxBounceReason
+    ? reason
+    : "The message can't be delivered.";
 };
 
 /** Core's sign-in routes (Better Auth, core's `authBasePath`). */
@@ -160,6 +194,11 @@ export default {
     }
 
     const { pathname } = url;
+    // Mail reaches core only through `email` below, signed: never from
+    // the public, whatever it sends.
+    if (pathname === mailIngressPath) {
+      return new Response("Not found", { status: 404 });
+    }
     const isAuth =
       pathname === authBasePath || pathname.startsWith(`${authBasePath}/`);
     // Signing out needs no protection from guessing, and refusing it would
@@ -194,6 +233,9 @@ export default {
     headers.delete("host");
     headers.set(routerSecretHeader, route.secret);
     headers.delete(routerClientIpHeader);
+    for (const name of mailIngressHeaders) {
+      headers.delete(name);
+    }
     const clientIp = request.headers.get("cf-connecting-ip");
     if (clientIp !== null) {
       headers.set(routerClientIpHeader, clientIp);
@@ -214,5 +256,79 @@ export default {
       });
       return new Response("Bad gateway", { status: 502 });
     }
+  },
+
+  /**
+   * Sorts the mail Email Routing hands the router (one catch-all for every
+   * client's domain) to the client whose hostname is the recipient's
+   * domain, and to no other: unknown, the message bounces. Passes the
+   * raw message on to that client's core, signed for exactly its
+   * recipient, sender and bytes (@grasp-os/shared/mail-ingress), and
+   * keeps nothing of it. Core's answer is the message's: taken, bounced
+   * with core's reason, or anything else failed for now (thrown), so
+   * Email Routing tells the sender to try again. Logs the domain, the
+   * message's hash and size, never an address or what it says.
+   */
+  async email(message, env) {
+    const at = message.to.lastIndexOf("@");
+    const host = routerHostKey(message.to.slice(at + 1));
+    // Thrown when the map or the key can't be read: failed for now, never
+    // sent anywhere else.
+    const route = at > 0 ? await routeFor(host, env) : null;
+    if (route === null) {
+      log.info("router.mail_unrouted", { host });
+      message.setReject("No such address.");
+      return;
+    }
+    const raw =
+      message.rawSize > mailIngressMaxBytes
+        ? undefined
+        : await readAtMost(message.raw, mailIngressMaxBytes);
+    if (raw === undefined) {
+      log.info("router.mail_too_large", { host, size: message.rawSize });
+      message.setReject("The message is too large.");
+      return;
+    }
+    const mail = {
+      to: message.to,
+      from: message.from,
+      sha256: await sha256HexOfBytes(raw),
+      size: raw.byteLength,
+      sentAt: new Date().toISOString(),
+    };
+    const response = await fetch(`${route.origin}${mailIngressPath}`, {
+      method: "POST",
+      headers: {
+        "content-type": "message/rfc822",
+        [routerSecretHeader]: route.secret,
+        [mailToHeader]: mail.to,
+        [mailFromHeader]: mail.from,
+        [mailSha256Header]: mail.sha256,
+        [mailSizeHeader]: String(mail.size),
+        [mailSentAtHeader]: mail.sentAt,
+        [mailSignatureHeader]: await signMail(route.secret, mail),
+      },
+      body: raw,
+      redirect: "manual",
+    });
+    const fields = {
+      host,
+      message: mail.sha256,
+      size: mail.size,
+      status: response.status,
+    };
+    if (response.status === mailRejectedStatus) {
+      log.info("router.mail_bounced", fields);
+      message.setReject(bounceReason(await response.json().catch(() => null)));
+      return;
+    }
+    await response.body?.cancel();
+    if (response.status !== 202) {
+      log.error("router.mail_failed", fields);
+      throw new Error(
+        `Core didn't take message ${mail.sha256} (${response.status})`
+      );
+    }
+    log.info("router.mail_delivered", fields);
   },
 } satisfies ExportedHandler<Env>;

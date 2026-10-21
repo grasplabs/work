@@ -74,6 +74,7 @@
     "./knowledge": "./src/knowledge.ts",
     "./knowledge-signals": "./src/knowledge-signals.ts",
     "./log": "./src/log.ts",
+    "./mail-ingress": "./src/mail-ingress.ts",
     "./members": "./src/members.ts",
     "./memory": "./src/memory.ts",
     "./models": "./src/models.ts",
