@@ -213,8 +213,8 @@ export const workflowResourceErrors = defineErrorFamily({
 
 /**
  * The binding kinds the host catalog serves, beside other workflows. A
- * `knowledge` or `template` binding is reached only by the workflow's own
- * actions (GRA-700): no JSON task calls one.
+ * `knowledge`, `template` or `files` binding is reached only by the
+ * workflow's own actions (GRA-700, GRA-724): no JSON task calls one.
  */
 export const catalogBindingKinds = [
   "operation",
@@ -224,6 +224,7 @@ export const catalogBindingKinds = [
   "event",
   "knowledge",
   "template",
+  "files",
 ] as const;
 export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
 
@@ -394,6 +395,11 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     version: z.int().min(1),
     contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
   }),
+  // The run's own files (GRA-724): what its actions write and read back,
+  // its own alone, gone with its details. Nothing outside the run serves
+  // it, so there is nothing to name: the admin approves that the version
+  // keeps run files at all.
+  z.strictObject({ kind: z.literal("files") }),
 ]);
 export type WorkflowBindingTarget = z.infer<typeof workflowBindingTargetSchema>;
 
