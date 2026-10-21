@@ -9,7 +9,9 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 // prints an isolate's console and its uncaught errors with their message.
 //
 // - `/call`: App code through `callSandboxed`, as core runs an inspection
-//   or a migration's batch here.
+//   or a migration's batch here, with no Node.js (`isolateBase`).
+// - `/app-node-timers`: App code importing a timer by name from
+//   `node:timers`, which it doesn't have.
 // - `/js`: an isolate whose main module is given as `{ js }`, through the
 //   loader core reads its `LOADER` through (`quietLoader`).
 // - `/hashbang`: a main module that starts with a hashbang, which must stay
@@ -17,8 +19,10 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 //   carriage return, with an App import after it.
 // - `/nested`: a main module in a directory, beside an App module named
 //   as the quiet module is.
-// - `/thrown`: a call that throws to its caller, which workerd served
-//   `--verbose` reports with its message (GRA-939).
+// - `/thrown`: a call that throws to its caller, which crosses as a value
+//   and is thrown again here, so workerd served `--verbose` never reports
+//   it with its message (GRA-939); `/thrown-long`: one whose message is
+//   longer than crosses.
 // - `/cjs`: a main module that can't import the quiet module first.
 // - `/control`: the same code in the Loader as it is, which shows workerd's
 //   output is read at all.
@@ -39,9 +43,9 @@ const values = {
  * an error and a rejection uncaught, then answers with it.
  */
 const isolateOf = (
-  value: string
-): string => `import nodeConsole from "node:console";
-import { WorkerEntrypoint } from "cloudflare:workers";
+  value: string,
+  node = true
+): string => `${node ? 'import nodeConsole from "node:console";\n' : ""}import { WorkerEntrypoint } from "cloudflare:workers";
 const value = ${JSON.stringify(value)};
 const kept = console.log;
 export class App extends WorkerEntrypoint {
@@ -50,7 +54,7 @@ export class App extends WorkerEntrypoint {
     for (const level of ["log", "info", "warn", "error", "debug", "trace"]) {
       console[level](value);
     }
-    nodeConsole.log(value);
+    ${node ? "nodeConsole.log(value);" : ""}
     console.log = (...args) => console.error(...args);
     console.log(value);
     Promise.reject(new Error(value));
@@ -71,16 +75,44 @@ export class App extends WorkerEntrypoint {
 }
 `;
 
-/** An isolate whose call throws `value` to its caller. */
+/**
+ * An isolate whose call throws `message` to its caller, as a `TypeError`
+ * with a code, from a method its entrypoint's own call reaches: which
+ * throws to that call as it always did, and is caught there once.
+ */
 const throwingOf = (
-  value: string
+  message: string
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
 export class App extends WorkerEntrypoint {
+  inner() {
+    throw Object.assign(new TypeError(${JSON.stringify(message)}), { code: "app.failed" });
+  }
   run() {
-    throw new Error(${JSON.stringify(value)});
+    try {
+      this.inner();
+    } catch (error) {
+      if (!(error instanceof TypeError)) {
+        return "the entrypoint's own call was answered, not thrown";
+      }
+    }
+    this.inner();
   }
 }
 `;
+
+/** What a host-side error from an isolate says: its kind, code and size. */
+const thrownBy = async (call: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    return { answered: await call() };
+  } catch (error) {
+    return {
+      kind: error instanceof TypeError ? "TypeError" : "other",
+      code: error instanceof Error ? String(Reflect.get(error, "code")) : "",
+      length: error instanceof Error ? error.message.length : -1,
+      start: error instanceof Error ? error.message.slice(0, 32) : "",
+    };
+  }
+};
 
 const settings = {
   compatibilityDate: "2026-09-15",
@@ -133,12 +165,61 @@ export class App extends WorkerEntrypoint {
 }
 `;
 
+/**
+ * What GRA-939's routes answer (`/thrown`, `/thrown-long`,
+ * `/app-node-timers`), or undefined for any other.
+ */
+const answerOfThrown = async (
+  route: string,
+  env: SandboxedEnv
+): Promise<unknown> => {
+  if (route === "/thrown" || route === "/thrown-long") {
+    const message =
+      route === "/thrown" ? values.thrown : values.thrown.repeat(500);
+    return await thrownBy(
+      async () =>
+        await runApp(
+          quietLoader(env.LOADER).load({
+            ...settings,
+            mainModule: "app.js",
+            modules: { "app.js": throwingOf(message) },
+          })
+        )
+    );
+  }
+  if (route === "/app-node-timers") {
+    try {
+      return await callSandboxed(
+        env,
+        {
+          mainModule: "app.js",
+          modules: {
+            "app.js": `import { setTimeout } from "node:timers";\nimport { WorkerEntrypoint } from "cloudflare:workers";\nexport class App extends WorkerEntrypoint {\n  run() {\n    return typeof setTimeout;\n  }\n}\n`,
+          },
+        },
+        "App",
+        "run"
+      );
+    } catch {
+      return "refused";
+    }
+  }
+  return undefined;
+};
+
 /** What a route answers: the isolate's answer, or why it was refused. */
 const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
+  const thrown = await answerOfThrown(route, env);
+  if (thrown !== undefined) {
+    return thrown;
+  }
   if (route === "/call") {
     return await callSandboxed(
       env,
-      { mainModule: "app.js", modules: { "app.js": isolateOf(values.call) } },
+      {
+        mainModule: "app.js",
+        modules: { "app.js": isolateOf(values.call, false) },
+      },
       "App",
       "run"
     );
@@ -214,19 +295,6 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
         },
       })
     );
-  }
-  if (route === "/thrown") {
-    try {
-      return await runApp(
-        quietLoader(env.LOADER).load({
-          ...settings,
-          mainModule: "app.js",
-          modules: { "app.js": throwingOf(values.thrown) },
-        })
-      );
-    } catch {
-      return "threw";
-    }
   }
   if (route === "/hashbang") {
     return await runApp(

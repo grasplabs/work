@@ -23,14 +23,13 @@ const sessionValue = "session-value-c81d";
 
 /**
  * An isolate that logs `value` every way it can: each console method, a
- * console method it kept as it loaded, `node:console`, a console method it
- * puts back itself, a rejection nothing handles and an error thrown in a
+ * console method it kept as it loaded, a console method it puts back
+ * itself (App code has no `node:console`: no Node.js, `isolateSettings`), a rejection nothing handles and an error thrown in a
  * microtask. Then it answers with `value`, through `probe` when given.
  */
 const loggingModule = (
   value: string
-): string => `import nodeConsole from "node:console";
-import { WorkerEntrypoint } from "cloudflare:workers";
+): string => `import { WorkerEntrypoint } from "cloudflare:workers";
 // Kept as the module loads, to log with later.
 const kept = console.log;
 const value = ${JSON.stringify(value)};
@@ -45,8 +44,6 @@ export class App extends WorkerEntrypoint {
     console.trace(value);
     console.dir({ value });
     console.table([value]);
-    nodeConsole.log(value);
-    nodeConsole.error(value);
     console.log = (...args) => console.error(...args);
     console.log(value);
     Promise.reject(new Error(value));

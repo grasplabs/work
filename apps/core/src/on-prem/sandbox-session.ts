@@ -415,7 +415,14 @@ class Session extends CapnwebTarget {
     const isolate = this.#env.LOADER.get(null, () => ({
       ...this.#settings,
       compatibilityFlags: parsed.nodejsCompat
-        ? [...compatibilityFlags, "nodejs_compat"]
+        ? [
+            // Node.js on: the flags that turn it off (`isolateSettings`)
+            // dropped.
+            ...compatibilityFlags.filter(
+              (flag) => !flag.startsWith("no_nodejs_compat")
+            ),
+            "nodejs_compat",
+          ]
         : compatibilityFlags,
       ...loaded,
       env: {},

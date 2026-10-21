@@ -12,6 +12,7 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { maxThrownMessage } from "@grasp-os/shared/quiet-loader";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -115,16 +116,48 @@ const core :Workerd.Worker = (
     });
   });
 
-  // What the quiet module can't stop: workerd served `--verbose` reports
-  // an exception thrown out of a call, as it hands it to the caller, and
-  // what a callback of a timer imported by name from `node:timers` throws
-  // (the binding is the module's own, which nothing loaded first can
-  // change). Pinned so a change to either is seen (GRA-939); without
-  // `--verbose`, as the supervisor and a deployment run, neither is
-  // printed.
-  it("still has a call's thrown error and a named node:timers timer's reported by a workerd served --verbose", async () => {
-    const thrown = await fetch(new URL("/thrown", served.url));
-    const { answered, values } = ranSchema.parse(await thrown.json());
+  // What an entrypoint's call throws crosses as a value and is thrown
+  // again host-side (GRA-939): of the same kind, with its code and its
+  // message, which is cut at `maxThrownMessage`. Workerd reports nothing of
+  // it, and the entrypoint's own calls of its methods throw as before.
+  it("throws an entrypoint's thrown error to its caller host-side, of its kind and code, with nothing of it reported", async () => {
+    const run = async (route: string) => {
+      const response = await fetch(new URL(route, served.url));
+      return z.object({ answered: z.unknown() }).parse(await response.json())
+        .answered;
+    };
+    const thrown = await run("/thrown");
+    const long = await run("/thrown-long");
+    await sleep(SETTLE_MS);
+
+    expect({
+      thrown,
+      long,
+      reported: served.logs().includes("record-value-c40b"),
+    }).toStrictEqual({
+      thrown: {
+        kind: "TypeError",
+        code: "app.failed",
+        length: "record-value-c40b".length,
+        start: "record-value-c40b",
+      },
+      long: {
+        kind: "TypeError",
+        code: "app.failed",
+        length: maxThrownMessage,
+        start: "record-value-c40brecord-value-c4",
+      },
+      reported: false,
+    });
+  });
+
+  // App code has no Node.js (`isolateBase`: `nodejs_compat` is the default
+  // from 2026-08-04 on, so it is turned off): a timer imported by name from
+  // `node:timers`, whose callback's throw nothing loaded first can catch,
+  // can't be had. Core's own code that needs Node turns it on, and its
+  // named timers are still reported: pinned so a change is seen (GRA-939).
+  it("loads no App code that imports node:timers, and still reports a named timer's throw in core's own Node code", async () => {
+    const refused = await fetch(new URL("/app-node-timers", served.url));
     const named = await fetch(new URL("/path/nodeNamedSetTimeout", served.url));
     const namedValue = z
       .object({ answered: z.string() })
@@ -132,10 +165,10 @@ const core :Workerd.Worker = (
     await sleep(SETTLE_MS);
 
     expect({
-      answered,
-      reported: served.logs().includes(values.thrown),
+      refused: z.object({ answered: z.unknown() }).parse(await refused.json())
+        .answered,
       named: served.logs().includes(namedValue),
-    }).toStrictEqual({ answered: "threw", reported: true, named: true });
+    }).toStrictEqual({ refused: "refused", named: true });
   });
 
   // Each way an isolate's code can have workerd report an error with its

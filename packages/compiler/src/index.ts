@@ -10,7 +10,7 @@
  * imports only the version.
  */
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { isolateBase } from "@grasp-os/shared/runtime";
+import { isolateBase, withNode } from "@grasp-os/shared/runtime";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
@@ -183,7 +183,7 @@ export const serverSdkModules = async (assets: Fetcher): Promise<KitModules> =>
  */
 export const isolateSettings = {
   ...isolateBase,
-  compatibilityFlags: [...isolateBase.compatibilityFlags, "nodejs_compat"],
+  compatibilityFlags: withNode(isolateBase.compatibilityFlags),
   env: {},
   globalOutbound: null,
   limits: { cpuMs: platformLimits.compilerTaskCpuMs, subRequests: 0 },
@@ -321,7 +321,7 @@ export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
 /**
  * How the package builder's isolate runs: no bindings, no importable env,
  * no network (`globalOutbound: null` and no subrequests), no Node.js
- * compatibility, and at most one build task's CPU per call (spec 18.1,
+ * compatibility (`isolateBase`), and at most one build task's CPU per call (spec 18.1,
  * `compilerTaskCpuMs`: 20 s), as the compiler's.
  */
 export const packageBuilderSettings = {
