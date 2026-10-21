@@ -88,6 +88,10 @@ interface FrameSource {
   /** The route the screen was navigated to by, and its input as JSON text. */
   route?: string;
   input?: string;
+  /** The surface it opens in (spec 34.1), which core checks the input with. */
+  surface?: string;
+  /** Running beside the page (the shell's panel), outliving its navigations. */
+  beside?: boolean;
 }
 
 /** How a screen navigates the page, and holds it while a form is unsaved. */
@@ -115,7 +119,7 @@ const jsonInput = (text: string | undefined): unknown => {
 const start = (
   frame: HTMLIFrameElement,
   core: CoreConnection,
-  { app, screen, chatId, route, input }: FrameSource,
+  { app, screen, chatId, route, input, surface }: FrameSource,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
   confirm: (review: PendingConfirmation) => Promise<boolean>,
@@ -125,7 +129,13 @@ const start = (
     ? runScreen(frame, core, app, screen ?? "", onState, onOpened, confirm, {
         ...(route === undefined
           ? {}
-          : { route: { route, input: jsonInput(input) } }),
+          : {
+              route: {
+                route,
+                input: jsonInput(input),
+                ...(surface === undefined ? {} : { surface }),
+              },
+            }),
         navigation,
       })
     : runPreview(
@@ -184,24 +194,37 @@ const policedNavigation = (
   router: ReturnType<typeof useRouter>,
   navigateTo: { readonly current: ScreenNavigate | undefined },
   onGuard: (guarded: boolean) => void,
-  current: { current: NavigationPolicy | null }
+  current: { current: NavigationPolicy | null },
+  frame: HTMLIFrameElement,
+  beside: boolean
 ): FrameNavigation => {
-  // Read as each navigation is asked for.
+  // Read as each navigation is asked for. Where the page is: its history
+  // entry, which differs for each, even at one address. Whether the person
+  // just acted: on the page, for a screen that is the page's; beside it,
+  // only in its own frame, so a click anywhere else on the page is never
+  // the panel's to use.
   const page: PageState = {
     location: () => ({
-      here: router.state.location.href,
-      going: router.latestLocation.href,
+      here: router.state.location.state.__TSR_key ?? router.state.location.href,
+      going:
+        router.latestLocation.state.__TSR_key ?? router.latestLocation.href,
     }),
-    activated: () => navigator.userActivation?.isActive ?? false,
+    activated: () =>
+      (navigator.userActivation?.isActive ?? false) &&
+      (!beside || document.activeElement === frame),
     now: () => Date.now(),
   };
-  const policy = navigationPolicy(async (target, replace) => {
-    const go = navigateTo.current;
-    if (go === undefined) {
-      throw screenErrors.create("screen.invalid");
-    }
-    await go(target, replace);
-  }, page);
+  const policy = navigationPolicy(
+    async (target, replace) => {
+      const go = navigateTo.current;
+      if (go === undefined) {
+        throw screenErrors.create("screen.invalid");
+      }
+      await go(target, replace);
+    },
+    page,
+    beside ? "beside" : "page"
+  );
   // The leave dialog tells this start's policy when the person stays.
   current.current = policy;
   return {
@@ -237,6 +260,8 @@ const Frame = ({
   chatId,
   route,
   input,
+  surface,
+  beside,
   title,
   onState,
   onOpened,
@@ -260,11 +285,19 @@ const Frame = ({
               ...(chatId === undefined ? {} : { chatId }),
               ...(route === undefined ? {} : { route }),
               ...(input === undefined ? {} : { input }),
+              ...(surface === undefined ? {} : { surface }),
             },
             onState,
             onOpened,
             onAsk,
-            policedNavigation(router, navigateTo, onGuard, policy)
+            policedNavigation(
+              router,
+              navigateTo,
+              onGuard,
+              policy,
+              frame,
+              beside === true
+            )
           )
         : undefined,
     [
@@ -276,6 +309,8 @@ const Frame = ({
       chatId,
       route,
       input,
+      surface,
+      beside,
       onState,
       onOpened,
       onAsk,
@@ -300,7 +335,7 @@ const Frame = ({
  * change whose outcome isn't known yet: once per leave, in Grasp's own
  * dialog, which the screen can't draw over or answer.
  */
-const LeaveConfirmDialog = ({
+export const LeaveConfirmDialog = ({
   open,
   onLeave,
   onStay,
@@ -357,6 +392,8 @@ const FramedScreen = ({
   embedded,
   onReload,
   onNavigate,
+  onEnded,
+  onGuardChange,
 }: {
   source: FrameSource;
   title: string;
@@ -364,9 +401,22 @@ const FramedScreen = ({
   embedded: boolean;
   onReload?: () => void;
   onNavigate?: ScreenNavigate;
+  onEnded?: ScreenEnded;
+  onGuardChange?: (guarded: boolean) => void;
 }) => {
   const Title = embedded ? "h2" : "h1";
   const [state, setState] = useState<ScreenState>({ status: "loading" });
+  // Told once the screen failed or its person signed out: the frame is
+  // emptied then, and whatever holds it may let it go.
+  const endedTo = useRef(onEnded);
+  useEffect(() => {
+    endedTo.current = onEnded;
+  }, [onEnded]);
+  useEffect(() => {
+    if (state.status === "failed" || state.status === "signed-out") {
+      endedTo.current?.(state);
+    }
+  }, [state]);
   const [appName, setAppName] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [asked, setAsked] = useState<Asked | null>(null);
@@ -377,8 +427,19 @@ const FramedScreen = ({
   // A failed or signed-out screen is emptied: nothing of it is left to lose.
   const holdsEdits =
     guarded && (state.status === "running" || state.status === "updated");
+  // Beside the page (the shell's panel), the page's own navigations leave
+  // the screen where it is, so only closing the tab is confirmed here; its
+  // own closing is the panel's to confirm (`onGuardChange`).
+  const beside = source.beside === true;
+  const guardTo = useRef(onGuardChange);
+  useEffect(() => {
+    guardTo.current = onGuardChange;
+  }, [onGuardChange]);
+  useEffect(() => {
+    guardTo.current?.(holdsEdits);
+  }, [holdsEdits]);
   const leaving = useBlocker({
-    shouldBlockFn: () => holdsEdits,
+    shouldBlockFn: () => holdsEdits && !beside,
     enableBeforeUnload: () => holdsEdits,
     withResolver: true,
   });
@@ -441,6 +502,8 @@ const FramedScreen = ({
         {...(source.chatId === undefined ? {} : { chatId: source.chatId })}
         {...(source.route === undefined ? {} : { route: source.route })}
         {...(source.input === undefined ? {} : { input: source.input })}
+        {...(source.surface === undefined ? {} : { surface: source.surface })}
+        {...(source.beside === true ? { beside: true } : {})}
       />
     </div>
   );
@@ -463,6 +526,10 @@ interface ScreenFrameProps {
   /** The route the screen was navigated to by, and its input as JSON text. */
   route?: string;
   input?: string;
+  /** The surface it opens in, checked by core with its route. */
+  surface?: string;
+  /** Beside the page (the shell's panel): its navigations outlive the page's. */
+  beside?: boolean;
   /** How its navigation takes the page on (`ScreenNavigate`). */
   onNavigate?: ScreenNavigate;
   /**
@@ -472,7 +539,16 @@ interface ScreenFrameProps {
   embedded?: boolean;
   /** Also called when the person loads the screen again. */
   onReload?: () => void;
+  /** Called once the screen failed or its person signed out. */
+  onEnded?: ScreenEnded;
+  /** Told whether the screen holds edits leaving would lose, as that changes. */
+  onGuardChange?: (guarded: boolean) => void;
 }
+
+/** How a screen ended: it failed, and why, or its person signed out. */
+export type ScreenEnded = (
+  ended: Extract<ScreenState, { status: "failed" | "signed-out" }>
+) => void;
 
 /** An App's screen, running in a sandboxed frame (`FramedScreen`). */
 export const ScreenFrame = ({
@@ -480,9 +556,13 @@ export const ScreenFrame = ({
   screen,
   route,
   input,
+  surface,
+  beside = false,
   embedded = false,
   onReload,
   onNavigate,
+  onEnded,
+  onGuardChange,
 }: ScreenFrameProps) => {
   const { t } = useLingui();
   return (
@@ -494,10 +574,14 @@ export const ScreenFrame = ({
         screen,
         ...(route === undefined ? {} : { route }),
         ...(input === undefined ? {} : { input }),
+        ...(surface === undefined ? {} : { surface }),
+        ...(beside ? { beside } : {}),
       }}
       title={t`${screen} app`}
       {...(onReload === undefined ? {} : { onReload })}
       {...(onNavigate === undefined ? {} : { onNavigate })}
+      {...(onEnded === undefined ? {} : { onEnded })}
+      {...(onGuardChange === undefined ? {} : { onGuardChange })}
     />
   );
 };

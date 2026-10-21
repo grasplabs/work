@@ -1752,10 +1752,6 @@ msgstr "Alle aanroepen"
 msgid "All calls together"
 msgstr "Alle aanroepen samen"
 
-#: src/chat/side-panel.tsx
-msgid "All domains"
-msgstr "Alle domeinen"
-
 #: src/brain/brain-atlas.ts
 msgid "All interviewed"
 msgstr "Allemaal geïnterviewd"
@@ -2873,6 +2869,7 @@ msgstr "Klik om Gebruik te openen"
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
+#: src/screens/app-panel.tsx
 msgid "Close"
 msgstr "Sluiten"
 
@@ -2884,6 +2881,10 @@ msgstr "{name} sluiten"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Close it for the onboarding"
 msgstr "Sluiten voor de onboarding"
+
+#: src/screens/app-panel.tsx
+msgid "Close panel"
+msgstr "Paneel sluiten"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Closes {closes}"
@@ -3703,6 +3704,10 @@ msgstr "Domeinbudgetten"
 msgid "Domain not found"
 msgstr "Domein niet gevonden"
 
+#: src/frame/surface-nav.tsx
+msgid "Domain shortcuts"
+msgstr "Snelkoppelingen van domeinen"
+
 #: src/chat/side-panel.tsx
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
@@ -4362,6 +4367,10 @@ msgstr "Uit de kick-off met de sponsor. Wat hier verandert, geldt vanaf de volge
 #: src/landscape/data-tab.tsx
 msgid "From the permissions people granted and how the app is classified."
 msgstr "Op basis van de rechten die mensen gaven en hoe de app is ingedeeld."
+
+#: src/frame/surface-nav.tsx
+msgid "From your domains"
+msgstr "Uit je domeinen"
 
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
@@ -8388,6 +8397,7 @@ msgid "Set. Type a new value to replace it."
 msgstr "Ingesteld. Typ een nieuwe waarde om deze te vervangen."
 
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Instellingen"
@@ -8495,6 +8505,7 @@ msgid "Shows which apps it would flag or block, without doing it."
 msgstr "Laat zien welke apps de regel zou markeren of blokkeren, zonder het te doen."
 
 #: src/routes/_shell.index.tsx
+#: src/screens/app-panel.tsx
 msgid "Side panel"
 msgstr "Zijpaneel"
 
@@ -9876,6 +9887,10 @@ msgstr "Dit klopt"
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Dit is de toestemming zoals Grasp die nu formuleert. Het auditlog bewaart een hash van de exacte tekst die werd getoond."
 
+#: src/routes/_shell.links.$app.$surface.tsx
+msgid "This link doesn't open anything you can open"
+msgstr "Deze link opent niets wat je kunt openen"
+
 #: src/routes/guest.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "Deze link werkt niet. Vraag wie hem stuurde om een nieuwe."
@@ -11177,7 +11192,7 @@ msgctxt "where a package runs"
 msgid "Workflows"
 msgstr "Workflows"
 
-#: src/chat/side-panel.tsx
+#: src/screens/app-panel.tsx
 msgid "Workflows and more"
 msgstr "Workflows en meer"
 
