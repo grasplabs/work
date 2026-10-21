@@ -5301,10 +5301,12 @@ msgid "Doors"
 msgstr "Deuren"
 
 #: src/chat/chat-more.tsx
+#: src/workflows/run-detail.tsx
 msgid "Download"
 msgstr "Downloaden"
 
 #: src/knowledge/uploads.tsx
+#: src/workflows/run-detail.tsx
 msgid "Download {name}"
 msgstr "{name} downloaden"
 
@@ -5934,6 +5936,7 @@ msgstr "Bestand"
 #: src/chat/builds.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
+#: src/workflows/run-detail.tsx
 msgid "Files"
 msgstr "Bestanden"
 
@@ -6004,6 +6007,7 @@ msgid "Finish"
 msgstr "Afronden"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
+#: src/workflows/run-detail.tsx
 msgid "Finished"
 msgstr "Afgerond"
 
@@ -8469,6 +8473,7 @@ msgstr "Gedempt"
 #: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
+#: src/workflows/run-detail.tsx
 msgid "Name"
 msgstr "Naam"
 
@@ -12782,6 +12787,7 @@ msgid "Signing out didn't work"
 msgstr "Uitloggen is niet gelukt"
 
 #: src/workflows/files-and-apps.tsx
+#: src/workflows/run-detail.tsx
 msgid "Size"
 msgstr "Grootte"
 
@@ -14972,6 +14978,10 @@ msgstr "Dit project is er niet meer."
 #: src/chat/failure.ts
 msgid "This run has made all the model calls it may make."
 msgstr "Deze run heeft alle modelaanroepen gedaan die hij mag doen."
+
+#: src/workflows/run-detail.tsx
+msgid "This run kept no files."
+msgstr "Deze run heeft geen bestanden bewaard."
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "This run's details were removed once its retention was over, and its history with them."

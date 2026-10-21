@@ -1,3 +1,4 @@
+import type { RunFileListing } from "@grasp-os/shared/run-files";
 import type {
   WorkflowCandidateTrace,
   WorkflowRunTrace,
@@ -83,6 +84,7 @@ import {
   resourceRunFor,
   terminateResourceRun,
 } from "./workflows/resource-runs.ts";
+import { runFilesFor } from "./workflows/run-file-downloads.ts";
 import { sealPackages } from "./workflows/sealed-packages.ts";
 
 // Independent workflows over `/rpc` (workflow-resources.ts, where who may
@@ -339,6 +341,13 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) =>
         await resourceRunTrace(this.#env, person, id, runId, options)
+    );
+  }
+
+  async runFiles(id: string, runId: string): Promise<RunFileListing[] | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await runFilesFor(this.#env, person, id, runId)
     );
   }
 

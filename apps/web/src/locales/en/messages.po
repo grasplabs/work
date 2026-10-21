@@ -5301,10 +5301,12 @@ msgid "Doors"
 msgstr "Doors"
 
 #: src/chat/chat-more.tsx
+#: src/workflows/run-detail.tsx
 msgid "Download"
 msgstr "Download"
 
 #: src/knowledge/uploads.tsx
+#: src/workflows/run-detail.tsx
 msgid "Download {name}"
 msgstr "Download {name}"
 
@@ -5934,6 +5936,7 @@ msgstr "File"
 #: src/chat/builds.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
+#: src/workflows/run-detail.tsx
 msgid "Files"
 msgstr "Files"
 
@@ -6004,6 +6007,7 @@ msgid "Finish"
 msgstr "Finish"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
+#: src/workflows/run-detail.tsx
 msgid "Finished"
 msgstr "Finished"
 
@@ -8469,6 +8473,7 @@ msgstr "Muted"
 #: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
+#: src/workflows/run-detail.tsx
 msgid "Name"
 msgstr "Name"
 
@@ -12782,6 +12787,7 @@ msgid "Signing out didn't work"
 msgstr "Signing out didn't work"
 
 #: src/workflows/files-and-apps.tsx
+#: src/workflows/run-detail.tsx
 msgid "Size"
 msgstr "Size"
 
@@ -14972,6 +14978,10 @@ msgstr "This project isn't here any more."
 #: src/chat/failure.ts
 msgid "This run has made all the model calls it may make."
 msgstr "This run has made all the model calls it may make."
+
+#: src/workflows/run-detail.tsx
+msgid "This run kept no files."
+msgstr "This run kept no files."
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "This run's details were removed once its retention was over, and its history with them."

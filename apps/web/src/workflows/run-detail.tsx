@@ -1,18 +1,30 @@
 import { failureText } from "@grasp-os/shared/errors";
+import { runFileContentPath } from "@grasp-os/shared/run-files";
+import type { RunFileListing } from "@grasp-os/shared/run-files";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { DownloadIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatBytes, formatDateTime } from "../format.ts";
 import { useCore } from "../use-core.ts";
 import type { Names } from "./activity-bar.tsx";
 import { runDotOf, runStatusLabels } from "./run-status.ts";
@@ -128,6 +140,124 @@ export const RunResultView = ({
   );
 };
 
+/** The files an ended run finished, each to download (GRA-888). */
+const RunFileTable = ({
+  workflow,
+  run,
+  files,
+}: {
+  workflow: string;
+  run: string;
+  files: RunFileListing[];
+}) => {
+  const { t } = useLingui();
+  if (files.length === 0) {
+    return (
+      <p className="text-muted-foreground">
+        <Trans>This run kept no files.</Trans>
+      </p>
+    );
+  }
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t`Name`}</TableHead>
+          <TableHead>{t`Size`}</TableHead>
+          <TableHead>{t`Finished`}</TableHead>
+          <TableHead>
+            <span className="sr-only">{t`Download`}</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {files.map(({ id, name, size, finishedAt }) => (
+          <TableRow key={id}>
+            <TableCell>{name}</TableCell>
+            <TableCell>{formatBytes(size)}</TableCell>
+            <TableCell>{formatDateTime(finishedAt)}</TableCell>
+            <TableCell>
+              {/* Core serves it as an attachment only, to those who may download it. */}
+              <a
+                aria-label={t`Download ${name}`}
+                className={buttonVariants({
+                  size: "icon-sm",
+                  variant: "ghost",
+                })}
+                download
+                href={runFileContentPath(workflow, run, id)}
+              >
+                <DownloadIcon />
+              </a>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+};
+
+/**
+ * The files an ended run finished, for those core lets download them (its
+ * person and, unless the run is restricted, the organization's admins):
+ * nothing for anyone else, whom core answers null. Core decides who sees
+ * what and serves each file only as an attachment.
+ */
+const RunFiles = ({
+  workflow,
+  run,
+}: {
+  workflow: string;
+  run: WorkflowResourceRun;
+}) => {
+  const core = useCore();
+  const [files, setFiles] = useState<RunFileListing[] | null>(null);
+  const [failure, setFailure] = useState<string>();
+  const hasEnded = ended(run);
+
+  useEffect(() => {
+    let stopped = false;
+    const read = async (): Promise<void> => {
+      try {
+        const listed = await core.withSession(
+          async (session) =>
+            await session.workflowResources.runFiles(workflow, run.id)
+        );
+        if (!stopped) {
+          setFiles(listed);
+          setFailure(undefined);
+        }
+      } catch (error) {
+        if (!stopped) {
+          setFailure(failureText(error));
+        }
+      }
+    };
+    // A run still going finishes no files yet: read once it ends.
+    if (hasEnded) {
+      void read();
+    }
+    return () => {
+      stopped = true;
+    };
+  }, [core, workflow, run.id, hasEnded]);
+
+  if (failure === undefined && files === null) {
+    return null;
+  }
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-muted-foreground">
+        <Trans>Files</Trans>
+      </h3>
+      <ErrorText>{failure}</ErrorText>
+      {files === null ? null : (
+        <RunFileTable files={files} run={run.id} workflow={workflow} />
+      )}
+    </section>
+  );
+};
+
 /**
  * Run `opened`: its facts, then its result. Read again until it ends, or,
  * given `status` (what its followed steps last said of it; null before
@@ -212,6 +342,7 @@ const RunFacts = ({
         <Fact label={t`Version`}>{run.version}</Fact>
       </dl>
       <RunResultView run={run} seesResult={seesResult} />
+      <RunFiles run={run} workflow={workflow} />
     </div>
   );
 };

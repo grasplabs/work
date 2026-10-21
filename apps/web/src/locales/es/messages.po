@@ -5301,10 +5301,12 @@ msgid "Doors"
 msgstr "Puertas"
 
 #: src/chat/chat-more.tsx
+#: src/workflows/run-detail.tsx
 msgid "Download"
 msgstr "Descargar"
 
 #: src/knowledge/uploads.tsx
+#: src/workflows/run-detail.tsx
 msgid "Download {name}"
 msgstr "Descargar {name}"
 
@@ -5934,6 +5936,7 @@ msgstr "Archivo"
 #: src/chat/builds.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
+#: src/workflows/run-detail.tsx
 msgid "Files"
 msgstr "Archivos"
 
@@ -6004,6 +6007,7 @@ msgid "Finish"
 msgstr "Terminar"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
+#: src/workflows/run-detail.tsx
 msgid "Finished"
 msgstr "Terminadas"
 
@@ -8469,6 +8473,7 @@ msgstr "En silencio"
 #: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
+#: src/workflows/run-detail.tsx
 msgid "Name"
 msgstr "Nombre"
 
@@ -12782,6 +12787,7 @@ msgid "Signing out didn't work"
 msgstr "No se pudo cerrar la sesión"
 
 #: src/workflows/files-and-apps.tsx
+#: src/workflows/run-detail.tsx
 msgid "Size"
 msgstr "Tamaño"
 
@@ -14972,6 +14978,10 @@ msgstr "Este proyecto ya no está aquí."
 #: src/chat/failure.ts
 msgid "This run has made all the model calls it may make."
 msgstr "Esta ejecución ya ha hecho todas las llamadas al modelo que puede hacer."
+
+#: src/workflows/run-detail.tsx
+msgid "This run kept no files."
+msgstr "Esta ejecución no guardó archivos."
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "This run's details were removed once its retention was over, and its history with them."
