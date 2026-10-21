@@ -468,6 +468,28 @@ const published = async (
     : row;
 
 /**
+ * Stores `text` for `collectionId` and sends the save's batch with it. A
+ * payload collected between its staging and the batch refuses the batch
+ * (`isUncommitted`): the text is stored again, once.
+ */
+const stagedAndSent = async (
+  env: Env,
+  db: DrizzleD1Database,
+  collectionId: string,
+  text: string,
+  send: (staged: StagedPayload) => Promise<void>
+): Promise<void> => {
+  try {
+    await send(await stagePayload(env, db, collectionId, text));
+  } catch (error) {
+    if (!isUncommitted(error)) {
+      throw error;
+    }
+    await send(await stagePayload(env, db, collectionId, text));
+  }
+};
+
+/**
  * Writes the next version, if the document is still at `ifVersion`
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
  * it is at, and writes nothing otherwise.
@@ -507,6 +529,8 @@ export const writeVersion = async (
     indexState: "queued" as const,
     indexAttempts: 0,
     indexFailure: null,
+    indexRun: 0,
+    indexFailedAt: null,
     updatedAt: now,
   };
   const row: DocumentRow = {
@@ -588,14 +612,7 @@ export const writeVersion = async (
   // Checked before the text is stored too: a write it refuses never
   // uploads it.
   await write.lastCheck?.();
-  try {
-    await send(await stagePayload(env, db, collection.id, text));
-  } catch (error) {
-    if (!isUncommitted(error)) {
-      throw error;
-    }
-    await send(await stagePayload(env, db, collection.id, text));
-  }
+  await stagedAndSent(env, db, collection.id, text, send);
   // Saved: search has it once published, here or by its indexing run.
   return toSummary(
     await published(env, db, row, prepared.sections, write.purge === true)

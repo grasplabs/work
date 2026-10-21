@@ -105,6 +105,13 @@ export const documents = sqliteTable(
     indexAttempts: integer("index_attempts").notNull().default(0),
     /** The code of the error indexing the current version last failed with. */
     indexFailure: text("index_failure"),
+    /**
+     * Which run indexes the current version: 0 for the first, one more for
+     * each the cron trigger starts again after the one before failed.
+     */
+    indexRun: integer("index_run").notNull().default(0),
+    /** When indexing the current version last failed for good. */
+    indexFailedAt: timestamp("index_failed_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

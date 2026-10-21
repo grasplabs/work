@@ -1,7 +1,7 @@
 import { isExpectedCode, isExpectedError } from "@grasp-os/shared/errors";
-import { errorFields, log } from "@grasp-os/shared/log";
+import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import { log } from "@grasp-os/shared/log";
 import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
-import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import { and, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -40,12 +40,18 @@ import { readPayload } from "./payloads.ts";
 // the document marked indexed last. So a late generation never replaces a
 // newer one, and readers never see two generations mixed.
 //
-// The workflow (`runIndexing`, once per document version) reads the
+// The workflow (`runIndexing`, once per document version and run) reads the
 // version's payload and publishes it, retrying with backoff; each failed
 // attempt marks the document `retrying`, and once the retries are spent it
 // is `failed`, with the code of why: the dead letter. The cron trigger
 // starts runs that never started and fails documents whose run ended
-// without indexing them (`sweepIndexing`).
+// without indexing them (`sweepIndexing`), and starts a new run for a
+// failed document after a while, doubling, a bounded number of times.
+//
+// A purge can't wait on that: whatever saved the document, search must hold
+// its current version before the purge reports done
+// (`requireCurrentIndexed`), or the purge fails with
+// `knowledge.purge_index_pending` and its indexing run is started.
 
 /** D1 binds at most 100 parameters to one statement: a section binds 8. */
 const sectionsPerInsert = 10;
@@ -79,8 +85,11 @@ const inputSchema = z.object({
 });
 
 /** A document version's indexing run: its instance on the engine. */
-export const indexRunId = (documentId: string, version: number): string =>
-  `index-${documentId}-${version}`;
+export const indexRunId = (
+  documentId: string,
+  version: number,
+  run: number
+): string => `index-${documentId}-${version}-${run}`;
 
 /** The sections of a version's text, as search holds them. */
 export const sectionsOf = (path: string, text: string): Section[] =>
@@ -128,6 +137,7 @@ const publishStatements = (
         indexState: "indexed",
         indexAttempts: 0,
         indexFailure: null,
+        indexFailedAt: null,
       })
       .where(and(eq(documents.id, documentId), guard(documentId, version))),
   ];
@@ -175,49 +185,62 @@ export const publish = async (
   return indexed;
 };
 
-/** Starts the indexing run of `version` of `documentId`. */
+/** Starts run `run` of indexing `version` of `documentId`. */
 const startRun = async (
   env: Env,
   documentId: string,
-  version: number
+  version: number,
+  run: number
 ): Promise<void> => {
   await runEngine(env).createInternal({
-    id: indexRunId(documentId, version),
+    id: indexRunId(documentId, version, run),
     workflow: "indexing",
     input: { documentId, version },
   });
 };
 
 /**
- * Publishes a save's version from the sections it split, right after its
- * batch. Resolves whether search holds it now. When it can't, the
- * document stays queued and its indexing run is started; that failing
- * too, the cron trigger starts it. `required` (a purge, whose erasure
- * mustn't wait on the index) throws instead.
+ * What a failure is logged with: its name only. A message may repeat what
+ * failed to be written, and a purge's would hold the terms it removes.
  */
-export const publishInline = async (
+const failureFields = (error: unknown) => ({
+  errorName: error instanceof Error ? error.name : typeof error,
+});
+
+/** The current and indexed versions, and run, of `documentId`. */
+const stateOf = async (db: DrizzleD1Database, documentId: string) =>
+  await db
+    .select({
+      currentVersion: documents.currentVersion,
+      indexedVersion: documents.indexedVersion,
+      indexRun: documents.indexRun,
+    })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .get();
+
+/** Starts indexing `documentId`'s current version, logging a failure. */
+const startCurrentRun = async (
   env: Env,
   db: DrizzleD1Database,
-  documentId: string,
-  version: number,
-  found: readonly Section[],
-  required: boolean
-): Promise<boolean> => {
+  documentId: string
+): Promise<void> => {
   try {
-    return await publish(db, documentId, version, found);
-  } catch (error) {
-    if (required) {
-      throw error;
+    const state = await stateOf(db, documentId);
+    if (state !== undefined) {
+      await startRun(env, documentId, state.currentVersion, state.indexRun);
     }
-    log.warn("knowledge.index_inline_failed", errorFields(error));
-  }
-  try {
-    await startRun(env, documentId, version);
   } catch (error) {
-    log.warn("knowledge.index_run_start_failed", errorFields(error));
+    log.warn("knowledge.index_run_start_failed", failureFields(error));
   }
-  return false;
 };
+
+/**
+ * A purge's refusal while search may still hold a generation with its
+ * terms: the data is rewritten, the index isn't yet. Running the purge
+ * again finishes it, as does the indexing run started for it.
+ */
+const pending = () => knowledgeErrors.create("knowledge.purge_index_pending");
 
 /** What indexing a version that is still current sets, by `where`. */
 const whileCurrent = (documentId: string, version: number): SQL | undefined =>
@@ -264,6 +287,76 @@ export const indexVersion = async (
   await publish(db, documentId, version, sectionsOf(found.path, text));
 };
 
+/** How often a purge publishes a document saved over while it does. */
+const requireAttempts = 3;
+
+/**
+ * Makes sure search holds `documentId`'s current version, publishing it
+ * from its payload when it doesn't: a purge's, so that no generation it
+ * hasn't rewritten stays live. Throws `knowledge.purge_index_pending`
+ * when it can't (its indexing run started), never resolving otherwise.
+ */
+export const requireCurrentIndexed = async (
+  env: Env,
+  db: DrizzleD1Database,
+  documentId: string
+): Promise<void> => {
+  for (let attempt = 0; attempt < requireAttempts; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- again only after a save
+    const state = await stateOf(db, documentId);
+    if (state === undefined || state.indexedVersion === state.currentVersion) {
+      return;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- again only after a save
+      await indexVersion(env, documentId, state.currentVersion);
+    } catch (error) {
+      log.warn("knowledge.index_purge_failed", failureFields(error));
+      // oxlint-disable-next-line no-await-in-loop -- once, before refusing
+      await startCurrentRun(env, db, documentId);
+      throw pending();
+    }
+  }
+  await startCurrentRun(env, db, documentId);
+  throw pending();
+};
+
+/**
+ * Publishes a save's version from the sections it split, right after its
+ * batch. Resolves whether search holds it now. When it can't, the
+ * document stays queued and its indexing run is started; that failing
+ * too, the cron trigger starts it. `required` (a purge, whose erasure
+ * mustn't wait on the index) makes sure search holds the current version,
+ * whatever saved it (`requireCurrentIndexed`), or throws.
+ */
+export const publishInline = async (
+  env: Env,
+  db: DrizzleD1Database,
+  documentId: string,
+  version: number,
+  found: readonly Section[],
+  required: boolean
+): Promise<boolean> => {
+  try {
+    const published = await publish(db, documentId, version, found);
+    if (required && !published) {
+      // Saved over meanwhile: what search holds must still be current.
+      await requireCurrentIndexed(env, db, documentId);
+    }
+    return published;
+  } catch (error) {
+    if (knowledgeErrors.codeOf(error) === "knowledge.purge_index_pending") {
+      throw error;
+    }
+    log.warn("knowledge.index_inline_failed", failureFields(error));
+    await startCurrentRun(env, db, documentId);
+    if (required) {
+      throw pending();
+    }
+    return false;
+  }
+};
+
 /** The code an error ends indexing with, as the engine keeps its message. */
 const codeOf = (error: unknown): string => {
   const code =
@@ -284,42 +377,117 @@ export const runIndexing = async (
       try {
         await indexVersion(env, documentId, version);
       } catch (error) {
-        const code = isExpectedError(error) ? error.code : undefined;
+        const code = isExpectedError(error)
+          ? error.code
+          : "internal.unexpected";
         await db
           .update(documents)
           .set({
             indexState: "retrying",
             indexAttempts: sql`${documents.indexAttempts} + 1`,
-            indexFailure: code ?? "internal.unexpected",
+            indexFailure: code,
           })
           .where(whileCurrent(documentId, version));
-        // By its code, which survives the engine.
-        throw code === undefined ? error : new Error(code);
+        // Only its code reaches the engine, never its message.
+        throw new Error(code, { cause: error });
       }
       return null;
     });
   } catch (error) {
-    const code =
-      error instanceof NonRetryableError ? error.message : codeOf(error);
+    const code = codeOf(error);
     await step.do("fail", {}, async () => {
       await db
         .update(documents)
-        .set({ indexState: "failed", indexFailure: code })
+        .set({
+          indexState: "failed",
+          indexFailure: code,
+          indexFailedAt: new Date(),
+        })
         .where(whileCurrent(documentId, version));
       return null;
     });
   }
 };
 
+/** Runs the cron trigger starts again for a failed document, at most. */
+export const maxIndexReruns = 8;
+
+/** How long a document stays failed before run `run` is started. */
+const rerunAfterMs = (run: number): number =>
+  Math.min(15 * 60_000 * 2 ** run, 24 * 60 * 60_000);
+
+/**
+ * Starts the next run for documents failed for long enough (`rerunAfterMs`,
+ * doubling, up to {@link maxIndexReruns}), so a text a later save replaced
+ * (a removal, say) doesn't stay matchable until the next save.
+ */
+const rerunFailed = async (
+  env: Env,
+  db: DrizzleD1Database,
+  now: Date
+): Promise<void> => {
+  const failed = await db
+    .select({
+      id: documents.id,
+      version: documents.currentVersion,
+      run: documents.indexRun,
+      failedAt: documents.indexFailedAt,
+    })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.indexState, "failed"),
+        lt(documents.indexRun, maxIndexReruns)
+      )
+    )
+    .orderBy(sql`random()`)
+    .limit(sweepBatch);
+  for (const { id, version, run, failedAt } of failed) {
+    if (
+      failedAt !== null &&
+      now.getTime() - failedAt.getTime() < rerunAfterMs(run)
+    ) {
+      continue;
+    }
+    try {
+      // The row first, under the run it was failed by: one sweep starts it.
+      // oxlint-disable-next-line no-await-in-loop -- a few at a time
+      const [taken] = await db
+        .update(documents)
+        .set({ indexState: "retrying", indexRun: run + 1 })
+        .where(
+          and(
+            eq(documents.id, id),
+            eq(documents.currentVersion, version),
+            eq(documents.indexState, "failed"),
+            eq(documents.indexRun, run)
+          )
+        )
+        .returning({ id: documents.id });
+      if (taken !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- a few at a time
+        await startRun(env, id, version, run + 1);
+      }
+    } catch (error) {
+      log.warn("knowledge.index_sweep_failed", failureFields(error));
+    }
+  }
+};
+
 /**
  * Every minute (index.ts): looks at documents queued (or retrying) for a
  * while. One whose run never started gets it; one whose run ended without
- * indexing it fails.
+ * indexing it fails. Then starts runs again for failed ones
+ * (`rerunFailed`).
  */
 export const sweepIndexing = async (env: Env, now: Date): Promise<void> => {
   const db = drizzle(env.KNOWLEDGE);
   const stale = await db
-    .select({ id: documents.id, version: documents.currentVersion })
+    .select({
+      id: documents.id,
+      version: documents.currentVersion,
+      run: documents.indexRun,
+    })
     .from(documents)
     .where(
       and(
@@ -332,23 +500,28 @@ export const sweepIndexing = async (env: Env, now: Date): Promise<void> => {
     .orderBy(sql`random()`)
     .limit(sweepBatch);
   const engine = runEngine(env);
-  for (const { id, version } of stale) {
+  for (const { id, version, run } of stale) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- a few at a time
-      const run = await engine.status(indexRunId(id, version));
-      if (run === undefined) {
+      const status = await engine.status(indexRunId(id, version, run));
+      if (status === undefined) {
         // oxlint-disable-next-line no-await-in-loop -- a few at a time
-        await startRun(env, id, version);
-      } else if (endedStatuses.has(run.status)) {
+        await startRun(env, id, version, run);
+      } else if (endedStatuses.has(status.status)) {
         // oxlint-disable-next-line no-await-in-loop -- a few at a time
         await db
           .update(documents)
-          .set({ indexState: "failed", indexFailure: "internal.unexpected" })
+          .set({
+            indexState: "failed",
+            indexFailure: "internal.unexpected",
+            indexFailedAt: now,
+          })
           .where(whileCurrent(id, version));
       }
     } catch (error) {
       // One document's trouble doesn't keep the sweep from the rest.
-      log.warn("knowledge.index_sweep_failed", errorFields(error));
+      log.warn("knowledge.index_sweep_failed", failureFields(error));
     }
   }
+  await rerunFailed(env, db, now);
 };

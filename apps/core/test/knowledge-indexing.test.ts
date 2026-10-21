@@ -47,22 +47,32 @@ const codeOf = async (promise: Promise<unknown>): Promise<unknown> => {
 const deletesSections = /^delete from "sections"/iu;
 
 /**
- * Fails the next batch that publishes sections, as an outage would: the
- * save before it has committed. Returns what restores it.
+ * Watches the batches that publish sections: each one (`publishing`) is
+ * failed while `fail` says so, as an outage would, or runs `before` first:
+ * another writer that gets in between. Returns what restores the database.
  */
-const failNextPublish = (): (() => void) => {
+const watchPublishes = (hooks: {
+  fail?: (nth: number) => boolean;
+  before?: (nth: number) => Promise<void>;
+}): (() => void) => {
   const db = env.KNOWLEDGE;
   const realPrepare = db.prepare.bind(db);
   const realBatch = db.batch.bind(db);
   let publishing = false;
-  let failed = false;
+  let seen = 0;
   const prepare = vi.spyOn(db, "prepare").mockImplementation((query) => {
     publishing ||= deletesSections.test(query);
     return realPrepare(query);
   });
   const batch = vi.spyOn(db, "batch").mockImplementation(async (statements) => {
-    if (publishing && !failed) {
-      failed = true;
+    if (!publishing) {
+      return await realBatch(statements);
+    }
+    publishing = false;
+    seen += 1;
+    const nth = seen;
+    await hooks.before?.(nth);
+    if (hooks.fail?.(nth) === true) {
       throw new Error("D1 DB is overloaded");
     }
     return await realBatch(statements);
@@ -72,6 +82,10 @@ const failNextPublish = (): (() => void) => {
     batch.mockRestore();
   };
 };
+
+/** Fails the next batch that publishes sections: the save before it committed. */
+const failNextPublish = (): (() => void) =>
+  watchPublishes({ fail: (nth) => nth === 1 });
 
 /** Runs `run` with the engine out of reach: no run can start. */
 const withEngineDown = async <T>(run: () => Promise<T>): Promise<T> => {
@@ -134,6 +148,23 @@ const foundVersions = async (
 ): Promise<number[]> => {
   const { hits } = await api.search(word, { collectionId });
   return hits.map(({ version }) => version);
+};
+
+/** A content purge of `term` from `documentId`. */
+const purgeOf = (documentId: string, term: string) => ({
+  type: "content" as const,
+  documentIds: [documentId],
+  terms: [term],
+  reason: "offboarding" as const,
+});
+
+/** The current text of `documentId`. */
+const readTextOf = async (
+  api: KnowledgeApi,
+  documentId: string
+): Promise<string> => {
+  const { version } = await api.getDocument(documentId);
+  return version.text;
 };
 
 const indexingOf = (document: DocumentSummary | undefined) => ({
@@ -240,7 +271,7 @@ describe("publishing search generations", () => {
       ifVersion: 1,
     });
     // Version 1's indexing, arriving after version 2 is published.
-    const late = `${indexRunId(first.id, 1)}-late`;
+    const late = `${indexRunId(first.id, 1, 0)}-late`;
     await runEngine(env).createInternal({
       id: late,
       workflow: "indexing",
@@ -462,7 +493,7 @@ describe("publishing search generations", () => {
     });
   });
 
-  it("refuses a purge whose sections can't be published, so erasure never waits on indexing", async () => {
+  it("refuses a purge whose sections can't be published as pending, and the index catches up even when its run fails too", async () => {
     const { api } = await knowledgeOf();
     const { id: collectionId } = await api.createCollection(shared());
     const name = `Bakker${unique()}`;
@@ -472,29 +503,90 @@ describe("publishing search generations", () => {
       text: textOf(`${name} signs`),
       ifVersion: 0,
     });
-    const input = {
-      type: "content" as const,
-      documentIds: [document.id],
-      terms: [name],
-      reason: "offboarding" as const,
-    };
-    const { token } = await api.preparePurge(input);
-    const restore = failNextPublish();
+    const { token } = await api.preparePurge(purgeOf(document.id, name));
+    // Every publish fails: the purge's own, and each of its run's tries.
+    const restore = watchPublishes({ fail: () => true });
     let refused: unknown;
+    let failed: DocumentSummary | undefined;
     try {
-      refused = await api.purge(input, token).then(
+      failed = await withRetriesAtOnce(async () => {
+        refused = await codeOf(api.purge(purgeOf(document.id, name), token));
+        return await settledIndexing(api, collectionId, document.id);
+      });
+    } finally {
+      restore();
+    }
+    const whileFailed = await foundVersions(api, name, collectionId);
+    // Nobody purges again: the cron trigger starts its run again.
+    await runCron({}, new Date(Date.now() + 20 * 60_000));
+    const indexed = await settledIndexing(api, collectionId, document.id);
+
+    expect({
+      refused,
+      failed: failed?.indexing,
+      whileFailed,
+      indexed: indexingOf(indexed),
+      after: await foundVersions(api, name, collectionId),
+    }).toStrictEqual({
+      refused: "knowledge.purge_index_pending",
+      failed: "failed",
+      whileFailed: [1],
+      indexed: { indexing: "indexed", indexedVersion: 2 },
+      after: [],
+    });
+  });
+
+  it("publishes what a save made current during a purge, so no generation with the terms stays live", async () => {
+    const { api } = await knowledgeOf();
+    const { id: collectionId } = await api.createCollection(shared());
+    const name = `Visser${unique()}`;
+    const document = await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`${name} signs`),
+      ifVersion: 0,
+    });
+    const clean = textOf(`Clean${unique()}`);
+    const { token } = await api.preparePurge(purgeOf(document.id, name));
+    // Just before the purge publishes, someone saves over it, and that
+    // save's own publish fails, with no engine to index it.
+    const restore = watchPublishes({
+      before: async (nth) => {
+        if (nth !== 1) {
+          return;
+        }
+        await withEngineDown(
+          async () =>
+            await api.saveDocument({
+              collectionId,
+              path: "policy.md",
+              text: clean,
+              ifVersion: 2,
+            })
+        );
+      },
+      fail: (nth) => nth === 2,
+    });
+    let outcome: string;
+    try {
+      outcome = await api.purge(purgeOf(document.id, name), token).then(
         () => "purged",
-        () => "refused"
+        (error: unknown) => String(knowledgeErrors.codeOf(error))
       );
     } finally {
       restore();
     }
-    const again = await api.preparePurge(input);
-    await api.purge(input, again.token);
 
     expect({
-      refused,
-      found: await foundVersions(api, name, collectionId),
-    }).toStrictEqual({ refused: "refused", found: [] });
+      outcome,
+      indexed: indexingOf(await listed(api, collectionId, document.id)),
+      term: await foundVersions(api, name, collectionId),
+      clean: await readTextOf(api, document.id),
+    }).toStrictEqual({
+      outcome: "purged",
+      indexed: { indexing: "indexed", indexedVersion: 3 },
+      term: [],
+      clean,
+    });
   });
 });

@@ -556,6 +556,9 @@ export const searchSections = async (
       ORDER BY document_pass, document_rank, document_id, in_document
       LIMIT ${limit}
     )
+    -- The title, description and path are the document's as it is now;
+    -- the headings and snippet are of the version search holds, which can
+    -- be older while indexing catches up (the hit's version says which).
     SELECT ranked.document_id AS documentId,
       ranked.collection_id AS collectionId, ranked.sensitive,
       documents.path, documents.title, documents.type, documents.description,
