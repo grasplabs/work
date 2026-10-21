@@ -2,7 +2,7 @@ import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   actionMaxRunning,
   streamMaxRunning,
@@ -113,15 +113,24 @@ export class App extends DurableObject<Env> {
    * Deletes the database of the facet the App's v1 server code ran in,
    * once: a hard cut, nothing of it released (GRA-789), so nothing reads
    * it. The note is written after, so a start that dies between deletes
-   * again, which changes nothing.
+   * again, which changes nothing. A cleanup never stops the App's host
+   * object from starting: one that fails is logged, its note left unset,
+   * and the next start tries again.
    */
   #dropV1Server(): void {
     const { kv } = this.ctx.storage;
-    if (kv.get(v1ServerDroppedKey) === true) {
-      return;
+    try {
+      if (kv.get(v1ServerDroppedKey) === true) {
+        return;
+      }
+      this.ctx.facets.delete(v1ServerFacet);
+      kv.put(v1ServerDroppedKey, true);
+    } catch (error) {
+      log.error("app.v1_server_drop_failed", {
+        objectId: this.ctx.id.toString(),
+        ...errorFields(error),
+      });
     }
-    this.ctx.facets.delete(v1ServerFacet);
-    kv.put(v1ServerDroppedKey, true);
   }
 
   /** Screens following the App's runs, by workflow and ID (`watchRuns`). */

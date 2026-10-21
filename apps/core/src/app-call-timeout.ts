@@ -1,10 +1,10 @@
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 
 /**
- * How long one call may take in all, starting the code and waiting
- * included, before the host gives up on it: its caller gets
- * `app.timed_out`, and its token stops working, so a call that never ends
- * can't keep acting for its caller. A server invocation's wall time
+ * How long one call of an App's sealed function may take in all, starting
+ * its code and waiting included: a run step's call ends by then (its
+ * deadline, app-functions.ts), and so does the session of the isolate
+ * that runs it (release-runner.ts). A server invocation's wall time
  * (spec 18.1); tests shorten it with `APP_CALL_TIMEOUT_MS`, which can
  * only lower it, and it is never set in wrangler.jsonc.
  */
