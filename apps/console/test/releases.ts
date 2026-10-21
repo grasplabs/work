@@ -13,7 +13,14 @@ import {
   releaseManifestSchema,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
-import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import type {
+  LimitEvidence,
+  PlatformLimits,
+  PreviousRelease,
+  ReleaseManifest,
+  RuntimeProfile,
+  WorkerEntry,
+} from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 
 const encoder = new TextEncoder();
@@ -35,7 +42,38 @@ export interface ReleaseSpec {
   coreSecrets?: string[];
   /** core's Durable Object migration tags, in order: `v1` by default. */
   durableObjectMigrations?: string[];
+  /** Its platform limits: {@link testLimits} by default. */
+  platformLimits?: PlatformLimits;
+  /** The release before it, as its manifest names it: none by default. */
+  previousRelease?: PreviousRelease;
+  /** Its limit evidence, made for the release once its id and commit are known. */
+  limitEvidence?: (release: { id: string; commit: string }) => LimitEvidence[];
 }
+
+/** The platform limits a test release has unless its spec says otherwise. */
+export const testLimits: PlatformLimits = {
+  workflowSteps: 1000,
+  workflowBranches: 8,
+};
+
+/**
+ * Evidence for raising `limit` to `raisedTo` on `profile`, as CI makes it
+ * for `release`: its own commit and id, a capacity run on that commit.
+ */
+export const evidenceFor = (
+  release: { id: string; commit: string },
+  limit: string,
+  raisedTo: number | null,
+  profile: RuntimeProfile = "cloudflare"
+): LimitEvidence => ({
+  limit,
+  raisedTo,
+  commit: release.commit,
+  releaseId: release.id,
+  profile,
+  capacityRun: { jobId: 4242, commit: release.commit, profile },
+  securityReview: { pullRequest: 101, approvedBy: "nickruigrok" },
+});
 
 /** A built release: its manifest and every blob, by R2 key. */
 export interface TestRelease {
@@ -216,6 +254,9 @@ export const buildRelease = async (
       },
     },
     assets,
+    platformLimits: spec.platformLimits ?? testLimits,
+    previousRelease: spec.previousRelease ?? null,
+    limitEvidence: spec.limitEvidence?.({ id, commit }) ?? [],
   });
   return {
     id,

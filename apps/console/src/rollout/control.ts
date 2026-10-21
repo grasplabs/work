@@ -40,14 +40,22 @@ import {
   deploySecrets,
   MissingStoreSecretError,
 } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { assertLimitEvidence, errorCode } from "../deploy/deploy.ts";
+import { DeployError } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { hasEnded, instanceStatus } from "../runners.ts";
 import { RolloutError } from "./errors.ts";
 import { goOnToStop } from "./rollback.ts";
 import { storePrints } from "./shared-secrets.ts";
 import type { SharedPrints } from "./shared-secrets.ts";
-import { firstRing, rolloutScopeSchema, targetsOf } from "./targets.ts";
+import {
+  firstRing,
+  rolloutScopeSchema,
+  skipReason,
+  targetClient,
+  targetsOf,
+} from "./targets.ts";
+import type { ReleaseAt, RolloutTarget } from "./targets.ts";
 import { approvalEvent, rolloutSteps, stepBudget } from "./workflow.ts";
 import type { RolloutParams } from "./workflow.ts";
 
@@ -139,6 +147,40 @@ const startingPrints = async (env: Env): Promise<SharedPrints> => {
 };
 
 /**
+ * Refuses (`limit_evidence_missing`) a rollout of `release` that would
+ * take a client in `targets` past a platform limit raise with no evidence
+ * for its profile. Only what the client would get: one the rollout skips
+ * (pinned elsewhere, on it already, on a newer one) is left out. Every
+ * deploy checks again as it starts (`assertLimitEvidence`), against what
+ * the client runs by then.
+ */
+const assertTargetsEvidenced = async (
+  db: ConsoleDatabase,
+  release: ReleaseAt,
+  targets: readonly RolloutTarget[]
+): Promise<void> => {
+  for (const { clientId } of targets) {
+    // oxlint-disable-next-line no-await-in-loop -- a ring's clients, in turn
+    const client = await targetClient(db, clientId);
+    if (client === undefined || skipReason(client, release) !== null) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a ring's clients, in turn
+      await assertLimitEvidence(db, clientId, release.id);
+    } catch (error) {
+      if (
+        error instanceof DeployError &&
+        error.code === "limit_evidence_missing"
+      ) {
+        throw new RolloutError("limit_evidence_missing", error.message);
+      }
+      throw error;
+    }
+  }
+};
+
+/**
  * The most Workers a client runs: what a secrets rollout, which deploys
  * each client's own release, budgets steps for.
  */
@@ -150,8 +192,10 @@ const mostWorkers = clientWorkers.worker.enumValues.length;
  * ring 0 then `input.scope`, and returns the rollout's id. Refused while
  * another rollout is running or waiting (`rollout_running`), when no
  * active client is in scope, when a ring past 0 or a client it names adds
- * no one past ring 0 (`ring_zero_only`), and when its run would take more
- * steps than `stepBudget` (`too_large`).
+ * no one past ring 0 (`ring_zero_only`), when its run would take more
+ * steps than `stepBudget` (`too_large`), and when the release raises a
+ * platform limit without evidence for a client it would reach
+ * (`limit_evidence_missing`).
  */
 export const startRollout = async (
   env: Env,
@@ -168,9 +212,10 @@ export const startRollout = async (
       "Set CLIENT_DOMAIN on the console before rolling out"
     );
   }
+  let release: ReleaseAt | undefined;
   if (releaseId !== null) {
-    const [release] = await db
-      .select({ id: releases.id })
+    [release] = await db
+      .select({ id: releases.id, builtAt: releases.builtAt })
       .from(releases)
       .where(eq(releases.id, releaseId));
     if (release === undefined) {
@@ -210,6 +255,9 @@ export const startRollout = async (
       "too_large",
       `${targets.length} clients would take about ${steps} steps, over ${stepBudget}: roll out one ring or client at a time`
     );
+  }
+  if (release !== undefined) {
+    await assertTargetsEvidenced(db, release, targets);
   }
   // What Secrets Store holds as a secrets rollout starts: what proves a
   // rotation reached its clients (src/rollout/shared-secrets.ts).

@@ -387,8 +387,8 @@ jobs:
   # or deploys fail is never published, so the console can't roll it out to
   # a client. When deploy-staging fails, is cancelled or is skipped, this job
   # is skipped too, and the commit's changes ship in the next release that
-  # passes staging. The R2 key is loaded after the build and passed only to
-  # the upload step, which keeps it out of the build's environment; all
+  # passes staging. The R2 key is passed only to the steps that read and
+  # write the bucket, which keeps it out of the build's environment; all
   # steps share one runner, so that isn't a security boundary. Skipped until
   # the repository variable PUBLISH_RELEASES is `true`, set once the bucket,
   # key and environment exist, and staging deploys. Pushes to main share the
@@ -412,7 +412,6 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - run: vp run release:build --out release-out
       - id: r2
         uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
         with:
@@ -422,6 +421,17 @@ jobs:
           R2_ENDPOINT: op://grasp-os-releases/r2/endpoint
           R2_ACCESS_KEY_ID: op://grasp-os-releases/r2/access-key-id
           R2_SECRET_ACCESS_KEY: op://grasp-os-releases/r2/secret-access-key
+      # The release published before this one: what its platform limits
+      # are raised over. A raise fails the build until evidence for it is
+      # passed with --evidence (a capacity run per profile and the PR's
+      # CODEOWNERS approval).
+      - run: vp run release:previous --out previous-manifest.json
+        env:
+          R2_ENDPOINT: ${{ steps.r2.outputs.R2_ENDPOINT }}
+          R2_BUCKET: grasp-os-releases
+          R2_ACCESS_KEY_ID: ${{ steps.r2.outputs.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ steps.r2.outputs.R2_SECRET_ACCESS_KEY }}
+      - run: vp run release:build --out release-out --previous previous-manifest.json
       - run: vp run release:upload --release release-out
         env:
           R2_ENDPOINT: ${{ steps.r2.outputs.R2_ENDPOINT }}

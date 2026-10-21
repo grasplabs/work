@@ -28,6 +28,7 @@ import {
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { memoryLimitsSchema } from "@grasp-os/shared/memory";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
+import type { RuntimeProfile } from "@grasp-os/shared/release";
 import { z } from "zod";
 
 import { DeployError } from "./errors.ts";
@@ -41,9 +42,10 @@ export const clientGatewayId = "grasp-os";
 /**
  * The runtime every client's core runs on: Cloudflare, where the isolates
  * Code Mode loads have their CPU limit enforced. Not a setting: a client
- * can't make its run records claim otherwise.
+ * can't make its run records claim otherwise. Also the profile a release's
+ * limit evidence must cover to reach a client (src/releases/limits.ts).
  */
-const clientRuntimeProfile = "cloudflare";
+export const clientRuntimeProfile: RuntimeProfile = "cloudflare";
 
 const { domains, admins } = signInConfigSchema.shape;
 const { hostedDomain } = signInConfigSchema.shape.google.unwrap().shape;

@@ -11,7 +11,16 @@
  * `.grasp-release` marker: an existing `--out` is replaced only when it's
  * empty or holds one.
  *
+ * The manifest records the platform limits core and connect are built
+ * with (@grasp-os/shared/platform-limits) and, for each one higher than in
+ * the release published before it (`--previous`, the manifest
+ * previous-release.ts fetched; none for the first), the evidence for it
+ * (`--evidence`, a JSON array of the manifest's `limitEvidence` entries
+ * for this release). A raise without evidence fails the build: the
+ * console would refuse the release anyway.
+ *
  * Usage: vp run release:build --out <dir> [--release-id <id>]
+ *        [--previous <manifest.json>] [--evidence <evidence.json>]
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -19,6 +28,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import {
+  limitEvidenceSchema,
+  platformLimitsSchema,
+  releaseIdSchema,
+  verifyLimitEvidence,
+} from "@grasp-os/shared/release";
+import type { PreviousRelease } from "@grasp-os/shared/release";
 import { z } from "zod";
 
 import { parseJsonc } from "../wrangler-config-rules.ts";
@@ -51,6 +68,8 @@ const { values: args } = parseArgs({
   options: {
     out: { type: "string" },
     "release-id": { type: "string" },
+    previous: { type: "string" },
+    evidence: { type: "string" },
   },
 });
 if (args.out === undefined) {
@@ -137,6 +156,31 @@ const buildWorker = async (
   };
 };
 
+const readJson = (file: string): unknown =>
+  JSON.parse(readFileSync(path.resolve(file), "utf-8"));
+
+// A manifest from before limits were recorded has none: this release is
+// then the first that records them, and raises nothing.
+// previous-release.ts writes `null` when nothing was published before.
+const previousRelease = (file: string | undefined): PreviousRelease => {
+  if (file === undefined) {
+    return null;
+  }
+  const previous = z
+    .object({
+      releaseId: releaseIdSchema,
+      platformLimits: platformLimitsSchema.optional(),
+    })
+    .nullable()
+    .parse(readJson(file));
+  return previous?.platformLimits === undefined
+    ? null
+    : {
+        releaseId: previous.releaseId,
+        platformLimits: previous.platformLimits,
+      };
+};
+
 const releaseId = args["release-id"] ?? defaultReleaseId();
 const wranglerVersion = readPackageJson(
   path.join(ROOT, "node_modules/wrangler")
@@ -144,6 +188,16 @@ const wranglerVersion = readPackageJson(
 if (wranglerVersion === undefined) {
   throw new Error("wrangler has no version");
 }
+const limits = {
+  platformLimits,
+  previousRelease: previousRelease(args.previous),
+  limitEvidence:
+    args.evidence === undefined
+      ? []
+      : z.array(limitEvidenceSchema).parse(readJson(args.evidence)),
+};
+// Before minutes of building: a raise without evidence fails it anyway.
+verifyLimitEvidence({ releaseId, commit, ...limits });
 console.info(`Building release ${releaseId} from ${commit}`);
 // Refuses a mistyped --out before minutes of building, not after. Only a
 // check: an earlier release in it stays until this one is built.
@@ -177,6 +231,7 @@ const manifest = generateManifest(
     notes: run("git", ["log", "-1", "--format=%s", commit]),
     wranglerVersion,
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
+    ...limits,
   },
   workers
 );

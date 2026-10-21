@@ -5,6 +5,11 @@
 export const deployErrorCodes = [
   /** The release isn't imported, or its manifest no longer parses. */
   "release_not_imported",
+  /**
+   * The release raises a platform limit over what the client runs without
+   * capacity and security evidence for the client's runtime profile.
+   */
+  "limit_evidence_missing",
   /** A blob in R2 is missing, or isn't what the imported manifest says. */
   "release_blob_mismatch",
   /** Two Workers give one database different migrations. */

@@ -59,9 +59,14 @@ import {
   settings,
 } from "../db/schema.ts";
 import type { ReleaseStore } from "../releases/import.ts";
+import { uncoveredLimitRaise } from "../releases/limits.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
-import { checkDeployedConfig, derivedCoreConfig } from "./core-config.ts";
+import {
+  checkDeployedConfig,
+  clientRuntimeProfile,
+  derivedCoreConfig,
+} from "./core-config.ts";
 import type { SignInApps } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
 import { migrateDatabases } from "./migrations.ts";
@@ -169,6 +174,30 @@ export const redeployKind = (changes: {
 };
 
 /**
+ * Throws `limit_evidence_missing` when release `releaseId` raises a
+ * platform limit over what client `clientId` runs that no evidence covers
+ * on the client's profile; `release_not_imported` when it isn't imported.
+ */
+export const assertLimitEvidence = async (
+  db: ConsoleDatabase,
+  clientId: string,
+  releaseId: string
+): Promise<void> => {
+  const raise = await uncoveredLimitRaise(
+    db,
+    clientId,
+    releaseId,
+    clientRuntimeProfile
+  );
+  if (raise !== undefined) {
+    throw new DeployError(
+      "limit_evidence_missing",
+      `Release ${releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} over what ${clientId} runs, without capacity and security evidence for ${clientRuntimeProfile}`
+    );
+  }
+};
+
+/**
  * Starts deploying release `releaseId` to client `clientId`, and returns
  * the deploy's id for `runDeploy`. The client's older deploys that hadn't
  * finished are superseded in the same batch. A client whose id can't be
@@ -176,7 +205,10 @@ export const redeployKind = (changes: {
  * `settings` deploy runs the same steps; core records it as new secrets
  * or settings rather than a release. `recording` gives what else records
  * the deploy (a rollout's target naming it), written in the same batch:
- * no deploy starts that its starter has no record of.
+ * no deploy starts that its starter has no record of. A `release` deploy
+ * of a release that raises a platform limit over what the client runs,
+ * without evidence for its profile, is refused
+ * (`limit_evidence_missing`, src/releases/limits.ts).
  */
 export const startDeploy = async (
   db: ConsoleDatabase,
@@ -191,6 +223,9 @@ export const startDeploy = async (
       "invalid_client_id",
       `${clientId} can't be a client's hostname`
     );
+  }
+  if (kind === "release") {
+    await assertLimitEvidence(db, clientId, releaseId);
   }
   const id = crypto.randomUUID();
   const now = new Date();

@@ -30,7 +30,7 @@ import { z } from "zod";
 import { toHex } from "./encoding.ts";
 
 /** The manifest shape the console must understand (see the header comment). */
-export const MANIFEST_VERSION = 1;
+export const MANIFEST_VERSION = 2;
 
 /** A binding's name, as wrangler.jsonc and the Workers API take it. */
 export const bindingNameSchema = z.string().regex(/^[A-Z][A-Z0-9_]*$/u);
@@ -71,6 +71,241 @@ const RELEASE_ID = /^(?:r\d{6,}-[0-9a-f]{7}|dev-[0-9a-z]+)$/u;
 
 /** A release's id: `r<run6>-<sha7>` from CI, `dev-<time>` locally. */
 export const releaseIdSchema = z.string().regex(RELEASE_ID);
+
+// Platform limits and the evidence for raising one.
+//
+// A platform limit (platform-limits.ts) is raised only by a release, and
+// only with evidence CI produced for it: a capacity run on the release's
+// own commit, for a runtime profile, and the security review of the change
+// (its pull request and the CODEOWNERS approval). Never a success report
+// from a client's core. Three places hold a release to it, with these
+// rules:
+// - CI's build, which fails before publishing a release whose raises it
+//   has no evidence for (scripts/release).
+// - The console's import (`verifyLimitEvidence`): the evidence is exactly
+//   the manifest's own raises over the release before it, each entry
+//   naming the manifest's commit and release id.
+// - Every deploy of a release to a client (`uncoveredRaise`): a limit
+//   higher than what the client runs needs evidence for the client's
+//   profile, from the console's own records rather than the manifest's
+//   word about its predecessor.
+// None of this stops someone who can write the releases bucket: they can
+// write a consistent manifest with forged evidence, as they can forge the
+// release. Binding the manifest to its producer (a signature checked on
+// import, GRA-891's pattern) closes that, and these checks run unchanged
+// after it.
+
+const commitSchema = z.string().regex(/^[0-9a-f]{40}$/u);
+
+/**
+ * Where a release runs, as core's `RUNTIME_PROFILE` names it: Cloudflare,
+ * or plain workerd on premises. Capacity holds per profile.
+ */
+export const runtimeProfiles = ["cloudflare", "workerd"] as const;
+export const runtimeProfileSchema = z.enum(runtimeProfiles);
+export type RuntimeProfile = z.infer<typeof runtimeProfileSchema>;
+
+/** A limit's name, as `platformLimits` spells it. */
+const limitNameSchema = z.string().regex(/^[a-z][A-Za-z0-9]*$/u);
+
+/** A limit's value, in the unit its name says. */
+const limitValueSchema = z.int().nonnegative();
+
+/** Every platform limit of a release, by name. */
+export const platformLimitsSchema = z.record(limitNameSchema, limitValueSchema);
+export type PlatformLimits = z.infer<typeof platformLimitsSchema>;
+
+/**
+ * The release before this one, as CI found it: the last one published, not
+ * the parent commit, since a burst of merges can leave a commit
+ * unpublished. Null for the first release that records limits.
+ */
+export const previousReleaseSchema = z
+  .strictObject({
+    releaseId: releaseIdSchema,
+    platformLimits: platformLimitsSchema,
+  })
+  .nullable();
+export type PreviousRelease = z.infer<typeof previousReleaseSchema>;
+
+/** A GitHub login: what CODEOWNERS names. */
+const githubLoginSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u);
+
+/**
+ * The evidence for one raised limit on one profile. `raisedTo` is the
+ * value it vouches for: the release's own, or null when the release drops
+ * the limit (unbounded).
+ */
+export const limitEvidenceSchema = z.strictObject({
+  limit: limitNameSchema,
+  raisedTo: limitValueSchema.nullable(),
+  /** The source: the commit the release was built from. */
+  commit: commitSchema,
+  /** The candidate: the release it was produced for. */
+  releaseId: releaseIdSchema,
+  /** The profile it holds for. */
+  profile: runtimeProfileSchema,
+  /** The CI job that ran the capacity workload. */
+  capacityRun: z.strictObject({
+    jobId: z.int().positive(),
+    commit: commitSchema,
+    profile: runtimeProfileSchema,
+  }),
+  /** The pull request that made the change, and its CODEOWNERS approval. */
+  securityReview: z.strictObject({
+    pullRequest: z.int().positive(),
+    approvedBy: githubLoginSchema,
+  }),
+});
+export type LimitEvidence = z.infer<typeof limitEvidenceSchema>;
+
+/** A limit higher in one release than another: null when it's dropped. */
+export interface LimitRaise {
+  limit: string;
+  raisedTo: number | null;
+}
+
+/**
+ * The limits `to` raises over `from`: each one higher, and each one `from`
+ * has that `to` drops (unbounded). A limit new in `to` is a lower one,
+ * from none, so it's no raise.
+ */
+export const limitRaises = (
+  from: PlatformLimits,
+  to: PlatformLimits
+): LimitRaise[] => {
+  const raises: LimitRaise[] = [];
+  for (const [limit, before] of Object.entries(from)) {
+    const after = Object.hasOwn(to, limit) ? to[limit] : undefined;
+    if (after === undefined) {
+      raises.push({ limit, raisedTo: null });
+    } else if (after > before) {
+      raises.push({ limit, raisedTo: after });
+    }
+  }
+  return raises;
+};
+
+/** What a release says about its limits, as its manifest has it. */
+export type ReleaseLimits = Pick<
+  ReleaseManifest,
+  | "releaseId"
+  | "commit"
+  | "platformLimits"
+  | "previousRelease"
+  | "limitEvidence"
+>;
+
+const show = (value: number | null): string =>
+  value === null ? "unbounded" : String(value);
+
+/**
+ * Throws unless `release`'s evidence is exactly what its raises over the
+ * release before it need: at least one entry for each raise, each for the
+ * value the release raises it to, and each naming the release's own commit
+ * and id, its capacity run on that commit and for its profile. An entry for
+ * a limit it doesn't raise, or a second one for a limit and profile, is
+ * refused too: evidence is produced for one release, never carried along.
+ */
+export const verifyLimitEvidence = (release: ReleaseLimits): void => {
+  const raises = new Map(
+    limitRaises(
+      release.previousRelease?.platformLimits ?? release.platformLimits,
+      release.platformLimits
+    ).map(({ limit, raisedTo }) => [limit, raisedTo])
+  );
+  const seen = new Set<string>();
+  for (const entry of release.limitEvidence) {
+    const what = `The evidence for ${entry.limit} on ${entry.profile}`;
+    if (
+      entry.commit !== release.commit ||
+      entry.capacityRun.commit !== release.commit
+    ) {
+      throw new Error(
+        `${what} is for commit ${entry.commit === release.commit ? entry.capacityRun.commit : entry.commit}, not the release's ${release.commit}`
+      );
+    }
+    if (entry.releaseId !== release.releaseId) {
+      throw new Error(
+        `${what} is for release ${entry.releaseId}, not ${release.releaseId}`
+      );
+    }
+    if (entry.capacityRun.profile !== entry.profile) {
+      throw new Error(
+        `${what} names a capacity run on ${entry.capacityRun.profile}`
+      );
+    }
+    const key = `${entry.limit} ${entry.profile}`;
+    if (seen.has(key)) {
+      throw new Error(`${what} is given twice`);
+    }
+    seen.add(key);
+    if (!raises.has(entry.limit)) {
+      throw new Error(`${what} is for a limit the release doesn't raise`);
+    }
+    const raisedTo = raises.get(entry.limit) ?? null;
+    if (entry.raisedTo !== raisedTo) {
+      throw new Error(
+        `${what} vouches for ${show(entry.raisedTo)}, but the release raises it to ${show(raisedTo)}`
+      );
+    }
+  }
+  for (const [limit, raisedTo] of raises) {
+    if (!release.limitEvidence.some((entry) => entry.limit === limit)) {
+      throw new Error(
+        `Release ${release.releaseId} raises ${limit} to ${show(raisedTo)} without capacity and security evidence`
+      );
+    }
+  }
+};
+
+/** Whether `entry` vouches for `raise` on `profile`, by itself. */
+const covers = (
+  entry: LimitEvidence,
+  raise: LimitRaise,
+  profile: RuntimeProfile
+): boolean =>
+  entry.limit === raise.limit &&
+  entry.profile === profile &&
+  (entry.raisedTo === null ||
+    (raise.raisedTo !== null && entry.raisedTo >= raise.raisedTo));
+
+/**
+ * Whether `evidence` vouches for `raise` on `profile`: the release that
+ * raised the limit last (the latest with an entry for it; only a release
+ * that raises a limit carries one) has an entry for the profile that
+ * raised it at least as far, a dropped limit only one that drops it. The
+ * last raise, not any: a limit lowered and raised again needs evidence for
+ * the code that raised it again.
+ */
+const vouchedFor = (
+  evidence: readonly LimitEvidence[],
+  raise: LimitRaise,
+  profile: RuntimeProfile
+): boolean => {
+  const forLimit = evidence.filter((entry) => entry.limit === raise.limit);
+  const last = forLimit.at(-1)?.releaseId;
+  return forLimit.some(
+    (entry) => entry.releaseId === last && covers(entry, raise, profile)
+  );
+};
+
+/**
+ * The first raise from `from` to `to` that `evidence` doesn't vouch for
+ * on `profile` (`vouchedFor`), or undefined when it vouches for each.
+ * `evidence` is what the releases a client passes through on the way to
+ * `to` carry, oldest release first, each already checked to be its own
+ * (`verifyLimitEvidence`).
+ */
+export const uncoveredRaise = (
+  from: PlatformLimits,
+  to: PlatformLimits,
+  evidence: readonly LimitEvidence[],
+  profile: RuntimeProfile
+): LimitRaise | undefined =>
+  limitRaises(from, to).find((raise) => !vouchedFor(evidence, raise, profile));
 
 const workerEntrySchema = z.strictObject({
   /** The Worker's name in every client account. */
@@ -133,7 +368,7 @@ export const releaseManifestSchema = z.strictObject({
   manifestVersion: z.literal(MANIFEST_VERSION),
   releaseId: releaseIdSchema,
   /** The full commit SHA it was built from. */
-  commit: z.string().regex(/^[0-9a-f]{40}$/u),
+  commit: commitSchema,
   createdAt: z.iso.datetime(),
   /**
    * The release note: the squash commit's subject, which is the merged pull
@@ -149,6 +384,12 @@ export const releaseManifestSchema = z.strictObject({
   workers: z.record(z.string(), workerEntrySchema),
   /** Every asset blob, by content key. */
   assets: z.record(assetHash, z.strictObject({ size, r2Key: z.string() })),
+  /** The platform limits core and connect were built with. */
+  platformLimits: platformLimitsSchema,
+  /** The release before it, which its limits are raised over. */
+  previousRelease: previousReleaseSchema,
+  /** The evidence for each limit it raises, per profile. */
+  limitEvidence: z.array(limitEvidenceSchema),
 });
 
 export type ReleaseManifest = z.infer<typeof releaseManifestSchema>;

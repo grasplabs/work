@@ -10,6 +10,17 @@
  * corrupted uploads, not against whoever can write to the bucket: a
  * release that's consistent with its own manifest imports.
  *
+ * A release that raises a platform limit must carry the evidence for it
+ * (`verifyLimitEvidence`): an entry per raised limit, each for the value
+ * it's raised to and naming the manifest's own commit and release id.
+ * What it raises over is the release before it as its manifest names it,
+ * checked against that release when the console holds it. The manifest's
+ * sha256 is recorded, so the evidence is part of what was verified; each
+ * deploy then holds the release to the client's profile
+ * (src/releases/limits.ts). A signature over the manifest (GRA-891's
+ * pattern) is what would stop a bucket writer forging evidence too: it
+ * would be checked here, before any of this is read.
+ *
  * A release that doesn't verify is recorded as failed, audited, and tried
  * again after a wait that doubles with each attempt, so a broken release
  * costs a few reads a day and never holds up the releases after or before
@@ -21,13 +32,20 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   blobCount,
+  limitRaises,
   manifestKey,
+  platformLimitsSchema,
   releaseIdSchema,
   releaseManifestSchema,
   sha256OfBytes,
+  verifyLimitEvidence,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
-import type { Bytes, ReleaseManifest } from "@grasp-os/shared/release";
+import type {
+  Bytes,
+  PlatformLimits,
+  ReleaseManifest,
+} from "@grasp-os/shared/release";
 import { eq, sql } from "drizzle-orm";
 
 import { actIfChanged } from "../db/act.ts";
@@ -175,6 +193,66 @@ const parseManifest = (
   return { manifest, text };
 };
 
+/** Whether two releases' limits are the same, name for name. */
+const sameLimits = (a: PlatformLimits, b: PlatformLimits): boolean => {
+  const names = Object.keys(a);
+  return (
+    names.length === Object.keys(b).length &&
+    names.every((name) => Object.hasOwn(b, name) && a[name] === b[name])
+  );
+};
+
+/**
+ * Throws when the release `manifest` says came before it is one the
+ * console holds and isn't what it says: built later, or with other limits
+ * than the manifest raises over. One the console doesn't hold (yet) is
+ * taken at its word here; what a client runs never is
+ * (src/releases/limits.ts).
+ */
+const checkPreviousRelease = async (
+  db: ConsoleDatabase,
+  manifest: ReleaseManifest
+): Promise<void> => {
+  const previous = manifest.previousRelease;
+  if (previous === null) {
+    return;
+  }
+  if (previous.releaseId === manifest.releaseId) {
+    throw new Error(`Release ${manifest.releaseId} names itself as previous`);
+  }
+  const [row] = await db
+    .select({
+      builtAt: releases.builtAt,
+      limits: sql<
+        string | null
+      >`json_extract(${releases.manifest}, '$.platformLimits')`,
+    })
+    .from(releases)
+    .where(eq(releases.id, previous.releaseId));
+  if (row === undefined) {
+    return;
+  }
+  if (row.builtAt >= new Date(manifest.createdAt)) {
+    throw new Error(
+      `Release ${manifest.releaseId} names ${previous.releaseId}, built after it, as previous`
+    );
+  }
+  const limits =
+    row.limits === null
+      ? undefined
+      : platformLimitsSchema.safeParse(JSON.parse(row.limits)).data;
+  if (limits === undefined) {
+    throw new Error(
+      `Release ${manifest.releaseId} names ${previous.releaseId} as previous, which records no limits`
+    );
+  }
+  if (!sameLimits(limits, previous.platformLimits)) {
+    throw new Error(
+      `Release ${manifest.releaseId} raises its limits over other values than ${previous.releaseId} has`
+    );
+  }
+};
+
 /**
  * Verifies release `id` and records it: `absent` when it has no manifest
  * (yet), `deferred` when its blobs don't fit in the run's reads. Throws
@@ -194,6 +272,8 @@ const importRelease = async (
     return "absent";
   }
   const { manifest, text } = parseManifest(id, manifestBytes);
+  verifyLimitEvidence(manifest);
+  await checkPreviousRelease(db, manifest);
   const blobs = blobCount(manifest);
   if (blobs > MAX_BLOBS_PER_RELEASE) {
     throw new Error(
@@ -210,6 +290,19 @@ const importRelease = async (
     { concurrency: READ_CONCURRENCY }
   );
   const manifestSha256 = await sha256OfBytes(manifestBytes);
+  // What it raises, on which profiles: in the audit trail with the import,
+  // as `<limit> to <value> on <profile>+<profile>`, one per limit.
+  const raised = limitRaises(
+    manifest.previousRelease?.platformLimits ?? manifest.platformLimits,
+    manifest.platformLimits
+  )
+    .map(({ limit, raisedTo }) => {
+      const profiles = manifest.limitEvidence
+        .filter((entry) => entry.limit === limit)
+        .map((entry) => entry.profile);
+      return `${limit} to ${raisedTo ?? "unbounded"} on ${profiles.join("+")}`;
+    })
+    .join("; ");
   await actIfChanged(
     db,
     "system",
@@ -227,7 +320,11 @@ const importRelease = async (
     {
       action: "release.import",
       target: id,
-      detail: { commit: manifest.commit, manifestSha256 },
+      detail: {
+        commit: manifest.commit,
+        manifestSha256,
+        ...(raised === "" ? {} : { raised }),
+      },
     }
   );
   // Bookkeeping only: the import itself is what's audited.
