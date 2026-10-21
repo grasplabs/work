@@ -653,11 +653,6 @@ const parsed = <Schema extends z.ZodType>(
 };
 
 /**
- * Makes one call of a files use for `caller`'s run: `operation`, with
- * `args` checked here, as the host's own contract has them. The action
- * host has already checked the use declares the operation it needs.
- */
-/**
  * Refuses a files call whose arguments a real call would refuse
  * (`workflow.call_invalid`), touching nothing: for a test run, which
  * answers the call from its fixture and keeps no file.
@@ -675,6 +670,11 @@ export const requireFilesArguments = (
   }
 };
 
+/**
+ * Makes one call of a files use for `caller`'s run: `operation`, with
+ * `args` checked here, as the host's own contract has them. The action
+ * host has already checked the use declares the operation it needs.
+ */
 export const callFiles = async (
   env: Env,
   caller: FilesCaller,
