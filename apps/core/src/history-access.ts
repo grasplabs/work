@@ -124,7 +124,8 @@ const readableApps = async (
  * Of `sourceIds`, those the chat's agent may read for its person now: a
  * collection a Knowledge read would allow now (granted to the agent, and
  * readable by the person: `collectionsAllowed`); a connection the agent
- * holds a grant for in this chat now that the person may use themselves;
+ * holds a grant for in this chat now, not disconnected, that the person
+ * may use themselves;
  * an App read the agent's grants and the person's role in the App allow
  * now. Anything else, an unknown source included, is not. Throws what the
  * reads throw (a person who left, a database away): the caller withholds
@@ -176,8 +177,13 @@ export const readableSources = async (
         .filter((id) => rest.includes(id))
     ),
   ]);
-  for (const { id, ownerUserId } of owners) {
-    if (ownerUserId === null || ownerUserId === scope.personId) {
+  for (const { id, ownerUserId, status } of owners) {
+    // A disconnected one is gone, whoever owned it; one waiting to be
+    // signed in again changes nobody's access.
+    if (
+      status !== "disconnected" &&
+      (ownerUserId === null || ownerUserId === scope.personId)
+    ) {
       found.add(id);
     }
   }

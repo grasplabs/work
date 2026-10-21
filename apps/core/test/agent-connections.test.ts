@@ -4,6 +4,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { withheldResult } from "../src/agent.ts";
 import {
   chatOf,
   codeResults,
@@ -570,6 +571,47 @@ describe("a chat's connections", setUpTime, () => {
     await expect(texts(chat.stub, chat.chat.id)).resolves.toStrictEqual([
       `Returned:\n${JSON.stringify({ output: null, pending: { id } })}`,
       `Returned:\n${permissionErrors.create("permission.denied").message}`,
+    ]);
+  });
+
+  it("withhold what a connection returned from the model once it is disconnected, but not while it only needs signing in again", async () => {
+    const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
+    const { mail, chat, grant } = await setUp(
+      codeStep(
+        `export default async (self, env) => (await env.connections.call("MAIL", "mail.search", { query: ${JSON.stringify(marker)} })).output;`
+      ),
+      says("Found it."),
+      says("Still there."),
+      says("Gone.")
+    );
+    await grant(mail.id, "MAIL");
+    const setStatus = async (status: string) => {
+      await connectDb()
+        .prepare("UPDATE connections SET status = ? WHERE id = ?")
+        .bind(status, mail.id)
+        .run();
+    };
+
+    await chat.ask("Find the mail.");
+    await setStatus("needs_reauth");
+    await chat.ask("And now?");
+    await setStatus("disconnected");
+    await chat.ask("And now?");
+
+    expect(
+      chat.gateway.requests.slice(1).map(({ body }) => {
+        const sent = JSON.stringify(body);
+        return {
+          found: sent.includes(`${marker}-1`),
+          withheld: sent.includes(withheldResult),
+        };
+      })
+    ).toStrictEqual([
+      // Its result, as the code read it.
+      { found: true, withheld: false },
+      // Signing in again changes nobody's access.
+      { found: true, withheld: false },
+      { found: false, withheld: true },
     ]);
   });
 
