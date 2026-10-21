@@ -25,6 +25,7 @@ import type {
 } from "@grasp-os/workerflow/contracts";
 import { runObjectName } from "@grasp-os/workerflow/identity";
 import type { RunStub } from "@grasp-os/workerflow/instance";
+import type { EventOutcome } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
 import { inJurisdiction } from "../durable-objects.ts";
@@ -53,6 +54,14 @@ import { inJurisdiction } from "../durable-objects.ts";
 // once the run has ended: every run is created with that as its
 // retention, so the engine purges the record itself, on the same clock as
 // core removes the rest of the run's details (retention.ts).
+
+/** An event as core admits it to a run (`RunEngine.admitEvent`). */
+export interface AdmittedEngineEvent {
+  readonly type: string;
+  readonly payload: Json;
+  readonly key: string;
+  readonly attributes: Readonly<Record<string, string>>;
+}
 
 /** What an App's run is pinned to: the dispatcher loads it by these. */
 export interface PinnedRun {
@@ -271,6 +280,16 @@ export interface RunEngine {
     key: string
   ) => Promise<"delivered" | "refused">;
   /**
+   * Accepts `event` into the run's inbox, for a wait that matches it by
+   * its type and attributes (`waitForMatch`): the engine's own answer, so
+   * the caller tells a duplicate delivery (`duplicate`, the same key, type,
+   * payload and attributes) from a key reused for another event
+   * (`conflict`), a full inbox or too large a payload, an ended run, and a
+   * run the engine has no record of yet (`missing`). Throws when the run
+   * can't be reached.
+   */
+  admitEvent: (id: string, event: AdmittedEngineEvent) => Promise<EventOutcome>;
+  /**
    * Removes the run, with all the engine kept of it, whether or not it has
    * ended; one it has no record of stays as it is. For a run core ended
    * that the engine's own retention may not reach (retention.ts).
@@ -413,6 +432,13 @@ export const runEngine = (env: Env): RunEngine => ({
   resume: async (id, generation) => {
     await runStub(env, id).resume({ keepDeadlines: true, fence: generation });
   },
+  admitEvent: async (id, event) =>
+    await runStub(env, id).sendEvent({
+      type: event.type,
+      payload: encode(event.payload),
+      key: event.key,
+      attributes: event.attributes,
+    }),
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({
       type,

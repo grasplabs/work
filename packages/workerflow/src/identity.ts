@@ -188,3 +188,136 @@ export const stepKey = (
   executionUid: string,
   step: { type: string; name: string; occurrence: number }
 ): string => `${executionUid}:${step.type}:${step.occurrence}:${step.name}`;
+
+/** CloudEvents' rule for an attribute's name. */
+const attributeNamePattern = /^[a-z0-9]{1,20}$/u;
+
+/** The most attributes an event is sent with, or a match names. */
+export const maxEventAttributes = 16;
+
+/** The longest value an event attribute has. */
+export const maxEventAttributeLength = 1024;
+
+/** The most entries one `waitForMatch` takes. */
+export const maxEventMatches = 16;
+
+/** Attributes as the journal keeps them: their names in order. */
+const canonicalAttributes = (
+  attributes: Readonly<Record<string, string>>
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(attributes).toSorted(([a], [b]) => (a < b ? -1 : 1))
+  );
+
+/**
+ * An event's attributes, checked: a plain object of 0 to 16 names by
+ * CloudEvents' rule, each a string of at most 1,024 characters; as the
+ * journal keeps them, names in order (`null` for none).
+ */
+export const eventAttributesOf = (attributes: unknown): string | null => {
+  if (attributes === undefined || attributes === null) {
+    return null;
+  }
+  if (
+    typeof attributes !== "object" ||
+    Array.isArray(attributes) ||
+    Object.getPrototypeOf(attributes) !== Object.prototype
+  ) {
+    throw new TypeError("An event's attributes are a plain object");
+  }
+  const entries = Object.entries(attributes);
+  if (entries.length > maxEventAttributes) {
+    throw new TypeError(
+      `An event has at most ${maxEventAttributes} attributes`
+    );
+  }
+  for (const [name, value] of entries) {
+    if (!attributeNamePattern.test(name)) {
+      throw new TypeError(
+        `An event attribute's name is 1 to 20 lowercase letters and digits: ${JSON.stringify(name).slice(0, 40)}`
+      );
+    }
+    if (typeof value !== "string" || value.length > maxEventAttributeLength) {
+      throw new TypeError(
+        `An event attribute's value is text of at most ${maxEventAttributeLength} characters: ${name}`
+      );
+    }
+  }
+  return entries.length === 0
+    ? null
+    : JSON.stringify(
+        canonicalAttributes(
+          // SAFETY: every entry was checked to be a string just above.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+          attributes as Record<string, string>
+        )
+      );
+};
+
+/** Attributes as `eventAttributesOf` keeps them, read back. */
+const readAttributes = (text: string | null): Record<string, string> => {
+  if (text === null) {
+    return {};
+  }
+  // SAFETY: only ever text eventAttributesOf wrote, of names to strings.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return JSON.parse(text) as Record<string, string>;
+};
+
+/** One entry of a match, as the journal keeps it. */
+export interface JournaledMatch {
+  type: string;
+  attributes: Record<string, string>;
+}
+
+/**
+ * The entries of a `waitForMatch`, checked: 1 to 16, each an event type
+ * and the attributes it must have been sent with; as the journal keeps
+ * them, so a replay giving the same match gives the same text.
+ */
+export const eventMatchOf = (match: unknown): string => {
+  if (
+    !Array.isArray(match) ||
+    match.length === 0 ||
+    match.length > maxEventMatches
+  ) {
+    throw new TypeError(
+      `waitForMatch takes 1 to ${maxEventMatches} events to match`
+    );
+  }
+  const entries: JournaledMatch[] = [];
+  for (const entry of match) {
+    if (typeof entry !== "object" || entry === null) {
+      throw new TypeError("waitForMatch takes { type, attributes? } entries");
+    }
+    const type = assertEventType(Reflect.get(entry, "type"));
+    const attributes = eventAttributesOf(Reflect.get(entry, "attributes"));
+    entries.push({ type, attributes: readAttributes(attributes) });
+  }
+  return JSON.stringify(entries);
+};
+
+/** A match as `eventMatchOf` journaled it. */
+export const readEventMatch = (text: string): JournaledMatch[] =>
+  // SAFETY: only ever text eventMatchOf wrote.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  JSON.parse(text) as JournaledMatch[];
+
+/**
+ * Whether an event of `type`, sent with the attributes `attributes` (as
+ * `eventAttributesOf` keeps them), matches any entry of `match`.
+ */
+export const eventMatches = (
+  match: readonly JournaledMatch[],
+  type: string,
+  attributes: string | null
+): boolean => {
+  const sent = readAttributes(attributes);
+  return match.some(
+    (entry) =>
+      entry.type === type &&
+      Object.entries(entry.attributes).every(
+        ([name, value]) => Object.hasOwn(sent, name) && sent[name] === value
+      )
+  );
+};

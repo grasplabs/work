@@ -37,6 +37,7 @@ import type {
   WorkflowCalls,
 } from "@grasp-os/shared/workflows";
 import type {
+  EventMatch,
   WorkflowDuration,
   WorkflowStepConfig,
 } from "@grasp-os/workerflow/contracts";
@@ -172,6 +173,15 @@ export interface RunStep {
     name: string,
     options: { type: string; timeout: WorkflowDuration }
   ) => Promise<{ payload: unknown }>;
+  /**
+   * Waits until `until`, in ms since the epoch, for the oldest event of the
+   * run's inbox that matches an entry of `match`: its type, and every
+   * attribute it names (@grasp-os/workerflow's `waitForMatch`).
+   */
+  waitForMatch: (
+    name: string,
+    options: { match: readonly EventMatch[]; until: number }
+  ) => Promise<{ payload: unknown; timestamp: Date }>;
 }
 
 /**
@@ -1145,6 +1155,10 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
     waitForEvent: async (name, options) => {
       take(name);
       return await step.waitForEvent(name, options);
+    },
+    waitForMatch: async (name, options) => {
+      take(name);
+      return await step.waitForMatch(name, options);
     },
   };
 };

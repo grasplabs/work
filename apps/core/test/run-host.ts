@@ -29,6 +29,7 @@ export const engineOfTest = (): {
       await Promise.resolve();
     },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
   };
   const leaseOf: HostHooks["leaseOf"] = (key, attempt) =>
     attempt === 1 && leases.has(key)
