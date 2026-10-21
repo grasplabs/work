@@ -47,7 +47,7 @@
  *
  * - An isolate prints what it holds (a record, a caller's input) to the
  *   deployment's logs, which its processes' output shares. The sandbox
- *   host silences every isolate it loads (apps/core/src/on-prem/
+ *   host silences every isolate it loads (packages/shared/src/
  *   quiet-isolate.ts), as Cloudflare drops their output; and this
  *   supervisor starts workerd one way only, never `--verbose`, refusing
  *   any option of its own it doesn't know.
@@ -116,7 +116,7 @@ const capabilitySource = path.join(
   repo,
   "apps/core/src/on-prem/sandbox-capability.ts"
 );
-const quietSource = path.join(repo, "apps/core/src/on-prem/quiet-isolate.ts");
+const quietSource = path.join(repo, "packages/shared/src/quiet-isolate.ts");
 const callLimitsSource = path.join(repo, "apps/core/src/call-limits.ts");
 /** capnweb, as workerd loads it: one module importing only the runtime's. */
 const capnwebSource = path.join(
@@ -312,10 +312,11 @@ const sandbox :Workerd.Worker = (
     (name = "on-prem/sandbox-session.ts", esModule = embed "sandbox-session.js"),
     (name = "on-prem/sandbox-capability.ts", esModule = embed "sandbox-capability.js"),
     (name = "on-prem/sandbox-settings.ts", esModule = embed "sandbox-settings.js"),
-    (name = "on-prem/quiet-isolate.ts", esModule = embed "quiet-isolate.js"),
     (name = "call-limits.ts", esModule = embed "call-limits.js"),
-    # workerd resolves a bare specifier beside its importer.
+    # workerd resolves a bare specifier beside its importer: capnweb, and
+    # the quiet module from @grasp-os/shared (packages/shared/src).
     (name = "on-prem/capnweb", esModule = embed "capnweb.js"),
+    (name = "on-prem/@grasp-os/shared/quiet-isolate", esModule = embed "quiet-isolate.js"),
   ],
   compatibilityDate = "2026-09-15",
   # Its only binding: no storage, no secrets, nothing for escaped code.

@@ -26,6 +26,7 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
@@ -52,7 +53,6 @@ import type {
   Reader,
   SnapshotCallback,
 } from "./query-subscriptions.ts";
-import { quietLoader } from "./quiet-loader.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { capability, noPlaceOf } from "./sandbox-session.ts";

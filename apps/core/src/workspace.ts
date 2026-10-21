@@ -60,6 +60,7 @@ import {
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
@@ -135,7 +136,6 @@ import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
-import { quietLoader } from "./quiet-loader.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { SealedPreviews } from "./sealed-previews.ts";

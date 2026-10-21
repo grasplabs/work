@@ -1,3 +1,10 @@
+import {
+  captureEntrypoint,
+  captureMethod,
+  capturedModules,
+  hasNodeModules,
+  quietModules,
+} from "@grasp-os/shared/quiet-isolate";
 /**
  * A session on the on-prem sandbox host (sandbox-host.ts): one call of an
  * isolate whose code reaches back into core through capabilities, such as
@@ -33,13 +40,6 @@ import {
 import type { RpcTarget } from "cloudflare:workers";
 
 import { sessionMaxRuns } from "../call-limits.ts";
-import {
-  captureEntrypoint,
-  captureMethod,
-  capturedModules,
-  hasNodeModules,
-  quietModules,
-} from "./quiet-isolate.ts";
 import {
   declaredMethodsOf,
   invoke,
@@ -94,7 +94,7 @@ interface SessionCall {
   /**
    * The function capability that takes what the call writes with
    * `console`, bounded, once it settled: a draft's sealed preview's, for
-   * the agent's check of it (quiet-isolate.ts, `capturedModules`). None
+   * the agent's check of it (@grasp-os/shared/quiet-isolate, `capturedModules`). None
    * for any other call, whose output is dropped.
    */
   consoleSink: string | undefined;

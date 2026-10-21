@@ -1,5 +1,9 @@
 import { chunkBytes } from "@grasp-os/shared/chunks";
 import { whenAborted } from "@grasp-os/shared/deadline";
+import {
+  maxCapturedLines,
+  maxCapturedMessage,
+} from "@grasp-os/shared/quiet-isolate";
 import type {
   HeldPool,
   RpcAccountingLimits,
@@ -16,10 +20,6 @@ import { RpcSession, WebSocketTransport } from "capnweb";
 import { z } from "zod";
 
 import { sessionMaxRuns } from "./call-limits.ts";
-import {
-  maxCapturedLines,
-  maxCapturedMessage,
-} from "./on-prem/quiet-isolate.ts";
 import { capabilityMarker } from "./on-prem/sandbox-capability.ts";
 import { browserMessageSize } from "./rpc-target.ts";
 import {
@@ -110,7 +110,7 @@ export interface SessionCall {
    * Takes what the call writes with `console`, bounded, once it settled
    * (`consoleLinesOf`): a draft's sealed preview's, for the agent's check
    * of it, as a Loader tail would on Cloudflare (server-logs.ts). Any
-   * other call's output is dropped (on-prem/quiet-isolate.ts).
+   * other call's output is dropped (@grasp-os/shared/quiet-isolate).
    */
   readonly console?: (lines: ConsoleLine[]) => unknown;
   /** CPU time the call may use: the runtime's limit on Cloudflare. */

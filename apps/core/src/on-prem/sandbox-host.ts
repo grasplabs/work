@@ -22,11 +22,12 @@
  *
  * Whatever it's sent, the isolate gets no env and no network: this Worker
  * sets both itself. Nor does it print anything to the process's output,
- * which the deployment's logs share (quiet-isolate.ts). It has no binding but its Loader, so code that escaped
+ * which the deployment's logs share (@grasp-os/shared/quiet-isolate). It has no binding but its Loader, so code that escaped
  * its isolate would find nothing here: no storage, no secrets.
  */
 
-import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
+import { hasNodeModules, quietModules } from "@grasp-os/shared/quiet-isolate";
+
 import { sessionResponse } from "./sandbox-session.ts";
 import { isolateSettings } from "./sandbox-settings.ts";
 
