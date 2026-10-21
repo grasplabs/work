@@ -181,6 +181,12 @@ const recordDeleted = async (
     .where(eq(previewFixtureStores.storeId, storeId));
 };
 
+/**
+ * The longest one store's discard may take in a sweep: a fraction of its
+ * budget, so one that hangs costs that sweep little.
+ */
+const storeStepMs = 5000;
+
 /** How long the sweep leaves a store whose discard failed before it tries again. */
 const retryDelayMs = 60 * 60 * 1000;
 
@@ -195,10 +201,16 @@ const retriedLater = async (
   at: Date
 ): Promise<void> => {
   try {
-    await db
-      .update(previewFixtureStores)
-      .set({ retryAfter: new Date(at.getTime() + retryDelayMs) })
-      .where(eq(previewFixtureStores.storeId, storeId));
+    // Bounded, as every step of a sweep or removal is.
+    await within(
+      (async () => {
+        await db
+          .update(previewFixtureStores)
+          .set({ retryAfter: new Date(at.getTime() + retryDelayMs) })
+          .where(eq(previewFixtureStores.storeId, storeId));
+      })(),
+      storeStepMs
+    );
   } catch (error) {
     log.warn("preview.store_retry_unrecorded", {
       store: storeId,
@@ -215,12 +227,6 @@ const storesPerSweep = 100;
 
 /** How long one sweep goes on discarding, batch after batch. */
 const sweepBudgetMs = 20_000;
-
-/**
- * The longest one store's discard may take in a sweep: a fraction of its
- * budget, so one that hangs costs that sweep little.
- */
-const storeStepMs = 5000;
 
 /** Most of a person's preview stores one removal discards (`discardPreviewStoresOf`). */
 const storesPerErasure = 50;
@@ -291,6 +297,9 @@ export const discardPreviewStoresOf = async (
     }
   } catch (error) {
     log.warn("preview.store_erase_failed", errorFields(error));
+  }
+  if (gone > 0) {
+    log.info("preview.stores_erased", { stores: gone });
   }
   return gone;
 };
@@ -1342,6 +1351,17 @@ export class SealedPreviews {
         .insert(previewFixtureStores)
         .values({ storeId: id, appId: app, personId, createdAt: new Date() })
         .onConflictDoNothing();
+      // Removed while it was recorded: their removal may have read their
+      // stores before this one was there, so it goes now, and they get no
+      // store (`discardPreviewStoresOf`, members.ts).
+      if ((await memberRole(this.#env.DB, personId)) === undefined) {
+        await discardPreviewStoresOf(this.#env, personId);
+        this.#db
+          .delete(previewStores)
+          .where(eq(previewStores.storeId, id))
+          .run();
+        throw permissionErrors.create("permission.person_inactive");
+      }
     }
     // Dropped while that was written: its tables aren't made. The drop
     // discards the store (once that row exists, at the next preview).
