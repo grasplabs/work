@@ -3,10 +3,10 @@ import type { CollectionId } from "@grasp-os/shared/ids";
 import type { Provenance } from "@grasp-os/shared/knowledge";
 import { drizzle } from "drizzle-orm/d1";
 
+import { collections } from "../db/knowledge/schema.ts";
 import { grantedPermissions } from "../permissions.ts";
 import type { Reader } from "./access.ts";
 import { collectionsAllowed } from "./access.ts";
-import { readableCollection } from "./collections.ts";
 import { searchSections } from "./search.ts";
 import type { FoundSection } from "./search.ts";
 
@@ -16,11 +16,14 @@ import type { FoundSection } from "./search.ts";
 // reads through Knowledge's one access predicate (access.ts), so recall
 // never decides what may be read itself.
 
-/** A read of evidence for words, in one collection or all a reader may. */
+/** A read of evidence for words, in some collections or all a reader may. */
 export interface EvidenceQuery {
   query: string;
-  /** Only this collection; every one the reader may read if absent. */
-  collectionId?: CollectionId;
+  /**
+   * Only these, each refused as not found unless the reader may read it;
+   * every one the reader may read if absent.
+   */
+  collectionIds?: readonly CollectionId[];
   /** Most sections to return, best first. */
   limit: number;
 }
@@ -33,15 +36,6 @@ export interface BrainStore {
    * what it recalls from is still only the collections it was granted.
    */
   requireBrainGrant: (reader: Reader) => Promise<void>;
-  /**
-   * Refuses, as `knowledge.not_found`, unless `reader` may read every one
-   * of `collectionIds`: the same answer whether one is missing or hidden.
-   * Reads nothing of what they hold.
-   */
-  requireReadable: (
-    reader: Reader,
-    collectionIds: readonly CollectionId[]
-  ) => Promise<void>;
   /** Sections that match `query`, best first, of those `reader` may read. */
   findEvidence: (
     reader: Reader,
@@ -70,37 +64,44 @@ export const d1BrainStore = (env: Env): BrainStore => ({
       throw brainErrors.create("brain.denied");
     }
   },
-  requireReadable: async (reader, collectionIds) => {
+  findEvidence: async (reader, { query, collectionIds, limit }) =>
+    await searchSections(
+      env,
+      reader,
+      query,
+      { limit },
+      undefined,
+      collectionIds === undefined ? {} : { among: collectionIds }
+    ),
+  accessKey: async (reader) => {
+    // What may be read now: each collection the reader may read, with
+    // what decides who reads it (its access, whether it is sensitive),
+    // and for an App or agent its grants, the brain grant among them. A
+    // change to any of those changes the key.
     const db = drizzle(env.KNOWLEDGE);
     const { condition } = await collectionsAllowed(env, db, reader);
-    await Promise.all(
-      collectionIds.map(
-        async (collectionId) =>
-          await readableCollection(db, condition, collectionId)
-      )
-    );
-  },
-  findEvidence: async (reader, { query, collectionId, limit }) =>
-    collectionId === undefined
-      ? await searchSections(env, reader, query, { limit })
-      : await searchSections(env, reader, query, { limit }, collectionId),
-  accessKey: async (reader) => {
-    if (reader.type === "person") {
-      const { userId, role, teams } = reader.person;
-      return JSON.stringify([
-        "person",
-        userId,
-        role,
-        teams.map(({ id }) => id).toSorted(),
-      ]);
-    }
-    const db = drizzle(env.KNOWLEDGE);
-    const { granted } = await collectionsAllowed(env, db, reader);
+    const readable = await db
+      .select({
+        id: collections.id,
+        access: collections.access,
+        sensitive: collections.sensitive,
+      })
+      .from(collections)
+      .where(condition)
+      .orderBy(collections.id);
+    const permissions =
+      reader.type === "person"
+        ? []
+        : await grantedPermissions(env, reader.authority);
+    const grants = permissions.map(({ id }) => id).toSorted();
     return JSON.stringify([
-      "delegate",
-      reader.authority.onBehalfOf,
-      reader.permissionId ?? null,
-      [...(granted ?? [])].toSorted(),
+      reader.type,
+      reader.type === "person"
+        ? reader.person.userId
+        : reader.authority.onBehalfOf,
+      reader.type === "person" ? null : (reader.permissionId ?? null),
+      grants,
+      readable.map(({ id, access, sensitive }) => [id, access, sensitive]),
     ]);
   },
 });

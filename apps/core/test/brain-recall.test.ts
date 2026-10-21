@@ -4,9 +4,10 @@ import type { Role } from "@grasp-os/shared/roles";
 import { describe, expect, it } from "vite-plus/test";
 
 import { requestGranted } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { actingFor, collectionIn, envOf, knowledgeIn } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
+import { newTeam, readCollection } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's recall (knowledge/recall.ts), through the boundaries callers
@@ -323,5 +324,87 @@ describe("the Brain's recall", setUpTime, () => {
       fewTokens: [0, true, "bounded", 1],
       fromTheDocument: true,
     });
+  });
+
+  it("records a recall as a read of what it returned, quotes at most 4,000 characters of a section, and changes its access revision with access", async () => {
+    const admin = await personOf("admin");
+    const user = await personOf("user");
+    const word = rareWord();
+    const { documentId } = await collectionSaying(
+      admin,
+      "everyone",
+      `# Long\n\n## Section\n${word} ${"filler ".repeat(2000)}`
+    );
+    const found = await user.knowledge.recall({ query: word });
+    const nothing = await user.knowledge.recall({ query: rareWord() });
+    const logged = await allEvents();
+    const events = logged.filter(
+      ({ actor }) => actor.type === "person" && actor.userId === user.userId
+    );
+    const recalls = events
+      .filter(({ detail }) => detail.via === "recall")
+      .map(({ action, provenance }) => [
+        action,
+        provenance?.includes(documentId),
+      ]);
+    // A collection the person can read is added: what they may read changed.
+    await collectionSaying(user, "me", "# Mine\nNothing here.");
+    const afterNew = await user.knowledge.recall({ query: word });
+    expect({
+      quoted: found.items[0]?.statement.length,
+      recalls,
+      emptySearches: events.filter(
+        ({ action }) => action === "knowledge.search.empty"
+      ).length,
+      sameAccess: nothing.accessRevision === found.accessRevision,
+      changedAccess: afterNew.accessRevision === found.accessRevision,
+    }).toStrictEqual({
+      quoted: 4000,
+      recalls: [
+        ["knowledge.search", true],
+        ["knowledge.search", false],
+      ],
+      emptySearches: 0,
+      sameAccess: true,
+      changedAccess: false,
+    });
+  });
+
+  it("answers an agent nothing from a granted collection its person can't read", async () => {
+    const admin = await personOf("admin");
+    const user = await personOf("user");
+    const agent = newAgent();
+    const word = rareWord();
+    const team = await newTeam(admin, [admin]);
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Team ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    await admin.knowledge.saveDocument({
+      collectionId,
+      path: "plan.md",
+      text: `# Plan\n${word}`,
+      ifVersion: 0,
+    });
+    await requestGranted(idp, admin, readCollection(agent, collectionId));
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const forUser = await agentRecall(agent, user);
+    const forAdmin = await agentRecall(agent, admin);
+    expect({
+      user: cited(await forUser.recall({ query: word })).sources.length,
+      userNamed: await outcome(
+        forUser.recall({
+          query: word,
+          filters: { collectionIds: [collectionId] },
+        })
+      ),
+      admin: cited(await forAdmin.recall({ query: word })).sources.length,
+    }).toStrictEqual({ user: 0, userNamed: "brain.not_found", admin: 1 });
   });
 });

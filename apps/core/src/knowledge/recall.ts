@@ -108,21 +108,6 @@ const itemOf = ({
   };
 };
 
-/** The sections, read collection by collection in turn, best first. */
-const interleaved = (lists: readonly FoundSection[][]): FoundSection[] => {
-  const longest = Math.max(0, ...lists.map((list) => list.length));
-  const merged: FoundSection[] = [];
-  for (let index = 0; index < longest; index += 1) {
-    for (const list of lists) {
-      const section = list[index];
-      if (section !== undefined) {
-        merged.push(section);
-      }
-    }
-  }
-  return merged;
-};
-
 /**
  * As many of `found`, in order, as the budget holds: no more items than it
  * allows, and no more tokens.
@@ -225,30 +210,21 @@ export const recall = async (
     if (only !== undefined && named?.some((id) => id !== only) === true) {
       throw brainErrors.create("brain.not_found");
     }
-    const collections = only === undefined ? named : [only];
-    if (collections !== undefined) {
-      await store.requireReadable(reader, collections);
-    }
+    const collectionIds = only === undefined ? named : [only];
     // One more than asked, to tell a full pack from a cut one.
     const limit = Math.min(limits.maxItems + 1, searchMaxLimit);
-    const reads = (collections ?? [undefined]).map(
-      async (collectionId) =>
-        await store.findEvidence(reader, {
-          query,
-          limit,
-          ...(collectionId === undefined ? {} : { collectionId }),
-        })
-    );
     const read = await Promise.race([
-      Promise.all(reads),
+      store.findEvidence(reader, {
+        query,
+        limit,
+        ...(collectionIds === undefined ? {} : { collectionIds }),
+      }),
       timeout(limits.deadlineMs),
     ]);
-    const found = interleaved((read ?? []).map(({ sections }) => sections));
+    const found = read?.sections ?? [];
     const { items, tokenCount } = packed(found, limits);
     const truncated =
-      items.length < found.length ||
-      (read !== undefined &&
-        read.some(({ sections }) => sections.length === searchMaxLimit));
+      items.length < found.length || read?.sections.length === searchMaxLimit;
     return {
       id: crypto.randomUUID(),
       contractVersion: brainContractVersion,
@@ -256,8 +232,9 @@ export const recall = async (
       items,
       sourceVersions: sourcesOf(items),
       conflicts: [],
+      // A read the deadline stopped proves nothing missing.
       gaps:
-        items.length === 0
+        items.length === 0 && read !== undefined
           ? [{ about: "No evidence the caller may read matched the question." }]
           : [],
       coverage: coverageOf(read === undefined, truncated),
