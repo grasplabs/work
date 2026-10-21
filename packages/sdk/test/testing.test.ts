@@ -1,4 +1,5 @@
 /* oxlint-disable require-await -- fakes of async interfaces answer right away */
+import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -389,6 +390,67 @@ describe("workflow tests", () => {
       ],
       unheld: true,
       reached: ["CRM", "CRM", "MAIL"],
+    });
+  });
+
+  it("hold an AI step to the model its review shows it asking, and a key to a step its review shows keyed", async () => {
+    const asked: string[] = [];
+    const summary = workflow("summary", { params: {} }, async (step) => {
+      const text = await step.llm("write", {
+        description: "Write",
+        binding: "WRITER",
+        instructions: "Summarise",
+        input: "Invoice INV-7",
+        schema: z.string(),
+      });
+      await step.do(
+        "file",
+        { description: "File", key: "k1" },
+        async () => text.length
+      );
+      return text;
+    });
+    const tests = workflowTests(summary, [
+      {
+        name: "runs",
+        model: (request) => {
+          asked.push(request.binding);
+          return "Fine";
+        },
+        expect: {},
+      },
+    ]);
+    const reviewed = {
+      steps: { write: [], file: [] },
+      kinds: { write: "ai", file: "exact" },
+      models: { write: ["WRITER"] },
+      keyed: ["file"],
+      all: [],
+    } as const satisfies WorkflowCalls;
+
+    const held = await runWorkflowTests(tests, reviewed);
+    const anotherModel = await runWorkflowTests(tests, {
+      ...reviewed,
+      models: { write: ["DRAFTER"] },
+    });
+    const unkeyed = await runWorkflowTests(tests, { ...reviewed, keyed: [] });
+
+    expect({
+      held: held.passed,
+      anotherModel: anotherModel.results[0]?.failures,
+      unkeyed: unkeyed.results[0]?.failures,
+      asked,
+    }).toStrictEqual({
+      held: true,
+      anotherModel: [
+        expect.stringContaining('Step "write" asked model WRITER'),
+      ],
+      unkeyed: [
+        expect.stringContaining('Step "file:k1" isn\'t one the review'),
+      ],
+      // Asked twice: the run held to its review, and the one whose file
+      // step was refused after it. Never in the one refused.
+      asked: ["WRITER", "WRITER"],
     });
   });
 
