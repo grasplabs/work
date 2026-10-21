@@ -118,6 +118,9 @@ export interface RolloutParams {
   startedBy: Staff;
 }
 
+/** The event staff send to retry a rollout's failed fleet clients, as round `round`. */
+export const retryEvent = (round: number): string => `retry-${round}`;
+
 /** The event staff send to approve the fleet, from its first ring, `ring`. */
 export const approvalEvent = (ring: number): string => `approve-ring-${ring}`;
 
@@ -139,10 +142,14 @@ export const gradualStages = [
  */
 export const stepBudget = 900;
 
+/** The steps of one client of a release with `apps` Workers (`rolloutSteps`). */
+const clientSteps = (apps: number): number =>
+  5 + apps * (2 + 2 * gradualStages.length);
+
 /**
  * The steps a rollout's run takes for `clientCount` clients in `rings` rings
- * of a release with `apps` Workers: its own (the targets, done, a stop
- * recorded), three for the fleet's approval (waiting, approved, the
+ * of a release with `apps` Workers: its own (the targets, the check for
+ * failed clients, done, a stop recorded), three for the fleet's approval (waiting, approved, the
  * wait), one for each ring of the fleet after its first, and for each
  * client its claim, prepare, finish and done, or its failure, with each
  * Worker's upload, a traffic change and a hold per stage, and all of its
@@ -153,9 +160,14 @@ export const rolloutSteps = (
   clientCount: number,
   apps: number
 ): number =>
-  3 +
-  (rings > 1 ? 3 + (rings - 2) : 0) +
-  clientCount * (5 + apps * (2 + 2 * gradualStages.length));
+  4 + (rings > 1 ? 3 + (rings - 2) : 0) + clientCount * clientSteps(apps);
+
+/**
+ * The steps a retry of `clientCount` failed clients adds: the wait for it
+ * (waiting, asked, the wait, its targets) and each client's.
+ */
+export const retrySteps = (clientCount: number, apps: number): number =>
+  4 + clientCount * clientSteps(apps);
 
 /** How long a rollout waits for the fleet's approval before it stops. */
 const approvalTimeout = "30 days";
@@ -622,15 +634,17 @@ const clientStep = async <T>(
 
 /**
  * The steps of client `clientId`'s deploy once the rollout claimed it,
- * each of them `clientStep`: prepared (marked started first), each
- * Worker uploaded, moved by stages and made live, finished, then done.
+ * each of them `clientStep`, named after `label`: prepared (marked
+ * started first), each Worker uploaded, moved by stages and made live,
+ * finished, then done.
  */
 const deployClaimed = async (
   env: Env,
   step: WorkflowStep,
   params: RolloutParams,
   clientId: string,
-  { deployId, running }: Extract<Claimed, { state: "claimed" }>
+  { deployId, running }: Extract<Claimed, { state: "claimed" }>,
+  label: string
 ): Promise<void> => {
   const { rolloutId } = params;
   const db = consoleDatabase(env.DB);
@@ -640,7 +654,7 @@ const deployClaimed = async (
     step,
     db,
     client,
-    `${clientId} prepare`,
+    `${label} prepare`,
     deployStepConfig,
     async () => {
       await markStarted(db, rolloutId, clientId);
@@ -654,7 +668,7 @@ const deployClaimed = async (
       step,
       db,
       client,
-      `${clientId} ${app} upload`,
+      `${label} ${app} upload`,
       deployStepConfig,
       async () =>
         await uploadDeployWorker(
@@ -695,7 +709,7 @@ const deployClaimed = async (
           step,
           db,
           client,
-          `${clientId} ${app} ${percent}%`,
+          `${label} ${app} ${percent}%`,
           quickStep,
           async () => {
             await shiftDeployTraffic(await context(), deployId, app, {
@@ -706,7 +720,7 @@ const deployClaimed = async (
           }
         );
         // oxlint-disable-next-line no-await-in-loop -- held before the next stage
-        await step.sleep(`${clientId} ${app} ${percent}% hold`, hold);
+        await step.sleep(`${label} ${app} ${percent}% hold`, hold);
       }
     }
     // oxlint-disable-next-line no-await-in-loop -- live before the next Worker
@@ -714,7 +728,7 @@ const deployClaimed = async (
       step,
       db,
       client,
-      `${clientId} ${app} live`,
+      `${label} ${app} live`,
       quickStep,
       async () => {
         await makeDeployWorkerLive(
@@ -730,39 +744,34 @@ const deployClaimed = async (
     step,
     db,
     client,
-    `${clientId} finish`,
+    `${label} finish`,
     deployStepConfig,
     async () => {
       await finishDeploy(await context(), deployId);
     }
   );
-  await clientStep(
-    step,
-    db,
-    client,
-    `${clientId} done`,
-    quickStep,
-    async () => {
-      await completeTarget(db, rolloutId, clientId);
-    }
-  );
+  await clientStep(step, db, client, `${label} done`, quickStep, async () => {
+    await completeTarget(db, rolloutId, clientId);
+  });
 };
 
 /**
  * Deploys client `clientId`, as steps of the rollout's run: claimed, its
  * resources and migrations, each Worker by stages, the smoke check and
- * the router, then released. Returns whether the rollout goes on: not
+ * the router, then released, its steps named after `label` (a retry's
+ * differ from its first try's). Returns whether the rollout goes on: not
  * once staff stopped it.
  */
 const deployClient = async (
   env: Env,
   step: WorkflowStep,
   params: RolloutParams,
-  clientId: string
+  clientId: string,
+  label = clientId
 ): Promise<boolean> => {
   const db = consoleDatabase(env.DB);
   const claimed = await step.do(
-    `${clientId} claim`,
+    `${label} claim`,
     claimStep,
     guarded(async () => await claimTarget(env, db, params, clientId))
   );
@@ -770,7 +779,7 @@ const deployClient = async (
     return claimed.state === "skipped";
   }
   try {
-    await deployClaimed(env, step, params, clientId, claimed);
+    await deployClaimed(env, step, params, clientId, claimed, label);
     return true;
   } catch (error) {
     if (error instanceof ClientEndedError) {
@@ -966,10 +975,11 @@ const deployFleetClient = async (
   env: Env,
   step: WorkflowStep,
   params: RolloutParams,
-  clientId: string
+  clientId: string,
+  label = clientId
 ): Promise<boolean> => {
   try {
-    return await deployClient(env, step, params, clientId);
+    return await deployClient(env, step, params, clientId, label);
   } catch (error) {
     const reason = stopReason(error);
     const replaced: DeployErrorCode = "runner_replaced";
@@ -978,7 +988,7 @@ const deployFleetClient = async (
     }
     const db = consoleDatabase(env.DB);
     await step.do(
-      `${clientId} failed`,
+      `${label} failed`,
       quickStep,
       guarded(async () => {
         await failTarget(db, params.rolloutId, clientId, reason);
@@ -986,6 +996,114 @@ const deployFleetClient = async (
     );
     return true;
   }
+};
+
+/** The fleet targets of rollout `rolloutId` (past its first ring) in `status`. */
+export const fleetTargets = async (
+  db: ConsoleDatabase,
+  rolloutId: string,
+  status: "failed" | "pending"
+): Promise<string[]> => {
+  const [internal, ...fleet] = await ringsOf(db, rolloutId);
+  const rows = await db
+    .select({ clientId: rolloutTargets.clientId })
+    .from(rolloutTargets)
+    .where(
+      and(
+        eq(rolloutTargets.rolloutId, rolloutId),
+        eq(rolloutTargets.status, status)
+      )
+    );
+  const inStatus = new Set(rows.map(({ clientId }) => clientId));
+  return internal === undefined
+    ? []
+    : fleet.flatMap(({ clientIds }) =>
+        clientIds.filter((clientId) => inStatus.has(clientId))
+      );
+};
+
+/**
+ * Where retry `round` of rollout `rolloutId` is: asked for (a staff
+ * member set its failed clients going again, src/rollout/control.ts),
+ * still waiting, or the rollout cancelled.
+ */
+const retryOf = async (
+  db: ConsoleDatabase,
+  rolloutId: string
+): Promise<"asked" | "waiting" | "cancelled"> => {
+  const [row] = await db
+    .select({ status: rollouts.status })
+    .from(rollouts)
+    .where(eq(rollouts.id, rolloutId));
+  if (row?.status === "cancelled") {
+    return "cancelled";
+  }
+  return row?.status === "running" ? "asked" : "waiting";
+};
+
+/**
+ * Waits, once the rollout reached every client, for staff to retry the
+ * fleet clients that failed, as round `round`: the rollout marked
+ * waiting, audited, then a retry recorded already, or the event it sends
+ * (one per round). Returns the clients to deploy again, in ring order;
+ * null when none failed, so there's nothing to wait for; `cancelled` once
+ * staff cancelled the rollout instead.
+ */
+const awaitRetry = async (
+  step: WorkflowStep,
+  db: ConsoleDatabase,
+  rolloutId: string,
+  round: number
+): Promise<string[] | "cancelled" | null> => {
+  const failed = await step.do(
+    `retry ${round} waiting`,
+    quickStep,
+    guarded(async () => {
+      const clientIds = await fleetTargets(db, rolloutId, "failed");
+      if (clientIds.length > 0) {
+        await actIfChanged(
+          db,
+          "system",
+          db
+            .update(rollouts)
+            .set({ status: "waiting", updatedAt: new Date() })
+            .where(
+              and(eq(rollouts.id, rolloutId), eq(rollouts.status, "running"))
+            ),
+          {
+            action: "rollout.wait_retry",
+            target: rolloutId,
+            detail: { failed: clientIds.length },
+          }
+        );
+      }
+      return clientIds.length;
+    })
+  );
+  if (failed === 0) {
+    return null;
+  }
+  // Checked first: a retry recorded after this check reaches the run as
+  // its event.
+  const retry = await step.do(
+    `retry ${round} asked`,
+    quickStep,
+    guarded(async () => await retryOf(db, rolloutId))
+  );
+  if (retry === "cancelled") {
+    return "cancelled";
+  }
+  if (retry === "waiting") {
+    await step.waitForEvent(`retry ${round}`, {
+      type: retryEvent(round),
+      timeout: approvalTimeout,
+    });
+  }
+  return await step.do(
+    `retry ${round} targets`,
+    quickStep,
+    guarded(async () => await fleetTargets(db, rolloutId, "pending"))
+  );
 };
 
 /** Moves running rollout `rolloutId` on to ring `ring`, audited once. */
@@ -1108,6 +1226,32 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
             step,
             params,
             clientId
+          );
+          if (!goOn) {
+            return result;
+          }
+        }
+      }
+      // Fleet clients that failed wait for staff: retried in this rollout,
+      // which keeps what a rollback of each puts back and deploys none of
+      // the others again, or the rollout cancelled.
+      for (let round = 1; ; round += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        const retried = await awaitRetry(step, db, rolloutId, round);
+        if (retried === "cancelled") {
+          return result;
+        }
+        if (retried === null) {
+          break;
+        }
+        for (const clientId of retried) {
+          // oxlint-disable-next-line no-await-in-loop -- one client at a time
+          const goOn = await deployFleetClient(
+            this.env,
+            step,
+            params,
+            clientId,
+            `${clientId} retry ${round}`
           );
           if (!goOn) {
             return result;
