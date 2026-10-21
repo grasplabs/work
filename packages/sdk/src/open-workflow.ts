@@ -173,6 +173,15 @@ export interface Looped extends FlowState {
   readonly end: boolean;
 }
 
+/**
+ * A `fork` task: the stages before and after its branches, and whether
+ * they compete (a race: the first branch that succeeds wins, its outcome
+ * recorded).
+ */
+export interface ForkPlan extends EnterPlan, LeavePlan {
+  readonly compete?: true;
+}
+
 /** The tasks generated code runs, one after the other. */
 export interface Flow {
   /** The workflow's `input.from`, on its raw input. */
@@ -232,6 +241,25 @@ export interface Flow {
     data: TaskData,
     plan: ForPlan,
     body: ScopeBody
+  ) => Promise<Looped>;
+  /**
+   * Runs `fork` task `id` on `data`: its enter step, if it has stages
+   * there; then its branches one after another (concurrency 1), each on a
+   * flow of its own scope (`<fork>.<branch>`), from the task's transformed
+   * input and the context as the task found it, so no branch sees
+   * another's exports. Without `compete`, every branch runs and the
+   * fork's output is their outputs in declaration order; with it, the
+   * first branch that succeeds wins, the branches after it never run, and
+   * its outcome is recorded (`task:<id>`): the fork's output is its
+   * output, and a fork whose every branch failed fails as the last did.
+   * Then its leave step, on that output. An `end` in a branch ends the
+   * fork, and says so.
+   */
+  readonly fork: (
+    id: string,
+    data: TaskData,
+    plan: ForkPlan,
+    branches: readonly ScopeBody[]
   ) => Promise<Looped>;
   /** Durably waits `milliseconds` as task `id`, holding no isolate. */
   readonly wait: (id: string, milliseconds: number) => Promise<void>;
@@ -348,13 +376,37 @@ const stepOf = (
   scope: string
 ): string => `${kind}:${requireTaskId(id)}${scope === "" ? "" : `@${scope}`}`;
 
-/** Scope `scope` with the item `index` of `for` task `id` inside it. */
+/**
+ * Scope `scope` with the item `index` of `for` task `id` (or the branch
+ * `index` of `fork` task `id`) inside it.
+ */
 const itemScope = (scope: string, id: string, index: number): string =>
   `${scope === "" ? "" : `${scope}/`}${requireTaskId(id)}.${index}`;
 
 // `Array.isArray` doesn't narrow a readonly array type.
 const isStageList = (value: readonly Stage[]): value is readonly Stage[] =>
   isArray(value);
+
+// As `isStageList`, for a fork's branches.
+const isBodyList = (
+  value: readonly ScopeBody[]
+): value is readonly ScopeBody[] => isArray(value);
+
+/** The most branches a fork has (the profile's maxForkBranches). */
+const maxBranches = 64;
+
+/** Whether `plan` has stages after its task's own work. */
+const leaves = (plan: LeavePlan): boolean =>
+  plan.outputAs !== undefined ||
+  plan.outputSchema === true ||
+  plan.exportAs !== undefined ||
+  plan.exportSchema === true;
+
+/** Whether `plan` has stages before its task's own work. */
+const enters = (plan: EnterPlan): boolean =>
+  plan.if !== undefined ||
+  plan.inputSchema === true ||
+  plan.inputFrom !== undefined;
 
 /** What a step's stages work on as they go: its input, then its output. */
 interface Frame {
@@ -704,12 +756,7 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
           return { ...state, end: true };
         }
       }
-      const hasLeave =
-        plan.outputAs !== undefined ||
-        plan.outputSchema === true ||
-        plan.exportAs !== undefined ||
-        plan.exportSchema === true;
-      if (!hasLeave) {
+      if (!leaves(plan)) {
         return { ...state, end: false };
       }
       return {
@@ -720,6 +767,76 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
           state.output,
           plan
         )),
+        end: false,
+      };
+    },
+    fork: async (id, data, plan, branches) => {
+      if (
+        !isBodyList(branches) ||
+        branches.length === 0 ||
+        branches.length > maxBranches
+      ) {
+        throw new TypeError("A fork has its branches, in order");
+      }
+      let { input } = data;
+      if (enters(plan)) {
+        const entered = await flow.enter(id, data, plan);
+        if (entered.skipped) {
+          return { output: data.input, context: data.context, end: false };
+        }
+        ({ input } = entered);
+      }
+      const outputs: FlowValue[] = [];
+      let failure: unknown;
+      let won: { output: FlowValue; branch: number } | undefined;
+      for (const [index, branch] of branches.entries()) {
+        const scoped = itemScope(within, id, index);
+        let done: ScopeEnd;
+        try {
+          // One branch after another (concurrency 1), each from the
+          // context the fork found: never another branch's exports.
+          // oxlint-disable-next-line no-await-in-loop -- see above
+          done = await branch(flowOf(engine, scoped), {
+            output: input,
+            context: data.context,
+          });
+        } catch (error) {
+          if (plan.compete !== true) {
+            throw error;
+          }
+          // A race goes on to its next branch: this one's completed
+          // effects stand.
+          failure = error;
+          continue;
+        }
+        if (done.end === true) {
+          return { output: done.output, context: data.context, end: true };
+        }
+        if (plan.compete === true) {
+          won = { output: done.output, branch: index };
+          break;
+        }
+        outputs.push(done.output);
+      }
+      let output: FlowValue = outputs;
+      if (plan.compete === true) {
+        if (won === undefined) {
+          throw failure;
+        }
+        const winner: FlowValue = { output: won.output, branch: won.branch };
+        ({ output } = readRecord(
+          await engine.do(
+            named("task", id),
+            captured(data),
+            async () => await Promise.resolve(winner)
+          )
+        ));
+      }
+      if (!leaves(plan)) {
+        return { output, context: data.context, end: false };
+      }
+      return {
+        ...(await flow.leave(id, data, input, output, plan)),
         end: false,
       };
     },
