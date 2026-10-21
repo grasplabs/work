@@ -1020,6 +1020,12 @@ export const appTestRuns = sqliteTable(
      * store, whose run reaches none.
      */
     fixtureStoreId: text("fixture_store_id"),
+    /**
+     * The approvals of its version's store operation bindings its start
+     * froze, by alias (JSON): a call goes through the one its start found,
+     * never one approved since.
+     */
+    approvals: text().notNull().default("{}"),
   },
   (table) => [index("app_test_runs_deadline").on(table.deadline)]
 );

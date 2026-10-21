@@ -25,7 +25,10 @@ import {
 import type { Acting } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
+import {
+  approveWorkflowBinding,
+  revokeWorkflowBinding,
+} from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { actionMainModule } from "../src/workflow-modules.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
@@ -1331,6 +1334,26 @@ const fixtureRequests = async (
     .parse(answer);
 };
 
+/** A fixture store recorded for `app` at `version`. */
+const recordedFixture = async (app: string, version: number) => {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO app_test_fixtures (store_id, app_id, version, created_at) VALUES (?, ?, ?, ?)"
+  )
+    .bind(id, app, version, Date.now())
+    .run();
+  return id;
+};
+
+/** Points the App's test runs at fixture store `store`. */
+const pointAt = async (app: string, store: string) => {
+  await env.DB.prepare(
+    "UPDATE app_test_runs SET fixture_store_id = ? WHERE app_id = ?"
+  )
+    .bind(store, app)
+    .run();
+};
+
 /** Rows of `table` naming workflow `workflow`. */
 const rowsNaming = async (table: string, workflow: string) => {
   const row = await env.DB.prepare(
@@ -1473,18 +1496,23 @@ export default workflowTest({
       });
     });
 
-    it("refuse its store operation once its approval is revoked, or its test's fixture store isn't the one recorded", async () => {
+    it("refuse its store operation once its approval is revoked or replaced, or its record names a store its test didn't make for it", async () => {
       const revoked = await storeApp();
       await env.DB.prepare(
         "UPDATE workflow_binding_approvals SET status = 'revoked' WHERE workflow_resource_id = ?"
       )
         .bind(revoked.workflowId)
         .run();
-      // Its call a moment after it starts, once its record is changed.
-      const swapped = await storeApp({}, undefined, [
-        { first: { wait: "PT1S" } },
-        ...recording,
-      ]);
+      // Each makes its call a moment after it starts, once changed.
+      const delayed = async () =>
+        await storeApp({}, undefined, [
+          { first: { wait: "PT1S" } },
+          ...recording,
+        ]);
+      const replaced = await delayed();
+      const business = await delayed();
+      const otherApp = await delayed();
+      const otherVersion = await delayed();
       const endedOn = async (
         { release }: Awaited<ReturnType<typeof storeApp>>,
         before: () => Promise<void> = async () => {
@@ -1500,23 +1528,67 @@ export default workflowTest({
         );
         await before();
         const ended = await endOf(session, run);
+        const written = await fixtureRequests(session, release);
         await session.close();
-        return ended;
+        return { ended, written };
+      };
+      const refused = {
+        ended: { status: "failed", code: "resource.unavailable" },
+        written: [],
       };
       expect({
         revoked: await endedOn(revoked),
-        // Its record names a store no test made for it.
-        swapped: await endedOn(swapped, async () => {
-          await env.DB.prepare(
-            "UPDATE app_test_runs SET fixture_store_id = ? WHERE app_id = ?"
+        // Approved again after the run started: not the approval it froze.
+        replaced: await endedOn(replaced, async () => {
+          const approval = await env.DB.prepare(
+            "SELECT id, target FROM workflow_binding_approvals WHERE workflow_resource_id = ? AND status = 'active'"
           )
-            .bind(swapped.fixture.store, swapped.fixture.app)
-            .run();
+            .bind(replaced.workflowId)
+            .first<{ id: string; target: string }>();
+          await revokeWorkflowBinding(
+            env,
+            replaced.admin,
+            replaced.workflowId,
+            approval?.id
+          );
+          await approveWorkflowBinding(
+            env,
+            replaced.admin,
+            replaced.workflowId,
+            {
+              alias: "record",
+              target: z.json().parse(JSON.parse(approval?.target ?? "{}")),
+              reviewed: { version: 1 },
+            }
+          );
+        }),
+        // The App's business store.
+        business: await endedOn(business, async () => {
+          await pointAt(business.fixture.app, business.fixture.store);
+        }),
+        // Another App's fixture store, and one of this App's other version.
+        otherApp: await endedOn(otherApp, async () => {
+          await pointAt(
+            otherApp.fixture.app,
+            await recordedFixture(revoked.fixture.app, 2)
+          );
+        }),
+        otherVersion: await endedOn(otherVersion, async () => {
+          await pointAt(
+            otherVersion.fixture.app,
+            await recordedFixture(otherVersion.fixture.app, 1)
+          );
         }),
       }).toMatchObject({
-        revoked: { status: "failed", code: "resource.unavailable" },
-        swapped: { status: "failed", code: "resource.unavailable" },
+        revoked: refused,
+        replaced: refused,
+        business: refused,
+        otherApp: refused,
+        otherVersion: refused,
       });
+      await expect(
+        businessRequests(business.builder, business.fixture.app)
+      ).resolves.toStrictEqual([]);
     });
   }
 );
