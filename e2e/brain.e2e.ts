@@ -95,3 +95,50 @@ test("a person opens a part's page from the brain's navigation, and a note in th
     page.getByRole("navigation", { name: "Breadcrumb" })
   ).toContainText("Vision");
 });
+
+test("a person asks the brain on its atlas, in a chat of its own apart from the one the dock carries elsewhere", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("brainChat");
+  const page = await pageOf(member);
+  const tag = crypto.randomUUID().slice(0, 8);
+  const ofTheBrain = `About the brain ${tag}?`;
+  const elsewhere = `About something else ${tag}?`;
+
+  /** The dock's box, its Send ready once the models are read, and the question sent. */
+  const ask = async (name: string, question: string) => {
+    const box = page.getByRole("textbox", { name });
+    await box.fill(question);
+    await expect(
+      page
+        .locator("form")
+        .filter({ has: box })
+        .getByRole("button", { name: "Send" })
+    ).toBeEnabled();
+    await box.press("Enter");
+  };
+  const firstQuestion = (name: string) =>
+    page
+      .getByRole("region", { name })
+      .getByRole("list", { name: "Messages" })
+      .getByRole("listitem")
+      .first();
+
+  // On the atlas, the dock is the brain's.
+  await page.goto("/brain");
+  await expect(
+    page.getByRole("textbox", { name: "Ask the brain" })
+  ).toHaveAttribute("placeholder", "Ask anything about the brain");
+  await ask("Ask the brain", ofTheBrain);
+  await expect(firstQuestion("Ask the brain")).toHaveText(ofTheBrain);
+
+  // Elsewhere the dock is Grasp's, and starts a chat of its own.
+  await page.goto("/knowledge");
+  await ask("Ask Grasp", elsewhere);
+  await expect(firstQuestion("Ask Grasp")).toHaveText(elsewhere);
+
+  // Back on the atlas, the brain's conversation goes on.
+  await page.goto("/brain");
+  await page.getByRole("button", { name: "Open the chat" }).click();
+  await expect(firstQuestion("Ask the brain")).toHaveText(ofTheBrain);
+});
