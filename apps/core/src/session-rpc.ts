@@ -9,6 +9,7 @@ import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
 import { EmailPreferencesRpc } from "./email-preferences-rpc.ts";
+import { AdmissionRpc } from "./knowledge/admission-rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
 import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
@@ -56,6 +57,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #brain: BrainRpc;
   readonly #knowledgeSignals: KnowledgeSignalsRpc;
   readonly #memory: MemoryRpc;
+  readonly #admission: AdmissionRpc;
   readonly #uploads: UploadsRpc;
   readonly #permissions: PermissionsRpc;
   readonly #resourceBindings: ResourceBindingsRpc;
@@ -97,6 +99,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#brain = new BrainRpc(env, full);
     this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
     this.#memory = new MemoryRpc(env, full);
+    this.#admission = new AdmissionRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
@@ -178,6 +181,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get memory(): MemoryRpc {
     return this.#memory;
+  }
+
+  get admission(): AdmissionRpc {
+    return this.#admission;
   }
 
   get uploads(): UploadsRpc {

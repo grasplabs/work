@@ -79,6 +79,7 @@
     "./mail-ingress": "./src/mail-ingress.ts",
     "./members": "./src/members.ts",
     "./memory": "./src/memory.ts",
+    "./admission": "./src/admission.ts",
     "./models": "./src/models.ts",
     "./notifications": "./src/notifications.ts",
     "./onboarding": "./src/onboarding.ts",

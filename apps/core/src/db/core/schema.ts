@@ -3706,6 +3706,16 @@ export const admissionTopics = sqliteTable(
     owner: text({ enum: ["platform", "company"] }).notNull(),
     effectiveAt: timestamp("effective_at").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * A company topic's words and phrases, normalized, as JSON
+     * (`string[]`): what detects it. Empty for the platform's, whose
+     * detectors are code.
+     */
+    terms: text().notNull().default("[]"),
+    /** Whether this revision ends the topic. */
+    retired: integer({ mode: "boolean" }).notNull().default(false),
+    /** Who saved it; `null` for the platform's. */
+    createdBy: text("created_by"),
   },
   (table) => [primaryKey({ columns: [table.id, table.revision] })]
 );

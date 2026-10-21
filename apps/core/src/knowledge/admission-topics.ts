@@ -28,18 +28,7 @@
 // condition", "union type", "SSH key fingerprint", "pay the invoice") are
 // deliberately not on the lists.
 
-/** The product's languages, which every topic's examples cover. */
-export const admissionLanguages = ["en", "nl", "de", "fr", "es"] as const;
-export type AdmissionLanguage = (typeof admissionLanguages)[number];
-
-/** Who owns a topic: the platform's minimum, or a company's own. */
-export type TopicOwner = "platform" | "company";
-
-/** An example of what a topic covers, in one language. */
-export interface TopicExample {
-  language: AdmissionLanguage;
-  text: string;
-}
+import type { TopicExample, TopicOwner } from "@grasp-os/shared/admission";
 
 /** One revision of an exclusion topic, as recorded. */
 export interface TopicRecord {

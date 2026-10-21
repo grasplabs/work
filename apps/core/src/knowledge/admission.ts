@@ -1,7 +1,10 @@
+import { topicLeadMs } from "@grasp-os/shared/admission";
+import type { TopicOwner } from "@grasp-os/shared/admission";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
 import { admissionTopics } from "../db/core/schema.ts";
@@ -10,7 +13,6 @@ import {
   personReferences,
   platformTopics,
 } from "./admission-topics.ts";
-import type { TopicRecord } from "./admission-topics.ts";
 
 // Knowledge admission: the one gate between text and canonical Knowledge
 // storage. `writeVersion` (documents.ts) runs it right before its batch,
@@ -20,12 +22,19 @@ import type { TopicRecord } from "./admission-topics.ts";
 // the Grasp skills skip it.
 //
 // It fails closed. Text the platform minimum's detectors match is
-// excluded; text they might match, held; both are refused, and nothing
-// is kept: no version, section, link or upload original, and no queue of
-// held text, which would itself keep it. A policy core can't read throws
-// (a retry passes the gate again); a topic in effect that this code has
-// no detector for (a company's, or a platform revision newer than the
-// code) holds every write. The refusal's error, log line and audit event
+// excluded; text they might match, held; text a company topic's terms
+// match, excluded. All are refused, and nothing is kept: no version,
+// section, link or upload original, and no queue of held text, which
+// would itself keep it. A policy core can't read throws (a retry passes
+// the gate again); a topic in effect that this code can't enforce (a
+// platform revision newer than the code, or a company topic without
+// terms) holds every write.
+//
+// Topics live in core's database and versions in Knowledge's, so no one
+// transaction covers both. Instead a topic revision takes effect no
+// sooner than `topicLeadMs` after it's saved, a write is checked against
+// every revision in effect at any time over that window ahead, and it
+// commits within the window or is checked again (`AdmittedUntil`). The refusal's error, log line and audit event
 // name only the outcome and the policy's revision: never the text, the
 // words matched or the topic, so the audit log doesn't become a list of
 // who has health or pay data.
@@ -34,7 +43,7 @@ import type { TopicRecord } from "./admission-topics.ts";
 export type AdmissionOutcome = "admitted" | "held" | "excluded";
 
 /** Matches any of `terms` as whole words (admission-topics.ts's syntax). */
-const termsPattern = (terms: readonly string[]): RegExp => {
+export const termsPattern = (terms: readonly string[]): RegExp => {
   const alternatives = terms.map((term) => {
     const stem = term.endsWith("*");
     const body = (stem ? term.slice(0, -1) : term)
@@ -116,7 +125,7 @@ const lowered = (text: string): string =>
  * HTML and shows the halves around it joined ("can<b></b>cer"). A word
  * any reading has counts: when unsure, hold.
  */
-const normalized = (text: string): string => {
+export const normalized = (text: string): string => {
   const plain = lowered(text);
   if (!text.includes("<") && !text.includes("](")) {
     return plain;
@@ -314,8 +323,11 @@ const unitsOf = (text: string): Unit[] => {
   return units;
 };
 
-const judge = (unit: Unit): AdmissionOutcome => {
+const judge = (unit: Unit, company: readonly RegExp[]): AdmissionOutcome => {
   const plain = normalized(unit.text);
+  if (company.some((pattern) => pattern.test(plain))) {
+    return "excluded";
+  }
   let outcome: AdmissionOutcome = "admitted";
   let person: boolean | undefined = undefined;
   for (const [index, topic] of compiledTopics.entries()) {
@@ -432,10 +444,13 @@ const worse = (
 };
 
 /** What the detectors decide for `text`, read as written. */
-const screenWritten = (text: string): AdmissionOutcome => {
+const screenWritten = (
+  text: string,
+  company: readonly RegExp[]
+): AdmissionOutcome => {
   let outcome: AdmissionOutcome = "admitted";
   for (const unit of unitsOf(text)) {
-    const judged = judge(unit);
+    const judged = judge(unit, company);
     if (judged === "excluded") {
       return judged;
     }
@@ -453,14 +468,18 @@ const screenWritten = (text: string): AdmissionOutcome => {
 const lineEndHyphen = /-[ \t]*\n[ \t]*(?=\p{Ll})/gu;
 
 /**
- * What the platform minimum's detectors decide for `text`: excluded if any
- * sentence or table certainly holds a person's sensitive data, held if one
- * might, admitted otherwise. The text is also read as rendered, with its
- * HTML character references decoded (`&#99;ancer` is "cancer"), and with
- * words a line-end hyphen breaks joined ("can-\ncer"); the worst reading
- * decides. Pure: the topics in effect are the gate's.
+ * What the platform minimum's detectors, and the company topics' terms
+ * (`company`), decide for `text`: excluded if any sentence or table
+ * certainly holds what a topic covers, held if one might, admitted
+ * otherwise. The text is also read as rendered, with its HTML character
+ * references decoded (`&#99;ancer` is "cancer"), and with words a
+ * line-end hyphen breaks joined ("can-\ncer"); the worst reading decides.
+ * Pure: the topics in effect are the gate's.
  */
-export const screen = (text: string): AdmissionOutcome => {
+export const screen = (
+  text: string,
+  company: readonly RegExp[] = []
+): AdmissionOutcome => {
   const rendered = text.includes("&") ? decodedReferences(text) : text;
   const readings = new Set([
     text,
@@ -470,7 +489,7 @@ export const screen = (text: string): AdmissionOutcome => {
   ]);
   let outcome: AdmissionOutcome = "admitted";
   for (const reading of readings) {
-    outcome = worse(outcome, screenWritten(reading));
+    outcome = worse(outcome, screenWritten(reading, company));
     if (outcome === "excluded") {
       return outcome;
     }
@@ -478,13 +497,17 @@ export const screen = (text: string): AdmissionOutcome => {
   return outcome;
 };
 
-/** The topics in effect, and whether this code enforces all of them. */
+/** The topics a write is checked against, and whether all are enforced. */
 interface Policy {
-  /** The revision every topic in effect is at, as a short hash. */
+  /** Every revision applied, as a short hash. */
   revision: string;
-  /** Whether a topic in effect has no detector here: then everything holds. */
+  /** The company topics' detectors. */
+  company: RegExp[];
+  /** Whether a topic applied can't be enforced: then everything holds. */
   unenforced: boolean;
 }
+
+type TopicRow = typeof admissionTopics.$inferSelect;
 
 /**
  * Every topic revision recorded, the platform's current ones among them:
@@ -492,19 +515,9 @@ interface Policy {
  * revision) is recorded first, so the record always shows what is
  * enforced. Throws when core's database can't be read or written.
  */
-const topicRows = async (env: Env) => {
+export const topicRows = async (env: Env): Promise<TopicRow[]> => {
   const db = drizzle(env.DB);
-  const read = async () =>
-    await db
-      .select({
-        id: admissionTopics.id,
-        revision: admissionTopics.revision,
-        owner: admissionTopics.owner,
-        effectiveAt: admissionTopics.effectiveAt,
-      })
-      .from(admissionTopics)
-      .all();
-  const rows = await read();
+  const rows = await db.select().from(admissionTopics).all();
   const recorded = new Set(rows.map((row) => `${row.id}@${row.revision}`));
   const missing = platformTopics.filter(
     ({ record }) => !recorded.has(`${record.id}@${record.revision}`)
@@ -528,71 +541,127 @@ const topicRows = async (env: Env) => {
       }))
     )
     .onConflictDoNothing();
-  return await read();
+  return await db.select().from(admissionTopics).all();
 };
 
-/** Each topic's latest revision in effect at `now`. */
-const inEffect = (
-  rows: Pick<TopicRecord, "id" | "revision" | "owner" | "effectiveAt">[],
-  now: Date
-) => {
-  const latest = new Map<string, (typeof rows)[number]>();
+/** A topic revision, as the policy reads it. */
+interface Revision {
+  id: string;
+  revision: number;
+  owner: TopicOwner;
+  effectiveAt: Date;
+  terms: string;
+  retired: boolean;
+}
+
+/**
+ * The revisions that apply over [`from`, `until`]: each topic's revision
+ * in effect at `from`, and every later one taking effect by `until`.
+ * Applying them all is the strictest of the policies over the window: a
+ * revision that narrows or retires a topic loosens nothing until it is in
+ * effect, and one that adds to it holds from as soon as it's saved.
+ */
+export const applying = <
+  Row extends Pick<Revision, "id" | "revision" | "effectiveAt">,
+>(
+  rows: readonly Row[],
+  from: Date,
+  until: Date
+): Row[] => {
+  const current = new Map<string, Row>();
+  const coming: Row[] = [];
   for (const row of rows) {
-    const current = latest.get(row.id);
-    if (
-      row.effectiveAt <= now &&
-      (current === undefined || row.revision > current.revision)
-    ) {
-      latest.set(row.id, row);
+    if (row.effectiveAt <= from) {
+      const held = current.get(row.id);
+      if (held === undefined || row.revision > held.revision) {
+        current.set(row.id, row);
+      }
+    } else if (row.effectiveAt <= until) {
+      coming.push(row);
     }
   }
-  return [...latest.values()];
+  return [...current.values(), ...coming];
+};
+
+const termsSchema = z.array(z.string().min(1));
+
+/** Company topics' detectors, by `id@revision`: revisions never change. */
+const companyPatterns = new Map<string, RegExp | null>();
+
+/** A company revision's detector; `null` if it lists no valid terms. */
+const companyPattern = (row: Revision): RegExp | null => {
+  const key = `${row.id}@${row.revision}`;
+  const cached = companyPatterns.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const parsed = termsSchema.safeParse(JSON.parse(row.terms));
+  const pattern =
+    parsed.success && parsed.data.length > 0 ? termsPattern(parsed.data) : null;
+  companyPatterns.set(key, pattern);
+  return pattern;
 };
 
 /**
- * The policy in effect now. The platform topics are enforced from code
- * whatever their rows say; a row can only add a topic, and one with no
- * detector here holds everything. Throws when core's database can't be
- * read, so a write fails rather than pass unchecked.
+ * The policy over the window from `now`. The platform topics are enforced
+ * from code whatever their rows say; a row can only add to them, and one
+ * this code can't enforce holds everything. Throws when core's database
+ * can't be read, so a write fails rather than pass unchecked.
  */
-const policyNow = async (env: Env): Promise<Policy> => {
+const policyFrom = async (env: Env, now: Date): Promise<Policy> => {
   const rows = await topicRows(env);
   const enforced = new Map(
     platformTopics.map(({ record }) => [record.id, record.revision])
   );
-  const effective = inEffect(rows, new Date());
+  const applied = applying(rows, now, new Date(now.getTime() + topicLeadMs));
+  const company: RegExp[] = [];
   // A row whose effective time can't be read may be in effect: it holds.
-  const unreadable = rows.some((row) =>
-    Number.isNaN(row.effectiveAt.getTime())
-  );
-  const unenforced =
-    unreadable ||
-    effective.some(
-      (row) => row.owner !== "platform" || enforced.get(row.id) !== row.revision
-    );
+  let unenforced = rows.some((row) => Number.isNaN(row.effectiveAt.getTime()));
+  for (const row of applied) {
+    if (row.owner === "platform") {
+      // Its own detector, or none this code knows: a newer revision.
+      unenforced ||= enforced.get(row.id) !== row.revision;
+    } else if (!row.retired) {
+      const pattern = companyPattern(row);
+      if (pattern === null) {
+        unenforced = true;
+      } else {
+        company.push(pattern);
+      }
+    }
+  }
   const revisions = new Set([
-    ...effective.map((row) => `${row.id}@${row.revision}`),
+    ...applied.map((row) => `${row.id}@${row.revision}`),
     ...[...enforced].map(([id, revision]) => `${id}@${revision}`),
   ]);
   const digest = await sha256Hex([...revisions].toSorted().join("\n"));
-  return { revision: digest.slice(0, 16), unenforced };
+  return { revision: digest.slice(0, 16), company, unenforced };
 };
+
+/**
+ * Until when, in milliseconds since the epoch, an admitted write may
+ * commit: past it, a topic revision saved after the check may be in
+ * effect, and the write is checked again.
+ */
+export type AdmittedUntil = number;
 
 /**
  * Admits `text` into canonical Knowledge in `collectionId`, or refuses it:
  * `knowledge.excluded` or `knowledge.held`, recorded in the audit log by
- * outcome and policy revision only. Run it last before the write's batch.
+ * outcome and policy revision only. Run it last before the write's batch,
+ * and the batch before the time it returns.
  */
 export const admitToKnowledge = async (
   env: Env,
   actor: AuditActor,
   collectionId: string,
   text: string
-): Promise<void> => {
-  const policy = await policyNow(env);
-  const outcome = policy.unenforced ? "held" : screen(text);
+): Promise<AdmittedUntil> => {
+  const now = new Date();
+  const policy = await policyFrom(env, now);
+  const outcome = policy.unenforced ? "held" : screen(text, policy.company);
   if (outcome === "admitted") {
-    return;
+    return now.getTime() + topicLeadMs;
   }
   await keepAuditEvent(env, drizzle(env.KNOWLEDGE), {
     actor,

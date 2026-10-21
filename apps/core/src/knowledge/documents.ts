@@ -47,6 +47,7 @@ import {
 import { allowedCollections, noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { admitToKnowledge } from "./admission.ts";
+import type { AdmittedUntil } from "./admission.ts";
 import { allowedFor } from "./app-entries.ts";
 import type { Allowed } from "./app-entries.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
@@ -421,18 +422,18 @@ export interface Write {
 /**
  * Admits `write` into canonical Knowledge (admission.ts), or throws:
  * its text, path, message, the title it gets and every string its
- * frontmatter decodes to (`prepared`). A purge removes personal data and
- * the Grasp skills' sync writes the release's own text: neither is
- * screened.
+ * frontmatter decodes to (`prepared`); returns until when its batch may
+ * be sent. A purge removes personal data and the Grasp skills' sync
+ * writes the release's own text: neither is screened.
  */
 const admitted = async (
   env: Env,
   by: Writer,
   write: Write,
   prepared: Prepared
-): Promise<void> => {
+): Promise<AdmittedUntil> => {
   if (write.purge === true || write.graspSync === true) {
-    return;
+    return Number.POSITIVE_INFINITY;
   }
   // Everything the version keeps, each as a paragraph of its own: its
   // path and the title made from it, its message, its text as written,
@@ -446,7 +447,12 @@ const admitted = async (
     write.text,
     ...prepared.decoded,
   ];
-  await admitToKnowledge(env, by.actor, write.collection.id, kept.join("\n\n"));
+  return await admitToKnowledge(
+    env,
+    by.actor,
+    write.collection.id,
+    kept.join("\n\n")
+  );
 };
 
 /**
@@ -555,10 +561,20 @@ export const writeVersion = async (
           )
         )
     : db.insert(documents).values(row);
+  // Admitted against the policy in effect now, after everything else
+  // that could refuse the write, and before anything is stored: R2 only
+  // ever holds text that was admitted.
+  let admittedUntil = await admitted(env, by, write, prepared);
   // A payload collected between its staging and the batch refuses the
   // batch (`isUncommitted`): the text is stored again, once.
   const send = async (staged: StagedPayload): Promise<void> => {
     await write.lastCheck?.();
+    // Admission holds only until the time it gave: a staging or
+    // `lastCheck` that took longer is followed by admission again,
+    // against the topics then.
+    if (Date.now() >= admittedUntil) {
+      admittedUntil = await admitted(env, by, write, prepared);
+    }
     try {
       await auditedBatch(env, db, [document, ...statements(staged)]);
     } catch (error) {
@@ -568,10 +584,6 @@ export const writeVersion = async (
       throw error;
     }
   };
-  // Admitted against the policy in effect now, after everything else
-  // that could refuse the write, and before anything is stored: R2 only
-  // ever holds text that was admitted.
-  await admitted(env, by, write, prepared);
   // Checked before the text is stored too: a write it refuses never
   // uploads it.
   await write.lastCheck?.();

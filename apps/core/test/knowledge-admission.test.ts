@@ -710,7 +710,7 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       for (const row of results) {
         // oxlint-disable-next-line no-await-in-loop -- one row at a time
         await env.DB.prepare(
-          `INSERT INTO admission_topics
+          `INSERT OR IGNORE INTO admission_topics
              (id, revision, name, coverage, examples, owner, effective_at, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )

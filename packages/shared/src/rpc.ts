@@ -1,3 +1,4 @@
+import type { AdmissionApi } from "./admission.ts";
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
 import type { BrainApi } from "./brain.ts";
@@ -113,6 +114,11 @@ export interface SessionApi {
   readonly knowledgeSignals: KnowledgeSignalsApi;
   /** Memory files: the collections that hold them. */
   readonly memory: MemoryApi;
+  /**
+   * What Knowledge admission keeps out of the company brain: Grasp's
+   * sensitive-data topics and the company's own, for admins.
+   */
+  readonly admission: AdmissionApi;
   /**
    * Files uploaded into Knowledge: uploading one, and following its
    * status as its text is extracted.
