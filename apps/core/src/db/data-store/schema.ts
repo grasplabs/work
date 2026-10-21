@@ -750,3 +750,74 @@ export const preferences = sqliteTable("sdk_preferences", {
   lastInputHash: text("last_input_hash"),
   lastAnswerJson: text("last_answer_json"),
 });
+
+/**
+ * A cascade past one commit's bound (store-host.ts, `#planCascadeJob`): the
+ * records a commit's deletions reach by `onDelete: "cascade"`, planned in
+ * that commit and deleted by the store's alarm in batches, leaves first.
+ * Written in the commit that planned it, with its members; finished once
+ * the last member is gone. Who deleted is the commit's principal, and the
+ * commit's receipt names the job (`Committed.cascadePending`).
+ */
+export const cascadeJobs = sqliteTable(
+  "sdk_cascade_jobs",
+  {
+    jobId: text("job_id").primaryKey(),
+    receiptId: text("receipt_id").notNull(),
+    principal: text().notNull(),
+    /**
+     * The resource the commit came through (its receipt's scope): the App
+     * whose release committed the deletion, or the consumer that called the
+     * store's public operation.
+     */
+    resourceId: text("resource_id"),
+    /** The workflow run the commit was made in, if any. */
+    runId: text("run_id"),
+    /** The first record the commit itself deleted: what the job is named by. */
+    rootTableId: text("root_table_id").notNull(),
+    rootRecordId: text("root_record_id").notNull(),
+    planned: integer().notNull(),
+    deleted: integer().notNull().default(0),
+    /**
+     * Batches of it that failed in a row: past `cascadeJobMaxAttempts` the
+     * job fails (`failedAt`) and is tried again later, its records still
+     * deleting until it finishes.
+     */
+    attempts: integer().notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    finishedAt: integer("finished_at"),
+    failedAt: integer("failed_at"),
+  },
+  (table) => [
+    // The jobs still to finish, in the order the alarm takes them: what
+    // every commit's and alarm's schedule looks for, which finished jobs,
+    // kept for good, never slow down.
+    index("sdk_cascade_jobs_unfinished")
+      .on(table.attempts, table.createdAt)
+      .where(sql`${table.finishedAt} IS NULL`),
+  ]
+);
+
+/**
+ * The records a cascade job still has to delete: one row per record, so a
+ * record belongs to one job at most. While it has a row it stays readable,
+ * and a write to it or a new reference to it is refused (`data.deleting`);
+ * the batch that deletes it removes the row in the same transaction.
+ * Only a commit is refused: the store's own migrations and backfills
+ * (store-migrations.ts, store-backfill.ts) may still rewrite a deleting
+ * record, which the job then deletes as it is.
+ */
+export const cascadeMembers = sqliteTable(
+  "sdk_cascade_members",
+  {
+    tableId: text("table_id").notNull(),
+    recordId: text("record_id").notNull(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => cascadeJobs.jobId),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tableId, table.recordId] }),
+    index("sdk_cascade_members_job").on(table.jobId),
+  ]
+);

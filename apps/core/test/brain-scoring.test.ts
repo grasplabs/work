@@ -4,6 +4,7 @@ import { transcriptWithReads } from "./brain-harness.ts";
 import {
   blockedByChange,
   bootstrapInterval,
+  budgetVerdict,
   compareArms,
   decide,
   percentile,
@@ -629,6 +630,97 @@ const backings = (parts: ReturnType<typeof transcriptWithReads>) =>
   parts.flatMap(({ by, call, backing }) =>
     by === "tool" ? [[call, backing]] : []
   );
+describe("the proposed budgets", () => {
+  /** An arm whose answers and abstentions are all right, cheap and quick. */
+  const sound = (arm: string, changes: Partial<TrialScore> = {}) => [
+    trial(arm, "answer", true, changes),
+    trial(arm, "outsider", true, {
+      kind: "abstain",
+      why: "unauthorized",
+      abstained: true,
+      evidenceRecall: null,
+      citationSupport: null,
+    }),
+    trial(arm, "nothing", true, {
+      kind: "abstain",
+      why: "empty",
+      abstained: true,
+      evidenceRecall: null,
+      citationSupport: null,
+    }),
+    trial(arm, "answer", true, { repeat: 2, cold: true }),
+  ];
+
+  it("passes an arm that meets every budget, and leaves the cost budget to the retrieval arms", () => {
+    expect([
+      budgetVerdict(summarizeArm("fullText", sound("fullText"))),
+      budgetVerdict(
+        summarizeArm("agent", sound("agent", { costMicros: 900_000 }))
+      ),
+    ]).toStrictEqual([
+      { arm: "fullText", hardMissed: [], missed: [], unmeasured: [] },
+      { arm: "agent", hardMissed: [], missed: [], unmeasured: [] },
+    ]);
+  });
+
+  it("misses a hard budget for a leak or an answer it wasn't allowed to give, whatever its quality", () => {
+    const [answer, outsider, ...rest] = sound("fullText");
+    expect(
+      answer === undefined || outsider === undefined
+        ? []
+        : budgetVerdict(
+            summarizeArm("fullText", [
+              { ...answer, authorized: false, completed: false, leaks: ["X"] },
+              { ...outsider, abstained: false, completed: false },
+              ...rest,
+            ])
+          ).hardMissed
+    ).toStrictEqual([
+      "security.no-unauthorized-trial",
+      "security.abstains-when-not-allowed",
+    ]);
+  });
+
+  it("misses the targets it falls short of, and names what a run didn't measure", () => {
+    expect([
+      budgetVerdict(
+        summarizeArm(
+          "fullText",
+          sound("fullText", {
+            evidenceRecall: 0.5,
+            latencyMs: 9000,
+            costMicros: 200_000,
+          })
+        )
+      ),
+      budgetVerdict(
+        summarizeArm("fullContext", [trial("fullContext", "a", true)])
+      ),
+    ]).toStrictEqual([
+      {
+        arm: "fullText",
+        hardMissed: [],
+        missed: [
+          "quality.evidence-recall",
+          "latency.warm-p95",
+          "cost.per-completed-task",
+        ],
+        unmeasured: [],
+      },
+      {
+        arm: "fullContext",
+        hardMissed: [],
+        missed: [],
+        unmeasured: [
+          "security.abstains-when-not-allowed",
+          "quality.abstains-on-empty",
+          "latency.cold-p95",
+        ],
+      },
+    ]);
+  });
+});
+
 describe("blocking comparisons", () => {
   it("blocks every comparison of a run once any arm changed stored state, and none for a leak alone", () => {
     const comparison = compareArms(

@@ -183,6 +183,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "data.referenced": "domain",
   "data.reference_invalid": "domain",
   "data.cascade_limit": "domain",
+  "data.deleting": "domain",
   "data.not_unique": "domain",
   "data.result_limit": "domain",
   "data.aggregate_overflow": "domain",
