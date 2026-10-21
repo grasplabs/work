@@ -128,11 +128,13 @@ const core :Workerd.Worker = (
     };
     const thrown = await run("/thrown");
     const long = await run("/thrown-long");
+    const cached = await run("/thrown-cached");
     await sleep(SETTLE_MS);
 
     expect({
       thrown,
       long,
+      cached,
       reported: served.logs().includes("record-value-c40b"),
     }).toStrictEqual({
       thrown: {
@@ -146,6 +148,20 @@ const core :Workerd.Worker = (
         code: "app.failed",
         length: maxThrownMessage,
         start: "record-value-c40brecord-value-c4",
+      },
+      cached: {
+        first: {
+          kind: "TypeError",
+          code: "app.failed",
+          length: "record-value-c40b".length,
+          start: "record-value-c40b",
+        },
+        second: {
+          kind: "TypeError",
+          code: "app.failed",
+          length: "record-value-c40b".length,
+          start: "record-value-c40b",
+        },
       },
       reported: false,
     });

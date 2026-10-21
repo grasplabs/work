@@ -19,6 +19,8 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 //   carriage return, with an App import after it.
 // - `/nested`: a main module in a directory, beside an App module named
 //   as the quiet module is.
+// - `/thrown-cached`: the same, from an isolate the Loader keeps, asked
+//   for twice.
 // - `/thrown`: a call that throws to its caller, which crosses as a value
 //   and is thrown again here, so workerd served `--verbose` never reports
 //   it with its message (GRA-939); `/thrown-long`: one whose message is
@@ -186,6 +188,23 @@ const answerOfThrown = async (
           })
         )
     );
+  }
+  if (route === "/thrown-cached") {
+    // An isolate the Loader keeps, asked for by two stubs of their own: the
+    // second's call throws too, as the first's.
+    const code = {
+      ...settings,
+      mainModule: "app.js",
+      modules: { "app.js": throwingOf(values.thrown) },
+    };
+    const key = `thrown-${crypto.randomUUID()}`;
+    const first = await thrownBy(
+      async () => await runApp(quietLoader(env.LOADER).get(key, () => code))
+    );
+    const second = await thrownBy(
+      async () => await runApp(quietLoader(env.LOADER).get(key, () => code))
+    );
+    return { first, second };
   }
   if (route === "/app-node-timers") {
     try {

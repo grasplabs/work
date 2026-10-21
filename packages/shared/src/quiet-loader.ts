@@ -67,6 +67,15 @@ const maxThrownName = 200;
 /** The header a quiet `fetch`'s thrown error crosses under, as a Response. */
 const thrownHeader = "x-grasp-thrown";
 
+/**
+ * The key a quiet entrypoint's thrown error crosses under, as a value. One
+ * for every isolate, so an isolate the Loader keeps answers the same key
+ * whichever stub of it asks: no value of a call has it but by intent, and
+ * code that forges it only makes its own call throw, which it could do
+ * anyway.
+ */
+const thrownKey = "\u0000grasp:thrown";
+
 /** The wrapper module's name: a main module none of the isolate's has. */
 const entryModule = "grasp-sandbox-entry.js";
 
@@ -120,7 +129,7 @@ const builtinsModule = "grasp-sandbox-builtins.js";
  * The wrapper main module of an isolate whose entrypoint `entrypoint` is
  * called (`default` for its default export): it imports the original main
  * and exports that entrypoint wrapped, so whatever the entrypoint's call
- * throws is answered as a value branded `brand`, never thrown to workerd,
+ * throws is answered as a value under `thrownKey`, never thrown to workerd,
  * which served `--verbose` would report it with its message (GRA-939).
  *
  * - A `WorkerEntrypoint` class: a subclass whose instances are proxies,
@@ -140,12 +149,11 @@ const builtinsModule = "grasp-sandbox-builtins.js";
 const entrySource = (
   mainModule: string,
   builtins: string,
-  entrypoint: string,
-  brand: string
+  entrypoint: string
 ): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
 const { apply, get, define, keys, isPrototypeOf, stringOf, slice, stringify, Proxy, Response, resolve, then, bind, entrypointPrototype } = builtins;
-const brand = ${JSON.stringify(brand)};
+const thrownKey = ${JSON.stringify(thrownKey)};
 const cut = (text, most) => apply(slice, text, [0, most]);
 const textOf = (read, fallback) => {
   try {
@@ -175,7 +183,7 @@ const answered = (method, self, args) =>
     try {
       return await apply(method, self, args);
     } catch (error) {
-      return { [brand]: thrownOf(error) };
+      return { [thrownKey]: thrownOf(error) };
     }
   })();
 const fetched = (method, self, args) =>
@@ -185,7 +193,7 @@ const fetched = (method, self, args) =>
     } catch (error) {
       return new Response(stringify(thrownOf(error)), {
         status: 500,
-        headers: { ${JSON.stringify(thrownHeader)}: brand },
+        headers: { ${JSON.stringify(thrownHeader)}: "1" },
       });
     }
   })();
@@ -304,28 +312,25 @@ const rebuilt = (thrown: unknown): Error => {
 };
 
 /** What a quiet entrypoint's call answered, its thrown error thrown again. */
-const rethrown = async (answer: unknown, brand: string): Promise<unknown> => {
+const rethrown = async (answer: unknown): Promise<unknown> => {
   const value: unknown = await answer;
   if (
     typeof value === "object" &&
     value !== null &&
     !Array.isArray(value) &&
-    Object.hasOwn(value, brand)
+    Object.hasOwn(value, thrownKey)
   ) {
-    throw rebuilt(Reflect.get(value, brand));
+    throw rebuilt(Reflect.get(value, thrownKey));
   }
   return value;
 };
 
 /** What a quiet `fetch` answered, its thrown error thrown again. */
-const rethrownFetch = async (
-  answer: unknown,
-  brand: string
-): Promise<unknown> => {
+const rethrownFetch = async (answer: unknown): Promise<unknown> => {
   const response: unknown = await answer;
   if (
     response instanceof Response &&
-    response.headers.get(thrownHeader) === brand
+    response.headers.get(thrownHeader) === "1"
   ) {
     throw rebuilt(await response.json());
   }
@@ -337,11 +342,11 @@ const stubOwn: ReadonlySet<PropertyKey> = new Set(["then", "constructor"]);
 
 /**
  * The entrypoint stub `entry` with each call's thrown error, answered as a
- * value branded `brand`, thrown again host-side: as an error of the same
+ * value under `thrownKey`, thrown again host-side: as an error of the same
  * built-in kind, with its name, its code and its message to
  * `maxThrownMessage` characters, as an RPC call's thrown error arrived.
  */
-const rethrowing = (entry: object, brand: string): object =>
+const rethrowing = (entry: object): object =>
   new Proxy(entry, {
     get: (target, property) => {
       const value: unknown = Reflect.get(target, property, target);
@@ -355,21 +360,20 @@ const rethrowing = (entry: object, brand: string): object =>
       return async (...args: unknown[]) => {
         const answer: unknown = Reflect.apply(value, target, args);
         return property === "fetch"
-          ? await rethrownFetch(answer, brand)
-          : await rethrown(answer, brand);
+          ? await rethrownFetch(answer)
+          : await rethrown(answer);
       };
     },
   });
 
 /**
  * `code` with its console silenced first and its main module wrapped so
- * entrypoint `entrypoint`'s thrown errors cross as values branded `brand`,
+ * entrypoint `entrypoint`'s thrown errors cross as values (`thrownKey`),
  * unless it has a tail.
  */
 const quietCode = <Code extends QuietableCode>(
   code: Code,
-  entrypoint: string,
-  brand: string
+  entrypoint: string
 ): Code => {
   if ((code.tails?.length ?? 0) > 0 || (code.streamingTails?.length ?? 0) > 0) {
     return code;
@@ -411,7 +415,7 @@ const quietCode = <Code extends QuietableCode>(
         ? modules
         : { ...modules, [code.mainModule]: { js: quieted } }),
       [builtins]: builtinsSource,
-      [entry]: entrySource(code.mainModule, builtins, entrypoint, brand),
+      [entry]: entrySource(code.mainModule, builtins, entrypoint),
     },
   };
 };
@@ -439,24 +443,17 @@ const entrypointOf = (entrypoint = "default"): string => {
  * exports that one (`entrySource`).
  */
 const quietStub = <Stub extends QuietableStub>(
-  load: (entrypoint: string, brand: string) => Stub
+  load: (entrypoint: string) => Stub
 ): Stub => {
   const stub: QuietableStub = {
     getEntrypoint: (name, options) => {
-      const brand = crypto.randomUUID();
-      const entry = load(entrypointOf(name), brand).getEntrypoint(
-        name,
-        options
-      );
+      const entry = load(entrypointOf(name)).getEntrypoint(name, options);
       return typeof entry === "object" && entry !== null
-        ? rethrowing(entry, brand)
+        ? rethrowing(entry)
         : entry;
     },
     getDurableObjectClass: (name, options) =>
-      load(entrypointOf(name), crypto.randomUUID()).getDurableObjectClass?.(
-        name,
-        options
-      ),
+      load(entrypointOf(name)).getDurableObjectClass?.(name, options),
   };
   // SAFETY: a stub with the Loader's stub's methods, each answering what
   // the Loader's own answers, through `rethrowing`.
@@ -478,18 +475,16 @@ export const quietLoader = <
   loader: QuietableLoader<Code, Stub>
 ): QuietableLoader<Code, Stub> => ({
   get: (name, getCode) =>
-    quietStub((entrypoint, brand) =>
+    quietStub((entrypoint) =>
       loader.get(
         name === null ? null : `${name}\u0000quiet:${entrypoint}`,
-        async () => quietCode(await getCode(), entrypoint, brand)
+        async () => quietCode(await getCode(), entrypoint)
       )
     ),
   load: (code) => {
     // Refused as it is loaded, as the Loader refuses a module it can't
     // load: the isolate itself loads once an entrypoint is asked for.
-    quietCode(code, "default", "");
-    return quietStub((entrypoint, brand) =>
-      loader.load(quietCode(code, entrypoint, brand))
-    );
+    quietCode(code, "default");
+    return quietStub((entrypoint) => loader.load(quietCode(code, entrypoint)));
   },
 });
