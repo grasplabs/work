@@ -1398,10 +1398,11 @@ build: {
     /**
      * What the draft ran into so far in the preview in the person's side
      * panel (empty while nobody has it open): any problem fails the check,
-     * so fix what it says and check again. A refused call (a connection,
-     * another App, a write to Knowledge, workflow runs on a screen)
-     * rejects with \`app.preview_side_effect\`: handle it as a failed call,
-     * as a screen must live. \`seen\` is false when the preview reported
+     * so fix what it says and check again. A preview reaches nothing
+     * outside it: a function's resource call (a connection, another App,
+     * Knowledge, a model) rejects with \`resource.unavailable\`, and a
+     * screen's workflow run with \`app.preview_side_effect\`. Handle either
+     * as a failed call, as a screen must live. \`seen\` is false when the preview reported
      * nothing on this write within a few seconds: nobody has it open, or
      * its screens neither called the server nor failed. Its screens then
      * weren't checked at run time: say so, or \`call\` the server yourself.
