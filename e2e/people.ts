@@ -168,6 +168,7 @@ const cast = {
   screenApproval: { builder: "builder", admin: "admin" },
   notesApp: { builder: "builder" },
   screenNavigation: { builder: "builder" },
+  appSurfaces: { builder: "builder", user: "user" },
   notesAppSwitch: { first: "builder", next: "user" },
   notesAppTwoTabs: { first: "builder", next: "user" },
   notesAppSignedOut: { first: "builder" },

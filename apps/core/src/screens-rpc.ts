@@ -1,4 +1,5 @@
 // oxlint-disable max-classes-per-file -- a connection's screens, and each frame's own way to its App on that connection, which shares its checks
+import { compilerVersion } from "@grasp-os/compiler";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { AppManifest } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
@@ -43,20 +44,27 @@ import type {
   ScreenFrameApi,
   ScreensApi,
   ScreenTarget,
+  SidebarApp,
+  SurfaceSummary,
+  TargetSurface,
 } from "@grasp-os/shared/screens";
+import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import type {
   RunControl,
   RunSummary,
   WorkflowRun,
 } from "@grasp-os/shared/workflows";
+import { and, eq, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { asksPreferenceWindow, windowExtentOf } from "./app-functions.ts";
-import { versionReferenceSource } from "./app-releases.ts";
+import { heldManifest, versionReferenceSource } from "./app-releases.ts";
 import { isPlainData, plainDataBounds } from "./app.ts";
 import type { AppAnswer } from "./app.ts";
-import { appFor, findVersion, getApp, versionFiles } from "./apps.ts";
+import { appFor, findVersion, getApp, listApps, versionFiles } from "./apps.ts";
+import { screenBuilds } from "./db/core/schema.ts";
 import { withReferencesOf } from "./draft-references.ts";
 import type { ReferenceSource } from "./draft-references.ts";
 import { appHost } from "./durable-objects.ts";
@@ -239,15 +247,30 @@ export const withinAnswer = <Answer>(answer: Answer): Answer => {
 /** A screen's route, as its version's manifest declares it (spec 8). */
 type RouteManifest = AppManifest["screens"][string];
 
-/** What a navigation or an opening names: a route, and its input. */
+/** A surface, as its version's manifest declares it (spec 34.1). */
+type SurfaceManifest = AppManifest["surfaces"][string];
+
+/** What has an input schema to normalize with: a route, or a surface. */
+type InputManifest = RouteManifest | SurfaceManifest;
+
+/**
+ * What a navigation or an opening names: a route, its input, and one of
+ * its screen's declared surfaces, if any.
+ */
 const screenRouteRequestSchema = z.strictObject({
   route: screenRouteSchema,
   input: z.unknown().optional(),
+  surface: screenRouteSchema.optional(),
+  /**
+   * Asked for by a deep link, which anyone can write: only a surface the
+   * App declares as a deep link opens from one.
+   */
+  deepLink: z.literal(true).optional(),
 });
 
-/** Each route's input schema, read once from its descriptor. */
+/** Each route's or surface's input schema, read once from its descriptor. */
 const routeSchemas = new WeakMap<
-  RouteManifest,
+  InputManifest,
   ReturnType<typeof schemaFromDescriptor>
 >();
 
@@ -261,7 +284,7 @@ const maxInputIssues = 10;
  * validated by the native validator. `screen.input_too_large` or
  * `screen.input_invalid` otherwise, naming what is wrong.
  */
-const routeInput = (route: RouteManifest, input?: unknown): Json => {
+const routeInput = (route: InputManifest, input?: unknown): Json => {
   // Only input left out is `{}`: `null` is input, and refused as one.
   const read = jsonWithin(
     input === undefined ? {} : input,
@@ -325,6 +348,68 @@ const routeNamed = (
 };
 
 /**
+ * The surface `name` of `manifest`, declared for `route`'s screen; only a
+ * surface the version's own manifest declares for that screen, so a name
+ * from anywhere else (another screen's, another App's, a prototype key)
+ * is refused (`screen.not_found`).
+ */
+const surfaceNamed = (
+  manifest: AppManifest | undefined,
+  route: RouteManifest,
+  name: string
+): SurfaceManifest => {
+  const surface =
+    manifest !== undefined && Object.hasOwn(manifest.surfaces, name)
+      ? manifest.surfaces[name]
+      : undefined;
+  if (surface === undefined || surface.screen !== route.name) {
+    throw screenErrors.create("screen.not_found");
+  }
+  return surface;
+};
+
+/**
+ * Where `asked` goes in `manifest`: its route and screen file, its input
+ * normalized, and its surface, if it names one. A surface's input is
+ * checked with the surface's own schema first, then with its screen's,
+ * so the screen gets nothing its route refuses whatever the surface took.
+ * `carried` is what the page carries to open it again: the route's input,
+ * or the surface's, as the surface's own schema normalized it, which
+ * opening checks with both again.
+ */
+const resolvedRoute = (
+  manifest: AppManifest | undefined,
+  asked: z.infer<typeof screenRouteRequestSchema>
+): {
+  route: RouteManifest;
+  file: string;
+  input: Json;
+  carried: Json;
+  surface?: TargetSurface;
+} => {
+  const { route, file } = routeNamed(manifest, asked.route);
+  if (asked.deepLink === true && asked.surface === undefined) {
+    throw screenErrors.create("screen.not_found");
+  }
+  if (asked.surface === undefined) {
+    const input = routeInput(route, asked.input);
+    return { route, file, input, carried: input };
+  }
+  const surface = surfaceNamed(manifest, route, asked.surface);
+  if (asked.deepLink === true && surface.kind !== "deepLink") {
+    throw screenErrors.create("screen.not_found");
+  }
+  const carried = routeInput(surface, asked.input);
+  return {
+    route,
+    file,
+    input: routeInput(route, carried),
+    carried,
+    surface: { name: surface.name, kind: surface.kind, title: surface.title },
+  };
+};
+
+/**
  * The route screen file `file` opens by, and its input: the route `asked`
  * names (it must open that file), with its input normalized; or, asked
  * for none, the first route of the file, in the order declared, whose
@@ -339,14 +424,11 @@ const routedOpen = (
   asked: z.infer<typeof screenRouteRequestSchema> | undefined
 ): { route: string | null; input: Json } => {
   if (asked !== undefined) {
-    const named = routeNamed(manifest, asked.route);
+    const named = resolvedRoute(manifest, asked);
     if (named.file !== file) {
       throw screenErrors.create("screen.not_found");
     }
-    return {
-      route: named.route.name,
-      input: routeInput(named.route, asked.input),
-    };
+    return { route: named.route.name, input: named.input };
   }
   const routes = Object.values(manifest?.screens ?? {}).filter(
     ({ source }) => source === `screens/${file}.tsx`
@@ -483,15 +565,205 @@ const navigateScreen = async (
   }
   const raw = await versionFiles(env, id, version);
   const source = await routeSourceOf(env, id, version, raw);
-  const { route, file } = routeNamed(source?.manifest, asked.route);
-  const input = routeInput(route, asked.input);
+  const { route, file, carried, surface } = resolvedRoute(
+    source?.manifest,
+    asked
+  );
   const files = await withReferencesOf(id, version, raw, source);
   const built = await screenCode(env, files, file, version, id);
   await requireDelivery(env, by, id, built.artifact, {
     operation: "navigate",
     stage: "admission",
   });
-  return { screen: built.screen, route: route.name, input };
+  return {
+    screen: built.screen,
+    route: route.name,
+    input: carried,
+    ...(surface === undefined ? {} : { surface }),
+  };
+};
+
+/** Whether `surface` opens with nothing: its input schema takes `{}`. */
+const opensEmpty = (surface: SurfaceManifest): boolean => {
+  try {
+    routeInput(surface);
+    return true;
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/** The surfaces `manifest` declares, as the host lists them to place them. */
+const surfaceSummaries = (
+  manifest: AppManifest | undefined
+): SurfaceSummary[] =>
+  Object.values(manifest?.surfaces ?? {})
+    .toSorted((a, b) => (a.name < b.name ? -1 : 1))
+    .flatMap((surface) => {
+      const route = Object.hasOwn(manifest?.screens ?? {}, surface.screen)
+        ? manifest?.screens[surface.screen]
+        : undefined;
+      const screen =
+        route === undefined
+          ? undefined
+          : screenPath.exec(route.source)?.groups?.name;
+      return route === undefined || screen === undefined
+        ? []
+        : [
+            {
+              name: surface.name,
+              kind: surface.kind,
+              title: surface.title,
+              route: route.name,
+              screen,
+              opensEmpty: opensEmpty(surface),
+            },
+          ];
+    });
+
+/** The surfaces `version` of `app` declares. */
+const versionSurfaces = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<SurfaceSummary[]> => {
+  const raw = await versionFiles(env, app, version);
+  const source = await routeSourceOf(env, app, version, raw);
+  return surfaceSummaries(source?.manifest);
+};
+
+/**
+ * The surfaces of `app`'s current version (spec 34.1), for someone with a
+ * role in it: none while it has no version, or one that routes nothing.
+ * Listing them opens nothing: each is opened, and checked, as any screen.
+ */
+const appSurfaces = async (
+  env: Env,
+  by: Identity,
+  app: unknown
+): Promise<SurfaceSummary[]> => {
+  // Counted as one of the person's requests of the App, as opening is.
+  const { id, currentVersion: version } = await admittedApp(env, by, app);
+  return version === null ? [] : await versionSurfaces(env, id, version);
+};
+
+/** The most Apps the sidebar reads the surfaces of, and how many at once. */
+const sidebarLimits = { apps: 50, together: 5 };
+
+/**
+ * How often a person may read the sidebar: one read reads up to
+ * `sidebarLimits.apps` Apps, so each person's reads are counted, in this
+ * isolate, apart from their requests of any one App.
+ */
+const sidebarReads = new TokenBuckets({ burst: 10, perMinute: 30 });
+
+/**
+ * The screens of `app`'s `version` that would get the App's data now, of
+ * `screens`: each as this release builds it (`screen_builds`), approved or
+ * of an App whose data is ordinary (`deliveryOf`). A screen not built yet
+ * isn't listed: what isn't known to open isn't offered. Opening one still
+ * checks it, whatever this says.
+ */
+const deliveredScreens = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  screens: readonly string[]
+): Promise<ReadonlySet<string>> => {
+  if (screens.length === 0) {
+    return new Set();
+  }
+  const builds = await drizzle(env.DB)
+    .select({ screen: screenBuilds.screen, artifact: screenBuilds.artifact })
+    .from(screenBuilds)
+    .where(
+      and(
+        eq(screenBuilds.appId, app),
+        eq(screenBuilds.version, version),
+        eq(screenBuilds.release, compilerVersion),
+        inArray(screenBuilds.screen, [...screens])
+      )
+    );
+  const delivered = await Promise.all(
+    builds.map(async ({ screen, artifact }) =>
+      deliveryOf(await standingOf(env, app, artifact)) === "open"
+        ? [screen]
+        : []
+    )
+  );
+  return new Set(delivered.flat());
+};
+
+/**
+ * One App's sidebar entries; none when its surfaces can't be read now,
+ * so one App failing leaves the others' entries as they are.
+ */
+const sidebarEntries = async (
+  env: Env,
+  app: App & { currentVersion: number }
+): Promise<SidebarApp> => {
+  let surfaces: SurfaceSummary[] = [];
+  try {
+    // Only what core holds already: an App whose manifest it would have to
+    // work out now shows no entries, rather than inspecting its code here.
+    const raw = await versionFiles(env, app.id, app.currentVersion);
+    const manifest = await heldManifest(env, app.id, app.currentVersion, raw);
+    const listed = surfaceSummaries(manifest).filter(
+      ({ kind }) => kind === "sidebar"
+    );
+    const delivered = await deliveredScreens(
+      env,
+      app.id,
+      app.currentVersion,
+      listed.map(({ screen }) => screen)
+    );
+    surfaces = listed.filter(({ screen }) => delivered.has(screen));
+  } catch (error) {
+    if (!isExpectedError(error)) {
+      log.warn("screen.sidebar_app_failed", {
+        appId: app.id,
+        ...errorFields(error),
+      });
+    }
+  }
+  return { app: app.id, name: app.name, entries: surfaces };
+};
+
+/**
+ * The sidebar entries of the Apps the person has a role in (spec 34.1):
+ * each App with sidebar surfaces, with those, in the order the Apps list.
+ * At most `sidebarLimits.apps` Apps, read a few at a time; each read is
+ * of what core keeps (a sealed release, or a manifest kept by code hash),
+ * so the listing never builds or runs App code twice.
+ */
+const sidebarSurfaces = async (
+  env: Env,
+  by: Identity
+): Promise<SidebarApp[]> => {
+  if (!sidebarReads.take(by.userId)) {
+    throw rateLimited();
+  }
+  const apps = await listApps(env, by);
+  const found = apps
+    .flatMap((app) =>
+      app.currentVersion === null
+        ? []
+        : [{ ...app, currentVersion: app.currentVersion }]
+    )
+    .slice(0, sidebarLimits.apps);
+  const listed: SidebarApp[] = [];
+  for (let at = 0; at < found.length; at += sidebarLimits.together) {
+    const batch = found.slice(at, at + sidebarLimits.together);
+    // oxlint-disable-next-line no-await-in-loop -- a few Apps at a time, on purpose
+    const read = await Promise.all(
+      batch.map(async (app) => await sidebarEntries(env, app))
+    );
+    listed.push(...read);
+  }
+  return listed.filter(({ entries }) => entries.length > 0);
 };
 
 /** What a frame's calls on its App are decided on (`ScreenFrameRpc`). */
@@ -1317,6 +1589,20 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     return await withPerson(
       this.#check,
       async (by) => await navigateScreen(this.#env, by, app, navigation)
+    );
+  }
+
+  async surfaces(app: string): Promise<SurfaceSummary[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await appSurfaces(this.#env, by, app)
+    );
+  }
+
+  async sidebar(): Promise<SidebarApp[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await sidebarSurfaces(this.#env, by)
     );
   }
 

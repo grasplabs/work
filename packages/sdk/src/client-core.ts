@@ -1480,13 +1480,17 @@ export class GraspClient {
    * Opens another of the App's screens through the trusted host (spec
    * 10.7.7, `useNavigate`): `screen` from the generated `screens`, its
    * route input (left out only for an empty or all-default input), and
-   * `{ replace }` to replace the current entry rather than push one.
-   * Resolves once the host accepted the navigation, not once the screen
-   * loaded. One function for the client's life, so a screen's callbacks
-   * can keep it.
+   * `{ replace }` to replace the current entry rather than push one, or
+   * `{ surface }` to open one of its declared surfaces with that
+   * surface's input (spec 34.1). Resolves once the host accepted the
+   * navigation, not once the screen loaded. One function for the client's
+   * life, so a screen's callbacks can keep it.
    */
-  readonly navigate: Navigate = async (screen, ...args) => {
-    const [input, options] = args;
+  readonly navigate: Navigate = async (
+    screen: unknown,
+    input?: unknown,
+    options?: unknown
+  ): Promise<void> => {
     await navigateThrough(this.#transport?.navigation, screen, input, options);
   };
 

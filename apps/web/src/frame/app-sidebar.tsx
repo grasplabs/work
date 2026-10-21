@@ -22,7 +22,7 @@ import {
   MessagesSquareIcon,
   WorkflowIcon,
 } from "lucide-react";
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import type { ComponentType, SVGProps } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -30,6 +30,7 @@ import { DashboardItem } from "../dashboard/nav-item.tsx";
 import { GraspMark } from "../grasp-mark.tsx";
 import { IntegrationsIcon } from "./integrations-icon.tsx";
 import { PersonMenu } from "./person-menu.tsx";
+import { SurfaceNav } from "./surface-nav.tsx";
 
 // The product's sections, down the left beside every signed-in page. What
 // only admins use is in the person menu at its foot. Grasp's staff also
@@ -125,9 +126,16 @@ export const AppSidebar = ({
                       <SectionItem key={section.to} section={section} />
                     ))}
                     <DashboardItem identity={identity} />
-                    {sections.slice(1).map((section) => (
-                      <SectionItem key={section.to} section={section} />
-                    ))}
+                    {sections.slice(1).map((section) =>
+                      section.to === "/domains" ? (
+                        <Fragment key={section.to}>
+                          <SectionItem section={section} />
+                          <SurfaceNav core={core} />
+                        </Fragment>
+                      ) : (
+                        <SectionItem key={section.to} section={section} />
+                      )
+                    )}
                   </>
                 )}
                 {identity.staff ? <SectionItem section={onboarding} /> : null}
