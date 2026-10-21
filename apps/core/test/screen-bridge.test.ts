@@ -1,13 +1,11 @@
 import { kitModuleName, screenRuntime } from "@grasp-os/compiler";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { removeMember } from "../src/app-members.ts";
 import { appHost } from "../src/durable-objects.ts";
 import {
   deleteExpired,
@@ -15,9 +13,9 @@ import {
   stageFrame,
   sweepScreenFrames,
 } from "../src/screen-frame.ts";
+import { ScreenFrameRpc, ScreensRpc } from "../src/screens-rpc.ts";
 import { screenCode as buildScreenCode } from "../src/screens.ts";
-import { sessionRecheckMs } from "../src/session-check.ts";
-import { pastAccessRecheck, release } from "./apps.ts";
+import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   appModulesOf,
@@ -30,17 +28,7 @@ import {
 } from "./screen-frames.ts";
 import type { Framed } from "./screen-frames.ts";
 import type { RawSettled } from "./sign-in.ts";
-import {
-  auditedDuring,
-  countingSessionReads,
-  openRawRpc,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  signedInWithRole,
-  staffPerson,
-} from "./sign-in.ts";
+import { openRawRpc, openRpc, outcome, signedInApi } from "./sign-in.ts";
 
 // What the frontend's screen host reaches for an App's screens, taken from
 // the side of the screen: App code nobody reviewed line by line, which the
@@ -168,19 +156,15 @@ export class App extends DurableObject {
 }
 `;
 
-const screenCode = `import { callServer, useLive } from "@grasp-os/sdk/screen";
+const screenCode = `import { useWorkflow } from "@grasp-os/sdk/screen";
 import { Button } from "@grasp-os/ui/components/button";
 
 export default function Notes() {
-  const notes = useLive<string[]>("watchNotes", []);
+  const { runs } = useWorkflow("notes");
   return (
     <main className="flex flex-col gap-2 p-4">
-      <ul>
-        {notes.map((note) => (
-          <li key={note}>{note}</li>
-        ))}
-      </ul>
-      <Button onClick={() => void callServer("addNote", "Call Acme")}>Add a note</Button>
+      <p>{runs.length} runs</p>
+      <Button>Add a note</Button>
     </main>
   );
 }
@@ -215,20 +199,6 @@ const unchecked = (value: unknown): never =>
 /** A screen's callback that ignores what it gets. */
 const noop = (): void => {
   // Nothing to update.
-};
-
-/** A screen's callback that hands the App something back. */
-const askedForSomething = () => () => "a way into the screen";
-
-/** Collects what a server sends a callback. */
-const collector = () => {
-  const received: unknown[] = [];
-  return {
-    received,
-    callback: (value: unknown) => {
-      received.push(value);
-    },
-  };
 };
 
 /**
@@ -283,15 +253,6 @@ const inAppStorage = async <T>(
 /** How many of `outcomes` ended as `code`. */
 const ended = (outcomes: string[], code: string): number =>
   outcomes.filter((result) => result === code).length;
-
-/** A value `depth` levels deep: arrays around a leaf, which is a level too. */
-const nestedArrays = (depth: number): unknown => {
-  let value: unknown = "bottom";
-  for (let level = 1; level < depth; level += 1) {
-    value = [value];
-  }
-  return value;
-};
 
 /** `nestedArrays(depth)` as Cap'n Web writes it: each array as `[[...]]`. */
 const wireArrays = (depth: number): unknown => {
@@ -357,16 +318,43 @@ const sweptAt = async (ahead: number): Promise<void> => {
   }
 };
 
-const waitFor = async <T>(read: () => T | undefined): Promise<T> =>
-  await vi.waitFor(() => {
-    const value = read();
-    if (value === undefined) {
-      throw new Error("Not yet");
-    }
-    return value;
-  }, 10_000);
-
 describe("screens", { timeout: 60_000 }, () => {
+  it("is refused to people without a role in the App, and to nobody signed in", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const user = await personApi("user");
+
+    const asUser = await Promise.all([
+      outcome(user.api.screens.open(app, "notes")),
+      outcome(user.api.screens.frame(app, "").startRun("notes")),
+      outcome(user.api.screens.version(app)),
+      outcome(
+        user.api.screens.report(
+          app,
+          { version: 1, screen: "notes" },
+          { kind: "error", message: "boom" }
+        )
+      ),
+      outcome(user.api.screens.errors(app)),
+    ]);
+    const { core } = await openRpc();
+    const signedOut = await Promise.all([
+      outcome(core.authenticate().screens.frame(app, "").startRun("notes")),
+      outcome(core.authenticate().screens.version(app)),
+    ]);
+    expect({ asUser, signedOut }).toStrictEqual({
+      // As for an App that isn't there (app-roles.test.ts).
+      asUser: [
+        "app.not_found",
+        "app.not_found",
+        "app.not_found",
+        "app.not_found",
+        "app.not_found",
+      ],
+      signedOut: ["auth.unauthenticated", "auth.unauthenticated"],
+    });
+  });
+
   it("opens a screen at the App's current version, with only the kit modules it needs", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
@@ -763,550 +751,6 @@ describe("screens", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("is refused to people without a role in the App, and to nobody signed in", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const user = await personApi("user");
-
-    const asUser = await Promise.all([
-      outcome(user.api.screens.open(app, "notes")),
-      outcome(user.api.screens.frame(app, "").call("whoami", [])),
-      outcome(user.api.screens.version(app)),
-      outcome(
-        user.api.screens.report(
-          app,
-          { version: 1, screen: "notes" },
-          { kind: "error", message: "boom" }
-        )
-      ),
-      outcome(user.api.screens.errors(app)),
-    ]);
-    const { core } = await openRpc();
-    const signedOut = await outcome(
-      core.authenticate().screens.frame(app, "").call("whoami", [])
-    );
-    expect({ asUser, signedOut }).toStrictEqual({
-      // As for an App that isn't there (app-roles.test.ts).
-      asUser: [
-        "app.not_found",
-        "app.not_found",
-        "app.not_found",
-        "app.not_found",
-        "app.not_found",
-      ],
-      signedOut: "auth.unauthenticated",
-    });
-  });
-
-  it("runs the App's methods as the person, named only by a string", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const named = { toString: () => "whoami" };
-
-    const [whoami, ...refused] = await Promise.all([
-      builder.api.screens.frame(app, "").call("whoami", []),
-      // An object that turns into the name only when it's used.
-      outcome(builder.api.screens.frame(app, "").call(unchecked(named), [])),
-      outcome(
-        builder.api.screens.frame(app, "").call(unchecked(["whoami"]), [])
-      ),
-      outcome(
-        builder.api.screens.frame(app, "").call("whoami", unchecked("no list"))
-      ),
-      outcome(builder.api.screens.frame(app, "").call("__proto__", [])),
-      outcome(builder.api.screens.frame(app, "").call("constructor", [])),
-      outcome(builder.api.screens.frame(app, "").call("fetch", [])),
-      outcome(builder.api.screens.frame(app, "").call("#send", [])),
-    ]);
-    expect({ whoami, refused }).toStrictEqual({
-      whoami: builder.userId,
-      refused: [
-        "screen.invalid",
-        "screen.invalid",
-        "screen.invalid",
-        "app.method_invalid",
-        "app.method_invalid",
-        "app.method_invalid",
-        "app.method_invalid",
-      ],
-    });
-  });
-
-  it("passes the App's answers on as data, even one that looks like the platform's error", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-
-    const answer = await builder.api.screens
-      .frame(app, "")
-      .call("lookLikeThePlatform", []);
-    const { userId } = await builder.api.whoami();
-    // Answered, not refused: the page can't mistake it for its session
-    // ending, and the connection goes on.
-    expect({
-      answered: answer instanceof Error,
-      stillSignedIn: userId,
-    }).toStrictEqual({ answered: true, stillSignedIn: builder.userId });
-  });
-
-  it("sends live changes to everyone watching, from anyone's change", async () => {
-    const one = await personApi("builder");
-    const two = await personApi("builder");
-    const app = await sampleApp(one);
-    await one.api.apps.members.add(app, {
-      type: "person",
-      id: two.userId,
-      role: "user",
-    });
-    const watching = collector();
-
-    await one.api.screens
-      .frame(app, "")
-      .call("watchNotes", [watching.callback]);
-    await waitFor(() => watching.received[0]);
-    await two.api.screens.frame(app, "").call("addNote", ["Call Acme"]);
-
-    await expect(waitFor(() => watching.received[1])).resolves.toStrictEqual([
-      "Call Acme",
-    ]);
-    expect(watching.received[0]).toStrictEqual([]);
-  });
-
-  it("stops pushing to someone unshared within seconds, even when the App's host can't be reached", async () => {
-    const owner = await personApi("builder");
-    const member = await personApi("builder");
-    const app = await sampleApp(owner);
-    const them = { type: "person", id: member.userId } as const;
-    await owner.api.apps.members.add(app, { ...them, role: "user" });
-    const watching = collector();
-    await member.api.screens
-      .frame(app, "")
-      .call("watchNotes", [watching.callback]);
-    await waitFor(() => watching.received[0]);
-    // Core, with the App's host out of reach for the restart.
-    const unreachable = new Proxy(env.APPS, {
-      get: (target, property) => {
-        if (property === "getByName") {
-          return () => ({
-            restart: async () => {
-              await Promise.reject(new Error("The App's host is unreachable"));
-            },
-          });
-        }
-        const value: unknown = Reflect.get(target, property);
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
-
-    const removed = await outcome(
-      removeMember(
-        { ...env, APPS: unreachable },
-        await owner.api.whoami(),
-        app,
-        them
-      )
-    );
-    // The App wasn't restarted, so it still holds their subscription: the
-    // next push after their access was checked again releases it, and the
-    // App lets it go.
-    const left = await pastAccessRecheck(
-      async () =>
-        await vi.waitFor(
-          async () => {
-            await owner.api.screens
-              .frame(app, "")
-              .call("addNote", ["Meanwhile"]);
-            const count = await owner.api.screens
-              .frame(app, "")
-              .call("watching", []);
-            if (count !== 0) {
-              throw new Error("Still watching");
-            }
-            return count;
-          },
-          { timeout: 3000, interval: 250 }
-        )
-    );
-    const received = watching.received.length;
-    await owner.api.screens
-      .frame(app, "")
-      .call("addNote", ["After it was released"]);
-    expect({
-      removed,
-      left,
-      // Nothing more reaches them.
-      after: await owner.api.screens.frame(app, "").call("watching", []),
-      more: watching.received.length - received,
-      opens: await outcome(member.api.apps.get(app)),
-    }).toStrictEqual({
-      removed: "ok",
-      left: 0,
-      after: 0,
-      more: 0,
-      opens: "app.not_found",
-    });
-  });
-
-  it("keeps pushing to Grasp staff while their session holds, and stops once it ends", async () => {
-    const owner = await personApi("builder");
-    const app = await sampleApp(owner);
-    const { core } = await openRpc(
-      await signedIn(idp, "grasp-staff", staffPerson())
-    );
-    const staff = core.authenticate();
-    const { userId, staff: isStaff } = await staff.whoami();
-    const watching = collector();
-
-    // Every push checks their access as the session does, staff window
-    // and all: the first, right away, and the next.
-    await staff.screens.frame(app, "").call("watchNotes", [watching.callback]);
-    await waitFor(() => watching.received[0]);
-    await owner.api.screens.frame(app, "").call("addNote", ["For staff"]);
-    const pushed = await waitFor(() => watching.received[1]);
-
-    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?")
-      .bind(userId)
-      .run();
-    const left = await pastAccessRecheck(
-      async () =>
-        await vi.waitFor(
-          async () => {
-            await owner.api.screens
-              .frame(app, "")
-              .call("addNote", ["After it ended"]);
-            const count = await owner.api.screens
-              .frame(app, "")
-              .call("watching", []);
-            if (count !== 0) {
-              throw new Error("Still watching");
-            }
-            return count;
-          },
-          { timeout: 3000, interval: 250 }
-        )
-    );
-    expect({ isStaff, pushed, left }).toStrictEqual({
-      isStaff: true,
-      pushed: ["For staff"],
-      left: 0,
-    });
-  });
-
-  it("stops pushing within seconds to someone whose role in the organization no longer gives them the App, and refuses their calls", async () => {
-    const owner = await personApi("admin");
-    const admin = await personApi("admin");
-    const app = await sampleApp(owner);
-    const watching = collector();
-    // Admins have every App: this one isn't shared with them.
-    await admin.api.screens
-      .frame(app, "")
-      .call("watchNotes", [watching.callback]);
-    await waitFor(() => watching.received[0]);
-
-    await owner.api.members.setRole(admin.userId, "user");
-    const left = await pastAccessRecheck(
-      async () =>
-        await vi.waitFor(
-          async () => {
-            await owner.api.screens
-              .frame(app, "")
-              .call("addNote", ["After demotion"]);
-            const count = await owner.api.screens
-              .frame(app, "")
-              .call("watching", []);
-            if (count !== 0) {
-              throw new Error("Still watching");
-            }
-            return count;
-          },
-          { timeout: 3000, interval: 250 }
-        )
-    );
-    expect({
-      left,
-      received: watching.received,
-      calls: await outcome(
-        admin.api.screens.frame(app, "").call("watching", [])
-      ),
-    }).toStrictEqual({ left: 0, received: [[]], calls: "app.not_found" });
-  });
-
-  it("reads its person's session once every few seconds, however many calls and pushes their connection carries", async () => {
-    const owner = await personApi("builder");
-    const app = await sampleApp(owner);
-    const watcher = await signedInWithRole(idp, "admin");
-    const reads = { sessions: 0 };
-    const counted = { ...env, DB: countingSessionReads(env.DB, reads) };
-    const watching = collector();
-
-    const result = await atStoppedClock(async (advance) => {
-      const { core } = await openRpc(watcher.session, { coreEnv: counted });
-      // The upgrade reads the cookie to decide what the connection gets.
-      const opening = reads.sessions;
-      using api = core.authenticate();
-      let notes = 0;
-      /**
-       * `count` notes pushed to the connection and as many calls of its
-       * own, at once; how often its session was read once all arrived.
-       */
-      const busy = async (count: number): Promise<number> => {
-        const added = Array.from({ length: count }, (_value, index) => {
-          notes += 1;
-          return `Note ${notes} (${index})`;
-        });
-        await Promise.all([
-          ...added.map(
-            async (note) =>
-              await owner.api.screens.frame(app, "").call("addNote", [note])
-          ),
-          ...added.map(
-            async () => await api.screens.frame(app, "").call("watching", [])
-          ),
-        ]);
-        await waitFor(() =>
-          watching.received.find(
-            (pushed) => Array.isArray(pushed) && pushed.length === notes
-          )
-        );
-        return reads.sessions - opening;
-      };
-      await api.screens.frame(app, "").call("watchNotes", [watching.callback]);
-      await waitFor(() => watching.received[0]);
-      const first = await busy(5);
-      advance(sessionRecheckMs);
-      const second = await busy(10);
-      return { opening, first, second, pushes: watching.received.length };
-    });
-
-    // One reading for the first few seconds' calls and pushes, and one as
-    // the connection starts to follow the App's revocations for the
-    // callback it keeps (a revocation that landed in between is found by
-    // that reading), then one more.
-    expect({
-      opening: result.opening,
-      first: result.first,
-      second: result.second,
-    }).toStrictEqual({ opening: 1, first: 2, second: 3 });
-    expect(result.pushes).toBeGreaterThan(10);
-  });
-
-  it("closes nobody's screens when unsharing someone it isn't shared with", async () => {
-    const owner = await personApi("builder");
-    const member = await personApi("builder");
-    const app = await sampleApp(owner);
-    await owner.api.apps.members.add(app, {
-      type: "person",
-      id: member.userId,
-      role: "user",
-    });
-    const watching = collector();
-    await member.api.screens
-      .frame(app, "")
-      .call("watchNotes", [watching.callback]);
-    await waitFor(() => watching.received[0]);
-
-    // Someone it was never shared with, as a mistaken or repeated removal.
-    await owner.api.apps.members.remove(app, {
-      type: "person",
-      id: `user-${crypto.randomUUID()}`,
-    });
-    await owner.api.screens.frame(app, "").call("addNote", ["Still here"]);
-    await expect(waitFor(() => watching.received[1])).resolves.toStrictEqual([
-      "Still here",
-    ]);
-  });
-
-  it("stops sending to someone the App is no longer shared with", async () => {
-    const owner = await personApi("builder");
-    const member = await personApi("builder");
-    const app = await sampleApp(owner);
-    const them = { type: "person", id: member.userId } as const;
-    await owner.api.apps.members.add(app, { ...them, role: "user" });
-    const watching = collector();
-    await member.api.screens
-      .frame(app, "")
-      .call("watchNotes", [watching.callback]);
-    await waitFor(() => watching.received[0]);
-
-    await owner.api.apps.members.remove(app, them);
-    // Unsharing restarted the App, which let go of their subscription.
-    const left = await vi.waitFor(async () => {
-      const count = await owner.api.screens.frame(app, "").call("watching", []);
-      if (count !== 0) {
-        throw new Error("Still watching");
-      }
-      return count;
-    }, 10_000);
-    await owner.api.screens.frame(app, "").call("addNote", ["After unsharing"]);
-    expect({
-      left,
-      received: watching.received,
-      again: await outcome(
-        member.api.screens
-          .frame(app, "")
-          .call("watchNotes", [watching.callback])
-      ),
-    }).toStrictEqual({ left: 0, received: [[]], again: "app.not_found" });
-  });
-
-  it("stops sending to a screen whose connection ended", async () => {
-    const one = await personApi("builder");
-    const two = await personApi("builder");
-    const app = await sampleApp(one);
-    await one.api.apps.members.add(app, {
-      type: "person",
-      id: two.userId,
-      role: "user",
-    });
-    const watching = collector();
-    await one.api.screens
-      .frame(app, "")
-      .call("watchNotes", [watching.callback]);
-    await waitFor(() => watching.received[0]);
-    const before = await two.api.screens.frame(app, "").call("watching", []);
-
-    one.core[Symbol.dispose]();
-    await two.api.screens.frame(app, "").call("addNote", ["After it left"]);
-    const after = await vi.waitFor(async () => {
-      const count = await two.api.screens.frame(app, "").call("watching", []);
-      if (count !== 0) {
-        throw new Error("Still watching");
-      }
-      return count;
-    }, 10_000);
-    expect({ before, after, received: watching.received }).toStrictEqual({
-      before: 1,
-      after: 0,
-      received: [[]],
-    });
-  });
-
-  it("takes a screen's callbacks in any argument, and keeps as many as its App holds", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    // With the calls around them, within what one person may ask at once.
-    const many = 15;
-
-    const ignored = await builder.api.screens
-      .frame(app, "")
-      .call("ignore", [noop, noop]);
-    // Two callbacks, in two places around plain data, each reaching the
-    // screen with what the App sent it.
-    const first = collector();
-    const second = collector();
-    const calledBoth = await builder.api.screens
-      .frame(app, "")
-      .call("callBoth", [first.callback, "hello", second.callback]);
-    await Promise.all(
-      Array.from(
-        { length: many },
-        async () =>
-          await builder.api.screens.frame(app, "").call("watchNotes", [noop])
-      )
-    );
-    expect({
-      ignored,
-      calledBoth,
-      first: first.received,
-      second: second.received,
-      watching: await builder.api.screens.frame(app, "").call("watching", []),
-    }).toStrictEqual({
-      ignored: "not kept",
-      calledBoth: "called both",
-      first: ["first: hello"],
-      second: ["second: hello"],
-      watching: many,
-    });
-  });
-
-  it("frees a connection's callbacks as its Apps let them go", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    let released = 0;
-    // A screen's callback that notes when core lets go of it.
-    const tracked = () =>
-      Object.assign(
-        (): void => {
-          // Nothing to update.
-        },
-        {
-          [Symbol.dispose]: () => {
-            released += 1;
-          },
-        }
-      );
-    const half = 8;
-    const call = async (method: string) =>
-      await outcome(
-        builder.api.screens.frame(app, "").call(method, [tracked()])
-      );
-
-    // Half go to a method that doesn't keep them, half are kept and then
-    // dropped by the App: all of them are released.
-    const notKept = await Promise.all(
-      Array.from({ length: half }, async () => await call("ignore"))
-    );
-    const keptThenDropped = await Promise.all(
-      Array.from({ length: half }, async () => await call("watchNotes"))
-    );
-    await builder.api.screens.frame(app, "").call("dropWatchers", []);
-    // A call that fails after its App kept both its callbacks, passed in
-    // two places: core releases both.
-    const failed = await outcome(
-      builder.api.screens
-        .frame(app, "")
-        .call("keepThenFail", [tracked(), "note", tracked()])
-    );
-    const expected = 2 * half + 2;
-    await vi.waitFor(() => {
-      if (released < expected) {
-        throw new Error(`${released} released so far`);
-      }
-    }, 10_000);
-
-    expect({
-      notKept: notKept.every((result) => result === "ok"),
-      keptThenDropped: keptThenDropped.every((result) => result === "ok"),
-      failed,
-      released,
-    }).toStrictEqual({
-      notKept: true,
-      keptThenDropped: true,
-      failed: "app.failed",
-      released: expected,
-    });
-  });
-
-  it("never hands a screen a way into the App, or the App one back", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const handedOver = collector();
-
-    const [handOver, askScreen] = await Promise.all([
-      builder.api.screens
-        .frame(app, "")
-        .call("handOver", [handedOver.callback]),
-      builder.api.screens.frame(app, "").call("askScreen", [askedForSomething]),
-    ]);
-    const nested = await outcome(
-      builder.api.screens
-        .frame(app, "")
-        .call("whoami", [{ callback: () => "nested" }])
-    );
-    expect({
-      handOver,
-      received: handedOver.received,
-      askScreen,
-      nested,
-    }).toStrictEqual({
-      handOver: "app.answer_invalid",
-      received: [],
-      askScreen: "nothing",
-      nested: "screen.invalid",
-    });
-  });
-
   it("follows the App's current version", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
@@ -1396,62 +840,6 @@ describe("screens", { timeout: 60_000 }, () => {
         "screen.invalid",
         "app.version_not_found",
       ],
-    });
-  });
-
-  it("keeps what the App's server code writes with console, the first lines of each call, counted", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const called = await builder.api.screens
-      .frame(app, "")
-      .call("chatty", ["invoice 7"]);
-    await vi.waitFor(
-      async () => {
-        const { entries } = await builder.api.screens.errors(app);
-        expect(entries).toHaveLength(20);
-      },
-      { timeout: 10_000, interval: 50 }
-    );
-    // The same lines again: counted on the entries they match.
-    await builder.api.screens.frame(app, "").call("chatty", ["invoice 7"]);
-    const { entries, suppressed } = await vi.waitFor(
-      async () => {
-        const log = await builder.api.screens.errors(app);
-        expect(log.entries.every(({ count }) => count === 2)).toBeTruthy();
-        return log;
-      },
-      { timeout: 10_000, interval: 50 }
-    );
-    const undated = entries.map(({ at: _at, ...entry }) => entry);
-    expect({
-      called,
-      kept: entries.length,
-      suppressed,
-      newest: undated[0],
-      oldest: undated.at(-1),
-      dated: entries.every(({ at }) => !Number.isNaN(Date.parse(at))),
-    }).toStrictEqual({
-      called: "logged",
-      kept: 20,
-      suppressed: 0,
-      dated: true,
-      newest: {
-        source: "server",
-        version: 1,
-        method: "chatty",
-        level: "log",
-        message: "line 19",
-        count: 2,
-      },
-      // What the App wrote, with its method and time: never who called.
-      oldest: {
-        source: "server",
-        version: 1,
-        method: "chatty",
-        level: "error",
-        message: 'could not file {"note":"invoice 7"}',
-        count: 2,
-      },
     });
   });
 
@@ -1785,196 +1173,6 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
-  it("keeps two hundred lines a minute of what the App's server code logs, and its screens' reports whatever it logs", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const at = { version: 1, screen: "notes" };
-
-    const result = await atStoppedClock(async () => {
-      // Eleven calls of twenty lines each: twenty past what is kept.
-      for (let call = 0; call < 11; call += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- one call at a time
-        await builder.api.screens.frame(app, "").call("chatty", ["invoice 7"]);
-      }
-      const logged = await vi.waitFor(
-        async () => {
-          const log = await builder.api.screens.errors(app);
-          const kept = log.entries.reduce((sum, { count }) => sum + count, 0);
-          expect(kept + log.suppressed).toBe(220);
-          return { kept, suppressed: log.suppressed };
-        },
-        { timeout: 10_000, interval: 50 }
-      );
-      const report = await outcome(
-        builder.api.screens.report(app, at, {
-          kind: "error",
-          message: "Rendered too often",
-        })
-      );
-      const { entries } = await builder.api.screens.errors(app);
-      return {
-        logged,
-        report,
-        screen: entries
-          .filter(({ source }) => source === "screen")
-          .map(({ message }) => message),
-      };
-    });
-
-    expect(result).toStrictEqual({
-      logged: { kept: 200, suppressed: 20 },
-      report: "ok",
-      screen: ["Rendered too often"],
-    });
-  });
-
-  it("answers a burst of one person's requests of an App, refuses the rest, and another person's none", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const other = await personApi("user");
-    await builder.api.apps.members.add(app, {
-      type: "person",
-      id: other.userId,
-      role: "user",
-    });
-    const second = await openRpc(builder.session);
-    const connections = [builder.api, second.core.authenticate()];
-
-    const result = await atStoppedClock(async (advance) => {
-      const flood = await Promise.all(
-        Array.from({ length: 60 }, async (_value, index) => {
-          const screens =
-            connections[index % 2]?.screens ?? builder.api.screens;
-          // Every kind of request counts, the refused and malformed too.
-          if (index % 3 === 0) {
-            return await outcome(screens.frame(app, "").call("whoami", []));
-          }
-          if (index % 3 === 1) {
-            return await outcome(
-              screens.frame(app, "").call(unchecked({}), [])
-            );
-          }
-          return await outcome(screens.frame(app, "").runs("no-such-workflow"));
-        })
-      );
-      const others = await outcome(
-        other.api.screens.frame(app, "").call("whoami", [])
-      );
-      // Two a second.
-      advance(1000);
-      const later = await Promise.all(
-        [0, 0, 0].map(
-          async () =>
-            await outcome(builder.api.screens.frame(app, "").call("whoami", []))
-        )
-      );
-      return { flood, others, later };
-    });
-
-    expect({
-      admitted: 60 - ended(result.flood, "screen.rate_limited"),
-      others: result.others,
-      later: result.later.toSorted(),
-    }).toStrictEqual({
-      admitted: 20,
-      others: "ok",
-      later: ["ok", "ok", "screen.rate_limited"],
-    });
-  });
-
-  it("holds a call's arguments and answer to their size in bytes, not characters", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const add = async (note: string): Promise<string> =>
-      await outcome(builder.api.screens.frame(app, "").call("addNote", [note]));
-
-    const results = {
-      // 120,000 bytes: within the 128 KiB a call may send.
-      ascii: await add("a".repeat(120_000)),
-      // Fewer characters, but three bytes each: 150,000 bytes.
-      euros: await add("€".repeat(50_000)),
-      // The App answers every note: 240,000 bytes, within 256 KiB.
-      second: await add("b".repeat(120_000)),
-      // And now 360,000.
-      third: await add("c".repeat(120_000)),
-      read: await outcome(builder.api.screens.frame(app, "").call("notes", [])),
-    };
-
-    expect(results).toStrictEqual({
-      ascii: "ok",
-      euros: "screen.input_too_large",
-      second: "ok",
-      third: "screen.answer_too_large",
-      read: "screen.answer_too_large",
-    });
-  });
-
-  it("counts an error by the message it carries, sent or answered", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const call = async (method: string, argument: unknown): Promise<string> =>
-      await outcome(
-        builder.api.screens.frame(app, "").call(method, [argument])
-      );
-
-    // As JSON an error is "{}"; over the connection it is its message.
-    expect({
-      smallSent: await call("whoami", new Error("small")),
-      bigSent: await call("whoami", new Error("A".repeat(200_000))),
-      bigSentInside: await call("whoami", {
-        deep: [new Error("A".repeat(200_000))],
-      }),
-      smallAnswered: await call("failure", 10),
-      bigAnswered: await call("failure", 300_000),
-    }).toStrictEqual({
-      smallSent: "ok",
-      bigSent: "screen.input_too_large",
-      bigSentInside: "screen.input_too_large",
-      smallAnswered: "ok",
-      bigAnswered: "screen.answer_too_large",
-    });
-  });
-
-  it("holds what an App pushes a screen to the size of an answer, and drops the callback it refused", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const watching = collector();
-    await builder.api.screens
-      .frame(app, "")
-      .call("watchNotes", [watching.callback]);
-    const sizes = (): number[] =>
-      watching.received.map((notes) => JSON.stringify(notes).length);
-
-    // Each note is pushed with all before it: 120,000 bytes, 240,000,
-    // then 360,000, which is more than a screen takes.
-    for (const letter of ["a", "b", "c"]) {
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      await outcome(
-        builder.api.screens
-          .frame(app, "")
-          .call("addNote", [letter.repeat(120_000)])
-      );
-    }
-    // Asked slowly enough to stay within what a person may ask.
-    await vi.waitFor(
-      async () => {
-        expect({
-          watching: await builder.api.screens
-            .frame(app, "")
-            .call("watching", []),
-          pushes: watching.received.length,
-        }).toStrictEqual({ watching: 0, pushes: 3 });
-      },
-      { timeout: 10_000, interval: 500 }
-    );
-
-    expect(sizes().map((size) => size > 256 * 1024)).toStrictEqual([
-      false,
-      false,
-      false,
-    ]);
-  });
-
   it("counts following an App's runs as a request, however often a screen lets go again", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
@@ -1993,37 +1191,6 @@ describe("screens", { timeout: 60_000 }, () => {
       followed: ended(followed, "ok"),
       refused: ended(followed, "screen.rate_limited"),
     }).toStrictEqual({ followed: 20, refused: 5 });
-  });
-
-  it("passes on a value as deep as values may be, and ends a connection that sends one level more", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const attacker = await openRpc(builder.session);
-    const { screens } = attacker.core.authenticate();
-
-    // To the App and back, whole.
-    const deepest = await screens
-      .frame(app, "")
-      .call("echo", [nestedArrays(valueDepth)]);
-    const tooDeep = await outcome(
-      screens.frame(app, "").call("echo", [nestedArrays(valueDepth + 1)])
-    );
-
-    expect({
-      deepest,
-      tooDeepAnswered: tooDeep === "ok",
-      // The connection that sent it ends, and only that one.
-      afterOnIt:
-        (await outcome(screens.frame(app, "").call("whoami", []))) === "ok",
-      after: await outcome(
-        builder.api.screens.frame(app, "").call("whoami", [])
-      ),
-    }).toStrictEqual({
-      deepest: nestedArrays(valueDepth),
-      tooDeepAnswered: false,
-      afterOnIt: false,
-      after: "ok",
-    });
   });
 
   it("refuses a value built from many messages deeper than values may be, before any of core's code runs, and passes one as deep", async () => {
@@ -2052,27 +1219,56 @@ describe("screens", { timeout: 60_000 }, () => {
           raw.push([
             "pipeline",
             frame,
-            ["call"],
-            ["echo", [[["pipeline", pushed]]]],
+            ["startRun"],
+            ["missing", ["pipeline", pushed]],
           ])
         )
       );
 
-    const deepest = await echoed(built(valueDepth - 8, 8));
-    const oneMore = await echoed(built(valueDepth - 8, 9));
+    // A run's input, passed straight: one level deeper than values nest
+    // gets in (screen-limits.ts, `rpcArgumentDepth`), to core's own code.
+    const deepest = await echoed(built(valueDepth - 8, 9));
+    const oneMore = await echoed(built(valueDepth - 8, 10));
     // Thousands of levels: refused as such, not by running out of stack.
     const farDeeper = await echoed(built(30, 100));
     const after = await echoed(built(1, 0));
     raw.close();
 
     expect({ deepest, oneMore, farDeeper, after }).toStrictEqual({
-      deepest: { answered: wireArrays(valueDepth) },
+      // Past the connection's checks, refused by core's own code.
+      deepest: "workflow.not_found",
       // Core's own code would have said `screen.invalid`.
       oneMore: "request.too_deep",
       farDeeper: "request.too_deep",
       // The connection goes on.
-      after: { answered: "bottom" },
+      after: "workflow.not_found",
     });
+  });
+
+  it("serves no call of an App's server through a frame, nor on the connection", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const raw = await openRawRpc(builder.session);
+    const session = raw.push(["pipeline", 0, ["authenticate"], []]);
+    const frame = raw.push([
+      "pipeline",
+      session,
+      ["screens", "frame"],
+      [app, ""],
+    ]);
+    const called = rawOutcome(
+      await raw.pull(
+        raw.push(["pipeline", frame, ["call"], ["addNote", [["Call Acme"]]]])
+      )
+    );
+    raw.close();
+
+    expect({
+      called:
+        typeof called === "object" && called !== null && "answered" in called,
+      connection: "call" in ScreensRpc.prototype,
+      frame: "call" in ScreenFrameRpc.prototype,
+    }).toStrictEqual({ called: false, connection: false, frame: false });
   });
 
   it("refuses a value a key every object has carries in, a prototype and an error's own among them", async () => {
@@ -2092,7 +1288,7 @@ describe("screens", { timeout: 60_000 }, () => {
       deep = raw.push([[["pipeline", deep]]]);
     }
     const shallow = raw.push({ approved: true });
-    // `{ [key]: <a pushed value> }` as the App's one argument: Cap'n Web
+    // `{ [key]: <a pushed value> }` as a run's input: Cap'n Web
     // puts the value in place under the key once the message is checked.
     const echoed = async (key: string, pushed: number): Promise<unknown> =>
       rawOutcome(
@@ -2100,8 +1296,8 @@ describe("screens", { timeout: 60_000 }, () => {
           raw.push([
             "pipeline",
             frame,
-            ["call"],
-            ["echo", [[{ [key]: ["pipeline", pushed] }]]],
+            ["startRun"],
+            ["missing", { [key]: ["pipeline", pushed] }],
           ])
         )
       );
@@ -2120,19 +1316,15 @@ describe("screens", { timeout: 60_000 }, () => {
           raw.push([
             "pipeline",
             frame,
-            ["call"],
+            ["startRun"],
             [
-              "echo",
+              "missing",
               [
-                [
-                  [
-                    "error",
-                    "AggregateError",
-                    "m",
-                    null,
-                    { errors: ["pipeline", deep] },
-                  ],
-                ],
+                "error",
+                "AggregateError",
+                "m",
+                null,
+                { errors: ["pipeline", deep] },
               ],
             ],
           ])
@@ -2146,368 +1338,9 @@ describe("screens", { timeout: 60_000 }, () => {
       protoShallow: "request.unsupported_value",
       constructorDeep: "request.too_deep",
       toJSONDeep: "request.too_deep",
-      constructorShallow: JSON.stringify({
-        answered: { constructor: { approved: true } },
-      }),
+      // Past the connection's checks, refused by core's own code.
+      constructorShallow: JSON.stringify("workflow.not_found"),
       aggregateDeep: "request.too_deep",
     });
   });
-
-  it("refuses an answer fed back into a call deeper than values may be", async () => {
-    const builder = await personApi("builder");
-    const app = await sampleApp(builder);
-    const { screens } = builder.api;
-    // Not awaited: passed on as Cap'n Web's reference to the answer.
-    const answer = screens
-      .frame(app, "")
-      .call("echo", [nestedArrays(valueDepth)]);
-
-    expect({
-      fedBack: await screens.frame(app, "").call("echo", [answer]),
-      wrapped: await outcome(screens.frame(app, "").call("echo", [[answer]])),
-    }).toStrictEqual({
-      fedBack: nestedArrays(valueDepth),
-      wrapped: "request.too_deep",
-    });
-  });
 });
-
-// The v1 server's calls (`callServer`) go through the same trust gate as a
-// sealed App's functions (`delivering`): kept here until GRA-645 removes
-// the v1 server, so the gate's v1 call and the check of an error after it
-// ran stay covered while the path is live.
-const nothing = async (): Promise<void> => {
-  // Nothing happens between the App's read and its failure.
-};
-
-/** What a call failed with, and whether anything in it carries the App's data. */
-const failure = async (
-  call: Promise<unknown>
-): Promise<{ code: string; carriesData: boolean }> => {
-  try {
-    await call;
-    return { code: "ok", carriesData: false };
-  } catch (error) {
-    const code: unknown =
-      typeof error === "object" && error !== null
-        ? Reflect.get(error, "code")
-        : undefined;
-    return {
-      code: typeof code === "string" ? code : String(error),
-      carriesData: JSON.stringify({
-        error,
-        message: error instanceof Error ? error.message : undefined,
-      }).includes("Acme owes"),
-    };
-  }
-};
-
-const revokedServerCode = `import { DurableObject } from "cloudflare:workers";
-
-type Caller = { userId: string };
-
-export class App extends DurableObject {
-  // Reads, tells the screen it has, then fails with what it read.
-  async failingNotes(_caller: Caller, afterRead: () => Promise<void>): Promise<never> {
-    const note = "Acme owes 4,200";
-    await afterRead();
-    throw new Error(note);
-  }
-}
-`;
-
-/**
- * An App the builder made from the sample with its screen approved, and
- * the builder's connection presenting that build, as the page does.
- */
-const approvedSample = async (admin: Person, builder: Person) => {
-  const app = await sampleApp(builder);
-  const review = await admin.api.screenTrust.review(app);
-  await admin.api.screenTrust.approve(app, {
-    version: review.version,
-    generation: review.generation,
-    artifacts: builtArtifacts(review.screens),
-  });
-  const bundle = await builder.api.screens.open(app, "notes");
-  return { app, bundle };
-};
-
-/** A page's callback that records what it gets, and whether it was let go of. */
-const keptCallback = () => {
-  const received: unknown[] = [];
-  const state = { released: false };
-  const callback = Object.assign(
-    (value: unknown): void => {
-      received.push(value);
-    },
-    {
-      [Symbol.dispose]: (): void => {
-        state.released = true;
-      },
-    }
-  );
-  return { received, state, callback };
-};
-
-/** Undoes nothing. */
-const nothingUndone = (): void => {
-  // Nothing done yet.
-};
-
-/** The query that reads what core holds for a build (`standingOf`). */
-const readsStanding = /AS releaseRevoked/u;
-
-describe(
-  "the v1 server's calls of a revoked build",
-  { timeout: 60_000 },
-  () => {
-    it("read a build's standing once for every callback the connection keeps at a revocation", async () => {
-      const admin = await personApi("admin");
-      const builder = await personApi("builder");
-      const { app, bundle } = await approvedSample(admin, builder);
-      const reads = { standing: 0 };
-      const counted = {
-        ...env,
-        DB: new Proxy(env.DB, {
-          get: (target, property) => {
-            if (property === "prepare") {
-              return (query: string): D1PreparedStatement => {
-                if (readsStanding.test(query)) {
-                  reads.standing += 1;
-                }
-                return target.prepare(query);
-              };
-            }
-            const value: unknown = Reflect.get(target, property);
-            return typeof value === "function"
-              ? (...args: unknown[]): unknown =>
-                  Reflect.apply(value, target, args)
-              : value;
-          },
-        }),
-      };
-      const { core } = await openRpc(builder.session, { coreEnv: counted });
-      using api = core.authenticate();
-      const kept = Array.from({ length: 5 }, () => keptCallback());
-      for (const { callback, received } of kept) {
-        // oxlint-disable-next-line no-await-in-loop -- one kept at a time
-        await api.screens
-          .frame(app, bundle.lease)
-          .call("watchNotes", [callback]);
-        // oxlint-disable-next-line no-await-in-loop -- its first push in
-        await vi.waitFor(() => {
-          expect(received).toStrictEqual([[]]);
-        });
-      }
-      // What the calls and their first pushes read is done.
-      await vi.waitFor(() => {
-        expect(
-          kept.every(({ received }) => received.length === 1)
-        ).toBeTruthy();
-      });
-      const before = reads.standing;
-      await admin.api.screenTrust.revoke(app, bundle.artifact);
-      await vi.waitFor(
-        () => {
-          expect(kept.every(({ state }) => state.released)).toBeTruthy();
-        },
-        { timeout: 20_000, interval: 50 }
-      );
-      expect(reads.standing - before).toBe(1);
-    });
-
-    it("let go of the callbacks the App keeps when the App's revocations can't be followed", async () => {
-      const admin = await personApi("admin");
-      const builder = await personApi("builder");
-      const { app, bundle } = await approvedSample(admin, builder);
-      let undo = nothingUndone;
-      await runInDurableObject(
-        appHost(env, appIdSchema.parse(app)),
-        (instance) => {
-          // SAFETY: an App's object's prototype holds its methods.
-          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-          const methods = Object.getPrototypeOf(instance) as Record<
-            string,
-            (...args: unknown[]) => Promise<unknown>
-          >;
-          const original = methods.followAccess;
-          if (original === undefined) {
-            throw new Error("An App's object follows access");
-          }
-          methods.followAccess = async (): Promise<unknown> =>
-            await Promise.reject(new Error("The App's host is away."));
-          undo = () => {
-            methods.followAccess = original;
-          };
-        }
-      );
-      const kept = keptCallback();
-      try {
-        await builder.api.screens
-          .frame(app, bundle.lease)
-          .call("watchNotes", [kept.callback]);
-        await vi.waitFor(
-          () => {
-            expect(kept.state.released).toBeTruthy();
-          },
-          { timeout: 20_000, interval: 50 }
-        );
-      } finally {
-        undo();
-      }
-      expect(kept.state.released).toBeTruthy();
-    });
-
-    it("keep no more than fifty callbacks a connection's calls have its Apps keep", async () => {
-      const admin = await personApi("admin");
-      const builder = await personApi("builder");
-      const { app, bundle } = await approvedSample(admin, builder);
-      // On a held clock, a minute on every fifteen calls: what a person
-      // may ask a minute isn't what this bounds.
-      const answers = await atStoppedClock(async (advance) => {
-        const got: string[] = [];
-        for (let at = 0; at < 51; at += 1) {
-          if (at % 15 === 14) {
-            advance(60_000);
-          }
-          got.push(
-            // oxlint-disable-next-line no-await-in-loop -- one kept at a time
-            await outcome(
-              builder.api.screens
-                .frame(app, bundle.lease)
-                .call("watchNotes", [keptCallback().callback])
-            )
-          );
-        }
-        return got;
-      });
-      expect({
-        kept: answers.filter((answer) => answer === "ok").length,
-        last: answers.at(-1),
-      }).toStrictEqual({ kept: 50, last: "screen.too_many_subscriptions" });
-    });
-
-    it("let go of a callback the App keeps once the approval is taken back, with nothing pushed after", async () => {
-      const admin = await personApi("admin");
-      const builder = await personApi("builder");
-      const app = await sampleApp(builder);
-      const review = await admin.api.screenTrust.review(app);
-      await admin.api.screenTrust.approve(app, {
-        version: review.version,
-        generation: review.generation,
-        artifacts: builtArtifacts(review.screens),
-      });
-      const bundle = await builder.api.screens.open(app, "notes");
-      const received: unknown[] = [];
-      const state = { released: false };
-      const onChange = Object.assign(
-        (notes: unknown): void => {
-          received.push(notes);
-        },
-        {
-          [Symbol.dispose]: (): void => {
-            state.released = true;
-          },
-        }
-      );
-      // The App keeps it, and pushes what it holds at once.
-      await builder.api.screens
-        .frame(app, bundle.lease)
-        .call("watchNotes", [onChange]);
-      await vi.waitFor(() => {
-        expect(received).toStrictEqual([[]]);
-      });
-      const events = await auditedDuring(async () => {
-        await admin.api.screenTrust.revoke(app, bundle.artifact);
-        // Nothing written: the revocation alone lets go of it.
-        await vi.waitFor(
-          () => {
-            expect(state.released).toBeTruthy();
-          },
-          { timeout: 20_000, interval: 50 }
-        );
-      });
-      expect({
-        received,
-        refused: events
-          .filter(({ action }) => action === "app.artifact.refused")
-          .map(
-            ({ detail }) =>
-              `${detail.operation}/${detail.stage}: ${detail.reason}`
-          ),
-      }).toStrictEqual({ received: [[]], refused: ["call/push: revoked"] });
-    });
-
-    it("hand a screen no error of its App's once the approval is taken back as it runs", async () => {
-      const admin = await personApi("admin");
-      const builder = await personApi("builder");
-      const { id: app } = await builder.api.apps.create({ name: "Notes" });
-      const { version } = await builder.api.apps.files.commit(
-        app,
-        {
-          "app/server.ts": revokedServerCode,
-          "screens/notes.tsx":
-            "export default function Notes() {\n  return null;\n}\n",
-        },
-        "First"
-      );
-      await builder.api.apps.versions.setCurrent(app, version);
-      const review = await admin.api.screenTrust.review(app);
-      await admin.api.screenTrust.approve(app, {
-        version: review.version,
-        generation: review.generation,
-        artifacts: builtArtifacts(review.screens),
-      });
-      const bundle = await builder.api.screens.open(app, "notes");
-      const approved = await failure(
-        builder.api.screens
-          .frame(app, bundle.lease)
-          .call("failingNotes", [nothing])
-      );
-      let revoked: Awaited<ReturnType<typeof failure>> | undefined;
-      const passed = { released: false };
-      const revoking = Object.assign(
-        async (): Promise<void> => {
-          await admin.api.screenTrust.revoke(app, bundle.artifact);
-        },
-        {
-          [Symbol.dispose]: (): void => {
-            passed.released = true;
-          },
-        }
-      );
-      const events = await auditedDuring(async () => {
-        revoked = await failure(
-          builder.api.screens
-            .frame(app, bundle.lease)
-            .call("failingNotes", [revoking])
-        );
-        // The revocation lets go of the callback the call passed too.
-        await vi.waitFor(
-          () => {
-            expect(passed.released).toBeTruthy();
-          },
-          { timeout: 20_000, interval: 50 }
-        );
-      });
-
-      expect({
-        approved,
-        revoked,
-        refused: events
-          .filter(({ action }) => action === "app.artifact.refused")
-          .map(
-            ({ detail }) =>
-              `${detail.operation}/${detail.stage}: ${detail.reason}`
-          )
-          .toSorted(),
-      }).toStrictEqual({
-        approved: { code: "app.failed", carriesData: true },
-        revoked: { code: "screen.revoked", carriesData: false },
-        // The answer, and the callback it passed, let go of at the
-        // revocation.
-        refused: ["call/delivery: revoked", "call/push: revoked"],
-      });
-    });
-  }
-);

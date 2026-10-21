@@ -616,8 +616,6 @@ const appTarget = (
     }
   };
   return {
-    call: async (method, args) =>
-      await framed(async (frame) => await frame.call(method, args)),
     callFunction: async (request) =>
       await plain(
         async (person) => await callFunction(app, { lease, person }, request)
@@ -785,8 +783,7 @@ const handedClosed = async (
 };
 
 /**
- * A preview of the chat's draft: its server calls go to the draft's
- * preview, what its screen reports to the chat's agent; it starts no
+ * A preview of the chat's draft: what its screen reports to the chat's agent; it starts no
  * workflow run, finds none, and follows none. A draft of spec 8's layout
  * runs on its draft release (core's sealed-previews.ts): its function
  * calls and live queries go there, on a store of the preview's own.
@@ -798,12 +795,6 @@ export const previewTarget = (
 ): FrameTarget => {
   const { app, revision, screen } = bundle;
   return {
-    call: async (method, args) =>
-      await on(
-        link,
-        async ({ chats }) =>
-          await chats.previewCall(chatId, app, revision, method, args)
-      ),
     callFunction: async (request) =>
       await on(
         link,

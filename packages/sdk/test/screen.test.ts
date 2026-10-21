@@ -10,14 +10,16 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { bridgeTransport, connectBridge } from "../src/screen-runtime.ts";
-import { callServer, followRun, followRuns, live } from "../src/screen.ts";
+import {
+  bridge,
+  bridgeTransport,
+  connectBridge,
+} from "../src/screen-runtime.ts";
+import { followRun, followRuns } from "../src/screen.ts";
 
-// `live` from the side of the page: the screen's runtime connects to a fake
-// page over a real `MessagePort`, as in the frame, and the page plays core
-// and the App's server. It keeps each callback the screen passes, as a
-// server that sends updates does, and lets go of it as a dropped
-// connection does.
+// The screen's workflow hooks and stream transport from the side of the
+// page: the screen's runtime connects to a fake page over a real
+// `MessagePort`, as in the frame, and the page plays core.
 
 type Callback = (value: unknown) => Promise<void>;
 
@@ -67,7 +69,7 @@ class FakeStream extends RpcTarget {
   }
 }
 
-/** The page's side of the bridge, keeping each callback a call ends with. */
+/** The page's side of the bridge. */
 class FakePage extends RpcTarget {
   readonly streams: FakeStream[] = [];
 
@@ -77,27 +79,11 @@ class FakePage extends RpcTarget {
     return stream;
   }
 
-  readonly subscriptions: { args: unknown[]; callback: RpcStub<Callback> }[] =
-    [];
+  /** The input the screen was opened with: none here. */
+  readonly opened: null = null;
 
-  /** The code core refuses `watchNotes` with, once set, as core would. */
-  refuse: string | undefined;
-  /** How many subscriptions it refused. */
-  refused = 0;
-
-  call(method: string, args: unknown[]): string {
-    if (method === "watchNotes" && this.refuse !== undefined) {
-      this.refused += 1;
-      throw Object.assign(new Error("Refused."), { code: this.refuse });
-    }
-    const last = args.at(-1);
-    if (method === "watchNotes" && isCallback(last)) {
-      this.subscriptions.push({
-        args: args.slice(0, -1),
-        callback: last.dup(),
-      });
-    }
-    return "answered";
+  input(): null {
+    return this.opened;
   }
 
   // Each read of runs waits on a promise of its own, which a test resolves
@@ -153,10 +139,10 @@ const codeOf = (refusal: unknown): unknown =>
  * over the same port, which keeps messages in order.
  */
 const roundTrip = async (): Promise<void> => {
-  await callServer("ping");
+  await bridge().input();
 };
 
-describe(live, () => {
+describe("a screen's stream transport", () => {
   let page: FakePage;
   let sessions: Disposable[] = [];
 
@@ -174,22 +160,13 @@ describe(live, () => {
     vi.useRealTimers();
   });
 
-  /** The callback of the page's `index`th subscription. */
-  const callbackAt = (index: number): RpcStub<Callback> => {
-    const subscription = page.subscriptions[index];
-    if (!subscription) {
-      throw new Error(`No subscription ${index}`);
-    }
-    return subscription.callback;
-  };
-
   it("lets go of a stream's subscription once it is released, so the page holds none", async () => {
     const { port1, port2 } = new MessageChannel();
     const streaming = new FakePage();
     const served = servePage(port2, streaming);
-    const bridge = connectBridge(port1);
+    const connected = connectBridge(port1);
     try {
-      const transport = bridgeTransport(() => bridge);
+      const transport = bridgeTransport(() => connected);
       const stream = await transport.stream?.("stream", "{}", () => {
         // No frames here.
       });
@@ -203,143 +180,9 @@ describe(live, () => {
         ).toStrictEqual([{ released: true, disposed: true }]);
       });
     } finally {
-      bridge[Symbol.dispose]();
+      connected[Symbol.dispose]();
       served[Symbol.dispose]();
     }
-  });
-
-  it("passes on what the server sends until stopped, then rejects it, so the server lets go", async () => {
-    const received: unknown[] = [];
-    const stop = live("watchNotes", ["open"], (value) => {
-      received.push(value);
-    });
-    await roundTrip();
-    await callbackAt(0)(["Call Acme"]);
-
-    stop();
-    const afterStop = await callbackAt(0)(["Too late"]).then(
-      () => "delivered",
-      () => "rejected"
-    );
-    // The server lets go of a callback that rejects; no new one follows.
-    callbackAt(0)[Symbol.dispose]();
-    await roundTrip();
-    await vi.advanceTimersByTimeAsync(60_000);
-    await roundTrip();
-
-    expect({
-      args: page.subscriptions.map(({ args }) => args),
-      received,
-      afterStop,
-    }).toStrictEqual({
-      args: [["open"]],
-      received: [["Call Acme"]],
-      afterStop: "rejected",
-    });
-  });
-
-  it("drops what it showed once core lets go, then shows the build's revocation and stops subscribing", async () => {
-    const ended: unknown[] = [];
-    const stop = live(
-      "watchNotes",
-      [],
-      () => {
-        // Nothing shown in this test.
-      },
-      (refusal) => {
-        ended.push(refusal === undefined ? "let go" : codeOf(refusal));
-      }
-    );
-    await roundTrip();
-    // Core refuses it from now on, as once the build's approval is taken
-    // back, and lets go of its callback.
-    page.refuse = "screen.revoked";
-    callbackAt(0)[Symbol.dispose]();
-    await roundTrip();
-    const atRelease = [...ended];
-    await vi.advanceTimersByTimeAsync(1000);
-    await roundTrip();
-    await vi.advanceTimersByTimeAsync(60_000);
-    await roundTrip();
-    stop();
-    expect({
-      atRelease,
-      // The refusal stays the last word, however its refused attempt's
-      // callback is let go of: before the refusal arrives, or after.
-      last: ended.at(-1),
-      refusals: ended.filter((each) => each !== "let go"),
-      tries: page.refused,
-    }).toStrictEqual({
-      atRelease: ["let go"],
-      last: "screen.revoked",
-      refusals: ["screen.revoked"],
-      tries: 1,
-    });
-  });
-
-  it("keeps trying, backing off, after a refusal that may lift", async () => {
-    const ended: unknown[] = [];
-    const stop = live(
-      "watchNotes",
-      [],
-      () => {
-        // Nothing shown in this test.
-      },
-      (refusal) => {
-        ended.push(refusal);
-      }
-    );
-    await roundTrip();
-    page.refuse = "screen.unreviewed";
-    callbackAt(0)[Symbol.dispose]();
-    await roundTrip();
-    await vi.advanceTimersByTimeAsync(1000);
-    await roundTrip();
-    await vi.advanceTimersByTimeAsync(2000);
-    await roundTrip();
-    stop();
-    expect(page.refused).toBe(2);
-  });
-
-  it("subscribes again, backing off, when its callback is let go, and never once stopped", async () => {
-    const stop = live("watchNotes", [], () => {
-      // Nothing to update.
-    });
-    await roundTrip();
-
-    /** Drops the latest callback, and counts subscriptions `ms` later. */
-    const dropAndWait = async (ms: number): Promise<number> => {
-      callbackAt(page.subscriptions.length - 1)[Symbol.dispose]();
-      await roundTrip();
-      await vi.advanceTimersByTimeAsync(ms);
-      await roundTrip();
-      return page.subscriptions.length;
-    };
-
-    const afterFirstSecond = await dropAndWait(1000);
-    const beforeTwoSeconds = await dropAndWait(1999);
-    await vi.advanceTimersByTimeAsync(1);
-    await roundTrip();
-    const afterTwoSeconds = page.subscriptions.length;
-
-    // Stopped while waiting to subscribe again: it never does.
-    callbackAt(page.subscriptions.length - 1)[Symbol.dispose]();
-    await roundTrip();
-    stop();
-    await vi.advanceTimersByTimeAsync(60_000);
-    await roundTrip();
-
-    expect({
-      afterFirstSecond,
-      beforeTwoSeconds,
-      afterTwoSeconds,
-      afterStop: page.subscriptions.length,
-    }).toStrictEqual({
-      afterFirstSecond: 2,
-      beforeTwoSeconds: 2,
-      afterTwoSeconds: 3,
-      afterStop: 3,
-    });
   });
 });
 

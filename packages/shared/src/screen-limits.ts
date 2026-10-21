@@ -56,20 +56,18 @@ export const screenPersonHeader = "x-grasp-screen-person";
 export const screenModulePath = "/screen-modules";
 
 /**
- * The levels Cap'n Web counts around a value in the deepest shape an
- * untrusted side sends one: a screen's call, `call(method, [value])`,
+ * The levels Cap'n Web counts around a value an untrusted side sends,
  * through the page's bridge or over a browser's connection to core.
  * Measured with capnweb 0.12.0, which refuses a message once a level's
  * depth reaches `maxDepth`, counting from 0 at the message's expression:
- *
- * - the call's list of arguments is one level;
- * - a screen's list of arguments for its App is another, so a value
- *   `valueDepth` levels deep ends at depth `valueDepth + 1`.
+ * the call's list of arguments is one level, and one more is left only
+ * for `ChatsRpc.previewCall`, whose own list of arguments for a draft's
+ * server code is another. GRA-789's slice 3 removes `previewCall` and
+ * this level with it.
  *
  * A value passed straight as an argument (a run's input, a decision's
  * answer) has one level around it, and an answer, the message's own
- * expression, none: this shape is the deepest. Arrays and objects count
- * alike. So a value passed straight as an argument may be 33 levels deep
+ * expression, none. Arrays and objects count alike. So a value passed straight as an argument may be 33 levels deep
  * on the wire, on purpose: one more than values may nest, refused where
  * it is checked (no schema nests deeper than `valueDepth`), as bounding
  * each shape apart would take a limit of each call's own.
@@ -80,9 +78,7 @@ const rpcWrapperLevels = 2;
  * How deep a call's argument may be once it arrives, the value it refers
  * to in place (@grasp-os/shared/rpc-target): as deep as one message lets
  * a direct argument be, the call's list of arguments apart, so a call
- * sent whole in one message is never refused for its depth. A screen's
- * list of arguments for its App is one of these levels, so a value in it
- * may be `valueDepth` deep.
+ * sent whole in one message is never refused for its depth.
  */
 export const rpcArgumentDepth = valueDepth + rpcWrapperLevels - 1;
 
