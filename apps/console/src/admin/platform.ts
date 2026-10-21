@@ -87,6 +87,11 @@ const ringStateOf = (
   if (stopped > 0) {
     return "stopped";
   }
+  // A rollout that failed before it reached one of the ring's companies
+  // (reading its targets, say) leaves them pending: the ring failed too.
+  if (rollout.status === "failed" && ring === rollout.ring) {
+    return "failed";
+  }
   if (
     ring < rollout.ring ||
     (ring === rollout.ring && waiting + moving === 0)

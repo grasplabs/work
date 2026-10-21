@@ -128,6 +128,20 @@ describe("the Platform page's model", () => {
     ]);
   });
 
+  it("marks the ring a rollout failed on as failed, though its companies still wait", () => {
+    const rings = ringsOf(summary("f", "failed", 1), [
+      target("acme", 0, "done"),
+      target("beta", 1, "pending"),
+      target("gamma", 2, "pending"),
+    ]);
+
+    expect(rings.map(({ state }) => state)).toStrictEqual([
+      "done",
+      "failed",
+      "todo",
+    ]);
+  });
+
   it("says which active companies run each release, the newest first, then the ones the page doesn't list", () => {
     const spread = spreadOf(
       [
