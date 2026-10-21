@@ -95,6 +95,43 @@ const runApp = async (stub: WorkerStub): Promise<unknown> => {
   return typeof run === "function" ? await Reflect.apply(run, entry, []) : null;
 };
 
+/**
+ * The ways an isolate's code can have workerd served `--verbose` report an
+ * error with its message, each its own isolate (`/path/<name>`), the
+ * value its route's name.
+ */
+const paths: Readonly<Record<string, (value: string) => string>> = {
+  setImmediate: (value) => `setImmediate(() => {
+      throw new Error(${JSON.stringify(value)});
+    });`,
+  nodeSetTimeout: (value) => `nodeTimers.setTimeout(() => {
+      throw new Error(${JSON.stringify(value)});
+    }, 0);`,
+  nodeSetImmediate: (value) => `nodeTimers.setImmediate(() => {
+      throw new Error(${JSON.stringify(value)});
+    });`,
+  nodeNamedSetTimeout: (value) => `namedSetTimeout(() => {
+      throw new Error(${JSON.stringify(value)});
+    }, 0);`,
+  waitUntil: (value) =>
+    `this.ctx.waitUntil(Promise.reject(new Error(${JSON.stringify(value)})));`,
+};
+
+/** An isolate that does what path `name` does with `value`, then answers. */
+const pathIsolateOf = (
+  name: string,
+  value: string
+): string => `import nodeTimers, { setTimeout as namedSetTimeout } from "node:timers";
+import { WorkerEntrypoint } from "cloudflare:workers";
+export class App extends WorkerEntrypoint {
+  async run() {
+    ${paths[name]?.(value) ?? ""}
+    await scheduler.wait(50);
+    return ${JSON.stringify(value)};
+  }
+}
+`;
+
 /** What a route answers: the isolate's answer, or why it was refused. */
 const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
   if (route === "/call") {
@@ -113,6 +150,20 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
         mainModule: "app.mjs",
         modules: { "app.mjs": { js: isolateOf(values.js) } },
       })
+    );
+  }
+  const path = /^\/(?<loud>loud-)?path\/(?<name>\w+)$/u.exec(route)?.groups;
+  if (path?.name !== undefined && Object.hasOwn(paths, path.name)) {
+    const value = `${path.loud === undefined ? "quiet" : "loud"}-${path.name}-6d1f`;
+    const code = {
+      ...settings,
+      mainModule: "app.js",
+      modules: { "app.js": pathIsolateOf(path.name, value) },
+    };
+    return await runApp(
+      path.loud === undefined
+        ? quietLoader(env.LOADER).load(code)
+        : env.LOADER.load(code)
     );
   }
   if (route === "/cjs") {

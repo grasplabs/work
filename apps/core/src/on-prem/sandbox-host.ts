@@ -97,7 +97,10 @@ const run = async (
       ...isolateSettings,
       mainModule: worker.mainModule,
       // Printing nothing to the process's output, the deployment's logs.
-      modules: quietModules(worker.mainModule, worker.modules),
+      modules: quietModules(worker.mainModule, worker.modules, {
+        nodejsCompat:
+          isolateSettings.compatibilityFlags.includes("nodejs_compat"),
+      }),
       env: {},
       globalOutbound: null,
     })).getEntrypoint(entrypoint);

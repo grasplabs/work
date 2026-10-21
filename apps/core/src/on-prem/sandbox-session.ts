@@ -397,9 +397,13 @@ class Session extends CapnwebTarget {
       sink === undefined
         ? {
             mainModule: parsed.mainModule,
-            modules: quietModules(parsed.mainModule, modules),
+            modules: quietModules(parsed.mainModule, modules, {
+              nodejsCompat: parsed.nodejsCompat,
+            }),
           }
-        : capturedModules(parsed.mainModule, modules);
+        : capturedModules(parsed.mainModule, modules, {
+            nodejsCompat: parsed.nodejsCompat,
+          });
     const isolate = this.#env.LOADER.get(null, () => ({
       ...this.#settings,
       compatibilityFlags: parsed.nodejsCompat

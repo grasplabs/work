@@ -15,18 +15,27 @@
  *
  * How: the isolate's main module imports `quietModule` first, from beside
  * itself under a name no module of the isolate has (an import resolves
- * against the importer's name, so no App module can stand in for it), so it is
- * evaluated before any other module of the isolate and no module keeps a
- * console method of its own. It replaces every console method with one
- * that does nothing (`node:console` prints through them, and a method the
- * App puts back can only call the silenced ones), catches what a timer's
- * callback throws, and prevents the default of an unhandled rejection or
- * error, which workerd served `--verbose` would otherwise print with its
- * message. What it can't stop: workerd served `--verbose` reports an
- * exception thrown out of an entrypoint's call (an RPC method's, a
- * fetch's), message and stack, as it hands it to the caller as the call's
- * answer (GRA-939). Without `--verbose`, as the supervisor and a
- * deployment run, nothing of it is printed.
+ * against the importer's name, so no App module can stand in for it), so
+ * it is evaluated before any other module of the isolate and no module
+ * keeps a console method of its own. It replaces every console method with
+ * one that does nothing (`node:console` prints through them, and a method
+ * the App puts back can only call the silenced ones), and keeps what the
+ * isolate's code leaves uncaught from anything workerd served `--verbose`
+ * reports for an isolate: a timer's callback that throws (the global
+ * timers, `node:timers`' default export), a promise handed to a
+ * `WorkerEntrypoint`'s `ctx.waitUntil` that rejects, and any other
+ * unhandled rejection or error (`quietErrors`).
+ *
+ * What it can't stop, workerd served `--verbose` still reports, message
+ * and stack (GRA-939): an exception thrown out of an entrypoint's call (an
+ * RPC method's, a fetch's), as it hands it to the caller as the call's
+ * answer; what the callback of a timer imported by name from `node:timers`
+ * throws (the binding is the module's own); and what a default export's
+ * handler hands its own context's `waitUntil`. Without `--verbose` none of
+ * it is printed. The supervisor refuses `--verbose`
+ * (scripts/workerd-sandbox.ts); core loading isolates itself under
+ * `SANDBOX_IN_PROCESS=unbounded` can't tell how its process was served, so
+ * there not serving it `--verbose` is the operator's rule (GRA-939).
  *
  * One kind of call keeps what it writes, bounded, for whom core says: a
  * draft's sealed preview, whose lines go to the agent's next check of
@@ -48,13 +57,37 @@
 export const quietModule = "grasp-sandbox-quiet.js";
 
 /**
- * What both quiet modules do besides the console: a timer's callback that
- * throws is caught where it runs, and an unhandled rejection or error has
- * its default prevented, so workerd served `--verbose` reports neither.
- * (An exception thrown out of an entrypoint's call, an RPC method's or a
- * fetch's, still is: it is the call's answer, which its caller gets.)
+ * What a quiet module's isolate is loaded with that changes what it may
+ * do: `nodejsCompat`, its `node:` modules, `node:timers` among them.
  */
-const quietErrors = `const caught = (callback) =>
+export interface QuietOptions {
+  readonly nodejsCompat?: boolean;
+}
+
+/** The timer functions whose callbacks a quiet module catches. */
+const timerNames = '["setTimeout", "setInterval", "setImmediate"]';
+
+/**
+ * What both quiet modules do besides the console, so workerd served
+ * `--verbose` reports nothing of what the isolate's code leaves uncaught
+ * (see GRA-939 for what it still can):
+ *
+ * - A timer's callback that throws is caught where it runs: the global
+ *   timers, and `node:timers`' default export where the isolate has it.
+ * - A promise handed to `ctx.waitUntil` of a `WorkerEntrypoint` (the
+ *   classes core calls) that rejects is caught as it is handed over: the
+ *   context's every other property is the runtime's own.
+ * - An unhandled rejection or error has its default prevented.
+ *
+ * Its imports are the runtime's own modules, which no App's module can
+ * stand in for.
+ */
+const quietErrors = (
+  options: QuietOptions
+): { imports: string; source: string } => ({
+  imports: `import { WorkerEntrypoint as QuietEntrypoint } from "cloudflare:workers";
+${options.nodejsCompat === true ? 'import quietNodeTimers from "node:timers";\n' : ""}`,
+  source: `const caught = (callback) =>
   typeof callback === "function"
     ? function (...args) {
         try {
@@ -64,28 +97,63 @@ const quietErrors = `const caught = (callback) =>
         }
       }
     : callback;
-for (const name of ["setTimeout", "setInterval"]) {
-  const timer = globalThis[name];
-  if (typeof timer === "function") {
-    globalThis[name] = (callback, ...rest) => timer(caught(callback), ...rest);
+const quietTimers = (timers) => {
+  for (const name of ${timerNames}) {
+    const timer = timers[name];
+    if (typeof timer === "function") {
+      timers[name] = (callback, ...rest) => timer(caught(callback), ...rest);
+    }
   }
-}
+};
+quietTimers(globalThis);
+${options.nodejsCompat === true ? "quietTimers(quietNodeTimers);\n" : ""}const quietContext = (ctx) =>
+  ctx === null || typeof ctx !== "object"
+    ? ctx
+    : new Proxy(ctx, {
+        get: (target, property) => {
+          if (property === "waitUntil") {
+            return (promise) =>
+              target.waitUntil(Promise.resolve(promise).catch(() => undefined));
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+// The entrypoint's constructor sets its context: it takes the quiet one.
+Object.defineProperty(QuietEntrypoint.prototype, "ctx", {
+  configurable: true,
+  get() {
+    return undefined;
+  },
+  set(ctx) {
+    Object.defineProperty(this, "ctx", {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: quietContext(ctx),
+    });
+  },
+});
 addEventListener("unhandledrejection", (event) => {
   event.preventDefault();
 });
 addEventListener("error", (event) => {
   event.preventDefault();
 });
-`;
+`,
+});
 
 /** Every console method silenced, and nothing else left for workerd to report. */
-const quietSource = `const silent = () => undefined;
+const quietSource = (options: QuietOptions): string => {
+  const errors = quietErrors(options);
+  return `${errors.imports}const silent = () => undefined;
 for (const name of Object.getOwnPropertyNames(console)) {
   if (typeof console[name] === "function") {
     console[name] = silent;
   }
 }
-${quietErrors}`;
+${errors.source}`;
+};
 
 /** Where a hashbang's line ends: at any line terminator JavaScript has. */
 const lineTerminator = /[\r\n\u2028\u2029]/u;
@@ -124,7 +192,8 @@ const dirOf = (name: string): string =>
  */
 export const quietModules = <Module>(
   mainModule: string,
-  modules: Readonly<Record<string, Module | string>>
+  modules: Readonly<Record<string, Module | string>>,
+  options: QuietOptions = {}
 ): Record<string, Module | string> => {
   const main = modules[mainModule];
   if (typeof main !== "string") {
@@ -146,7 +215,7 @@ export const quietModules = <Module>(
   return {
     ...modules,
     [mainModule]: `${hashbang}import ${JSON.stringify(`./${quiet}`)};\n${rest}`,
-    [`${dir}${quiet}`]: quietSource,
+    [`${dir}${quiet}`]: quietSource(options),
   };
 };
 
@@ -164,7 +233,9 @@ const capturedLevels = ["debug", "info", "log", "warn", "error"];
  * bounded; every other console method does nothing, as does everything
  * when quiet.
  */
-const capturingSource = `const silent = () => undefined;
+const capturingSource = (
+  options: QuietOptions
+): string => `${quietErrors(options).imports}const silent = () => undefined;
 const lines = [];
 const partOf = (part) => {
   if (typeof part === "string") {
@@ -204,7 +275,7 @@ for (const name of Object.getOwnPropertyNames(console)) {
     console[name] = levels.has(name) ? recording(name) : silent;
   }
 }
-${quietErrors}export const takeLines = () => lines.splice(0);
+${quietErrors(options).source}export const takeLines = () => lines.splice(0);
 `;
 
 /** The host's module that runs a captured call's entrypoint. */
@@ -253,23 +324,20 @@ export class ${captureEntrypoint} extends WorkerEntrypoint {
  */
 export const capturedModules = <Module>(
   mainModule: string,
-  modules: Readonly<Record<string, Module | string>>
+  modules: Readonly<Record<string, Module | string>>,
+  options: QuietOptions = {}
 ): { mainModule: string; modules: Record<string, Module | string> } => {
   if (typeof modules[mainModule] !== "string") {
     return { mainModule, modules: { ...modules } };
   }
   // At the top, under names none of the isolate's modules has.
   const quiet = freeName(modules, "", quietModule);
-  const capture = freeName(
-    { ...modules, [quiet]: capturingSource },
-    "",
-    captureModule
-  );
+  const capture = freeName({ ...modules, [quiet]: "" }, "", captureModule);
   return {
     mainModule: capture,
     modules: {
       ...modules,
-      [quiet]: capturingSource,
+      [quiet]: capturingSource(options),
       [capture]: `import ${JSON.stringify(`./${quiet}`)};\n${captureSource(mainModule, quiet)}`,
     },
   };

@@ -11,13 +11,13 @@ import { quietModules } from "./on-prem/quiet-isolate.ts";
 //
 // So every isolate core loads goes through `quietLoader`: its main module
 // imports the sandbox host's quiet module first (on-prem/quiet-isolate.ts),
-// which silences every console method before any other module loads,
-// catches what a timer's callback throws, and keeps an unhandled error or
-// rejection from being printed. That holds on either profile; on
-// Cloudflare it drops nothing the runtime wouldn't. One thing still
-// reaches a workerd served `--verbose`: an exception thrown out of an
-// entrypoint's call, which workerd reports as it hands it to the caller
-// (GRA-939). Without `--verbose` nothing of it is printed.
+// which silences every console method before any other module loads and
+// keeps what the code leaves uncaught from anything workerd served
+// `--verbose` reports for an isolate, but for what that module's header
+// lists as beyond it (GRA-939). That holds on either profile; on Cloudflare
+// it drops nothing the runtime wouldn't. Core can't tell whether its own
+// process was served `--verbose`, so under `SANDBOX_IN_PROCESS=unbounded`
+// not doing so is the operator's rule (env.d.ts).
 //
 // An isolate with a tail is left as it is: its tail (server-logs.ts) is how
 // a builder sees what the App's server code wrote, and a silenced console
@@ -44,10 +44,16 @@ const quietCode = (code: WorkerLoaderWorkerCode): WorkerLoaderWorkerCode => {
       `An isolate's main module must be an ES module to be silenced: ${code.mainModule} isn't one.`
     );
   }
-  const modules = quietModules(code.mainModule, {
-    ...code.modules,
-    [code.mainModule]: given,
-  });
+  const modules = quietModules(
+    code.mainModule,
+    { ...code.modules, [code.mainModule]: given },
+    // Its `node:timers` caught too, where it has them.
+    {
+      nodejsCompat: (code.compatibilityFlags ?? []).some((flag) =>
+        flag.startsWith("nodejs_compat")
+      ),
+    }
+  );
   const quieted = modules[code.mainModule];
   return {
     ...code,
