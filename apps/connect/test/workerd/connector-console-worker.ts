@@ -10,6 +10,9 @@ import { loadConnector } from "../../src/connector-isolate.ts";
 //   loads one for every native action call.
 // - `/control`: the same code in the Loader as it is, which shows workerd's
 //   output is read at all.
+// - `/path/<name>`, `/loud-path/<name>`: one way a connector's code can
+//   have workerd report an error with its message, through `loadConnector`
+//   and as it is.
 
 /** What a connector holds that no log may carry, by route. */
 const values = {
@@ -49,6 +52,32 @@ export default {
 };
 `;
 
+/**
+ * The ways a connector's code can have workerd served `--verbose` report an
+ * error with its message, each its own isolate (`/path/<name>`), the
+ * value its route's name.
+ */
+const paths: Readonly<Record<string, (value: string) => string>> = {
+  setImmediate: (value) => `setImmediate(() => {
+      throw new Error(${JSON.stringify(value)});
+    });`,
+  waitUntil: (value) =>
+    `ctx.waitUntil(Promise.reject(new Error(${JSON.stringify(value)})));`,
+};
+
+/** A connector that does what path `name` does with `value`, then answers. */
+const pathConnectorOf = (
+  name: string,
+  value: string
+): string => `export default {
+  async fetch(request, env, ctx) {
+    ${paths[name]?.(value) ?? ""}
+    await scheduler.wait(50);
+    return new Response(${JSON.stringify(value)});
+  },
+};
+`;
+
 interface ConnectEnv {
   readonly LOADER: WorkerLoader;
   /** Where the connector's requests would go: this Worker, never reached. */
@@ -63,6 +92,25 @@ const answerOf = async (route: string, env: ConnectEnv): Promise<unknown> => {
       connectorOf(values.connector),
       env.EGRESS
     )
+      .getEntrypoint()
+      .fetch("https://connector.internal/mcp");
+    return await response.text();
+  }
+  const path = /^\/(?<loud>loud-)?path\/(?<name>\w+)$/u.exec(route)?.groups;
+  if (path?.name !== undefined && Object.hasOwn(paths, path.name)) {
+    const value = `${path.loud === undefined ? "quiet" : "loud"}-${path.name}-2c8e`;
+    const code = pathConnectorOf(path.name, value);
+    const stub =
+      path.loud === undefined
+        ? loadConnector(env.LOADER, code, env.EGRESS)
+        : env.LOADER.load({
+            ...isolateBase,
+            mainModule: "connector.js",
+            modules: { "connector.js": code },
+            env: {},
+            globalOutbound: env.EGRESS,
+          });
+    const response = await stub
       .getEntrypoint()
       .fetch("https://connector.internal/mcp");
     return await response.text();
