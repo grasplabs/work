@@ -84,15 +84,17 @@ import { heldWakeType } from "./wakes.ts";
 // - A step the build doesn't have. Every step is named after a task of
 //   the sealed task table and one of the steps it was sealed with
 //   (`task:<id>` for a set or switch, or a wait's sleep; `enter:<id>` and
-//   `leave:<id>` around a wait, a do or a for; `item:<id>` for a for's
-//   `while`), or the workflow's own `workflow:input` and `workflow:output`
+//   `leave:<id>` around a wait, a do, a for or a fork; `item:<id>` for a
+//   for's `while`; a race's `task:<id>`, which records its winning branch,
+//   one the fork has), or the workflow's own `workflow:input` and `workflow:output`
 //   when it has them; a wait lasts exactly what was sealed. Anything else
 //   is refused, and fails the run.
 // - A step run twice, or a loop's item it never had. Generated code has no
 //   loop statement, and each task runs at most once per item of the loops
-//   around it (generate.ts): a task inside `for` tasks names the item of
-//   each it runs in (`task:<id>@<for>.<index>/…`), exactly the loops the
-//   build sealed around it, and only an item of the items its loop's enter
+//   around it (generate.ts): a task inside `for` and `fork` tasks names the
+//   item or branch of each it runs in (`task:<id>@<for>.<index>/<fork>.<branch>`),
+//   exactly the scopes the build sealed around it, only a branch its fork
+//   has, and only an item of the items its loop's enter
 //   step recorded (`#items`), whose variables the host supplies from that
 //   record, never the isolate. An activation that asks for a step it
 //   already ran this activation is refused, so not even a forged module
@@ -1185,15 +1187,23 @@ export class ResourceRunHost
    * The loop variables of scope `scope`: for each `for` around it, its
    * item and index, from the items its enter step recorded in the scope
    * around it (`#items`); `undefined` when one of them recorded none, or
-   * fewer than the index names.
+   * fewer than the index names, or a `fork` around it has no such branch.
    */
   #loopOf(
     scope: readonly { id: string; index: number }[]
   ): Record<string, Json> | undefined {
     const loop: Record<string, Json> = {};
     for (const [depth, { id, index }] of scope.entries()) {
-      const items = this.#items.get(placeOf(id, scope.slice(0, depth)));
       const task = this.#run.build.tasks.find((one) => one.id === id);
+      // A fork's branch: one of the branches it was sealed with, and no
+      // variables of its own.
+      if (task?.kind === "fork") {
+        if (index >= task.fork.branches) {
+          return undefined;
+        }
+        continue;
+      }
+      const items = this.#items.get(placeOf(id, scope.slice(0, depth)));
       if (
         items === undefined ||
         index >= items.length ||
@@ -2192,7 +2202,10 @@ export class ResourceRunHost
     task: SealedTask
   ): Json | undefined {
     const inputFrom =
-      task.kind === "call" || task.kind === "wait" || task.kind === "for"
+      task.kind === "call" ||
+      task.kind === "wait" ||
+      task.kind === "for" ||
+      task.kind === "fork"
         ? task.inputFrom
         : undefined;
     return inputFrom === undefined
@@ -2930,7 +2943,10 @@ export class ResourceRunHost
 
   /** Whether `step`, of task `taskId`, evaluates the task's `if`. */
   #hasIf(step: StepOf, taskId: string): boolean {
+    // A race's record (a fork's `task` step) follows its enter step's `if`.
+    const race = step.kind === "task" && step.task?.kind === "fork";
     return (
+      !race &&
       stagesOf[step.kind].includes("taskIf") &&
       this.#run.build.expressions.some(
         (expression) =>
@@ -2978,20 +2994,38 @@ export class ResourceRunHost
   }
 
   /**
-   * Accepts what of `record` a loop's steps record, whatever the isolate
-   * resolved: an `item` step only what its `while` answered, as the host
-   * evaluated it (whether it was the whole record); a `for` task's enter
-   * step exactly the items the host resolved in that attempt, and no
-   * other step any.
+   * Accepts what of `record` a loop's or a fork's steps record, whatever
+   * the isolate resolved: a race (a competing fork's `task` step) only
+   * its winning branch, one it has; an `item` step only what its `while`
+   * answered, as the host evaluated it (whether it was the whole record);
+   * a `for` task's enter step exactly the items the host resolved in that
+   * attempt, and no other step any.
    */
   #acceptedLoopRecord(
     attempt: StepAttempt,
-    record: { output: Json; items?: Json[] | undefined }
+    record: {
+      output: Json;
+      items?: Json[] | undefined;
+      branch?: number | undefined;
+    }
   ): boolean {
     const { step } = attempt;
     const { task } = step;
     if (task === undefined) {
       return false;
+    }
+    // A race records its winning branch, one it has, and nothing of its
+    // own: what each branch did its own steps recorded.
+    if (task.kind === "fork" && step.kind === "task") {
+      const { branch } = record;
+      if (
+        branch === undefined ||
+        branch >= task.fork.branches ||
+        Object.keys(record).length !== 2
+      ) {
+        this.#refuse(`Task "${task.id}"'s race records its winning branch.`);
+      }
+      return true;
     }
     if (step.kind === "item") {
       if (
