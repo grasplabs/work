@@ -69,7 +69,11 @@ import {
   resourceAttemptMethods,
   ResourceRunHost,
 } from "./resource-host.ts";
-import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
+import type {
+  FixtureStoreCall,
+  HostedResourceRun,
+  ResourceHostHooks,
+} from "./resource-host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
@@ -799,6 +803,11 @@ export interface HostedActivation {
   readonly admission:
     | { readonly run: string; readonly root: string; readonly subject: string }
     | "fixture";
+  /**
+   * For a run an App's test started, its calls of the App's own store
+   * operations (fixture-runs.ts, `fixtureStoreCall`); unset, it makes none.
+   */
+  readonly fixtureStoreCall?: FixtureStoreCall;
 }
 
 /**
@@ -812,7 +821,7 @@ export const runActivation = async (
   memory: ResourceRunMemory,
   activation: HostedActivation
 ): Promise<unknown> => {
-  const { run, output, owner, admission } = activation;
+  const { run, output, owner, admission, fixtureStoreCall } = activation;
   const { runId } = run;
   // The workflow's own step limit only ever lowers the host's.
   const ceiling = await stepLimitOf(env);
@@ -843,6 +852,7 @@ export const runActivation = async (
     ...(admission === "fixture"
       ? {
           fixture: true,
+          ...(fixtureStoreCall === undefined ? {} : { fixtureStoreCall }),
           admitAttempt: async () => await Promise.resolve(unadmitted),
         }
       : {

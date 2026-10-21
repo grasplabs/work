@@ -1,0 +1,1 @@
+ALTER TABLE `app_test_runs` ADD `fixture_store_id` text;

@@ -887,6 +887,15 @@ class FixtureSession extends TestTarget {
             recorded: () => {
               recorded = true;
             },
+            // The store its principals' own calls reach: the run's store
+            // calls reach that one alone (fixture-runs.ts).
+            store: async () => {
+              if (this.#release.store === null) {
+                return null;
+              }
+              const store = await this.#storeOf();
+              return store.id;
+            },
           }
         );
       } catch (error) {

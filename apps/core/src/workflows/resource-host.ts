@@ -307,10 +307,31 @@ export interface ResourceHostHooks {
    * principal, no member of the organization, and reaches nothing outside
    * its own code and sealed modules. Every call that would (an App's, a
    * store's, a model's, a connection's, Knowledge's, a template's, an
-   * action's) is refused (`resource.unavailable`) before it is built.
+   * action's) is refused (`resource.unavailable`) before it is built,
+   * except a store operation's, which goes to `fixtureStoreCall` alone,
+   * if set.
    */
   fixture?: true;
+  /**
+   * For a test's run (`fixture`), its calls of its App's own store
+   * operations, on its test's fixture store (fixture-runs.ts): never
+   * `makeCall`'s, nor the organization's store.
+   */
+  fixtureStoreCall?: FixtureStoreCall;
 }
+
+/**
+ * Makes a test's run's store operation call, its arguments built, under
+ * its step's key, by its attempt's deadline and lease: its answer.
+ */
+export type FixtureStoreCall = (
+  call: Extract<BuiltCall, { name: "grasp.operation" }>,
+  effect: {
+    readonly key: string;
+    readonly deadline: number;
+    readonly requireHolds: () => void;
+  }
+) => Promise<Json>;
 
 /**
  * The model calls a run's actions made (GRA-700), kept with the run: an
@@ -2282,9 +2303,24 @@ export class ResourceRunHost
     if (call.name === "grasp.sleepUntil") {
       return this.#refuse(`Task "${task.id}" makes no call.`);
     }
-    // A test's run reaches only its own sealed modules (`fixture`).
+    // A test's run reaches only its own sealed modules (`fixture`), and
+    // its App's own store operations on its test's fixture store.
     if (this.#hooks.fixture === true && call.name !== "grasp.compute") {
-      throw operationErrors.create("resource.unavailable");
+      const storeCall = this.#hooks.fixtureStoreCall;
+      if (call.name !== "grasp.operation" || storeCall === undefined) {
+        throw operationErrors.create("resource.unavailable");
+      }
+      const built = await this.#builtCall(attempt, call, passed);
+      if (built.name !== "grasp.operation") {
+        throw operationErrors.create("resource.unavailable");
+      }
+      return await storeCall(built, {
+        key: stepIdempotencyKey(this.#run.runId, `task:${task.id}`),
+        deadline: attempt.deadline,
+        requireHolds: () => {
+          this.#requireCurrent(attempt);
+        },
+      });
     }
     if (call.name === "grasp.model") {
       if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
