@@ -33,13 +33,13 @@ catalog:
   vite-plus: 0.3.3
   vitest: 4.1.11
   # Same workerd as Wrangler; runs the on-prem smoke test.
-  workerd: 1.20260921.1
-  wrangler: 4.136.0
+  workerd: 1.20261012.1
+  wrangler: 4.151.0
 
   # Workers runtime and data
-  "@cloudflare/vite-plugin": 1.57.0
+  "@cloudflare/vite-plugin": 1.64.0
   "@cloudflare/vitest-pool-workers": 0.22.0
-  "@cloudflare/workers-types": 5.20260921.1
+  "@cloudflare/workers-types": 5.20261012.1
   capnweb: 0.12.0
   # Schedule triggers: cron expressions, in a time zone.
   croner: 10.0.1
@@ -166,7 +166,7 @@ overrides:
   vitest: "catalog:"
   # The test pool bundles an older workerd; align it with Wrangler's so tests
   # run on the same compatibility date as production.
-  "@cloudflare/vitest-pool-workers>miniflare": 5.20260921.0-alpha
+  "@cloudflare/vitest-pool-workers>miniflare": 5.20261012.0-beta
 
 peerDependencyRules:
   allowedVersions:
