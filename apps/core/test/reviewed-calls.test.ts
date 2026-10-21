@@ -1052,6 +1052,32 @@ queueMicrotask(() => {
       ),
       codeAsksPeople: await inStep("tidy", recipients),
       // A wait run as code from inside a step, caught there: the step fails.
+      // An AI step's host, borrowed by an exact step nested in it.
+      borrowedModel: await (async () => {
+        const { host, runId, tampered } = await hostHeldTo(calls);
+        let within: Settled<unknown> = { ok: true, value: null };
+        let nested: Settled<unknown> = { ok: true, value: null };
+        const done = await host.do("write", {}, async (outer) => {
+          nested = await host.do("tidy", {}, async () => {
+            within = await outer.callModel({
+              step: "write",
+              model: "default",
+              instructions: "Summarise the invoice",
+              input: "Invoice INV-7",
+              outputSchema: { type: "string" },
+            });
+            return { ok: true, value: null };
+          });
+          return { ok: true, value: null };
+        });
+        return {
+          code: codeOf(within),
+          nested: codeOf(nested),
+          step: codeOf(done),
+          tampered,
+          audited: await refusals(runId),
+        };
+      })(),
       nestedWaitAsCode: await (async () => {
         const { host, runId, tampered } = await hostHeldTo(calls);
         let within: Settled<unknown> = { ok: true, value: null };
@@ -1109,6 +1135,10 @@ queueMicrotask(() => {
         askedAsWait: tamperedWith("ask#asked"),
         codeAsksPeople: failedStep(tamperedWith("tidy", "decision")),
         nestedWaitAsCode: failedStep(tamperedWith("pause")),
+        borrowedModel: {
+          ...failedStep(tamperedWith("tidy", "model")),
+          nested: "workflow.step_not_reviewed",
+        },
         askedAsksPeople: failedStep(tamperedWith("ask#asked", "decision")),
         codeAsksModel: failedStep(tamperedWith("tidy", "model")),
         codeOpensDecision: failedStep(tamperedWith("tidy", "decision")),

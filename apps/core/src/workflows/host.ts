@@ -2451,33 +2451,42 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * `#requireKind` for a call inside `attempt`: refused, the attempt (and
-   * the one running now) is failed too (`StepAttempt.refused`), as a call
-   * its review doesn't show is (`#requireReviewed`), so a step that
-   * catches the refusal and returns still fails, never completes.
+   * Refuses a call of `attempt` as `use` unless both it and the attempt
+   * running now (a step nested in it may borrow its host) run as `use`
+   * (`stepRunsAs`), as `#requireReviewed` holds both to their calls.
+   * Refused, both fail (`StepAttempt.refused`), so a step that catches the
+   * refusal and returns still fails, never completes.
    */
   async #requireKindIn(
     attempt: StepAttempt,
     use: StepUse,
     call: string
   ): Promise<void> {
-    if (!stepRunsAs(this.#run.calls, attempt.step, use)) {
+    const running = this.#live.at(-1) ?? attempt;
+    const other = [running, attempt].find(
+      ({ step }) => !stepRunsAs(this.#run.calls, step, use)
+    );
+    if (other !== undefined) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
-      error.message = `Step "${attempt.step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
-      await this.#refuseIn(attempt, error, call);
+      error.message = `Step "${other.step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
+      await this.#refuseIn(attempt, error, call, other.step);
     }
   }
 
-  /** Fails `attempt` (and the one running now) with `error`, as tampering. */
+  /**
+   * Fails `attempt` (and the one running now) with `error`, as tampering
+   * audited under `step`.
+   */
   async #refuseIn(
     attempt: StepAttempt,
     error: Error,
-    call: string
+    call: string,
+    step = attempt.step
   ): Promise<never> {
     const running = this.#live.at(-1) ?? attempt;
     running.refused = error;
     attempt.refused = error;
-    return await this.#refuseTampering(error, { step: attempt.step, call });
+    return await this.#refuseTampering(error, { step, call });
   }
 
   /**
