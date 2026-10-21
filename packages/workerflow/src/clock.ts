@@ -123,7 +123,8 @@ const runClaimed = async <E>(
   tasks: readonly ClockTask<E>[],
   at: number,
   settle: (name: string, failed: boolean) => unknown,
-  report: ClockReport
+  report: ClockReport,
+  waitUntil: (promise: Promise<unknown>) => void
 ): Promise<void> => {
   const runs = tasks.map(async (task) => {
     let failed = false;
@@ -139,11 +140,15 @@ const runClaimed = async <E>(
       report("clock.settle_failed", task.name, error);
     }
   });
+  // Kept alive past the wait: a task that outlives it still ends, and
+  // settles, on its own invocation.
+  const all = Promise.allSettled(runs);
+  waitUntil(all);
   const { promise: waited, resolve } = Promise.withResolvers<"waited">();
   const timer = setTimeout(() => {
     resolve("waited");
   }, clockTickWaitMs);
-  await Promise.race([Promise.allSettled(runs), waited]);
+  await Promise.race([all, waited]);
   clearTimeout(timer);
 };
 
@@ -239,7 +244,10 @@ export abstract class ClockObject<E> extends DurableObject<E> {
         (name, failed) => {
           this.#settle(name, now, failed);
         },
-        this.report
+        this.report,
+        (promise) => {
+          this.ctx.waitUntil(promise);
+        }
       );
     } finally {
       await this.rearm();
@@ -356,6 +364,7 @@ export const tickClock = async <E>(
   tasks: readonly ClockTask<E>[],
   report: ClockReport,
   env: E,
+  ctx: Pick<ExecutionContext, "waitUntil">,
   period: ClockPeriod,
   at: number
 ): Promise<void> => {
@@ -373,7 +382,10 @@ export const tickClock = async <E>(
       async (name, failed) => {
         await clock.settle(name, claim.started, failed);
       },
-      report
+      report,
+      (promise) => {
+        ctx.waitUntil(promise);
+      }
     );
   } finally {
     await clock.rearm();

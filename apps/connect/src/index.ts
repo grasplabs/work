@@ -239,7 +239,11 @@ export default class Connect
    */
   override async scheduled(controller?: ScheduledController): Promise<void> {
     try {
-      await tickClock(this.env, controller?.scheduledTime ?? Date.now());
+      await tickClock(
+        this.env,
+        this.ctx,
+        controller?.scheduledTime ?? Date.now()
+      );
     } catch (error) {
       log.error("cron.failed", errorFields(error));
     }

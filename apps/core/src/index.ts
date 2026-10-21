@@ -94,13 +94,13 @@ export default {
   // runs on that alarm (see
   // src/audit-log.ts), and a deployment that appends nothing after a
   // release still gets it.
-  scheduled: async (controller, env) => {
+  scheduled: async (controller, env, ctx) => {
     // The client's clock runs them (src/clock.ts): this cron is one of its
     // explicit ticks, until the hard cut removes the crons.
     const period =
       controller.cron === quarterHourCron ? "quarterHour" : "minute";
     try {
-      await tickClock(env, period, controller.scheduledTime);
+      await tickClock(env, ctx, period, controller.scheduledTime);
     } catch (error) {
       log.error("cron.failed", errorFields(error));
     }

@@ -62,6 +62,10 @@ export const clock = (
 ): DurableObjectStub<Clock> => clockNamespace(env).getByName("clock");
 
 /** The cron's explicit tick, for time `at`. */
-export const tickClock = async (env: Env, at: number): Promise<void> => {
-  await tick(clock(env), clockTasks, report, env, "minute", at);
+export const tickClock = async (
+  env: Env,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  at: number
+): Promise<void> => {
+  await tick(clock(env), clockTasks, report, env, ctx, "minute", at);
 };

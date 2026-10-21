@@ -205,10 +205,11 @@ export const clock = (
 /** A cron's explicit tick of `period` for time `at` (`tickClock`). */
 export const tickClock = async (
   env: Env,
+  ctx: Pick<ExecutionContext, "waitUntil">,
   period: ClockPeriod,
   at: number
 ): Promise<void> => {
-  await tick(clock(env), clockTasks, report, env, period, at);
+  await tick(clock(env), clockTasks, report, env, ctx, period, at);
 };
 
 /** How core logs a clock it couldn't arm. */
