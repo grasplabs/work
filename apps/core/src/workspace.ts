@@ -673,21 +673,30 @@ export class Workspace extends DurableObject<Env> {
    * nothing of it released (GRA-789), and nothing reads them. A preview's
    * facet was deleted with its draft, so only a draft still held can
    * have one left. The note is written after, so a start that dies
-   * between deletes again, which changes nothing.
+   * between deletes again, which changes nothing. A cleanup never stops
+   * the workspace from starting: one that fails is logged, its note left
+   * unset, and the next start tries again.
    */
   #dropV1PreviewFacets(): void {
     const { kv } = this.ctx.storage;
-    if (kv.get(v1PreviewsDroppedKey) === true) {
-      return;
+    try {
+      if (kv.get(v1PreviewsDroppedKey) === true) {
+        return;
+      }
+      const drafts = this.#db
+        .select({ chatId: chatDrafts.chatId, appId: chatDrafts.appId })
+        .from(chatDrafts)
+        .all();
+      for (const { chatId, appId } of drafts) {
+        this.ctx.facets.delete(`preview:${chatId}:${appId}`);
+      }
+      kv.put(v1PreviewsDroppedKey, true);
+    } catch (error) {
+      log.error("workspace.v1_previews_drop_failed", {
+        objectId: this.ctx.id.toString(),
+        ...errorFields(error),
+      });
     }
-    const drafts = this.#db
-      .select({ chatId: chatDrafts.chatId, appId: chatDrafts.appId })
-      .from(chatDrafts)
-      .all();
-    for (const { chatId, appId } of drafts) {
-      this.ctx.facets.delete(`preview:${chatId}:${appId}`);
-    }
-    kv.put(v1PreviewsDroppedKey, true);
   }
 
   /**
