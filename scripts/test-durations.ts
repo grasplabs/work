@@ -2,7 +2,7 @@
 // shards (scripts/test-shards.ts), from the shards' test-progress
 // artifacts (scripts/stall-reporter.ts writes them):
 //
-//   gh run download <run> -n test-progress-1-of-4 -D runs/<run>-1
+//   gh run download <run> -n test-progress-1-of-6 -D runs/<run>-1
 //   ...
 //   vp run test:durations runs/*/test-progress.log
 //
