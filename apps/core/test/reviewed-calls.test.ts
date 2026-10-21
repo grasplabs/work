@@ -1051,7 +1051,6 @@ queueMicrotask(() => {
           })
       ),
       codeAsksPeople: await inStep("tidy", recipients),
-      // A wait run as code from inside a step, caught there: the step fails.
       // An AI step's host, borrowed by an exact step nested in it.
       borrowedModel: await (async () => {
         const { host, runId, tampered } = await hostHeldTo(calls);
@@ -1078,6 +1077,42 @@ queueMicrotask(() => {
           audited: await refusals(runId),
         };
       })(),
+      // Two steps live at once, which the SDK never runs (it runs steps
+      // one after another): the AI step's model call, made while an
+      // exact step started next to it runs, is refused, and both fail.
+      parallelModel: await (async () => {
+        const { host, runId, tampered } = await hostHeldTo(calls);
+        const tidyRuns = Promise.withResolvers<null>();
+        const asked = Promise.withResolvers<null>();
+        let within: Settled<unknown> = { ok: true, value: null };
+        const [write, tidy] = await Promise.all([
+          host.do("write", {}, async (attempt) => {
+            await tidyRuns.promise;
+            within = await attempt.callModel({
+              step: "write",
+              model: "default",
+              instructions: "Summarise the invoice",
+              input: "Invoice INV-7",
+              outputSchema: { type: "string" },
+            });
+            asked.resolve(null);
+            return { ok: true, value: null };
+          }),
+          host.do("tidy", {}, async () => {
+            tidyRuns.resolve(null);
+            await asked.promise;
+            return { ok: true, value: null };
+          }),
+        ]);
+        return {
+          code: codeOf(within),
+          nested: codeOf(tidy),
+          step: codeOf(write),
+          tampered,
+          audited: await refusals(runId),
+        };
+      })(),
+      // A wait run as code from inside a step, caught there: the step fails.
       nestedWaitAsCode: await (async () => {
         const { host, runId, tampered } = await hostHeldTo(calls);
         let within: Settled<unknown> = { ok: true, value: null };
@@ -1136,6 +1171,10 @@ queueMicrotask(() => {
         codeAsksPeople: failedStep(tamperedWith("tidy", "decision")),
         nestedWaitAsCode: failedStep(tamperedWith("pause")),
         borrowedModel: {
+          ...failedStep(tamperedWith("tidy", "model")),
+          nested: "workflow.step_not_reviewed",
+        },
+        parallelModel: {
           ...failedStep(tamperedWith("tidy", "model")),
           nested: "workflow.step_not_reviewed",
         },

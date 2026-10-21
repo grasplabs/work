@@ -1418,9 +1418,19 @@ export class RunHost extends RpcTarget {
   #tampered: Error | undefined;
   /**
    * The attempts whose functions run now, in the order they began: the
-   * last is the step running now, which every reviewed call is checked
-   * against as well as the step whose host it came through
-   * (`#requireReviewed`).
+   * last is the step running now, which every reviewed call and kind is
+   * checked against as well as the step whose host it came through
+   * (`#requireReviewed`, `#requireKindIn`).
+   *
+   * The SDK runs steps one after another, never inside or next to one
+   * another (`exclusive`, workflow.ts), so a workflow it runs has one
+   * attempt live at a time (and, at most, attempts the engine gave up on,
+   * whose calls fail as stale first). Two live at once is code past the
+   * SDK; the host can't tell which attempt's code made a call (a step
+   * arrives as `do` alone, saying nothing of what started it), so a call
+   * that either attempt's review doesn't allow is refused: it fails
+   * closed. Steps run side by side would need the SDK to allow them and
+   * each call to carry its caller first.
    */
   readonly #live: StepAttempt[] = [];
   /**
