@@ -380,6 +380,11 @@ export interface VersionSummary {
   message: string | null;
   /** The version it restored, if it was a restore. */
   restoredFrom: number | null;
+  /**
+   * Its text's SHA-256, in lowercase hex: what a citation of it pins, and
+   * what every read of its text is checked against.
+   */
+  sha256: string;
   /** ISO 8601. */
   createdAt: string;
 }
@@ -897,6 +902,8 @@ export const knowledgeErrors = defineErrorFamily({
     "This document changed since you opened it. Load the latest version and apply your change to it.",
   "knowledge.purge_expired":
     "This purge wasn't confirmed in time, or isn't the one prepared. Prepare it again.",
+  "knowledge.unavailable":
+    "This version's text can't be read right now. Try again in a moment.",
   "knowledge.purge_index_pending":
     "The data is deleted, but the search index isn't cleaned up yet. Run the purge again to finish.",
 });

@@ -19,6 +19,7 @@ import { refreshDailySignals } from "./daily-signals.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
+import { sweepPayloads } from "./knowledge/payloads.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
@@ -63,6 +64,14 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: retryAccessRevocations,
   },
   { name: "knowledge.uploads", period: "minute", run: sweepUploads },
+  // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
+  {
+    name: "knowledge.payloads",
+    period: "minute",
+    run: async (env) => {
+      await sweepPayloads(env, new Date());
+    },
+  },
   // Deploys apply migrations first (CI's db:migrate, and the console's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records
