@@ -285,6 +285,8 @@ export interface Names {
   teams: Map<string, { organization: string; id: string; name: string }>;
   /** By organization id and work id. */
   works: Map<string, { organization: string; id: string; name: string }>;
+  /** A company's integrations (apps it connected), by organization id and integration id. */
+  integrations: Map<string, { organization: string; id: string; name: string }>;
   /** Integrations to build, by build id. */
   apps: Map<string, string>;
 }
@@ -293,6 +295,7 @@ export const newNames = (): Names => ({
   organizations: new Map(),
   teams: new Map(),
   works: new Map(),
+  integrations: new Map(),
   apps: new Map(),
 });
 
@@ -337,6 +340,21 @@ const workRef = (
   return `work ${work.id}`;
 };
 
+/** An app a company connected, as an answer's text names it: by its id. */
+const integrationRef = (
+  names: Names,
+  view: AdminView,
+  integration: { id: string; name: string }
+): string => {
+  const organization = view.org.id;
+  names.integrations.set(`${organization}/${integration.id}`, {
+    organization,
+    id: integration.id,
+    name: integration.name,
+  });
+  return `integration ${integration.id}`;
+};
+
 /** `names` as an answer's structured content gives them. */
 export const namesData = (names: Names) => ({
   organizations: [...names.organizations].map(([id, each]) => ({
@@ -345,6 +363,7 @@ export const namesData = (names: Names) => ({
   })),
   teams: [...names.teams.values()],
   works: [...names.works.values()],
+  integrations: [...names.integrations.values()],
   apps: [...names.apps].map(([id, name]) => ({ id, name })),
 });
 
@@ -364,7 +383,11 @@ const isAccountNeed = (need: Need): need is AccountNeed =>
   ACCOUNT_NEEDS.has(need.kind);
 
 /** What the account, rather than the onboarding, needs from Grasp. */
-const accountNeedText = (need: AccountNeed): string => {
+const accountNeedText = (
+  need: AccountNeed,
+  view: AdminView,
+  names: Names
+): string => {
   switch (need.kind) {
     case "contract": {
       return given(need.sent)
@@ -375,7 +398,7 @@ const accountNeedText = (need: AccountNeed): string => {
       return `The contract ends on ${need.until}, in ${need.days} days, with nothing agreed after it.`;
     }
     case "signin": {
-      return `${need.integration.name} stopped working until someone at the company signs in again.`;
+      return `${integrationRef(names, view, need.integration)} stopped working until someone at the company signs in again.`;
     }
     case "budget": {
       return `More AI than the contract covers in ${need.month}: ${euros(need.spend)} against ${euros(need.included)}.`;
@@ -393,7 +416,7 @@ export const needText = (
   names: Names = newNames()
 ): string => {
   if (isAccountNeed(need)) {
-    return accountNeedText(need);
+    return accountNeedText(need, view, names);
   }
   switch (need.kind) {
     case "paused": {
@@ -536,7 +559,10 @@ export const summaryOf = (
   const brain = brainOf(view);
   const integrations =
     view.integrations
-      .map((each) => `${each.name}${each.again ? " (stopped)" : ""}`)
+      .map(
+        (each) =>
+          `${integrationRef(names, view, each)}${each.again ? " (stopped)" : ""}`
+      )
       .join(", ") || "none";
   const lines = [
     `## Organization ${orgRef(names, view)}`,
@@ -1039,6 +1065,7 @@ const anyName = (names: Names): boolean =>
   names.organizations.size +
     names.teams.size +
     names.works.size +
+    names.integrations.size +
     names.apps.size >
   0;
 
