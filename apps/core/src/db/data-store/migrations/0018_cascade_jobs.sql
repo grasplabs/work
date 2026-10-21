@@ -14,6 +14,7 @@ CREATE TABLE `sdk_cascade_jobs` (
 	`failed_at` integer
 );
 --> statement-breakpoint
+CREATE INDEX `sdk_cascade_jobs_unfinished` ON `sdk_cascade_jobs` (`attempts`,`created_at`) WHERE "sdk_cascade_jobs"."finished_at" IS NULL;--> statement-breakpoint
 CREATE TABLE `sdk_cascade_members` (
 	`table_id` text NOT NULL,
 	`record_id` text NOT NULL,

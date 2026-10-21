@@ -4193,6 +4193,18 @@ export class StoreHost {
       return storeTables.get(name);
     };
     for (const { table, tableId, recordId, base, fields, filled } of staged) {
+      // A record the commit only read (a guard) or wrote unchanged keeps
+      // its references as they are: they are read again only for what a
+      // commit changes. One a cascade job is deleting may name a record
+      // the job has deleted already (`#cascadeBatchOf`), which must never
+      // refuse a commit that writes elsewhere.
+      if (
+        base !== undefined &&
+        fields !== null &&
+        storedText(fields) === base.valueJson
+      ) {
+        continue;
+      }
       const held = new Set<string>();
       if (base !== undefined) {
         const where = and(

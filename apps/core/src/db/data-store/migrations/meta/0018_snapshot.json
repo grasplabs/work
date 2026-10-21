@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "618d2a6f-795c-4e24-acd8-b39e0d476232",
+  "id": "ad269e7c-4dac-48c2-9c18-13e26a909e87",
   "prevId": "3668d988-0737-4f16-985d-2df60c6d2e7f",
   "tables": {
     "sdk_abandoned_targets": {
@@ -419,7 +419,17 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "sdk_cascade_jobs_unfinished": {
+          "name": "sdk_cascade_jobs_unfinished",
+          "columns": [
+            "attempts",
+            "created_at"
+          ],
+          "isUnique": false,
+          "where": "\"sdk_cascade_jobs\".\"finished_at\" IS NULL"
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -2863,6 +2863,37 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
     const [first] = await cascadeJobsOf(store);
     // The index holds no reference to a record already gone, midway too.
     const midwayDangling = await danglingReferences(store);
+    // A sub still deleting whose parent the job deleted already, read as a
+    // guard by a commit that writes elsewhere: the commit goes through.
+    const survivor = await runInDurableObject(
+      objectOf(store.id),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ id: string }>(
+            `SELECT r.record_id AS id FROM sdk_records r
+             JOIN sdk_tables t ON t.table_id = r.table_id AND t.name = 'subs'
+             WHERE NOT EXISTS (SELECT 1 FROM sdk_records p
+               WHERE p.record_id = json_extract(r.value_json, '$.parent'))
+             LIMIT 1`
+          )
+          .one().id
+    );
+    const guarded = await failure(
+      async () =>
+        await commitIn(store, {
+          principal: ada,
+          schemaHash: cascadeHash,
+          guards: [{ table: "subs", id: survivor, expectedRevision: 1 }],
+          writes: [
+            {
+              op: "insert",
+              table: "notes",
+              id: newRecordId(),
+              fields: { title: "Elsewhere" },
+            },
+          ],
+        })
+    );
     await cascadeDone(store);
     const [job] = await cascadeJobsOf(store);
     expect({
@@ -2871,13 +2902,20 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
         bounded: (first?.deleted ?? 0) <= 10 * commitMaxCascade,
         unfinished: first?.finished === null,
         dangling: midwayDangling,
+        guarded,
       },
       count: await recordCount(store),
       dangling: await danglingReferences(store),
       deleted: job?.deleted,
     }).toStrictEqual({
-      firstAlarm: { bounded: true, unfinished: true, dangling: 0 },
-      count: before - size - 2,
+      firstAlarm: {
+        bounded: true,
+        unfinished: true,
+        dangling: 0,
+        guarded: "ok",
+      },
+      // The ring, its link and its note gone; the guarded commit's note kept.
+      count: before - size - 2 + 1,
       dangling: 0,
       deleted: size + 2,
     });

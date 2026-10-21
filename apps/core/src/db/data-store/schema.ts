@@ -759,33 +759,44 @@ export const preferences = sqliteTable("sdk_preferences", {
  * the last member is gone. Who deleted is the commit's principal, and the
  * commit's receipt names the job (`Committed.cascadePending`).
  */
-export const cascadeJobs = sqliteTable("sdk_cascade_jobs", {
-  jobId: text("job_id").primaryKey(),
-  receiptId: text("receipt_id").notNull(),
-  principal: text().notNull(),
-  /**
-   * The resource the commit came through (its receipt's scope): the App
-   * whose release committed the deletion, or the consumer that called the
-   * store's public operation.
-   */
-  resourceId: text("resource_id"),
-  /** The workflow run the commit was made in, if any. */
-  runId: text("run_id"),
-  /** The first record the commit itself deleted: what the job is named by. */
-  rootTableId: text("root_table_id").notNull(),
-  rootRecordId: text("root_record_id").notNull(),
-  planned: integer().notNull(),
-  deleted: integer().notNull().default(0),
-  /**
-   * Batches of it that failed in a row: past `cascadeJobMaxAttempts` the
-   * job fails (`failedAt`) and is tried again later, its records still
-   * deleting until it finishes.
-   */
-  attempts: integer().notNull().default(0),
-  createdAt: integer("created_at").notNull(),
-  finishedAt: integer("finished_at"),
-  failedAt: integer("failed_at"),
-});
+export const cascadeJobs = sqliteTable(
+  "sdk_cascade_jobs",
+  {
+    jobId: text("job_id").primaryKey(),
+    receiptId: text("receipt_id").notNull(),
+    principal: text().notNull(),
+    /**
+     * The resource the commit came through (its receipt's scope): the App
+     * whose release committed the deletion, or the consumer that called the
+     * store's public operation.
+     */
+    resourceId: text("resource_id"),
+    /** The workflow run the commit was made in, if any. */
+    runId: text("run_id"),
+    /** The first record the commit itself deleted: what the job is named by. */
+    rootTableId: text("root_table_id").notNull(),
+    rootRecordId: text("root_record_id").notNull(),
+    planned: integer().notNull(),
+    deleted: integer().notNull().default(0),
+    /**
+     * Batches of it that failed in a row: past `cascadeJobMaxAttempts` the
+     * job fails (`failedAt`) and is tried again later, its records still
+     * deleting until it finishes.
+     */
+    attempts: integer().notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    finishedAt: integer("finished_at"),
+    failedAt: integer("failed_at"),
+  },
+  (table) => [
+    // The jobs still to finish, in the order the alarm takes them: what
+    // every commit's and alarm's schedule looks for, which finished jobs,
+    // kept for good, never slow down.
+    index("sdk_cascade_jobs_unfinished")
+      .on(table.attempts, table.createdAt)
+      .where(sql`${table.finishedAt} IS NULL`),
+  ]
+);
 
 /**
  * The records a cascade job still has to delete: one row per record, so a
