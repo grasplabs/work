@@ -156,7 +156,7 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
     route
   )?.groups;
   if (path?.name !== undefined && Object.hasOwn(paths, path.name)) {
-    const value = `${path.loud === undefined ? "quiet" : "loud"}-${path.name}-6d1f`;
+    const value = `${path.loud === undefined ? "quiet" : "loud"}-${path.name}${path.half ?? ""}-6d1f`;
     const code = {
       ...settings,
       // No `nodejs_compat`: its date gives the isolate `node:` modules, and

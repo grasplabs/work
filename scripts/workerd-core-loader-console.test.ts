@@ -165,7 +165,7 @@ const core :Workerd.Worker = (
         quiet: served.logs().includes(quiet),
         loud: served.logs().includes(loud),
       }).toStrictEqual({
-        answered: [`quiet-${name}-6d1f`, `loud-${name}-6d1f`],
+        answered: [`quiet-${name}${half}-6d1f`, `loud-${name}${half}-6d1f`],
         quiet: false,
         loud: true,
       });
