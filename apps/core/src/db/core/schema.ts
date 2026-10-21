@@ -2227,6 +2227,33 @@ export const packageCleanups = sqliteTable(
 );
 
 /**
+ * The trusted record of each compiler build core keeps in R2
+ * (src/build-cache.ts), by its cache key: the SHA-256 and size of the
+ * bytes the build that passed its gates wrote, which a cached object must
+ * hash to before it is served. Only core writes it, and only the build
+ * that holds the key's lease. Also the key's lease (`holder`,
+ * `lease_expires_at`), so builds of the same files in any isolate run
+ * once, and its integrity failures: past a few, the key is quarantined
+ * (`quarantined_at`) and nothing is served from or written to the cache
+ * for it.
+ */
+export const buildReceipts = sqliteTable("build_receipts", {
+  key: text().primaryKey(),
+  sha256: text(),
+  bytes: integer(),
+  builtAt: timestamp("built_at"),
+  holder: text(),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  integrityFailures: integer("integrity_failures").notNull().default(0),
+  /**
+   * The `built_at` of the build whose bytes last failed their check: each
+   * kept build counts one failure at most, however many read it.
+   */
+  failedBuiltAt: timestamp("failed_built_at"),
+  quarantinedAt: timestamp("quarantined_at"),
+});
+
+/**
  * The one build under way of each target of an App's graph
  * (src/packages/build.ts): a build takes its lease before it builds, and
  * gives it back when it ends; another of the same App, graph and target
