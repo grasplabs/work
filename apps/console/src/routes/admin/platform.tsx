@@ -500,10 +500,13 @@ const PlatformPage = () => {
       description="Every company runs its own Grasp, in its own Cloudflare account in the EU. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
       title="Platform"
     >
-      <GoingOut names={names} rollout={platform.rollout} />
-      <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
-      <EveryCompany live={live} releases={platform.releases} rows={rows} />
-      <DoneHere events={platform.events} names={names} />
+      {/* The panels' type, as the prototype's sections set it. */}
+      <div className="flex flex-col gap-6 text-sm">
+        <GoingOut names={names} rollout={platform.rollout} />
+        <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
+        <EveryCompany live={live} releases={platform.releases} rows={rows} />
+        <DoneHere events={platform.events} names={names} />
+      </div>
     </AdminPage>
   );
 };

@@ -5,7 +5,7 @@
  * steps, and the console's own things as the admin says them.
  */
 import { cn } from "@grasp-os/ui/lib/utils";
-import { CheckIcon, PauseIcon, XIcon } from "lucide-react";
+import { CheckIcon, LoaderCircleIcon, PauseIcon, XIcon } from "lucide-react";
 
 import type { TargetView } from "../rollout/queries.ts";
 import type { StaffEvent } from "./platform-data.ts";
@@ -155,36 +155,36 @@ const RingMark = ({ state }: { state: RingState }) => {
       <span
         className={cn(
           markBase,
-          "border-status-attention text-status-attention"
+          "bg-status-attention text-background border-transparent"
         )}
       >
         <XIcon aria-hidden="true" className="size-3.5" />
       </span>
     );
   }
-  if (state === "waiting") {
+  if (state === "running") {
     return (
       <span className={cn(markBase, "border-foreground")}>
+        <LoaderCircleIcon
+          aria-hidden="true"
+          className="size-3.5 motion-safe:animate-spin"
+        />
+      </span>
+    );
+  }
+  if (state === "waiting") {
+    return (
+      <span
+        className={cn(
+          markBase,
+          "border-status-attention text-status-attention"
+        )}
+      >
         <PauseIcon aria-hidden="true" className="size-3" />
       </span>
     );
   }
-  return (
-    <span
-      className={cn(
-        markBase,
-        state === "running" ? "border-foreground" : "border-border"
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "size-2 rounded-full",
-          state === "running" ? "bg-foreground" : "bg-transparent"
-        )}
-      />
-    </span>
-  );
+  return <span className={cn(markBase, "bg-card")} />;
 };
 
 /** One step of the rollout: a ring, what it says, and where it stands. */
