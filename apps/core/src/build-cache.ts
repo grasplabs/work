@@ -17,9 +17,9 @@ import { buildReceipts } from "./db/core/schema.ts";
 // - Cache poisoning (a stray or forged object, a write cut short, bytes
 //   that rotted): an object is served only when its bytes hash to its
 //   receipt, which only core writes, and only the build holding the key's
-//   lease, after the bytes are written. R2's own metadata is never
-//   trusted for it. An object with no receipt, or another hash, is built
-//   again and never served.
+//   lease, after the bytes are written, under an object of its own. R2's
+//   own metadata is never trusted for it. An object no receipt names, or
+//   with another hash, is never served: the build runs again.
 // - Different inputs under one key: the key is the build's kind and
 //   compiler call, a key schema (`keySchema`), the compiler's version (its
 //   kit, SDKs and policy) and the SHA-256 of the exact files the build
@@ -60,7 +60,7 @@ export interface CacheEnv {
 
 /** What the cache holds for a key, as checked against its receipt. */
 export type CacheRead =
-  | { state: "hit"; text: string; object: R2Object }
+  | { state: "hit"; text: string; object: R2Object; objectKey: string }
   | { state: "miss" }
   | { state: "quarantined" };
 
@@ -143,39 +143,42 @@ export const readVerified = async (
   env: CacheEnv,
   key: string
 ): Promise<CacheRead> => {
-  // The receipt first, then the bytes: a build kept between the two reads
-  // replaces a receipt this read no longer matches by `built_at`, so old
-  // bytes are never counted against it (`integrityFailed`). A receipt that
-  // can't be read throws: nothing vouches for cached bytes then. Bytes that
-  // can't be read are a miss: the build runs, under the lease.
+  // The receipt first, then the object it names: each holder keeps its
+  // bytes under an object of its own (`objectKeyOf`), written once, so a
+  // receipt and its object never race. A receipt that can't be read
+  // throws: nothing vouches for cached bytes then. Bytes that can't be
+  // read are a miss: the build runs, under the lease.
   const receipt = await receiptOf(env, key);
-  let object: R2ObjectBody | null;
-  try {
-    object = await env.FILES.get(key);
-  } catch (error) {
-    log.warn("build.cache_read_failed", { key, ...errorFields(error) });
-    object = null;
-  }
   if (receipt?.quarantinedAt !== null && receipt?.quarantinedAt !== undefined) {
     return { state: "quarantined" };
   }
-  if (object === null) {
+  const objectKey = receipt?.objectKey ?? null;
+  const expected = receipt?.sha256 ?? null;
+  if (objectKey === null || expected === null) {
     return { state: "miss" };
   }
-  const text = await object.text();
-  const expected = receipt?.sha256 ?? null;
-  if (expected === null) {
-    // Written without a receipt: a build that stopped between its write
-    // and its receipt, or anything else. Built again, never served.
-    log.warn("build.cache_unreceipted", { key });
+  let object: R2ObjectBody | null = null;
+  let text: string | undefined;
+  try {
+    object = await env.FILES.get(objectKey);
+    text = await object?.text();
+  } catch (error) {
+    log.warn("build.cache_read_failed", { key, ...errorFields(error) });
+    return { state: "miss" };
+  }
+  if (object === null || text === undefined) {
     return { state: "miss" };
   }
   if ((await sha256Hex(text)) !== expected) {
     await integrityFailed(env, key, receipt?.builtAt ?? null, text);
     return { state: "miss" };
   }
-  return { state: "hit", text, object };
+  return { state: "hit", text, object, objectKey };
 };
+
+/** The object `holder` keeps `key`'s bytes under: under the key's prefix, for the sweep. */
+export const objectKeyOf = (key: string, holder: string): string =>
+  `${key}~${holder}`;
 
 /**
  * Takes `key`'s lease for `holder` for `ms`, if nobody holds it or the
@@ -225,10 +228,11 @@ const giveBack = async (
 };
 
 /**
- * Keeps `text` as `key`'s build, written by `holder`: the bytes first, then
- * their receipt, only while `holder` still holds the lease, so a build
- * that lost it leaves the one that took it alone. Nothing for a
- * quarantined key.
+ * Keeps `text` as `key`'s build, written by `holder`: the bytes under an
+ * object of the holder's own, then the receipt naming it, only while
+ * `holder` still holds the lease. A holder that lost its lease writes at
+ * most an object no receipt names, which the sweep removes; the build
+ * that took the lease over is left alone. Nothing for a quarantined key.
  */
 const keep = async (
   env: CacheEnv,
@@ -245,17 +249,12 @@ const keep = async (
   ) {
     return;
   }
-  // Its old receipt goes first: a reader between the write and the new
-  // receipt finds bytes with none, built again, never a mismatch counted
-  // against a build that is sound.
-  await drizzle(env.DB)
-    .update(buildReceipts)
-    .set({ sha256: null, bytes: null, builtAt: null })
-    .where(and(eq(buildReceipts.key, key), eq(buildReceipts.holder, holder)));
-  await env.FILES.put(key, text, options);
+  const objectKey = objectKeyOf(key, holder);
+  await env.FILES.put(objectKey, text, options);
   await drizzle(env.DB)
     .update(buildReceipts)
     .set({
+      objectKey,
       sha256: await sha256Hex(text),
       bytes: new TextEncoder().encode(text).byteLength,
       builtAt: new Date(),
@@ -295,12 +294,18 @@ export const throughCache = async (
 ): Promise<{
   text: string;
   outcome: CacheOutcome;
-  /** For a hit, its object: when it was last used. */
+  /** For a hit, its object (when it was last used) and where it is. */
   object?: R2Object;
+  objectKey?: string;
 }> => {
   const first = await readVerified(env, key);
   if (first.state === "hit") {
-    return { text: first.text, outcome: "hit", object: first.object };
+    return {
+      text: first.text,
+      outcome: "hit",
+      object: first.object,
+      objectKey: first.objectKey,
+    };
   }
   // Given up on: no lease is taken, and nothing more is read or built.
   signal?.throwIfAborted();
@@ -347,20 +352,20 @@ export const throughCache = async (
   }
 };
 
-/** Forgets the receipts of `keys`, whose objects the sweep deleted. */
+/** Forgets the receipts naming `objectKeys`, the objects the sweep deleted. */
 export const forgetReceipts = async (
   env: CacheEnv,
-  keys: readonly string[]
+  objectKeys: readonly string[]
 ): Promise<void> => {
   const db = drizzle(env.DB);
   // Within D1's bound values.
-  for (let start = 0; start < keys.length; start += 90) {
+  for (let start = 0; start < objectKeys.length; start += 90) {
     // oxlint-disable-next-line no-await-in-loop -- a chunk at a time
     await db
       .delete(buildReceipts)
       .where(
         and(
-          inArray(buildReceipts.key, keys.slice(start, start + 90)),
+          inArray(buildReceipts.objectKey, objectKeys.slice(start, start + 90)),
           isNull(buildReceipts.holder),
           isNull(buildReceipts.quarantinedAt)
         )

@@ -50,14 +50,14 @@ const keptBuild = async () => {
   const text = JSON.stringify(built);
   const sha256 = await sha256Hex(text);
   const row = await env.DB.prepare(
-    "SELECT key FROM build_receipts WHERE sha256 = ?"
+    "SELECT key, object_key AS objectKey FROM build_receipts WHERE sha256 = ?"
   )
     .bind(sha256)
-    .first<{ key: string }>();
+    .first<{ key: string; objectKey: string }>();
   if (row === null) {
     throw new Error("The build has no receipt");
   }
-  return { files, built, text, key: row.key };
+  return { files, built, text, key: row.key, objectKey: row.objectKey };
 };
 
 /** A build that passed no gate, as forged bytes would claim. */
@@ -70,14 +70,24 @@ const forged = JSON.stringify({
 
 const receiptOf = async (key: string) =>
   await env.DB.prepare(
-    "SELECT sha256, integrity_failures AS failures, quarantined_at AS quarantinedAt FROM build_receipts WHERE key = ?"
+    "SELECT sha256, object_key AS objectKey, integrity_failures AS failures, quarantined_at AS quarantinedAt FROM build_receipts WHERE key = ?"
   )
     .bind(key)
     .first<{
       sha256: string | null;
+      objectKey: string | null;
       failures: number;
       quarantinedAt: number | null;
     }>();
+
+/** Forges the bytes of `key`'s kept build, under the object its receipt names. */
+const forgeKept = async (key: string): Promise<void> => {
+  const receipt = await receiptOf(key);
+  if (receipt?.objectKey === null || receipt?.objectKey === undefined) {
+    throw new Error("The build has no object");
+  }
+  await env.FILES.put(receipt.objectKey, forged);
+};
 
 describe("the build cache", { timeout: 120_000 }, () => {
   it("serves no bytes its receipt doesn't vouch for, builds them again, and keeps the bad ones for operators", async () => {
@@ -85,7 +95,7 @@ describe("the build cache", { timeout: 120_000 }, () => {
     const { started, loader } = counting();
 
     // Forged under a key with a receipt: a mismatch, counted once.
-    await env.FILES.put(key, forged);
+    await forgeKept(key);
     const afterForgery = await buildScreens(
       { ...env, LOADER: loader },
       files,
@@ -134,7 +144,7 @@ describe("the build cache", { timeout: 120_000 }, () => {
 
   it("counts one bad build once, however many find it at once", async () => {
     const { files, built, key } = await keptBuild();
-    await env.FILES.put(key, forged);
+    await forgeKept(key);
     const found = await Promise.all(
       ["app-one", "app-two", "app-three"].map(
         async (app) => await buildScreens(env, files, app)
@@ -154,7 +164,7 @@ describe("the build cache", { timeout: 120_000 }, () => {
     const { files, built, key } = await keptBuild();
     for (let round = 0; round < quarantineAfter; round += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one round after another
-      await env.FILES.put(key, forged);
+      await forgeKept(key);
       // oxlint-disable-next-line no-await-in-loop -- one round after another
       await buildScreens(env, files, "app-test");
     }
@@ -165,7 +175,7 @@ describe("the build cache", { timeout: 120_000 }, () => {
       files,
       "app-test"
     );
-    const stored = await env.FILES.get(key);
+    const stored = await env.FILES.get(quarantined?.objectKey ?? key);
 
     expect({
       failures: quarantined?.failures,
@@ -203,11 +213,11 @@ describe("the build cache", { timeout: 120_000 }, () => {
       "app-test"
     );
     await scheduler.wait(600);
-    await env.FILES.put(key, text);
+    await env.FILES.put(`${key}~elsewhere`, text);
     await env.DB.prepare(
-      "UPDATE build_receipts SET sha256 = ?, built_at = ?, holder = NULL, lease_expires_at = NULL WHERE key = ?"
+      "UPDATE build_receipts SET object_key = ?, sha256 = ?, built_at = ?, holder = NULL, lease_expires_at = NULL WHERE key = ?"
     )
-      .bind(await sha256Hex(text), Date.now(), key)
+      .bind(`${key}~elsewhere`, await sha256Hex(text), Date.now(), key)
       .run();
     const shared = await waiting;
 

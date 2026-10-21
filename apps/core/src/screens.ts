@@ -389,7 +389,7 @@ const cachedBuild = async <Build>(
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
   const started = Date.now();
-  const { text, outcome, object } = await throughCache(
+  const { text, outcome, object, objectKey } = await throughCache(
     env,
     cacheKey,
     // Held as long as a build may take, and a little more.
@@ -425,11 +425,12 @@ const cachedBuild = async <Build>(
   log.info("build.cache", { kind, outcome, ms: Date.now() - started });
   if (
     object !== undefined &&
+    objectKey !== undefined &&
     Date.now() - lastUsedOf(object) > buildRefreshMs
   ) {
     try {
       // The same bytes: its receipt still holds.
-      await env.FILES.put(cacheKey, text, usedNow());
+      await env.FILES.put(objectKey, text, usedNow());
     } catch (error) {
       // The build is served all the same: a refresh that failed is tried
       // again at its next use, well before the sweep's limit.

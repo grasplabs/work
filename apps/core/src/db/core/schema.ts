@@ -2239,6 +2239,12 @@ export const packageCleanups = sqliteTable(
  */
 export const buildReceipts = sqliteTable("build_receipts", {
   key: text().primaryKey(),
+  /**
+   * The R2 object holding the bytes: the key and the holder that kept
+   * them, so a holder that lost its lease writes only an object of its
+   * own, which no receipt names.
+   */
+  objectKey: text("object_key"),
   sha256: text(),
   bytes: integer(),
   builtAt: timestamp("built_at"),
