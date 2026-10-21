@@ -128,6 +128,43 @@ const workerEntrySchema = z.strictObject({
 /** Everything the manifest says about one Worker. */
 export type WorkerEntry = z.infer<typeof workerEntrySchema>;
 
+/** Versions from `min` to `max`, both included. */
+const versionRangeSchema = z
+  .strictObject({ min: z.int().positive(), max: z.int().positive() })
+  .refine(({ min, max }) => min <= max, "A range's min is at most its max");
+
+/**
+ * What a release's code works with, which the console checks before it
+ * makes the release live in a client (spec 40.3): every Worker that
+ * calls another must call the version that one serves, at each step of a
+ * deploy or rollback, since a client's Workers switch one at a time; and
+ * the release must read every workflow journal and run every App
+ * release the client's current code may have left. Database schemas are
+ * the release's migrations themselves: they only expand for the code of
+ * the release before, so a deploy applies them first, and a rollback
+ * goes back no further than that release.
+ */
+export const releaseCompatibilitySchema = z.strictObject({
+  /**
+   * By app: the version of the interface it serves the release's other
+   * Workers, if it serves one, and the versions of each other Worker's
+   * interface it calls correctly.
+   */
+  interfaces: z.record(
+    z.string(),
+    z.strictObject({
+      serves: z.int().positive().optional(),
+      calls: z.record(z.string(), versionRangeSchema),
+    })
+  ),
+  /** The workflow journal schemas core's engine reads. */
+  workflowJournal: versionRangeSchema,
+  /** The SDK protocol versions of the App releases core runs. */
+  sdkProtocols: versionRangeSchema,
+});
+
+export type ReleaseCompatibility = z.infer<typeof releaseCompatibilitySchema>;
+
 /** The release manifest (see the header comment). */
 export const releaseManifestSchema = z.strictObject({
   manifestVersion: z.literal(MANIFEST_VERSION),
@@ -149,6 +186,11 @@ export const releaseManifestSchema = z.strictObject({
   workers: z.record(z.string(), workerEntrySchema),
   /** Every asset blob, by content key. */
   assets: z.record(assetHash, z.strictObject({ size, r2Key: z.string() })),
+  /**
+   * What its code works with. Releases built before it was declared
+   * have none, and the console makes none of those live.
+   */
+  compatibility: releaseCompatibilitySchema.optional(),
 });
 
 export type ReleaseManifest = z.infer<typeof releaseManifestSchema>;

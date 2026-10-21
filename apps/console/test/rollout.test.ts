@@ -46,7 +46,8 @@ import { checkRevocation } from "../src/rollout/shared-secrets.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api.ts";
 import { racingDb } from "./racing-db.ts";
-import { publishRelease } from "./releases.ts";
+import { declared, publishRelease } from "./releases.ts";
+import type { ReleaseSpec } from "./releases.ts";
 import {
   emptyStoreSecret,
   setStoreSecret,
@@ -60,8 +61,11 @@ const db = consoleDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 
 /** A release, published and imported. */
-const importedRelease = async (notes: string): Promise<string> => {
-  const release = await publishRelease({ notes });
+const importedRelease = async (
+  notes: string,
+  spec: Omit<ReleaseSpec, "notes"> = {}
+): Promise<string> => {
+  const release = await publishRelease({ notes, ...spec });
   await importReleases(env.RELEASES, db);
   return release.id;
 };
@@ -2572,6 +2576,28 @@ describe("controlling a rollout", () => {
       counts: deploymentCounts(internal.account),
       runner: await runnerOf(internal.clientId),
     }).toStrictEqual({ refused: "too_far_back", counts, runner: null });
+  });
+
+  it("refuses a rollback to a release that doesn't read the workflow journals the rollout's may have left", async () => {
+    const before = await importedRelease("feat(core): reads journals 8–9");
+    const internal = await activeClient(0, before);
+    const release = await importedRelease("feat(core): reads journal 10 too", {
+      compatibility: { ...declared, workflowJournal: { min: 8, max: 10 } },
+    });
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const counts = deploymentCounts(internal.account);
+
+    const refused = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+
+    expect({
+      refused,
+      counts: deploymentCounts(internal.account),
+      runner: await runnerOf(internal.clientId),
+    }).toStrictEqual({ refused: "incompatible", counts, runner: null });
   });
 
   it("refuses a rollback while the rollout is still preparing the client, with nothing of it live", async () => {

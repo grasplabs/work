@@ -61,6 +61,7 @@ import {
 import type { ReleaseStore } from "../releases/import.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
+import { currentReleases, incompatibility } from "./compatibility.ts";
 import { checkDeployedConfig, derivedCoreConfig } from "./core-config.ts";
 import type { SignInApps } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
@@ -614,11 +615,32 @@ const runPhase = async <T>(
 };
 
 /**
+ * Refuses (`release_undeclared`, `release_incompatible`) a release the
+ * client can't go to from what its Workers run, switched in the order a
+ * deploy makes them live (src/deploy/compatibility.ts).
+ */
+const assertCompatible = async (
+  db: ConsoleDatabase,
+  { deploy, manifest }: LoadedDeploy
+): Promise<void> => {
+  const refused = incompatibility(
+    await currentReleases(db, deploy.clientId),
+    manifest,
+    appsOf(manifest)
+  );
+  if (refused !== null) {
+    throw new DeployError(refused.code, refused.message);
+  }
+};
+
+/**
  * The first two steps: the account's resources, then the release's
  * database migrations. Returns its databases' ids, by name. Before either,
- * the config the deploy would set on core is checked (`coreVars`), so a
- * setting core wouldn't take, or a sign-in nobody could use, stops the
- * deploy before it changes anything in the client's account.
+ * the release is checked against what the client runs (`assertCompatible`)
+ * and the config the deploy would set on core (`coreVars`), so a release
+ * the client can't go to, a setting core wouldn't take, or a sign-in
+ * nobody could use, stops the deploy before it changes anything in the
+ * client's account.
  */
 const prepare = async (
   context: DeployContext,
@@ -628,6 +650,7 @@ const prepare = async (
   const { api, db, store } = context;
   const { deploy, manifest } = loaded;
   current("resources");
+  await assertCompatible(db, loaded);
   await coreVars(context, deploy);
   const resources = await ensureResources(api, deploy.accountId, manifest);
   await recordStep(db, loaded, "resources", {

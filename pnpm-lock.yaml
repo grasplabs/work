@@ -293,6 +293,9 @@ importers:
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:packages/shared
+      '@grasp-os/workerflow':
+        specifier: workspace:*
+        version: link:packages/workerflow
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.63.0

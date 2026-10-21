@@ -10,6 +10,30 @@
     }
   },
   "commit": "0000000000000000000000000000000000000000",
+  "compatibility": {
+    "interfaces": {
+      "connect": {
+        "calls": {},
+        "serves": 1
+      },
+      "core": {
+        "calls": {
+          "connect": {
+            "max": 1,
+            "min": 1
+          }
+        }
+      }
+    },
+    "sdkProtocols": {
+      "max": 2,
+      "min": 2
+    },
+    "workflowJournal": {
+      "max": 9,
+      "min": 8
+    }
+  },
   "compatibilityDate": "2026-09-15",
   "createdAt": "2026-01-01T00:00:00.000Z",
   "manifestVersion": 1,

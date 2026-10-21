@@ -95,6 +95,30 @@ describe("the release manifest", () => {
     expect(() => generateManifest(info, [core])).toThrow(/grasp-os-connect/u);
   });
 
+  it("refuses a build its compatibility doesn't declare", () => {
+    const { interfaces } = info.compatibility;
+    const declaring = (changed: typeof interfaces) => () =>
+      generateManifest(
+        {
+          ...info,
+          compatibility: { ...info.compatibility, interfaces: changed },
+        },
+        fixture
+      );
+    // A Worker it doesn't declare.
+    expect(
+      declaring({ core: { calls: { connect: { min: 1, max: 1 } } } })
+    ).toThrow(/declares core/u);
+    // A service binding without the versions it calls.
+    expect(declaring({ ...interfaces, core: { calls: {} } })).toThrow(
+      /core binds connect/u
+    );
+    // A call of a Worker that serves no version.
+    expect(declaring({ ...interfaces, connect: { calls: {} } })).toThrow(
+      /declares no version it serves/u
+    );
+  });
+
   it("refuses Workers on different compatibility dates", () => {
     const [connect, core] = fixture;
     if (connect === undefined || core === undefined) {
