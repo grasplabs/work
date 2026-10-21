@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import { isExportName } from "./apps.ts";
 import type { AgentProposer } from "./apps.ts";
 import { defineErrorFamily } from "./errors.ts";
 import {
@@ -143,8 +142,8 @@ const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
  * What a permission gives access to: a connection (all of it, or one
  * resource in it, such as one mailbox), a Knowledge collection, an
  * independent workflow (to follow its runs, `read`, or start it,
- * `start`), another App's exports: the methods of its server
- * code it lets other Apps call (`appExportsPath`), a business store's
+ * `start`), an App's sealed functions, for an agent (reading with
+ * `read`, writing with `write`: core's agent-apps.ts), a business store's
  * public operations (the public queries and mutations of the App that owns
  * it, each action one of them by its path: core's store-operations.ts), or
  * the platform's own statistics.
@@ -203,10 +202,9 @@ const isActionOf = (type: PermissionObjectType, action: string): boolean => {
   if (type === "connection") {
     return connectionActionPattern.test(action);
   }
-  // Another App's exports: all those it marks `read`, all those it marks
-  // `write`, or one by its name, whichever it is marked.
+  // An App's functions, for an agent: those that read, or all of them.
   if (type === "app") {
-    return action === "read" || action === "write" || isExportName(action);
+    return action === "read" || action === "write";
   }
   // A store's public operations, each by its path, e.g. `notes.list`.
   if (type === "store") {
@@ -404,9 +402,8 @@ export type DeclaredPermission = z.infer<typeof declaredPermissionSchema>;
 /**
  * Requested: asked for, allows nothing yet. Active: granted, allows its
  * actions. Revoked: allows nothing, for good (ask again for a new one).
- * An App's active permission on a connection, to start a workflow, or to
- * call another App's exports other than all those
- * marked `read`, goes back to requested when someone who couldn't grant
+ * An App's active permission on a connection or to start a workflow goes
+ * back to requested when someone who couldn't grant
  * it (Grasp staff included) makes another version of the App current
  * (`AppVersionsApi.setCurrent`), until an admin grants it again.
  */

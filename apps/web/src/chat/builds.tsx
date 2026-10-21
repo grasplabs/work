@@ -32,7 +32,6 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { ChosenAtRunTime } from "../workflows/chosen-at-run-time.tsx";
 import {
-  exportChangeText,
   migrationFixturesText,
   pendingToShow,
   readyToMakeCurrent,
@@ -171,7 +170,7 @@ const proposerText = ({ proposedBy }: VersionReview): string => {
 };
 
 /**
- * Each changed file of a version's server code (`app/**.ts`), before and
+ * Each changed file of a version's server code (`app.ts`, `schema.ts`, `operations/` and the rest its seal builds), before and
  * after: against the current version, or as a first version has it.
  */
 const serverCodeOf = async (
@@ -429,28 +428,6 @@ const ReviewDetails = ({
                 )}
               </li>
             ))}
-          </ul>
-        </section>
-      )}
-      {review.exports.length === 0 ? null : (
-        <section aria-label={t`Exports`} className="flex flex-col gap-1">
-          <h4 className="font-medium">
-            <Trans>What other domains may call</Trans>
-          </h4>
-          <ul className="flex flex-col gap-1">
-            {review.exports.map((change) => {
-              const { text, widens } = exportChangeText(change);
-              return (
-                <li className="flex items-center gap-2" key={change.name}>
-                  {text}
-                  {widens ? (
-                    <Badge variant="destructive">
-                      <Trans>Changes the domain&apos;s data</Trans>
-                    </Badge>
-                  ) : null}
-                </li>
-              );
-            })}
           </ul>
         </section>
       )}

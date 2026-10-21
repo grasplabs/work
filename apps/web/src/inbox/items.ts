@@ -228,9 +228,9 @@ const outcomeItems = (
 /** A permission an App or agent asked for, which an admin grants or rejects. */
 const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
-    const { directory, exports } = pending;
+    const { directory } = pending;
     const subject = subjectOf(request, directory);
-    const object = objectOf(request, directory, exports);
+    const object = objectOf(request, directory);
     const actions = formatList(request.actions);
     const who = t`${subject}: ${actions} on ${object}`;
     const { binding } = request;

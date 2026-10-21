@@ -677,14 +677,6 @@ msgstr "{name} {range}, satisfait par {resolved}"
 msgid "{name} {range}, not met"
 msgstr "{name} {range}, non satisfait"
 
-#: src/chat/builds-state.ts
-msgid "{name} changed"
-msgstr "{name} a changé"
-
-#: src/chat/builds-state.ts
-msgid "{name} changed: it {does}"
-msgstr "{name} a changé : {does}"
-
 #. The first hour Pulse may report on a day
 #: src/settings/week-hours.tsx
 msgid "{name} from"
@@ -725,14 +717,6 @@ msgstr "{name} : déconnexion partout effectuée."
 #: src/connections/app-logo.tsx
 msgid "{name} logo"
 msgstr "Logo {name}"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the domain's data (write → read)"
-msgstr "{name} ne modifie plus les données du domaine (écriture → lecture)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the domain's data (read → write)"
-msgstr "{name} modifie désormais les données du domaine (lecture → écriture)"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -2769,14 +2753,6 @@ msgstr "Des modifications envoyées par Grasp pour quelqu'un dont la réponse s'
 msgid "Changes something"
 msgstr "Modifie quelque chose"
 
-#: src/chat/builds-state.ts
-msgid "changes the domain's data"
-msgstr "modifie les données du domaine"
-
-#: src/chat/builds.tsx
-msgid "Changes the domain's data"
-msgstr "Modifie les données du domaine"
-
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Modifications des magasins du domaine"
@@ -3304,10 +3280,6 @@ msgstr "Impossible de copier l’adresse"
 #: src/landscape/audit-trail.tsx
 msgid "Could not copy the fingerprint"
 msgstr "Impossible de copier l’empreinte"
-
-#: src/activity/pending.tsx
-msgid "couldn't be read"
-msgstr "n’a pas pu être lu"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
@@ -4137,14 +4109,6 @@ msgstr "Exporter ce chat"
 msgid "Exported the audit trail"
 msgstr "A exporté le journal d’audit"
 
-#: src/chat/builds.tsx
-msgid "Exports"
-msgstr "Exports"
-
-#: src/activity/pending.tsx
-msgid "Exports of {domain}: {covered}"
-msgstr "Exports de {domain} : {covered}"
-
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
 msgid "Extra high"
@@ -4435,6 +4399,14 @@ msgstr "De vos domaines"
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "Depuis votre outil RH ou de paie. Microsoft 365 ou Google pourront être connectés plus tard, avec nous."
+
+#: src/activity/pending.tsx
+msgid "Functions of {domain}, reading and changing its data"
+msgstr "Fonctions de {domain}, qui lisent et modifient ses données"
+
+#: src/activity/pending.tsx
+msgid "Functions of {domain}, reading its data"
+msgstr "Fonctions de {domain}, qui lisent ses données"
 
 #: src/brain/brain.ts
 msgid "Gap"
@@ -6404,10 +6376,6 @@ msgstr "Aucune actuelle"
 msgid "None found."
 msgstr "Aucun résultat."
 
-#: src/activity/pending.tsx
-msgid "none now"
-msgstr "aucune pour l’instant"
-
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "None of its rules are in use any more."
 msgstr "Aucune de ses règles n’est plus en vigueur."
@@ -7093,18 +7061,6 @@ msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Autres"
 
-#: src/chat/builds-state.ts
-msgid "Other domains may no longer call {name}"
-msgstr "Les autres domaines ne peuvent plus appeler {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}"
-msgstr "Les autres domaines peuvent désormais appeler {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}, which {does}"
-msgstr "Les autres domaines peuvent désormais appeler {name}, qui {does}"
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Sinon :"
@@ -7747,10 +7703,6 @@ msgstr "Lecture…"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
 msgstr "Lit"
-
-#: src/chat/builds-state.ts
-msgid "reads the domain's data"
-msgstr "lit les données du domaine"
 
 #: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
@@ -11001,10 +10953,6 @@ msgstr "Ce qui le fait s’exécuter tout seul ne peut pas être lu dans son cod
 #: src/routes/_shell.onboarding.index.tsx
 msgid "What needs Grasp"
 msgstr "Ce qui attend Grasp"
-
-#: src/chat/builds.tsx
-msgid "What other domains may call"
-msgstr "Ce que les autres domaines peuvent appeler"
 
 #: src/dashboard/report.ts
 msgid "What ran"

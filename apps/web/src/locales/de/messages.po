@@ -677,14 +677,6 @@ msgstr "{name} {range}, erfüllt durch {resolved}"
 msgid "{name} {range}, not met"
 msgstr "{name} {range}, nicht erfüllt"
 
-#: src/chat/builds-state.ts
-msgid "{name} changed"
-msgstr "{name} geändert"
-
-#: src/chat/builds-state.ts
-msgid "{name} changed: it {does}"
-msgstr "{name} geändert: {does}"
-
 #. The first hour Pulse may report on a day
 #: src/settings/week-hours.tsx
 msgid "{name} from"
@@ -725,14 +717,6 @@ msgstr "{name} ist überall abgemeldet."
 #: src/connections/app-logo.tsx
 msgid "{name} logo"
 msgstr "Logo von {name}"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the domain's data (write → read)"
-msgstr "{name} ändert die Daten der Domäne nicht mehr (schreiben → lesen)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the domain's data (read → write)"
-msgstr "{name} ändert jetzt die Daten der Domäne (lesen → schreiben)"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -2769,14 +2753,6 @@ msgstr "Änderungen, die Grasp für jemanden gesendet hat und deren Antwort verl
 msgid "Changes something"
 msgstr "Ändert etwas"
 
-#: src/chat/builds-state.ts
-msgid "changes the domain's data"
-msgstr "ändert die Daten der Domäne"
-
-#: src/chat/builds.tsx
-msgid "Changes the domain's data"
-msgstr "Ändert die Daten der Domäne"
-
 #: src/engines/store-changes.tsx
 msgid "Changes to the domain's stores"
 msgstr "Änderungen an den Speichern der Domäne"
@@ -3304,10 +3280,6 @@ msgstr "Die Adresse konnte nicht kopiert werden"
 #: src/landscape/audit-trail.tsx
 msgid "Could not copy the fingerprint"
 msgstr "Fingerabdruck konnte nicht kopiert werden"
-
-#: src/activity/pending.tsx
-msgid "couldn't be read"
-msgstr "konnte nicht gelesen werden"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
@@ -4137,14 +4109,6 @@ msgstr "Diesen Chat exportieren"
 msgid "Exported the audit trail"
 msgstr "Den Audit-Trail exportiert"
 
-#: src/chat/builds.tsx
-msgid "Exports"
-msgstr "Exporte"
-
-#: src/activity/pending.tsx
-msgid "Exports of {domain}: {covered}"
-msgstr "Exporte von {domain}: {covered}"
-
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
 msgid "Extra high"
@@ -4435,6 +4399,14 @@ msgstr "Aus Ihren Domänen"
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "Aus Ihrem HR- oder Lohnsystem. Microsoft 365 oder Google lässt sich später mit uns verbinden."
+
+#: src/activity/pending.tsx
+msgid "Functions of {domain}, reading and changing its data"
+msgstr "Funktionen von {domain}, die seine Daten lesen und ändern"
+
+#: src/activity/pending.tsx
+msgid "Functions of {domain}, reading its data"
+msgstr "Funktionen von {domain}, die seine Daten lesen"
 
 #: src/brain/brain.ts
 msgid "Gap"
@@ -6404,10 +6376,6 @@ msgstr "Keine aktuell"
 msgid "None found."
 msgstr "Nichts gefunden."
 
-#: src/activity/pending.tsx
-msgid "none now"
-msgstr "derzeit keine"
-
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "None of its rules are in use any more."
 msgstr "Keine ihrer Regeln ist mehr im Einsatz."
@@ -7093,18 +7061,6 @@ msgctxt "the team for people a staff list gives no team"
 msgid "Other"
 msgstr "Sonstige"
 
-#: src/chat/builds-state.ts
-msgid "Other domains may no longer call {name}"
-msgstr "Andere Domänen dürfen {name} nicht mehr aufrufen"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}"
-msgstr "Andere Domänen dürfen jetzt {name} aufrufen"
-
-#: src/chat/builds-state.ts
-msgid "Other domains may now call {name}, which {does}"
-msgstr "Andere Domänen dürfen jetzt {name} aufrufen, das {does}"
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Sonst:"
@@ -7747,10 +7703,6 @@ msgstr "Wird gelesen…"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
 msgstr "Liest"
-
-#: src/chat/builds-state.ts
-msgid "reads the domain's data"
-msgstr "liest die Daten der Domäne"
 
 #: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
@@ -11001,10 +10953,6 @@ msgstr "Was ihn von selbst laufen lässt, lässt sich nicht aus seinem Code lese
 #: src/routes/_shell.onboarding.index.tsx
 msgid "What needs Grasp"
 msgstr "Was Grasp braucht"
-
-#: src/chat/builds.tsx
-msgid "What other domains may call"
-msgstr "Was andere Domänen aufrufen dürfen"
 
 #: src/dashboard/report.ts
 msgid "What ran"
