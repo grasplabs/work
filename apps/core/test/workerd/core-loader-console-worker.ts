@@ -128,15 +128,17 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
     }
   }
   if (route === "/nested") {
-    // An App module where the quiet module's name resolves from a main
-    // in a directory: it can't take the quiet module's place.
+    // App modules named as the quiet module is, beside a main in a
+    // directory and at the top: neither takes the quiet module's place.
     return await runApp(
       quietLoader(env.LOADER).load({
         ...settings,
         mainModule: "src/app.js",
         modules: {
-          "src/app.js": isolateOf(values.nested),
-          "src/grasp-sandbox-quiet.js": "export {};",
+          // The App's own module of that name, imported by its main: kept,
+          // and silenced like any other.
+          "src/app.js": `import { ownModule } from "./grasp-sandbox-quiet.js";\nif (ownModule !== true) throw new Error("not kept");\n${isolateOf(values.nested)}`,
+          "src/grasp-sandbox-quiet.js": `console.log(${JSON.stringify(values.nested)});\nexport const ownModule = true;`,
           "grasp-sandbox-quiet.js": "export {};",
         },
       })
