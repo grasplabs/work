@@ -2533,6 +2533,49 @@ const failedAnswer = (
 });
 
 /**
+ * `sent`'s answer with its usage as the gateway recorded it (`usedBy`):
+ * the provider's counts, with an estimate on top where a failed request's
+ * count fell short of what came of it, priced at the request's pinned
+ * prices, in place of pi's own. So what a chat shows of a reply, answered
+ * or failed, is what its `model.call` audit event says it used and cost.
+ */
+const chargedAnswer = (
+  route: Pick<Route, "ref" | "price">,
+  sent: Sent
+): AssistantMessage => {
+  const { answer } = sent;
+  const used = usedBy(route, sent);
+  const { usage } = answer;
+  return {
+    ...answer,
+    usage: {
+      ...usage,
+      // The estimate goes to the prompt's own tokens, beside the cache's.
+      input: usage.input + used.inputTokens - inputTokens(usage),
+      output: used.outputTokens,
+      totalTokens: used.inputTokens + used.outputTokens,
+      cost: { ...usage.cost, total: used.cost },
+    },
+  };
+};
+
+/**
+ * The context window of the model pi named `model` answered with, in
+ * tokens, from the catalog of the providers the gateway offers; none for
+ * a model it doesn't offer (core's own words, `grasp`).
+ */
+export const contextWindowOf = (model: string): number | undefined => {
+  for (const { catalog } of Object.values(providers)) {
+    const models: Readonly<Record<string, Model<Api>>> = catalog;
+    const found = Object.hasOwn(models, model) ? models[model] : undefined;
+    if (found !== undefined && found.contextWindow > 0) {
+      return found.contextWindow;
+    }
+  }
+  return undefined;
+};
+
+/**
  * Streams one admitted request to `out`, event by event, and records it
  * before its last event: the loop sees an answer only once its audit event
  * is safe. A failure reaches the loop in our own words.
@@ -2583,21 +2626,22 @@ const relayEvents = async (
       out.push({
         ...event,
         error: {
-          ...event.error,
+          ...chargedAnswer(route, sent),
           errorMessage: rateLimited ?? failureMessage(failure),
         },
       });
       return;
     }
     if (event.type === "done") {
+      const sent: Sent = { answer: event.message, ...response };
       await record(
         env,
         route,
-        { answer: event.message, ...response },
+        sent,
         1,
         event.reason === "length" ? "truncated" : "answered"
       );
-      out.push(event);
+      out.push({ ...event, message: chargedAnswer(route, sent) });
       return;
     }
     ({ partial } = event);
@@ -2611,8 +2655,13 @@ const relayEvents = async (
     content: partial?.content ?? [],
     usage: partial?.usage ?? noUsage,
   };
-  await record(env, route, { answer, ...response }, 1, "failed");
-  out.push({ type: "error", reason: "error", error: answer });
+  const sent: Sent = { answer, ...response };
+  await record(env, route, sent, 1, "failed");
+  out.push({
+    type: "error",
+    reason: "error",
+    error: chargedAnswer(route, sent),
+  });
 };
 
 /**

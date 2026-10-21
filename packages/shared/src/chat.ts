@@ -170,6 +170,24 @@ export type ChatReplyEnd =
   | "failed";
 
 /**
+ * What one of the agent's replies used, as the model gateway counted it:
+ * counts only, never content. The prompt it was sent is `input` and the
+ * cache's (`cacheRead`, `cacheWrite`) together: how full the model's
+ * window was, against `contextWindow`.
+ */
+export interface ChatReplyUsage {
+  /** Prompt tokens neither read from nor written to the provider's cache. */
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** US dollars, at the prices the gateway charges budgets by. */
+  cost: number;
+  /** The model's context window, in tokens; null when core doesn't know it. */
+  contextWindow: number | null;
+}
+
+/**
  * One stored message of a chat, oldest first by `id`. The agent's
  * instructions and the APIs it was shown aren't among them.
  */
@@ -185,6 +203,11 @@ export type ChatMessage =
       end: ChatReplyEnd;
       /** Why it failed, in the model gateway's words. */
       error?: string;
+      /**
+       * What the reply used, as the model gateway counted it; none for one
+       * no model wrote (core's own words, after a restart).
+       */
+      usage?: ChatReplyUsage;
       at: string;
     }
   | {

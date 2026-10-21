@@ -1,7 +1,10 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { applyPartial } from "@grasp-os/shared/chat";
 import type {
   ChatPartial,
   ChatProvenance,
+  ChatReplyUsage,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -131,6 +134,32 @@ const shown = (follower: Follower) =>
     role: message.role,
     text: message.text,
   }));
+
+/** Anthropic's models, as pi's catalog gives them. */
+const anthropicModels: Readonly<Record<string, Model<Api>>> = ANTHROPIC_MODELS;
+
+/** The chats' model's context window, as its provider's catalog gives it. */
+const modelWindow =
+  anthropicModels[model.slice(model.indexOf("/") + 1)]?.contextWindow;
+
+/**
+ * A reply's usage as the gateway's record of its request puts it: the
+ * prompt with the cache's tokens, the model's window, and whether the
+ * whole prompt fits in it.
+ */
+const usedOf = (usage: ChatReplyUsage | undefined) => {
+  if (usage === undefined) {
+    return null;
+  }
+  const prompt = usage.input + usage.cacheRead + usage.cacheWrite;
+  return {
+    prompt,
+    output: usage.output,
+    cost: usage.cost,
+    window: usage.contextWindow,
+    fits: prompt < (usage.contextWindow ?? 0),
+  };
+};
 
 describe("chats", () => {
   it("are kept per person: made, listed newest first, renamed and deleted", async () => {
@@ -641,6 +670,68 @@ describe("chats", () => {
       { role: "user", text: "Hi." },
       { role: "assistant", text: "Hi, Ann." },
     ]);
+  });
+
+  it.each([
+    ["answered", says("Hi, Ann.")],
+    // Breaks off with its prompt counted and not its answer: the gateway
+    // estimates the answer's tokens, and so does the reply.
+    ["broken off", { ...says("Hi, Ann, here is a longer answer."), cut: 12 }],
+    // Its prompt partly written to the provider's cache: counted apart.
+    ["cached", { ...says("Hi, Ann."), cacheWrite1h: 150 }],
+  ])(
+    "show what each reply used as the model gateway counted it, %s: its tokens, its cost and the model's window",
+    async (_case, answer) => {
+      const ann = await person();
+      await answering(ann, answer);
+      const chat = await ann.chats.create("Usage");
+      const follower = await follow(ann.chats, chat.id);
+
+      await ann.chats.send(chat.id, { text: "Hi.", model });
+      await settled(follower);
+      const reply = follower.messages().at(-1);
+      // The gateway's own record of the request.
+      const events = await allEvents();
+      const counted = events.find(
+        ({ action, actor }) =>
+          action === "model.call" &&
+          actor.type === "agent" &&
+          actor.onBehalfOf === ann.userId
+      );
+
+      expect(
+        reply?.role === "assistant" ? usedOf(reply.usage) : null
+      ).toStrictEqual({
+        prompt: counted?.model?.inputTokens,
+        output: counted?.model?.outputTokens,
+        cost: counted?.cost?.amount,
+        window: modelWindow,
+        fits: true,
+      });
+      expect(counted?.cost?.amount).toBeGreaterThan(0);
+      // The cache's tokens apart from the prompt's own, as the provider
+      // counted them.
+      const usage = reply?.role === "assistant" ? reply.usage : undefined;
+      expect((usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0)).toBe(
+        answer.cacheWrite1h ?? 0
+      );
+    }
+  );
+
+  it("show no usage for a reply that used nothing: the provider refused it", async () => {
+    const ann = await person();
+    await answering(ann, { status: 400, errorType: "invalid_request_error" });
+    const chat = await ann.chats.create("Refused");
+    const follower = await follow(ann.chats, chat.id);
+
+    await ann.chats.send(chat.id, { text: "Hi.", model });
+    await settled(follower);
+
+    const reply = follower.messages().at(-1);
+    expect({
+      end: reply?.role === "assistant" ? reply.end : null,
+      usage: reply !== undefined && "usage" in reply,
+    }).toStrictEqual({ end: "failed", usage: false });
   });
 
   it("stream a reply as it is written: its code steps, their results, and the answer", async () => {
