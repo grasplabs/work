@@ -219,7 +219,6 @@ const waiting = (ranOut = true) =>
       data: {
         requests: [request],
         directory: { people: new Map(), apps: new Map() },
-        exports: new Map(),
       },
     },
     dependencies: {

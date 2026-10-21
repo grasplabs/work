@@ -34,7 +34,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { BuiltinBlueprint } from "#blueprints";
 
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
-import { exportsIn } from "./app-exports.ts";
+import { refuseV1Server } from "./app-v1-server.ts";
 import {
   appFor,
   blueprintFiles,
@@ -588,6 +588,9 @@ export const createFromBlueprint = async (
     blueprint.permissions,
     blueprint.id
   );
+  // A blueprint marked from a version holding the v1 server's files: no
+  // App is created from it as none is committed with them.
+  refuseV1Server(files);
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
   await storeTree(env, app, takenCode);
@@ -645,12 +648,11 @@ export const createFromBlueprint = async (
     workflows: workflowsIn(files),
     screens: screensIn(files),
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
-    exports: exportsIn(files),
     proposedBy: null,
     // Typed as the code it copies was: the requests it is created with,
     // and over them the source version's binding names, which a copy
     // keeps though it asks only for what it may declare (no connection or
-    // other App's exports), and which hold even where a name the
+    // workflow), and which hold even where a name the
     // blueprint declares is now another kind. Types grant nothing: a call
     // is refused until the copy holds the permission.
     workflowBindings: {
@@ -1001,7 +1003,6 @@ export const acceptBlueprintUpdate = async (
     workflows: workflowsIn(files),
     screens: screensIn(files),
     workflowCalls: workflowCallsIn(Object.fromEntries(files)),
-    exports: exportsIn(files),
     proposedBy: null,
     workflowBindings: await appBindingKinds(env, appId),
   };
