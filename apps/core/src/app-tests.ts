@@ -372,7 +372,7 @@ const createFixtureStore = async (
     version: release.manifest.resourceVersion,
     createdAt: new Date(),
   });
-  const store = openFixtureStore(env, id);
+  const store = await openFixtureStore(env, id);
   await store.defineTables(manifestText(release.app.schema), {
     resourceId: app,
     resourceVersion: release.manifest.resourceVersion,

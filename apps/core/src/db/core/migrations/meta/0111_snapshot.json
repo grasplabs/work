@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "28a056f0-c26e-4043-b787-3d3380a3fd8d",
+  "id": "3640e2e0-e2a4-4aa9-bb7d-a523902bcd1a",
   "prevId": "3f38fee9-fcc4-47ba-8d7f-5cb16627bb43",
   "tables": {
     "access_revocations": {
@@ -884,6 +884,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "approvals": {
+          "name": "approvals",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
         }
       },
       "indexes": {
