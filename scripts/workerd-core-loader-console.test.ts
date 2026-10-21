@@ -142,20 +142,22 @@ const core :Workerd.Worker = (
   // message: the same isolate loaded as it is reports it, which shows the
   // path is read; silenced, it reports nothing.
   it.each([
-    ["setImmediate"],
-    ["nodeSetTimeout"],
-    ["nodeSetImmediate"],
-    ["waitUntil"],
+    ["setImmediate", ""],
+    ["nodeSetTimeout", ""],
+    ["nodeSetImmediate", ""],
+    ["waitUntil", ""],
+    // Only `no_nodejs_compat` set: `node:timers` is still there.
+    ["nodeSetTimeout", "-half"],
   ])(
-    "prints nothing an isolate's %s leaves uncaught, where the isolate loaded as it is does",
-    async (name) => {
+    "prints nothing an isolate's %s leaves uncaught (%s), where the isolate loaded as it is does",
+    async (name, half) => {
       const run = async (route: string) => {
         const response = await fetch(new URL(route, served.url));
         return z.object({ answered: z.string() }).parse(await response.json())
           .answered;
       };
-      const quiet = await run(`/path/${name}`);
-      const loud = await run(`/loud-path/${name}`);
+      const quiet = await run(`/path${half}/${name}`);
+      const loud = await run(`/loud-path${half}/${name}`);
       await sleep(SETTLE_MS);
 
       expect({

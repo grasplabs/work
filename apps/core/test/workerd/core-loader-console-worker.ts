@@ -152,13 +152,16 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
       })
     );
   }
-  const path = /^\/(?<loud>loud-)?path\/(?<name>\w+)$/u.exec(route)?.groups;
+  const path = /^\/(?<loud>loud-)?path(?<half>-half)?\/(?<name>\w+)$/u.exec(
+    route
+  )?.groups;
   if (path?.name !== undefined && Object.hasOwn(paths, path.name)) {
     const value = `${path.loud === undefined ? "quiet" : "loud"}-${path.name}-6d1f`;
     const code = {
       ...settings,
-      // No `nodejs_compat`: its date gives the isolate `node:` modules.
-      compatibilityFlags: [],
+      // No `nodejs_compat`: its date gives the isolate `node:` modules, and
+      // turning off only `no_nodejs_compat`'s half leaves `node:timers`.
+      compatibilityFlags: path.half === undefined ? [] : ["no_nodejs_compat"],
       mainModule: "app.js",
       modules: { "app.js": pathIsolateOf(path.name, value) },
     };

@@ -70,14 +70,20 @@ const nodejsByDefaultFrom = "2026-08-04";
 /**
  * Whether an isolate loaded with `settings` has `node:` modules: asked for
  * (`nodejs_compat`), or by default from {@link nodejsByDefaultFrom} on,
- * unless `no_nodejs_compat` turns them off.
+ * unless turned off. `no_nodejs_compat` alone leaves `node:timers` there
+ * (its `_v2` half stays on by date), so only both off count as none: a
+ * module the quiet module would import that isn't there fails the load,
+ * one it doesn't that is there goes unquieted.
  */
 export const hasNodeModules = (settings: {
   readonly compatibilityDate: string;
   readonly compatibilityFlags?: readonly string[];
 }): boolean => {
   const flags = settings.compatibilityFlags ?? [];
-  if (flags.includes("no_nodejs_compat")) {
+  if (
+    flags.includes("no_nodejs_compat") &&
+    flags.includes("no_nodejs_compat_v2")
+  ) {
     return false;
   }
   return (
