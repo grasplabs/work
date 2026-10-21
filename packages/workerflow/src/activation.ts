@@ -37,12 +37,20 @@
 // left of the alarm handler's wall time (config.ts); one that doesn't is
 // left for a fresh activation, whose first attempt always runs.
 //
-// Waits come one at a time. A second sleep or wait reached while one is
-// pending ends the run with a WorkflowParallelWaitError, and a replay that
-// reaches a wait other than the one the journal holds (another event type
-// or duration, or a new wait while the run's suspended one still waits)
-// ends it with a WorkflowReplayMismatchError: a `Halt`, through the same
-// typed outcome, never a loop of activations.
+// Waits may wait together, and beside steps (GRA-955). A sleep or a wait
+// that isn't due is journaled, with its deadline, the first time it is
+// reached, and parks as a step's retry does: the activation suspends only
+// once every call still out is parked, until the earliest of them, so no
+// step out at its effect is suspended under, and every wait raced or
+// awaited together is reached and journaled first. An event accepted for
+// a parked wait while the activation still ran wakes the run at once. A
+// wait reached inside a step's callback ends the run with a
+// WorkflowParallelWaitError: its step would stay out while it waits. A
+// replay that reaches a wait other than the one the journal holds (another
+// event type or duration), or that would suspend without reaching a wait
+// or a retry the journal holds still waiting, ends with a
+// WorkflowReplayMismatchError: a `Halt`, through the same typed outcome,
+// never a loop of activations.
 //
 // A pause asked for while the activation runs (the run is
 // `waitingForPause`, run.ts) is taken at the safe boundaries: no attempt is
@@ -200,11 +208,15 @@ export interface ActivationLimits {
 /** What a sensitive step's error message is, wherever it is kept. */
 const redactedMessage = "[REDACTED]";
 
-/** A step, sleep or wait reached beside a sleep or wait still pending. */
-const parallelWait = (kind: string, name: string): Error =>
+/**
+ * A sleep or a wait reached from inside a step's callback: its step is
+ * out at its effect for as long as it waits, so the run could never
+ * suspend under it without the effect going out again on replay.
+ */
+const waitInStep = (kind: string, name: string): Error =>
   namedError(
     "WorkflowParallelWaitError",
-    `The ${kind} ${JSON.stringify(name)} was reached while a sleep or wait of the run was pending, or a wait beside a step still out; parallel waits aren't supported yet`
+    `The ${kind} ${JSON.stringify(name)} was reached inside a step's callback, which can't wait durably: its step stays out at its effect while it waits`
   );
 
 /** A replay that reaches what the journal doesn't hold. */
@@ -437,10 +449,28 @@ const delayFailure = (identity: StepIdentity, reason: string): Delay => ({
 type WaitOutcome =
   | { ok: true; event: EventRow | undefined }
   | { ok: false; error: string }
-  | { suspend: number }
-  | { pause: true }
+  /**
+   * Not due: parked until `wake`, the event wait's type given; a wait
+   * reached while a pause is asked for parks unjournaled, due at once.
+   */
+  | { park: number; eventType: string | null; deadline: number }
   | { mismatch: string }
   | null;
+
+/** A step's identity as a key: its type, name and occurrence. */
+const seenKey = ({
+  type,
+  name,
+  occurrence,
+}: Pick<StepIdentity, "type" | "name" | "occurrence">): string =>
+  JSON.stringify([type, name, occurrence]);
+
+/**
+ * What deciding to suspend came to: the run let go of (suspended or
+ * paused), a replay that strayed, or nothing for an activation no longer
+ * current.
+ */
+type Suspension = "suspended" | "paused" | { strayed: string } | null;
 
 /** What a wait journals when it is first reached. */
 interface WaitPlan {
@@ -562,13 +592,12 @@ const timeOf = (value: unknown): number | undefined => {
 };
 
 /**
- * Why the journaled wait `step` isn't the one `plan` describes, or why
- * the journal holds another wait still waiting: waits run one at a time,
- * so a replay that reaches this one while another waits has strayed
- * from the run it replays. Undefined when the journal agrees.
+ * Why the journaled wait `step` isn't the one `plan` describes: a replay
+ * that reaches it otherwise has strayed from the run it replays.
+ * Undefined when the journal agrees, and for a wait it doesn't hold yet.
+ * Waits may wait together, so others waiting are no mismatch.
  */
 const mismatchIn = (
-  sql: SqlStorage,
   identity: StepIdentity,
   step: StepRow | undefined,
   plan: WaitPlan
@@ -584,21 +613,6 @@ const mismatchIn = (
       return `${named} was given ${String(step.duration_ms)}ms, and is now given ${String(plan.durationMs)}ms`;
     }
     return undefined;
-  }
-  // A new wait: the run's waits come one at a time, so none may still be
-  // waiting. One that is was never reached by this replay.
-  const [other] = sql
-    .exec<{
-      type: string;
-      name: string;
-      state: string;
-    }>(
-      "SELECT type, name, state FROM steps WHERE state IN ('waiting', 'retrying') LIMIT 1"
-    )
-    .toArray();
-  if (other !== undefined) {
-    const still = other.state === "retrying" ? "waiting to retry" : "waiting";
-    return `it reached ${named} while the ${other.type} ${JSON.stringify(other.name)} it suspended on is still ${still}`;
   }
   return undefined;
 };
@@ -617,15 +631,28 @@ export class Activation {
   readonly stopped: Promise<Stop>;
   readonly #occurrences = new Map<string, number>();
   /**
-   * A sleep or wait of this activation that hasn't settled. One that
-   * suspended never does, so this stays set once the activation let go.
+   * Sleeps and waits of this activation that haven't settled: reached and
+   * being resolved, or parked. One that parked never settles.
    */
-  #waitPending = false;
+  #waitsOut = 0;
   /**
-   * `do` steps of this activation whose outcome isn't journaled yet: what
-   * a sleep or a wait may not be reached beside.
+   * This activation's parked waits: sleeps and event waits that aren't
+   * due, each until its deadline. They count among the waits out; once
+   * they and the parked steps are all that is out, the activation
+   * suspends until the earliest is due.
    */
-  #stepsInFlight = 0;
+  #parkedWaits = 0;
+  /**
+   * The parked event waits, by their event type and deadline: an event
+   * accepted for one before the activation suspends wakes the run at once.
+   */
+  readonly #parkedEventWaits: { eventType: string; deadline: number }[] = [];
+  /**
+   * The steps this activation reached, by identity (`seenKey`): a wait or
+   * a retry the journal holds still waiting that it never reached by the
+   * time it would suspend is a replay that strayed (`#strayedIn`).
+   */
+  readonly #seen = new Set<string>();
   /**
    * `do` calls of this activation that haven't returned: out at their
    * effect, parked, or handing their outcome back to a continuation that
@@ -1654,27 +1681,73 @@ export class Activation {
    * the parked steps are all that is out and no wait is pending. The wake
    * is journaled and the alarm set in one synchronous turn.
    */
+  /**
+   * Why this activation, about to suspend, has strayed from its journal:
+   * a wait the journal holds still waiting, or a step waiting to retry,
+   * that its replay never reached. Waits and retries may wait together,
+   * but one of them the definition no longer reaches isn't the run the
+   * journal recorded. Undefined when every one was reached. A compensating
+   * activation replays only to get rollbacks back: none applies.
+   */
+  #strayedIn(sql: SqlStorage): string | undefined {
+    if (this.#compensating) {
+      return undefined;
+    }
+    const waiting = sql
+      .exec<{
+        type: StepType;
+        name: string;
+        occurrence: number;
+        state: string;
+      }>(
+        "SELECT type, name, occurrence, state FROM steps WHERE state IN ('waiting', 'retrying') AND type != 'rollback'"
+      )
+      .toArray();
+    const missed = waiting.find((step) => !this.#seen.has(seenKey(step)));
+    if (missed === undefined) {
+      return undefined;
+    }
+    const still = missed.state === "retrying" ? "waiting to retry" : "waiting";
+    return `it never reached the ${missed.type} ${JSON.stringify(missed.name)}, which is still ${still}`;
+  }
+
   #suspendIfParked(): void {
     const quiet =
       !this.#over &&
-      this.#parkedCount > 0 &&
-      !this.#waitPending &&
-      this.#callsOut === this.#parkedCount;
+      this.#parkedCount + this.#parkedWaits > 0 &&
+      this.#callsOut === this.#parkedCount &&
+      this.#waitsOut === this.#parkedWaits;
     if (!quiet) {
       return;
     }
-    const wake = this.#parkedWake;
+    let wake = this.#parkedWake;
     const letGo = this.#write(() =>
-      this.#storage.transactionSync((): "suspended" | "paused" | null => {
+      this.#storage.transactionSync((): Suspension => {
         if (!this.#current()) {
           return null;
+        }
+        const strayed = this.#strayedIn(this.#storage.sql);
+        if (strayed !== undefined) {
+          return { strayed };
         }
         const now = Date.now();
         if (this.#pausing()) {
           this.#pauseIn(this.#storage.sql, now);
           return "paused";
         }
-        this.#suspendIn(this.#storage.sql, now, wake);
+        // An event accepted for a parked wait while this activation ran
+        // woke no one (`run.ts` wakes only a waiting run): the run wakes
+        // for it now, not at the wait's deadline.
+        const { sql } = this.#storage;
+        if (
+          this.#parkedEventWaits.some(
+            ({ eventType, deadline }) =>
+              readNextEvent(sql, eventType, deadline) !== undefined
+          )
+        ) {
+          wake = Math.min(wake, now);
+        }
+        this.#suspendIn(sql, now, wake);
         return "suspended";
       })
     );
@@ -1683,6 +1756,10 @@ export class Activation {
     }
     if (letGo === null) {
       this.#letGo();
+      return;
+    }
+    if (typeof letGo === "object") {
+      this.#haltNow(replayMismatch(letGo.strayed));
       return;
     }
     this.#over = true;
@@ -1698,25 +1775,11 @@ export class Activation {
     if (this.#compensating) {
       return await this.#replayDo(name, rest);
     }
-    if (this.#waitPending) {
-      return await this.#halt(parallelWait("step", name));
-    }
-    this.#stepsInFlight += 1;
     this.#callsOut += 1;
-    let inFlight = true;
-    // Out of flight once its outcome is journaled: a wait started after
-    // that can't cost the step its effect. Once, whichever way it lands.
-    const land = (): void => {
-      if (inFlight) {
-        inFlight = false;
-        this.#stepsInFlight -= 1;
-      }
-    };
     try {
-      return await this.#doAlone(name, rest, land);
+      return await this.#doAlone(name, rest);
     } finally {
       // Never reached by a step whose call never settles.
-      land();
       this.#callsOut -= 1;
       // The calls still out may all be parked now, once the continuation
       // this outcome goes to has had its turn to reach its next step.
@@ -1724,11 +1787,7 @@ export class Activation {
     }
   }
 
-  async #doAlone(
-    name: string,
-    rest: unknown[],
-    land: () => void
-  ): Promise<unknown> {
+  async #doAlone(name: string, rest: unknown[]): Promise<unknown> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
       return await never();
@@ -1739,6 +1798,7 @@ export class Activation {
     assertStepName(name);
     const { work, config } = readCall(rest);
     const identity = this.#occurrence("do", name);
+    this.#seen.add(seenKey(identity));
     const journaled = this.#write(() => readStep(this.#storage.sql, identity));
     if (journaled === failed) {
       return await never();
@@ -1753,22 +1813,19 @@ export class Activation {
       );
     }
     if (journaled?.state === "succeeded" && journaled.value !== null) {
-      land();
       // What this step's work returned, through the codec or from storage,
       // as the attempt that journaled it returned it.
       return await this.#result(journaled.ordinal, journaled.value);
     }
     if (journaled?.state === "failed" && journaled.error !== null) {
-      land();
       throw rebuild(journaled.error);
     }
     if (journaled?.state === "fatal" && journaled.error !== null) {
       // The step's result couldn't be kept, and the run ends with that,
       // however this replay got here: never to the definition.
-      land();
       return await this.#halt(rebuild(journaled.error));
     }
-    return await this.#attempts(identity, config, work, land);
+    return await this.#attempts(identity, config, work);
   }
 
   /**
@@ -1778,8 +1835,7 @@ export class Activation {
   async #attempts(
     identity: StepIdentity,
     config: StepConfig,
-    work: StepWork,
-    land: () => void
+    work: StepWork
   ): Promise<unknown> {
     const next = this.#write(() => this.#nextAttempt(identity, config));
     if (next === failed) {
@@ -1840,9 +1896,8 @@ export class Activation {
       return await this.#refuse();
     }
     if (landed === "retry") {
-      return await this.#attempts(identity, config, work, land);
+      return await this.#attempts(identity, config, work);
     }
-    land();
     await this.#renewWatchdog();
     if ("failed" in landed) {
       throw rebuild(landed.failed);
@@ -1917,15 +1972,15 @@ export class Activation {
       const now = Date.now();
       if (this.#pausing()) {
         // The safe boundary, before the wait is journaled or takes an
-        // event. Waits come with no step out (#wait), so nothing of this
-        // activation is out: the run is paused here.
-        this.#pauseIn(sql, now);
-        return { pause: true };
+        // event: it parks, due at once, and the run pauses once nothing
+        // else of this activation is out (`#suspendIfParked`). Should the
+        // pause be called off first, the next activation reaches it again.
+        return { park: now, eventType: null, deadline: now };
       }
       let step = readStep(sql, identity);
       // Checked before anything is written: a replay that strayed leaves
       // the journal as it found it.
-      const mismatch = mismatchIn(sql, identity, step, plan);
+      const mismatch = mismatchIn(identity, step, plan);
       if (mismatch !== undefined) {
         return { mismatch };
       }
@@ -1971,7 +2026,11 @@ export class Activation {
         return { ok: true, event: { ...event, consumed_by: step.ordinal } };
       }
       if (now < step.deadline) {
-        return { suspend: this.#suspendIn(sql, now, step.deadline) };
+        return {
+          park: step.deadline,
+          eventType: step.event_type,
+          deadline: step.deadline,
+        };
       }
       if (step.type === "sleep") {
         sql.exec(
@@ -1999,35 +2058,28 @@ export class Activation {
     if (this.#compensating) {
       return await this.#replayWait(plan);
     }
-    if (this.#waitPending || this.#stepsInFlight > 0) {
-      // Racing a wait against a sleep would quietly lose the sleep: the
-      // first suspends the activation, and the second is never reached. A
-      // wait beside a step out at its effect would suspend under it, and
-      // the effect would go out again on replay. Until parallel waits are
-      // built, the run ends saying so.
-      return await this.#halt(parallelWait(plan.type, plan.name));
+    // From inside a step's callback, a wait would hold its step out at its
+    // effect for as long as it waits: never quiet, never suspended.
+    if (attempts.getStore()?.live === true) {
+      return await this.#halt(waitInStep(plan.type, plan.name));
     }
-    this.#waitPending = true;
-    let pending = true;
-    // No longer pending once its outcome is journaled. Once.
-    const land = (): void => {
-      if (pending) {
-        pending = false;
-        this.#waitPending = false;
-      }
-    };
+    // A wait that isn't due parks, as a step's retry does: the
+    // activation suspends only once everything still out is parked, so
+    // no step out at its effect is suspended under, and every sleep or
+    // wait raced or awaited together is reached and journaled first.
+    this.#waitsOut += 1;
     try {
-      return await this.#waitAlone(plan, land);
+      return await this.#waitAlone(plan);
     } finally {
-      // Never reached by a wait that suspended: its call never settles.
-      land();
+      // Never reached by a wait that parked: its call never settles.
+      this.#waitsOut -= 1;
+      // What is still out may all be parked now, once the continuation
+      // this outcome goes to has had its turn to reach its next call.
+      this.#checkWhenQuiet();
     }
   }
 
-  async #waitAlone(
-    plan: WaitPlan,
-    land: () => void
-  ): Promise<EventRow | undefined> {
+  async #waitAlone(plan: WaitPlan): Promise<EventRow | undefined> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
       return await never();
@@ -2036,6 +2088,7 @@ export class Activation {
       return await this.#refuse();
     }
     const identity = this.#occurrence(plan.type, plan.name);
+    this.#seen.add(seenKey(identity));
     const outcome = this.#write(() => this.#resolveWait(identity, plan));
     if (outcome === failed) {
       return await never();
@@ -2046,20 +2099,18 @@ export class Activation {
     if ("mismatch" in outcome) {
       return await this.#halt(replayMismatch(outcome.mismatch));
     }
-    if ("suspend" in outcome) {
-      this.#over = true;
-      // The wake goes with the write that suspended the run.
-      await this.#arm(outcome.suspend);
-      this.#stop(suspended);
+    if ("park" in outcome) {
+      this.#parkedWaits += 1;
+      this.#parkedWake = Math.min(this.#parkedWake, outcome.park);
+      if (outcome.eventType !== null) {
+        this.#parkedEventWaits.push({
+          eventType: outcome.eventType,
+          deadline: outcome.deadline,
+        });
+      }
+      this.#checkWhenQuiet();
       return await never();
     }
-    if ("pause" in outcome) {
-      this.#over = true;
-      await this.#disarm();
-      this.#stop(suspended);
-      return await never();
-    }
-    land();
     await this.#renewWatchdog();
     if (!outcome.ok) {
       throw rebuild(outcome.error);
@@ -2223,7 +2274,7 @@ export class Activation {
         ? undefined
         : {
             row,
-            mismatch: mismatchIn(sql, identity, row, plan),
+            mismatch: mismatchIn(identity, row, plan),
             event: readConsumedEvent(sql, row.ordinal),
           };
     });
@@ -2297,19 +2348,10 @@ export class Activation {
     };
     // Counted as `#do` counts a step: a parked retry suspends the run once
     // it is all that is out.
-    this.#stepsInFlight += 1;
     this.#callsOut += 1;
-    let inFlight = true;
-    const land = (): void => {
-      if (inFlight) {
-        inFlight = false;
-        this.#stepsInFlight -= 1;
-      }
-    };
     try {
-      await this.#attempts(identity, registration.config, work, land);
+      await this.#attempts(identity, registration.config, work);
     } finally {
-      land();
       this.#callsOut -= 1;
       this.#checkWhenQuiet();
     }

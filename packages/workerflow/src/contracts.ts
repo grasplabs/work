@@ -293,16 +293,12 @@ export interface WorkflowStep {
    * hours when it is missing or falsy, 0 included, as on Cloudflare). Each
    * replay returns the same event, or rejects the same way.
    *
-   * Sleeps and waits run one at a time, and never beside a step, until
-   * parallel waits are built. The run ends with a
-   * WorkflowParallelWaitError when a definition reaches:
-   *
-   * - a sleep or a wait while another is pending (say
-   *   `Promise.race([waitForEvent(…), sleep(…)])`);
-   * - a sleep or a wait while a `do` step is out, whether at its effect or
-   *   waiting for its retry, a sleep or a wait called from inside a step's
-   *   callback included, as that step is out;
-   * - a `do` step while a sleep or a wait is pending.
+   * Sleeps and waits may wait together, and beside `do` steps (say
+   * `Promise.race([waitForEvent(…), sleep(…)])`, or `Promise.all` of a
+   * step and a sleep): the run suspends only once everything still out is
+   * waiting, until the earliest of them. A sleep or a wait called from
+   * inside a step's callback ends the run with a WorkflowParallelWaitError,
+   * as that step would stay out at its effect while it waits.
    *
    * `do` steps may run side by side, and a step's callback may call `do`
    * itself while its attempt is out; a call from a callback whose attempt

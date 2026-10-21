@@ -992,6 +992,66 @@ export const definitions: Record<string, WorkflowDefinition> = {
       return await doing;
     },
   },
+  // Two sleeps awaited together: the first the duration the params say,
+  // the second a second longer.
+  naps: {
+    run: async (event, step) => {
+      const first = Number(durationIn(event.payload, 200));
+      await Promise.all([
+        step.sleep("first", first),
+        step.sleep("second", first + 1000),
+      ]);
+      return "slept";
+    },
+  },
+  // A wait for "go" beside a step the test holds out at its effect.
+  listens: {
+    run: async (event, step) => {
+      const [heard, done] = await Promise.all([
+        step.waitForEvent("go", { type: "go", timeout: "1 hour" }),
+        step.do(
+          "slow",
+          async (context) => await effect(event.instanceId, "slow", context)
+        ),
+      ]);
+      return { payload: heard.payload, done };
+    },
+  },
+  // A step that fails its first attempt and retries soon, beside a
+  // longer sleep.
+  "retry-nap": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      return await Promise.all([
+        step.do(
+          "flaky",
+          {
+            retries: {
+              limit: 1,
+              delay: "1 second",
+              backoff: "constant",
+            },
+          },
+          async (context) => {
+            const receipt = await effect(instanceId, "flaky", context);
+            if (context.attempt === 1) {
+              throw namedError("FlakyError", "attempt 1 failed");
+            }
+            return receipt;
+          }
+        ),
+        step.sleep("nap", 2500),
+      ]);
+    },
+  },
+  // A sleep called from inside a step's callback.
+  "sleep-in-step": {
+    run: async (_event, step) =>
+      await step.do("outer", async () => {
+        await step.sleep("inside", 1000);
+        return "slept";
+      }),
+  },
   // A wait raced against a sleep, inside the author's own handlers.
   races: {
     run: async (event, step) => {
