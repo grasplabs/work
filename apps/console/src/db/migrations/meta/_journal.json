@@ -106,6 +106,13 @@
       "when": 1792571315781,
       "tag": "0014_client_resources",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792573991614,
+      "tag": "0015_client_resource_create_requests",
+      "breakpoints": true
     }
   ]
 }

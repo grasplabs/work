@@ -439,6 +439,13 @@ export const clientResources = sqliteTable(
     physicalName: text("physical_name").notNull(),
     /** The provider's id for it once observed, such as a D1 database's uuid. */
     providerId: text("provider_id"),
+    /**
+     * The run that last asked the provider to create it; null until one
+     * did. A resource found under its name is adopted only after such a
+     * request (a create whose answer was lost), never otherwise
+     * (src/hosting/provision.ts).
+     */
+    createRequestedBy: text("create_requested_by"),
     /** Where its data is kept, as its policy set it at allocation. */
     jurisdiction: text().notNull(),
     /** The deployment id that owns it: nothing else may adopt it. */
