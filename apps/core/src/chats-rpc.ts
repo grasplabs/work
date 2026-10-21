@@ -20,6 +20,7 @@ import type {
   PreviewBundle,
   ProjectDocument,
 } from "@grasp-os/shared/chat";
+import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import {
   authErrors,
   internalErrors,
@@ -55,6 +56,7 @@ import { gatewaySettings, modelEffortsOf } from "./models.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { relayPreviewStream } from "./preview-stream-relay.ts";
+import { previewLoadMsOf } from "./preview-updates.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type { LiveReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -242,6 +244,15 @@ const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
     return { result: answered.answer.result, reads: answered.reads };
   },
 });
+
+/** Settles once `promise` does, however it does. */
+const settledOf = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch {
+    // Its own caller hears how it failed.
+  }
+};
 
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   readonly #env: Env;
@@ -544,48 +555,143 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   ): Promise<PreviewBundle> {
     return await withPerson(this.#check, async (by) => {
       const { id, name } = await appFor(this.#env, by, app, "builder");
-      const draft = await this.#chatsOf(by.userId).previewDraft(
+      // One update of the preview loads at a time, and one waits, the
+      // newest (preview-updates.ts).
+      const chats = this.#chatsOf(by.userId);
+      const token = await chats.takePreviewUpdate(
         chatIdOf(chatId),
         by.userId,
         id
       );
-      const files = await draftFiles(this.#env, id, draft);
-      const screens = screensIn(files);
-      if (screens.length === 0) {
-        throw screenErrors.create("screen.not_found");
+      if (token === null) {
+        throw appErrors.create("app.preview_superseded");
       }
-      // A draft of spec 8's layout: its screens import the references its
-      // draft release generates, the very release their calls run on.
-      const withReferences = await withReferencesText(
-        Object.fromEntries(files),
-        async () =>
-          (await this.#chatsOf(by.userId).previewReferences(
-            chatIdOf(chatId),
-            by.userId,
-            id,
-            draft.revision
-          )) ?? undefined
-      );
-      const built = await screenCode(
-        this.#env,
-        withReferences,
-        screen ?? screens[0],
-        null,
-        id
-      );
-      // A preview reads no real data, so no approval decides it; its
-      // frame still runs exactly this build and nothing else.
-      await stageFrame(this.#env, built.artifact, built.code);
-      return {
-        app: id,
-        name,
-        revision: draft.revision,
-        screens,
-        screen: built.screen,
-        artifact: built.artifact,
-        frameToken: await frameAccess(this.#env, built.artifact),
-      };
+      // Given back once the load itself has stopped, however long after
+      // its caller heard it was too slow: no two build at once.
+      let stopped: Promise<unknown> = Promise.resolve();
+      try {
+        // A caller gone while it waited never says so: its place is free
+        // again soon (preview-updates.ts).
+        const confirmed = await chats.confirmPreviewUpdate(
+          chatIdOf(chatId),
+          by.userId,
+          id,
+          token
+        );
+        if (!confirmed) {
+          throw appErrors.create("app.preview_superseded");
+        }
+        // Ends before its place does (preview-updates.ts): a load that
+        // stalls stops at its next step.
+        const limit = timeLimit(previewLoadMsOf(this.#env));
+        const loading = this.#loadPreview(
+          by,
+          chatId,
+          id,
+          name,
+          screen,
+          limit.signal
+        );
+        stopped = settledOf(loading);
+        try {
+          return await Promise.race([loading, whenAborted(limit.signal)]);
+        } catch (error) {
+          if (limit.signal.aborted) {
+            throw screenErrors.create("screen.build_slow");
+          }
+          throw error;
+        } finally {
+          limit.clear();
+        }
+      } finally {
+        void this.#settleOnceStopped(stopped, by, chatId, id, token);
+      }
     });
+  }
+
+  /**
+   * Gives back place `token` of `chatId`'s preview of App `id` once its
+   * load has `stopped`. Housekeeping: a place never given back frees
+   * itself once its lease ends, so a failure here is only logged.
+   */
+  async #settleOnceStopped(
+    stopped: Promise<unknown>,
+    by: Identity,
+    chatId: string,
+    id: AppId,
+    token: string
+  ): Promise<void> {
+    await stopped;
+    try {
+      await this.#chatsOf(by.userId).settlePreviewUpdate(
+        chatIdOf(chatId),
+        by.userId,
+        id,
+        token
+      );
+    } catch (error) {
+      log.warn("app.preview_settle_failed", {
+        app: id,
+        ...errorFields(error),
+      });
+    }
+  }
+
+  /** The bundle of `chatId`'s preview of App `id`, built from its draft now, until `signal` stops it. */
+  async #loadPreview(
+    by: Identity,
+    chatId: string,
+    id: AppId,
+    name: string,
+    screen: string | undefined,
+    signal: AbortSignal
+  ): Promise<PreviewBundle> {
+    const draft = await this.#chatsOf(by.userId).previewDraft(
+      chatIdOf(chatId),
+      by.userId,
+      id
+    );
+    signal.throwIfAborted();
+    const files = await draftFiles(this.#env, id, draft);
+    signal.throwIfAborted();
+    const screens = screensIn(files);
+    if (screens.length === 0) {
+      throw screenErrors.create("screen.not_found");
+    }
+    // A draft of spec 8's layout: its screens import the references its
+    // draft release generates, the very release their calls run on.
+    const withReferences = await withReferencesText(
+      Object.fromEntries(files),
+      async () =>
+        (await this.#chatsOf(by.userId).previewReferences(
+          chatIdOf(chatId),
+          by.userId,
+          id,
+          draft.revision
+        )) ?? undefined
+    );
+    signal.throwIfAborted();
+    const built = await screenCode(
+      this.#env,
+      withReferences,
+      screen ?? screens[0],
+      null,
+      id
+    );
+    // A preview reads no real data, so no approval decides it; its
+    // frame still runs exactly this build and nothing else.
+    signal.throwIfAborted();
+    await stageFrame(this.#env, built.artifact, built.code);
+    signal.throwIfAborted();
+    return {
+      app: id,
+      name,
+      revision: draft.revision,
+      screens,
+      screen: built.screen,
+      artifact: built.artifact,
+      frameToken: await frameAccess(this.#env, built.artifact),
+    };
   }
 
   /**

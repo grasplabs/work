@@ -601,6 +601,8 @@ export const appErrors = defineErrorFamily({
   "app.no_draft": "This chat has no draft of that App to preview.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
+  "app.preview_superseded":
+    "A newer load of this preview replaced this one while it waited. The newer one shows the draft.",
   "app.preview_side_effect":
     "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to Knowledge.",
 });

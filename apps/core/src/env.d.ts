@@ -117,6 +117,8 @@ interface __BaseEnv_Env {
   APP_TEST_LIMITS_MS?: string;
   /** Tests only: a shorter bound on one build of a save (src/save-builds.ts). */
   BUILD_WAIT_MS?: string;
+  /** Tests only: a shorter bound on one load of a draft's preview (src/preview-updates.ts). */
+  PREVIEW_LOAD_MS?: string;
   /**
    * Tests only: a shorter bound on one load of a release, before it is
    * taken for abandoned (src/app-releases.ts).
