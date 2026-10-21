@@ -6,8 +6,18 @@ import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 // the prototype's (`data/dashboard.ts`, `components/dashboard/
 // widget-board.tsx`). Each change is a new list; the board saves it whole.
 
-/** The board as it begins, and as it is for anyone who never changed theirs. */
-export const defaultWidgets: readonly StandardWidgetId[] = standardWidgetIds;
+/** The widgets only admins are offered: what the models cost, which core reads only to them. */
+const adminWidgets: ReadonlySet<StandardWidgetId> = new Set(["spend"]);
+
+/**
+ * The widgets Grasp offers this person, in the order the board begins
+ * with: every one to admins. It is their board as it begins, and as it is
+ * if they never changed it.
+ */
+export const offeredWidgets = (admin: boolean): readonly StandardWidgetId[] =>
+  admin
+    ? standardWidgetIds
+    : standardWidgetIds.filter((widget) => !adminWidgets.has(widget));
 
 /**
  * Moves `id` to place `to`, as dragging it there does: the ones between
@@ -53,16 +63,17 @@ export const addWidget = (
 
 /** Whether the board is other than it began: other widgets, or in another order. */
 export const differsFromDefault = (
-  widgets: readonly StandardWidgetId[]
+  widgets: readonly StandardWidgetId[],
+  offered: readonly StandardWidgetId[]
 ): boolean =>
-  widgets.length !== defaultWidgets.length ||
-  widgets.some((widget, index) => widget !== defaultWidgets[index]);
+  widgets.length !== offered.length ||
+  widgets.some((widget, index) => widget !== offered[index]);
 
-/** The widgets Grasp has that aren't on the board, in the order the board begins with. */
+/** The widgets offered that aren't on the board, in the order the board begins with. */
 export const missingWidgets = (
-  widgets: readonly StandardWidgetId[]
-): StandardWidgetId[] =>
-  defaultWidgets.filter((widget) => !widgets.includes(widget));
+  widgets: readonly StandardWidgetId[],
+  offered: readonly StandardWidgetId[]
+): StandardWidgetId[] => offered.filter((widget) => !widgets.includes(widget));
 
 /**
  * The grid of blocks as it stands on screen: where it is, its columns,

@@ -1,5 +1,6 @@
 import type { App } from "@grasp-os/shared/apps";
 import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
+import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -33,7 +34,6 @@ import { byState, enginesOf, stateOf, workflowStates } from "./board.ts";
 import type { Engines, EngineWorkflows, WorkflowState } from "./board.ts";
 import {
   addWidget,
-  defaultWidgets,
   differsFromDefault,
   missingWidgets,
   moveWidget,
@@ -46,6 +46,7 @@ import type { WorkReturns } from "./returns.ts";
 import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
+import { SpendWidget } from "./spend-widget.tsx";
 import {
   GoalListView,
   ReturnChartView,
@@ -94,12 +95,16 @@ export interface EnginesRead {
 export interface Board {
   /** The widgets on the person's board, in order. */
   layout: readonly StandardWidgetId[];
+  /** The widgets Grasp offers them, as their board begins (`offeredWidgets`). */
+  offered: readonly StandardWidgetId[];
   /** What the return, goals and teams widgets count. */
   returns: WorkReturns;
   workflows: Promise<Loaded<WorkflowSummary[]>>;
   engines: Promise<Loaded<EnginesRead>>;
   runs: Promise<Loaded<RunActivity>>;
   signals: Promise<Loaded<Signals>>;
+  /** What the models cost this month: admins only, the only ones offered its widget. */
+  spend: Promise<Loaded<ModelMonthSpend>> | undefined;
 }
 
 /** Each state's dot, as the prototype's workflow dots are painted: orange where a person is needed, green once it ran, grey before. */
@@ -465,6 +470,7 @@ const widgetTitles: Record<StandardWidgetId, MessageDescriptor> = {
   engines: msg`Domains`,
   runs: msg`Runs this week`,
   signals: msg`Could be better`,
+  spend: msg({ message: "AI spend this month", context: "dashboard widget" }),
 };
 
 /** Each widget in its block, titled `title`, as its read comes. */
@@ -524,6 +530,18 @@ const widgetBlocks: Record<
     </Await>
   ),
   signals: (board) => <CouldBeBetter signals={board.signals} />,
+  spend: (board, title) =>
+    board.spend === undefined ? null : (
+      <Await fallback={<WidgetLoading title={title} />} promise={board.spend}>
+        {(loaded) =>
+          loaded.state === "ready" ? (
+            <SpendWidget spend={loaded.data} title={title} />
+          ) : (
+            <NotRead loaded={loaded} title={title} />
+          )
+        }
+      </Await>
+    ),
 };
 
 /**
@@ -848,7 +866,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   };
 
   const reset = () => {
-    void save(defaultWidgets, t`The dashboard is back to how it began.`);
+    void save(board.offered, t`The dashboard is back to how it began.`);
   };
 
   // A drag follows the pointer over the whole page, so a block that moves
@@ -946,7 +964,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     window.addEventListener("pointercancel", cancel);
   };
 
-  const missing = missingWidgets(widgets);
+  const missing = missingWidgets(widgets, board.offered);
   return (
     <div className="@container">
       <div className="grid grid-cols-1 gap-4 @4xl:grid-cols-2" ref={grid}>
@@ -1008,7 +1026,9 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
         {announcement}
       </p>
       <ErrorText>{failure}</ErrorText>
-      {differsFromDefault(widgets) ? <ResetLine onReset={reset} /> : null}
+      {differsFromDefault(widgets, board.offered) ? (
+        <ResetLine onReset={reset} />
+      ) : null}
     </div>
   );
 };

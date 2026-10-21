@@ -2,10 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   addWidget,
-  defaultWidgets,
   differsFromDefault,
   missingWidgets,
   moveWidget,
+  offeredWidgets,
   placeWidget,
   removeWidget,
   slotAt,
@@ -15,6 +15,16 @@ import type { GridShape } from "./layout.ts";
 // How a person changes the widget board's layout (layout.ts): moving,
 // taking off and adding widgets, whether it is still as it began, and
 // which place a dragged block is over.
+
+/** The board as it begins for someone who isn't an admin. */
+const defaultWidgets = offeredWidgets(false);
+
+describe("the widgets offered", () => {
+  it("offers admins what the models cost too, last", () => {
+    expect(defaultWidgets).not.toContain("spend");
+    expect(offeredWidgets(true)).toStrictEqual([...defaultWidgets, "spend"]);
+  });
+});
 
 describe("moving a widget", () => {
   it("puts it in its new place, the ones between moving one over", () => {
@@ -79,7 +89,7 @@ describe("taking off and adding widgets", () => {
       "runs",
       "signals",
     ]);
-    expect(missingWidgets(without)).toStrictEqual(["goals"]);
+    expect(missingWidgets(without, defaultWidgets)).toStrictEqual(["goals"]);
     const again = addWidget(without, "goals");
     expect(again).toStrictEqual([
       "return",
@@ -91,25 +101,29 @@ describe("taking off and adding widgets", () => {
       "goals",
     ]);
     expect(addWidget(again, "goals")).toStrictEqual(again);
-    expect(missingWidgets(again)).toStrictEqual([]);
+    expect(missingWidgets(again, defaultWidgets)).toStrictEqual([]);
   });
 
   it("tells a board other than it began: another order, or fewer", () => {
-    expect(differsFromDefault(defaultWidgets)).toBeFalsy();
+    expect(differsFromDefault(defaultWidgets, defaultWidgets)).toBeFalsy();
     expect(
-      differsFromDefault(moveWidget(defaultWidgets, "runs", 1))
+      differsFromDefault(moveWidget(defaultWidgets, "runs", 1), defaultWidgets)
     ).toBeTruthy();
     expect(
-      differsFromDefault(removeWidget(defaultWidgets, "runs"))
+      differsFromDefault(removeWidget(defaultWidgets, "runs"), defaultWidgets)
     ).toBeTruthy();
-    expect(differsFromDefault([])).toBeTruthy();
-    expect(missingWidgets([])).toStrictEqual(defaultWidgets);
+    expect(differsFromDefault([], defaultWidgets)).toBeTruthy();
+    expect(missingWidgets([], defaultWidgets)).toStrictEqual(defaultWidgets);
   });
 
   it("puts what a board saved before the newer widgets were there beside them", () => {
     const saved = ["workflows", "engines", "runs", "signals"] as const;
-    expect(differsFromDefault(saved)).toBeTruthy();
-    expect(missingWidgets(saved)).toStrictEqual(["return", "goals", "teams"]);
+    expect(differsFromDefault(saved, defaultWidgets)).toBeTruthy();
+    expect(missingWidgets(saved, defaultWidgets)).toStrictEqual([
+      "return",
+      "goals",
+      "teams",
+    ]);
   });
 });
 

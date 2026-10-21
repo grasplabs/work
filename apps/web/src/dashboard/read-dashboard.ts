@@ -21,7 +21,7 @@ import { listWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
-import { defaultWidgets } from "./layout.ts";
+import { offeredWidgets } from "./layout.ts";
 import { loadEveryPage } from "./outcome-pages.ts";
 import { reportWindow, todayUtc } from "./programme.ts";
 import type { ReportReads } from "./report.ts";
@@ -271,18 +271,20 @@ const readReport = async (
 /**
  * The widgets on the person's board, in order: as they last saved it, or
  * as it begins when they never did. A read that fails gives the board as
- * it begins too, rather than no board.
+ * it begins too, rather than no board. A widget no longer `offered` (an
+ * admin's, saved before they stopped being one) is left out.
  */
 const readLayout = async (
-  core: CoreConnection
+  core: CoreConnection,
+  offered: readonly StandardWidgetId[]
 ): Promise<readonly StandardWidgetId[]> => {
   const loaded = await loadFromCore(
     core,
     async (session) => await session.dashboard.layout()
   );
   return loaded.state === "ready" && loaded.data !== null
-    ? loaded.data.widgets
-    : defaultWidgets;
+    ? loaded.data.widgets.filter((widget) => offered.includes(widget))
+    : offered;
 };
 
 /**
@@ -322,6 +324,10 @@ export const readDashboard = async (
   const activity = isAdmin(identity.role)
     ? loadFromCore(core, async (session) => await readActivity(session))
     : undefined;
+  const spend = isAdmin(identity.role)
+    ? loadFromCore(core, async (session) => await session.models.spend())
+    : undefined;
+  const offered = offeredWidgets(isAdmin(identity.role));
   const programme = loadFromCore(
     core,
     async (session) => await session.onboarding.programme()
@@ -342,14 +348,23 @@ export const readDashboard = async (
   // the page waits for too.
   const [waiting, layout, read] = await Promise.all([
     readWaiting(core, identity),
-    readLayout(core),
+    readLayout(core, offered),
     programme,
   ]);
   return {
     waiting,
     // Core keeps no hours, stages, goals or teams' work yet: the return,
     // goals and teams widgets show they have nothing to count.
-    board: { layout, returns: noReturns, workflows, engines, runs, signals },
+    board: {
+      layout,
+      offered,
+      returns: noReturns,
+      workflows,
+      engines,
+      runs,
+      signals,
+      spend,
+    },
     programme: read,
     today,
     report,

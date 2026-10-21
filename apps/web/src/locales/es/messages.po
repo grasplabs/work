@@ -133,6 +133,10 @@ msgstr "{alertAt} de un límite"
 msgid "{alone} of {handled} items without a person"
 msgstr "{alone} de {handled} elementos sin persona"
 
+#: src/dashboard/spend-widget.tsx
+msgid "{amount} in all"
+msgstr "{amount} en total"
+
 #: src/brain/brain-atlas.ts
 msgid "{answered} answered"
 msgstr "{answered} respondidas"
@@ -412,6 +416,10 @@ msgstr "{done, plural, one {# pregunta está respondida, por quien lo sabía.} o
 #: src/brain/brain-atlas.ts
 msgid "{drawn} drawn in the builder"
 msgstr "{drawn} dibujados en el editor"
+
+#: src/dashboard/spend-widget.tsx
+msgid "{each} a run"
+msgstr "{each} por ejecución"
 
 #: src/brain/brain-atlas.ts
 msgid "{employees, plural, one {# employee answered as well, by voice or chat.} other {# employees answered as well, by voice or chat.}}"
@@ -1692,6 +1700,15 @@ msgstr "La IA es una función principal de esta aplicación. Genera, decide o ac
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "Gasto en IA"
+
+#: src/dashboard/spend-widget.tsx
+msgid "AI spend in Settings"
+msgstr "Gasto en IA en Ajustes"
+
+#: src/dashboard/widget-board.tsx
+msgctxt "dashboard widget"
+msgid "AI spend this month"
+msgstr "Gasto en IA este mes"
 
 #: src/policies/policy.ts
 msgid "AI tool"
@@ -4325,6 +4342,10 @@ msgstr "Para cada {name}"
 msgid "For each {name}, while it holds"
 msgstr "Para cada {name}, mientras se cumpla"
 
+#: src/dashboard/spend-widget.tsx
+msgid "for every model call this month"
+msgstr "por todas las llamadas a modelos este mes"
+
 #: src/connections/connect-dialog.tsx
 msgid "For everyone"
 msgstr "Para todos"
@@ -6176,6 +6197,7 @@ msgstr "Sin uso detectado"
 msgid "No watching rule catches an app."
 msgstr "Ninguna regla en observación detecta una aplicación."
 
+#: src/dashboard/spend-widget.tsx
 #: src/routes/_shell.settings.spend.tsx
 msgid "No workflow has called a model this month."
 msgstr "Ningún flujo de trabajo ha llamado a un modelo este mes."
@@ -11209,6 +11231,10 @@ msgstr "Flujos de trabajo conocidos"
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Flujos de trabajo que fallaron"
+
+#: src/dashboard/spend-widget.tsx
+msgid "Workflows that spent most"
+msgstr "Flujos de trabajo que más gastaron"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
