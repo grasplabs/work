@@ -70,7 +70,7 @@ describe("the admin's Platform page", () => {
       .where(ne(clients.status, "offboarded"));
   });
 
-  it("shows the rollout waiting after ring 0, who runs which release, and every company with the one on an old release needing a look first", async () => {
+  it("shows the rollout waiting after ring 0 with its approval, who runs which release, and every company with the one on an old release needing a look first", async () => {
     const oldest = await publishRelease({ notes: "feat(core): the oldest" });
     const older = await publishRelease({ notes: "feat(core): the older" });
     const newest = await publishRelease({ notes: "feat(core): the newest" });
@@ -113,7 +113,8 @@ describe("the admin's Platform page", () => {
     expect({
       status,
       release: goingOut.includes(`Going out now: ${newest.id}`),
-      waits: goingOut.includes("Waits for ring 1"),
+      // A waiting rollout is approved from here, as on its own page.
+      approve: goingOut.includes("Approve ring 1"),
       ring0: goingOut.includes("Ring 0, first"),
       firstOnIt: goingOut.includes("Firstco Ring 0, first On it"),
       earlyWaits: goingOut.includes("Earlyco Ring 1, early Waits"),
@@ -126,7 +127,7 @@ describe("the admin's Platform page", () => {
     }).toMatchObject({
       status: 200,
       release: true,
-      waits: true,
+      approve: true,
       ring0: true,
       firstOnIt: true,
       earlyWaits: true,
