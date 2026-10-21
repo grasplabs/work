@@ -46,6 +46,7 @@ import {
 } from "../db/knowledge/schema.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { admitToKnowledge } from "./admission.ts";
 import { allowedFor } from "./app-entries.ts";
 import type { Allowed } from "./app-entries.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
@@ -395,6 +396,27 @@ export interface Write {
 }
 
 /**
+ * Admits `write` into canonical Knowledge (admission.ts), or throws:
+ * its text, path, message and the title it gets (`title`). A purge
+ * removes personal data and the Grasp skills' sync writes the release's
+ * own text: neither is screened.
+ */
+const admitted = async (
+  env: Env,
+  by: Writer,
+  write: Write,
+  title: string
+): Promise<void> => {
+  if (write.purge === true || write.graspSync === true) {
+    return;
+  }
+  // Everything the version keeps, each as a paragraph of its own: its
+  // path and the title made from it, its message, and its text.
+  const kept = [write.path, title, write.message ?? "", write.text];
+  await admitToKnowledge(env, by.actor, write.collection.id, kept.join("\n\n"));
+};
+
+/**
  * Writes the next version, if the document is still at `ifVersion`
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
  * it is at, and writes nothing otherwise.
@@ -500,8 +522,6 @@ export const writeVersion = async (
           )
         )
     : db.insert(documents).values(row);
-  // GRA-328's admission gate (knowledge/admission.ts) belongs here, before
-  // anything is stored: R2 only ever holds text that was admitted.
   // A payload collected between its staging and the batch refuses the
   // batch (`isUncommitted`): the text is stored again, once.
   const send = async (staged: StagedPayload): Promise<void> => {
@@ -515,6 +535,10 @@ export const writeVersion = async (
       throw error;
     }
   };
+  // Admitted against the policy in effect now, after everything else
+  // that could refuse the write, and before anything is stored: R2 only
+  // ever holds text that was admitted.
+  await admitted(env, by, write, prepared.title);
   // Checked before the text is stored too: a write it refuses never
   // uploads it.
   await write.lastCheck?.();

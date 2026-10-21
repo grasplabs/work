@@ -1403,7 +1403,7 @@ describe("a purge of content", setUpTime, () => {
     const secret = `pietersz${unique()}`;
     const kept = `kept${unique()}`;
     // A passage, with characters a pattern would read otherwise.
-    const passage = `on sick leave (burnout${unique()}) since May.`;
+    const passage = `on paid leave (course${unique()}) since May.`;
     const handbook = await admin.api.knowledge.createCollection({
       name: "Handbook",
       access: "everyone",
