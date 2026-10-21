@@ -311,7 +311,7 @@ export default function Escapes() {
     <div ref={box}>
       <link rel="stylesheet" href="https://cdn.example/theme.css" />
       <img alt="" src="https://cdn.example/logo.png" />
-      <img alt="" src="data:image/png;base64,AAAA" />
+      <img alt="" srcSet="data:image/png;base64,AAAA 1x, https://cdn.example/logo@2x.png 2x" />
       <div className="!p-2 gap-2" />
       <div dangerouslySetInnerHTML={{ __html: "<b>hi</b>" }} />
       <div className={cn("gap-2", [{ "p-4!": true }])} />
@@ -339,6 +339,7 @@ export default function Escapes() {
       "14 grasp/no-style-escapes",
       "18 grasp/no-remote-resources",
       "19 grasp/no-remote-resources",
+      "20 grasp/no-remote-resources",
       "21 grasp/no-important",
       "22 grasp/no-style-escapes",
       "23 grasp/no-important",
@@ -371,6 +372,7 @@ export default function Lookalikes() {
         {style}! {list.head} {String(new Error("Oops!").message)}
       </p>
       <img alt="" src="./logo.png" />
+      <img alt="" srcSet="data:image/png;base64,AAAA 1x, blob:x 2x" />
     </section>
   );
 }

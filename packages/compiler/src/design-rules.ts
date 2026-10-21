@@ -37,6 +37,20 @@ const remote = /^\s*(?:[a-z][a-z\d+.-]*:|\/\/)/iu;
 /** A URL the frame's CSP serves from the page itself. */
 const local = /^\s*(?:data|blob):/iu;
 
+/**
+ * The URLs an attribute loads: a `srcSet`'s candidates each (HTML's
+ * image candidate strings: a URL up to whitespace, then descriptors,
+ * separated by commas, which a `data:` URL may itself hold), any other
+ * attribute's value whole.
+ */
+const urlsOf = (attribute: string, value: string): string[] =>
+  attribute === "srcSet"
+    ? value
+        .split(/\s+/u)
+        .map((token) => token.replaceAll(/^,+|,+$/gu, ""))
+        .filter((token) => token !== "")
+    : [value];
+
 /** DOM properties that write a stylesheet or styles directly. */
 const styleWrites = new Set(["cssText", "innerHTML", "outerHTML"]);
 
@@ -256,14 +270,18 @@ const noRemoteResources: Rule.RuleModule = {
           continue;
         }
         const attributeName = jsxName(get(attribute, "name"));
-        const url = stringOf(get(attribute, "value"));
+        const value = stringOf(get(attribute, "value"));
         if (
-          attributeName !== undefined &&
-          loadingAttributes.has(attributeName) &&
-          url !== undefined &&
-          remote.test(url) &&
-          !local.test(url)
+          attributeName === undefined ||
+          !loadingAttributes.has(attributeName) ||
+          value === undefined
         ) {
+          continue;
+        }
+        const url = urlsOf(attributeName, value).find(
+          (candidate) => remote.test(candidate) && !local.test(candidate)
+        );
+        if (url !== undefined) {
           context.report({
             node: attribute,
             messageId: "remote",
