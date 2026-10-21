@@ -317,6 +317,14 @@ const appendedAgain = async (
   if (chunk.fileId !== row.id || chunk.sha256 !== sha256) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
+  // Deleted since, as the same attempt's later call may have: what the
+  // append answered stands, and none of its bytes are stored again.
+  if (row.state === "deleted") {
+    return {
+      output: { size: row.size },
+      detail: { ...detailOf(row), size: row.size },
+    };
+  }
   if (!chunk.stored) {
     await store(env, caller, chunk.key, bytes, sha256);
   }
@@ -342,18 +350,20 @@ const append = async (
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
   const db = drizzle(env.DB);
-  const row = await fileOf(env, caller, args.file);
-  if (row === undefined) {
-    throw notFound();
-  }
-  const sha256 = await sha256HexOfBytes(bytes);
   const earlier = await db
     .select()
     .from(workflowRunFileChunks)
     .where(eq(workflowRunFileChunks.appendKey, caller.effectKey))
     .get();
+  // A deleted file is found only by the append that already went in.
+  const row = await fileOf(env, caller, args.file, earlier !== undefined);
+  if (row === undefined) {
+    throw notFound();
+  }
+  const sha256 = await sha256HexOfBytes(bytes);
   // The same append again answers what the first did, even once its file
-  // is finished: its effect key is its own task's, so no other writes so.
+  // is finished or deleted: its effect key is its own task's, so no other
+  // writes so.
   if (earlier !== undefined) {
     return await appendedAgain(env, caller, row, earlier, bytes, sha256);
   }
@@ -421,6 +431,25 @@ const textOf = (decoder: TextDecoder, bytes: Uint8Array): boolean => {
 };
 
 /**
+ * What finishing `row` answers when it needs no finishing: one finished,
+ * then perhaps deleted (as the same attempt's later call may have), is
+ * answered as finished; one deleted unfinished is gone. Nothing for one
+ * still being written.
+ */
+const finishedBefore = (row: FileRow): FilesAnswer | undefined => {
+  if (
+    row.state === "done" ||
+    (row.state === "deleted" && row.sha256 !== null)
+  ) {
+    return { output: refJson(row), detail: detailOf(row) };
+  }
+  if (row.state === "deleted") {
+    throw notFound();
+  }
+  return undefined;
+};
+
+/**
  * Finishes a file the calling task wrote: its bytes checked against its
  * type and hashed, all of them, as stored.
  */
@@ -430,12 +459,13 @@ const finish = async (
   args: z.infer<typeof argumentSchemas.finish>
 ): Promise<FilesAnswer> => {
   const db = drizzle(env.DB);
-  const row = await fileOf(env, caller, args.file);
+  const row = await fileOf(env, caller, args.file, true);
   if (row === undefined) {
     throw notFound();
   }
-  if (row.state === "done") {
-    return { output: refJson(row), detail: detailOf(row) };
+  const before = finishedBefore(row);
+  if (before !== undefined) {
+    return before;
   }
   requireWriter(row, caller);
   const chunks = await db
@@ -627,6 +657,24 @@ const parsed = <Schema extends z.ZodType>(
  * `args` checked here, as the host's own contract has them. The action
  * host has already checked the use declares the operation it needs.
  */
+/**
+ * Refuses a files call whose arguments a real call would refuse
+ * (`workflow.call_invalid`), touching nothing: for a test run, which
+ * answers the call from its fixture and keeps no file.
+ */
+export const requireFilesArguments = (
+  operation: FilesCallOperation,
+  args: Json
+): void => {
+  const checked = parsed(argumentSchemas[operation], args);
+  if (operation === "append" && "content" in checked) {
+    const size = bytesOfBase64(checked.content).length;
+    if (size === 0 || size > runFileLimits.callBytes) {
+      throw workflowResourceErrors.create("workflow.call_invalid");
+    }
+  }
+};
+
 export const callFiles = async (
   env: Env,
   caller: FilesCaller,

@@ -805,6 +805,63 @@ describe("a workflow run's own files", () => {
     });
   });
 
+  it("answer an attempt's calls again as they answered, once its own later call deleted the file, storing nothing again", async () => {
+    const caller = callerOf();
+    const opened = await callFiles(env, caller.next(), "open", {
+      name: "short.txt",
+      type: "text/plain",
+    });
+    const file = String(fieldOf(opened.output, "file"));
+    const appended = await callFiles(env, caller.next(), "append", {
+      file,
+      content: base64Of("hello"),
+    });
+    const finished = await callFiles(env, caller.next(), "finish", { file });
+    await callFiles(env, caller.next(), "delete", { file });
+    const stored = await objectsOf(caller.run);
+    // The attempt cut off after its delete: its calls, replayed in order.
+    const openAgain = await callFiles(env, caller.again(1), "open", {
+      name: "short.txt",
+      type: "text/plain",
+    });
+    const appendAgain = await callFiles(env, caller.again(2), "append", {
+      file,
+      content: base64Of("hello"),
+    });
+    const finishAgain = await callFiles(env, caller.again(3), "finish", {
+      file,
+    });
+    const replayed = {
+      open: openAgain.output,
+      append: appendAgain.output,
+      finish: finishAgain.output,
+      delete: await outcome(
+        callFiles(env, caller.again(4), "delete", { file })
+      ),
+    };
+    // A new call finds it gone.
+    const later = await outcome(
+      callFiles(env, caller.next(), "append", {
+        file,
+        content: base64Of("more"),
+      })
+    );
+    expect({
+      replayed,
+      later,
+      storedAgain: (await objectsOf(caller.run)) - stored,
+    }).toStrictEqual({
+      replayed: {
+        open: opened.output,
+        append: appended.output,
+        finish: finished.output,
+        delete: "ok",
+      },
+      later: "file.not_found",
+      storedAgain: 0,
+    });
+  });
+
   it("leave no bytes behind when a delete and a sweep land while an append is under way, and finish only the file as hashed", async () => {
     // The file deleted, and swept within the grace, while its append's put
     // is under way: the sweep leaves the chunk, the put lands and finds its

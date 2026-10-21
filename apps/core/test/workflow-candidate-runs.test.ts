@@ -354,13 +354,30 @@ export const listFiles = action({
 });
 `;
 
-/** A definition calling action `listFiles`, which lists through `files`. */
-const listing = (key: string): Definition => ({
+/** The module of action `deleteFile`, deleting the file its input names. */
+const deleteFileModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+
+export const deleteFile = action({
+  args: { who: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [resource.files("files", { operations: ["delete"] })],
+  handler: async (ctx, args) => {
+    await ctx.resources.files.delete({ file: args.who });
+    return { status: "deleted" };
+  },
+});
+`;
+
+/**
+ * A definition calling action `contract` (by default `listFiles`, which
+ * lists through `files`) with the run's input.
+ */
+const listing = (
+  key: string,
+  action = "local:code/list-files.ts#listFiles"
+): Definition => ({
   bindings: {
-    lister: {
-      kind: "operation",
-      contract: "local:code/list-files.ts#listFiles",
-    },
+    lister: { kind: "operation", contract: action },
     files: { kind: "files", contract: key },
   },
   tasks: [
@@ -553,6 +570,34 @@ describe("test runs of a workflow's draft", () => {
         calls: [],
       }))
     );
+  });
+
+  it("refuses a files call a real call would refuse, its fixture notwithstanding, and keeps no file", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = await contract(admin, "files");
+    const { workflow, revision } = await drafted(
+      ada,
+      listing(key, "local:code/delete-file.ts#deleteFile"),
+      { modules: { "code/delete-file.ts": deleteFileModule } }
+    );
+    const run = async (who: string) => {
+      const { runId } = await startCandidateRun(env, ada, workflow.id, {
+        revision,
+        input: { who },
+        fixtures: { files: { output: null } },
+      });
+      return endOf(await ended(ada, workflow.id, runId));
+    };
+    expect({
+      // No file's ID: refused as a real call is.
+      invalid: await run("not-a-file"),
+      // A file's ID: answered from the fixture, though no such file is.
+      valid: await run(crypto.randomUUID()),
+    }).toStrictEqual({
+      invalid: { status: "failed", code: "workflow.call_invalid" },
+      valid: { status: "completed", output: { status: "deleted" } },
+    });
   });
 
   it("refuses a model request a real call would refuse, its fixture notwithstanding", async () => {

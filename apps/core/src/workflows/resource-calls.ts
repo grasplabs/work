@@ -40,7 +40,7 @@ import {
   callTemplate,
   requireKnowledgeRequest,
 } from "./resource-reads.ts";
-import { callFiles } from "./run-files.ts";
+import { callFiles, requireFilesArguments } from "./run-files.ts";
 import type { FilesCallOperation } from "./run-files.ts";
 
 // The effects of a run of an independent workflow's sealed build
@@ -716,8 +716,10 @@ const candidateAnswer = async (
       return boundedAnswer(answer, "output");
     }
     // A test run keeps no file: its files calls answer what its start
-    // gave, and nothing is written to the run's files.
+    // gave, and nothing is written to the run's files, once their
+    // arguments are what a real call would take.
     case "grasp.files": {
+      requireFilesArguments(call.operation, call.arguments);
       return boundedAnswer(answer, "output");
     }
     default: {
