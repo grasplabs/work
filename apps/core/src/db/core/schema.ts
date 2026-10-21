@@ -1153,10 +1153,11 @@ export const workflowRuns = sqliteTable(
      * allowances its work is charged to, the first run of its kind in the
      * lineage (`run_lineage_accounts`). Its attempts, host
      * calls, model spend and share count there; its place (descendants,
-     * depth, age) stays the lineage's. A run of its parent's App takes its
-     * parent's: so a run of the root's App under a run charged to an
-     * account is charged there too. Null for a root, and for a run of the
-     * root's App whose parent is charged to the lineage's own
+     * depth, age) stays the lineage's. A run of the root's App whose parent
+     * is of that App too takes its parent's: so under a run of the root's
+     * App charged to an account (one under another App's run), it is
+     * charged there as well. Null for a root, and for a run of the root's
+     * App whose parent, of that App, is charged to the lineage's own
      * (src/workflows/quotas.ts, `accountClaimed`). Written once, with the
      * row: never changed once set (migration 0112's trigger).
      */
