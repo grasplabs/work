@@ -45,7 +45,7 @@ import {
   modelGatewayConfigSchema as gatewayConfigSchema,
   modelRulesConfigSchema as rulesConfigSchema,
 } from "@grasp-os/shared/deployment-config";
-import type { ModelRules } from "@grasp-os/shared/deployment-config";
+import type { ModelRole, ModelRules } from "@grasp-os/shared/deployment-config";
 import {
   appIdSchema,
   connectionIdSchema,
@@ -316,10 +316,47 @@ const modelRules = (env: ModelsEnv): ModelRules | undefined => {
  */
 export const gatewaySettings = (
   env: ModelsEnv
-): { models: string[]; rules: ModelRules | undefined } => ({
-  models: modelGatewayConfig(env)?.models ?? [],
-  rules: modelRules(env),
-});
+): {
+  models: string[];
+  roles: Partial<Record<ModelRole, string>>;
+  rules: ModelRules | undefined;
+} => {
+  const config = modelGatewayConfig(env);
+  return {
+    models: config?.models ?? [],
+    roles: config?.roles ?? {},
+    rules: modelRules(env),
+  };
+};
+
+/**
+ * The model for `role` (`MODEL_GATEWAY`'s `roles`), for a call that
+ * carries sensitive data when `sensitive` is set: the one the deployment
+ * named, or, for a role it left out, the first allowed model the rules let
+ * the call use. `undefined` when there is none, and when the rules refuse
+ * the named model: a role never falls back to a model the deployment
+ * didn't name for it. The gateway checks the rules again either way.
+ */
+export const modelForRole = (
+  { models: allowed, roles, rules }: ReturnType<typeof gatewaySettings>,
+  role: ModelRole,
+  { sensitive }: { sensitive: boolean }
+): string | undefined => {
+  const fits = (model: string) =>
+    (!sensitive ||
+      rules?.sensitive === undefined ||
+      rules.sensitive.models.includes(model)) &&
+    (rules?.eu?.deployment !== true || rules.eu.models.includes(model));
+  const named = roles[role];
+  if (named === undefined) {
+    return allowed.find(fits);
+  }
+  if (!fits(named)) {
+    log.error("model.role_refused", { role, model: named });
+    return undefined;
+  }
+  return named;
+};
 
 /**
  * The thinking level a request asks `model` for: the call's effort, or

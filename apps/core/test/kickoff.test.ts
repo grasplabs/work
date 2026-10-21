@@ -5,7 +5,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { models } from "../src/models.ts";
+import { gatewaySettings, modelForRole, models } from "../src/models.ts";
 import type { ModelsEnv } from "../src/models.ts";
 import { OnboardingStaffRpc } from "../src/onboarding/staff-rpc.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -127,6 +127,10 @@ const answering = async <T>(
   }
 };
 
+/** The gateway's settings under `config` as `MODEL_GATEWAY`. */
+const settings = (config: unknown) =>
+  gatewaySettings({ ...env, MODEL_GATEWAY: config });
+
 /** Grasp's staff, on a connection of their own. */
 const asStaff = async () => {
   const session = await signedIn(idp, "grasp-staff", staffPerson());
@@ -215,6 +219,66 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       refused: result,
       sent: none.length,
     }).toStrictEqual({ model: [true], refused: "kickoff.not_read", sent: 0 });
+  });
+
+  it("is read by the model the deployment names for careful work, and by no other when the rules refuse that one", async () => {
+    const staff = await asStaff();
+    const { requests } = await answering(
+      [answer(reading)],
+      async () => await staff.onboardingStaff.saveKickoff(pasted(dutch)),
+      {
+        gateway: "grasp-os-test",
+        // The careful model is not the first allowed one.
+        models: [workersAi, euModel],
+        roles: { quick: workersAi, careful: euModel },
+      }
+    );
+    const { requests: none, result } = await answering(
+      [],
+      async () =>
+        await outcome(staff.onboardingStaff.saveKickoff(pasted(dutch))),
+      {
+        gateway: "grasp-os-test",
+        // euModel may take sensitive data, but it isn't the careful one.
+        models: [workersAi, euModel],
+        roles: { careful: workersAi },
+        sensitive: { models: [euModel], connections: [] },
+      }
+    );
+    expect({
+      model: requests.map(({ url }) => url.includes("openai")),
+      refused: result,
+      sent: none.length,
+    }).toStrictEqual({ model: [true], refused: "kickoff.not_read", sent: 0 });
+  });
+
+  it("gives each role the model the deployment names for it, and allows no model through a role it doesn't allow", () => {
+    const named = settings({
+      gateway: "grasp-os-test",
+      models: [workersAi, euModel],
+      roles: { quick: workersAi, careful: euModel },
+    });
+    const unnamed = settings({
+      gateway: "grasp-os-test",
+      models: [workersAi, euModel],
+    });
+    const notAllowed = settings({
+      gateway: "grasp-os-test",
+      models: [workersAi],
+      roles: { careful: euModel },
+    });
+    const notSensitive = { sensitive: false };
+    expect({
+      quick: modelForRole(named, "quick", notSensitive),
+      careful: modelForRole(named, "careful", notSensitive),
+      unnamed: modelForRole(unnamed, "careful", notSensitive),
+      notAllowed: notAllowed.models,
+    }).toStrictEqual({
+      quick: workersAi,
+      careful: euModel,
+      unnamed: workersAi,
+      notAllowed: [],
+    });
   });
 
   it("goes through a gateway that judges every onboarding call as carrying sensitive data", async () => {
