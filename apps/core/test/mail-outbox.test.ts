@@ -19,6 +19,9 @@ import { auditedDuring } from "./sign-in.ts";
 
 const minuteMs = 60 * 1000;
 
+/** Someone's link, as their mail has it. */
+const linkPattern = new RegExp(`${clientOrigin}/interview#[A-Za-z0-9_-]+`, "u");
+
 /** A store of its own, apart from the deployment's. */
 const newStore = () => env.ONBOARDING.getByName(`mail-${crypto.randomUUID()}`);
 
@@ -187,7 +190,6 @@ describe("the mail outbox", () => {
       { processing: true, assessment: true, council: "none" },
       by
     );
-    await store.releaseDue(yesterday);
     const mail = await captureMail(store, "E_RATE_LIMIT_EXCEEDED");
     const logged = [
       vi.spyOn(console, "log"),
@@ -195,27 +197,20 @@ describe("the mail outbox", () => {
       vi.spyOn(console, "warn"),
       vi.spyOn(console, "error"),
     ];
+    // Their link goes out by email: refused at first, then sent.
     const audited = await auditedDuring(async () => {
-      await store.sendMail({
-        ...note("link/oli"),
-        fill: "oli",
-        mail: {
-          subject: "Your interview",
-          text: "Your link: {{link}}",
-          html: '<a href="{{link}}">{{link}}</a>',
-        },
-      });
+      await store.releaseDue(yesterday);
       await store.deliverMail();
       await store.deliverMail(Date.now() + 6 * minuteMs);
     });
     const [sent] = mail.sent;
-    const link = sent?.text?.replace("Your link: ", "") ?? "";
+    const link = linkPattern.exec(sent?.text ?? "")?.[0] ?? "";
     const secret = link.split("#")[1] ?? "";
     const logs = JSON.stringify(logged.flatMap((spy) => spy.mock.calls));
     expect({
       link: link.startsWith(`${clientOrigin}/interview#`),
       secret: secret.length,
-      html: sent?.html,
+      html: sent?.html?.includes(`<a href="${link}">`),
       inLogs: logs.includes(secret),
       inAudit: JSON.stringify(audited).includes(secret),
       // The retry was logged: the logs were looked at, not empty.
@@ -224,7 +219,7 @@ describe("the mail outbox", () => {
     }).toStrictEqual({
       link: true,
       secret: 43,
-      html: `<a href="${link}">${link}</a>`,
+      html: true,
       inLogs: false,
       inAudit: false,
       retried: true,

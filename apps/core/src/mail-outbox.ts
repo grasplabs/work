@@ -172,6 +172,17 @@ export const queueAgain = (
     )
     .toArray().length > 0;
 
+/**
+ * Drops the mail about `about` still queued: for someone who left, whom
+ * it would no longer be right to write to. Sent and failed mail stays.
+ */
+export const dropMailAbout = (storage: SqlStorage, about: string): void => {
+  storage.exec(
+    "DELETE FROM mail_outbox WHERE about = ? AND state = 'queued'",
+    about
+  );
+};
+
 /** When the next queued mail is due (ms), or null for none. */
 export const nextMailAt = (storage: SqlStorage): number | null => {
   const [row] = storage
