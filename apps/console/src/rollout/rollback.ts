@@ -306,28 +306,36 @@ const movedOffPrevious = async (
 };
 
 /**
- * Refuses (`incompatible`) going back to `previous` when its code doesn't
- * work with what client `clientId` runs now, with `workers` restored one
- * at a time, in order (src/deploy/compatibility.ts).
+ * Refuses (`incompatible`) going back to `previous` from release
+ * `releaseId`, the rollout's, when its code doesn't work with what client
+ * `clientId` runs now, with `workers` restored one at a time, in order
+ * (src/deploy/compatibility.ts). Each Worker it restores is taken to run
+ * the rollout's release, whatever its record says: a version can go live
+ * and the write after it fail, and the record lags what runs.
  */
 const assertCompatible = async (
   db: ConsoleDatabase,
   clientId: string,
+  releaseId: string,
   previous: PreviousRun,
   workers: readonly RestoredWorker[]
 ): Promise<void> => {
-  const before =
-    previous.release === null
-      ? null
-      : await importedManifest(db, previous.release);
-  const refused =
-    before === null
-      ? null
-      : incompatibility(
-          await currentReleases(db, clientId),
-          before,
-          workers.map(({ app }) => app)
-        );
+  const [before, rolledOut] = await Promise.all([
+    previous.release === null ? null : importedManifest(db, previous.release),
+    importedManifest(db, releaseId),
+  ]);
+  if (before === null) {
+    return;
+  }
+  const current = await currentReleases(db, clientId);
+  for (const { app } of workers) {
+    current.set(app, rolledOut);
+  }
+  const refused = incompatibility(
+    current,
+    before,
+    workers.map(({ app }) => app)
+  );
   if (refused !== null) {
     throw new RolloutError(
       "incompatible",
@@ -421,7 +429,7 @@ const check = async (
       `${clientId} ran ${previous.release ?? "several releases"} before, not the release right before ${latest.releaseId}: roll out instead`
     );
   }
-  await assertCompatible(db, clientId, previous, workers);
+  await assertCompatible(db, clientId, latest.releaseId, previous, workers);
   const mapped = await mappedGeneration(
     env.ROUTER_HOSTS,
     `${clientId}.${clientDomain(env) ?? ""}`

@@ -2578,7 +2578,7 @@ describe("controlling a rollout", () => {
     }).toStrictEqual({ refused: "too_far_back", counts, runner: null });
   });
 
-  it("refuses a rollback to a release that doesn't read the workflow journals the rollout's may have left", async () => {
+  it("refuses a rollback to a release that doesn't read the workflow journals the rollout's may have left, whatever the client's record says it runs", async () => {
     const before = await importedRelease("feat(core): reads journals 8–9");
     const internal = await activeClient(0, before);
     const release = await importedRelease("feat(core): reads journal 10 too", {
@@ -2592,12 +2592,26 @@ describe("controlling a rollout", () => {
     const refused = await codeOf(
       rollbackClient(env, staff, rolloutId, internal.clientId)
     );
+    // As a record whose write failed after the versions went live leaves it.
+    await db
+      .update(clientWorkers)
+      .set({ releaseId: before })
+      .where(eq(clientWorkers.clientId, internal.clientId));
+    const unrecorded = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
 
     expect({
       refused,
+      unrecorded,
       counts: deploymentCounts(internal.account),
       runner: await runnerOf(internal.clientId),
-    }).toStrictEqual({ refused: "incompatible", counts, runner: null });
+    }).toStrictEqual({
+      refused: "incompatible",
+      unrecorded: "incompatible",
+      counts,
+      runner: null,
+    });
   });
 
   it("refuses a rollback while the rollout is still preparing the client, with nothing of it live", async () => {
