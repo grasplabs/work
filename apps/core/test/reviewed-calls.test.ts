@@ -1051,6 +1051,21 @@ queueMicrotask(() => {
           })
       ),
       codeAsksPeople: await inStep("tidy", recipients),
+      // A wait run as code from inside a step, caught there: the step fails.
+      nestedWaitAsCode: await (async () => {
+        const { host, runId, tampered } = await hostHeldTo(calls);
+        let within: Settled<unknown> = { ok: true, value: null };
+        const done = await host.do("tidy", {}, async () => {
+          within = await host.do("pause", {}, ranOne);
+          return { ok: true, value: null };
+        });
+        return {
+          code: codeOf(within),
+          step: codeOf(done),
+          tampered,
+          audited: await refusals(runId),
+        };
+      })(),
       askedAsksPeople: await inStep("ask#asked", recipients),
       // Code asking a model, or opening a decision.
       codeAsksModel: await inStep(
@@ -1093,6 +1108,7 @@ queueMicrotask(() => {
         answerAsCode: tamperedWith("ask#answer"),
         askedAsWait: tamperedWith("ask#asked"),
         codeAsksPeople: failedStep(tamperedWith("tidy", "decision")),
+        nestedWaitAsCode: failedStep(tamperedWith("pause")),
         askedAsksPeople: failedStep(tamperedWith("ask#asked", "decision")),
         codeAsksModel: failedStep(tamperedWith("tidy", "model")),
         codeOpensDecision: failedStep(tamperedWith("tidy", "decision")),

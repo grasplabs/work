@@ -2427,27 +2427,27 @@ export class RunHost extends RpcTarget {
     if (!stepReviewed(this.#run.calls, step)) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${step}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
-      await this.#refuseTampering(error, { step, call: null });
+      await this.#refuseStep(step, error);
     }
-    await this.#requireKind(step, use, null);
-  }
-
-  /**
-   * Refuses running step `step` as `use` when its review kept it as
-   * another kind (`stepRunsAs`): a wait as code, an exact step asking a
-   * model or a person. Tampering, as a name the review doesn't show is:
-   * caught or not, it ends the run, audited under the step and `call`.
-   */
-  async #requireKind(
-    step: string,
-    use: StepUse,
-    call: string | null
-  ): Promise<void> {
     if (!stepRunsAs(this.#run.calls, step, use)) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
-      await this.#refuseTampering(error, { step, call });
+      await this.#refuseStep(step, error);
     }
+  }
+
+  /**
+   * Refuses step `step` as tampering (`#refuseTampering`). Asked for from
+   * inside another step's attempt, that attempt fails too
+   * (`StepAttempt.refused`), so a step that catches the refusal of a step
+   * nested in it and returns still fails, never completes.
+   */
+  async #refuseStep(step: string, error: Error): Promise<never> {
+    const running = this.#live.at(-1);
+    if (running !== undefined) {
+      running.refused = error;
+    }
+    return await this.#refuseTampering(error, { step, call: null });
   }
 
   /**
