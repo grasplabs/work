@@ -243,8 +243,8 @@ describe("the rollout pages", () => {
 
     expect({
       status,
-      waiting: html.includes("waiting for approval after ring 0"),
-      approve: html.includes("Approve the next ring"),
+      waiting: html.includes("ring 0 passed: waiting for approval"),
+      approve: html.includes("Approve every other client"),
       cancel: html.includes("Cancel"),
       rings: html.includes("Ring 0") && html.includes("Ring 1"),
       clients:
@@ -288,7 +288,7 @@ describe("the rollout pages", () => {
         says: own.html.includes(
           "Secrets only, on each client&#x27;s own release"
         ),
-        approve: own.html.includes("Approve the next ring"),
+        approve: own.html.includes("Approve every other client"),
       },
     }).toStrictEqual({
       shown: 2,

@@ -1192,6 +1192,93 @@ describe("rolling a release out", () => {
       acme: counts,
     });
   });
+
+  it("rolls out to every ring after the first on one approval, audited once", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    const internal = await activeClient(0, before);
+    const acme = await activeClient(1, before);
+    const beta = await activeClient(2, before);
+    const release = await importedRelease("feat(core): to the whole fleet");
+    await using run = await followRollouts();
+
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await approveRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+
+    expect({
+      rollout: await rolloutRow(rolloutId),
+      targets: await targetsOf(rolloutId),
+      actions: await rolloutActions(rolloutId),
+    }).toStrictEqual({
+      rollout: { status: "done", ring: 2 },
+      targets: {
+        [internal.clientId]: { ring: 0, status: "done", error: null },
+        [acme.clientId]: { ring: 1, status: "done", error: null },
+        [beta.clientId]: { ring: 2, status: "done", error: null },
+      },
+      actions: [
+        "rollout.start",
+        "rollout.client_start",
+        "rollout.client_done",
+        "rollout.wait",
+        "rollout.approve",
+        "rollout.client_start",
+        "rollout.client_done",
+        "rollout.ring",
+        "rollout.client_start",
+        "rollout.client_done",
+        "rollout.done",
+      ],
+    });
+  });
+
+  it("ends only a fleet client that fails, goes on to the clients after it, and ends the rollout failed", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    const internal = await activeClient(0, before);
+    const acme = await activeClient(1, before);
+    const beta = await activeClient(2, before);
+    const release = await importedRelease("feat(core): one client won't take");
+    const acmeCounts = deploymentCounts(acme.account);
+    // A setting core doesn't read: acme's deploy is refused before
+    // anything is uploaded.
+    await db.insert(settings).values({
+      clientId: acme.clientId,
+      key: "NOT_A_SETTING",
+      value: "true",
+      updatedBy: staff.email,
+      updatedAt: new Date(),
+    });
+    await using run = await followRollouts();
+
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await approveRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+
+    const betaWorkers = await workersOf(beta.clientId);
+    expect({
+      rollout: await rolloutRow(rolloutId),
+      targets: await targetsOf(rolloutId),
+      acme: deploymentCounts(acme.account),
+      runner: await runnerOf(acme.clientId),
+      beta: betaWorkers.map(({ releaseId }) => releaseId),
+    }).toStrictEqual({
+      rollout: { status: "failed", ring: 2 },
+      targets: {
+        [internal.clientId]: { ring: 0, status: "done", error: null },
+        [acme.clientId]: {
+          ring: 1,
+          status: "failed",
+          error: "unknown_setting",
+        },
+        [beta.clientId]: { ring: 2, status: "done", error: null },
+      },
+      acme: acmeCounts,
+      runner: null,
+      beta: [release, release],
+    });
+  });
 });
 
 /** Each of the client's Workers' live version in `account`, by app. */
