@@ -52,6 +52,10 @@ const stdoutOf = async (
   child.stdout.on("data", (chunk: string) => {
     stdout += chunk;
   });
+  // Killed, this rejects at once, without waiting for its streams to
+  // close: a process it started may hold them open, and the test runner
+  // stops soon after a timeout, so the planted files go first. What the
+  // killed lint still reads of them no one reads.
   await once(child, "close");
   return stdout;
 };
