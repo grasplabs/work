@@ -1614,6 +1614,39 @@ const sleepsOf = (task: JsonObject, kind: string): boolean =>
 /** The most `for` tasks one inside another (spec 18: eight levels). */
 export const maxLoopDepth = 8;
 
+/**
+ * The longest a step's name may be (`task:<id>@<for>.<index>/…`): the
+ * engine's 256 characters (workerflow's `maxStepNameLength`), less what
+ * core adds to it for the steps of a call it waits on (`:held:<round>:
+ * <check>:check`, resource-host.ts).
+ */
+export const maxStepNameLength = 200;
+
+/** The most digits an item's index has: a collection holds at most 1,000. */
+const maxIndexDigits = 3;
+
+/**
+ * The longest name of a step of task `id` in scope `scope` (the `for`
+ * tasks around it), its index at its widest: `item:` steps of a `for`
+ * task in its own item's scope too.
+ */
+const longestStepName = (
+  id: string,
+  scope: readonly string[],
+  ownItem: boolean
+): number => {
+  const segments = ownItem ? [...scope, id] : scope;
+  const suffix =
+    segments.length === 0
+      ? 0
+      : 1 +
+        segments.reduce(
+          (length, segment) => length + segment.length + 1 + maxIndexDigits,
+          segments.length - 1
+        );
+  return "enter:".length + id.length + suffix;
+};
+
 /** Task `task`'s `metadata.grasp`, if it has one. */
 const graspMetadataOf = (task: JsonObject): JsonObject | undefined =>
   isObject(task.metadata) && isObject(task.metadata.grasp)
@@ -1826,6 +1859,12 @@ const lowerTask = (
     throw new Error(`The checked workflow has a task of no kind at ${pointer}`);
   }
   if (refusedOf(emitter, item, kind)) {
+    return;
+  }
+  // A step's name names every loop around its task: one past what the
+  // engine takes is refused here, never at run time.
+  if (longestStepName(id, emitter.scope, kind === "for") > maxStepNameLength) {
+    emitter.refusals.add(pointer, "step:name_too_long", id);
     return;
   }
   const sleeps = sleepsOf(task, kind);
