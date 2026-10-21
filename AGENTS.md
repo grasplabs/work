@@ -65,11 +65,11 @@ Conflicts: rebase your branch on `main`. For generated files (lockfile, Worker t
 
 ## Working from Linear
 
-Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo.
+Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issues spent 6 to 15 October 2026 in Shipmunk and came back with new numbers: find an issue by its title, not by a number from an older commit, pull request or note.
 
-- Only pick up issues in **To Do**; their blockers are done. Parent issues are containers; never pick one up.
+- Only pick up issues in **Todo**; their blockers are done. Parent issues are containers; never pick one up.
 - Move the issue to **In Progress** when you start and to **In Review** when the pull request is ready. Branch names and PR titles don't carry the issue ID, so move issues by hand.
-- When your issue is **Done**, move any issue it blocked to **To Do** once all of that issue's blockers are done.
+- When your issue is **Done**, move any issue it blocked to **Todo** once all of that issue's blockers are done.
 - Issues labelled **Security** are reviewed by a person before merge.
 - Don't follow an issue blindly: if its scope conflicts with this file or the code, raise it in the issue.
 
