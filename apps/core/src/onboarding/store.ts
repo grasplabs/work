@@ -18,7 +18,7 @@ import type {
   KickoffView,
   VisionField,
 } from "@grasp-os/shared/kickoff";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { agreementsSchema, planSchema } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
@@ -63,6 +63,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
+import { signInConfig } from "../auth/config.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
@@ -83,6 +84,9 @@ import {
   usage,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
+import { deliverMail, mailState, queueMail } from "../mail-outbox.ts";
+import type { MailState, MailToQueue } from "../mail-outbox.ts";
+import { sendMail } from "../mail.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import {
   kickoffBrief,
@@ -125,6 +129,9 @@ import { interviewBrief, setupView } from "./stephen-setup.ts";
 //   What each person does on their link is in the onboarding's own log,
 //   which only staff read, never in the audit log, which the company's
 //   admin reads: it would tell them who talked, and when.
+// - A mail going twice, or a link's secret kept or logged: mail goes
+//   through the outbox (mail-outbox.ts), once by its key, the link filled
+//   in only as the mail is sent.
 
 /** The one store of a deployment, by the name it is reached under. */
 const storeName = "onboarding";
@@ -160,6 +167,18 @@ const answered = <T>(value: T) => ({ ok: true, value }) as const;
 
 /** A person's first name, as Stephen calls them. */
 const firstName = (name: string): string => name.trim().split(/\s+/u)[0] ?? "";
+
+/**
+ * Waits for `promise`, and logs it failing instead of throwing: for the
+ * delivery of mail after it, which runs all the same.
+ */
+const quietly = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch (error) {
+    log.error("mail.delivery_failed", errorFields(error));
+  }
+};
 
 /** How long the alarm waits, at most, before it looks for due links again. */
 const linkCheckMs = 60 * 60 * 1000;
@@ -324,6 +343,8 @@ export class Onboarding extends DurableObject<Env> {
   #auditRetryMs = auditRetryMs.first;
   /** Calls per link in the current minute: the store counts per link, never per address. */
   readonly #calls = new Map<string, { minute: string; count: number }>();
+  /** The delivery of mail running now: the next waits for it. */
+  #mailing: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -1272,7 +1293,51 @@ export class Onboarding extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     await this.#drainAudit();
     this.releaseDue();
+    await this.deliverMail();
     await this.#armLinks();
+  }
+
+  /**
+   * Queues a mail (mail-outbox.ts) and sends it in the background: once
+   * by its key, which starts with its kind (`link/…`), so queuing it again
+   * sends nothing. False when its key was queued already.
+   */
+  sendMail(mail: MailToQueue): boolean {
+    const queued = this.ctx.storage.transactionSync(() =>
+      queueMail(this.ctx.storage.sql, mail)
+    );
+    this.#deliverMailSoon();
+    return queued;
+  }
+
+  /** What became of the mail `key`; null for none queued. */
+  mailOf(key: string): MailState | null {
+    return mailState(this.ctx.storage.sql, key);
+  }
+
+  /**
+   * Sends the mail due by `now`, after any delivery already running, and
+   * sets the alarm for the next mail due. Returns when that is, or null.
+   */
+  async deliverMail(now: number = Date.now()): Promise<number | null> {
+    const before = this.#mailing;
+    const run = (async () => {
+      await before;
+      return await deliverMail(this.ctx.storage.sql, {
+        send: async (mail) => await sendMail(this.env, mail),
+        fill: async (person) => await this.#linkFill(person),
+        settled: (state) => {
+          this.#mailSettled(state, now);
+        },
+        now,
+      });
+    })();
+    this.#mailing = quietly(run);
+    const next = await run;
+    if (next !== null) {
+      await this.#alarmBy(next);
+    }
+    return next;
   }
 
   /** Releases every link due by `now`, while the interviews are open. Returns whose. */
@@ -1316,6 +1381,55 @@ export class Onboarding extends DurableObject<Env> {
     });
     this.#deliverAudit();
     return due;
+  }
+
+  /** Sends the mail due now in the background; the alarm retries what is left. */
+  #deliverMailSoon(): void {
+    this.ctx.waitUntil(this.deliverMail());
+  }
+
+  /**
+   * What fills the `{{link}}` slot of a mail with someone's link: the
+   * link, made as the mail goes. Null once it can't be: they are off the
+   * roster, or their link isn't out; or the deployment has no address.
+   */
+  async #linkFill(person: string): Promise<Record<string, string> | null> {
+    const origin = signInConfig(this.env)?.origin;
+    const [sent] = this.#db
+      .select({ person: links.person })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (origin === undefined || sent === undefined) {
+      return null;
+    }
+    const path = await this.linkOf(person);
+    return path === null ? null : { link: `${origin}${path}` };
+  }
+
+  /**
+   * Records in the log that a mail was sent or ended failed, and why, by
+   * its kind: `mail.link.sent`, `mail.link.failed.recipient_suppressed`.
+   * Never its words or its address.
+   */
+  #mailSettled(state: MailState, now: number): void {
+    const [kind = "mail"] = state.key.split("/");
+    const reason = (state.reason ?? "unknown")
+      .replace(/^E_|^mail\./u, "")
+      .toLowerCase();
+    const what =
+      state.state === "sent"
+        ? `mail.${kind}.sent`
+        : `mail.${kind}.failed.${reason}`;
+    this.#db
+      .insert(events)
+      .values({
+        at: new Date(now).toISOString(),
+        by: whoIs({ type: "system" }),
+        what,
+        about: state.about,
+      })
+      .run();
   }
 
   #linkFacts() {

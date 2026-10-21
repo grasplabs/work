@@ -205,6 +205,12 @@ export const coreProject = (
               gateway: "grasp-os-test",
               models: ["workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
             },
+            // Who core's mail is from (src/mail.ts); tests capture what
+            // the EMAIL binding is given (test/mail-capture.ts).
+            MAIL_FROM: {
+              name: "Stephen at Grasp",
+              address: "onboarding@mail.grasp.test",
+            },
             // workerd doesn't implement Durable Object jurisdictions.
             DURABLE_OBJECT_JURISDICTION: "none",
             // Plain workerd: no CPU limit on Code Mode's isolates.

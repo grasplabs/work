@@ -85,6 +85,11 @@
   // set up outside core, sends to core. An email trigger's address shows
   // whole with it, `<local part>@<domain>`, and as its local part without.
   //
+  // And who the mail core sends is from, `MAIL_FROM` (src/mail.ts): a
+  // name and an address on the deployment's sending domain, set up for
+  // Email Sending outside core. Without it core sends no mail, and each
+  // mail it means to send fails, saying why.
+  //
   // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
   // `cloudflare` makes Code Mode's run record claim the CPU limit as
   // enforced. Not a var here, which local dev and tests read too: staging's
@@ -176,7 +181,10 @@
   // The model gateway's transport to AI Gateway (src/models.ts); core never
   // holds a raw provider key.
   "ai": { "binding": "AI", "remote": true },
-  // Sends mail. Mail in comes from Email Routing: a catch-all rule for the
+  // Sends mail, through the mail outbox (src/mail-outbox.ts), from
+  // `MAIL_FROM`. On-prem binds `EMAIL` to a service of its own that takes
+  // the same message, or leaves it unbound, and core then sends nothing
+  // (src/mail.ts). Mail in comes from Email Routing: a catch-all rule for the
   // deployment's mail domain that sends every message to this Worker's
   // `email` handler (src/workflows/inbound-email.ts), set up with the
   // domain, outside this file.

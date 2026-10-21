@@ -260,6 +260,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "INBOUND_MAIL_DOMAIN",
   "KNOWLEDGE",
   "LOADER",
+  // Who core's mail is from (core's src/mail.ts).
+  "MAIL_FROM",
   "MEMORY_LIMITS",
   "MICROSOFT_CLIENT_ID",
   "MICROSOFT_CLIENT_SECRET",

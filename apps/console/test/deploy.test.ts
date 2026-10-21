@@ -820,6 +820,11 @@ describe("deploying safely", () => {
       ["INBOUND_MAIL_DOMAIN", JSON.stringify("Mail.Acme.test")],
       ["INBOUND_MAIL_DOMAIN", JSON.stringify(`${"a".repeat(64)}.acme.test`)],
       ["INBOUND_MAIL_DOMAIN", JSON.stringify("mail-.acme.test")],
+      // A name that would change the From header it goes in.
+      [
+        "MAIL_FROM",
+        JSON.stringify({ name: 'Grasp" <x@evil.test', address: "a@acme.test" }),
+      ],
       ["MEMORY_LIMITS", "{not json"],
       // A quota above the platform's: only a release raises one.
       [

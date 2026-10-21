@@ -32,6 +32,8 @@ interface __BaseEnv_Env {
   RUN_RETENTION_DAYS?: unknown;
   /** The domain the deployment receives mail at (src/workflows/overview.ts). */
   INBOUND_MAIL_DOMAIN?: unknown;
+  /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
+  MAIL_FROM?: unknown;
   /**
    * The limits the operator lowered, with the policy's generation
    * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;
