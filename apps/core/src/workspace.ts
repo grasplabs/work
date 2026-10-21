@@ -1882,7 +1882,8 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Keeps `documentIds` as given to the chat's code: each once, after the
    * chat's last message when it first was, then drops the oldest past
-   * {@link chatDocumentsMax}.
+   * {@link chatDocumentsMax}: given after an earlier message, or in an
+   * earlier read since the same one (insertion order, `rowid`).
    */
   #keepGiven(chatId: ChatId, documentIds: readonly string[]): void {
     if (documentIds.length === 0) {
@@ -1902,7 +1903,7 @@ export class Workspace extends DurableObject<Env> {
       .onConflictDoNothing()
       .run();
     this.#db.run(
-      sql`DELETE FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} AND ${chatDocuments.documentId} NOT IN (SELECT ${chatDocuments.documentId} FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} ORDER BY ${chatDocuments.givenAfter} DESC, ${chatDocuments.documentId} LIMIT ${chatDocumentsMax})`
+      sql`DELETE FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} AND ${chatDocuments.documentId} NOT IN (SELECT ${chatDocuments.documentId} FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} ORDER BY ${chatDocuments.givenAfter} DESC, rowid DESC LIMIT ${chatDocumentsMax})`
     );
   }
 
