@@ -499,6 +499,28 @@ describe("listen tasks", { timeout: 120_000 }, () => {
     expect(journal?.events).toHaveLength(1);
   });
 
+  it("fail the run, taking nothing, when the binding's approval is revoked between an event's admission and the listen", async () => {
+    const admin = await person("admin");
+    const { workflow, approvals } = await listening(admin, [
+      { pause: { wait: "PT2S" } },
+      listen("await-job", { one: ofThisJob(completed) }),
+      notes,
+    ]);
+    const runId = await started(admin, workflow.id);
+    await waiting(runId);
+
+    await admitRunEvent(env, delivery(workflow.id, runId, { note: "early" }));
+    await revokeWorkflowBinding(env, admin, workflow.id, approvals.jobEvents);
+    const run = await endOf(admin, workflow.id, runId);
+    const journal = await runObject(runId).journal();
+
+    expect({ status: run.status, code: run.error?.code }).toStrictEqual({
+      status: "failed",
+      code: "workflow.event_denied",
+    });
+    expect(journal?.events.map((row) => row.consumed_by)).toStrictEqual([null]);
+  });
+
   it("aren't lowered with a filter that correlates on an event's content", async () => {
     const admin = await person("admin");
     const { version } = await listening(admin, [
