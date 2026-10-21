@@ -12,11 +12,16 @@
  * out to clients (src/rollout/workflow.ts), `RollbackClient` rolls a
  * client back from one, and `ApplyClient` applies a client's settings
  * now (src/clients/apply.ts).
+ *
+ * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
+ * behind the same Access check.
  */
 import handler from "@tanstack/react-start/server-entry";
+import { env } from "cloudflare:workers";
 
 import { withAccess } from "./access.ts";
 import type { Staff } from "./access.ts";
+import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
 import { consoleDatabase } from "./db/act.ts";
 import { importReleases } from "./releases/import.ts";
 
@@ -32,11 +37,15 @@ declare module "@tanstack/react-start" {
 }
 
 export default {
-  fetch: withAccess(
-    async (request, staff) =>
-      await handler.fetch(request, { context: { staff } })
+  fetch: withAccess(async (request, staff) =>
+    new URL(request.url).pathname === adminMcpPath
+      ? await adminMcp(request, staff, env)
+      : await handler.fetch(request, { context: { staff } })
   ),
-  scheduled: async (_controller, env) => {
-    await importReleases(env.RELEASES, consoleDatabase(env.DB));
+  scheduled: async (_controller, scheduledEnv) => {
+    await importReleases(
+      scheduledEnv.RELEASES,
+      consoleDatabase(scheduledEnv.DB)
+    );
   },
 } satisfies ExportedHandler<Env>;
