@@ -34,25 +34,45 @@ const themeClasses = new Set(["dark", "light"]);
 /** Functional pseudo-classes whose classes still pick the package's own. */
 const keepingScope = new Set(["is", "where", "matches", "-webkit-any"]);
 
-/** Tokens that open a function, a parenthesis or a bracket. */
-const opening = new Set<CssToken["type"]>(["function", "(", "["]);
+/**
+ * The token that closes a function, parenthesis, bracket or brace opened
+ * by `type`, if it opens one. A block closes only on its own closer (CSS
+ * Syntax §5.4.8): any other closer inside it is a token of it, so `]`
+ * never closes `(`, nor `}` a function.
+ */
+const closerOf = (type: CssToken["type"]): CssToken["type"] | undefined => {
+  if (type === "function" || type === "(") {
+    return ")";
+  }
+  if (type === "[") {
+    return "]";
+  }
+  return type === "{" ? "}" : undefined;
+};
 
-/** Tokens that close one. */
-const closing = new Set<CssToken["type"]>([")", "]"]);
+/**
+ * Reads `type` into `expected`, the closers of the blocks open, innermost
+ * last: opens a block, or closes the innermost on its own closer.
+ */
+const track = (expected: CssToken["type"][], type: CssToken["type"]): void => {
+  const closer = closerOf(type);
+  if (closer !== undefined) {
+    expected.push(closer);
+  } else if (type === expected.at(-1)) {
+    expected.pop();
+  }
+};
 
 /** A rule's prelude split at its top-level commas: one selector each. */
 const selectorsOf = (prelude: readonly CssToken[]): CssToken[][] => {
   const selectors: CssToken[][] = [[]];
-  let depth = 0;
+  const expected: CssToken["type"][] = [];
   for (const token of prelude) {
-    if (token.type === "function" || token.type === "(" || token.type === "[") {
-      depth += 1;
-    } else if (token.type === ")" || token.type === "]") {
-      depth -= 1;
-    } else if (token.type === "," && depth === 0) {
+    if (token.type === "," && expected.length === 0) {
       selectors.push([]);
       continue;
     }
+    track(expected, token.type);
     selectors.at(-1)?.push(token);
   }
   return selectors.filter((selector) =>
@@ -62,16 +82,14 @@ const selectorsOf = (prelude: readonly CssToken[]): CssToken[][] => {
 
 /** Where the function or bracket opened at `at` closes (or the end). */
 const closeOf = (selector: readonly CssToken[], at: number): number => {
-  let depth = 0;
+  const expected: CssToken["type"][] = [];
   for (let index = at; index < selector.length; index += 1) {
     const type = selector[index]?.type;
-    if (type !== undefined && opening.has(type)) {
-      depth += 1;
-    } else if (type !== undefined && closing.has(type)) {
-      depth -= 1;
-      if (depth === 0) {
-        return index;
-      }
+    if (type !== undefined) {
+      track(expected, type);
+    }
+    if (expected.length === 0) {
+      return index;
     }
   }
   return selector.length;
@@ -90,7 +108,7 @@ const scoped = (selector: readonly CssToken[]): boolean => {
     if (token === undefined) {
       break;
     }
-    if (opening.has(token.type)) {
+    if (closerOf(token.type) !== undefined) {
       const end = closeOf(selector, at);
       if (
         token.type === "function" &&
@@ -157,17 +175,18 @@ interface Reading {
   prelude: CssToken[];
   /** The at-rule the prelude is of, if any. */
   atRule: string | undefined;
-  /** Brackets and functions open within the prelude. */
-  nested: number;
+  /** The closers of the blocks open within the prelude, innermost last. */
+  expected: CssToken["type"][];
+  /** The closers of the blocks open within a block skipped whole. */
+  skipping: CssToken["type"][];
 }
 
 const blank = new Set<CssToken["type"]>(["whitespace", "cdo", "cdc"]);
 
-/** Inside a block skipped whole: only its own blocks count. */
+/** Inside a block skipped whole, which ends on its own `}` alone. */
 const skip = (reading: Reading, { type }: CssToken): void => {
-  if (type === "{") {
-    reading.levels.push("skip");
-  } else if (type === "}") {
+  track(reading.skipping, type);
+  if (reading.skipping.length === 0) {
     reading.levels.pop();
   }
 };
@@ -191,9 +210,9 @@ const open = (reading: Reading): void => {
   // A style rule's block holds declarations, and nested rules the
   // selector around them already scopes or doesn't: skipped whole, as an
   // at-rule's block is unless it holds rules.
-  reading.levels.push(
-    atRule !== undefined && holdingRules.has(atRule) ? "rules" : "skip"
-  );
+  const holds = atRule !== undefined && holdingRules.has(atRule);
+  reading.levels.push(holds ? "rules" : "skip");
+  reading.skipping = holds ? [] : ["}"];
   restart(reading);
 };
 
@@ -211,7 +230,8 @@ const starts = (reading: Reading, token: CssToken): boolean => {
 
 /** One token at a level of rules. */
 const inRules = (reading: Reading, token: CssToken): void => {
-  if (token.type === "}" && reading.nested === 0) {
+  const { expected } = reading;
+  if (token.type === "}" && expected.length === 0) {
     reading.levels.pop();
     restart(reading);
     return;
@@ -219,18 +239,14 @@ const inRules = (reading: Reading, token: CssToken): void => {
   if (starts(reading, token)) {
     return;
   }
-  if (opening.has(token.type)) {
-    reading.nested += 1;
-  } else if (closing.has(token.type) && reading.nested > 0) {
-    reading.nested -= 1;
-  }
-  if (reading.nested > 0 || (token.type !== "{" && token.type !== ";")) {
-    reading.prelude.push(token);
-  } else if (token.type === ";") {
+  if (expected.length === 0 && token.type === "{") {
+    open(reading);
+  } else if (expected.length === 0 && token.type === ";") {
     // An at-rule with no block (`@import`, `@layer a;`): nothing selected.
     restart(reading);
   } else {
-    open(reading);
+    track(expected, token.type);
+    reading.prelude.push(token);
   }
 };
 
@@ -244,7 +260,8 @@ export const unscopedInCss = (css: string, limit = 50): string[] => {
     levels: [],
     prelude: [],
     atRule: undefined,
-    nested: 0,
+    expected: [],
+    skipping: [],
   };
   for (const token of cssTokens(css)) {
     if (reading.found.size >= limit) {

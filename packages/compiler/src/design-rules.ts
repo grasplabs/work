@@ -342,8 +342,11 @@ const isAttributeValue = (node: unknown): boolean => {
   );
 };
 
-/** A class with Tailwind's important modifier, at either end. */
-const important = /(?:^|\s)(?:!\S+|\S+!)(?=\s|$)/u;
+/**
+ * A class with Tailwind's important modifier: leading, after any variants
+ * (`!p-2`, `md:!flex`), or trailing (`p-2!`).
+ */
+const important = /(?:^|:)!|!$/u;
 
 const noImportant: Rule.RuleModule = {
   meta: {
@@ -373,6 +376,27 @@ const noImportant: Rule.RuleModule = {
         const value = stringOf(get(node, "value"));
         if (value !== undefined) {
           check(node, value);
+        }
+      },
+      // A template's static parts, in a `className` or a class helper;
+      // one with no expressions in a `className` the attribute checks.
+      TemplateLiteral: (node: Rule.Node) => {
+        const quasis = get(node, "quasis");
+        const expressions = get(node, "expressions");
+        if (
+          !Array.isArray(quasis) ||
+          (Array.isArray(expressions) &&
+            expressions.length === 0 &&
+            isAttributeValue(node)) ||
+          !inClassList(node)
+        ) {
+          return;
+        }
+        for (const quasi of quasis) {
+          const cooked = get(get(quasi, "value"), "cooked");
+          if (typeof cooked === "string") {
+            check(node, cooked);
+          }
         }
       },
       // Class lists built with `cn(…)` or a condition.

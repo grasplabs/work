@@ -315,6 +315,7 @@ export default function Escapes() {
       <div className="!p-2 gap-2" />
       <div dangerouslySetInnerHTML={{ __html: "<b>hi</b>" }} />
       <div className={cn("gap-2", [{ "p-4!": true }])} />
+      <div className={\`md:!flex \${["gap", "2"].join("-")}\`} />
     </div>
   );
 }
@@ -341,6 +342,7 @@ export default function Escapes() {
       "21 grasp/no-important",
       "22 grasp/no-style-escapes",
       "23 grasp/no-important",
+      "24 grasp/no-important",
     ]);
     // Each says what to do instead.
     expect(

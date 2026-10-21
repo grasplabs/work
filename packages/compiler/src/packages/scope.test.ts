@@ -60,4 +60,17 @@ h1,
 .lib-title { font-weight: 600; }`;
     expect(unscopedInCss(css)).toStrictEqual(["body", "button", "h1"]);
   });
+
+  it("can't be tricked by a closer that doesn't match its opener", () => {
+    const css = `:is(] ), body, .lib { margin: 0; }
+:is({ ) } ), html, .lib { margin: 0; }
+.lib { content: f(}); } button { color: red; }`;
+    expect(unscopedInCss(css)).toStrictEqual([
+      ":is(] )",
+      "body",
+      ":is({ ) } )",
+      "html",
+      "button",
+    ]);
+  });
 });
