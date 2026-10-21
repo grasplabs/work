@@ -83,7 +83,8 @@ export const eventWords = (
   const company = event.clientId === null ? "" : nameOf(event.clientId);
   const target = event.target ?? "";
   const what: Record<StaffEvent["action"], string> = {
-    "rollout.start": `started a rollout${target === "" ? "" : ` (${target})`}`,
+    // A rollout's id says nothing to a reader; its release is on the page.
+    "rollout.start": "started a rollout",
     "rollout.approve": "approved a rollout's next ring",
     "rollout.pause": "paused a rollout",
     "rollout.resume": "resumed a rollout",
