@@ -832,7 +832,7 @@ ${llmStep()}`,
         rootRunId: root.id,
       });
     const told = async (app: string) => {
-      const refused = await models(env)
+      const caught = await models(env)
         .call(stepCall({ app, person: builder.userId }, inLineage(app), false))
         .then(
           () => "admitted",
@@ -843,7 +843,7 @@ ${llmStep()}`,
           code: z.string(),
           details: z.record(z.string(), z.unknown()),
         })
-        .parse(refused);
+        .parse(caught);
       return [code, details.because, details.retryAfterSeconds];
     };
 
