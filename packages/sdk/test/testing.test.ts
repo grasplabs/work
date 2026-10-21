@@ -371,6 +371,8 @@ describe("workflow tests", () => {
     const held = await runWorkflowTests(tests, {
       steps: { find: ["CRM"], tidy: [] },
       kinds: { find: "exact", tidy: "exact" },
+      models: {},
+      keyed: [],
       all: ["CRM"],
     });
     const unheld = await runWorkflowTests(tests);
