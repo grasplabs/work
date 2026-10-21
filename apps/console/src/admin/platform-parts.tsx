@@ -36,6 +36,7 @@ export const targetWords: Record<TargetView["status"], string> = {
 export const standingWords: Record<Standing, string> = {
   attention: "Needs a look",
   setup: "Being set up",
+  unread: "Not read",
   healthy: "Healthy",
   offboarded: "Offboarded",
 };
@@ -73,6 +74,7 @@ export const needWords = (need: PlatformNeed): string => {
 const standingDot: Record<Standing, string> = {
   attention: "bg-status-attention",
   setup: "bg-foreground",
+  unread: "bg-muted-foreground",
   healthy: "bg-status-agreed",
   offboarded: "bg-border",
 };

@@ -232,7 +232,17 @@ export const needsOf = (
 };
 
 /** How a company stands, as one word. */
-export type Standing = "attention" | "setup" | "healthy" | "offboarded";
+/**
+ * How a company stands, as one word. `unread`: active, nothing recorded
+ * needs a look, but its account wasn't read (yet, or the read failed), so
+ * whether it drifted or errs isn't known; never called healthy unread.
+ */
+export type Standing =
+  | "attention"
+  | "setup"
+  | "unread"
+  | "healthy"
+  | "offboarded";
 
 export const standingOf = (
   row: GridRow,
@@ -245,14 +255,18 @@ export const standingOf = (
   if (needsOf(row, live, releases).length > 0) {
     return "attention";
   }
-  return row.status === "provisioning" ? "setup" : "healthy";
+  if (row.status === "provisioning") {
+    return "setup";
+  }
+  return live === undefined ? "unread" : "healthy";
 };
 
 const standingOrder: Record<Standing, number> = {
   attention: 0,
   setup: 1,
-  healthy: 2,
-  offboarded: 3,
+  unread: 2,
+  healthy: 3,
+  offboarded: 4,
 };
 
 /** Every company, the ones that need a look first, then by name. */

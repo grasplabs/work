@@ -154,7 +154,7 @@ describe("the Platform page's model", () => {
     ]);
   });
 
-  it("lists the companies that need a look first: a failed deploy, drift, errors, or two releases behind unpinned, older than every listed one included", () => {
+  it("lists the companies that need a look first: a failed deploy, drift, errors, or two releases behind unpinned, older than every listed one included; one not read never as healthy", () => {
     const releases = [release("r1", 1), release("r2", 2), release("r3", 3)];
     const companies = companiesOf(
       [
@@ -168,6 +168,7 @@ describe("the Platform page's model", () => {
         row("older", { release: "r0" }),
         row("pinned", { release: "r1", pinnedReleaseId: "r1" }),
         row("new", { status: "provisioning", release: null }),
+        row("unread"),
         row("gone", { status: "offboarded", release: "r1" }),
       ],
       {
@@ -195,6 +196,7 @@ describe("the Platform page's model", () => {
       { id: "older", standing: "attention", needs: ["behind"] },
       { id: "split", standing: "attention", needs: ["drift"] },
       { id: "new", standing: "setup", needs: [] },
+      { id: "unread", standing: "unread", needs: [] },
       { id: "pinned", standing: "healthy", needs: [] },
       { id: "zeta", standing: "healthy", needs: [] },
       { id: "gone", standing: "offboarded", needs: [] },
