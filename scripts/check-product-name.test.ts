@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { rm, writeFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vite-plus/test";
@@ -23,6 +24,28 @@ const lintReport = z.object({
   ),
 });
 
+/**
+ * How long the lint test may take. It runs the repo's own `vp lint`, as
+ * `vp check` does: type-aware and type-checking, so it builds the
+ * TypeScript programs of both apps the planted files sit in, with every JS
+ * plugin loaded. About a second on an idle machine, and well past the
+ * default 5 s on a CI runner shared with the other test shards. The
+ * config's file scoping is what the test checks, so no lighter run will do.
+ */
+const lintTimeoutMs = 60_000;
+
+/** What `command` printed, once it exited, whatever its exit code. */
+const stdoutOf = async (command: string, args: string[]): Promise<string> => {
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
+  child.stdout.setEncoding("utf-8");
+  let stdout = "";
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  await once(child, "close");
+  return stdout;
+};
+
 /** What `vp lint` reports for each rule of ours on `files`, planted in the repo for the run. */
 const linted = async (
   files: Record<string, string>
@@ -39,11 +62,13 @@ const linted = async (
       })
     );
     // The repo's own, whatever the shell running the tests has on its path.
-    const { stdout } = spawnSync(
-      "node_modules/.bin/vp",
-      ["lint", "--format", "json", ...planted.map(({ path }) => path)],
-      { encoding: "utf-8" }
-    );
+    // Not spawnSync: the worker waits on the lint without blocking.
+    const stdout = await stdoutOf("node_modules/.bin/vp", [
+      "lint",
+      "--format",
+      "json",
+      ...planted.map(({ path }) => path),
+    ]);
     const { diagnostics } = lintReport.parse(JSON.parse(stdout));
     return (
       diagnostics
@@ -84,30 +109,36 @@ describe("the product's old name", () => {
     }
   );
 
-  it("fails the lint in a string or JSX text people read, never in a comment, a code name or a test", async () => {
-    const reported = await linted({
-      "apps/web/src/NAME.tsx": [
-        "// Grasp OS, in a comment, is for us.",
-        'export const title = "Welcome to Grasp OS";',
-        "export const Banner = () => <p>Grasp OS is here</p>;",
-        'export const route = "/grasp-os";',
-        "",
-      ].join("\n"),
-      "apps/core/src/NAME.ts": [
-        "export const subject = `Your Grasp OS invite`;",
-        // Escaped, it still reads as the old name.
-        "export const escaped = `Grasp\\u0020OS`;",
-        "",
-      ].join("\n"),
-      "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
-    });
-    expect(reported).toStrictEqual([
-      { file: "apps/core/src/NAME.ts", line: 1 },
-      { file: "apps/core/src/NAME.ts", line: 2 },
-      { file: "apps/web/src/NAME.tsx", line: 2 },
-      { file: "apps/web/src/NAME.tsx", line: 3 },
-    ]);
-  });
+  it(
+    "fails the lint in a string or JSX text people read, never in a comment, a code name or a test",
+    {
+      timeout: lintTimeoutMs,
+    },
+    async () => {
+      const reported = await linted({
+        "apps/web/src/NAME.tsx": [
+          "// Grasp OS, in a comment, is for us.",
+          'export const title = "Welcome to Grasp OS";',
+          "export const Banner = () => <p>Grasp OS is here</p>;",
+          'export const route = "/grasp-os";',
+          "",
+        ].join("\n"),
+        "apps/core/src/NAME.ts": [
+          "export const subject = `Your Grasp OS invite`;",
+          // Escaped, it still reads as the old name.
+          "export const escaped = `Grasp\\u0020OS`;",
+          "",
+        ].join("\n"),
+        "apps/web/src/NAME.test.ts": 'export const title = "Grasp OS";\n',
+      });
+      expect(reported).toStrictEqual([
+        { file: "apps/core/src/NAME.ts", line: 1 },
+        { file: "apps/core/src/NAME.ts", line: 2 },
+        { file: "apps/web/src/NAME.tsx", line: 2 },
+        { file: "apps/web/src/NAME.tsx", line: 3 },
+      ]);
+    }
+  );
 
   it("fails the check in a catalog or page people read, naming where", () => {
     const files = [
