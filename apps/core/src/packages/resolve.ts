@@ -51,7 +51,12 @@ import { ofSubject } from "../dependencies/subjects.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
 import type { PackageBuilderRun } from "./builder.ts";
 import { lookalikeFindings } from "./lookalikes.ts";
-import { askedOf, osvMalwareIn, whenFree } from "./malware.ts";
+import {
+  advisoriesAffecting,
+  malwareAdvised,
+  osvMalwareIn,
+  whenFree,
+} from "./malware.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
 // Resolving what an App's package.json asks for into one exact graph, and
@@ -234,21 +239,10 @@ const findingsOf = async (
   // malware there), and OSV.dev's malware reports (GRA-749), which carry
   // GitHub's malware advisories and the OpenSSF malicious-packages data
   // the registry's answer never does. Either failing fails the resolve.
-  const [advisories, reported] = await Promise.all([
-    whenFree(async () => await env.CONNECT.npmAdvisories(askedOf(packages))),
+  const [affecting, reported] = await Promise.all([
+    advisoriesAffecting(env, packages),
     osvMalwareIn(env, packages),
   ]);
-  const affecting = packages.flatMap(({ name, version }) =>
-    (Object.hasOwn(advisories, name) ? (advisories[name] ?? []) : [])
-      .filter(
-        ({ vulnerableVersions }) =>
-          validRange(vulnerableVersions) === null ||
-          // As npm audit matches: a prerelease is inside a range that
-          // names none (`2.0.0-beta.1` in `<2.0.0`).
-          satisfies(version, vulnerableVersions, { includePrerelease: true })
-      )
-      .map((advisory) => ({ advisory, package: { name, version } }))
-  );
   const security = affecting.map(
     ({ advisory, package: ref }): DependencyFinding => ({
       kind: "security",
@@ -266,12 +260,7 @@ const findingsOf = async (
       )
       .slice(0, dependencyMaxFindings),
     total: all.length,
-    malware: [
-      ...affecting.flatMap(({ advisory, package: ref }) =>
-        advisory.malware ? [{ package: ref, advisory: advisory.id }] : []
-      ),
-      ...reported,
-    ],
+    malware: [...malwareAdvised(affecting), ...reported],
   };
 };
 

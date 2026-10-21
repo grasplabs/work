@@ -46,7 +46,7 @@ import {
 } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { graspLockSchema } from "@grasp-os/shared/packages";
+import { graspLockSchema, packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageLimits } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -90,7 +90,7 @@ import {
   lockStatements,
   unusedLockStatements,
 } from "../packages/locks.ts";
-import { osvMalwareIn } from "../packages/malware.ts";
+import { knownMalwareIn } from "../packages/malware.ts";
 import { holdsApprove, holdsApproveSql } from "./approvers.ts";
 import { peerIssues } from "./peers.ts";
 import { dropPending } from "./pending.ts";
@@ -231,6 +231,7 @@ type DependencyAction =
   | "superseded"
   | "withdrawn"
   | "approved"
+  | "approval_refused"
   | "denied"
   | "retired"
   | "revoked"
@@ -794,7 +795,9 @@ export const refuseMalware = async (
   env: Env,
   by: Acting,
   subject: DependencySubject,
-  found: readonly [MalwareFound, ...MalwareFound[]]
+  found: readonly [MalwareFound, ...MalwareFound[]],
+  /** Where it was refused, when not at a resolve: an approval's request. */
+  at?: { request: string; at: "approval" }
 ): Promise<never> => {
   const db = drizzle(env.DB);
   const actor = by.actor ?? actorOf(by);
@@ -809,6 +812,7 @@ export const refuseMalware = async (
         version: malware.package.version,
         advisory: malware.advisory,
         found: found.length,
+        ...at,
       },
     })
   );
@@ -978,20 +982,23 @@ export const dependencyReview = async (
 };
 
 /**
- * Refuses approving `found`'s graph when OSV.dev now reports a package of
- * it as malware (GRA-913): one reported after the graph was proposed,
- * when it was checked (`findingsOf`, packages/resolve.ts), is refused all
- * the same, audited as at a resolve (`refuseMalware`); the request stays
- * pending, for an admin to deny. Fails closed when OSV.dev can't be read
- * (`package.malware_unchecked`). Asked only to approve: saying no never
- * waits on OSV.dev.
+ * Refuses approving `found`'s graph when a package of it is now known as
+ * malware (GRA-913), by the registry's advisories (CWE-506) or OSV.dev's
+ * reports, asked again as at a resolve (`findingsOf`, packages/resolve.ts):
+ * one reported after the graph was proposed is refused all the same,
+ * audited as at a resolve (`refuseMalware`), saying the request and that
+ * it was its approval; the request stays pending, for an admin to deny.
+ * Fails closed when either source can't be read, audited as an approval
+ * refused (`dependency.approval_refused`, with its error code). Asked only
+ * to approve: saying no never waits on either.
  */
-const refuseReportedMalware = async (
+const refuseKnownMalware = async (
   env: Env,
   by: Identity,
   found: Listed
 ): Promise<void> => {
-  const row = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const row = await db
     .select({ snapshot: dependencyRequests.snapshot })
     .from(dependencyRequests)
     .where(eq(dependencyRequests.id, found.id))
@@ -1000,13 +1007,32 @@ const refuseReportedMalware = async (
     throw notFound();
   }
   const { graph } = snapshotSchema.parse(JSON.parse(row.snapshot));
-  const reported = await osvMalwareIn(
-    env,
-    graph.packages.map(({ name, version }) => ({ name, version }))
-  );
-  const [first, ...rest] = reported;
+  let known: MalwareFound[];
+  try {
+    known = await knownMalwareIn(
+      env,
+      graph.packages.map(({ name, version }) => ({ name, version }))
+    );
+  } catch (error) {
+    const code = packageErrors.codeOf(error);
+    if (code !== undefined) {
+      await auditedBatch(env, db, [
+        outboxed(
+          db,
+          requestEntry(actorOf(by), "approval_refused", found, {
+            errorCode: code,
+          })
+        ),
+      ]);
+    }
+    throw error;
+  }
+  const [first, ...rest] = known;
   if (first !== undefined) {
-    await refuseMalware(env, by, subjectOfRow(found), [first, ...rest]);
+    await refuseMalware(env, by, subjectOfRow(found), [first, ...rest], {
+      request: found.id,
+      at: "approval",
+    });
   }
 };
 
@@ -1052,7 +1078,12 @@ export const decideDependency = async (
     throw notFound();
   }
   if (approved) {
-    await refuseReportedMalware(env, by, found);
+    // A request already decided, or reviewed at another graph, is refused
+    // as stale before anything is asked of the registry or OSV.dev.
+    if (found.status !== "pending" || found.graphHash !== reviewed.graphHash) {
+      throw dependencyErrors.create("dependency.stale");
+    }
+    await refuseKnownMalware(env, by, found);
   }
   const status = approved ? "approved" : "denied";
   const [[decided]] = await auditedBatch(env, db, [

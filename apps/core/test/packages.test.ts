@@ -682,7 +682,7 @@ describe("the platform's own packages", () => {
     });
   });
 
-  it("refuses to approve a graph OSV.dev reported as malware after it was proposed, fails closed when OSV can't be read, and still lets an admin deny it", async () => {
+  it("refuses to approve a graph reported as malware after it was proposed, by OSV.dev or the registry, fails closed when OSV can't be read, and still lets an admin deny it", async () => {
     const { builder, app } = await builderWithApp();
     const admin = await personApi("admin");
     await admin.api.dependencies.grantApprover({
@@ -737,13 +737,40 @@ describe("the platform's own packages", () => {
     await osvAnswers(unread, 503);
     let unreadApproval: Decided | undefined;
     let denial: Decided | undefined;
+    let pendingWhileUnread: string | undefined;
+    let unreadEvents: Awaited<ReturnType<typeof auditedDuring>> = [];
     try {
-      unreadApproval = await decide(unchecked, true);
+      unreadEvents = await auditedDuring(async () => {
+        unreadApproval = await decide(unchecked, true);
+      });
+      const whileUnread = await other.builder.api.dependencies.status({
+        app: other.app,
+      });
+      pendingWhileUnread = whileUnread.pending?.id;
       // Saying no never needs OSV.dev.
       denial = await decide(unchecked, false);
     } finally {
       await osvAnswers(unread, null);
     }
+    // Reported by the registry instead, as malware (CWE-506), after it
+    // was proposed: refused as at a resolve.
+    const fourth = await builderWithApp();
+    const advised = named("advised");
+    await publish(plain(advised, "1.0.0"));
+    const { request: advisedRequest } =
+      await fourth.builder.api.dependencies.resolve(
+        intentFor(fourth.app, { [advised]: "1.0.0" })
+      );
+    await advise(
+      advised,
+      advisory({
+        url: "https://github.com/advisories/GHSA-mmmm-wwww-2026",
+        vulnerable_versions: "=1.0.0",
+        severity: "low",
+        cwe: ["CWE-506"],
+      })
+    );
+    const advisedApproval = await decide(advisedRequest, true);
     // A graph nobody reported is approved as before.
     const third = await builderWithApp();
     const clean = named("clean");
@@ -753,6 +780,15 @@ describe("the platform's own packages", () => {
         intentFor(third.app, { [clean]: "1.0.0" })
       );
     const approved = await decide(cleanRequest, true);
+    // Decided already: stale, before OSV.dev is asked, so even while it
+    // can't be read.
+    await osvAnswers(clean, 503);
+    let again: Decided | undefined;
+    try {
+      again = await decide(cleanRequest, true);
+    } finally {
+      await osvAnswers(clean, null);
+    }
 
     expect({
       refused,
@@ -764,8 +800,21 @@ describe("the platform's own packages", () => {
       ).length,
       stillPending: afterRefusal.pending?.id,
       unreadApproval: decidedCode(unreadApproval),
+      unreadAudited: unreadEvents
+        .filter(({ action }) =>
+          ["dependency.approval_refused", "dependency.approved"].includes(
+            action
+          )
+        )
+        .map(({ action, detail }) => ({
+          action,
+          errorCode: detail.errorCode,
+        })),
+      pendingWhileUnread,
       denial: decidedCode(denial),
+      advisedApproval,
       approved: decidedCode(approved),
+      again: decidedCode(again),
     }).toStrictEqual({
       refused: {
         code: "dependency.malware",
@@ -778,13 +827,28 @@ describe("the platform's own packages", () => {
           version: "1.0.0",
           advisory: "MAL-2026-20001",
           found: 1,
+          request: reported.id,
+          at: "approval",
         },
       ],
       approvedEvents: 0,
       stillPending: reported.id,
       unreadApproval: "package.malware_unchecked",
+      // Refused for want of a check, audited so, and nothing approved.
+      unreadAudited: [
+        {
+          action: "dependency.approval_refused",
+          errorCode: "package.malware_unchecked",
+        },
+      ],
+      pendingWhileUnread: unchecked.id,
       denial: "ok",
+      advisedApproval: {
+        code: "dependency.malware",
+        details: { packages: [`${advised}@1.0.0 (GHSA-mmmm-wwww-2026)`] },
+      },
       approved: "ok",
+      again: "dependency.stale",
     });
   });
 
