@@ -1,5 +1,6 @@
 import type {
   BrainApi,
+  BrainChangePage,
   Company,
   Connection,
   Source,
@@ -18,6 +19,8 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/auth.ts";
+import { brainChanges } from "./brain-changes.ts";
+import type { SourceChange } from "./brain-changes.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { onboardingStore } from "./onboarding/store.ts";
@@ -146,6 +149,25 @@ const onboardingSources = (facts: OnboardingFacts | null): Source[] => {
             step: 2,
           } satisfies Source,
         ]),
+  ];
+};
+
+/**
+ * The onboarding's sources as changes (brain-changes.ts): the kickoff when
+ * its transcript came in, the staff list when it was last saved; none for
+ * anyone but an admin, who alone has `facts`, as for `brain.read`.
+ */
+const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] => {
+  const kickoffAt = facts?.kickoff.transcript?.at;
+  return [
+    ...(kickoffAt === undefined
+      ? []
+      : [{ id: kickoffSourceId, title: "Kickoff", at: kickoffAt }]),
+    ...(facts === null ||
+    facts.view.roster === null ||
+    facts.rosterSavedAt === null
+      ? []
+      : [{ id: rosterSourceId, title: "Staff list", at: facts.rosterSavedAt }]),
   ];
 };
 
@@ -367,8 +389,9 @@ export const readBrain = async (
 };
 
 /**
- * The company brain over `/rpc`: for anyone signed in. Not audited
- * itself: it reads nothing from Knowledge.
+ * The company brain over `/rpc`: for anyone signed in. Its workspace isn't
+ * audited itself: it reads nothing from Knowledge. Its changes are, as the
+ * Knowledge read they are (brain-changes.ts).
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
   readonly #env: Env;
@@ -384,6 +407,19 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await readBrain(this.#env, person)
+    );
+  }
+
+  async changes(options: unknown): Promise<BrainChangePage> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await brainChanges(
+          this.#env,
+          person,
+          options,
+          sourceChanges(await onboardingFacts(this.#env, person))
+        )
     );
   }
 }
