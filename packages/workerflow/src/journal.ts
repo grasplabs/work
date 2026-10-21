@@ -34,6 +34,7 @@
 // Values and errors are kept as codec text (codec.ts), never as live
 // objects; a step's stream result as chunks beside them (streams.ts).
 import { createHistory } from "./history.ts";
+import { eventMatches } from "./identity.ts";
 import type { JournaledMatch } from "./identity.ts";
 import { journalSchemaVersion } from "./journal-schema.ts";
 import { createNotifications } from "./notifications.ts";
@@ -812,35 +813,29 @@ export const readNextEvent = (
 /**
  * The oldest event no wait has taken that matches any entry of `match`
  * (identity.ts, `eventMatches`), if the run accepted it before
- * `deadline`: the one a `waitForMatch` with that deadline takes. Each
- * entry's type and attributes are compared in the query, so it reads the
- * one row it takes; the attribute names were checked by CloudEvents' rule
- * and go in as bound values, never as text of the query.
+ * `deadline`: the one a `waitForMatch` with that deadline takes. The query
+ * narrows by type alone, one bound value per distinct type (16 at most,
+ * well within SQLite's bound-parameter limit however many attributes the
+ * entries name); the attributes are compared as the rows are read, in the
+ * order the run accepted them, stopping at the first that matches.
  */
 export const readMatchingEvent = (
   sql: SqlStorage,
   match: readonly JournaledMatch[],
   deadline: number
 ): EventRow | undefined => {
-  const clauses: string[] = [];
-  const values: (string | number)[] = [];
-  for (const entry of match) {
-    const parts = ["type = ?"];
-    values.push(entry.type);
-    for (const [name, value] of Object.entries(entry.attributes)) {
-      parts.push("json_extract(attributes, ?) IS ?");
-      values.push(`$."${name}"`, value);
+  const types = [...new Set(match.map((entry) => entry.type))];
+  const rows = sql.exec<EventRow>(
+    `SELECT ${eventColumns} FROM events WHERE consumed_by IS NULL AND accepted_at < ? AND type IN (${types.map(() => "?").join(", ")}) ORDER BY seq`,
+    deadline,
+    ...types
+  );
+  for (const row of rows) {
+    if (eventMatches(match, row.type, row.attributes)) {
+      return row;
     }
-    clauses.push(`(${parts.join(" AND ")})`);
   }
-  const [oldest] = sql
-    .exec<EventRow>(
-      `SELECT ${eventColumns} FROM events WHERE consumed_by IS NULL AND accepted_at < ? AND (${clauses.join(" OR ")}) ORDER BY seq LIMIT 1`,
-      deadline,
-      ...values
-    )
-    .toArray();
-  return oldest;
+  return undefined;
 };
 
 /** A step whose rollback is still to run, or ended the rolling back. */
