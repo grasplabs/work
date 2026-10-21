@@ -274,7 +274,6 @@ apps: {
   }[]>;
   /** An App's files by path, at \`version\`, or at its latest version without one. Only for Apps the person builds. */
   files(app: string, version?: number): Promise<Record<string, string>>;
-  }>;
   /**
    * Calls a public function (query, mutation or action) of an App's current
    * version for the person, through a sealed reference: \`request\` is the
