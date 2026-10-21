@@ -36,6 +36,7 @@ import type {
 } from "./client-portable.ts";
 import { DraftStore } from "./form-drafts.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
+import { preferencePaths } from "./preference-operations.ts";
 import type {
   ArgsOf,
   OperationReference,
@@ -1190,6 +1191,18 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
   settled.kind === "value" ||
   (isAction && !ranNothing(settled, isAction)) ||
   (settled.kind === "failed" && settled.error.code === "data.conflict");
+
+/** The preference operations' paths: core answers them itself (preference-operations.ts). */
+const preferenceContracts = new Set<string>(Object.values(preferencePaths));
+
+/**
+ * Whether the host's recovery index holds a keyed submission of
+ * `reference`, so its answer is acknowledged: any of the App's own
+ * mutations and actions, never a preference update, whose receipt is the
+ * person's document revision and which core answers before indexing.
+ */
+const indexed = (reference: ReadReference): boolean =>
+  !preferenceContracts.has(reference.contractId);
 
 /**
  * Where a key left unknown is remembered: by App, operation and key, as
@@ -3148,7 +3161,7 @@ export class GraspClient {
         : this.#send(reference, request, key, {
             scoped,
             input: inputText,
-            acknowledge: true,
+            acknowledge: indexed(reference),
           });
     return await waitFor(done, signal, () =>
       clientError("submission.cancelled", { sent: true })
