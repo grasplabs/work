@@ -757,8 +757,13 @@ const ProjectGroup = ({
             />
             <span className="min-w-0 flex-1 truncate">{name}</span>
             {/* How many chats it holds, as the chat switcher and the project
-                cards say it; its menu takes the place where it is pointed at. */}
-            <span className="text-muted-foreground flex-none text-xs tabular-nums group-focus-within/row:invisible group-hover/row:invisible group-has-data-popup-open/row:invisible pointer-coarse:invisible">
+                cards say it; its menu takes the place where it is pointed at,
+                so it keeps that room. Seen only, so the project is still named
+                by its name alone. */}
+            <span
+              aria-hidden="true"
+              className="text-muted-foreground min-w-5 flex-none text-right text-xs tabular-nums group-focus-within/row:invisible group-hover/row:invisible group-has-data-popup-open/row:invisible pointer-coarse:invisible"
+            >
               {chats.length}
             </span>
           </button>
