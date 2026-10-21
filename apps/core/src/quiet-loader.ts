@@ -27,24 +27,30 @@ const quietCode = (code: WorkerLoaderWorkerCode): WorkerLoaderWorkerCode => {
     return code;
   }
   const main = code.modules[code.mainModule];
-  // An ES module given as `{ js }` is the same module as its text.
-  const source =
+  // An ES module given as `{ js }` stays one: a module given as text is
+  // read by its name's extension, which `{ js }` doesn't need.
+  const given =
     typeof main === "object" && "js" in main && typeof main.js === "string"
       ? main.js
       : main;
-  if (typeof source !== "string") {
+  if (typeof given !== "string") {
     // Anything else (CommonJS, Python, a missing module) can't import the
     // quiet module first: refused rather than loaded unsilenced.
     throw new TypeError(
       `An isolate's main module must be an ES module to be silenced: ${code.mainModule} isn't one.`
     );
   }
+  const modules = quietModules(code.mainModule, {
+    ...code.modules,
+    [code.mainModule]: given,
+  });
+  const quieted = modules[code.mainModule];
   return {
     ...code,
-    modules: quietModules(code.mainModule, {
-      ...code.modules,
-      [code.mainModule]: source,
-    }),
+    modules:
+      typeof main === "string" || typeof quieted !== "string"
+        ? modules
+        : { ...modules, [code.mainModule]: { js: quieted } },
   };
 };
 
