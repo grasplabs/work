@@ -1,3 +1,4 @@
+import type { Organization } from "@grasp-os/shared/organization";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -14,13 +15,12 @@ import { GraspMark } from "../grasp-mark.tsx";
 // and the organization's name over "Grasp", the product it works in.
 // Until core says the name, or when it has none, "Grasp" alone.
 
-/** The organization's name, or none when core couldn't say. Outside the component, as the React Compiler can't compile `try`. */
-const readName = async (core: CoreConnection): Promise<string | undefined> => {
+/** The organization's name, or none when it has none or core couldn't say. Outside the component, as the React Compiler can't compile `try`. */
+const nameOf = async (
+  organization: () => Promise<Organization>
+): Promise<string | undefined> => {
   try {
-    const { name } = await readWithin(
-      core,
-      async (session) => await session.organization.get()
-    );
+    const { name } = await organization();
     return name.trim() === "" ? undefined : name;
   } catch {
     return undefined;
@@ -50,13 +50,17 @@ export const SidebarBrandView = ({ name }: { name?: string }) => (
   </SidebarMenu>
 );
 
-/** The header, reading the organization's name from core once. */
-export const SidebarBrand = ({ core }: { core: CoreConnection }) => {
+/** The header, reading the organization's name once with `organization`. */
+export const SidebarBrandOf = ({
+  organization,
+}: {
+  organization: () => Promise<Organization>;
+}) => {
   const [name, setName] = useState<string>();
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
-      const named = await readName(core);
+      const named = await nameOf(organization);
       if (current) {
         setName(named);
       }
@@ -65,6 +69,18 @@ export const SidebarBrand = ({ core }: { core: CoreConnection }) => {
     return () => {
       current = false;
     };
-  }, [core]);
+  }, [organization]);
   return <SidebarBrandView name={name} />;
 };
+
+/** The header, reading the organization's name from core once. */
+export const SidebarBrand = ({ core }: { core: CoreConnection }) => (
+  <SidebarBrandOf
+    organization={async () =>
+      await readWithin(
+        core,
+        async (session) => await session.organization.get()
+      )
+    }
+  />
+);
