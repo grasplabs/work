@@ -1,5 +1,4 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import type { AppExports } from "@grasp-os/shared/apps";
 import type {
   Permission,
   PermissionSubject,
@@ -16,7 +15,6 @@ import {
   readPeople,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
-import { formatList } from "../format.ts";
 
 // Pending approvals: the permissions Apps and agents asked for, which an
 // admin grants or rejects on the dashboard's pile (`dashboard/pile-cards.tsx`).
@@ -27,12 +25,6 @@ import { formatList } from "../format.ts";
 export interface PendingRequests {
   requests: Permission[];
   directory: Directory;
-  /**
-   * The exports of each App a request asks to call, as they are now: what
-   * granting it lets the asking App call. Missing for one that couldn't
-   * be read.
-   */
-  exports: ReadonlyMap<string, AppExports>;
 }
 
 /**
@@ -49,27 +41,7 @@ export const readPendingRequests = async (
     session.apps.list(),
     readPeople(session),
   ]);
-  const directory = { people, apps: appsById(apps) };
-  const called = [
-    ...new Set(
-      requests.flatMap(({ object }) =>
-        object.type === "app" ? [object.appId] : []
-      )
-    ),
-  ];
-  // Each App's exports on their own: one that can't be read is shown as
-  // such, and the requests are still there to decide.
-  const read = await Promise.allSettled(
-    called.map(async (app) => await session.apps.exports(app))
-  );
-  const exports = new Map<string, AppExports>();
-  for (const [index, app] of called.entries()) {
-    const result = read[index];
-    if (result?.status === "fulfilled") {
-      exports.set(app, result.value.exports);
-    }
-  }
-  return { requests, directory, exports };
+  return { requests, directory: { people, apps: appsById(apps) } };
 };
 
 /**
@@ -107,30 +79,10 @@ export const subjectOf = (
     ? appName(directory, subject.appId)
     : holderName(subject);
 
-/**
- * The exports of another App a request's actions cover, as they are now:
- * all those marked `read` or `write`, and each named.
- */
-const coveredExports = (
-  actions: readonly string[],
-  exported: AppExports | undefined
-): string => {
-  if (exported === undefined) {
-    return i18n._(msg`couldn't be read`);
-  }
-  const covered = Object.entries(exported).flatMap(([name, { access }]) =>
-    actions.includes(name) || actions.includes(access)
-      ? [`${name} (${access})`]
-      : []
-  );
-  return covered.length === 0 ? i18n._(msg`none now`) : formatList(covered);
-};
-
 /** What it asks for, by ID: connections and collections have no names here. */
 export const objectOf = (
   { object, actions }: Permission,
-  directory: Directory,
-  exports: PendingRequests["exports"]
+  directory: Directory
 ): string => {
   if (object.type === "connection") {
     const { connectionId, resource } = object;
@@ -143,9 +95,14 @@ export const objectOf = (
     return i18n._(msg`Collection ${collectionId}`);
   }
   if (object.type === "app") {
+    // An agent's permission on an App's functions: those that read, or
+    // all of them.
     const engine = appName(directory, object.appId);
-    const covered = coveredExports(actions, exports.get(object.appId));
-    return i18n._(msg`Exports of ${ph({ domain: engine })}: ${covered}`);
+    return actions.includes("write")
+      ? i18n._(
+          msg`Functions of ${ph({ domain: engine })}, reading and changing its data`
+        )
+      : i18n._(msg`Functions of ${ph({ domain: engine })}, reading its data`);
   }
   if (object.type === "platform" && actions.includes("guests")) {
     // Consent in plain words: who reaches what, and at whose cost.

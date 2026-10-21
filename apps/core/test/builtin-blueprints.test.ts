@@ -34,7 +34,7 @@ import type { Release } from "../src/builtins.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildScreens } from "../src/screens.ts";
 import { fakeGateway } from "./ai-gateway.ts";
-import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
+import { grantReviewed, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
 import { calledAs } from "./sealed-apps.ts";
@@ -333,7 +333,6 @@ describe("the built-in blueprints", () => {
     await expect(ensureInstalled()).resolves.toBeTruthy();
     const admin = await signedInApi(idp, "admin");
     const before = await helloRow();
-    const caller = await admin.api.apps.create({ name: `Caller ${unique()}` });
     const listed = await admin.api.apps.list();
 
     expect({
@@ -342,7 +341,7 @@ describe("the built-in blueprints", () => {
       unmark: await outcome(admin.api.apps.blueprints.unmark("hello")),
       calls: await outcome(
         admin.api.permissions.request({
-          subject: { type: "app", appId: caller.id },
+          subject: { type: "agent", agentId: `agent-${unique()}` },
           object: { type: "app", appId: "hello" },
           actions: ["read"],
           binding: "HELLO",
@@ -370,10 +369,6 @@ describe("the built-in blueprints", () => {
       // Its workflows' tests run as it becomes current.
       // oxlint-disable-next-line no-await-in-loop -- as above
       await builder.api.apps.versions.setCurrent(created.app.id, 1);
-      if ("app/server.ts" in blueprint.files) {
-        // oxlint-disable-next-line no-await-in-loop -- as above
-        await serverBuilt(created.app.id, 1);
-      }
       // Its workflows call the App's bindings where a review can name each
       // call, as the check of an agent's draft over it asks, and its steps
       // read as the workflow and review pages outline them: none throws.

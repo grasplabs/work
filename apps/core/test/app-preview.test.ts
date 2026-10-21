@@ -11,7 +11,7 @@ import {
   previewUpdateLeaseMs,
 } from "../src/preview-updates.ts";
 import { openTestRun } from "./agent-chat.ts";
-import { release, serverBuilt } from "./apps.ts";
+import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -29,160 +29,24 @@ const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
-/** Runs a promise and says how it ended, by error code; for App code. */
-const outcomeCode = `export const outcome = async (promise: Promise<unknown>): Promise<string> => {
-  try {
-    await promise;
-    return "ok";
-  } catch (error) {
-    return (error as { code?: string }).code ?? "failed";
-  }
-};
-`;
-
-/**
- * The App's server code: it keeps notes in its storage. The draft's
- * (`tries`) also tries every binding its permissions give it.
- */
-const serverCode = (
-  tries: boolean
-) => `import { DurableObject } from "cloudflare:workers";
-
-import { outcome } from "./outcome.js";
-
-type Caller = { userId: string; token: string };
-const env = (self: DurableObject): Record<string, any> => (self as unknown as { env: Record<string, any> }).env;
-
-export class App extends DurableObject {
-  remember(_caller: Caller, note: string): string[] {
-    this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS notes (note TEXT)");
-    this.ctx.storage.sql.exec("INSERT INTO notes VALUES (?)", note);
-    return this.notes();
-  }
-
-  notes(): string[] {
-    const found = this.ctx.storage.sql
-      .exec("SELECT name FROM sqlite_master WHERE name = 'notes'")
-      .toArray();
-    if (found.length === 0) {
-      return [];
-    }
-    return this.ctx.storage.sql.exec("SELECT note FROM notes").toArray().map((row) => String(row.note));
-  }
-
-  envNames(): string[] {
-    return Object.keys(env(this)).toSorted();
-  }
-
-  tables(): string[] {
-    return this.ctx.storage.sql
-      .exec("SELECT name FROM sqlite_master WHERE type = 'table'")
-      .toArray()
-      .map((row) => String(row.name))
-      .filter((name) => !name.startsWith("_cf") && !name.startsWith("sqlite"));
-  }
-${
-  tries
-    ? `
-  async tries(caller: Caller, documentId: string): Promise<Record<string, unknown>> {
-    const { MAIL, ARCHIVE, GUESTS, HANDBOOK, LEDGER, STATISTICS } = env(this);
-    const listed = await HANDBOOK.listDocuments(caller);
-    const guests = await GUESTS.list(caller);
-    const found = await HANDBOOK.search(caller, "note");
-    const stats = await STATISTICS.read(caller, { measure: "opened", days: 1, where: {} });
-    return {
-      mail: await outcome(MAIL.call(caller, "mail.send", { to: "ben@acme.test", subject: "Hi" }, { idempotencyKey: "k" })),
-      archive: await outcome(ARCHIVE.call(caller, "mail.send", { to: "ben@acme.test", subject: "Hi" }, { idempotencyKey: "k" })),
-      listed: listed.documents.length,
-      found: found.hits.length,
-      read: await outcome(HANDBOOK.getDocument(caller, documentId)),
-      section: await outcome(HANDBOOK.read(caller, documentId)),
-      ledger: await outcome(LEDGER.call(caller, "book", {})),
-      point: await outcome(STATISTICS.record(caller, { measure: "opened", value: 1 })),
-      stats: stats.groups.length,
-      invite: await outcome(GUESTS.invite(caller, { name: "Ann", skill: "interview" })),
-      guests: guests.length,
-      guest: await outcome(GUESTS.read(caller, "guest-1")),
-      revoke: await outcome(GUESTS.revoke(caller, "guest-1")),
-      fetch: await outcome(fetch("https://example.com/")),
-    };
-  }
-
-  fail(): never {
-    throw new Error("Invoice 7 has no total");
-  }
-
-  async kinds(caller: Caller): Promise<string[]> {
-    const { MAIL, HANDBOOK, LEDGER, STATISTICS } = env(this);
-    const said = async (call: () => Promise<unknown>): Promise<string> => {
-      try {
-        await call();
-        return "ok";
-      } catch (error) {
-        return String((error as Error).message);
-      }
-    };
-    return [
-      await said(() => MAIL.listDocuments(caller)),
-      await said(() => HANDBOOK.call(caller, "mail.send", {})),
-      await said(() => LEDGER.record(caller, {})),
-      await said(() => STATISTICS.getDocument(caller, "note")),
-    ];
-  }
-
-  #watcher: ((value: number) => Promise<void>) | undefined;
-  #pushed = 0;
-  #stopped = "no";
-
-  watch(_caller: Caller, onChange: { dup(): (value: number) => Promise<void> }): string {
-    this.#watcher = onChange.dup();
-    const push = async (): Promise<void> => {
-      try {
-        this.#pushed += 1;
-        await this.#watcher?.(this.#pushed);
-        setTimeout(push, 50);
-      } catch (error) {
-        this.#stopped = (error as { code?: string }).code ?? "failed";
-      }
-    };
-    void push();
-    return "watching";
-  }
-
-  stopped(): string {
-    return this.#stopped;
-  }
-
-  async slow(_caller: Caller, entered: (value: string) => Promise<void>): Promise<string> {
-    await entered("in");
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    return "done";
-  }
-`
-    : ""
-}}
-`;
-
 const screen = `export default function Desk() {
   return <main>Desk</main>;
 }
 `;
 
-/** The App as released: notes in its storage, and a screen. */
+/** The App as released: a screen. */
 const released = {
-  "app/server.ts": serverCode(false),
-  "app/outcome.ts": outcomeCode,
   "screens/desk.tsx": screen,
 };
 
-/** A new App of `builder`'s, released and built ahead. */
+/** A new App of `builder`'s, released. */
 const newApp = async (
   builder: Person,
   name: string,
   files: Record<string, string>
 ): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name });
-  await serverBuilt(id, await release(builder, id, files));
+  await release(builder, id, files);
   return appIdSchema.parse(id);
 };
 

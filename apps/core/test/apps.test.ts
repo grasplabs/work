@@ -81,25 +81,6 @@ const first = {
   "AGENTS.md": "# Invoice desk — facturen, 請求書 🧾\n",
 };
 
-/** Exports, as an App declares them in `app/exports.json`. */
-const exported = {
-  findInvoices: {
-    access: "read",
-    input: {
-      type: "object",
-      properties: { customer: { type: "string" } },
-      required: ["customer"],
-    },
-    output: { type: "array", items: { type: "string" } },
-  },
-  payInvoice: {
-    access: "write",
-    description: "Marks an invoice paid",
-    input: { type: "string" },
-    output: { type: "boolean" },
-  },
-} as const;
-
 // Making a version with workflows current compiles them and runs their
 // tests, as "names the screens and workflows" does. That takes half a
 // second locally, and several times that on a loaded runner, closer to
@@ -364,7 +345,7 @@ describe("App code", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("names the screens, workflows and exports of the version that runs, and only those", async () => {
+  it("names the screens and workflows of the version that runs, and only those", async () => {
     const { apps } = await appsApi("builder");
     const app = await newApp(apps);
     await commit(apps, app.id, first);
@@ -372,7 +353,6 @@ describe("App code", { timeout: 60_000 }, () => {
     await apps.versions.setCurrent(app.id, 1);
     await commit(apps, app.id, {
       "screens/archive.tsx": "export default () => null;\n",
-      "app/exports.json": JSON.stringify(exported),
       // Neither is a screen or a workflow: code they share.
       "screens/parts/row.tsx": "export const Row = () => null;\n",
       "workflows/lib/dates.ts": "export const today = () => 0;\n",
@@ -393,15 +373,12 @@ export default workflowTests(report, [{ name: "counts", mocks: { count: 1 }, exp
     });
     // Committed, not yet current: what runs is still version 1.
     const beforeCurrent = await apps.contents(app.id);
-    const exportsBefore = await apps.exports(app.id);
     await apps.versions.setCurrent(app.id, 2);
 
     expect({
       none,
       beforeCurrent,
       current: await apps.contents(app.id),
-      exportsBefore,
-      exports: await apps.exports(app.id),
     }).toStrictEqual({
       none: { version: null, screens: [], workflows: [] },
       beforeCurrent: { version: 1, screens: ["inbox"], workflows: [] },
@@ -410,160 +387,40 @@ export default workflowTests(report, [{ name: "counts", mocks: { count: 1 }, exp
         screens: ["archive", "inbox"],
         workflows: ["report"],
       },
-      exportsBefore: { version: 1, exports: {} },
-      // As declared, with the description a declaration leaves out.
-      exports: {
-        version: 2,
-        exports: {
-          findInvoices: { ...exported.findInvoices, description: "" },
-          payInvoice: exported.payInvoice,
-        },
-      },
     });
-    await expect(
-      Promise.all([
-        outcome(apps.contents("no-such-app")),
-        outcome(apps.exports("no-such-app")),
-      ])
-    ).resolves.toStrictEqual(["app.not_found", "app.not_found"]);
+    await expect(outcome(apps.contents("no-such-app"))).resolves.toBe(
+      "app.not_found"
+    );
   });
 
-  it("refuses to commit exports that aren't valid, saying why", async () => {
+  it("refuses to commit the v1 server's files under app/, naming them, and keeps nothing of the commit", async () => {
     const { apps } = await appsApi("builder");
     const app = await newApp(apps);
-    const committing = async (text: string): Promise<string> =>
-      await outcome(
-        commit(apps, app.id, { "app/exports.json": text }, "Exports")
-      );
-    const valid = exported.findInvoices;
-    const refused: string[] = [];
-    for (const text of [
-      "not json",
-      JSON.stringify({ find_invoices: valid }),
-      JSON.stringify({ toString: valid }),
-      // What a permission's actions mean as all exports so marked.
-      JSON.stringify({ read: valid }),
-      JSON.stringify({ write: valid }),
-      JSON.stringify({ toJSON: valid }),
-      // A regular expression of the exporting App's, run by core on what
-      // another App sends: one written to backtrack takes seconds.
-      JSON.stringify({
-        findInvoices: {
-          ...valid,
-          input: { type: "string", pattern: "^(a+)+$" },
-        },
-      }),
-      JSON.stringify({
-        findInvoices: {
-          ...valid,
-          input: {
-            type: "object",
-            patternProperties: { "^(a+)+$": { type: "string" } },
-          },
-        },
-      }),
-      JSON.stringify({
-        findInvoices: { ...valid, input: { type: "string", format: "email" } },
-      }),
-      // Keywords core doesn't check: a bound nobody enforces.
-      JSON.stringify({
-        findInvoices: { ...valid, output: { type: "array", minItems: 1 } },
-      }),
-      JSON.stringify({
-        findInvoices: {
-          ...valid,
-          input: { type: "string", contentMediaType: "application/json" },
-        },
-      }),
-      JSON.stringify({
-        findInvoices: { ...valid, input: { allOf: [{ type: "string" }] } },
-      }),
-      // Types every object has by inheritance are no types either.
-      JSON.stringify({
-        findInvoices: { ...valid, input: { type: "constructor" } },
-      }),
-      JSON.stringify({
-        findInvoices: { ...valid, output: { type: "__proto__" } },
-      }),
-      JSON.stringify({
-        findInvoices: { ...valid, input: { minLength: 1 } },
-      }),
-      JSON.stringify({
-        findInvoices: {
-          ...valid,
-          input: {
-            type: "object",
-            properties: { customer: { type: "string", pattern: "^a" } },
-          },
-        },
-      }),
-      JSON.stringify({ findInvoices: { ...valid, access: "admin" } }),
-      JSON.stringify({ findInvoices: { ...valid, input: { type: 7 } } }),
-      JSON.stringify({ findInvoices: { ...valid, extra: true } }),
-      JSON.stringify(
-        Object.fromEntries(
-          Array.from({ length: 65 }, (_, index) => [`find${index}`, valid])
-        )
-      ),
-      JSON.stringify({
-        findInvoices: { ...valid, description: "x".repeat(64_000) },
-      }),
-    ]) {
-      // One at a time: each is refused for its own exports alone.
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      refused.push(await committing(text));
-    }
-    expect(refused).toStrictEqual(refused.map(() => "app.exports_invalid"));
-    await expect(apps.versions.list(app.id)).resolves.toStrictEqual([]);
-    // Refused with what's wrong, never failing on the way.
-    await expect(
-      commit(apps, app.id, {
-        "app/exports.json": JSON.stringify({
-          findInvoices: { ...valid, input: { type: "constructor" } },
-        }),
-      })
-    ).rejects.toMatchObject({
-      code: "app.exports_invalid",
-      details: {
-        issues: [expect.stringContaining("findInvoices.input")],
-      },
-    });
-    // And valid exports commit, with every keyword core checks.
-    await expect(
-      committing(
-        JSON.stringify({
-          findInvoices: valid,
-          countInvoices: {
-            access: "read",
-            input: {
-              type: "object",
-              title: "Filter",
-              properties: {
-                status: { enum: ["open", "paid"] },
-                year: {
-                  type: "integer",
-                  minimum: 2000,
-                  exclusiveMaximum: 3000,
-                },
-                amount: { type: "number", multipleOf: 0.01, maximum: 1e9 },
-                note: { type: "string", minLength: 1, maxLength: 200 },
-                tags: {
-                  type: "array",
-                  items: { type: "string" },
-                  minItems: 1,
-                  maxItems: 5,
-                },
-                owner: { anyOf: [{ type: "string" }, { type: "null" }] },
-                kind: { const: "invoice" },
-              },
-              required: ["status"],
-              additionalProperties: false,
-            },
-            output: { oneOf: [{ type: "integer" }, { type: "boolean" }] },
-          },
-        })
+    const v1Files: Record<string, string>[] = [
+      { "app/server.ts": "export class App {}\n" },
+      { "app/exports.json": "{}" },
+      { "app/lib/books.ts": "export const books = 1;\n" },
+    ];
+    const refusals = await Promise.all(
+      v1Files.map(
+        async (files) =>
+          await commit(apps, app.id, { ...first, ...files }).then(
+            () => ({ code: "committed" }),
+            (error: unknown) => error
+          )
       )
-    ).resolves.toBe("ok");
+    );
+
+    expect(refusals).toMatchObject([
+      { code: "app.v1_server", details: { issues: ["app/server.ts"] } },
+      { code: "app.v1_server", details: { issues: ["app/exports.json"] } },
+      { code: "app.v1_server", details: { issues: ["app/lib/books.ts"] } },
+    ]);
+    await expect(apps.versions.list(app.id)).resolves.toStrictEqual([]);
+    // Without them, the same files commit.
+    await expect(commit(apps, app.id, first)).resolves.toMatchObject({
+      version: 1,
+    });
   });
 
   it("audits every commit and version change, by identifiers only", async () => {
