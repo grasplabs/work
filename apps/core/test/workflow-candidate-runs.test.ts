@@ -193,7 +193,7 @@ const endsOf = async (runId: string) => {
     )
     .map(({ action, target, detail }) => ({
       action,
-      target: target?.type,
+      target,
       candidate: detail?.candidate,
       ...(detail?.failureCode === undefined
         ? {}
@@ -986,14 +986,14 @@ describe("test runs of a workflow's draft", () => {
         [
           {
             action: "workflow.run.completed",
-            target: "workflow_resource",
+            target: { type: "workflow_resource", id: workflow.id },
             candidate: true,
           },
         ],
         [
           {
             action: "workflow.run.failed",
-            target: "workflow_resource",
+            target: { type: "workflow_resource", id: workflow.id },
             candidate: true,
             failureCode: "workflow.start_unconfirmed",
           },
@@ -1193,7 +1193,7 @@ describe("test runs of a workflow's draft", () => {
         long: [
           {
             action: "workflow.run.failed",
-            target: "workflow_resource",
+            target: { type: "workflow_resource", id: long.id },
             candidate: true,
             failureCode: "workflow.candidate_wait_limit",
           },
@@ -1201,7 +1201,7 @@ describe("test runs of a workflow's draft", () => {
         stopped: [
           {
             action: "workflow.run.cancelled",
-            target: "workflow_resource",
+            target: { type: "workflow_resource", id: workflow.id },
             candidate: true,
           },
         ],
@@ -1288,7 +1288,7 @@ describe("test runs of a workflow's draft", () => {
       lostEnd: [
         {
           action: "workflow.run.failed",
-          target: "workflow_resource",
+          target: { type: "workflow_resource", id: workflow.id },
           candidate: true,
           failureCode: "workflow.run_unavailable",
         },
