@@ -565,8 +565,17 @@ export interface ModelAnswer<Output> {
   output: Output;
   /** The model hit its output limit, so the text may stop short. */
   truncated: boolean;
-  /** Across every request the call made. */
-  usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Across every request the call made. `inputTokens` counts the whole
+   * prompt, cached or not; `cacheRead` and `cacheWrite` say how much of it
+   * was read from the provider's prompt cache, and written to it.
+   */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
   /** In US dollars, at the provider's list prices. */
   cost: number;
 }
@@ -2404,7 +2413,12 @@ const answerCall = async <Output>(
   askAgain = true
 ): Promise<ModelAnswer<Output>> => {
   const { call } = request;
-  const usage = { inputTokens: 0, outputTokens: 0 };
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+  };
   let cost = 0;
   // A call with a schema asks once more when the answer doesn't fit it.
   const attempts = schema === undefined || !askAgain ? 1 : 2;
@@ -2421,6 +2435,8 @@ const answerCall = async <Output>(
     const { answer } = sent;
     usage.inputTokens += inputTokens(answer.usage);
     usage.outputTokens += answer.usage.output;
+    usage.cacheRead += answer.usage.cacheRead;
+    usage.cacheWrite += answer.usage.cacheWrite;
     cost += pricedCost(request.price, answer.usage);
     const text = answerText(answer);
     const truncated = answer.stopReason === "length";

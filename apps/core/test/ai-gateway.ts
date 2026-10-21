@@ -51,6 +51,11 @@ export type GatewayReply =
       noUsage?: boolean;
       /** Prompt tokens written to a one-hour cache (Anthropic). */
       cacheWrite1h?: number;
+      /**
+       * Prompt tokens read from and written to the five-minute cache
+       * (Anthropic), besides `inputTokens`.
+       */
+      cache?: { read: number; write: number };
     }
   | {
       status: number;
@@ -215,6 +220,12 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
           usage: {
             input_tokens: inputTokens,
             output_tokens: 0,
+            ...(answer.cache === undefined
+              ? {}
+              : {
+                  cache_read_input_tokens: answer.cache.read,
+                  cache_creation_input_tokens: answer.cache.write,
+                }),
             ...(answer.cacheWrite1h === undefined
               ? {}
               : {
