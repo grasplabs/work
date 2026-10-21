@@ -54,6 +54,10 @@ import {
   setSecurityHeaders,
 } from "./security-headers.ts";
 import { quotaPolicyReportResponse } from "./workflows/quota-report.ts";
+import {
+  runFileResponse,
+  runFileRouteOf,
+} from "./workflows/run-file-downloads.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -214,6 +218,11 @@ const appCallResponse = async (
   const tokenApp = tokenRequestApp(pathname);
   if (tokenApp !== undefined) {
     return await appTokenResponse(request, env, tokenApp, requestId);
+  }
+  // A run's finished file, downloaded from its run page.
+  const runFile = runFileRouteOf(pathname);
+  if (runFile !== undefined) {
+    return await runFileResponse(request, env, runFile, requestId);
   }
   const fileRoute = fileRouteOf(pathname, request.method);
   if (fileRoute === "not_found") {

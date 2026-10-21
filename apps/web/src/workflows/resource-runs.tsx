@@ -14,6 +14,7 @@ import {
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
 
 import { formatDateTime } from "../format.ts";
 
@@ -23,7 +24,9 @@ import { formatDateTime } from "../format.ts";
 // failed stays on the run itself, under its own rule for who sees it.
 
 // Each in a context of its own: a run's status, not a workflow's.
-const statusLabels: Readonly<Record<WorkflowRunStatus, MessageDescriptor>> = {
+export const statusLabels: Readonly<
+  Record<WorkflowRunStatus, MessageDescriptor>
+> = {
   starting: msg({ message: "Starting", context: "status of a workflow run" }),
   running: msg({ message: "Running", context: "status of a workflow run" }),
   completed: msg({ message: "Completed", context: "status of a workflow run" }),
@@ -63,7 +66,15 @@ export const ResourceRuns = ({
       <TableBody>
         {runs.map((run) => (
           <TableRow key={run.id}>
-            <TableCell>{formatDateTime(run.createdAt)}</TableCell>
+            <TableCell>
+              <Link
+                className="hover:underline focus-visible:underline"
+                params={{ workflow: run.workflowId, run: run.id }}
+                to="/workflows/$workflow/runs/$run"
+              >
+                {formatDateTime(run.createdAt)}
+              </Link>
+            </TableCell>
             <TableCell>{t(statusLabels[run.status])}</TableCell>
             <TableCell>{run.version}</TableCell>
             <TableCell>
