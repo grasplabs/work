@@ -149,7 +149,7 @@ const sealForActivation = async (
  * sealed for it declares (`aiStepProblem`): an App without a release
  * declares none. Each such step is named, at its line.
  */
-const requireDeclaredModels = async (
+export const requireDeclaredModels = async (
   env: Env,
   app: AppId,
   version: number,
@@ -195,7 +195,5 @@ export const activateVersion = async (
     expected,
     seal: async (id, number, files, building) => {
       await sealForActivation(env, by, id, number, files, building);
-      // Checked against the release just sealed, before its gates.
-      await requireDeclaredModels(env, id, number, files);
     },
   });

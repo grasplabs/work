@@ -1187,7 +1187,8 @@ export const setCurrentVersion = async (
  * `setCurrentVersion` then requires. A version of spec 8's layout must
  * have a runnable release, migrations that passed their fixtures, a store
  * whose contract holds its schema (or a ready explicit migration to it),
- * and passing App tests; every version, passing workflow tests.
+ * and passing App tests; every version, AI steps through declared models
+ * only and passing workflow tests.
  */
 export const verifyVersion = async (
   env: Env,
@@ -1214,6 +1215,12 @@ export const verifyVersion = async (
     const { requireAppTestsPass } = await import("./app-tests.ts");
     await requireAppTestsPass(env, appId, number, files);
   }
+  // Its workflows' AI steps go only through models its release declares
+  // (app-activation.ts): for every candidate, however it was frozen, so
+  // one verified here is never made current without it. Imported here:
+  // activation reaches back into this module.
+  const { requireDeclaredModels } = await import("./app-activation.ts");
+  await requireDeclaredModels(env, appId, number, files);
   await requireWorkflowTestsPass(env, appId, number, files);
 };
 
