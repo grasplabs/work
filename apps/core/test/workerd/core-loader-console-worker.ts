@@ -12,7 +12,12 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 // - `/js`: an isolate whose main module is given as `{ js }`, through the
 //   loader core reads its `LOADER` through (`quietLoader`).
 // - `/hashbang`: a main module that starts with a hashbang, which must stay
-//   its first line.
+//   its first line; `/carriage`: one whose hashbang line ends in a
+//   carriage return, with an App import after it.
+// - `/nested`: a main module in a directory, beside an App module named
+//   as the quiet module is.
+// - `/thrown`: a call that throws to its caller, which workerd served
+//   `--verbose` reports with its message (GRA-939).
 // - `/cjs`: a main module that can't import the quiet module first.
 // - `/control`: the same code in the Loader as it is, which shows workerd's
 //   output is read at all.
@@ -21,6 +26,9 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 const values = {
   call: "record-value-5c1e",
   js: "record-value-b84d",
+  nested: "record-value-3e97",
+  carriage: "record-value-71d2",
+  thrown: "record-value-c40b",
   control: "control-value-0a6f",
 } as const;
 
@@ -48,8 +56,27 @@ export class App extends WorkerEntrypoint {
     queueMicrotask(() => {
       throw new Error(value);
     });
+    setTimeout(() => {
+      throw new Error(value);
+    }, 0);
+    const interval = setInterval(() => {
+      clearInterval(interval);
+      throw new Error(value);
+    }, 0);
+    reportError(new Error(value));
     await scheduler.wait(50);
     return value;
+  }
+}
+`;
+
+/** An isolate whose call throws `value` to its caller. */
+const throwingOf = (
+  value: string
+): string => `import { WorkerEntrypoint } from "cloudflare:workers";
+export class App extends WorkerEntrypoint {
+  run() {
+    throw new Error(${JSON.stringify(value)});
   }
 }
 `;
@@ -98,6 +125,48 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
       return "loaded";
     } catch (error) {
       return error instanceof TypeError ? "refused" : "failed";
+    }
+  }
+  if (route === "/nested") {
+    // An App module where the quiet module's name resolves from a main
+    // in a directory: it can't take the quiet module's place.
+    return await runApp(
+      quietLoader(env.LOADER).load({
+        ...settings,
+        mainModule: "src/app.js",
+        modules: {
+          "src/app.js": isolateOf(values.nested),
+          "src/grasp-sandbox-quiet.js": "export {};",
+          "grasp-sandbox-quiet.js": "export {};",
+        },
+      })
+    );
+  }
+  if (route === "/carriage") {
+    // A hashbang line ended by a carriage return, an App import after it:
+    // the quiet import still comes before that import.
+    return await runApp(
+      quietLoader(env.LOADER).load({
+        ...settings,
+        mainModule: "app.js",
+        modules: {
+          "app.js": `#!x\rimport "./early.js";\n${isolateOf(values.carriage)}`,
+          "early.js": `console.log(${JSON.stringify(values.carriage)});`,
+        },
+      })
+    );
+  }
+  if (route === "/thrown") {
+    try {
+      return await runApp(
+        quietLoader(env.LOADER).load({
+          ...settings,
+          mainModule: "app.js",
+          modules: { "app.js": throwingOf(values.thrown) },
+        })
+      );
+    } catch {
+      return "threw";
     }
   }
   if (route === "/hashbang") {
