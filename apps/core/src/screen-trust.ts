@@ -58,7 +58,7 @@ import { appHost } from "./durable-objects.ts";
 //
 // - A screen saying it is approved, or naming another build's hash.
 //   Nothing a screen or the page reports is read as trust. Which build a
-//   connection's frame runs is what core itself handed that person for
+//   frame runs is what core itself handed that person for
 //   that App, proved by a lease only core can sign (`leaseFor`); whether
 //   that build is approved is the row.
 // - A lease used by someone else, or for another App. It is signed over
