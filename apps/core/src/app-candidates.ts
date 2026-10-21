@@ -195,7 +195,9 @@ export const freezeCandidate = async (
     .where(
       and(eq(appCandidates.appId, app), lt(appCandidates.version, version))
     )
-    .orderBy(desc(appCandidates.createdAt), desc(appCandidates.id))
+    // rowid breaks ties in insertion order: two freezes can share a
+    // millisecond, and an ID is no order.
+    .orderBy(desc(appCandidates.createdAt), desc(sql`rowid`))
     .limit(1)
     .get();
   await auditedBatch(env, db, [

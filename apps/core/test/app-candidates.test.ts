@@ -5,7 +5,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -129,7 +129,7 @@ const candidatesOf = async (app: AppId): Promise<CandidateRow[]> =>
     .select()
     .from(appCandidates)
     .where(eq(appCandidates.appId, app))
-    .orderBy(appCandidates.createdAt)
+    .orderBy(appCandidates.createdAt, asc(sql`rowid`))
     .all();
 
 /** A candidate of `version` frozen over what is current, run to verified. */
