@@ -145,7 +145,11 @@ export const readVerified = async (
 ): Promise<CacheRead> => {
   const [receipt, object] = await Promise.all([
     receiptOf(env, key),
-    env.FILES.get(key),
+    // R2 out is a miss: the build runs, under the same lease and receipt.
+    env.FILES.get(key).catch((error: unknown) => {
+      log.warn("build.cache_read_failed", { key, ...errorFields(error) });
+      return null;
+    }),
   ]);
   if (receipt?.quarantinedAt !== null && receipt?.quarantinedAt !== undefined) {
     return { state: "quarantined" };
@@ -293,13 +297,11 @@ export const throughCache = async (
     return { text: first.text, outcome: "hit", object: first.object };
   }
   const holder = crypto.randomUUID();
-  let waited = false;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one try at a time
     if (await takeLease(env, key, holder, leaseMs)) {
       break;
     }
-    waited = true;
     // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
     await scheduler.wait(pollMs);
     // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
@@ -309,17 +311,21 @@ export const throughCache = async (
     }
   }
   try {
-    // Kept by another holder while this one took the lease over.
-    if (waited) {
-      const kept = await readVerified(env, key);
-      if (kept.state === "hit") {
-        return { text: kept.text, outcome: "shared" };
-      }
+    // Kept by another holder between the first read and taking the lease.
+    const kept = await readVerified(env, key);
+    if (kept.state === "hit") {
+      return { text: kept.text, outcome: "shared" };
     }
     const built = await build();
     const quarantined = await isQuarantined(env, key);
     if (built.cache && !quarantined) {
-      await keep(env, key, holder, built.text, options());
+      try {
+        await keep(env, key, holder, built.text, options());
+      } catch (error) {
+        // The build stands: what it left of the cache has no receipt, and
+        // is built again at its next use.
+        log.error("build.cache_keep_failed", { key, ...errorFields(error) });
+      }
     }
     return {
       text: built.text,

@@ -244,6 +244,39 @@ describe("the build cache", { timeout: 120_000 }, () => {
     });
   });
 
+  it("still builds when R2 can't be read or written, and keeps nothing unreceipted", async () => {
+    const files = screen();
+    // Every read and write of R2 fails, as in an outage.
+    const out: Pick<R2Bucket, "get" | "put"> = {
+      get: async (key) => {
+        if (key.length > 0) {
+          throw new Error("R2 is out");
+        }
+        return await env.FILES.get(key);
+      },
+      put: async (...args: Parameters<R2Bucket["put"]>) => {
+        if (args[0].length > 0) {
+          throw new Error("R2 is out");
+        }
+        return await env.FILES.put(...args);
+      },
+    };
+    const built = await buildScreens({ ...env, FILES: out }, files, "app-test");
+    // Nothing was kept, so the next build compiles again.
+    const { started, loader } = counting();
+    const again = await buildScreens(
+      { ...env, LOADER: loader },
+      files,
+      "app-test"
+    );
+
+    expect({ ok: built.ok, again, started: started.count }).toStrictEqual({
+      ok: true,
+      again: built,
+      started: 1,
+    });
+  });
+
   it("builds the same files asked for at once by two Apps once", async () => {
     const files = screen();
     const { started, loader } = counting();
