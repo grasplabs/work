@@ -305,6 +305,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.2
+      '@types/semver':
+        specifier: 'catalog:'
+        version: 7.8.0
       aws4fetch:
         specifier: 'catalog:'
         version: 1.0.20
@@ -314,6 +317,9 @@ importers:
       secretlint:
         specifier: 'catalog:'
         version: 13.0.5(supports-color@10.2.2)
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -329,6 +335,9 @@ importers:
       wrangler:
         specifier: 'catalog:'
         version: 4.151.0(@cloudflare/workers-types@5.20261012.1)(@types/node@26.6.2)
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
       zod:
         specifier: 'catalog:'
         version: 4.6.5
