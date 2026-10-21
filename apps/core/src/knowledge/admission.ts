@@ -83,6 +83,10 @@ const amount =
 const accents = /\p{M}/gu;
 /** Invisible formatting, such as the soft hyphens of PDF and Word text. */
 const invisible = /\p{Cf}/gu;
+/** An HTML tag, as Markdown may hold one, or anything else in `<…>`. */
+const tag = /<[^<>\n]*>/gu;
+/** A Markdown link, `[text](url)`. */
+const link = /\[(?<text>[^[\]\n]*)\]\([^()\s]*\)/gu;
 /** Markdown's emphasis and code marks, which split no word. */
 const emphasis = /[*`~]/gu;
 const apostrophes = /[‘’ʼ]/gu;
@@ -92,7 +96,7 @@ const joiners = /[-‐-―_/]/gu;
  * Lowercased, accents, invisible characters and emphasis removed, hyphens
  * and slashes as spaces.
  */
-const normalized = (text: string): string =>
+const lowered = (text: string): string =>
   text
     .normalize("NFKD")
     .replaceAll(accents, "")
@@ -103,6 +107,23 @@ const normalized = (text: string): string =>
     .replaceAll(joiners, " ");
 
 /**
+ * `text` as the detectors read it (`lowered`). Text with markup is read
+ * twice, joined: as written, and with its tags removed and its links
+ * reduced to their text, so a word a tag or link splits ("trade
+ * <span>union</span>") is seen, and so is one inside what only looks like
+ * a tag ("hours < 8, on sick leave > 5 days") or in a link's address. A
+ * word either reading has counts: when unsure, hold.
+ */
+const normalized = (text: string): string => {
+  const plain = lowered(text);
+  if (!text.includes("<") && !text.includes("](")) {
+    return plain;
+  }
+  const unmarked = text.replaceAll(tag, " ").replaceAll(link, "$<text>");
+  return `${plain}\n${lowered(unmarked)}`;
+};
+
+/**
  * A sentence's end: not the full stop of an abbreviation such as "Mr." or
  * "Dhr.", whose name belongs to the same sentence.
  */
@@ -110,23 +131,31 @@ const sentenceEnd =
   /(?<!(?<![\p{L}])(?:mr|mrs|ms|dr|dhr|mevr|sr|sra|mme|m|st|nr|no|vs|etc))[.!?](?=\s)/iu;
 
 const tableRow = /^\s*\|/u;
-/** A Markdown heading: not a hashtag or an issue number ("#42"). */
-const headingLine = /^ {0,3}#{1,6}(?:\s|$)/u;
+/** A Markdown heading's level: not a hashtag or an issue number ("#42"). */
+const atxHeading = /^ {0,3}(?<marks>#{1,6})(?:\s|$)/u;
+/** The line under a setext heading: `===` for level 1, `---` for 2. */
+const setextUnderline = /^ {0,3}(?:=+|-+)[ \t]*$/u;
 const listLine = /^\s*(?:[-*+>]\s|\d+[.)]\s)/u;
 
-/** A unit to judge: a sentence, or a whole table or list. */
+/** A unit to judge: a sentence, a table or list, or a run of lines. */
 interface Unit {
   text: string;
   /** A table's first row, which names its columns. */
   header?: string;
-  /** What the heading above it says, as signals: never its text again. */
+  /** What the headings above it say, as signals: never their text again. */
   heading?: Heading;
+  /**
+   * A run of blocks judged together: it may only hold, never exclude by
+   * an amount, which may belong to another of its sentences.
+   */
+  wide?: true;
 }
 
 /**
- * A heading's signals for the blocks under it, worked out once: whether
- * it refers to a person, and which topics' words it has. Carrying these
- * instead of its text keeps a long heading over many sentences cheap.
+ * Headings' signals for the blocks under them, worked out once: whether
+ * one refers to a person, and which topics' words they have. Carrying
+ * these instead of their text keeps a long heading over many sentences
+ * cheap.
  */
 interface Heading {
   person: boolean;
@@ -136,12 +165,9 @@ interface Heading {
 /** A block's lines: a run of table rows, list or quote lines, or prose. */
 type Block = "table" | "list" | "prose";
 
-const blockOf = (line: string): Block | "heading" | "blank" => {
+const blockOf = (line: string): Block | "blank" => {
   if (line.trim() === "") {
     return "blank";
-  }
-  if (headingLine.test(line)) {
-    return "heading";
   }
   if (tableRow.test(line)) {
     return "table";
@@ -157,57 +183,122 @@ const refersToPerson = (unit: Unit, plain: string): boolean =>
   (unit.header !== undefined &&
     personColumnPattern.test(normalized(unit.header)));
 
-/** The signals of the heading `line`. */
-const headingOf = (line: string): Heading => {
+/** The signals of the heading `line`, with those of `above` it. */
+const headingOf = (line: string, above: Heading | undefined): Heading => {
   const plain = normalized(line);
-  const topics = new Set<number>();
+  const topics = new Set<number>(above?.topics);
   for (const [index, topic] of compiledTopics.entries()) {
     if (topic.weak.test(plain)) {
       topics.add(index);
     }
   }
-  return { person: refersToPerson({ text: line }, plain), topics };
+  return {
+    person: above?.person === true || refersToPerson({ text: line }, plain),
+    topics,
+  };
+};
+
+/** The heading level `line` starts, with the line under it: 0 for none. */
+const headingLevel = (line: string, next: string | undefined): number => {
+  const marks = atxHeading.exec(line)?.groups?.marks;
+  if (marks !== undefined) {
+    return marks.length;
+  }
+  if (
+    next !== undefined &&
+    blockOf(line) === "prose" &&
+    setextUnderline.test(next)
+  ) {
+    return next.trimStart().startsWith("=") ? 1 : 2;
+  }
+  return 0;
 };
 
 /**
- * The text's units: each heading, each table and each run of list or
- * quote lines whole (an HR record's lines are one), and the sentences of
- * each paragraph, its lines joined first so a sentence wrapped over two
- * lines is one. Each unit under a heading carries it: "## Jan Jansen"
- * above "Sick since May." is about him.
+ * The text's units: each heading; each table and each run of list or
+ * quote lines whole (an HR record's lines are one), list items one blank
+ * line apart included; the sentences of each paragraph, its lines joined
+ * first so a sentence wrapped over two lines is one; and each run of
+ * non-blank lines, whatever its blocks, as a wide unit (prose above a
+ * list, two tables). Each unit carries the headings above it, of every
+ * level: "# Employee Jan" over "## Status" over "sick leave" is about Jan.
  */
 const unitsOf = (text: string): Unit[] => {
   const units: Unit[] = [];
+  const lines = text.split("\n");
+  // Each level's heading, with the signals of those above it.
+  const headings: (Heading | undefined)[] = [];
   let heading: Heading | undefined = undefined;
   let kind: Block | undefined = undefined;
-  let lines: string[] = [];
-  const end = () => {
+  let block: string[] = [];
+  let run: string[] = [];
+  let runHeader: string | undefined = undefined;
+  const endBlock = () => {
     if (kind === "prose") {
-      for (const sentence of lines.join(" ").split(sentenceEnd)) {
+      for (const sentence of block.join(" ").split(sentenceEnd)) {
         units.push({ text: sentence, heading });
       }
     } else if (kind === "table") {
-      units.push({ text: lines.join("\n"), header: lines[0], heading });
+      units.push({ text: block.join("\n"), header: block[0], heading });
     } else if (kind === "list") {
-      units.push({ text: lines.join("\n"), heading });
+      units.push({ text: block.join("\n"), heading });
     }
     kind = undefined;
-    lines = [];
+    block = [];
   };
-  for (const line of text.split("\n")) {
-    const block = blockOf(line);
-    if (block !== kind) {
-      end();
+  const endRun = () => {
+    endBlock();
+    if (run.length > 1) {
+      units.push({
+        text: run.join("\n"),
+        header: runHeader,
+        heading,
+        wide: true,
+      });
     }
-    if (block === "heading") {
-      heading = headingOf(line);
+    run = [];
+    runHeader = undefined;
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const next = lines[index + 1];
+    const level = headingLevel(line, next);
+    if (level > 0) {
+      endRun();
+      headings.length = level - 1;
+      heading = headingOf(
+        line,
+        headings.findLast((h) => h !== undefined)
+      );
+      headings[level - 1] = heading;
       units.push({ text: line });
-    } else if (block !== "blank") {
-      kind = block;
-      lines.push(line);
+      if (atxHeading.exec(line) === null) {
+        // A setext heading's underline.
+        index += 1;
+      }
+      continue;
+    }
+    const lineKind = blockOf(line);
+    if (lineKind === "blank") {
+      // List items a blank line apart are one list.
+      const looseList =
+        kind === "list" && next !== undefined && blockOf(next) === "list";
+      if (!looseList) {
+        endRun();
+      }
+      continue;
+    }
+    if (lineKind !== kind) {
+      endBlock();
+    }
+    kind = lineKind;
+    block.push(line);
+    run.push(line);
+    if (lineKind === "table") {
+      runHeader ??= line;
     }
   }
-  end();
+  endRun();
   return units;
 };
 
@@ -222,7 +313,7 @@ const judge = (unit: Unit): AdmissionOutcome => {
     if (topic.weak.test(plain) || unit.heading?.topics.has(index) === true) {
       person ??= unit.heading?.person === true || refersToPerson(unit, plain);
       if (person) {
-        if (topic.amounts && amount.test(plain)) {
+        if (topic.amounts && unit.wide !== true && amount.test(plain)) {
           return "excluded";
         }
         outcome = "held";

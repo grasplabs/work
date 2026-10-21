@@ -144,6 +144,19 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       // A heading's person, for the block under it.
       underHeading: "## Employee Jan Jansen\n\nOn sick leave since May.",
       headingTopic: "## Sick leave\n\nJan's back on Monday.",
+      // Headings of every level above it.
+      headingStack: "# Employee Jan Jansen\n\n## Status\n\nOn sick leave.",
+      setext: "Employee Jan Jansen\n===\n\nOn sick leave since May.",
+      // Runs of lines, whatever their blocks.
+      looseList: "- Employee: Jan Jansen\n\n- Status: sick leave",
+      proseAndList: "Jan Jansen is an employee.\n- Status: sick leave",
+      tableAndList:
+        "| Name | Team |\n| --- | --- |\n| Jan | Sales |\n- Status: sick leave",
+      // Markup inside the words.
+      tagged: 'She is a trade <span class="x">union</span> member.',
+      linked: "She is a trade [union](https://hr.example) member.",
+      // What only looks like a tag is read as written too.
+      comparison: "Jan's hours < 8, on sick leave > 5 days.",
       underTaggedHeading:
         "## Employee Jan Jansen\n#todo #42\nOn sick leave since May.",
       french: "J'ai un cancer.",
@@ -171,6 +184,14 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       quote: "held",
       underHeading: "held",
       headingTopic: "held",
+      headingStack: "held",
+      setext: "held",
+      looseList: "held",
+      proseAndList: "held",
+      tableAndList: "held",
+      tagged: "held",
+      linked: "held",
+      comparison: "held",
       underTaggedHeading: "held",
       french: "held",
       frenchCurly: "held",
@@ -190,6 +211,9 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "x@".repeat(size / 2),
       `sick ${" ".repeat(size)}x`,
       "- ".repeat(size / 2),
+      "<a".repeat(size / 2),
+      `<${"a".repeat(size)}`,
+      "[a](".repeat(size / 4),
       // A long heading over many short sentences.
       `# ${"heading ".repeat(size / 16)}\n${"Ok. ".repeat(size / 4)}`,
     ];
@@ -219,6 +243,7 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "Het salarisbeleid wordt elk jaar herzien.",
       "Meld je vóór negen uur ziek bij je leidinggevende en de arbodienst.",
       "Kun je me bellen als je ziek bent?",
+      "# Leave policy\n\n## Sick leave\n\nReport sick before nine.\n\n- Call the office.\n\n- Rest.",
       "Die Gehaltsbänder werden jährlich überprüft.",
       "La politique de rémunération est revue chaque année.",
       "La política salarial se revisa cada año.",
