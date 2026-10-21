@@ -1,7 +1,15 @@
 import type { WorkflowTrigger } from "@grasp-os/shared/workflows";
 import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { CalendarClockIcon, MailIcon, ZapIcon } from "lucide-react";
+import {
+  CalendarClockIcon,
+  CheckIcon,
+  CopyIcon,
+  MailIcon,
+  ZapIcon,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { formatDateTime } from "../format.ts";
 
@@ -37,16 +45,65 @@ const ScheduleTrigger = ({
   );
 };
 
-/** One trigger: what starts the workflow, in words. */
-const Trigger = ({ trigger }: { trigger: WorkflowTrigger }) => {
+/** A button that copies an email trigger's address, and says it did. */
+const CopyAddress = ({ address }: { address: string }) => {
+  const [copied, setCopied] = useState<"no" | "yes" | "failed">("no");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current !== null) {
+        clearTimeout(timer.current);
+      }
+    },
+    []
+  );
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied("yes");
+    } catch {
+      setCopied("failed");
+    }
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+    }
+    timer.current = setTimeout(() => {
+      setCopied("no");
+    }, 1500);
+  };
+  return (
+    <Button
+      onClick={() => {
+        void copy();
+      }}
+      size="xs"
+      variant="ghost"
+    >
+      {copied === "yes" ? (
+        <CheckIcon data-icon="inline-start" />
+      ) : (
+        <CopyIcon data-icon="inline-start" />
+      )}
+      {copied === "yes" ? <Trans>Address copied</Trans> : null}
+      {copied === "failed" ? <Trans>Could not copy the address</Trans> : null}
+      {copied === "no" ? <Trans>Copy address</Trans> : null}
+    </Button>
+  );
+};
+
+/**
+ * An email trigger: the whole address to send to, with a way to copy it,
+ * once the deployment's inbound mail domain is set (`INBOUND_MAIL_DOMAIN`);
+ * until then the part before the `@`, said to be that.
+ */
+const EmailTrigger = ({
+  trigger,
+}: {
+  trigger: Extract<WorkflowTrigger, { type: "email" }>;
+}) => {
   const { t } = useLingui();
-  if (trigger.type === "schedule") {
-    return <ScheduleTrigger trigger={trigger} />;
-  }
-  if (trigger.type === "email") {
-    // Core keeps only the part before the `@`: the mail domain is set up
-    // with Email Routing, outside core, so no domain is known to show.
-    const { address: localPart } = trigger;
+  const { address, localPart } = trigger;
+  if (address === null) {
     return (
       <>
         <MailIcon aria-hidden="true" className="mt-0.5 size-4" />
@@ -63,6 +120,26 @@ const Trigger = ({ trigger }: { trigger: WorkflowTrigger }) => {
         </span>
       </>
     );
+  }
+  return (
+    <>
+      <MailIcon aria-hidden="true" className="mt-0.5 size-4" />
+      <span className="min-w-0 flex-1 font-medium">
+        {t`When an email arrives at ${address}`}
+      </span>
+      <CopyAddress address={address} />
+    </>
+  );
+};
+
+/** One trigger: what starts the workflow, in words. */
+const Trigger = ({ trigger }: { trigger: WorkflowTrigger }) => {
+  const { t } = useLingui();
+  if (trigger.type === "schedule") {
+    return <ScheduleTrigger trigger={trigger} />;
+  }
+  if (trigger.type === "email") {
+    return <EmailTrigger trigger={trigger} />;
   }
   const { event } = trigger;
   return (
