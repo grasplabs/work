@@ -54,8 +54,11 @@ const ends: Record<AssistantMessage["stopReason"], ChatReplyEnd> = {
   error: "failed",
 };
 
-/** The provider core names its own messages by (workspace.ts). */
-const coreProvider = "grasp";
+/**
+ * What core names the messages it writes itself by, as their provider,
+ * API and model (workspace.ts): no model wrote them, so they used nothing.
+ */
+export const coreMessageProvider = "grasp";
 
 /** Whether `usage` counts nothing at all: a request that used nothing. */
 const usedNothing = ({ input, output, cacheRead, cacheWrite, cost }: Usage) =>
@@ -71,7 +74,7 @@ const usageOf = ({
   model,
   usage,
 }: AssistantMessage): ChatReplyUsage | undefined =>
-  provider === coreProvider || usedNothing(usage)
+  provider === coreMessageProvider || usedNothing(usage)
     ? undefined
     : {
         input: usage.input,
