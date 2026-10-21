@@ -271,7 +271,11 @@ describe(
     it("hand back no decision's recipients and record no ask, cancelled at any stage", async () => {
       const admin = await personApi("admin");
       const app = await appWith(admin, {});
-      const calls = { steps: { tidy: [] }, all: [] };
+      const calls: WorkflowCalls = {
+        steps: { tidy: [] },
+        kinds: { tidy: "decision" },
+        all: [],
+      };
       // Opens the decision, then asks who it asks, armed only for the asking.
       const ask = async (attempt: AttemptHost, arm: () => void) => {
         const opened = await attempt.openDecision({
@@ -334,7 +338,11 @@ describe(
     it("open no decision, and record or tell of none, for a run cancelled as it opens", async () => {
       const admin = await personApi("admin");
       const app = await appWith(admin, {});
-      const calls = { steps: { tidy: [] }, all: [] };
+      const calls: WorkflowCalls = {
+        steps: { tidy: [] },
+        kinds: { tidy: "decision" },
+        all: [],
+      };
       const open = async (attempt: AttemptHost, arm: () => void) => {
         arm();
         return await attempt.openDecision({
@@ -408,7 +416,11 @@ describe(
         new Uint8Array(await crypto.subtle.digest("SHA-256", raw))
       );
       const stored = await keepMessage(env, [appIdSchema.parse(app)], id, raw);
-      const calls = { steps: { tidy: [] }, all: [] };
+      const calls: WorkflowCalls = {
+        steps: { tidy: [] },
+        kinds: { tidy: "exact" },
+        all: [],
+      };
       const read = async (attempt: AttemptHost, arm: () => void) => {
         arm();
         return await attempt.readAttachment(stored, 0);
@@ -471,7 +483,11 @@ describe(
           collectionId
         )
       );
-      const calls = { steps: { tidy: ["HANDBOOK"] }, all: ["HANDBOOK"] };
+      const calls: WorkflowCalls = {
+        steps: { tidy: ["HANDBOOK"] },
+        kinds: { tidy: "exact" },
+        all: ["HANDBOOK"],
+      };
       const read = async (attempt: AttemptHost, arm: () => void) => {
         arm();
         return await attempt.callCollection("HANDBOOK", "getDocument", [

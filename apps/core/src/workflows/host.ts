@@ -21,6 +21,7 @@ import {
   executionErrors,
   reviewerChosenAtRun,
   stepReviewed,
+  stepRunsAs,
   isRetryable,
   paramsStep,
   maxAttemptTimeoutMs,
@@ -30,7 +31,11 @@ import {
   storedEmailSchema,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
-import type { InputShape, WorkflowCalls } from "@grasp-os/shared/workflows";
+import type {
+  InputShape,
+  StepUse,
+  WorkflowCalls,
+} from "@grasp-os/shared/workflows";
 import type {
   WorkflowDuration,
   WorkflowStepConfig,
@@ -1787,7 +1792,7 @@ export class RunHost extends RpcTarget {
     try {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
-      await this.#requireStepReviewed(step);
+      await this.#requireStepReviewed(step, "do");
       const parsed = checked(doOptionsSchema, options);
       sideEffect = parsed.sideEffect === true;
       input = inputShape(parsed.input);
@@ -2024,7 +2029,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       const step = checked(stepNameSchema, name);
-      await this.#requireStepReviewed(step);
+      await this.#requireStepReviewed(step, "sleep");
       const ms = checked(milliseconds, duration);
       await this.#step.sleep(step, ms);
       return null;
@@ -2185,6 +2190,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "model");
       requireUnrefused(attempt);
+      await this.#requireKind(attempt.step, "model", "model");
       await this.#requirePerson();
       const { binding, instructions, input, outputSchema } = checked(
         modelRequestSchema,
@@ -2417,11 +2423,30 @@ export class RunHost extends RpcTarget {
    * couldn't read the steps, every name may run (`stepReviewed`), and the
    * run's history names none of them.
    */
-  async #requireStepReviewed(step: string): Promise<void> {
+  async #requireStepReviewed(step: string, use: StepUse): Promise<void> {
     if (!stepReviewed(this.#run.calls, step)) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${step}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
       await this.#refuseTampering(error, { step, call: null });
+    }
+    await this.#requireKind(step, use, null);
+  }
+
+  /**
+   * Refuses running step `step` as `use` when its review kept it as
+   * another kind (`stepRunsAs`): a wait as code, an exact step asking a
+   * model or a person. Tampering, as a name the review doesn't show is:
+   * caught or not, it ends the run, audited under the step and `call`.
+   */
+  async #requireKind(
+    step: string,
+    use: StepUse,
+    call: string | null
+  ): Promise<void> {
+    if (!stepRunsAs(this.#run.calls, step, use)) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
+      await this.#refuseTampering(error, { step, call });
     }
   }
 
@@ -2719,6 +2744,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
+      await this.#requireKind(attempt.step, "decision", "decision");
       const { step, from, description, timeout } = checked(
         decisionSchema,
         request
@@ -2759,6 +2785,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
+      await this.#requireKind(attempt.step, "recipients", "decision");
       return await decisionRecipients(
         this.#env,
         this.#run,
@@ -2788,7 +2815,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       const step = checked(stepNameSchema, name);
-      await this.#requireStepReviewed(step);
+      await this.#requireStepReviewed(step, "waitForDecision");
       const { decision, timeout, last } = checked(decisionWaitSchema, options);
       // Whether it was answered when the run looked, and when that was:
       // recorded, so every replay decides as the first activation did

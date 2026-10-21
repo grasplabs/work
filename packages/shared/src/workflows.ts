@@ -926,6 +926,12 @@ export interface WorkflowCalls {
    * be read, and every step is then held to `all`.
    */
   steps: Record<string, string[]> | null;
+  /**
+   * Each step's kind, by step name, as its outline names it
+   * (`StepOutline.kind`): what the host lets it run as (`stepRunsAs`).
+   * Empty when the steps can't be read.
+   */
+  kinds: Record<string, StepKind>;
   /** Every binding the workflow's code calls, in any step. */
   all: string[];
   /**
@@ -973,6 +979,69 @@ export const reviewerChosenAtRun = (
 ): boolean =>
   calls.steps === null ||
   (calls.dynamic?.[outlineNameOf(engineStep)]?.includes("from") ?? false);
+
+/**
+ * How the host is asked to run a step, by the SDK only in these ways for
+ * each kind (workflow.ts): `do` its function (an exact step, an AI step,
+ * a decision's opening, and its parts `name#…`); `sleep` (a wait);
+ * `waitForDecision` (a decision's `name#answer…`); and, inside a step's
+ * attempt, `model` (an AI step), `decision` (opening one) and
+ * `recipients` (who a decision asks, in its `#ask` or `#remind` part).
+ */
+export type StepUse =
+  | "do"
+  | "sleep"
+  | "waitForDecision"
+  | "model"
+  | "decision"
+  | "recipients";
+
+/**
+ * Whether a step of engine name `engineStep` may be run as `use`: as the
+ * kind its review keeps (`WorkflowCalls.kinds`) runs it, so a reviewed
+ * name is never run as another kind (a wait as code, an exact step asking
+ * a model or a person). Any use when the steps can't be read, as any name
+ * then; the SDK's `$params` only as a `do`. A reviewed name with no kept
+ * kind is refused.
+ */
+export const stepRunsAs = (
+  calls: WorkflowCalls,
+  engineStep: string,
+  use: StepUse
+): boolean => {
+  if (calls.steps === null) {
+    return true;
+  }
+  if (engineStep === paramsStep) {
+    return use === "do";
+  }
+  const name = outlineNameOf(engineStep);
+  const kind = Object.hasOwn(calls.kinds, name) ? calls.kinds[name] : undefined;
+  const part = engineStep.includes("#");
+  switch (use) {
+    case "do": {
+      return part ? kind === "decision" : kind !== undefined && kind !== "wait";
+    }
+    case "sleep": {
+      return kind === "wait" && !part;
+    }
+    case "waitForDecision": {
+      return kind === "decision" && part;
+    }
+    case "recipients": {
+      return kind === "decision";
+    }
+    case "decision": {
+      return kind === "decision" && !part;
+    }
+    case "model": {
+      return kind === "ai" && !part;
+    }
+    default: {
+      return false;
+    }
+  }
+};
 
 /**
  * The task a step of engine name `engineStep` is, as `calls` (its

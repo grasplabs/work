@@ -1714,7 +1714,7 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
     context = readContext(source);
   } catch (error) {
     if (error instanceof WorkflowError) {
-      return { steps: null, all: [] };
+      return { steps: null, kinds: {}, all: [] };
     }
     throw error;
   }
@@ -1731,6 +1731,7 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
       outline === null
         ? null
         : Object.fromEntries(steps.map(({ name, env }) => [name, env ?? []])),
+    kinds: Object.fromEntries(steps.map(({ name, kind }) => [name, kind])),
     all: envCallsIn(bindings, [run.body]),
     ...(dynamic.length === 0 ? {} : { dynamic: Object.fromEntries(dynamic) }),
   };
