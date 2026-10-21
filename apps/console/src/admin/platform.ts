@@ -234,8 +234,9 @@ export const needsOf = (
 /** How a company stands, as one word. */
 /**
  * How a company stands, as one word. `unread`: active, nothing recorded
- * needs a look, but its account wasn't read (yet, or the read failed), so
- * whether it drifted or errs isn't known; never called healthy unread.
+ * needs a look, but its account wasn't read (yet, or the read failed or
+ * timed out), so whether it drifted or errs isn't known; never called
+ * healthy unread.
  */
 export type Standing =
   | "attention"
@@ -243,6 +244,14 @@ export type Standing =
   | "unread"
   | "healthy"
   | "offboarded";
+
+/**
+ * Whether the account was read for what a standing needs: its drift and
+ * its last day's requests. A read that failed or timed out comes back with
+ * them unknown (`gridLive`), which says nothing about either.
+ */
+const wasRead = (live: LiveStatus | undefined): boolean =>
+  live !== undefined && live.drift !== "unknown" && live.day !== null;
 
 export const standingOf = (
   row: GridRow,
@@ -258,7 +267,7 @@ export const standingOf = (
   if (row.status === "provisioning") {
     return "setup";
   }
-  return live === undefined ? "unread" : "healthy";
+  return wasRead(live) ? "healthy" : "unread";
 };
 
 const standingOrder: Record<Standing, number> = {

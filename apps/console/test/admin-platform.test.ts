@@ -169,6 +169,7 @@ describe("the Platform page's model", () => {
         row("pinned", { release: "r1", pinnedReleaseId: "r1" }),
         row("new", { status: "provisioning", release: null }),
         row("unread"),
+        row("timedout"),
         row("gone", { status: "offboarded", release: "r1" }),
       ],
       {
@@ -179,6 +180,7 @@ describe("the Platform page's model", () => {
         behind: live(),
         older: live(),
         pinned: live(),
+        timedout: live({ drift: "unknown", day: null, reach: "unknown" }),
       },
       releases
     );
@@ -196,6 +198,7 @@ describe("the Platform page's model", () => {
       { id: "older", standing: "attention", needs: ["behind"] },
       { id: "split", standing: "attention", needs: ["drift"] },
       { id: "new", standing: "setup", needs: [] },
+      { id: "timedout", standing: "unread", needs: [] },
       { id: "unread", standing: "unread", needs: [] },
       { id: "pinned", standing: "healthy", needs: [] },
       { id: "zeta", standing: "healthy", needs: [] },
