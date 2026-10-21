@@ -164,6 +164,36 @@ const hostCallsOf = async (runId: string): Promise<number | undefined> => {
   return row?.hostCalls;
 };
 
+/** An ID of `length` characters, of its own letter. */
+const longId = (letter: string, length = 60): string =>
+  `${letter}${"x".repeat(length - 1)}`;
+
+/**
+ * Three loops of long IDs, one inside another, around a task: the first
+ * two's step names fit what the engine takes, the third's don't, so it is
+ * refused (and the task in it with it).
+ */
+const longNamed = (): unknown => ({
+  [longId("a")]: {
+    for: { each: "a", at: "ia", in: "${ [1] }" },
+    do: [
+      {
+        [longId("b")]: {
+          for: { each: "b", at: "ib", in: "${ [1] }" },
+          do: [
+            {
+              [longId("c")]: {
+                for: { each: "c", at: "ic", in: "${ [1] }" },
+                do: [{ [longId("d")]: { set: '${ {status: "x"} }' } }],
+              },
+            },
+          ],
+        },
+      },
+    ],
+  },
+});
+
 /** A loop of one item with `metadata.grasp`. */
 const loop = (metadata: Record<string, unknown>) => ({
   each: {
@@ -497,11 +527,14 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
       keyed: await unsupportedOf(loop({ key: "${ $item }" })),
       eight: await unsupportedOf(nested(8)),
       nine: await unsupportedOf(nested(9)),
+      // Step names past what the engine takes, once every loop is named.
+      longNames: await unsupportedOf(longNamed()),
     }).toStrictEqual({
       concurrent: ["for:concurrency"],
       keyed: ["for:key"],
       eight: [],
       nine: ["for:depth"],
+      longNames: ["step:name_too_long"],
     });
   });
 });
