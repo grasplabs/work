@@ -4,7 +4,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { budgetPeriods } from "../src/model-budgets.ts";
@@ -675,13 +675,15 @@ describe("model budgets", { timeout: 60_000 }, () => {
     // Released however the checks go, so no call is left open.
     const told: Record<string, unknown[]> = {};
     try {
-      let mine = await ledgerOf(month, ada.userId);
-      while (mine.reservedMicros === 0) {
-        // oxlint-disable-next-line no-await-in-loop -- until Ada's call is under way
-        await scheduler.wait(10);
-        // oxlint-disable-next-line no-await-in-loop -- until Ada's call is under way
-        mine = await ledgerOf(month, ada.userId);
-      }
+      // Until Ada's call is under way: a setup that fails says so, and
+      // still releases it.
+      await vi.waitFor(
+        async () => {
+          const mine = await ledgerOf(month, ada.userId);
+          expect(mine.reservedMicros).toBeGreaterThan(0);
+        },
+        { timeout: 10_000, interval: 10 }
+      );
       const retryAfter = async (more: Partial<ModelCall<undefined>>) => {
         const { code, details } = await toldBy(call(sonnet(more)));
         return [code, details.because, details.retryAfterSeconds];
