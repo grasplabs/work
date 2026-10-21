@@ -1,7 +1,7 @@
 /**
  * On plain workerd, where no sandbox bounds them and the deployment hasn't
- * set `SANDBOX_IN_PROCESS=unbounded`, core refuses to load an App's server
- * object (apps/core/test/workerd/unbounded-worker.ts):
+ * set `SANDBOX_IN_PROCESS=unbounded`, core refuses what would run App code
+ * in process (apps/core/test/workerd/unbounded-worker.ts):
  * a bound `SANDBOX_HOST` doesn't allow them, as nothing runs them there.
  * A workflow's code (its runs, metadata, tests and dry runs), the screen
  * compiler and the package builder run on the sandbox host where one is
@@ -75,13 +75,5 @@ describe("App code no sandbox bounds, on plain workerd", () => {
         "SandboxUnavailableError: No sandbox bounds App code here"
       ),
     ]);
-  });
-
-  it("refuses to load an App's server object, which a workflow's step calls", async () => {
-    const refused = await refusal("app");
-    expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain(
-      "No sandbox bounds an App's server object here yet"
-    );
   });
 });

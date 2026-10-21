@@ -16,7 +16,6 @@ import {
   createAuditEvent,
 } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
@@ -42,7 +41,6 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { appHost } from "./durable-objects.ts";
 import type { PersonAccess } from "./knowledge/access.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -143,20 +141,6 @@ const appMemberEntry = (
   app: App,
   member: AppMemberRef & { role: string }
 ): AuditEntry => memberEntry(by, action, { type: "app", id: app.id }, member);
-
-/**
- * Restarts the App's server code after someone was unshared, so it lets go
- * of their screens' subscriptions at once. Best effort: every push through
- * a subscription checks the person's role again anyway (screens-rpc.ts),
- * so theirs stop within seconds even when the App's host can't be reached.
- */
-const closeScreens = async (env: Env, app: App): Promise<void> => {
-  try {
-    await appHost(env, app.id).restart("It is no longer shared with someone.");
-  } catch (error) {
-    log.error("app.restart_failed", { appId: app.id, ...errorFields(error) });
-  }
-};
 
 /**
  * Whose role a change of `member`'s row can lower, for the App's host to
@@ -398,7 +382,6 @@ export const removeMember = async (
     ),
   ]);
   if (removed) {
-    await closeScreens(env, found);
     await tellKept(env, revocations);
     return;
   }
