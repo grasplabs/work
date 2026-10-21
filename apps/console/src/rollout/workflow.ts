@@ -1247,6 +1247,7 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
           break;
         }
         for (const clientId of retried) {
+          current = clientId;
           // oxlint-disable-next-line no-await-in-loop -- one client at a time
           const goOn = await deployFleetClient(
             this.env,
@@ -1255,6 +1256,7 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
             clientId,
             `${clientId} retry ${round}`
           );
+          current = null;
           if (!goOn) {
             return result;
           }
