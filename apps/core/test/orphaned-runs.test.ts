@@ -330,8 +330,21 @@ const gatedCounting = workflowFiles(
   { work: null }
 );
 
+/**
+ * Ends what a test left: its live runs, then the rows whose start it left
+ * pending. A later test's repair wraps round to every pending start
+ * (`repairStarts`), so it would send those too, waiting on dozens of
+ * starts it isn't about, and start runs that go on past the file's end.
+ */
+const endTest = async (): Promise<void> => {
+  await endLiveRuns();
+  await env.DB.prepare(
+    "DELETE FROM workflow_runs WHERE pending_start IS NOT NULL"
+  ).run();
+};
+
 describe("starts core stopped in the middle of", () => {
-  afterEach(endLiveRuns);
+  afterEach(endTest);
 
   it("are sent again once they're old enough, however long ago, and run once", async () => {
     const builder = await personApi("builder");
@@ -947,8 +960,7 @@ describe("starts core stopped in the middle of", () => {
     const afterCancel = await rowStatus(run);
     await setAge(run, 20 * minute);
 
-    // From this run's ID: other tests' orphans, more than a repair takes,
-    // could otherwise fill its slice.
+    // From this run's ID, so its row comes first in the repair's slice.
     await repairStarts(env, run);
 
     expect({
