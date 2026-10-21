@@ -597,10 +597,10 @@ describe("the page's bridge to a screen", () => {
   it("passes on a value as deep as values may be, and ends the session over one level more", async () => {
     const frame = framed();
     const deepest = await outcome(
-      frame.page.startRun("notes", nested(valueDepth))
+      frame.page.startRun("notes", nested(valueDepth + 1))
     );
     const tooDeep = await outcome(
-      frame.page.startRun("notes", nested(valueDepth + 1))
+      frame.page.startRun("notes", nested(valueDepth + 2))
     );
     frame.close();
 
@@ -612,9 +612,9 @@ describe("the page's bridge to a screen", () => {
     }).toStrictEqual({
       deepest: "started",
       tooDeep: "refused",
-      // Whole, every level of it: an argument passed straight may be as
-      // deep as values nest, and no deeper (`rpcArgumentDepth`).
-      reached: [{ workflow: "notes", input: nested(valueDepth) }],
+      // Whole, every level of it: an argument passed straight may be one
+      // level deeper than values nest (`rpcArgumentDepth`).
+      reached: [{ workflow: "notes", input: nested(valueDepth + 1) }],
       broken: 1,
     });
   });
@@ -640,8 +640,8 @@ describe("the page's bridge to a screen", () => {
         ])
       );
 
-    const deepest = await called(built(valueDepth - 8, 8));
-    const oneMore = await called(built(valueDepth - 8, 9));
+    const deepest = await called(built(valueDepth - 8, 9));
+    const oneMore = await called(built(valueDepth - 8, 10));
     // Thousands of levels: refused as such, not by running out of stack.
     const farDeeper = await called(built(30, 100));
     // Passed as a run's input, straight.
@@ -671,7 +671,7 @@ describe("the page's bridge to a screen", () => {
       asInput: "request.too_deep",
       after: { answered: "started" },
       reached: [
-        { workflow: "notes", input: nested(valueDepth) },
+        { workflow: "notes", input: nested(valueDepth + 1) },
         { workflow: "notes", input: "bottom" },
       ],
       // The session goes on.

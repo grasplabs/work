@@ -59,18 +59,24 @@ export const screenModulePath = "/screen-modules";
  * The levels Cap'n Web counts around a value a page sends, through its
  * bridge to a screen or over a browser's connection to core. Measured
  * with capnweb 0.12.0, which refuses a message once a level's depth
- * reaches `maxDepth`, counting from 0 at the message's expression: the
- * call's list of arguments is the one level. A value passed straight as
- * an argument (a run's input, a decision's answer, a function call's
- * request) is the deepest shape a page's call takes, so it may be
- * `valueDepth` levels deep and no more; an answer, the message's own
- * expression, has none. Arrays and objects count alike. No page's call
- * takes a list of arguments of its own any more (GRA-789 removed the
- * last, a draft's preview call), so no level is left over. App code in
- * an isolate sends deeper shapes (a write around a record's field) and
- * has a bound of its own: `isolateArgumentDepth` (stores.ts).
+ * reaches `maxDepth`, counting from 0 at the message's expression:
+ *
+ * - the call's list of arguments is one level;
+ * - a navigation's target (`ScreensApi.navigate` and `open`'s
+ *   `{ route, input }`) is another, so its input `valueDepth` levels deep
+ *   ends at depth `valueDepth + 1`.
+ *
+ * A value passed straight as an argument (a run's input, a decision's
+ * answer, a function call's request) has one level around it, and an
+ * answer, the message's own expression, none. Arrays and objects count
+ * alike. So a value passed straight may be one level deeper than values
+ * nest, on purpose: refused where it is checked (no schema nests deeper
+ * than `valueDepth`), as bounding each shape apart would take a limit of
+ * each call's own. App code in an isolate sends deeper shapes (a write
+ * around a record's field) and has a bound of its own:
+ * `isolateArgumentDepth` (stores.ts).
  */
-const rpcWrapperLevels = 1;
+const rpcWrapperLevels = 2;
 
 /**
  * How deep a call's argument may be once it arrives, the value it refers

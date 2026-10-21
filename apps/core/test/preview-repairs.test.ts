@@ -91,6 +91,55 @@ export default app({
 `,
 });
 
+/**
+ * The fixed desk with two queries that write with `console`: `chatty`, a
+ * warning and then 25 short lines, and `shouting`, five lines of 1,500
+ * characters.
+ */
+const talkingDesk = (): Record<string, string> => {
+  const fixed = desk(true);
+  return {
+    ...fixed,
+    "operations/desk.ts": `${fixed["operations/desk.ts"] ?? ""}
+export const chatty = query({
+  args: { note: v.string() },
+  returns: v.string(),
+  handler: async (_ctx, args) => {
+    console.warn("about to log", { note: args.note });
+    for (let line = 1; line <= 25; line += 1) {
+      console.log("line", line);
+    }
+    return "logged";
+  },
+});
+
+export const shouting = query({
+  args: {},
+  returns: v.string(),
+  handler: async () => {
+    for (let line = 1; line <= 5; line += 1) {
+      console.log(String(line).repeat(1500));
+    }
+    return "shouted";
+  },
+});
+`,
+    "app.ts": (fixed["app.ts"] ?? "")
+      .replace("import { total }", "import { chatty, shouting, total }")
+      .replace("desk: { total }", "desk: { chatty, shouting, total }"),
+  };
+};
+
+/** Checks the draft, with what its functions wrote in the preview. */
+const checkLogs = `export default async (self, env) => {
+  const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+  const { preview } = await env.build.check(app.id);
+  return {
+    messages: preview.logs.map(({ message }) => message),
+    leftOut: preview.logsLeftOut,
+  };
+};`;
+
 /** Finds the Invoice desk, and writes `files` into its draft. */
 const write = (
   files: Record<string, string>
@@ -516,27 +565,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const id = chatIdSchema.parse(chatId);
     const appId = appIdSchema.parse(app);
     const { chats } = builder.api;
-    const fixed = desk(true);
-    // The desk with a query that talks: a warning, then 25 lines.
-    const chatty: Record<string, string> = {
-      ...fixed,
-      "operations/desk.ts": `${fixed["operations/desk.ts"] ?? ""}
-export const chatty = query({
-  args: { note: v.string() },
-  returns: v.string(),
-  handler: async (_ctx, args) => {
-    console.warn("about to log", { note: args.note });
-    for (let line = 1; line <= 25; line += 1) {
-      console.log("line", line);
-    }
-    return "logged";
-  },
-});
-`,
-      "app.ts": (fixed["app.ts"] ?? "")
-        .replace("import { total }", "import { chatty, total }")
-        .replace("desk: { total }", "desk: { chatty, total }"),
-    };
+    const chatty = talkingDesk();
     await stub.saveDraft(
       id,
       app,
@@ -614,6 +643,86 @@ export const chatty = query({
       problems: 10,
       longest: screenLimits.report.message,
     });
+  });
+
+  it("hands the agent's check the newest lines its draft's functions wrote, within a size, and how many it left out", async () => {
+    const { builder, app, chatId, stub } = await setUp([
+      codeStep(checkLogs),
+      says("Checked."),
+      codeStep(checkLogs),
+      says("Checked again."),
+    ]);
+    const id = chatIdSchema.parse(chatId);
+    const appId = appIdSchema.parse(app);
+    const { chats } = builder.api;
+    const writeDraft = async (revision: number) => {
+      await stub.saveDraft(
+        id,
+        app,
+        1,
+        talkingDesk(),
+        [],
+        revision,
+        await openTestRun(stub, id)
+      );
+      return revision + 1;
+    };
+    const call = async (
+      revision: number,
+      path: string,
+      input: unknown = {}
+    ): Promise<unknown> =>
+      answerOf(
+        await chats.previewFunction(
+          chatId,
+          app,
+          revision,
+          await requestFor(
+            builder,
+            { chatId: id, app: appId, revision },
+            path,
+            input
+          )
+        )
+      );
+    /** Waits until the preview at `revision` keeps `lines` lines. */
+    const logged = async (revision: number, lines: number) => {
+      await vi.waitFor(
+        async () => {
+          const reports = await stub.previewReports(id, app, revision, 0);
+          expect(reports.logs).toHaveLength(lines);
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+    };
+
+    // Forty short lines: the newest twenty reach the check.
+    const first = await writeDraft(0);
+    await call(first, "desk.chatty", { note: "ship" });
+    await call(first, "desk.chatty", { note: "again" });
+    await logged(first, 40);
+    await stub.ask(id, { text: "Check the invoice desk", model });
+    // Five long lines: the newest two, within 4,000 characters.
+    const second = await writeDraft(first);
+    await call(second, "desk.shouting");
+    await logged(second, 5);
+    await stub.ask(id, { text: "Check it again", model });
+
+    const results = await codeResults(stub, chatId);
+    expect(results.map(({ text }) => returned(text))).toStrictEqual([
+      {
+        messages: [
+          'about to log {"note":"again"}',
+          ...Array.from({ length: 19 }, (_, index) => `line ${index + 1}`),
+        ],
+        leftOut: 20,
+      },
+      { messages: ["4".repeat(1500), "5".repeat(1500)], leftOut: 3 },
+    ]);
+    // What the preview keeps stays as it was.
+    await expect(
+      stub.previewReports(id, app, second, 0)
+    ).resolves.toMatchObject({ logs: { length: 5 } });
   });
 
   it("lets the agent call a function of its spec 8 draft by its path, and hears what it got wrong as data", async () => {
