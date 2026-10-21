@@ -35,6 +35,10 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { appFor } from "./apps.ts";
 import {
+  attachmentContentType,
+  attachmentDisposition,
+} from "./attachment-headers.ts";
+import {
   auditedBatch,
   outboxedEventWhere,
   storedEvent,
@@ -367,28 +371,13 @@ const isUploadState = (
   value: Publishable | UploadState
 ): value is UploadState => "state" in value;
 
-/** What RFC 8187's attr-char leaves out and `encodeURIComponent` doesn't. */
-const notAttrChar = /['()*]/gu;
-
 /**
  * `Content-Disposition` for a file of `type` stored as `name`: an
  * attachment, saved under `downloadNameOf` it (its type's extension, no
- * invisible formatting), ASCII first and the name in full after.
+ * invisible formatting).
  */
-const contentDisposition = (name: string, type: FileType): string => {
-  const saved = downloadNameOf(name, type);
-  const fallback = saved.replaceAll(/[^\u0020-\u007E]|["\\]/gu, "_");
-  const encoded = encodeURIComponent(saved).replaceAll(
-    notAttrChar,
-    (character) =>
-      `%${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}`
-  );
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
-};
-
-/** The `Content-Type` a file of `type` is sent with. */
-const contentTypeOf = (type: FileType): string =>
-  type.startsWith("text/") ? `${type}; charset=utf-8` : type;
+const contentDisposition = (name: string, type: FileType): string =>
+  attachmentDisposition(downloadNameOf(name, type));
 
 /**
  * The release of the App's current version, for a person with a role in
@@ -715,7 +704,7 @@ const contentResponse = async (
   );
   return new Response(body, {
     headers: {
-      "content-type": contentTypeOf(content.mimeType),
+      "content-type": attachmentContentType(content.mimeType),
       "content-disposition": contentDisposition(content.name, content.mimeType),
       "content-length": String(content.size),
       "cache-control": "private, no-store",

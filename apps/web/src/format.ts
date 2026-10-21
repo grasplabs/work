@@ -74,3 +74,17 @@ export const formatEuro = (value: number): string =>
     currency: "EUR",
     maximumFractionDigits: 0,
   }).format(value);
+
+/** A file's size in bytes, as "2.4 MB" or "12 kB" in the page's language. */
+export const formatFileSize = (bytes: number): string =>
+  bytes >= 1_000_000
+    ? new Intl.NumberFormat(i18n.locale, {
+        style: "unit",
+        unit: "megabyte",
+        maximumFractionDigits: 1,
+      }).format(bytes / 1_000_000)
+    : new Intl.NumberFormat(i18n.locale, {
+        style: "unit",
+        unit: "kilobyte",
+        maximumFractionDigits: 0,
+      }).format(Math.max(1, bytes / 1000));

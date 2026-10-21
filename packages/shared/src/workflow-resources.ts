@@ -7,6 +7,7 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "./operation-limits.ts";
+import type { RunFileListing } from "./run-files.ts";
 import type { WorkflowDiagram, WorkflowRunTrace } from "./workflow-diagrams.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 import type { ActionUse } from "./workflow-modules.ts";
@@ -971,6 +972,12 @@ export interface WorkflowResourcesApi {
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
   /** What run `runId` did, over its version's diagram, for builders. */
   runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
+  /**
+   * Run `runId`'s finished files, for those who may download them (its
+   * person and, unless it is restricted, the organization's admins); null
+   * for anyone else who may see the run.
+   */
+  runFiles: (id: string, runId: string) => Promise<RunFileListing[] | null>;
   /**
    * Starts a test run of the draft's checkpoint at an exact revision,
    * never published, its calls answered from the start's fixtures; for

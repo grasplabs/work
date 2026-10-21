@@ -30,8 +30,9 @@ import { inList } from "../db/d1.ts";
 //   person: every lookup is by the file's ID *and* the calling run's,
 //   and anything else answers `file.not_found`, as a file that isn't
 //   there does. A file's ID is a random UUID; holding one grants nothing
-//   outside its run. Nothing serves a run file outside its run's actions:
-//   no route, no RPC, no download.
+//   outside its run. Outside its run's actions, only its run page serves
+//   a finished one, to the run's person and, unless the run is
+//   restricted, the organization's admins (run-file-downloads.ts).
 // - Data leaving through a file: it has no way out but the run's own
 //   bindings, each approved and decided again on every call; a restricted
 //   run's actions still make no connector call (resource-calls.ts). A
@@ -58,8 +59,7 @@ import { inList } from "../db/d1.ts";
 // - Bytes that aren't what their type says: finishing checks the type
 //   against the bytes (a binary type by its signature, a text type as
 //   UTF-8 with no NUL and no signature) and the whole file's SHA-256; a
-//   file that fails is deleted. Core parses nothing else of a file, and
-//   serves none.
+//   file that fails is deleted. Core parses nothing else of a file.
 // - Size and cost: each limit (`runFileLimits`) is checked in the same
 //   statement that reserves a chunk, before its bytes reach R2, so two
 //   calls at once can't both take the last of a limit. One call moves at
@@ -70,8 +70,10 @@ import { inList } from "../db/d1.ts";
 //   list of likely contents, so a receipt's digest says as much of such a
 //   file as its content would; the audit log is read by admins only.
 // - Typing by signature only: a binary type's bytes are checked by their
-//   first bytes alone. Nothing serves a run file yet; before downloads
-//   (phase 2) serve one, check this again (a polyglot file passes).
+//   first bytes alone, so a polyglot file passes. Checked again for
+//   downloads (GRA-888): a file is only ever served as its checked type,
+//   as an attachment, under `nosniff` and a policy that runs nothing
+//   (run-file-downloads.ts), so no browser renders one as anything else.
 
 /** What each call of a files use asks for, as the action's use declares it. */
 export const filesCallOperations = {

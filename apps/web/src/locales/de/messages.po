@@ -3738,6 +3738,15 @@ msgctxt "inbox tab: what someone dealt with"
 msgid "Done"
 msgstr "Erledigt"
 
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Download"
+msgstr "Herunterladen"
+
+#. placeholder {0}: file.name
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Download {0}"
+msgstr "{0} herunterladen"
+
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
 msgstr "{name} herunterladen"
@@ -3864,6 +3873,11 @@ msgstr "Interviews mit Mitarbeitenden"
 #: src/workflows/resource-runs.tsx
 msgid "Ended"
 msgstr "Beendet"
+
+#. placeholder {0}: formatDateTime(summary.endedAt)
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Ended {0}"
+msgstr "Beendet {0}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
@@ -4158,6 +4172,7 @@ msgstr "Datei"
 
 #: src/chat/builds.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Files"
 msgstr "Dateien"
 
@@ -4236,6 +4251,10 @@ msgstr "Fingerabdruck kopiert"
 #: src/routes/guest.tsx
 msgid "Finish"
 msgstr "Beenden"
+
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Finished"
+msgstr "Fertiggestellt"
 
 #: src/onboarding/setup-steps.tsx
 msgid "First I need your staff list."
@@ -5708,6 +5727,7 @@ msgstr "Alte Einträge aus dem Audit-Trail ausgelagert"
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 #: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Name"
@@ -8044,6 +8064,7 @@ msgid "Rules waiting for a decision"
 msgstr "Regeln warten auf eine Entscheidung"
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Run"
 msgstr "Lauf"
 
@@ -8078,8 +8099,13 @@ msgid "Run logs"
 msgstr "Laufprotokolle"
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Run not found"
 msgstr "Lauf nicht gefunden"
+
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Run of {name}"
+msgstr "Lauf von {name}"
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "Run of {workflow}"
@@ -8615,6 +8641,10 @@ msgstr "Die Anmeldung erfolgt bei {app}. Sie dauert etwa eine Minute."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Abmelden hat nicht funktioniert"
+
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Size"
+msgstr "Größe"
 
 #: src/brain/brain.ts
 msgid "Size changed to {people}"
@@ -9931,6 +9961,10 @@ msgstr "Diese Richtlinie gibt es nicht mehr"
 msgid "This rule is not here any more"
 msgstr "Diese Regel gibt es nicht mehr"
 
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "This run kept no files."
+msgstr "Dieser Lauf hat keine Dateien behalten."
+
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "This run's details were removed once its retention was over, and its history with them."
 msgstr "Die Details dieses Laufs wurden nach Ablauf der Aufbewahrungsfrist entfernt, und mit ihnen sein Verlauf."
@@ -11121,6 +11155,7 @@ msgstr "Ermittelt, was sich verbessern ließe"
 #: src/dashboard/standard-widgets.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.packages.index.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -11161,6 +11196,7 @@ msgstr "workflow.json"
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx
