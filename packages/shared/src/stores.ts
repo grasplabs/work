@@ -78,11 +78,18 @@ export const documentMaxDepth = valueDepth;
 export const commitMaxWrites = 100;
 
 /**
- * The most records one commit's deletions may delete by cascade (records
- * whose `v.id` field says `onDelete: "cascade"`), across every level:
- * more is a workflow's, deleting them in batches first.
+ * The most records one commit's deletions delete by cascade (records whose
+ * `v.id` field says `onDelete: "cascade"`), across every level, in the
+ * commit itself. More, up to `cascadeJobMaxRecords`, the store deletes in
+ * batches of this many after the commit, as a cascade job (store-host.ts).
  */
 export const commitMaxCascade = 100;
+
+/**
+ * The most records one deletion's cascade may reach in all, the deleted
+ * records included: past it, the deletion is refused.
+ */
+export const cascadeJobMaxRecords = 10_000;
 
 /** The most revision guards (records read) one commit may carry. */
 export const commitMaxGuards = 100;
@@ -430,6 +437,18 @@ export const committedSchema = z.strictObject({
     )
     .max(commitMaxCascade)
     .optional(),
+  /**
+   * A cascade past `commitMaxCascade`: the job deleting its members after
+   * the commit, and how many there are, the commit's own deletions
+   * included. They stay readable, and refuse writes and new references,
+   * until the job deletes them. Left out when there was none.
+   */
+  cascadePending: z
+    .strictObject({
+      job: z.string(),
+      members: z.int().min(1).max(cascadeJobMaxRecords),
+    })
+    .optional(),
 });
 export type Committed = z.infer<typeof committedSchema>;
 
@@ -536,7 +555,9 @@ export const dataErrors = defineErrorFamily({
     "This record can't be deleted while another record refers to it. Remove those references first.",
   "data.reference_invalid":
     "This record refers to a record that doesn't exist or that you can't read.",
-  "data.cascade_limit": `Deleting this would also delete more than ${commitMaxCascade} records that refer to it, more than one change may. Delete those from a workflow, in batches, first.`,
+  "data.cascade_limit": `Deleting this would also delete more than ${cascadeJobMaxRecords} records that refer to it, more than one deletion may. Delete some of those first, in batches.`,
+  "data.deleting":
+    "This record is being deleted, with the records that refer to it. It can't be changed or referred to meanwhile.",
   "data.store_bound":
     "This store can't be deleted while an App's kept versions read and write it.",
   "data.store_managed_by_app":
