@@ -117,6 +117,9 @@ describe("the Playbook's records", { timeout: 120_000 }, () => {
           detail,
         })),
       source: workspace.sources.find(({ id }) => id === ids.source),
+      // The staff list a record names, as where it came from: when it came
+      // in, for a member who reads nothing else of the onboarding.
+      staffList: workspace.sources.find(({ id }) => id === "src-roster"),
       tool: workspace.tools.find(({ id }) => id === ids.tool),
       candidate: workspace.candidates.find(({ id }) => id === ids.candidate),
       statements: workspace.statements.filter(({ sourceId }) =>
@@ -131,6 +134,14 @@ describe("the Playbook's records", { timeout: 120_000 }, () => {
           detail: { added: 6 },
         },
       ],
+      staffList: {
+        id: "src-roster",
+        kind: "import",
+        connection: "directory",
+        title: "Staff list",
+        date: new Date().toISOString().slice(0, 10),
+        step: 2,
+      },
       source: {
         id: ids.source,
         kind: "interview",
@@ -323,6 +334,12 @@ describe("the Playbook's records", { timeout: 120_000 }, () => {
           },
         ])
       ),
+      // Nor as another type's own id.
+      rosterIdTaken: await outcome(
+        admin.api.brain.addRecords([
+          { type: "candidate", id: "src-roster", name: "Invoice entry" },
+        ])
+      ),
       tooMany: await outcome(
         admin.api.brain.addRecords(
           Array.from({ length: brainRecordsMaxPerCall + 1 }, (_, index) => ({
@@ -348,6 +365,7 @@ describe("the Playbook's records", { timeout: 120_000 }, () => {
         painlessGoal: "brain.record_invalid",
         transcript: "brain.record_invalid",
         kickoffId: "brain.record_invalid",
+        rosterIdTaken: "brain.record_invalid",
         tooMany: "brain.record_invalid",
       },
       kept: false,

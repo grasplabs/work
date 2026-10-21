@@ -62,12 +62,18 @@ export const painfulKinds: ReadonlySet<string> = new Set([
   "handover",
 ]);
 
+/**
+ * A record's own id: never one of the onboarding's source ids, which a
+ * record may name but not take, whatever its type.
+ */
+const ownIdSchema = brainRecordIdSchema.refine(
+  (id) => !onboardingSourceIds.has(id),
+  "That id is the onboarding's."
+);
+
 const sourceRecordSchema = z.strictObject({
   type: z.literal("source"),
-  id: brainRecordIdSchema.refine(
-    (id) => !onboardingSourceIds.has(id),
-    "That id is the onboarding's."
-  ),
+  id: ownIdSchema,
   kind: z.enum(["interview", "chat", "document", "import", "runLog"]),
   /** What it was, in a few words: never a person's name. */
   title: label,
@@ -84,7 +90,7 @@ const sourceRecordSchema = z.strictObject({
 
 const toolRecordSchema = z.strictObject({
   type: z.literal("tool"),
-  id: brainRecordIdSchema,
+  id: ownIdSchema,
   name: label,
   teamIds: ids,
   sourceId: brainRecordIdSchema,
@@ -93,7 +99,7 @@ const toolRecordSchema = z.strictObject({
 
 const candidateRecordSchema = z.strictObject({
   type: z.literal("candidate"),
-  id: brainRecordIdSchema,
+  id: ownIdSchema,
   name: label,
   /** The drawn workflow, once step 3 has drawn it. */
   workflowId: brainRecordIdSchema.optional(),
@@ -102,7 +108,7 @@ const candidateRecordSchema = z.strictObject({
 const statementRecordSchema = z
   .strictObject({
     type: z.literal("statement"),
-    id: brainRecordIdSchema,
+    id: ownIdSchema,
     kind: z.enum([
       "goal",
       "blocker",

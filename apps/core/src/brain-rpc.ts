@@ -348,6 +348,38 @@ const onboardingSources = (
   ];
 };
 
+/**
+ * The onboarding's sources `named` (the kickoff, the staff list), for a
+ * member whose brain holds records naming them: only what
+ * `onboardingSources` says of each (its title and when it came in),
+ * never what it says.
+ */
+const sourcesForRecords = async (
+  env: Env,
+  named: ReadonlySet<string>
+): Promise<Source[]> => {
+  if (named.size === 0) {
+    return [];
+  }
+  const store = onboardingStore(env);
+  const [kickoff, view, rosterSavedAt] = await Promise.all([
+    store.kickoff(),
+    store.view(),
+    store.rosterSavedAt(),
+  ]);
+  const facts: OnboardingFacts = {
+    view,
+    kickoff,
+    rosterSavedAt,
+    sentLinks: [],
+    leadsTalked: [],
+    documents: [],
+  };
+  return onboardingSources(facts).flatMap(({ source }) =>
+    named.has(source.id) ? [source] : []
+  );
+};
+
 /** The onboarding's sources as changes (brain-changes.ts), with the ids and titles `brain.read` gives them. */
 const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] =>
   onboardingSources(facts).map(({ source: { id, title }, at }) => ({
@@ -558,6 +590,19 @@ export const readBrain = async (
   };
 
   const teams = onboardingTeams(facts);
+  // A member reads the onboarding's sources only as the records naming
+  // them need: when each came in, so a fact shows where it came from.
+  const named = new Set(
+    [...records.tools, ...records.statements].flatMap(({ sourceId }) =>
+      sourceId === kickoffSourceId || sourceId === rosterSourceId
+        ? [sourceId]
+        : []
+    )
+  );
+  const sources =
+    facts === null
+      ? await sourcesForRecords(env, named)
+      : onboardingSources(facts).map(({ source }) => source);
 
   return {
     company,
@@ -565,10 +610,7 @@ export const readBrain = async (
     goals: [],
     teams,
     tools: [...documentTools(facts, teamsByName(teams)), ...records.tools],
-    sources: [
-      ...onboardingSources(facts).map(({ source }) => source),
-      ...records.sources,
-    ],
+    sources: [...sources, ...records.sources],
     statements: records.statements,
     candidates: records.candidates,
     gaps: [],
