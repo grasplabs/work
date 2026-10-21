@@ -79,6 +79,24 @@ const verifiedStaff = async (
 /** Where TanStack Start serves server functions (its default base). */
 const serverFunctionBase = "/_serverFn";
 
+/** Where the admin's MCP is served (src/admin/mcp.ts). */
+const mcpPath = "/mcp";
+
+/**
+ * Whether a request is an MCP client's call of the admin's MCP: a POST to
+ * its path with a JSON body and no `Origin`. MCP clients send no `Origin`,
+ * and a browser sends one on every POST, so no page elsewhere can make
+ * one with a staff member's Access cookie; a browser's own POST from the
+ * console keeps its `Origin` and takes the rule below.
+ */
+const isMcpRequest = (request: Request, url: URL): boolean =>
+  url.pathname === mcpPath &&
+  request.method === "POST" &&
+  request.headers.get("origin") === null &&
+  (request.headers.get("content-type") ?? "")
+    .toLowerCase()
+    .startsWith("application/json");
+
 /**
  * Whether a request could be a cross-site forgery (CSRF), on top of
  * Access's SameSite cookie:
@@ -92,6 +110,9 @@ const serverFunctionBase = "/_serverFn";
  */
 const isForgeable = (request: Request): boolean => {
   const url = new URL(request.url);
+  if (isMcpRequest(request, url)) {
+    return false;
+  }
   if (
     url.pathname.startsWith(serverFunctionBase) &&
     request.headers.get("x-tsr-serverfn") !== "true"

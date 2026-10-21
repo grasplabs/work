@@ -44,6 +44,17 @@
       "jurisdiction": "eu",
     },
   ],
+  // Tool calls of the admin's MCP (src/admin/mcp.ts), per staff member:
+  // 30 a minute. A call reads every client's core once, so this bounds the
+  // reads one person's chat can start. The namespace id is unique in
+  // grasp-os-ops, beside the router's 1001 to 1003.
+  "ratelimits": [
+    {
+      "name": "ADMIN_MCP_RATE_LIMIT",
+      "namespace_id": "1004",
+      "simple": { "limit": 30, "period": 60 },
+    },
+  ],
   // Imports newly published releases (src/releases/import.ts).
   "triggers": { "crons": ["*/5 * * * *"] },
   // Onboards a client (src/provision/workflow.ts): an instance per attempt,
