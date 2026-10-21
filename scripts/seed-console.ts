@@ -31,22 +31,22 @@ const at = (day: number, time = "08:00"): number =>
 
 const releases = [
   {
-    id: "r418-3f9c2ab",
+    id: "r000418-3f9c2ab",
     day: 14,
     notes: "feat(core): draw workflows left to right",
   },
   {
-    id: "r412-91d0e47",
+    id: "r000412-91d0e47",
     day: 7,
     notes: "feat(core): answer with where the brain read it",
   },
   {
-    id: "r405-c27b18f",
+    id: "r000405-c27b18f",
     day: 0,
     notes: "feat(core): sign in with Google Workspace",
   },
   {
-    id: "r399-0a6e5d3",
+    id: "r000399-0a6e5d3",
     day: -7,
     notes: "feat(connect): run connect as a Worker of its own",
   },
@@ -62,7 +62,7 @@ const companies = [
     name: "Hartog Groothandel",
     ring: 0,
     status: "active",
-    release: "r418-3f9c2ab",
+    release: "r000418-3f9c2ab",
     // Its last deploy, of its settings and new secrets, failed.
     lastDeploy: { status: "failed", kind: "settings_and_secrets", day: 15 },
   },
@@ -71,7 +71,7 @@ const companies = [
     name: "Noordkade Finance",
     ring: 1,
     status: "active",
-    release: "r418-3f9c2ab",
+    release: "r000418-3f9c2ab",
     lastDeploy: { status: "done", kind: "release", day: 14 },
   },
   {
@@ -79,7 +79,7 @@ const companies = [
     name: "Veldkamp Installatietechniek",
     ring: 2,
     status: "active",
-    release: "r412-91d0e47",
+    release: "r000412-91d0e47",
     lastDeploy: { status: "done", kind: "release", day: 9 },
   },
   {
@@ -106,7 +106,6 @@ const row = (values: (string | number | null)[]): string =>
     .join(", ")})`;
 
 const ids = companies.map(({ id }) => sqlString(id)).join(", ");
-const releaseIds = releases.map(({ id }) => sqlString(id)).join(", ");
 
 const statements = [
   // What the last run wrote, children first.
@@ -118,8 +117,8 @@ const statements = [
   `DELETE FROM client_admin_reads WHERE client_id IN (${ids})`,
   `DELETE FROM settings WHERE client_id IN (${ids})`,
   `DELETE FROM client_workers WHERE client_id IN (${ids})`,
-  `DELETE FROM clients WHERE id IN (${ids})`,
-  `DELETE FROM releases WHERE id IN (${releaseIds})`,
+  // The companies and releases in place, as anything else a local console
+  // made of them (another rollout's targets, say) may name them.
   `INSERT INTO releases (id, commit_sha, manifest, manifest_sha256, built_at, imported_at) VALUES ${releases
     .map(({ id, day, notes }) =>
       row([
@@ -131,12 +130,16 @@ const statements = [
         releaseAt(day),
       ])
     )
-    .join(", ")}`,
+    .join(
+      ", "
+    )} ON CONFLICT(id) DO UPDATE SET commit_sha = excluded.commit_sha, manifest = excluded.manifest, manifest_sha256 = excluded.manifest_sha256, built_at = excluded.built_at, imported_at = excluded.imported_at`,
   `INSERT INTO clients (id, name, account_id, ring, status, created_by, created_at, updated_at) VALUES ${companies
     .map(({ id, name, ring, status }) =>
       row([id, name, `seed-account-${id}`, ring, status, staff, at(1), at(1)])
     )
-    .join(", ")}`,
+    .join(
+      ", "
+    )} ON CONFLICT(id) DO UPDATE SET name = excluded.name, account_id = excluded.account_id, ring = excluded.ring, status = excluded.status, created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at, generation = 1, rotated_at = NULL, rotation_live_at = NULL, workers_subdomain = NULL, sign_in = NULL, config_changed_at = NULL, pinned_release_id = NULL`,
   ...companies.flatMap(({ id, release }) =>
     release === null
       ? []
@@ -182,7 +185,7 @@ const statements = [
     [
       rolloutId,
       "release",
-      "r418-3f9c2ab",
+      "r000418-3f9c2ab",
       mode,
       mode === "running" ? 2 : 1,
       staff,
@@ -237,7 +240,12 @@ const wrangler = (args: string[]): void => {
     }
   );
   if (result.status !== 0) {
-    throw new Error(`wrangler ${args.join(" ")} failed`, {
+    const how =
+      result.error?.message ??
+      (result.signal === null
+        ? `exit status ${String(result.status)}`
+        : `signal ${result.signal}`);
+    throw new Error(`wrangler ${args.join(" ")} failed: ${how}`, {
       cause: result.error,
     });
   }
