@@ -12,7 +12,7 @@ import {
 } from "@grasp-os/shared/run-files";
 import type { RunFileRef, RunFileType } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -718,6 +718,223 @@ const deletesPerSweep = 10;
  * delete has put its bytes by then.
  */
 export const sweepGraceMs = 60 * 60_000;
+
+/**
+ * A file a start hands its run (GRA-885): an App's file, as its store
+ * recorded it, read by its recorded chunks only.
+ */
+export interface RunFileSource {
+  readonly name: string;
+  readonly type: string;
+  readonly size: number;
+  /** Its recorded chunks, in order: each one's R2 key and SHA-256. */
+  readonly chunks: readonly { readonly key: string; readonly sha256: string }[];
+}
+
+/** Who opened a start's copies into run `runId`: no task's step key. */
+const startOpener = (runId: string): string => `start:${runId}`;
+
+/** Why copying `size` bytes more into run `runId` was refused. */
+const startLimitPassed = async (
+  env: Env,
+  runId: string,
+  size: number
+): Promise<Error> => {
+  const run = await env.DB.prepare(
+    "SELECT count(*) AS files, coalesce(sum(size), 0) AS bytes FROM workflow_run_files WHERE run_id = ? AND state <> 'deleted'"
+  )
+    .bind(runId)
+    .first<{ files: number; bytes: number }>();
+  return (run?.files ?? 0) >= runFileLimits.runFiles ||
+    (run?.bytes ?? 0) + size > runFileLimits.runBytes
+    ? runFileErrors.create("file.run_full")
+    : runFileErrors.create("file.workflow_quota");
+};
+
+/**
+ * Copies `source` into run `runId`'s files, as file `slot` of its start,
+ * before the start is admitted: its bytes read chunk by chunk, each
+ * against its recorded SHA-256, written to the run's own objects, then
+ * checked as a finish checks a file (its size, its type by its bytes, its
+ * SHA-256 over what was copied). Its row stays `writing`, opened by the
+ * start, so no action can write to it and nothing reads it, until the
+ * admitting batch marks it done (`startFilesAdmitted`); a start never
+ * admitted leaves it to be dropped (`startFilesDropped`) or swept. Every
+ * limit is checked as its row goes in, its whole size reserved at once.
+ * Its ID, once copied.
+ */
+export const copyIntoRun = async (
+  env: Env,
+  target: { readonly runId: string; readonly workflowId: string },
+  slot: number,
+  source: RunFileSource
+): Promise<string> => {
+  const type = runFileTypeSchema.safeParse(source.type);
+  const name = runFileNameSchema.safeParse(source.name);
+  if (!type.success) {
+    throw runFileErrors.create("file.run_type_unsupported");
+  }
+  if (!name.success) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  if (source.size > runFileLimits.fileBytes) {
+    throw runFileErrors.create("file.run_too_large");
+  }
+  const id = crypto.randomUUID();
+  const reserved = await env.DB.prepare(
+    `INSERT INTO workflow_run_files
+      (id, run_id, workflow_resource_id, opened_by, open_key, name, type, size, state, created_at)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'writing', ?9
+    WHERE (SELECT count(*) FROM workflow_run_files
+        WHERE run_id = ?2 AND state <> 'deleted') < ?10
+      AND (SELECT coalesce(sum(size), 0) FROM workflow_run_files
+        WHERE run_id = ?2 AND state <> 'deleted') + ?8 <= ?11
+      AND (SELECT coalesce(sum(size), 0) FROM workflow_run_files
+        WHERE workflow_resource_id = ?3) + ?8 <= ?12`
+  )
+    .bind(
+      id,
+      target.runId,
+      target.workflowId,
+      startOpener(target.runId),
+      `${startOpener(target.runId)}:${slot}`,
+      name.data,
+      type.data,
+      source.size,
+      Date.now(),
+      runFileLimits.runFiles,
+      runFileLimits.runBytes,
+      runFileLimits.workflowBytes
+    )
+    .run();
+  if (reserved.meta.changes === 0) {
+    throw await startLimitPassed(env, target.runId, source.size);
+  }
+  const db = drizzle(env.DB);
+  const gone = async (error: Error): Promise<never> => {
+    await db
+      .update(workflowRunFiles)
+      .set({ state: "deleted", deletedAt: new Date() })
+      .where(eq(workflowRunFiles.id, id));
+    throw error;
+  };
+  const text = runFileTextTypes.has(type.data);
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+  const digest = new crypto.DigestStream("SHA-256");
+  const writer = digest.getWriter();
+  const head = new Uint8Array(16);
+  let headLength = 0;
+  let readable = true;
+  let size = 0;
+  for (const [index, chunk] of source.chunks.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- in order: the hash is of the bytes as they follow
+    const object = await env.FILES.get(chunk.key);
+    // oxlint-disable-next-line no-await-in-loop -- in order, as above
+    const bytes = object === null ? null : await object.bytes();
+    if (
+      bytes === null ||
+      // oxlint-disable-next-line no-await-in-loop -- in order, as above
+      (await sha256HexOfBytes(bytes)) !== chunk.sha256
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- ends the copy
+      return await gone(fileErrors.create("file.not_found"));
+    }
+    const key = `run-files/${target.runId}/${id}/${crypto.randomUUID()}`;
+    // Recorded before its object is put, so the sweep finds every object
+    // a dropped copy wrote.
+    // oxlint-disable-next-line no-await-in-loop -- in order, as above
+    await db.insert(workflowRunFileChunks).values({
+      fileId: id,
+      index,
+      key,
+      appendKey: `${startOpener(target.runId)}:${slot}:${index}`,
+      size: bytes.length,
+      sha256: chunk.sha256,
+      stored: false,
+    });
+    // oxlint-disable-next-line no-await-in-loop -- in order, as above
+    await env.FILES.put(key, bytes, { sha256: chunk.sha256 });
+    // oxlint-disable-next-line no-await-in-loop -- in order, as above
+    await db
+      .update(workflowRunFileChunks)
+      .set({ stored: true })
+      .where(eq(workflowRunFileChunks.key, key));
+    // oxlint-disable-next-line no-await-in-loop -- in order, as above
+    await writer.write(bytes);
+    size += bytes.length;
+    if (headLength < head.length) {
+      const taken = bytes.subarray(0, head.length - headLength);
+      head.set(taken, headLength);
+      headLength += taken.length;
+    }
+    readable &&= !text || textOf(decoder, bytes);
+  }
+  await writer.close();
+  const sha256 = toHex(new Uint8Array(await digest.digest));
+  if (text && readable) {
+    try {
+      decoder.decode();
+    } catch {
+      readable = false;
+    }
+  }
+  const shown =
+    readable &&
+    size === source.size &&
+    (text || size > 0) &&
+    runFileTypeOfBytes(head.subarray(0, headLength), type.data);
+  if (!shown) {
+    return await gone(fileErrors.create("file.content_mismatch"));
+  }
+  await db
+    .update(workflowRunFiles)
+    .set({ sha256 })
+    .where(eq(workflowRunFiles.id, id));
+  return id;
+};
+
+/**
+ * Marks the files run `runId`'s start copied done, in the batch that
+ * admits it, only once `admitted` (its receipt written) holds: until
+ * then they are no file of a run.
+ */
+export const startFilesAdmitted = (
+  db: ReturnType<typeof drizzle>,
+  runId: string,
+  admitted: SQL
+) =>
+  db
+    .update(workflowRunFiles)
+    .set({ state: "done", finishedAt: new Date() })
+    .where(
+      and(
+        eq(workflowRunFiles.runId, runId),
+        eq(workflowRunFiles.openedBy, startOpener(runId)),
+        eq(workflowRunFiles.state, "writing"),
+        isNotNull(workflowRunFiles.sha256),
+        admitted
+      )
+    );
+
+/**
+ * Drops the files a start copied for run `runId` that it never admitted:
+ * deleted, so the sweep takes their chunks.
+ */
+export const startFilesDropped = async (
+  env: Env,
+  runId: string
+): Promise<void> => {
+  await drizzle(env.DB)
+    .update(workflowRunFiles)
+    .set({ state: "deleted", deletedAt: new Date() })
+    .where(
+      and(
+        eq(workflowRunFiles.runId, runId),
+        eq(workflowRunFiles.openedBy, startOpener(runId)),
+        eq(workflowRunFiles.state, "writing")
+      )
+    );
+};
 
 /**
  * Marks files of the runs `runIds` deleted: their run's details went

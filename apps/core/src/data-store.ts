@@ -477,6 +477,21 @@ export class DataStore extends DurableObject<Env> {
     return await this.#live().files.content(storeId, reader, resource, fileId);
   }
 
+  /** `FileHost.readableThrough`. */
+  async fileReadableThrough(
+    storeId: StoreId,
+    reader: FileReader,
+    fileId: string,
+    resources: string[]
+  ): Promise<FileContent> {
+    return await this.#live().files.readableThrough(
+      storeId,
+      reader,
+      fileId,
+      resources
+    );
+  }
+
   /** `FileHost.usable`. */
   async filesUsable(
     storeId: StoreId,
