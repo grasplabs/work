@@ -108,7 +108,7 @@ const accessOf = async (
 
 /**
  * The Apps whose data each of `apps` may hold through calls between Apps
- * (app-calls.ts), itself included, following every permission on another
+ * by their exports (until GRA-789's slice 5 removes them), itself included, following every permission on another
  * App's exports ever granted, as sources are: an App may hold what the
  * Apps it calls answered, so what they may have read; and what the Apps
  * that may write into it (any permission beyond `read`) sent it, so what

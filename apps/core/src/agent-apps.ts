@@ -249,8 +249,7 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Restricts App `app` when the chat is restricted, before a call that may
-   * write there: its input may carry what the chat read restricted, as a
-   * call between Apps carries it (app-calls.ts).
+   * write there: its input may carry what the chat read restricted.
    */
   async #carryChatRestricted(app: AppId): Promise<void> {
     const scope = this.ctx.props;

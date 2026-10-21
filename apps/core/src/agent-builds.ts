@@ -31,8 +31,6 @@ import { asPerson } from "./agent-person.ts";
 import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
-import { isPlainData } from "./app.ts";
-import type { AppAnswer } from "./app.ts";
 import {
   appFor,
   applyChanges,
@@ -53,6 +51,8 @@ import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { appBindingKinds, requestPermission } from "./permissions.ts";
+import { isPlainData } from "./plain-data.ts";
+import type { AppAnswer } from "./plain-data.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
 import { buildOnSave } from "./save-builds.ts";

@@ -6,7 +6,7 @@ import type {
 import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectCall, ConnectResult } from "@grasp-os/shared/connect";
 import { isExpectedError, toOpaqueError } from "@grasp-os/shared/errors";
-import type { AppId, PermissionId } from "@grasp-os/shared/ids";
+import type { PermissionId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { bindingNameSchema } from "@grasp-os/shared/permissions";
 import type {
@@ -390,25 +390,6 @@ export const connectionGrantOf =
     object.type === "connection"
       ? { context, permissionId: id, connection: object }
       : undefined;
-
-/**
- * A permission on another App's exports, as a stub holds it (app-calls.ts).
- * An App's calls of another App keep the calling App's restricted mode,
- * so it needs no context of its own.
- */
-export interface ExportGrant {
-  /** The permission the stub was built from: only it counts on each call. */
-  permissionId: PermissionId;
-  /** The App whose exports it calls. */
-  app: AppId;
-}
-
-/** A permission on another App's exports as its grant; nothing for any other. */
-export const exportGrantOf = ({
-  id,
-  object,
-}: Permission): ExportGrant | undefined =>
-  object.type === "app" ? { permissionId: id, app: object.appId } : undefined;
 
 /** A collection permission as its grant in `context`; nothing for any other. */
 export const collectionGrantOf =

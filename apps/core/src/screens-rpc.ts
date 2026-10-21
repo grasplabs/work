@@ -60,7 +60,6 @@ import { z } from "zod";
 
 import { asksPreferenceWindow, windowExtentOf } from "./app-functions.ts";
 import { heldManifest, versionReferenceSource } from "./app-releases.ts";
-import type { AppAnswer } from "./app.ts";
 import { appFor, findVersion, getApp, listApps, versionFiles } from "./apps.ts";
 import { screenBuilds } from "./db/core/schema.ts";
 import { withReferencesOf } from "./draft-references.ts";
@@ -68,6 +67,7 @@ import type { ReferenceSource } from "./draft-references.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { PageCallback, StillOpen } from "./page-callbacks.ts";
+import type { AppAnswer } from "./plain-data.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { windowPages } from "./query-windows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";

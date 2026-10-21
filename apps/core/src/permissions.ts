@@ -417,32 +417,20 @@ const parseId = (id: unknown): PermissionId => {
 };
 
 /**
- * An App's server code gets its env when it starts: restarting it after a
- * grant or revoke gives it an env as the records are now, and its screens'
- * live workflow watches read again. A revoked stub
- * it still holds is refused anyway, on its next call. Best effort: the
- * change stands if the App can't be reached.
+ * Tells App `subject`'s screens that what it may start changed, after a
+ * grant or revoke of one of its permissions, so their live workflow
+ * watches read again (screen-workflows.ts). Best effort: the change
+ * stands if the App's host can't be reached.
  */
-const restartApp = async (
+const tellPolicyChanged = async (
   env: Env,
   subject: PermissionSubject
 ): Promise<void> => {
   if (subject.type !== "app") {
     return;
   }
-  const host = appHost(env, subject.appId);
   try {
-    await host.restart("Its permissions changed.");
-  } catch (error) {
-    log.error("app.restart_failed", {
-      appId: subject.appId,
-      ...errorFields(error),
-    });
-  }
-  // Its screens' live workflow watches read again, whether or not it
-  // restarted: what the App may start changed (screen-workflows.ts).
-  try {
-    await host.workflowPolicyChanged();
+    await appHost(env, subject.appId).workflowPolicyChanged();
   } catch (error) {
     log.error("app.workflow_policy_tell_failed", {
       appId: subject.appId,
@@ -1161,7 +1149,7 @@ export const grantPermission = async (
   }
   await tellKept(env, madeSensitive);
   const permission = toPermission(granted);
-  await restartApp(env, permission.subject);
+  await tellPolicyChanged(env, permission.subject);
   await tellChat(env, permission, "granted");
   return permission;
 };
@@ -1524,7 +1512,7 @@ export const revokePermission = async (
     return toPermission((await findRow(env, found.id)) ?? found);
   }
   const permission = toPermission(revoked);
-  await restartApp(env, permission.subject);
+  await tellPolicyChanged(env, permission.subject);
   // A chat's request that waited: revoking it decides it, so the chat's
   // agent is told, and its card goes.
   if (found.status === "requested") {
