@@ -101,11 +101,18 @@ describe("the sidebar's header", () => {
           organizationRenamed("Noordkade Group");
         }
       ),
+      // Renamed while the read is still out: its older answer doesn't undo it.
+      renamedFirst: await textWith(async () => {
+        organizationRenamed("Noordkade Group");
+        await settled();
+        return organizationNamed("Noordkade Finance");
+      }),
     }).toStrictEqual({
       named: "Noordkade Finance Grasp",
       unnamed: "Grasp",
       unanswered: "Grasp",
       renamed: "Noordkade Group Grasp",
+      renamedFirst: "Noordkade Group Grasp",
     });
   });
 });

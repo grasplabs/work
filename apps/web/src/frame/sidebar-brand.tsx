@@ -21,10 +21,13 @@ import { GraspMark } from "../grasp-mark.tsx";
 /** The organization's name as the header shows it, for the tab. */
 let shownName: string | undefined;
 
+/** How many renames the page saved: a read begun before one doesn't undo it. */
+let renames = 0;
+
 const listeners = new Set<() => void>();
 
 /** Shows `name` as the organization's: core's answer, or a rename just saved. */
-const showName = (name: string | undefined): void => {
+const showName = (name?: string): void => {
   if (name === shownName) {
     return;
   }
@@ -39,6 +42,7 @@ const showName = (name: string | undefined): void => {
  * Workspace settings call it once core saved a new name.
  */
 export const organizationRenamed = (name: string): void => {
+  renames += 1;
   showName(name.trim() === "" ? undefined : name);
 };
 
@@ -58,6 +62,22 @@ const nameOf = async (
     return name.trim() === "" ? undefined : name;
   } catch {
     return undefined;
+  }
+};
+
+/**
+ * Shows the organization's name as `organization` reads it, while `read`
+ * is current and no rename was saved meanwhile: a rename is newer than any
+ * read begun before it. Outside the component, as `nameOf` is.
+ */
+const readName = async (
+  organization: () => Promise<Organization>,
+  read: { current: boolean }
+): Promise<void> => {
+  const begun = renames;
+  const named = await nameOf(organization);
+  if (read.current && renames === begun) {
+    showName(named);
   }
 };
 
@@ -95,16 +115,13 @@ export const SidebarBrandOf = ({
 }) => {
   const name = useSyncExternalStore(subscribe, () => shownName);
   useEffect(() => {
-    let current = true;
-    const read = async (): Promise<void> => {
-      const named = await nameOf(organization);
-      if (current) {
-        showName(named);
-      }
-    };
-    void read();
+    const read = { current: true };
+    // A header mounted anew (another session, say) shows no name kept from
+    // before until core says this one's.
+    showName();
+    void readName(organization, read);
     return () => {
-      current = false;
+      read.current = false;
     };
   }, [organization]);
   return <SidebarBrandView name={name} />;
