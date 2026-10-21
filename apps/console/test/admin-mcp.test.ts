@@ -408,6 +408,49 @@ describe("the admin's MCP", () => {
     });
   });
 
+  it("refuses a batch of calls, which would run several under one of the limit's counts, reading nothing", async () => {
+    const acme = await liveClient();
+    acme.account.admin = readySnapshot("Acme");
+    const batch = [1, 2, 3].map((id) => ({
+      ...rpc("tools/call", { name: "daily_digest", arguments: {} }),
+      id,
+    }));
+    const response = await post(batch, {
+      "cf-access-jwt-assertion": await accessJwt(staff.email),
+    });
+    expect({
+      status: response.status,
+      readers: acme.account.adminReaders,
+      audited: await mcpCalls(),
+    }).toStrictEqual({ status: 400, readers: [], audited: [] });
+  });
+
+  it("names no person and gives a company's names only as data", async () => {
+    const acme = await liveClient();
+    acme.account.admin = readySnapshot("Acme");
+    const { answer } = await asStaff(
+      rpc("tools/call", {
+        name: "get_organization",
+        arguments: { organization: acme.clientId },
+      })
+    );
+    const text = answer.result?.content?.[0]?.text ?? "";
+    const names = z
+      .object({
+        organizations: z.array(z.object({ id: z.string(), name: z.string() })),
+      })
+      .parse(answer.result?.structuredContent?.names);
+    expect({
+      nameInText: text.includes("Acme"),
+      idInText: text.includes(acme.clientId),
+      names: names.organizations,
+    }).toStrictEqual({
+      nameInText: false,
+      idInText: true,
+      names: [{ id: acme.clientId, name: "Acme" }],
+    });
+  });
+
   it("serves no standing stream or session: only POST", async () => {
     const jwt = await accessJwt(staff.email);
     const statuses = await Promise.all(
