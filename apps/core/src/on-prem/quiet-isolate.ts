@@ -64,6 +64,28 @@ export interface QuietOptions {
   readonly nodejsCompat?: boolean;
 }
 
+/** The compatibility date from which workerd gives isolates `node:` modules. */
+const nodejsByDefaultFrom = "2026-08-04";
+
+/**
+ * Whether an isolate loaded with `settings` has `node:` modules: asked for
+ * (`nodejs_compat`), or by default from {@link nodejsByDefaultFrom} on,
+ * unless `no_nodejs_compat` turns them off.
+ */
+export const hasNodeModules = (settings: {
+  readonly compatibilityDate: string;
+  readonly compatibilityFlags?: readonly string[];
+}): boolean => {
+  const flags = settings.compatibilityFlags ?? [];
+  if (flags.includes("no_nodejs_compat")) {
+    return false;
+  }
+  return (
+    flags.some((flag) => flag.startsWith("nodejs_compat")) ||
+    settings.compatibilityDate >= nodejsByDefaultFrom
+  );
+};
+
 /** The timer functions whose callbacks a quiet module catches. */
 const timerNames = '["setTimeout", "setInterval", "setImmediate"]';
 

@@ -1,4 +1,4 @@
-import { quietModules } from "./on-prem/quiet-isolate.ts";
+import { hasNodeModules, quietModules } from "./on-prem/quiet-isolate.ts";
 
 // What an isolate core loads itself may print (GRA-910). On Cloudflare a
 // Loader isolate's console output is dropped unless a tail is attached, and
@@ -48,11 +48,7 @@ const quietCode = (code: WorkerLoaderWorkerCode): WorkerLoaderWorkerCode => {
     code.mainModule,
     { ...code.modules, [code.mainModule]: given },
     // Its `node:timers` caught too, where it has them.
-    {
-      nodejsCompat: (code.compatibilityFlags ?? []).some((flag) =>
-        flag.startsWith("nodejs_compat")
-      ),
-    }
+    { nodejsCompat: hasNodeModules(code) }
   );
   const quieted = modules[code.mainModule];
   return {

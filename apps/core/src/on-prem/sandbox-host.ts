@@ -26,7 +26,7 @@
  * its isolate would find nothing here: no storage, no secrets.
  */
 
-import { quietModules } from "./quiet-isolate.ts";
+import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
 import { sessionResponse } from "./sandbox-session.ts";
 import { isolateSettings } from "./sandbox-settings.ts";
 
@@ -98,8 +98,7 @@ const run = async (
       mainModule: worker.mainModule,
       // Printing nothing to the process's output, the deployment's logs.
       modules: quietModules(worker.mainModule, worker.modules, {
-        nodejsCompat:
-          isolateSettings.compatibilityFlags.includes("nodejs_compat"),
+        nodejsCompat: hasNodeModules(isolateSettings),
       }),
       env: {},
       globalOutbound: null,
