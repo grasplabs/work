@@ -14,8 +14,8 @@
  * answer, and core logs what it decides itself.
  *
  * How: the isolate's main module imports `quietModule` first, from beside
- * itself (an import resolves against the importer's name, and the quiet
- * module takes that name over whatever an App supplied there), so it is
+ * itself under a name no module of the isolate has (an import resolves
+ * against the importer's name, so no App module can stand in for it), so it is
  * evaluated before any other module of the isolate and no module keeps a
  * console method of its own. It replaces every console method with one
  * that does nothing (`node:console` prints through them, and a method the
@@ -91,12 +91,31 @@ ${quietErrors}`;
 const lineTerminator = /[\r\n\u2028\u2029]/u;
 
 /**
- * Where the quiet module goes for `mainModule`: beside it, so the main's
- * relative import names this module and no other an App's code supplied
- * (an import resolves against the importing module's own name).
+ * A module name in `dir` none of `modules` has, from `name`: `name` itself
+ * when it is free, otherwise with a number before its extension. The
+ * host's own modules go there, so they never take an App's module's place,
+ * and none of the App's takes theirs.
  */
-const quietPathOf = (mainModule: string): string =>
-  `${mainModule.slice(0, mainModule.lastIndexOf("/") + 1)}${quietModule}`;
+const freeName = (
+  modules: Readonly<Record<string, unknown>>,
+  dir: string,
+  name: string
+): string => {
+  const stem = name.replace(/\.js$/u, "");
+  let candidate = name;
+  for (
+    let count = 1;
+    Object.hasOwn(modules, `${dir}${candidate}`);
+    count += 1
+  ) {
+    candidate = `${stem}-${count}.js`;
+  }
+  return candidate;
+};
+
+/** The directory of module `name`, with its slash: "" at the top. */
+const dirOf = (name: string): string =>
+  name.slice(0, name.lastIndexOf("/") + 1);
 
 /**
  * `modules` with the quiet module, imported first by `mainModule`. A main
@@ -119,10 +138,15 @@ export const quietModules = <Module>(
     hashbang = end === -1 ? `${main}\n` : main.slice(0, end + 1);
   }
   const rest = main.slice(Math.min(hashbang.length, main.length));
+  // Beside the main, so its relative import names this module and no
+  // other (an import resolves against the importer's own name), under a
+  // name none of the isolate's modules has.
+  const dir = dirOf(mainModule);
+  const quiet = freeName(modules, dir, quietModule);
   return {
     ...modules,
-    [mainModule]: `${hashbang}import ${JSON.stringify(`./${quietModule}`)};\n${rest}`,
-    [quietPathOf(mainModule)]: quietSource,
+    [mainModule]: `${hashbang}import ${JSON.stringify(`./${quiet}`)};\n${rest}`,
+    [`${dir}${quiet}`]: quietSource,
   };
 };
 
@@ -196,9 +220,10 @@ export const captureMethod = "call";
  * made as workerd makes one, with this isolate's context and env.
  */
 const captureSource = (
-  mainModule: string
+  mainModule: string,
+  quiet: string
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
-import { takeLines } from ${JSON.stringify(`./${quietModule}`)};
+import { takeLines } from ${JSON.stringify(`./${quiet}`)};
 import * as main from ${JSON.stringify(mainModule)};
 export class ${captureEntrypoint} extends WorkerEntrypoint {
   async ${captureMethod}(entrypoint, method, args, sink) {
@@ -233,12 +258,19 @@ export const capturedModules = <Module>(
   if (typeof modules[mainModule] !== "string") {
     return { mainModule, modules: { ...modules } };
   }
+  // At the top, under names none of the isolate's modules has.
+  const quiet = freeName(modules, "", quietModule);
+  const capture = freeName(
+    { ...modules, [quiet]: capturingSource },
+    "",
+    captureModule
+  );
   return {
-    mainModule: captureModule,
+    mainModule: capture,
     modules: {
       ...modules,
-      [quietModule]: capturingSource,
-      [captureModule]: `import ${JSON.stringify(`./${quietModule}`)};\n${captureSource(mainModule)}`,
+      [quiet]: capturingSource,
+      [capture]: `import ${JSON.stringify(`./${quiet}`)};\n${captureSource(mainModule, quiet)}`,
     },
   };
 };
