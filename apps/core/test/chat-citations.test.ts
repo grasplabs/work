@@ -60,6 +60,27 @@ describe(citedIn, () => {
     });
   });
 
+  it("leaves code as it is written, and cites nothing in it", () => {
+    const code =
+      "```js\nconst a = '&#65; grasp:note/a \\/';\n```\nUse `[A](grasp:note/a)`, or:\n~~~\n[B](grasp:note/b)\n~~~";
+    expect(citedIn(code, given("a", "b"))).toStrictEqual({
+      text: code,
+      citations: [],
+    });
+  });
+
+  it("cleans what only looks like code: an unclosed span, one across a paragraph, a fence with a backtick after it", () => {
+    expect(
+      citedIn(
+        "`[X](grasp:note/x)\n\n[Y](grasp:note/y)`\n``` a`b\n[Z](grasp:note/z)",
+        given()
+      )
+    ).toStrictEqual({
+      text: "`X\n\nY`\n``` a`b\nZ",
+      citations: [],
+    });
+  });
+
   it("cites at most the first notes it may, and shows the links past them as text", () => {
     const ids = Array.from(
       { length: chatCitationsMax + 1 },
