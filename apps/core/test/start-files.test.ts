@@ -30,7 +30,9 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
-import { copyIntoRun } from "../src/workflows/run-files.ts";
+import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";
+import { handFiles } from "../src/workflows/start-files.ts";
+import type { StartFile } from "../src/workflows/start-files.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, seal } from "./sealed-apps.ts";
@@ -514,6 +516,138 @@ describe(
           objects: 0,
         }
       );
+    });
+
+    it("reads each file again once all are copied, refusing the start and dropping its copies when one was hidden meanwhile", async () => {
+      const runId = crypto.randomUUID();
+      const workflowId = crypto.randomUUID();
+      const bytes = png(90);
+      const key = `app-files/test/${crypto.randomUUID()}`;
+      await env.FILES.put(key, bytes);
+      const file: StartFile = {
+        id: crypto.randomUUID(),
+        name: "scan.png",
+        type: "image/png",
+        size: bytes.length,
+        ownerId: "user-ada",
+        chunks: [{ key, sha256: await sha256HexOfBytes(bytes) }],
+      };
+      let reads = 0;
+      const field = {
+        descriptorVersion: 1,
+        nullable: false,
+        presence: "required",
+      } as const;
+      const refused = await outcome(
+        handFiles(
+          env,
+          {
+            ...field,
+            kind: "object",
+            fields: { doc: { ...field, kind: "file" } },
+          },
+          JSON.stringify({ doc: { id: file.id } }),
+          { runId, workflowId, runs: true },
+          {
+            // Readable as it is copied, hidden by the time it is read again.
+            read: async () => {
+              reads += 1;
+              if (reads > 1) {
+                throw new Error("file.not_found");
+              }
+              return await Promise.resolve(file);
+            },
+            sent: () => {
+              throw new Error("Never audited: never admitted");
+            },
+          }
+        )
+      );
+
+      expect({ refused, reads, kept: await runFiles(runId) }).toMatchObject({
+        refused: "Error: file.not_found",
+        reads: 2,
+        kept: [{ state: "deleted" }],
+      });
+    });
+
+    it("counts no dropped copy against the workflow's bytes, and sweeps a copy no start admitted within the hour", async () => {
+      const workflowId = crypto.randomUUID();
+      const runId = crypto.randomUUID();
+      const other = crypto.randomUUID();
+      const insert = (row: {
+        openedBy: string;
+        size: number;
+        state: string;
+        at: number;
+      }) =>
+        env.DB.prepare(
+          "INSERT INTO workflow_run_files (id, run_id, workflow_resource_id, opened_by, open_key, name, type, size, state, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, 'a.txt', 'text/plain', ?, ?, ?, ?)"
+        ).bind(
+          crypto.randomUUID(),
+          other,
+          workflowId,
+          row.openedBy,
+          `${row.openedBy}:${crypto.randomUUID()}`,
+          row.size,
+          row.state,
+          row.at,
+          row.state === "deleted" ? row.at : null
+        );
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+      await env.DB.batch([
+        // A dropped copy as large as the workflow's whole quota.
+        insert({
+          openedBy: `start:${other}`,
+          size: runFileLimits.workflowBytes,
+          state: "deleted",
+          at: Date.now(),
+        }),
+        // A copy no start admitted, and a task's file, both two hours old.
+        insert({
+          openedBy: `start:${other}`,
+          size: 1,
+          state: "writing",
+          at: twoHoursAgo,
+        }),
+        insert({
+          openedBy: `${other}:task:write`,
+          size: 1,
+          state: "writing",
+          at: twoHoursAgo,
+        }),
+      ]);
+      const bytes = png(70);
+      const key = `app-files/test/${crypto.randomUUID()}`;
+      await env.FILES.put(key, bytes);
+      const copied = await outcome(
+        copyIntoRun(env, { runId, workflowId }, 0, {
+          name: "scan.png",
+          type: "image/png",
+          size: bytes.length,
+          chunks: [{ key, sha256: await sha256HexOfBytes(bytes) }],
+        })
+      );
+      await sweepRunFiles(env);
+      const { results } = await env.DB.prepare(
+        "SELECT opened_by, state FROM workflow_run_files WHERE run_id = ? AND size = 1 ORDER BY opened_by"
+      )
+        .bind(other)
+        .all<{ opened_by: string; state: string }>();
+
+      expect({
+        copied,
+        swept: results.map(({ opened_by: by, state }) => [
+          by.startsWith("start:") ? "start copy" : "task file",
+          state,
+        ]),
+      }).toStrictEqual({
+        copied: "ok",
+        swept: [
+          ["task file", "writing"],
+          ["start copy", "deleted"],
+        ],
+      });
     });
   }
 );

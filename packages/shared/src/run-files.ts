@@ -36,6 +36,12 @@ export const runFileLimits = {
   callBytes: 512 * kib,
   /** How long a file may stay unfinished before it is swept. */
   orphanMs: 24 * 60 * 60 * 1000,
+  /**
+   * How long a start's copy may stay unadmitted before it is swept: a
+   * copy is made and admitted within one start, so one left this long was
+   * never admitted (GRA-885).
+   */
+  startOrphanMs: 60 * 60 * 1000,
   /** Longest file name, in characters. */
   nameLength: 200,
   /**

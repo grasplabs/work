@@ -12,7 +12,18 @@ import {
 } from "@grasp-os/shared/run-files";
 import type { RunFileRef, RunFileType } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  like,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -790,7 +801,7 @@ export const copyIntoRun = async (
       AND (SELECT coalesce(sum(size), 0) FROM workflow_run_files
         WHERE run_id = ?2 AND state <> 'deleted') + ?8 <= ?11
       AND (SELECT coalesce(sum(size), 0) FROM workflow_run_files
-        WHERE workflow_resource_id = ?3) + ?8 <= ?12`
+        WHERE workflow_resource_id = ?3 AND state <> 'deleted') + ?8 <= ?12`
   )
     .bind(
       id,
@@ -972,9 +983,19 @@ export const sweepRunFiles = async (
     .where(
       and(
         eq(workflowRunFiles.state, "writing"),
-        lt(
-          workflowRunFiles.createdAt,
-          new Date(now.getTime() - runFileLimits.orphanMs)
+        or(
+          lt(
+            workflowRunFiles.createdAt,
+            new Date(now.getTime() - runFileLimits.orphanMs)
+          ),
+          // A start's copy never admitted: no task will finish it.
+          and(
+            like(workflowRunFiles.openedBy, "start:%"),
+            lt(
+              workflowRunFiles.createdAt,
+              new Date(now.getTime() - runFileLimits.startOrphanMs)
+            )
+          )
         )
       )
     );
