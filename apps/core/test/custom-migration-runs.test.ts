@@ -2,6 +2,11 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import {
+  activateCandidate,
+  freezeCandidate,
+  runCandidate,
+} from "../src/app-candidates.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import {
@@ -44,6 +49,61 @@ import { newRecordId } from "./store-schemas.ts";
 //   test.
 
 describe("an explicit migration's run", { timeout: 180_000 }, () => {
+  it("doesn't take over for a release whose candidate a commit superseded", async () => {
+    const { fixture, store, release } = await migrated(20, deriving);
+    const object = env.DATA_STORES.getByName(store.id);
+    const consumer = { resourceId: fixture.app, resourceVersion: 3 };
+    await vi.waitFor(
+      async () => {
+        await expect(
+          object.schemaStatus(store.id, release.manifest.schemaHash, consumer)
+        ).resolves.toMatchObject({ state: "ready" });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
+    // Verified over no current version, then superseded by a person's
+    // commit before it is made current.
+    const frozen = await freezeCandidate(
+      env,
+      fixture.owner,
+      fixture.app,
+      3,
+      null
+    );
+    const verified = await runCandidate(
+      env,
+      fixture.owner,
+      frozen,
+      async () => {
+        // Sealed already.
+      }
+    );
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "AGENTS.md": "# Notes\n" },
+      "Later"
+    );
+    const refused = await codeOf(
+      activateCandidate(env, fixture.owner, verified)
+    );
+    const next = await object.schemaStatus(
+      store.id,
+      release.manifest.schemaHash,
+      consumer
+    );
+    expect({
+      refused,
+      next: next.state,
+      first: await object.schemaStatus(store.id, fixture.firstSchema),
+    }).toStrictEqual({
+      refused: "app.candidate_superseded",
+      next: "ready",
+      first: { state: "active" },
+    });
+  });
+
   it("transforms every record once, then takes over as its release is made current", async () => {
     const { fixture, store, release } = await migrated(130, deriving);
     const object = env.DATA_STORES.getByName(store.id);

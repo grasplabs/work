@@ -1247,6 +1247,33 @@ const verifiedCandidateSql = (
       AND candidate.report_hash = ${candidate.reportHash})`;
 
 /**
+ * Refuses `candidate` unless it is still verified with the report it
+ * pins: superseded by a person's commit (`app.candidate_superseded`), or
+ * ended or reported otherwise since it was read (`app.conflict`). Asked
+ * before anything is switched for it, as the store's contract is; the
+ * statement that makes it current asks again (`verifiedCandidateSql`).
+ */
+const requireCandidateVerified = async (
+  env: Env,
+  candidate: VerifiedCandidate
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({
+      state: appCandidates.state,
+      reportHash: appCandidates.reportHash,
+    })
+    .from(appCandidates)
+    .where(eq(appCandidates.id, candidate.id))
+    .get();
+  if (row?.state === "superseded") {
+    throw appErrors.create("app.candidate_superseded");
+  }
+  if (row?.state !== "verified" || row.reportHash !== candidate.reportHash) {
+    throw appErrors.create("app.conflict");
+  }
+};
+
+/**
  * Makes a version the one that runs, from its verified candidate
  * (app-candidates.ts): the pending one after review, or any other, such
  * as an earlier one to roll back. Only over the version the candidate was
@@ -1333,6 +1360,10 @@ export const makeCurrent = async (
     const { requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
+    // Its candidate still verified, superseded by no commit meanwhile:
+    // asked here, before the store switches, so a candidate refused below
+    // never leaves the version current locked out of its store.
+    await requireCandidateVerified(env, candidate);
     if (
       await requireStoreSchemaActive(env, appId, number, { activate: true })
     ) {
