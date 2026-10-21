@@ -180,7 +180,7 @@ describe(
           manifestHash: release.manifestHash,
           sourceTreeHash: release.manifest.sourceTreeHash,
           verificationReportHash: release.manifest.verificationReportHash,
-          store: null,
+          dataStoreBindings: release.manifest.dataStoreBindings,
         },
         environment: { compilerVersion, sdkProtocolVersion },
       });

@@ -13,7 +13,7 @@ import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { loadRelease } from "./app-releases.ts";
+import { checkedReleaseManifest } from "./app-releases.ts";
 import {
   appFor,
   changeEntry,
@@ -390,17 +390,23 @@ const endUnlessLost = async (
 
 /**
  * The report of the verified candidate `row`: its identities, and for a
- * version of spec 8's layout its sealed release as loading reads it back,
- * every hash checked (`loadRelease`), with the evidence of its checks and
- * the store it binds. Only what core computed; no verdict.
+ * version of spec 8's layout its sealed manifest, checked against the
+ * hash and store binding core recorded (`checkedReleaseManifest`), with the
+ * evidence of its checks and the stores it binds. Only what core
+ * computed; no verdict. Reading its artifacts back into the report is
+ * GRA-394's next slice.
  */
 const reportOf = async (
   env: Env,
   row: CandidateRow,
   files: Record<string, string>
 ): Promise<string> => {
-  const release = isAppLayout(files)
-    ? await loadRelease(env, appIdSchema.parse(row.appId), row.version)
+  const sealed = isAppLayout(files)
+    ? await checkedReleaseManifest(
+        env,
+        appIdSchema.parse(row.appId),
+        row.version
+      )
     : undefined;
   return canonicalText({
     formatVersion: reportFormatVersion,
@@ -413,13 +419,13 @@ const reportOf = async (
       previousCandidate: row.previousCandidate,
     },
     release:
-      release === undefined
+      sealed === undefined
         ? null
         : {
-            manifestHash: release.manifestHash,
-            sourceTreeHash: release.manifest.sourceTreeHash,
-            verificationReportHash: release.manifest.verificationReportHash,
-            store: release.store,
+            manifestHash: sealed.hash,
+            sourceTreeHash: sealed.manifest.sourceTreeHash,
+            verificationReportHash: sealed.manifest.verificationReportHash,
+            dataStoreBindings: sealed.manifest.dataStoreBindings,
           },
     environment: { compilerVersion, sdkProtocolVersion },
   });
