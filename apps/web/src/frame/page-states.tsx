@@ -9,8 +9,8 @@ import {
 } from "@grasp-os/ui/components/empty";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useRouter, useRouterState } from "@tanstack/react-router";
-import { SearchXIcon, TriangleAlertIcon } from "lucide-react";
+import { Link, useRouter, useRouterState } from "@tanstack/react-router";
+import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { use } from "react";
 import type { ReactNode } from "react";
@@ -23,10 +23,11 @@ import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
 
 // How every page finds nothing, fails and loads, the same on each: the
-// prototype's not-found pattern (an empty state under the page's crumbs,
-// "It may have been renamed or removed."), the error with core's reason
-// and its request ID and a way to try again, and skeletons while a slow
-// read comes. Inside the frame each keeps the site header, and with it the
+// prototype's not-found pattern (an empty state under the page's crumbs
+// that says why it isn't there), the error with core's reason and its
+// request ID and a way to try again, and skeletons while a slow read
+// comes. Where one stands for the whole page in the frame, it also offers
+// the way to Chat, so nobody is left on it with nowhere to go. Inside the frame each keeps the site header, and with it the
 // way to the sidebar on a phone; outside it (core out of reach, a page
 // such as sign-in) the state fills the window on its own.
 
@@ -54,6 +55,21 @@ const Place = ({
  */
 type StateHeading = "h1" | "h2" | "h3";
 
+/**
+ * Whether a state offers the way to Chat: where it stands for the page in
+ * the frame. Not under a page's own heading, which leaves the page around
+ * it to go on from, nor outside the frame, where nobody may be signed in.
+ */
+const offersChat = (heading: StateHeading, inFrame: boolean): boolean =>
+  heading === "h1" && inFrame;
+
+/** The way on from a page that isn't there or didn't load: Chat, the product's home. */
+const GoToChat = () => (
+  <Button nativeButton={false} render={<Link to="/" />} variant="outline">
+    <Trans>Go to Chat</Trans>
+  </Button>
+);
+
 /** Not found, in a page that keeps its own frame, such as Knowledge with its sidebar. */
 export const NotFoundState = ({
   title,
@@ -67,6 +83,7 @@ export const NotFoundState = ({
   heading?: StateHeading;
 }) => {
   const { t } = useLingui();
+  const inFrame = use(InFrame);
   return (
     <Empty>
       <EmptyHeader>
@@ -74,12 +91,24 @@ export const NotFoundState = ({
           <Icon />
         </EmptyMedia>
         <EmptyTitle>
-          <Heading>{title ?? t`Not found`}</Heading>
+          <Heading>{title ?? t`This page is not here`}</Heading>
         </EmptyTitle>
         <EmptyDescription>
-          <Trans>It may have been renamed or removed.</Trans>
+          {/* An address no page has, or a named thing that went away. */}
+          {title === undefined ? (
+            <Trans>
+              The address may be wrong, or the page was moved or removed.
+            </Trans>
+          ) : (
+            <Trans>It may have been renamed or removed.</Trans>
+          )}
         </EmptyDescription>
       </EmptyHeader>
+      {offersChat(Heading, inFrame) ? (
+        <EmptyContent>
+          <GoToChat />
+        </EmptyContent>
+      ) : null}
     </Empty>
   );
 };
@@ -123,8 +152,8 @@ const TryAgain = ({ trying, reload }: { trying: boolean; reload: boolean }) => {
         }
         void router.invalidate();
       }}
-      variant="outline"
     >
+      <RotateCcwIcon data-icon="inline-start" />
       {trying ? t`Trying again…` : t`Try again`}
     </Button>
   );
@@ -147,6 +176,7 @@ export const ErrorState = ({
 }) => {
   const { t } = useLingui();
   const trying = useRouterState({ select: (state) => state.isLoading });
+  const inFrame = use(InFrame);
   return (
     <Empty>
       <EmptyHeader>
@@ -162,7 +192,10 @@ export const ErrorState = ({
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <TryAgain reload={reload} trying={trying} />
+        <div className="flex flex-wrap justify-center gap-2">
+          <TryAgain reload={reload} trying={trying} />
+          {offersChat(Heading, inFrame) ? <GoToChat /> : null}
+        </div>
       </EmptyContent>
     </Empty>
   );

@@ -4474,6 +4474,10 @@ msgctxt "inbox item kind"
 msgid "Go live"
 msgstr "Livegang"
 
+#: src/frame/page-states.tsx
+msgid "Go to Chat"
+msgstr "Zum Chat"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Go to Grasp"
 msgstr "Zu Grasp"
@@ -9381,6 +9385,10 @@ msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 msgid "The account you signed in with."
 msgstr "Das Konto, mit dem Sie sich angemeldet haben."
 
+#: src/frame/page-states.tsx
+msgid "The address may be wrong, or the page was moved or removed."
+msgstr "Die Adresse ist vielleicht falsch, oder die Seite wurde verschoben oder entfernt."
+
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "Der Agent hat etwas nachgeschlagen"
@@ -10121,6 +10129,10 @@ msgstr "Dieser kann nur freigegeben werden: Ein Budgeteintrag, auf den er angere
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Diese Seite wurde nicht geladen"
+
+#: src/frame/page-states.tsx
+msgid "This page is not here"
+msgstr "Diese Seite gibt es hier nicht"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "This policy is not here any more"
